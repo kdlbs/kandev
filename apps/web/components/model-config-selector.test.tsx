@@ -1,0 +1,122 @@
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ModelConfigSelector } from "@/components/model-config-selector";
+
+afterEach(() => {
+  cleanup();
+});
+
+describe("ModelConfigSelector", () => {
+  const effortSectionTestId = "config-option-section-effort";
+  const effortTriggerTestId = "config-option-trigger-effort";
+  const modelSettingsButtonName = "Model settings";
+  const makeModelOptions = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `model-${index + 1}`,
+      name: `Model ${index + 1}`,
+    }));
+
+  it("passes custom trigger classes to the button", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={[{ id: "gpt-5.5", name: "GPT-5.5" }]}
+        currentModel="gpt-5.5"
+        onModelChange={() => {}}
+        triggerClassName="max-w-[56vw]"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: modelSettingsButtonName }).className).toContain(
+      "max-w-[56vw]",
+    );
+  });
+
+  it("opens extra config options from compact sub-selector rows", () => {
+    const onConfigChange = vi.fn();
+
+    render(
+      <ModelConfigSelector
+        modelOptions={[{ id: "sonnet", name: "Sonnet" }]}
+        currentModel="sonnet"
+        onModelChange={() => {}}
+        onConfigChange={onConfigChange}
+        configOptions={[
+          {
+            type: "select",
+            id: "model",
+            name: "Model",
+            currentValue: "sonnet",
+            category: "model",
+            options: [{ value: "sonnet", name: "Sonnet" }],
+          },
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            currentValue: "medium",
+            options: [
+              { value: "low", name: "Low" },
+              { value: "medium", name: "Medium" },
+              { value: "high", name: "High" },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+
+    const effortTrigger = screen.getByTestId(effortTriggerTestId);
+    expect(effortTrigger.textContent).toContain("Effort");
+    expect(effortTrigger.textContent).toContain("Medium");
+    expect(screen.queryByTestId(effortSectionTestId)).toBeNull();
+
+    fireEvent.click(effortTrigger);
+
+    const effortSection = screen.getByTestId(effortSectionTestId);
+    expect(effortSection).not.toBeNull();
+    const backButton = screen.getByRole("button", { name: /back to model settings from effort/i });
+    expect(document.activeElement).toBe(backButton);
+
+    fireEvent.click(backButton);
+
+    expect(screen.queryByTestId(effortSectionTestId)).toBeNull();
+    expect(document.activeElement).toBe(screen.getByTestId(effortTriggerTestId));
+
+    fireEvent.click(screen.getByTestId(effortTriggerTestId));
+    const reopenedEffortSection = screen.getByTestId(effortSectionTestId);
+    fireEvent.click(within(reopenedEffortSection).getByRole("button", { name: "High" }));
+
+    expect(onConfigChange).toHaveBeenCalledWith("effort", "high");
+    expect(screen.queryByTestId(effortSectionTestId)).toBeNull();
+  });
+
+  it("hides the model filter when there are five or fewer models", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={makeModelOptions(5)}
+        currentModel="model-1"
+        onModelChange={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+
+    expect(screen.queryByPlaceholderText("Filter models...")).toBeNull();
+  });
+
+  it("shows the model filter when there are more than five models", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={makeModelOptions(6)}
+        currentModel="model-1"
+        onModelChange={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+
+    expect(screen.getByPlaceholderText("Filter models...")).not.toBeNull();
+  });
+});

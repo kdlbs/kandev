@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
 
 // WorkspacePollMode mirrors process.PollMode for the lifecycle layer. Defined
@@ -61,6 +63,15 @@ type workspacePollAggregator struct {
 	// known to belong to that workspace. Lets recordAndCompute iterate only
 	// sessions in the affected workspace instead of scanning all sessionModes.
 	workspaceSessions map[string]map[string]bool
+	// Last-write-wins queue: pendingPush + pushInFlight serialize per-workspace HTTP pushes so order matches enqueue.
+	pendingPush  map[string]workspacePushTarget
+	pushInFlight map[string]bool
+}
+
+// workspacePushTarget bundles the queued mode and the agentctl client captured at enqueue time.
+type workspacePushTarget struct {
+	mode   WorkspacePollMode
+	client *agentctl.Client
 }
 
 // newWorkspacePollAggregator wires an aggregator to the lifecycle manager.
@@ -70,6 +81,8 @@ func newWorkspacePollAggregator(mgr *Manager) *workspacePollAggregator {
 		sessionModes:      make(map[string]WorkspacePollMode),
 		lastPushed:        make(map[string]WorkspacePollMode),
 		workspaceSessions: make(map[string]map[string]bool),
+		pendingPush:       make(map[string]workspacePushTarget),
+		pushInFlight:      make(map[string]bool),
 	}
 }
 
@@ -182,23 +195,46 @@ func (a *workspacePollAggregator) recordAndCompute(sessionID string, mode Worksp
 	return workspacePath, effective, true
 }
 
-// pushAsync issues the SetWorkspacePollMode RPC to the agentctl client without
-// blocking the caller (typically the hub's session-mode goroutine).
+// pushAsync queues the latest mode and ensures exactly one pusher goroutine per workspace drains it (last-write-wins).
 func (a *workspacePollAggregator) pushAsync(execution *AgentExecution, workspacePath string, mode WorkspacePollMode) {
 	client := execution.GetAgentCtlClient()
 	if client == nil {
 		return
 	}
-	go func() {
+	a.mu.Lock()
+	a.pendingPush[workspacePath] = workspacePushTarget{mode: mode, client: client}
+	if a.pushInFlight[workspacePath] {
+		a.mu.Unlock()
+		return
+	}
+	a.pushInFlight[workspacePath] = true
+	a.mu.Unlock()
+	go a.pushLoop(workspacePath)
+}
+
+// pushLoop drains pendingPush for a workspace sequentially so HTTP order matches enqueue order.
+func (a *workspacePollAggregator) pushLoop(workspacePath string) {
+	for {
+		a.mu.Lock()
+		target, ok := a.pendingPush[workspacePath]
+		if !ok {
+			delete(a.pushInFlight, workspacePath)
+			a.mu.Unlock()
+			return
+		}
+		delete(a.pendingPush, workspacePath)
+		a.mu.Unlock()
+
 		ctx, cancel := context.WithTimeout(context.Background(), pushPollModeTimeout)
-		defer cancel()
-		if err := client.SetWorkspacePollMode(ctx, string(mode)); err != nil {
+		err := target.client.SetWorkspacePollMode(ctx, string(target.mode))
+		cancel()
+		if err != nil {
 			a.mgr.logger.Warn("failed to push workspace poll mode",
 				zap.String("workspace", workspacePath),
-				zap.String("mode", string(mode)),
+				zap.String("mode", string(target.mode)),
 				zap.Error(err))
 		}
-	}()
+	}
 }
 
 // FlushSessionMode resolves two races that leave agentctl in the wrong mode:

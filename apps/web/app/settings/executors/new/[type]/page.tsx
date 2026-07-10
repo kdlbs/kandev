@@ -1,7 +1,7 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -42,39 +42,11 @@ import {
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 
+import { EXECUTOR_TYPE_MAP } from "./executor-types";
+import { SSHCreatePage } from "./ssh-create-page";
+
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
-
-const EXECUTOR_TYPE_MAP: Record<
-  string,
-  { executorId: string; label: string; description: string }
-> = {
-  local: {
-    executorId: "exec-local",
-    label: "Local",
-    description: "Runs agents directly in the repository folder.",
-  },
-  worktree: {
-    executorId: "exec-worktree",
-    label: "Worktree",
-    description: "Creates git worktrees for isolated agent sessions.",
-  },
-  local_docker: {
-    executorId: "exec-local-docker",
-    label: "Docker",
-    description: "Runs Docker containers on this machine.",
-  },
-  remote_docker: {
-    executorId: "exec-remote-docker",
-    label: "Remote Docker",
-    description: "Connects to a remote Docker host.",
-  },
-  sprites: {
-    executorId: "exec-sprites",
-    label: "Sprites.dev",
-    description: "Runs agents in Sprites.dev cloud sandboxes.",
-  },
-};
 
 const DefaultIcon = EXECUTOR_ICON_MAP.local;
 
@@ -89,6 +61,10 @@ export default function CreateProfilePage({ params }: { params: Promise<{ type: 
 
   if (!typeInfo) {
     return <InvalidTypeFallback />;
+  }
+
+  if (type === "ssh") {
+    return <SSHCreatePage />;
   }
 
   return <CreateProfileForm executorType={type as ExecutorType} typeInfo={typeInfo} />;

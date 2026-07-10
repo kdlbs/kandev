@@ -1,37 +1,25 @@
 "use client";
 
 import { useState } from "react";
-import { useTheme } from "next-themes";
+import Link from "@/components/routing/app-link";
+import { useTheme } from "@/components/theme/app-theme";
 import {
+  IconActivity,
   IconCommand,
   IconPalette,
-  IconServer,
   IconKeyboard,
-  IconTerminal2,
+  IconGitBranch,
 } from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
-import { Input } from "@kandev/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectSeparator,
-  SelectTrigger,
-  SelectValue,
-} from "@kandev/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
-import { getBackendConfig } from "@/lib/config";
+import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
+import { GENERAL_NAV_ITEMS } from "@/components/settings/general-nav";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
-import { TERMINAL_FONT_PRESETS } from "@/lib/terminal/terminal-font";
-import type { FontCategory } from "@/lib/terminal/terminal-font";
 import type { Theme } from "@/lib/settings/types";
 
 function ThemeSettingsCard() {
@@ -116,29 +104,26 @@ function ChatSubmitKeyCard() {
   );
 }
 
-function TerminalLinksCard() {
+function ChangesPanelLayoutCard() {
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
   const [isSaving, setIsSaving] = useState(false);
 
-  const handleChange = async (value: "new_tab" | "browser_panel") => {
+  const handleChange = async (value: "flat" | "tree") => {
     if (isSaving) return;
     setIsSaving(true);
     const current = storeApi.getState().userSettings;
-    const previous = current.terminalLinkBehavior;
+    const previous = current.changesPanelLayout;
     try {
-      setUserSettings({ ...current, terminalLinkBehavior: value });
+      setUserSettings({ ...current, changesPanelLayout: value });
       await updateUserSettings({
         workspace_id: current.workspaceId || "",
         repository_ids: current.repositoryIds || [],
-        terminal_link_behavior: value,
+        changes_panel_layout: value,
       });
     } catch {
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        terminalLinkBehavior: previous,
-      });
+      setUserSettings({ ...storeApi.getState().userSettings, changesPanelLayout: previous });
     } finally {
       setIsSaving(false);
     }
@@ -147,254 +132,30 @@ function TerminalLinksCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Terminal Links</CardTitle>
+        <CardTitle className="text-base">Changes Panel Layout</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Label htmlFor="terminal-link-behavior">Open links in</Label>
+          <Label htmlFor="changes-panel-layout">File list view</Label>
           <Select
-            value={userSettings.terminalLinkBehavior}
-            onValueChange={(v) => handleChange(v as "new_tab" | "browser_panel")}
+            value={userSettings.changesPanelLayout}
+            onValueChange={(v) => handleChange(v as "flat" | "tree")}
             disabled={isSaving}
           >
-            <SelectTrigger id="terminal-link-behavior">
+            <SelectTrigger
+              id="changes-panel-layout"
+              data-testid="changes-panel-layout-select"
+              className="cursor-pointer"
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="new_tab">New browser tab</SelectItem>
-              <SelectItem value="browser_panel">Built-in browser panel</SelectItem>
+              <SelectItem value="flat">Flat list</SelectItem>
+              <SelectItem value="tree">Tree</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">Click a URL in the terminal to open it.</p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-const CUSTOM_VALUE = "__custom__";
-const CATEGORY_LABELS: Record<FontCategory, string> = {
-  icons: "Nerd Fonts",
-  ligatures: "Programming",
-  system: "System",
-};
-const CATEGORY_BADGES: Partial<Record<FontCategory, string>> = {
-  icons: "Icons",
-  ligatures: "Ligatures",
-};
-const FONT_GROUPS: Record<string, typeof TERMINAL_FONT_PRESETS> = TERMINAL_FONT_PRESETS.reduce(
-  (acc, p) => {
-    (acc[p.category] ??= []).push(p);
-    return acc;
-  },
-  {} as Record<string, typeof TERMINAL_FONT_PRESETS>,
-);
-const FONT_CATEGORIES: FontCategory[] = ["icons", "ligatures", "system"];
-
-function FontGroupOptions() {
-  return FONT_CATEGORIES.map((category) => (
-    <SelectGroup key={category}>
-      <SelectLabel className="flex items-center gap-2">
-        {CATEGORY_LABELS[category]}
-        {CATEGORY_BADGES[category] && (
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-            {CATEGORY_BADGES[category]}
-          </Badge>
-        )}
-      </SelectLabel>
-      {(FONT_GROUPS[category] ?? []).map((preset) => (
-        <SelectItem key={preset.value} value={preset.value}>
-          {preset.label}
-        </SelectItem>
-      ))}
-    </SelectGroup>
-  ));
-}
-
-function TerminalFontSizeCard() {
-  const storeApi = useAppStoreApi();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const [isSaving, setIsSaving] = useState(false);
-  const [fontSize, setFontSize] = useState(() => userSettings.terminalFontSize ?? 13);
-
-  const saveFontSize = async (value: number) => {
-    if (isSaving) return;
-    if (value < 8 || value > 24) return;
-    setIsSaving(true);
-    const current = storeApi.getState().userSettings;
-    const previous = current.terminalFontSize;
-    try {
-      setUserSettings({ ...current, terminalFontSize: value });
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        terminal_font_size: value,
-      });
-    } catch {
-      setUserSettings({ ...storeApi.getState().userSettings, terminalFontSize: previous });
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleFontSizeBlur = () => {
-    const v = Math.min(24, Math.max(8, fontSize));
-    setFontSize(v);
-    saveFontSize(v);
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Terminal Font Size</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="terminal-font-size">Font Size</Label>
-          <div className="flex items-center gap-3">
-            <Input
-              id="terminal-font-size"
-              type="number"
-              min={8}
-              max={24}
-              value={fontSize}
-              onChange={(e) => setFontSize(Number(e.target.value))}
-              onBlur={handleFontSizeBlur}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleFontSizeBlur();
-              }}
-              className="w-20"
-              disabled={isSaving}
-              data-testid="terminal-font-size-input"
-            />
-            <span className="text-xs text-muted-foreground">px (8-24)</span>
-          </div>
           <p className="text-xs text-muted-foreground">
-            Set the font size for the terminal. Default is 13px.
-          </p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TerminalFontCard() {
-  const storeApi = useAppStoreApi();
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isCustom, setIsCustom] = useState(() => {
-    const current = userSettings.terminalFontFamily;
-    if (!current) return false;
-    return !TERMINAL_FONT_PRESETS.some((p) => p.value === current);
-  });
-  const [customValue, setCustomValue] = useState(
-    () => (isCustom ? userSettings.terminalFontFamily : "") ?? "",
-  );
-
-  const saveFontFamily = async (value: string) => {
-    if (isSaving) return;
-    setIsSaving(true);
-    const current = storeApi.getState().userSettings;
-    const previous = current.terminalFontFamily;
-    try {
-      setUserSettings({ ...current, terminalFontFamily: value || null });
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        terminal_font_family: value,
-      });
-    } catch {
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        terminalFontFamily: previous,
-      });
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleSelectChange = (value: string) => {
-    if (value === CUSTOM_VALUE) {
-      setIsCustom(true);
-      return;
-    }
-    setIsCustom(false);
-    setCustomValue("");
-    saveFontFamily(value === "default" ? "" : value);
-  };
-
-  const handleCustomBlur = () => {
-    const trimmed = customValue.trim();
-    if (trimmed) saveFontFamily(trimmed);
-  };
-
-  const selectValue = isCustom ? CUSTOM_VALUE : userSettings.terminalFontFamily || "default";
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Terminal Font</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-3">
-          <Label htmlFor="terminal-font">Font Family</Label>
-          <Select value={selectValue} onValueChange={handleSelectChange} disabled={isSaving}>
-            <SelectTrigger id="terminal-font" data-testid="terminal-font-select">
-              <SelectValue placeholder="Default" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="default">Default (Menlo / Monaco)</SelectItem>
-              <FontGroupOptions />
-              <SelectSeparator />
-              <SelectItem value={CUSTOM_VALUE}>Custom...</SelectItem>
-            </SelectContent>
-          </Select>
-          {isCustom && (
-            <Input
-              placeholder='e.g. "My Custom Font"'
-              value={customValue}
-              onChange={(e) => setCustomValue(e.target.value)}
-              onBlur={handleCustomBlur}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCustomBlur();
-              }}
-              data-testid="terminal-font-custom-input"
-            />
-          )}
-          <p className="text-xs text-muted-foreground">
-            Choose a monospace font for the terminal. Nerd Fonts include icons for CLI tools.
-          </p>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function BackendConnectionCard() {
-  const [backendUrl] = useState<string>(() => getBackendConfig().apiBaseUrl);
-  const displayBackendUrl = backendUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Backend Server URL</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          <Label htmlFor="backend-url">Server URL</Label>
-          <Input
-            id="backend-url"
-            type="url"
-            value={displayBackendUrl}
-            readOnly
-            disabled
-            placeholder="http://localhost:38429"
-            className="cursor-default"
-          />
-          <p className="text-xs text-muted-foreground">
-            Backend URL is provided at runtime for SSR and WebSocket connections.
+            Display changed files as a flat list with full paths, or as a folder tree.
           </p>
         </div>
       </CardContent>
@@ -405,15 +166,30 @@ function BackendConnectionCard() {
 export function GeneralSettings() {
   return (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-2xl font-bold">General Settings</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Manage your application preferences and notifications
-        </p>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {GENERAL_NAV_ITEMS.map(({ href, label, description, icon: Icon }) => (
+          <Link key={href} href={href} className="cursor-pointer">
+            <Card className="h-full transition-colors hover:bg-muted/40">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Icon className="h-4 w-4 text-muted-foreground" />
+                  {label}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">{description}</p>
+              </CardContent>
+            </Card>
+          </Link>
+        ))}
       </div>
+    </div>
+  );
+}
 
-      <Separator />
-
+export function AppearanceSettings() {
+  return (
+    <div className="space-y-8">
       <SettingsSection
         icon={<IconPalette className="h-5 w-5" />}
         title="Appearance"
@@ -424,22 +200,30 @@ export function GeneralSettings() {
 
       <Separator />
 
-      <ShellSettingsCard />
-
-      <Separator />
-
       <SettingsSection
-        icon={<IconTerminal2 className="h-5 w-5" />}
-        title="Terminal"
-        description="Configure terminal appearance and behavior"
+        icon={<IconGitBranch className="h-5 w-5" />}
+        title="Changes Panel"
+        description="Customize how changed files are displayed"
       >
-        <TerminalFontCard />
-        <TerminalFontSizeCard />
-        <TerminalLinksCard />
+        <ChangesPanelLayoutCard />
       </SettingsSection>
 
       <Separator />
 
+      <SettingsSection
+        icon={<IconActivity className="h-5 w-5" />}
+        title="Resource Metrics"
+        description="Configure backend and execution resource sampling"
+      >
+        <SystemMetricsSettingsCard />
+      </SettingsSection>
+    </div>
+  );
+}
+
+export function KeyboardShortcutsSettings() {
+  return (
+    <div className="space-y-8">
       <SettingsSection
         icon={<IconKeyboard className="h-5 w-5" />}
         title="Chat Input"
@@ -456,16 +240,6 @@ export function GeneralSettings() {
         description="Customize keyboard shortcuts for the command panel"
       >
         <KeyboardShortcutsCard />
-      </SettingsSection>
-
-      <Separator />
-
-      <SettingsSection
-        icon={<IconServer className="h-5 w-5" />}
-        title="Backend Connection"
-        description="Configure the backend server URL"
-      >
-        <BackendConnectionCard />
       </SettingsSection>
     </div>
   );

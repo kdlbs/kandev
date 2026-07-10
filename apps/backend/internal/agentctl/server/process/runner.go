@@ -366,17 +366,39 @@ func (r *ProcessRunner) Stop(ctx context.Context, req StopProcessRequest) error 
 	// Attempt graceful shutdown, then escalate to force-kill
 	if proc.cmd != nil && proc.cmd.Process != nil {
 		pid := proc.cmd.Process.Pid
+		info := proc.snapshot(false)
+		r.logger.Debug("workspace process stop requested",
+			zap.String("process_id", req.ProcessID),
+			zap.Int("pid", pid),
+			zap.String("session_id", info.SessionID),
+			zap.String("kind", string(info.Kind)),
+			zap.String("script_name", info.ScriptName),
+			zap.String("command", info.Command),
+			zap.String("working_dir", info.WorkingDir))
 
 		// Phase 1: Graceful shutdown (SIGTERM on Unix, interrupt on Windows)
+		r.logger.Debug("workspace process interrupt requested",
+			zap.String("process_id", req.ProcessID),
+			zap.Int("pid", pid),
+			zap.String("signal", fmt.Sprint(os.Interrupt)))
 		_ = proc.cmd.Process.Signal(os.Interrupt)
 
 		// Wait for graceful exit (2 seconds) or context cancellation
 		select {
 		case <-ctx.Done():
 			// Context cancelled - force kill immediately
+			r.logger.Debug("workspace process group SIGKILL requested",
+				zap.String("process_id", req.ProcessID),
+				zap.Int("pgid", pid),
+				zap.String("reason", "context_canceled"),
+				zap.Error(ctx.Err()))
 			_ = killProcessGroup(pid)
 		case <-time.After(2 * time.Second):
 			// Phase 2: Grace period expired - force kill entire process tree
+			r.logger.Debug("workspace process group SIGKILL requested",
+				zap.String("process_id", req.ProcessID),
+				zap.Int("pgid", pid),
+				zap.String("reason", "grace_expired"))
 			_ = killProcessGroup(pid)
 		}
 	}
@@ -397,6 +419,8 @@ func (r *ProcessRunner) StopAll(ctx context.Context) error {
 		ids = append(ids, id)
 	}
 	r.mu.RUnlock()
+
+	r.logger.Debug("workspace process stop all requested", zap.Int("processes", len(ids)))
 
 	var errs []error
 	for _, id := range ids {
@@ -628,6 +652,10 @@ func (p *commandProcess) snapshot(includeOutput bool) ProcessInfo {
 // This allows processes to inherit the agentctl server's environment (including PATH,
 // HOME, etc.) while also supporting custom variables per process.
 func mergeEnv(env map[string]string) []string {
+	return mergeEnvWithStrip(env, nil)
+}
+
+func mergeEnvWithStrip(env map[string]string, stripEnv []string) []string {
 	base := make(map[string]string, len(os.Environ())+len(env))
 
 	// Parse parent environment into map, filtering out npm config variables
@@ -652,6 +680,10 @@ func mergeEnv(env map[string]string) []string {
 	// Override with custom variables
 	for k, v := range env {
 		base[k] = v
+	}
+
+	for _, key := range stripEnv {
+		delete(base, key)
 	}
 
 	// Convert back to []string format

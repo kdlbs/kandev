@@ -5,42 +5,9 @@ import { useAppStore } from "@/components/state-provider";
 import {
   useFileEditors,
   setPendingCursorPosition,
-  consumePendingCursorPosition,
+  scrollEditorIfMounted,
 } from "@/hooks/use-file-editors";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
-import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
-
-/**
- * Try to scroll an already-mounted editor to the given position.
- * Returns true if the editor was found and scrolled, false otherwise.
- * If successful, consumes the pending cursor position so handleEditorDidMount
- * doesn't double-apply it.
- */
-function scrollEditorIfMounted(
-  relativePath: string,
-  worktreePath: string | null,
-  line: number,
-  column: number,
-): boolean {
-  const monaco = getMonacoInstance();
-  if (!monaco) return false;
-
-  const monacoPath = worktreePath ? `${worktreePath}/${relativePath}` : relativePath;
-
-  for (const editor of monaco.editor.getEditors()) {
-    const model = editor.getModel();
-    if (!model) continue;
-    const modelPath = model.uri.path;
-    if (modelPath === `/${monacoPath}` || modelPath === monacoPath) {
-      consumePendingCursorPosition(relativePath);
-      editor.setPosition({ lineNumber: line, column });
-      editor.revealLineInCenter(line);
-      editor.focus();
-      return true;
-    }
-  }
-  return false;
-}
 
 /**
  * Connects LSP Go-to-Definition / Find References navigation to dockview file tabs.

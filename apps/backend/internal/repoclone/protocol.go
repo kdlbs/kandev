@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // ProtocolSSH is the SSH git protocol.
@@ -20,7 +22,7 @@ const ProtocolHTTPS = "https"
 func DetectGitProtocol() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "gh", "config", "get", "git_protocol").Output()
+	out, err := subproc.RunGHOutput(ctx, exec.CommandContext(ctx, "gh", "config", "get", "git_protocol"))
 	if err == nil {
 		if strings.TrimSpace(string(out)) == ProtocolHTTPS {
 			return ProtocolHTTPS
@@ -34,25 +36,41 @@ func DetectGitProtocol() string {
 // For HTTPS: https://github.com/{owner}/{name}.git
 // Returns an error if the provider is not supported.
 func CloneURL(provider, owner, name, protocol string) (string, error) {
-	host, err := providerHost(provider)
-	if err != nil {
-		return "", err
+	return CloneURLWithHost(provider, "", owner, name, protocol)
+}
+
+// CloneURLWithHost is like CloneURL but accepts an explicit host. When host
+// is non-empty (and stripped of scheme/trailing-slash), it overrides the
+// provider's default — used for self-managed GitLab. When host is empty,
+// behaves exactly like CloneURL.
+func CloneURLWithHost(provider, host, owner, name, protocol string) (string, error) {
+	resolvedHost := strings.TrimRight(host, "/")
+	resolvedHost = strings.TrimPrefix(strings.TrimPrefix(resolvedHost, "https://"), "http://")
+	if resolvedHost == "" {
+		var err error
+		resolvedHost, err = providerHost(provider)
+		if err != nil {
+			return "", err
+		}
 	}
 	if protocol == ProtocolSSH {
-		return fmt.Sprintf("git@%s:%s/%s.git", host, owner, name), nil
+		// scp-style "git@host:path" can't carry a port — when the host has
+		// one (gitlab.acme.corp:2222) fall back to the ssh:// URL form,
+		// which git understands and accepts a port natively.
+		if strings.Contains(resolvedHost, ":") {
+			return fmt.Sprintf("ssh://git@%s/%s/%s.git", resolvedHost, owner, name), nil
+		}
+		return fmt.Sprintf("git@%s:%s/%s.git", resolvedHost, owner, name), nil
 	}
-	return fmt.Sprintf("https://%s/%s/%s.git", host, owner, name), nil
+	return fmt.Sprintf("https://%s/%s/%s.git", resolvedHost, owner, name), nil
 }
 
 // providerHost maps a provider name to its git host.
-// Only "github" (and the empty string) are currently supported.
-// "gitlab" and "bitbucket" entries are placeholders for future support.
 func providerHost(provider string) (string, error) {
 	switch strings.ToLower(provider) {
 	case "github", "":
 		return "github.com", nil
 	case "gitlab":
-		// TODO: GitLab support is not yet implemented
 		return "gitlab.com", nil
 	case "bitbucket":
 		// TODO: Bitbucket support is not yet implemented

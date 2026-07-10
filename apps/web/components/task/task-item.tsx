@@ -2,6 +2,7 @@
 
 import { memo } from "react";
 import {
+  IconAlertCircle,
   IconChevronDown,
   IconCircleCheck,
   IconCircleDashed,
@@ -15,7 +16,8 @@ import { PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
-import { DEBUG_UI } from "@/lib/config";
+import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
+import { isDebugUI } from "@/lib/config";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
@@ -37,7 +39,15 @@ type TaskItemProps = {
   sessionState?: TaskSessionState;
   isArchived?: boolean;
   isSelected?: boolean;
+  /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
+  isMultiSelected?: boolean;
   onClick?: () => void;
+  /**
+   * Modifier-aware activation handler. When provided, both mouse clicks and
+   * keyboard Enter/Space delegate here (cmd/shift/plain dispatch lives in the
+   * parent); `onClick` is the fallback when no selection handler is wired.
+   */
+  onSelect?: (e: React.MouseEvent | React.KeyboardEvent) => void;
   diffStats?: DiffStats;
   isRemoteExecutor?: boolean;
   remoteExecutorType?: string;
@@ -51,6 +61,12 @@ type TaskItemProps = {
   hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   isSubTask?: boolean;
+  /**
+   * Nesting depth in the sidebar tree (0 = root). Drives left indentation so
+   * arbitrarily deep subtask trees read as a hierarchy. Falls back to
+   * `isSubTask` (depth 1) when omitted.
+   */
+  depth?: number;
   /** Number of subtasks under this parent task. Only set for parent rows. */
   subtaskCount?: number;
   /** Whether the subtasks of this parent are currently hidden. */
@@ -61,6 +77,7 @@ type TaskItemProps = {
   prInfo?: { number: number; state: string };
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
+  agentErrorMessage?: string | null;
 };
 
 function formatRelativeTime(dateString: string): string {
@@ -88,10 +105,58 @@ function computeIsInProgress(state?: TaskState, sessionState?: TaskSessionState)
   return classifyTask(sessionState, state) === "in_progress";
 }
 
-function handleTaskItemKeyDown(e: React.KeyboardEvent<HTMLDivElement>, onClick?: () => void): void {
+function computeIsPreparing(state?: TaskState, sessionState?: TaskSessionState): boolean {
+  if (state === "SCHEDULING") return true;
+  return sessionState === "STARTING" && classifyTask(sessionState, state) !== "review";
+}
+
+function handleTaskItemKeyDown(
+  e: React.KeyboardEvent<HTMLDivElement>,
+  onSelect: ((e: React.KeyboardEvent) => void) | undefined,
+  onClick: (() => void) | undefined,
+): void {
   if (e.key !== "Enter" && e.key !== " ") return;
   e.preventDefault();
-  onClick?.();
+  // Keyboard activation mirrors mouse: when a selection-aware handler is wired,
+  // Enter/Space toggles/extends the selection just like a click would.
+  if (onSelect) onSelect(e);
+  else onClick?.();
+}
+
+/** State attributes for the row: active-task (`aria-current`) + multi-selected. */
+function taskItemStateAttrs(isSelected: boolean, isMultiSelected: boolean) {
+  return {
+    "data-active": isSelected ? "true" : "false",
+    "data-multiselected": isMultiSelected ? "true" : undefined,
+    "aria-current": isSelected ? ("true" as const) : undefined,
+    // Surface the multi-selected state to assistive tech.
+    "aria-selected": isMultiSelected ? true : undefined,
+  };
+}
+
+function taskItemRowClassName(
+  isSelected: boolean,
+  isMultiSelected: boolean,
+  isRoot: boolean,
+): string {
+  return cn(
+    "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
+    "transition-colors duration-75 hover:bg-foreground/[0.05]",
+    isSelected && "bg-primary/10",
+    // When a row is both the active task and multi-selected, keep the stronger
+    // active background and just add the selection ring on top.
+    isMultiSelected && !isSelected && "bg-primary/5",
+    isMultiSelected && "ring-1 ring-inset ring-primary/40",
+    isRoot && "pl-3",
+  );
+}
+
+/** Mouse uses the modifier-aware `onSelect`; falls back to the plain `onClick`. */
+function taskItemRowClick(
+  onSelect: ((e: React.MouseEvent | React.KeyboardEvent) => void) | undefined,
+  onClick: (() => void) | undefined,
+): (e: React.MouseEvent) => void {
+  return (e) => (onSelect ? onSelect(e) : onClick?.());
 }
 
 function TaskStateIcon({
@@ -123,10 +188,20 @@ function TaskStateIcon({
       />
     );
   }
+  if (computeIsPreparing(state, sessionState)) {
+    return (
+      <IconCircleDashed
+        data-testid="task-state-running"
+        data-loading-phase="preparing"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/40 [animation-duration:2s]"
+      />
+    );
+  }
   if (isInProgress) {
     return (
       <IconCircleDashed
         data-testid="task-state-running"
+        data-loading-phase="running"
         className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
       />
     );
@@ -164,7 +239,9 @@ function TaskItemStatsRow({
   primarySessionId?: string | null;
 }) {
   const pollMode = useAppStore((s) =>
-    DEBUG_UI && primarySessionId ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null) : null,
+    isDebugUI() && primarySessionId
+      ? (s.sessionPollMode.bySessionId[primarySessionId] ?? null)
+      : null,
   );
 
   if (!updatedAt && !prInfo && !pollMode) return null;
@@ -198,7 +275,7 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
     <div
       className={cn(
         "shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
-        menuOpen ? "opacity-0" : "group-hover:opacity-0",
+        menuOpen ? "opacity-0" : "group-hover:opacity-0 group-focus-within:opacity-0",
       )}
     >
       <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
@@ -242,7 +319,7 @@ function TaskItemContent({
   updatedAt,
   prInfo,
   issueInfo,
-  reserveMenuSpace,
+  agentErrorMessage,
 }: {
   title: string;
   taskId?: string;
@@ -256,12 +333,10 @@ function TaskItemContent({
   updatedAt?: string;
   prInfo?: { number: number; state: string };
   issueInfo?: { url: string; number: number };
-  reserveMenuSpace: boolean;
+  agentErrorMessage?: string | null;
 }) {
   return (
-    <div
-      className={cn("flex min-w-0 flex-1 flex-col gap-0.5", reserveMenuSpace && "group-hover:pr-5")}
-    >
+    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
       <span className="flex items-center gap-1 min-w-0 text-[13px] font-medium text-foreground leading-tight">
         <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>
         {isPinned && (
@@ -272,6 +347,7 @@ function TaskItemContent({
         )}
         <TaskPRIcon taskId={taskId} prInfo={prInfo} />
         {issueInfo && <IssueTaskIcon issueInfo={issueInfo} />}
+        {agentErrorMessage && <TaskAgentErrorIcon message={agentErrorMessage} />}
         {isRemoteExecutor && (
           <RemoteCloudTooltip
             taskId={taskId ?? ""}
@@ -297,13 +373,34 @@ function TaskItemContent({
   );
 }
 
+function TaskAgentErrorIcon({ message }: { message: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          data-testid="task-agent-error-icon"
+          className="inline-flex shrink-0 cursor-help text-destructive"
+          aria-label="Task has an agent error"
+        >
+          <IconAlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="max-w-[320px] whitespace-pre-wrap break-words">
+        {message}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export const TaskItem = memo(function TaskItem({
   title,
   state,
   sessionState,
   isArchived,
   isSelected = false,
+  isMultiSelected = false,
   onClick,
+  onSelect,
   diffStats,
   isRemoteExecutor,
   remoteExecutorType,
@@ -316,6 +413,7 @@ export const TaskItem = memo(function TaskItem({
   hasPendingClarification,
   hasPendingPermission,
   isSubTask,
+  depth,
   subtaskCount,
   subtasksCollapsed,
   onToggleSubtasks,
@@ -323,33 +421,28 @@ export const TaskItem = memo(function TaskItem({
   prInfo,
   issueInfo,
   isPinned,
+  agentErrorMessage,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress = computeIsInProgress(state, sessionState);
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
   const showSubtaskToggle = !!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks;
   const taskColor = useTaskColor(taskId);
+  const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
 
   return (
     <div
       role="button"
       tabIndex={0}
       data-testid="sidebar-task-item"
-      onClick={onClick}
-      onKeyDown={(e) => handleTaskItemKeyDown(e, onClick)}
-      className={cn(
-        "group relative flex w-full items-start gap-2 py-2 pr-3 text-left text-sm outline-none cursor-pointer",
-        "transition-colors duration-75 hover:bg-foreground/[0.05]",
-        isSelected && "bg-primary/10",
-        isSubTask ? "pl-8" : "pl-3",
-      )}
+      {...taskItemStateAttrs(isSelected, isMultiSelected)}
+      onClick={taskItemRowClick(onSelect, onClick)}
+      onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
+      style={indent.depth > 0 ? { paddingLeft: indent.paddingLeftPx } : undefined}
+      className={taskItemRowClassName(isSelected, isMultiSelected, indent.depth === 0)}
     >
       <SelectionBar isSelected={isSelected} color={taskColor} />
-      {isSubTask && (
-        <span className="absolute left-3.5 top-[10px] select-none text-[11px] text-muted-foreground/30">
-          ↳
-        </span>
-      )}
+      <RowConnector depth={indent.depth} leftPx={indent.connectorLeftPx} />
       <TaskStateIcon
         sessionState={sessionState}
         state={state}
@@ -370,8 +463,18 @@ export const TaskItem = memo(function TaskItem({
         updatedAt={updatedAt}
         prInfo={prInfo}
         issueInfo={issueInfo}
-        reserveMenuSpace={!hasDiffStats}
+        agentErrorMessage={agentErrorMessage}
       />
+      {hasDiffStats ? (
+        <div className="relative shrink-0 self-center flex items-center">
+          <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
+          <div className="absolute inset-0 flex items-center justify-end">
+            <TaskMenuButton visible={effectiveMenuOpen} />
+          </div>
+        </div>
+      ) : (
+        <TaskMenuButton visible={effectiveMenuOpen} />
+      )}
       {showSubtaskToggle && (
         <SubtaskToggle
           taskId={taskId}
@@ -380,11 +483,22 @@ export const TaskItem = memo(function TaskItem({
           onToggle={onToggleSubtasks!}
         />
       )}
-      {hasDiffStats && <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />}
-      <TaskMenuButton visible={effectiveMenuOpen} shiftLeft={showSubtaskToggle} />
     </div>
   );
 });
+
+// Nested-subtask connector glyph. Renders nothing at the top level (depth 0).
+function RowConnector({ depth, leftPx }: { depth: number; leftPx: number }) {
+  if (depth === 0) return null;
+  return (
+    <span
+      style={{ left: leftPx }}
+      className="absolute top-[10px] select-none text-[11px] text-muted-foreground/30"
+    >
+      ↳
+    </span>
+  );
+}
 
 function SelectionBar({ isSelected, color }: { isSelected: boolean; color: TaskColor | null }) {
   if (color) {
@@ -439,15 +553,14 @@ function SubtaskToggle({
   );
 }
 
-function TaskMenuButton({ visible, shiftLeft }: { visible: boolean; shiftLeft?: boolean }) {
+function TaskMenuButton({ visible }: { visible: boolean }) {
   return (
     <div
       className={cn(
-        "absolute inset-y-0 flex items-center gap-0.5 transition-opacity duration-100",
-        // When a subtask toggle is present on the right, push the menu button
-        // left of it so the two controls don't overlap on hover.
-        shiftLeft ? "right-10" : "right-1",
-        visible ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+        "self-center shrink-0 flex items-center transition-opacity duration-100",
+        visible
+          ? "opacity-100"
+          : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
       )}
     >
       <button

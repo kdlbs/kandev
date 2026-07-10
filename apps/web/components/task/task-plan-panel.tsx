@@ -3,7 +3,7 @@
 import { memo, useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { PanelRoot, PanelBody, PanelHeaderBarSplit } from "./panel-primitives";
 import { TaskPlanRevisions } from "./task-plan-revisions";
-import dynamic from "next/dynamic";
+import dynamic from "@/lib/routing/client-dynamic";
 import { IconLoader2, IconFileText, IconRobot, IconMessage, IconClick } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useTaskPlan } from "@/hooks/domains/session/use-task-plan";

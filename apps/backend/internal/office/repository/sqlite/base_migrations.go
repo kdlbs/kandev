@@ -21,6 +21,7 @@ import (
 func (r *Repository) runMigrations() {
 	r.migrateSchedulerColumns()
 	r.migrateFailureColumns()
+	r.migrateRunPayloadIndexes()
 	if err := r.migrateTaskPriorityToText(); err != nil {
 		// Surface to stderr; this stage runs from initSchema which doesn't
 		// have a logger handle. The recreate is wrapped in a transaction
@@ -37,6 +38,13 @@ func (r *Repository) runMigrations() {
 	// CREATE TABLE statements, so this migration only creates the
 	// auxiliary tables.
 	r.migrateProviderRouting()
+}
+
+func (r *Repository) migrateRunPayloadIndexes() {
+	r.migrate.Apply(
+		"runs.idx_run_payload_comment_id",
+		runPayloadCommentIDIndexSQL(r.db.DriverName()),
+	)
 }
 
 // migrateProviderRouting creates the office_workspace_routing,
@@ -104,7 +112,7 @@ func (r *Repository) migrateFailureColumns() {
 	CREATE TABLE IF NOT EXISTS office_workspace_settings (
 		workspace_id TEXT PRIMARY KEY,
 		agent_failure_threshold INTEGER NOT NULL DEFAULT 3,
-		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	)`)
 
 	_, _ = r.db.Exec(`
@@ -112,7 +120,7 @@ func (r *Repository) migrateFailureColumns() {
 		user_id TEXT NOT NULL,
 		item_kind TEXT NOT NULL,
 		item_id TEXT NOT NULL,
-		dismissed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		dismissed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		PRIMARY KEY (user_id, item_kind, item_id)
 	)`)
 	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_inbox_dismissals_kind ON office_inbox_dismissals(item_kind, item_id)`)
@@ -126,7 +134,7 @@ func (r *Repository) migrateFailureColumns() {
 // directly without an interim ALTER step.
 func (r *Repository) migrateSchedulerColumns() {
 	r.migrate.Apply("tasks.checkout_agent_id", `ALTER TABLE tasks ADD COLUMN checkout_agent_id TEXT`)
-	r.migrate.Apply("tasks.checkout_at", `ALTER TABLE tasks ADD COLUMN checkout_at DATETIME`)
+	r.migrate.Apply("tasks.checkout_at", `ALTER TABLE tasks ADD COLUMN checkout_at TIMESTAMP`)
 }
 
 // migrateTaskFTS creates the FTS5 virtual table and triggers for full-text task search.
@@ -354,7 +362,7 @@ func taskPriorityMigrationStatements() []string {
 			labels TEXT DEFAULT '[]',
 			identifier TEXT,
 			checkout_agent_id TEXT,
-			checkout_at DATETIME
+			checkout_at TIMESTAMP
 		)`,
 		// archived_by_cascade_id is added to the task schema by
 		// task/repository/sqlite/base.go runMigrations() via an

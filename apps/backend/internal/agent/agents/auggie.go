@@ -78,8 +78,8 @@ func (a *Auggie) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *Auggie) BuildCommand(opts CommandOptions) Command {
-	// Model and mode are applied via ACP session/set_model and session/set_mode
-	// after session creation — no --model CLI flag. The --allow-indexing flag
+	// Model and mode are applied via ACP after session creation — no --model CLI flag.
+	// The --allow-indexing flag
 	// used to be applied here from PermissionValues; it now flows through
 	// AgentProfile.CLIFlags and is appended by CommandBuilder.BuildCommand.
 	return Cmd("npx", "-y", auggiePkg, "--acp").Build()
@@ -101,6 +101,7 @@ func (a *Auggie) Runtime() *RuntimeConfig {
 		Protocol:        agent.ProtocolACP,
 		WorkspaceFlag:   "--workspace-root",
 		AssumeMcpSse:    true,
+		AssumeMcpHttp:   true,
 		ProjectSkillDir: ".agents/skills",
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,

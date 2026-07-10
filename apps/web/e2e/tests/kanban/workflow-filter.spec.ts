@@ -144,8 +144,13 @@ test.describe("Kanban workflow filter", () => {
     await testPage.goto(`/t/${betaTaskId}`);
     await expect(testPage).toHaveURL(new RegExp(`/t/${betaTaskId}`));
 
-    // Breadcrumb = client-side nav: goto("/") re-runs SSR and re-resolves activeId, masking the bug.
-    await testPage.getByTestId("task-breadcrumb-home").click();
+    // AppSidebar Home link = client-side nav: goto("/") re-runs SSR and re-resolves activeId, masking the bug.
+    // `exact: true` disambiguates from the brand "Kandev home" link, which also
+    // points at "/" and would otherwise match the accessible-name substring.
+    await testPage
+      .getByTestId("app-sidebar")
+      .getByRole("link", { name: "Home", exact: true })
+      .click();
     await expect(testPage).toHaveURL(/\/$|\?/);
     await expect(kanban.board).toBeVisible();
 

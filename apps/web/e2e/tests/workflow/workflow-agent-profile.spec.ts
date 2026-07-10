@@ -1,6 +1,10 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { KanbanPage } from "../../pages/kanban-page";
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
 
 test.describe("Workflow agent profile", () => {
   test("set workflow-level agent profile in settings and persist after save", async ({

@@ -58,13 +58,6 @@ func New(name string, prober Prober, log *logger.Logger) *Poller {
 	return &Poller{prober: prober, logger: log, name: name, interval: DefaultInterval}
 }
 
-// SetInterval overrides the default cadence. Must be called before Start.
-func (p *Poller) SetInterval(d time.Duration) {
-	p.mu.Lock()
-	p.interval = d
-	p.mu.Unlock()
-}
-
 // Start launches the background loop. Calling Start more than once without
 // Stop is a no-op.
 func (p *Poller) Start(ctx context.Context) {

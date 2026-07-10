@@ -25,6 +25,10 @@ func (c *NoopClient) GetPR(context.Context, string, string, int) (*PR, error) {
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) GetIssue(context.Context, string, string, int) (*Issue, error) {
+	return nil, ErrNoClient
+}
+
 func (c *NoopClient) FindPRByBranch(context.Context, string, string, string) (*PR, error) {
 	return nil, ErrNoClient
 }
@@ -42,6 +46,14 @@ func (c *NoopClient) ListUserOrgs(context.Context) ([]GitHubOrg, error) {
 }
 
 func (c *NoopClient) SearchOrgRepos(context.Context, string, string, int) ([]GitHubRepo, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) ListUserRepos(context.Context, string, int) ([]GitHubRepo, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) ListAccessibleRepos(context.Context, string, int) ([]GitHubRepo, error) {
 	return nil, ErrNoClient
 }
 
@@ -77,7 +89,15 @@ func (c *NoopClient) ListRepoBranches(context.Context, string, string) ([]RepoBr
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) GetRepoMergeMethods(context.Context, string, string) (RepoMergeMethods, error) {
+	return RepoMergeMethods{}, ErrNoClient
+}
+
 func (c *NoopClient) SubmitReview(context.Context, string, string, int, string, string) error {
+	return ErrNoClient
+}
+
+func (c *NoopClient) MergePR(context.Context, string, string, int, string) error {
 	return ErrNoClient
 }
 
@@ -99,4 +119,12 @@ func (c *NoopClient) SearchPRsPaged(context.Context, string, string, int, int) (
 
 func (c *NoopClient) GetIssueState(context.Context, string, string, int) (string, error) {
 	return "", ErrNoClient
+}
+
+func (c *NoopClient) CreateGist(context.Context, CreateGistInput) (*GistResponse, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) DeleteGist(context.Context, string) error {
+	return ErrNoClient
 }

@@ -1,6 +1,6 @@
 {
   "name": "kandev",
-  "version": "0.50.0",
+  "version": "0.76.0",
   "private": false,
   "description": "Launcher for Kandev — manage tasks, orchestrate agents, review changes, and ship value",
   "license": "AGPL-3.0-only",
@@ -13,10 +13,10 @@
   "bin": {
     "kandev": "bin/cli.js"
   },
-  "main": "dist/cli.js",
+  "main": "bin/native-shim.js",
   "files": [
-    "bin",
-    "dist"
+    "bin/cli.js",
+    "bin/native-shim.js"
   ],
   "engines": {
     "npm": ">=7"
@@ -28,22 +28,20 @@
     "@kdlbs/runtime-darwin-arm64": "0.0.0-bootstrap",
     "@kdlbs/runtime-win32-x64": "0.0.0-bootstrap"
   },
-  "dependencies": {
-    "tar": "^7.5.11",
-    "tree-kill": "^1.2.2"
-  },
   "devDependencies": {
     "@types/node": "^20",
     "esbuild": "^0.24.0",
+    "tar": "^7.5.11",
+    "tree-kill": "^1.2.2",
     "tsx": "^4.15.7",
     "typescript": "^5",
     "vitest": "^1.6.0"
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "build": "tsc -p tsconfig.json",
-    "bundle": "esbuild dist/cli.js --bundle --platform=node --format=cjs --outfile=dist/cli.bundle.js",
-    "start": "node dist/cli.js",
+    "build": "node -c bin/cli.js && node -c bin/native-shim.js",
+    "bundle": "pnpm build",
+    "start": "node bin/cli.js",
     "test": "vitest run",
     "prepublishOnly": "pnpm build"
   }

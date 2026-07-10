@@ -1,4 +1,15 @@
-import { useRef, useCallback, useState, useEffect, useLayoutEffect, useMemo } from "react";
+import {
+  useRef,
+  useCallback,
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  type Dispatch,
+  type MutableRefObject,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 import {
   getChatDraftText,
   setChatDraftText,
@@ -17,8 +28,9 @@ import {
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { DiffComment } from "@/lib/diff/types";
-import type { MessageAttachment } from "./chat-input-container";
+import type { ChatSubmitResult, MessageAttachment } from "./chat-input-container";
 import type { TipTapInputHandle } from "./tiptap-input";
+import type { TaskMentionData } from "@/hooks/use-inline-mention";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
@@ -34,8 +46,18 @@ type UseChatInputStateProps = {
     reviewComments?: DiffComment[],
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
-  ) => void;
+    inlineTaskMentions?: TaskMentionData[],
+  ) => ChatSubmitResult;
 };
+
+function isPromiseLike(value: ChatSubmitResult): value is Promise<void | boolean> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "then" in value &&
+    typeof value.then === "function"
+  );
+}
 
 function collectComments(
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined,
@@ -50,8 +72,20 @@ function collectComments(
 function toMessageAttachments(attachments: FileAttachment[]): MessageAttachment[] {
   return attachments.map((att) =>
     att.isImage
-      ? { type: "image" as const, data: att.data, mime_type: att.mimeType }
-      : { type: "resource" as const, data: att.data, mime_type: att.mimeType, name: att.fileName },
+      ? {
+          type: "image" as const,
+          data: att.data,
+          mime_type: att.mimeType,
+          name: att.fileName,
+          ...(att.deliveryMode === "path" && { delivery_mode: "path" as const }),
+        }
+      : {
+          type: "resource" as const,
+          data: att.data,
+          mime_type: att.mimeType,
+          name: att.fileName,
+          delivery_mode: "path" as const,
+        },
   );
 }
 
@@ -60,6 +94,101 @@ function clearDraft(sessionId: string | null) {
   setChatDraftText(sessionId, "");
   setChatDraftContent(sessionId, null);
   setChatDraftAttachments(sessionId, []);
+}
+
+function clearDraftText(sessionId: string | null) {
+  if (!sessionId) return;
+  setChatDraftText(sessionId, "");
+  setChatDraftContent(sessionId, null);
+}
+
+function attachmentSnapshot(attachments: FileAttachment[]): string {
+  return attachments.map((att) => `${att.id}:${att.deliveryMode ?? "prompt"}`).join("|");
+}
+
+type ClearSubmittedInputArgs = {
+  valueRef: MutableRefObject<string>;
+  submittedText: string;
+  attachmentsRef: MutableRefObject<FileAttachment[]>;
+  submittedAttachments: string;
+  inputRef: RefObject<TipTapInputHandle | null>;
+  setValue: Dispatch<SetStateAction<string>>;
+  setAttachments: Dispatch<SetStateAction<FileAttachment[]>>;
+  setHistoryIndex: Dispatch<SetStateAction<number>>;
+  resetHeight: () => void;
+  sessionId: string | null;
+};
+
+function clearSubmittedInput(args: ClearSubmittedInputArgs) {
+  // Abort if the user already typed new content since this submit started.
+  if (args.valueRef.current.trim() !== args.submittedText) return;
+  const attachmentsChanged =
+    attachmentSnapshot(args.attachmentsRef.current) !== args.submittedAttachments;
+  args.inputRef.current?.clear();
+  args.setValue("");
+  args.setHistoryIndex(-1);
+  args.resetHeight();
+  if (attachmentsChanged) {
+    clearDraftText(args.sessionId);
+    return;
+  }
+  args.setAttachments([]);
+  clearDraft(args.sessionId);
+}
+
+function handleSubmitResult(result: ChatSubmitResult, onSuccess: () => void) {
+  if (isPromiseLike(result)) {
+    // Submitters should show user-visible failure feedback and resolve false;
+    // rejected promises are unexpected, so preserve the draft and log them.
+    void result
+      .then((submitted) => {
+        if (submitted !== false) onSuccess();
+      })
+      .catch((error) => {
+        console.error("Failed to submit chat input:", error);
+      });
+    return;
+  }
+  if (result !== false) onSuccess();
+}
+
+type SubmitDraftArgs = {
+  isSending: boolean;
+  valueRef: MutableRefObject<string>;
+  pendingCommentsRef: MutableRefObject<Record<string, DiffComment[]> | undefined>;
+  attachmentsRef: MutableRefObject<FileAttachment[]>;
+  hasContextComments: boolean;
+  inputRef: RefObject<TipTapInputHandle | null>;
+  onSubmit: UseChatInputStateProps["onSubmit"];
+  clearArgs: Omit<ClearSubmittedInputArgs, "submittedText" | "submittedAttachments">;
+};
+
+function submitDraft(args: SubmitDraftArgs) {
+  if (args.isSending) return;
+  const trimmed = args.valueRef.current.trim();
+  const allComments = collectComments(args.pendingCommentsRef.current);
+  const currentAttachments = args.attachmentsRef.current;
+  const submittedAttachments = attachmentSnapshot(currentAttachments);
+  const hasContent =
+    trimmed || allComments.length > 0 || currentAttachments.length > 0 || args.hasContextComments;
+  if (!hasContent) return;
+  const messageAttachments = toMessageAttachments(currentAttachments);
+  const inlineMentions = args.inputRef.current?.getMentions() ?? [];
+  const inlineTaskMentions = args.inputRef.current?.getTaskMentions() ?? [];
+  const result = args.onSubmit(
+    trimmed,
+    allComments.length > 0 ? allComments : undefined,
+    messageAttachments.length > 0 ? messageAttachments : undefined,
+    inlineMentions.length > 0 ? inlineMentions : undefined,
+    inlineTaskMentions.length > 0 ? inlineTaskMentions : undefined,
+  );
+  handleSubmitResult(result, () =>
+    clearSubmittedInput({
+      ...args.clearArgs,
+      submittedText: trimmed,
+      submittedAttachments,
+    }),
+  );
 }
 
 function useAttachments(sessionId: string | null) {
@@ -115,7 +244,19 @@ function useAttachments(sessionId: string | null) {
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((att) => att.id !== id));
+    setAttachments((prev) => {
+      const next = prev.filter((att) => att.id !== id);
+      attachmentsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const handleDeliveryModeChange = useCallback((id: string, deliveryMode: "prompt" | "path") => {
+    setAttachments((prev) => {
+      const next = prev.map((att) => (att.id === id ? { ...att, deliveryMode } : att));
+      attachmentsRef.current = next;
+      return next;
+    });
   }, []);
 
   const getAttachments = useCallback(
@@ -129,6 +270,7 @@ function useAttachments(sessionId: string | null) {
     setAttachments,
     addFiles,
     handleRemoveAttachment,
+    handleDeliveryModeChange,
     getAttachments,
   };
 }
@@ -156,6 +298,7 @@ export function useChatInputState({
     setAttachments,
     addFiles,
     handleRemoveAttachment,
+    handleDeliveryModeChange,
     getAttachments,
   } = useAttachments(sessionId);
 
@@ -186,27 +329,25 @@ export function useChatInputState({
 
   const handleSubmit = useCallback(
     (resetHeight: () => void) => {
-      if (isSending) return;
-      const trimmed = valueRef.current.trim();
-      const allComments = collectComments(pendingCommentsRef.current);
-      const currentAttachments = attachmentsRef.current;
-      const hasContent =
-        trimmed || allComments.length > 0 || currentAttachments.length > 0 || hasContextComments;
-      if (!hasContent) return;
-      const messageAttachments = toMessageAttachments(currentAttachments);
-      const inlineMentions = inputRef.current?.getMentions() ?? [];
-      onSubmit(
-        trimmed,
-        allComments.length > 0 ? allComments : undefined,
-        messageAttachments.length > 0 ? messageAttachments : undefined,
-        inlineMentions.length > 0 ? inlineMentions : undefined,
-      );
-      inputRef.current?.clear();
-      setValue("");
-      setAttachments([]);
-      setHistoryIndex(-1);
-      resetHeight();
-      clearDraft(sessionId);
+      submitDraft({
+        isSending,
+        valueRef,
+        pendingCommentsRef,
+        attachmentsRef,
+        hasContextComments,
+        inputRef,
+        onSubmit,
+        clearArgs: {
+          valueRef,
+          attachmentsRef,
+          inputRef,
+          setValue,
+          setAttachments,
+          setHistoryIndex,
+          resetHeight,
+          sessionId,
+        },
+      });
     },
     [onSubmit, isSending, sessionId, attachmentsRef, setAttachments, hasContextComments],
   );
@@ -221,6 +362,7 @@ export function useChatInputState({
               label: `Image (${formatBytes(att.size)})`,
               attachment: att,
               onRemove: () => handleRemoveAttachment(att.id),
+              onDeliveryModeChange: (mode) => handleDeliveryModeChange(att.id, mode),
             } as ImageContextItem)
           : ({
               kind: "file-attachment" as const,
@@ -231,7 +373,7 @@ export function useChatInputState({
             } as FileAttachmentContextItem),
     );
     return [...contextItems, ...attachmentItems];
-  }, [contextItems, attachments, handleRemoveAttachment]);
+  }, [contextItems, attachments, handleRemoveAttachment, handleDeliveryModeChange]);
 
   // prettier-ignore
   return { value, attachments, inputRef, addFiles, handleChange, handleSubmit, allItems, getAttachments };

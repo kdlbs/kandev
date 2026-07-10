@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -40,6 +43,16 @@ func isContainerizedExecutor(executorType string) bool {
 	default:
 		return false
 	}
+}
+
+// executorNeedsResolvedCredentials reports whether an executor runs the agent
+// off the control-plane host and therefore needs credentials resolved into
+// req.Env (rather than inherited from the kandev process environment). This is
+// every containerized executor plus SSH, whose remote agentctl only receives
+// the credential keys we forward in req.Env.
+func executorNeedsResolvedCredentials(executorType string) bool {
+	return isContainerizedExecutor(executorType) ||
+		models.ExecutorType(executorType) == models.ExecutorTypeSSH
 }
 
 // runAgentProcessAsync starts the agent subprocess in a background goroutine.
@@ -78,6 +91,8 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 						zap.String("task_id", taskID),
 						zap.Error(updateErr))
 				}
+			} else {
+				e.writeTaskReviewStateIfNoWorkingSessions(updateCtx, taskID, sessionID)
 			}
 			// Clean up the execution environment (e.g., destroy remote Sprites instance).
 			// Use force=true since the agent process never fully started.
@@ -104,6 +119,113 @@ func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID
 	}, true, false)
 }
 
+func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentExecutionID string) {
+	if agentExecutionID == "" {
+		return
+	}
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if stopErr := e.agentManager.StopAgent(stopCtx, agentExecutionID, true); stopErr != nil {
+		e.logger.Warn("failed to stop unstarted agent execution",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(stopErr))
+	}
+}
+
+func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, taskID, failedSessionID string) {
+	if e.onTaskReviewStateReconcile != nil {
+		e.onTaskReviewStateReconcile(ctx, taskID, failedSessionID)
+		return
+	}
+
+	if e.shouldSkipFailedStartReviewForTask(ctx, taskID, failedSessionID) {
+		return
+	}
+	if e.failedSessionStillWorkingOrUnknown(ctx, taskID, failedSessionID) {
+		return
+	}
+	if e.hasOtherWorkingSessions(ctx, taskID, failedSessionID) {
+		return
+	}
+	if updateErr := e.updateTaskState(ctx, taskID, v1.TaskStateReview); updateErr != nil {
+		e.logger.Warn("failed to update task state to REVIEW after start error",
+			zap.String("task_id", taskID),
+			zap.Error(updateErr))
+	}
+}
+
+func (e *Executor) shouldSkipFailedStartReviewForTask(ctx context.Context, taskID, failedSessionID string) bool {
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to load task before failed-start REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.Error(err))
+		return true
+	}
+	if task != nil && task.AssigneeAgentProfileID != "" {
+		e.logger.Debug("skipping failed-start task REVIEW state for office task",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID))
+		return true
+	}
+	return false
+}
+
+func (e *Executor) failedSessionStillWorkingOrUnknown(ctx context.Context, taskID, failedSessionID string) bool {
+	if failedSessionID == "" {
+		return false
+	}
+	session, err := e.repo.GetTaskSession(ctx, failedSessionID)
+	if err != nil {
+		e.logger.Warn("failed to load failed session before failed-start REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.Error(err))
+		return true
+	}
+	if session != nil && isRuntimeWorkingSessionState(session.State) {
+		e.logger.Debug("skipping failed-start task REVIEW state because failed session is active again",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.String("session_state", string(session.State)))
+		return true
+	}
+	return false
+}
+
+func (e *Executor) hasOtherWorkingSessions(ctx context.Context, taskID, failedSessionID string) bool {
+	sessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		e.logger.Warn("failed to list task sessions before failed-start REVIEW state reconcile",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID),
+			zap.Error(err))
+		return true
+	}
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		if failedSessionID != "" && session.ID == failedSessionID {
+			continue
+		}
+		if isRuntimeWorkingSessionState(session.State) {
+			e.logger.Debug("skipping failed-start task REVIEW state while another session is working",
+				zap.String("task_id", taskID),
+				zap.String("failed_session_id", failedSessionID),
+				zap.String("blocking_session_id", session.ID))
+			return true
+		}
+	}
+	return false
+}
+
+func isRuntimeWorkingSessionState(state models.TaskSessionState) bool {
+	return sessionstate.IsWorking(state)
+}
+
 // updateTaskState updates a task's state, using the callback if set for event publishing,
 // or falling back to the raw repository.
 func (e *Executor) updateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
@@ -120,6 +242,16 @@ func (e *Executor) updateSessionState(ctx context.Context, taskID, sessionID str
 		return e.onSessionStateChange(ctx, taskID, sessionID, state, errorMessage)
 	}
 	return e.repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+}
+
+// updateSessionStarting persists a full session-row STARTING transition, using
+// the orchestrator callback when present so task/session runtime state stays
+// serialized with guarded REVIEW reconciliation.
+func (e *Executor) updateSessionStarting(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+	if e.onSessionStarting != nil {
+		return e.onSessionStarting(ctx, taskID, session, promoteTask)
+	}
+	return e.repo.UpdateTaskSession(ctx, session)
 }
 
 // shouldUseWorktree returns true if the given executor type should use Git worktrees.
@@ -548,7 +680,10 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID st
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.
 func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *models.TaskSession, agentProfileID, sessionID string, repoInfo *repoInfo, resp *LaunchAgentResponse, startAgent bool, execCfg executorConfig) (*TaskExecution, error) {
 	now := time.Now().UTC()
-	e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now)
+	if err := e.persistLaunchState(ctx, task.ID, sessionID, session, resp, startAgent, now); err != nil {
+		e.stopUnstartedExecution(ctx, sessionID, resp.AgentExecutionID)
+		return nil, err
+	}
 	e.persistWorktreeAssociation(ctx, task.ID, session, repoInfo.RepositoryID, resp)
 
 	sessionState := v1.TaskSessionStateCreated
@@ -570,6 +705,24 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 
 	if startAgent {
 		e.startAgentProcessAsync(ctx, task.ID, sessionID, resp.AgentExecutionID)
+	} else {
+		// Prepare-only launch: the workspace + agentctl are up but the agent
+		// process is intentionally not being started. The lifecycle manager
+		// writes an active runtime status on row creation; flip it to
+		// 'prepared' so the row doesn't look like an agent process is running.
+		// When the user later starts the agent (StartCreatedSession), Launch
+		// re-runs and rewrites the row with the active runtime status via the
+		// usual path.
+		//
+		// Detach from the caller context so a client disconnect / WS timeout
+		// right after launch returns can't drop this write — that would leave
+		// the row stuck on "starting", which is the exact UX this fix closes.
+		statusCtx := context.WithoutCancel(ctx)
+		if err := e.repo.UpdateExecutorRunningStatus(statusCtx, sessionID, models.ExecutorRunningStatusPrepared); err != nil {
+			e.logger.Warn("failed to mark executors_running as prepared",
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 	}
 
 	e.logger.Info("agent launched for prepared session",
@@ -613,6 +766,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		SessionID:         sessionID,
 		TaskEnvironmentID: session.TaskEnvironmentID,
 		IsEphemeral:       task.IsEphemeral,
+		IsPassthrough:     session.IsPassthrough,
 		WorkspacePath:     session.WorkspacePath,
 	}
 
@@ -633,14 +787,20 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		}
 	}
 
-	// For containerized executors, resolve credentials in this order:
+	// For remote executors (containerized *and* SSH), resolve credentials into
+	// req.Env in this order:
 	// 1. Profile remote_auth_secrets (e.g., gh_cli_env method with secret)
 	// 2. Profile remote_credentials with gh_cli_token (extract from local gh CLI)
 	// 3. Global GITHUB_TOKEN secret (fallback)
 	// 4. Auto-extract from local gh CLI (final fallback)
-	if isContainerizedExecutor(execConfig.ExecutorType) {
+	// SSH is included so env-authenticated agents (e.g. claude-acp reading
+	// CLAUDE_CODE_OAUTH_TOKEN) and remote git get their credentials from the
+	// configured profile/secret store rather than from a blanket forward of the
+	// control-plane process env — the SSH executor only forwards req.Env keys.
+	if executorNeedsResolvedCredentials(execConfig.ExecutorType) {
 		e.applyContainerCredentials(ctx, req, metadata)
 	}
+	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 
 	metadata, err := e.applyRepositoryConfig(req, task, repoInfo, execConfig, metadata)
 	if err != nil {
@@ -653,6 +813,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	// (mirroring the primary) for downstream code that has not been migrated.
 	if len(allRepos) > 1 {
 		req.Repositories = buildRepoSpecs(allRepos)
+		for i := range req.Repositories {
+			req.Repositories[i].WorktreeBranchTicket = req.WorktreeBranchTicket
+		}
 	}
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
@@ -688,22 +851,32 @@ func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAge
 
 // buildRepoSpecs converts resolved repoInfos into per-repo launch specs for
 // the lifecycle layer. Used only when the task has more than one repository.
+// When the same RepositoryID appears more than once, each row gets a stable
+// BranchIdentitySlug for reuse while the lowest-position branch keeps the flat
+// layout (<task>/<repo>/). Other branches use sibling directories like
+// <task>/<repo>-<branch-slug>/.
+// This preserves the legacy single-branch path when a task later gains another
+// branch of the same repository.
 func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
+	branchPlans := buildRepoBranchPlans(allRepos)
 	out := make([]RepoSpec, 0, len(allRepos))
 	for _, info := range allRepos {
 		spec := RepoSpec{
-			RepositoryID:         info.RepositoryID,
-			RepositoryPath:       info.RepositoryPath,
-			BaseBranch:           info.BaseBranch,
-			CheckoutBranch:       info.CheckoutBranch,
-			WorktreeBranchPrefix: info.WorktreeBranchPrefix,
-			PullBeforeWorktree:   info.PullBeforeWorktree,
+			RepositoryID:           info.RepositoryID,
+			RepositoryPath:         info.RepositoryPath,
+			BaseBranch:             info.BaseBranch,
+			CheckoutBranch:         info.CheckoutBranch,
+			PRNumber:               info.PRNumber,
+			WorktreeBranchPrefix:   info.WorktreeBranchPrefix,
+			WorktreeBranchTemplate: info.WorktreeBranchTemplate,
+			PullBeforeWorktree:     info.PullBeforeWorktree,
 		}
 		if info.Repository != nil {
 			spec.RepoName = info.Repository.Name
 			spec.RepoSetupScript = info.Repository.SetupScript
 			spec.RepoCleanupScript = info.Repository.CleanupScript
 			spec.DefaultBranch = info.Repository.DefaultBranch
+			spec.CopyFiles = info.Repository.CopyFiles
 		}
 		// Containerized executors need a clone URL; reuse the same helper as
 		// the single-repo path (best-effort — skipped if Repository is nil).
@@ -712,19 +885,142 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 				spec.RepositoryURL = u
 			}
 		}
+		if plan, ok := branchPlans[info]; ok {
+			spec.BranchIdentitySlug = plan.identitySlug
+			spec.BranchSlug = plan.pathSlug
+		}
 		out = append(out, spec)
 	}
 	return out
+}
+
+type repoBranchPlan struct {
+	identitySlug string
+	pathSlug     string
+}
+
+func buildRepoBranchPlans(allRepos []*repoInfo) map[*repoInfo]repoBranchPlan {
+	groups := make(map[string][]*repoInfo, len(allRepos))
+	for _, info := range allRepos {
+		if info == nil || info.RepositoryID == "" {
+			continue
+		}
+		groups[info.RepositoryID] = append(groups[info.RepositoryID], info)
+	}
+
+	plans := make(map[*repoInfo]repoBranchPlan, len(allRepos))
+	for repoID, group := range groups {
+		identities := branchIdentitySlugsForGroup(repoID, group)
+		if len(group) < 2 {
+			for _, info := range group {
+				plans[info] = repoBranchPlan{identitySlug: identities[info]}
+			}
+			continue
+		}
+		flatIdentity := selectFlatBranchIdentity(group, identities)
+		for _, info := range group {
+			identity := identities[info]
+			pathSlug := identity
+			if identity == flatIdentity {
+				pathSlug = ""
+			}
+			plans[info] = repoBranchPlan{identitySlug: identity, pathSlug: pathSlug}
+		}
+	}
+	return plans
+}
+
+func branchIdentitySlugsForGroup(repoID string, group []*repoInfo) map[*repoInfo]string {
+	raw := make(map[*repoInfo]string, len(group))
+	counts := make(map[string]int, len(group))
+	for _, info := range group {
+		slug := preferredBranchIdentitySlug(info)
+		if slug == "" {
+			slug = "branch-" + branchIdentityHash(repoID, info)
+		}
+		raw[info] = slug
+		counts[slug]++
+	}
+
+	out := make(map[*repoInfo]string, len(group))
+	for _, info := range group {
+		slug := raw[info]
+		if counts[slug] > 1 {
+			slug += "-" + branchIdentityHash(repoID, info)
+		}
+		slug = worktree.SanitizeBranchSlug(slug)
+		if slug == "" {
+			slug = "branch-" + branchIdentityHash(repoID, info)
+		}
+		out[info] = slug
+	}
+	return out
+}
+
+func preferredBranchIdentitySlug(info *repoInfo) string {
+	branch := info.CheckoutBranch
+	if branch == "" {
+		branch = info.BaseBranch
+	}
+	if branch == "" && info.Repository != nil {
+		branch = info.Repository.DefaultBranch
+	}
+	return worktree.SanitizeBranchSlug(branch)
+}
+
+func branchIdentityHash(repoID string, info *repoInfo) string {
+	seed := strings.Join([]string{
+		repoID,
+		info.BaseBranch,
+		info.CheckoutBranch,
+		fmt.Sprintf("%d", info.PRNumber),
+	}, "\x00")
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(seed))
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
+func selectFlatBranchIdentity(group []*repoInfo, identities map[*repoInfo]string) string {
+	candidates := make([]*repoInfo, 0, len(group))
+	candidates = append(candidates, group...)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Position != candidates[j].Position {
+			return candidates[i].Position < candidates[j].Position
+		}
+		leftRank := flatBranchRank(candidates[i])
+		rightRank := flatBranchRank(candidates[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return identities[candidates[i]] < identities[candidates[j]]
+	})
+	return identities[candidates[0]]
+}
+
+func flatBranchRank(info *repoInfo) int {
+	if info.CheckoutBranch != "" {
+		return 3
+	}
+	if info.Repository != nil && info.Repository.DefaultBranch != "" && info.BaseBranch == info.Repository.DefaultBranch {
+		return 0
+	}
+	if info.BaseBranch == defaultBaseBranch {
+		return 1
+	}
+	return 2
 }
 
 // applyRepositoryConfig sets repository-related fields on the request and resolves clone URLs.
 func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task, repoInfo *repoInfo, execConfig executorConfig, metadata map[string]interface{}) (map[string]interface{}, error) {
 	if repoInfo.RepositoryPath != "" {
 		req.UseWorktree = shouldUseWorktree(execConfig.ExecutorType)
+		req.RepositoryID = repoInfo.RepositoryID
 		req.RepositoryPath = repoInfo.RepositoryPath
 		req.BaseBranch = repoInfo.BaseBranch
 		req.CheckoutBranch = repoInfo.CheckoutBranch
+		req.PRNumber = repoInfo.PRNumber
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
+		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
@@ -739,6 +1035,9 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 				metadata = make(map[string]interface{})
 			}
 			metadata[lifecycle.MetadataKeyRepoSetupScript] = repoInfo.Repository.SetupScript
+		}
+		if repoInfo.Repository != nil {
+			req.CopyFiles = repoInfo.Repository.CopyFiles
 		}
 	}
 
@@ -837,10 +1136,11 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	session.State = models.TaskSessionStateStarting
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := e.updateSessionStarting(ctx, task.ID, session, true); err != nil {
 		e.logger.Error("failed to update session state for agent start",
 			zap.String("session_id", session.ID),
 			zap.Error(err))
+		return nil, err
 	}
 
 	execution := &TaskExecution{
@@ -1046,6 +1346,12 @@ func (e *Executor) persistTaskEnvironment(
 		if sandboxID := extractSandboxID(resp.Metadata); sandboxID != "" {
 			existingEnv.SandboxID = sandboxID
 		}
+		// Refresh TaskDirName when the request carries a new value — covers
+		// resume-after-failure where the original env row was stamped with an
+		// empty task_dir_name and the resume regenerates it.
+		if req.TaskDirName != "" {
+			existingEnv.TaskDirName = req.TaskDirName
+		}
 		if err := e.repo.UpdateTaskEnvironment(ctx, existingEnv); err != nil {
 			e.logger.Warn("failed to update task environment",
 				zap.String("task_id", taskID),
@@ -1096,6 +1402,7 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 	for i, w := range worktrees {
 		out = append(out, &models.TaskEnvironmentRepo{
 			RepositoryID:   w.RepositoryID,
+			BranchSlug:     w.BranchSlug,
 			WorktreeID:     w.WorktreeID,
 			WorktreePath:   w.WorktreePath,
 			WorktreeBranch: w.WorktreeBranch,
@@ -1106,9 +1413,10 @@ func buildTaskEnvironmentRepos(worktrees []RepoWorktreeResult) []*models.TaskEnv
 	return out
 }
 
-// persistTaskEnvironmentRepos inserts per-repo rows under an existing env id,
-// skipping any (env, repo) pair that already exists. Used when an existing
-// environment is reused (resume / re-launch on the same task).
+// persistTaskEnvironmentRepos upserts per-repo rows under an existing env id.
+// Used when an existing environment is reused (resume / re-launch on the same
+// task), including cases where stale or legacy rows need the successful launch
+// result written back for the next handoff.
 func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string, worktrees []RepoWorktreeResult) {
 	if envID == "" || len(worktrees) == 0 {
 		return
@@ -1120,17 +1428,36 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 			zap.Error(err))
 		return
 	}
-	have := make(map[string]bool, len(existing))
+	byKey := make(map[string]*models.TaskEnvironmentRepo, len(existing))
+	legacyFlatByRepo := make(map[string]*models.TaskEnvironmentRepo)
 	for _, row := range existing {
-		have[row.RepositoryID] = true
+		key := row.RepositoryID + "\x00" + row.BranchSlug
+		byKey[key] = row
+		if row.RepositoryID != "" && row.BranchSlug == "" {
+			legacyFlatByRepo[row.RepositoryID] = row
+		}
 	}
 	for i, w := range worktrees {
-		if w.RepositoryID == "" || have[w.RepositoryID] {
+		if w.RepositoryID == "" {
 			continue
+		}
+		key := w.RepositoryID + "\x00" + w.BranchSlug
+		if row := byKey[key]; row != nil {
+			e.refreshTaskEnvironmentRepo(ctx, row, w, i)
+			continue
+		}
+		if w.BranchSlug != "" {
+			if row := legacyFlatByRepo[w.RepositoryID]; row != nil {
+				e.refreshTaskEnvironmentRepo(ctx, row, w, i)
+				delete(legacyFlatByRepo, w.RepositoryID)
+				byKey[key] = row
+				continue
+			}
 		}
 		row := &models.TaskEnvironmentRepo{
 			TaskEnvironmentID: envID,
 			RepositoryID:      w.RepositoryID,
+			BranchSlug:        w.BranchSlug,
 			WorktreeID:        w.WorktreeID,
 			WorktreePath:      w.WorktreePath,
 			WorktreeBranch:    w.WorktreeBranch,
@@ -1144,6 +1471,34 @@ func (e *Executor) persistTaskEnvironmentRepos(ctx context.Context, envID string
 				zap.Error(createErr))
 		}
 	}
+}
+
+func (e *Executor) refreshTaskEnvironmentRepo(ctx context.Context, row *models.TaskEnvironmentRepo, w RepoWorktreeResult, position int) {
+	if !taskEnvironmentRepoNeedsRefresh(row, w, position) {
+		return
+	}
+	row.BranchSlug = w.BranchSlug
+	row.WorktreeID = w.WorktreeID
+	row.WorktreePath = w.WorktreePath
+	row.WorktreeBranch = w.WorktreeBranch
+	row.Position = position
+	row.ErrorMessage = w.ErrorMessage
+	if err := e.repo.UpdateTaskEnvironmentRepo(ctx, row); err != nil {
+		e.logger.Warn("failed to update task environment repo",
+			zap.String("env_id", row.TaskEnvironmentID),
+			zap.String("repository_id", row.RepositoryID),
+			zap.String("branch_slug", row.BranchSlug),
+			zap.Error(err))
+	}
+}
+
+func taskEnvironmentRepoNeedsRefresh(row *models.TaskEnvironmentRepo, w RepoWorktreeResult, position int) bool {
+	return row.BranchSlug != w.BranchSlug ||
+		row.WorktreeID != w.WorktreeID ||
+		row.WorktreePath != w.WorktreePath ||
+		row.WorktreeBranch != w.WorktreeBranch ||
+		row.Position != position ||
+		row.ErrorMessage != w.ErrorMessage
 }
 
 // extractSandboxID extracts the sandbox identifier from launch response metadata.

@@ -227,6 +227,148 @@ func TestGetRepositoryStats_ExcludesSoftDeletedRepos(t *testing.T) {
 	}
 }
 
+// TestGetGlobalStats_AggregatesAcrossTables exercises the CTE-based query path
+// for every aggregated field — total/user/tool messages, turn count, and the
+// computed total duration — to guard against regressions when the query is
+// further consolidated.
+func TestGetGlobalStats_AggregatesAcrossTables(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-1', 'ws-1', 'board-1', '', 'T1', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-1', 'task-1', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	// Two turns: 5m + 10m of active duration (= 900_000 ms). All messages live
+	// on turn-1; turn-2 is intentionally empty so it's excluded from
+	// clean_turn_agg via the msg_count >= cleanTurnMinMessages filter.
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-1', 'sess-1', 'task-1', '2026-01-01T10:00:00Z', '2026-01-01T10:05:00Z', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-2', 'sess-1', 'task-1', '2026-01-01T10:10:00Z', '2026-01-01T10:20:00Z', ?, ?)`, nowStr, nowStr)
+	// Messages: 2 user, 1 tool_call, 1 tool_edit, 1 agent text.
+	execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES ('m-1', 'sess-1', 'turn-1', 'user', 'message', 'hi', ?)`, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES ('m-2', 'sess-1', 'turn-1', 'user', 'message', 'hello', ?)`, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES ('m-3', 'sess-1', 'turn-1', 'agent', 'tool_call', 'bash', ?)`, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES ('m-4', 'sess-1', 'turn-1', 'agent', 'tool_edit', 'edit', ?)`, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES ('m-5', 'sess-1', 'turn-1', 'agent', 'message', 'reply', ?)`, nowStr)
+
+	stats, err := repo.GetGlobalStats(ctx, "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetGlobalStats failed: %v", err)
+	}
+	if stats.TotalTasks != 1 {
+		t.Errorf("TotalTasks: want 1, got %d", stats.TotalTasks)
+	}
+	if stats.TotalSessions != 1 {
+		t.Errorf("TotalSessions: want 1, got %d", stats.TotalSessions)
+	}
+	if stats.TotalTurns != 2 {
+		t.Errorf("TotalTurns: want 2, got %d", stats.TotalTurns)
+	}
+	if stats.TotalMessages != 5 {
+		t.Errorf("TotalMessages: want 5, got %d", stats.TotalMessages)
+	}
+	if stats.TotalUserMessages != 2 {
+		t.Errorf("TotalUserMessages: want 2, got %d", stats.TotalUserMessages)
+	}
+	if stats.TotalToolCalls != 2 {
+		t.Errorf("TotalToolCalls: want 2 (tool_call + tool_edit), got %d", stats.TotalToolCalls)
+	}
+	assertDurationAlmostEqual(t, stats.TotalDurationMs, int64(15*60*1000), "TotalDurationMs")
+	// Clean-turn averages: only turn-1 (5m, 5 msgs) qualifies; turn-2 has 0 messages so it's excluded.
+	assertDurationAlmostEqual(t, stats.AvgTurnDurationMs, int64(5*60*1000), "AvgTurnDurationMs")
+	if math.Abs(stats.AvgMessagesPerTurn-5.0) > 0.01 {
+		t.Errorf("AvgMessagesPerTurn: want 5.0, got %f", stats.AvgMessagesPerTurn)
+	}
+}
+
+// TestGetGlobalStats_CleanTurnExcludesOutliers verifies that the clean-turn
+// metrics exclude turns shorter than 1s, longer than 1h, with no messages, or
+// without a completed_at timestamp.
+func TestGetGlobalStats_CleanTurnExcludesOutliers(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-1', 'ws-1', 'board-1', '', 'T1', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-1', 'task-1', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+
+	// turn-good: 2m, 4 messages — included.
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-good', 'sess-1', 'task-1', '2026-01-01T10:00:00Z', '2026-01-01T10:02:00Z', ?, ?)`, nowStr, nowStr)
+	// turn-short: 0.5s — excluded (below 1s floor).
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-short', 'sess-1', 'task-1', '2026-01-01T11:00:00.000Z', '2026-01-01T11:00:00.500Z', ?, ?)`, nowStr, nowStr)
+	// turn-zombie: 2h — excluded (above 1h ceiling).
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-zombie', 'sess-1', 'task-1', '2026-01-01T12:00:00Z', '2026-01-01T14:00:00Z', ?, ?)`, nowStr, nowStr)
+	// turn-boundary: exactly 1h — excluded (cleanTurnMaxDurationMs is exclusive).
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-boundary', 'sess-1', 'task-1', '2026-01-01T13:00:00Z', '2026-01-01T14:00:00Z', ?, ?)`, nowStr, nowStr)
+	// turn-empty: 10m, 0 messages — excluded (no messages).
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-empty', 'sess-1', 'task-1', '2026-01-01T15:00:00Z', '2026-01-01T15:10:00Z', ?, ?)`, nowStr, nowStr)
+	// turn-incomplete: still running — excluded (NULL completed_at).
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, created_at, updated_at) VALUES ('turn-incomplete', 'sess-1', 'task-1', '2026-01-01T16:00:00Z', ?, ?)`, nowStr, nowStr)
+
+	// Messages: 4 on turn-good, 1 each on the otherwise-excluded turns so they aren't excluded by msg filter alone.
+	for i, turnID := range []string{"turn-good", "turn-good", "turn-good", "turn-good", "turn-short", "turn-zombie", "turn-boundary", "turn-incomplete"} {
+		mid := fmt.Sprintf("m-%d", i)
+		execOrFatal(t, dbConn, `INSERT INTO task_session_messages (id, task_session_id, turn_id, author_type, type, content, created_at) VALUES (?, 'sess-1', ?, 'user', 'message', 'x', ?)`, mid, turnID, nowStr)
+	}
+
+	stats, err := repo.GetGlobalStats(ctx, "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetGlobalStats failed: %v", err)
+	}
+	// Only turn-good (120s, 4 msgs) contributes.
+	assertDurationAlmostEqual(t, stats.AvgTurnDurationMs, int64(2*60*1000), "AvgTurnDurationMs")
+	if math.Abs(stats.AvgMessagesPerTurn-4.0) > 0.01 {
+		t.Errorf("AvgMessagesPerTurn: want 4.0, got %f", stats.AvgMessagesPerTurn)
+	}
+}
+
+// TestGetGlobalStats_CleanTurnZeroWhenNoQualifyingTurns verifies that the
+// clean-turn averages are zero (not NaN/NULL) when every turn is filtered out.
+func TestGetGlobalStats_CleanTurnZeroWhenNoQualifyingTurns(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, created_at, updated_at) VALUES ('task-1', 'ws-1', 'board-1', '', 'T1', 0, ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-1', 'task-1', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	// Single short turn (excluded) — avg should be 0, not NaN.
+	execOrFatal(t, dbConn, `INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, completed_at, created_at, updated_at) VALUES ('turn-short', 'sess-1', 'task-1', '2026-01-01T10:00:00.000Z', '2026-01-01T10:00:00.100Z', ?, ?)`, nowStr, nowStr)
+
+	stats, err := repo.GetGlobalStats(ctx, "ws-1", nil)
+	if err != nil {
+		t.Fatalf("GetGlobalStats failed: %v", err)
+	}
+	if stats.AvgTurnDurationMs != 0 {
+		t.Errorf("AvgTurnDurationMs: want 0, got %d", stats.AvgTurnDurationMs)
+	}
+	if stats.AvgMessagesPerTurn != 0 {
+		t.Errorf("AvgMessagesPerTurn: want 0, got %f", stats.AvgMessagesPerTurn)
+	}
+}
+
 func TestGetGlobalStats_EmptyWorkspace(t *testing.T) {
 	dbConn := createTestDB(t)
 	repo, err := NewWithDB(dbConn, dbConn)

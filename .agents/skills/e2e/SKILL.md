@@ -46,27 +46,90 @@ Each worker gets an isolated backend, frontend, database, and mock agent — no 
 
 **Always run headless** (`make test-e2e`). Never use `--headed`, `e2e:headed`, or `test-e2e-headed` — headed mode requires a display and will fail in agent environments.
 
+### Preferred: `pnpm e2e:run` (managed runner — builds, runs, tears down)
+
+`e2e/scripts/run-e2e.sh` handles the build, the run, and cleanup in one command. Use it instead of stitching the steps together. It auto-selects docker vs host, runs N shards concurrently, enforces strict WS accounting by default (matching CI), and never leaves root-owned artifacts behind.
+
 ```bash
-make test-e2e                                                      # all tests, headless
+cd apps/web
+pnpm e2e:run                                   # auto: docker if daemon + CI image available, else host; builds first
+pnpm e2e:run tests/task/my-test.spec.ts        # single file (extra args pass through to Playwright)
+pnpm e2e:run tests/path/spec.ts -- --grep "exact test name"  # exact CI failure with a fresh build
+pnpm e2e:run --shards 3                          # 3 shards concurrently on this machine (isolated)
+pnpm e2e:run --no-build -- --grep "task creation"  # skip rebuild; forward flags after --
+pnpm e2e:docker                                # force the docker CI image (full isolation from a host dev instance)
+pnpm e2e:clean                                 # remove build/test artifacts, incl. root-owned ones from prior docker runs
+```
+
+The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
+
+### Raw commands (when you need fine control)
+
+```bash
+make test-e2e                                                      # all tests, headless (host)
 cd apps && pnpm --filter @kandev/web e2e -- tests/task/my-test.spec.ts  # single file
 cd apps && pnpm --filter @kandev/web e2e -- --grep "task creation" # by name
 ```
 
-**CRITICAL: E2E tests run against the production build** (`.next/standalone/`), not dev mode. After any frontend code change, you **must** rebuild before running tests:
+### Flake reproduction
+
+Start by matching CI as closely as possible, then add pressure deliberately:
+
+1. Run the exact failed shard in the CI runtime image with CI env enabled:
+   ```bash
+   docker run --rm --ipc=host -v "$PWD":/work -w /work/apps/web \
+     -e CI=true -e GITHUB_ACTIONS=true -e GITHUB_WORKSPACE=/work \
+     -e NODE_OPTIONS=--dns-result-order=ipv4first \
+     -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+     ghcr.io/kdlbs/kandev-ci:runtime-latest \
+     bash -lc 'git config --global --add safe.directory /work 2>/dev/null; npx playwright test --config e2e/playwright.config.ts --project=chromium --project=mobile-chrome --shard=10/10 --reporter=list'
+   ```
+2. If the exact shard passes, constrain container resources and repeat the
+   failing spec/test. GitHub-hosted runners can expose timing bugs that a roomy
+   local machine hides:
+   ```bash
+   docker run --rm --ipc=host --cpus=2 --memory=4g --memory-swap=4g \
+     -v "$PWD":/work -w /work/apps/web \
+     -e CI=true -e GITHUB_ACTIONS=true -e GITHUB_WORKSPACE=/work \
+     -e NODE_OPTIONS=--dns-result-order=ipv4first \
+     -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+     ghcr.io/kdlbs/kandev-ci:runtime-latest \
+     bash -lc 'git config --global --add safe.directory /work 2>/dev/null; npx playwright test --config e2e/playwright.config.ts --project=mobile-chrome e2e/tests/terminal/mobile-terminal-keybar.spec.ts --grep "user presses an OS-keyboard letter while no modifier is active" --repeat-each=30 --reporter=list'
+   ```
+3. Preserve nearby test ordering when a single-test repeat stays green. Run the
+   full spec file or full shard with the same resource limits before declaring
+   a flake non-reproducible.
+
+Record the exact command, resource limits, repeat number, and failure artifact
+path. Always inspect `error-context.md`; mobile/terminal flakes often show
+state that the stack trace alone hides, such as duplicate active terminals or a
+terminal stuck on "Starting terminal...".
+
+When a PR-specific E2E shard fails, first identify the failed spec(s). If failures are in unrelated existing specs and no changed code plausibly affects that surface, record the failure as unrelated in the PR fixup summary instead of changing unrelated tests.
+
+**CRITICAL: E2E tests run against the production Vite build served by the Go backend**, not dev mode. After any frontend code change, you **must** rebuild before running tests (`pnpm e2e:run` does this for you):
 
 ```bash
 make build-web   # ~30s, required after every frontend change
 ```
 
-Without this, tests run against stale code and failures are misleading. `make build-backend` is also required after Go changes. `make test-e2e` handles both automatically.
+Without this, tests run against stale code and failures are misleading. `make build-backend` is also required after Go changes. `make test-e2e` and `pnpm e2e:run` handle both automatically.
 
 ## Writing a test
 
 1. Read `helpers/api-client.ts` and `pages/` to discover available seed methods and page objects
-2. Import fixtures from `../../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow)
+2. Import fixtures from `../../fixtures/test-base` — provides `testPage`, `apiClient`, and `seedData` (pre-created workspace with default workflow). Pull `backend` from the fixture too when you need the backend URL — it's worker-scoped, dynamic, and `process.env.KANDEV_API_BASE_URL` is **not** set in the Playwright runner. Use `backend.baseUrl`.
 3. Use `data-testid` attributes for selectors — add them to components as needed
 4. Use page objects for common interactions; create new ones for new pages
 5. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
+
+### IDs and response shapes — common pitfalls
+
+- **`apiClient.createTaskWithAgent(...)` returns `CreateTaskResponse`**, which is `Task & { session_id?: string; agent_execution_id?: string }`. Read `created.session_id` directly — don't call `listTaskSessions(taskId)` just to fetch the session that was auto-started by the same call.
+- **The URL `/t/:id` contains the TASK ID**, not the session ID. Backend routes like `/port-proxy/:sessionId/:port/*path` expect the session ID. Don't extract IDs from `window.location.pathname` when you need a session ID — pull from the API response.
+- **`page.request` shares cookies/storage with the page context**. Fine for the current no-auth local backend; if auth ever lands, this is where you'd plug it in.
+- **Go boot-payload data is available before React mounts.** Routes that hydrate from `window.__KANDEV_BOOT_PAYLOAD__` may not issue a browser-visible API request on first paint. Use `apiClient` to seed or re-query backend state, assert the user-visible outcome, and reserve `page.waitForResponse("**/api/v1/...")` for client-side fetches that the browser actually performs.
+- **Preview iframe tests:** the seed repo has no `dev_script` configured, so the preview panel renders a placeholder ("Configure a dev script…") and the URL input never appears — tests that try to drive it hang on the locator timeout. To use the preview iframe in a test, set one first: `await apiClient.updateRepository(seedData.repositoryId, { dev_script: "echo dev" })`. Then click the Preview dockview tab (`await session.clickTab("Preview")`) — the toolbar will mount and the URL input becomes targetable.
 
 Example:
 
@@ -171,7 +234,7 @@ Create `apps/web/.pr-assets/manifest.json` so the `/pr` skill picks them up:
 
 ### Final verification
 
-Always verify against the production build before finishing — dev mode can hide SSR/hydration issues:
+Always verify against the production build before finishing — dev mode can hide boot-payload, asset-serving, or hydration issues:
 
 ```bash
 playwright-cli close
@@ -188,12 +251,17 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 - **Merge related tests into the same file.** Tests covering the same feature (e.g., git commit body and pre-hooks) belong in one file with separate `test.describe` blocks. Don't create a new file for each narrow scenario.
 - **Import paths from subdirectories** use `../../` (e.g., `from "../../fixtures/test-base"`).
 - **Standalone root files** are allowed for truly cross-cutting tests that don't fit any group.
+- **Extract large shared helpers.** For large specs with shared setup or polling helpers, extract helpers into a sibling `*-helpers.ts` file once the spec approaches the repo file-size limit. Keep spec files focused on test scenarios; put reusable page polling, seeding, and Dockview cleanup helpers in the helper module.
 
 ## Test quality guidelines
 
 - **Test through the UI, not the API.** E2E tests verify user-facing behavior. Don't write tests that only call the API and assert the response -- those are integration tests. Instead, navigate to the page, interact with UI elements, and assert what the user sees.
-- **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and SSR/client mismatches.
+- **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and Go boot-payload/client-store mismatches.
 - **Seed via API, assert via UI.** Use `apiClient` to set up preconditions quickly, but always verify the result by opening the page and checking the DOM.
+- **Workflow/session invariants.** For session-primary/profile behavior, prefer polling backend state with `apiClient.listTaskSessions(taskId)` for invariants such as `agent_profile_id`, `is_primary`, `state`, and session count, then add UI assertions as secondary evidence. UI tab markers can lag or be absent when the backend invariant is the behavior under test.
+- **Scope terminal helpers to the active panel.** Terminal/mobile helpers must avoid document-wide `.xterm` or `terminal-xterm-host` selectors because multiple terminal panels can be mounted at once. Scope locators through `data-testid="terminal-panel"` and prefer the visible or latest panel for `page.evaluate` helpers.
+- **Scope Dockview preview polling to visible panels.** Hidden or stale Dockview panels can remain mounted and produce false positives if helpers scan all matching custom elements globally. For `diffs-container`, filter candidate elements by visible layout box and computed visibility before reading shadow DOM text.
+- **Poll before Dockview cleanup.** If an E2E helper uses `window.__dockviewApi__`, wait or poll for the API to be attached before acting. A one-shot `if (!api) return` cleanup can silently skip cleanup during page initialization and leak prior preview panels into later assertions.
 
 ## Debugging failures
 
@@ -227,6 +295,7 @@ When a test fails:
 - **"Backend did not become healthy"** — run `make build-backend build-web`, check with `E2E_DEBUG=1`
 - **"Cannot find module"** — run `cd apps && pnpm install`
 - **Port conflicts** — backends use 18080+ and frontends use 13000+ (per worker), auto-offset by `E2E_PORT_OFFSET` (derived from PID). Set `E2E_PORT_OFFSET=0` for deterministic ports
+- **Auto-started session never goes idle** — for sessions started by the same call that creates them, the mock agent can finish before the client WS subscription registers, so a raw `idleInput()` visibility wait hangs. Use `SessionPage.waitForChatIdle()` instead; it reloads once and re-derives state from the Go boot payload.
 - **Flaky timeouts** — **never increase locator timeouts to fix flaky tests.** If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time. Note: infrastructure health timeouts (30s in `fixtures/backend.ts`) and overall test timeouts (60s in `playwright.config.ts`) are separate and should not be modified either.
 - Screenshots on failure, video on first retry (CI)
 
@@ -243,7 +312,29 @@ make build-backend build-web
 cd apps/web && npx playwright test --config e2e/playwright.config.ts --shard=2/10
 ```
 
-E2E tests run against the **production build** (`next build`), not dev mode. Always rebuild with `make build-web` (or `pnpm --filter @kandev/web build`) after code changes before running E2E tests locally.
+E2E tests run against the **production Vite build served by the Go backend**, not dev mode. Always rebuild with `make build-web` (or `pnpm --filter @kandev/web build`) after code changes before running E2E tests locally.
+
+```bash
+# Unzip a shard's blob report from CI artifacts
+unzip report-*.zip -d report-shard && cat report-shard/*.jsonl
+```
+
+When a CI shard fails, download its report-*.zip artifact and unzip it; the report is a *.jsonl event stream. Build a testId map by walking the events: test titles and locations come from the testBegin events, and final status plus duration come from the testEnd events. Match them by test id. This surfaces the slow but passing specs (the timing markers in Playwright output) that never show up as outright failures but are latent flake risks. Specs whose duration approaches the 60s per-test timeout (defined in playwright.config.ts) are the flake candidates to harden. Typically by converting raw chat-flow assertions to the waitForChatIdle() / expectChatResponseVisible() recovery helpers documented earlier in this file.
+
+### Flake triage: intrinsic race vs. contention
+
+A test that flakes under parallel/sharded load is one of two things — decide which **before** touching it:
+
+1. **Re-run it in a fresh, isolated container** (or at minimum a single fresh worker), `--retries=0`, a few reps:
+   ```bash
+   pnpm e2e:docker --no-build -- --repeat-each=4 --workers=1 --retries=0 tests/path.spec.ts:LINE
+   # or raw: pnpm exec playwright test --config e2e/playwright.config.ts --project=chromium --repeat-each=4 --workers=1 --retries=0 tests/path.spec.ts:LINE
+   ```
+   (On Apple Silicon, `pnpm e2e:docker` needs Colima + Rosetta — `colima start --vz-rosetta`; default QEMU segfaults the amd64 Go build. See `apps/web/e2e/README.md`.)
+   - **Flakes alone (fails some reps, fast):** intrinsic race — fix it (condition-correct wait, fix the actual race; not a timeout bump). E.g. a `waitForRequest` that times out the full window means the request *never fired* (a click swallowed during hydration) — retry the action with `await expect(async () => { ... }).toPass()`, don't extend the timeout.
+   - **Passes clean AND fast alone (well under timeout):** contention, not a defect. The wait is correct; the test just starved for CPU/IO under load. No code/test fix applies.
+2. **Signature of contention, not a code path:** two identical-config full runs giving *different* hard-fail counts (e.g. 0 vs 3). Same code + same config + different outcome ⇒ host oversubscription, not a bug. CI's isolated runners don't reproduce it; reduce local concurrency (2–3 shards, not 5+) for a clean signal.
+3. **Caveat — don't flake-hunt with `--repeat-each` across many heavy specs in one long-lived worker.** It exhausts per-worker resources (agentctl port range, memory) over a long run and manufactures *false* failures unrelated to the test. Use **one fresh container per spec** instead.
 
 ## Selector guidelines
 

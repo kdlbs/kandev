@@ -64,7 +64,7 @@ func (m *MockBootMessageService) getLastUpdatedMessage() *models.Message {
 }
 
 func TestFinalizeBootMessage_Success(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	bootSvc := &MockBootMessageService{}
 	mgr.bootMessageService = bootSvc
 
@@ -102,7 +102,7 @@ func TestFinalizeBootMessage_Success(t *testing.T) {
 }
 
 func TestFinalizeBootMessage_Failed(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	bootSvc := &MockBootMessageService{}
 	mgr.bootMessageService = bootSvc
 
@@ -129,7 +129,7 @@ func TestFinalizeBootMessage_Failed(t *testing.T) {
 }
 
 func TestFinalizeBootMessage_NilMessage(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	bootSvc := &MockBootMessageService{}
 	mgr.bootMessageService = bootSvc
 
@@ -144,7 +144,7 @@ func TestFinalizeBootMessage_NilMessage(t *testing.T) {
 }
 
 func TestFinalizeBootMessage_NilService(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	// bootMessageService is nil by default
 
 	msg := &models.Message{
@@ -187,7 +187,7 @@ func TestBootMessage_IsResumingFlag(t *testing.T) {
 }
 
 func TestPollAgentStderr_StopsOnClose(t *testing.T) {
-	mgr := newTestManager()
+	mgr := newTestManager(t)
 	bootSvc := &MockBootMessageService{}
 	mgr.bootMessageService = bootSvc
 

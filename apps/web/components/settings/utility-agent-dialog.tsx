@@ -17,6 +17,8 @@ import {
   type InferenceAgent,
   type InferenceModel,
 } from "@/lib/api/domains/utility-api";
+import { InferenceAgentStatusNote } from "./inference-agent-status";
+import { useInferenceAgents } from "./use-inference-agents";
 import { ScriptEditor } from "./profile-edit/script-editor";
 import type { ScriptPlaceholder } from "./profile-edit/script-editor-completions";
 
@@ -39,7 +41,7 @@ const defaultFormState: FormState = {
   name: "",
   description: "",
   prompt: "",
-  agent_id: "claude-code",
+  agent_id: "claude-acp",
   model: "",
 };
 
@@ -56,47 +58,58 @@ type AgentModelSelectProps = {
   agentId: string;
   model: string;
   inferenceAgents: InferenceAgent[];
+  selectedAgent: InferenceAgent | undefined;
   availableModels: InferenceModel[];
   onAgentChange: (agentId: string) => void;
   onModelChange: (model: string) => void;
+  onRefresh: () => Promise<unknown> | void;
 };
 
 function AgentModelSelect({
   agentId,
   model,
   inferenceAgents,
+  selectedAgent,
   availableModels,
   onAgentChange,
   onModelChange,
+  onRefresh,
 }: AgentModelSelectProps) {
   return (
-    <div className="grid grid-cols-2 gap-4">
-      <div className="space-y-2">
-        <Label>Agent</Label>
-        <Select value={agentId} onValueChange={onAgentChange}>
-          <SelectTrigger className="cursor-pointer">
-            <SelectValue placeholder="Select agent..." />
-          </SelectTrigger>
-          <SelectContent>
-            {inferenceAgents.map((ia) => (
-              <SelectItem key={ia.id} value={ia.id}>
-                {ia.display_name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Agent</Label>
+          <Select value={agentId} onValueChange={onAgentChange}>
+            <SelectTrigger className="cursor-pointer">
+              <SelectValue placeholder="Select agent..." />
+            </SelectTrigger>
+            <SelectContent>
+              {inferenceAgents.map((ia) => (
+                <SelectItem key={ia.id} value={ia.id}>
+                  {ia.display_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Model</Label>
+          <ModelCombobox
+            value={model}
+            onChange={onModelChange}
+            models={availableModels}
+            currentModelId={availableModels.find((m) => m.is_default)?.id}
+            placeholder="Select model..."
+            disabled={availableModels.length === 0}
+          />
+        </div>
       </div>
-      <div className="space-y-2">
-        <Label>Model</Label>
-        <ModelCombobox
-          value={model}
-          onChange={onModelChange}
-          models={availableModels}
-          currentModelId={availableModels.find((m) => m.is_default)?.id}
-          placeholder="Select model..."
-          disabled={availableModels.length === 0}
-        />
-      </div>
+      <InferenceAgentStatusNote
+        agent={selectedAgent}
+        fallbackName={agentId}
+        onRefresh={onRefresh}
+      />
     </div>
   );
 }
@@ -106,8 +119,10 @@ type UtilityAgentFormProps = {
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
   isBuiltin: boolean;
   inferenceAgents: InferenceAgent[];
+  selectedAgent: InferenceAgent | undefined;
   availableModels: InferenceModel[];
   placeholders: ScriptPlaceholder[];
+  onRefreshAgent: () => Promise<unknown> | void;
 };
 
 function UtilityAgentForm({
@@ -115,8 +130,10 @@ function UtilityAgentForm({
   setForm,
   isBuiltin,
   inferenceAgents,
+  selectedAgent,
   availableModels,
   placeholders,
+  onRefreshAgent,
 }: UtilityAgentFormProps) {
   return (
     <div className="space-y-4 py-4">
@@ -143,9 +160,11 @@ function UtilityAgentForm({
         agentId={form.agent_id}
         model={form.model}
         inferenceAgents={inferenceAgents}
+        selectedAgent={selectedAgent}
         availableModels={availableModels}
         onAgentChange={(v) => setForm((f) => ({ ...f, agent_id: v, model: "" }))}
         onModelChange={(v) => setForm((f) => ({ ...f, model: v }))}
+        onRefresh={onRefreshAgent}
       />
       <div className="space-y-2">
         <Label>Prompt Template</Label>
@@ -171,7 +190,7 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
   const [form, setForm] = useState<FormState>(defaultFormState);
   const [saving, setSaving] = useState(false);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
-  const [inferenceAgents, setInferenceAgents] = useState<InferenceAgent[]>([]);
+  const { inferenceAgents, setInferenceAgents, refreshAgent } = useInferenceAgents();
   const isEdit = Boolean(agent);
 
   // Fetch template variables and inference agents
@@ -183,15 +202,14 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
     listInferenceAgents()
       .then(({ agents }) => setInferenceAgents(agents))
       .catch(() => setInferenceAgents([]));
-  }, []);
+  }, [setInferenceAgents]);
 
-  // Get models for the selected agent
   const selectedAgent = useMemo(
     () => inferenceAgents.find((a) => a.id === form.agent_id),
     [inferenceAgents, form.agent_id],
   );
-
   const availableModels = selectedAgent?.models ?? [];
+  const refreshCurrentAgent = () => refreshAgent(form.agent_id);
 
   // Auto-select default model when agent changes
   useEffect(() => {
@@ -209,7 +227,7 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
         name: agent.name,
         description: agent.description,
         prompt: agent.prompt,
-        agent_id: agent.agent_id || "claude-code",
+        agent_id: agent.agent_id || "claude-acp",
         model: agent.model || "",
       });
     } else {
@@ -258,8 +276,10 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
           setForm={setForm}
           isBuiltin={agent?.builtin ?? false}
           inferenceAgents={inferenceAgents}
+          selectedAgent={selectedAgent}
           availableModels={availableModels}
           placeholders={placeholders}
+          onRefreshAgent={refreshCurrentAgent}
         />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">

@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@kandev/ui/textarea";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { CliModeIcon } from "@/components/cli-mode-icon";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
@@ -30,11 +31,13 @@ import {
   DEFAULT_ISSUE_WATCH_PROMPT,
 } from "@/components/github/issue-watch-placeholders";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
+import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
 import type {
   RepoFilter,
   IssueWatch,
   CreateIssueWatchRequest,
   UpdateIssueWatchRequest,
+  CleanupPolicy,
 } from "@/lib/types/github";
 
 type IssueWatchDialogProps = {
@@ -61,9 +64,28 @@ type FormState = {
   customQuery: string;
   enabled: boolean;
   pollInterval: number;
+  cleanupPolicy: CleanupPolicy;
 };
 
 const DEFAULT_QUERY = "type:issue state:open";
+
+const CLEANUP_POLICY_OPTIONS: Array<{ id: CleanupPolicy; label: string; description: string }> = [
+  {
+    id: "auto",
+    label: "Auto (recommended)",
+    description: "Delete closed-issue tasks unless you typed a message in them.",
+  },
+  {
+    id: "always",
+    label: "Always delete",
+    description: "Delete on close even if you engaged with the task.",
+  },
+  {
+    id: "never",
+    label: "Never auto-delete",
+    description: "Keep all tasks. Delete them manually from the task list.",
+  },
+];
 
 function makeDefaultForm(workspaceId: string): FormState {
   return {
@@ -79,6 +101,7 @@ function makeDefaultForm(workspaceId: string): FormState {
     customQuery: DEFAULT_QUERY,
     enabled: true,
     pollInterval: 300,
+    cleanupPolicy: "auto",
   };
 }
 
@@ -97,6 +120,7 @@ function formStateFromWatch(watch: IssueWatch): FormState {
     customQuery: watch.custom_query || DEFAULT_QUERY,
     enabled: watch.enabled,
     pollInterval: watch.poll_interval_seconds,
+    cleanupPolicy: watch.cleanup_policy ?? "auto",
   };
 }
 
@@ -116,12 +140,7 @@ function useWatchFormData(workspaceId: string) {
     [executors],
   );
 
-  const filteredAgentProfiles = useMemo(
-    () => agentProfiles.filter((p) => !p.cli_passthrough),
-    [agentProfiles],
-  );
-
-  return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
+  return { workflows, agentProfiles, allExecutorProfiles };
 }
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -218,6 +237,7 @@ function IssueFilterFields({
         selectedRepos={form.selectedRepos}
         onAllReposChange={onAllReposChange}
         onSelectedReposChange={onSelectedReposChange}
+        workspaceId={form.workspaceId}
       />
       <div className="space-y-1.5">
         <Label>Labels (comma-separated)</Label>
@@ -282,19 +302,29 @@ function IssueAutomationFields({
       <div className="grid grid-cols-2 gap-4">
         <SelectField
           label="Agent Profile"
-          description="The agent configuration for the task."
-          value={form.agentProfileId}
-          onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: v }))}
-          placeholder="Select agent profile"
-          items={agentProfiles.map((p) => ({ id: p.id, label: p.label }))}
+          description="Optional — falls back to step default."
+          value={form.agentProfileId || STEP_DEFAULT}
+          onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: resolveProfileId(v) }))}
+          placeholder={STEP_DEFAULT_LABEL}
+          items={[
+            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            ...agentProfiles.map((p) => ({
+              id: p.id,
+              label: p.label,
+              icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
+            })),
+          ]}
         />
         <SelectField
           label="Executor Profile"
-          description="The executor environment for the agent."
-          value={form.executorProfileId}
-          onChange={(v) => setForm((prev) => ({ ...prev, executorProfileId: v }))}
-          placeholder="Select executor profile"
-          items={allExecutorProfiles.map((p) => ({ id: p.id, label: p.name }))}
+          description="Optional — falls back to step default."
+          value={form.executorProfileId || STEP_DEFAULT}
+          onChange={(v) => setForm((prev) => ({ ...prev, executorProfileId: resolveProfileId(v) }))}
+          placeholder={STEP_DEFAULT_LABEL}
+          items={[
+            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            ...allExecutorProfiles.map((p) => ({ id: p.id, label: p.name })),
+          ]}
         />
       </div>
       <div className="space-y-1.5">
@@ -354,6 +384,16 @@ function IssueSettingsFields({
           className="cursor-pointer"
         />
       </div>
+      <SelectField
+        label="Cleanup behavior"
+        description={
+          CLEANUP_POLICY_OPTIONS.find((p) => p.id === form.cleanupPolicy)?.description ?? ""
+        }
+        value={form.cleanupPolicy}
+        onChange={(v) => setForm((prev) => ({ ...prev, cleanupPolicy: v as CleanupPolicy }))}
+        placeholder="Auto"
+        items={CLEANUP_POLICY_OPTIONS.map((p) => ({ id: p.id, label: p.label }))}
+      />
     </>
   );
 }
@@ -418,6 +458,7 @@ export function IssueWatchDialog({
         custom_query: form.customQuery,
         enabled: form.enabled,
         poll_interval_seconds: form.pollInterval,
+        cleanup_policy: form.cleanupPolicy,
       };
       if (watch) {
         await onUpdate(watch.id, payload);
@@ -467,13 +508,15 @@ export function IssueWatchDialog({
   );
 }
 
+type SelectFieldItem = { id: string; label: string; icon?: React.ReactNode };
+
 function SelectField(props: {
   label: string;
   description?: string;
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
-  items: { id: string; label: string }[];
+  items: SelectFieldItem[];
   disabled?: boolean;
 }) {
   return (
@@ -491,7 +534,14 @@ function SelectField(props: {
         <SelectContent>
           {props.items.map((item) => (
             <SelectItem key={item.id} value={item.id}>
-              {item.label}
+              {item.icon ? (
+                <span className="flex items-center gap-1.5">
+                  <span>{item.label}</span>
+                  {item.icon}
+                </span>
+              ) : (
+                item.label
+              )}
             </SelectItem>
           ))}
         </SelectContent>

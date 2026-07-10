@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { useParams, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
@@ -51,7 +51,6 @@ const createDraftProfile = (
   name: "",
   agentDisplayName,
   model: defaultModel,
-  allowIndexing: false,
   ...buildDefaultPermissions(permissionSettings ?? {}),
   cliPassthrough: false,
   cliFlags: seedDefaultCLIFlags(permissionSettings ?? {}),

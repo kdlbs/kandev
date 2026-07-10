@@ -1,5 +1,6 @@
 import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { attachAvailableCommandsCapture } from "../../helpers/ws-capture";
 
 /**
  * Quick Chat E2E tests: basic flow, enhance prompt, queued messages, multi-tab.
@@ -44,15 +45,18 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
 
 async function sendQuickChatMessage(dialog: Locator, page: Page, text: string) {
   const editor = dialog.locator(".tiptap.ProseMirror");
-  // Wait for the editor to be editable. With eager init, the agent boots
-  // during the picker → tab transition and the input is briefly disabled
-  // while the FE store catches up to RUNNING. Multi-tab scenarios share an
-  // agent slot so the second boot can take longer.
-  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
-  await editor.click();
-  await editor.fill(text);
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
-  await editor.press(`${modifier}+Enter`);
+  // With eager init, the agent boots during picker -> tab transition and the
+  // input can briefly toggle disabled while the FE store catches up. Retry the
+  // full edit action so fill() cannot race a contenteditable=false flip.
+  await expect(async () => {
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 1_000 });
+    await editor.click({ timeout: 1_000 });
+    await editor.fill(text, { timeout: 1_000 });
+    await expect(editor).toHaveText(text, { timeout: 1_000 });
+    await editor.press(`${modifier}+Enter`, { timeout: 1_000 });
+    await expect(editor).toHaveText("", { timeout: 2_000 });
+  }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
 }
 
 test.describe("Quick Chat", () => {
@@ -97,8 +101,11 @@ test.describe("Quick Chat", () => {
 
     const dialog = await openQuickChatWithAgent(testPage);
 
-    // Type initial text.
+    // Type initial text. Re-gate on the editor being editable: eager init can
+    // flip it back to contenteditable=false (agent briefly RUNNING) after the
+    // open helper's initial check, and fill() requires an editable element.
     const editor = dialog.locator(".tiptap.ProseMirror");
+    await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
     await editor.click();
     await editor.fill("fix the bug");
 
@@ -123,39 +130,7 @@ test.describe("Quick Chat", () => {
     // populated before the user sends their first prompt. Mock-agent emits
     // /slow, /error, /thinking, etc. on session/new (parity with real ACP
     // agents like OpenCode and Claude).
-    // Hook WebSocket BEFORE navigating to capture all session.available_commands
-    // frames into window.__wsAvailableCommands for assertion.
-    await testPage.addInitScript(() => {
-      const w = window as unknown as {
-        __wsAvailableCommands: unknown[];
-        __wsAll: unknown[];
-      };
-      w.__wsAvailableCommands = [];
-      w.__wsAll = [];
-      const OrigWS = window.WebSocket;
-      const Hooked = function (this: WebSocket, url: string | URL, protocols?: string | string[]) {
-        const ws = new OrigWS(url, protocols);
-        w.__wsAll.push({ event: "open", url: String(url) });
-        ws.addEventListener("message", (ev: MessageEvent) => {
-          try {
-            const m = JSON.parse(String(ev.data));
-            w.__wsAll.push({ event: "msg", action: m.action });
-            if (m.action === "session.available_commands") {
-              w.__wsAvailableCommands.push({
-                session_id: m.payload?.session_id,
-                count: m.payload?.available_commands?.length ?? 0,
-              });
-            }
-          } catch {
-            // ignore
-          }
-        });
-        return ws;
-      } as unknown as typeof WebSocket;
-      Hooked.prototype = OrigWS.prototype;
-      Object.assign(Hooked, OrigWS);
-      window.WebSocket = Hooked;
-    });
+    const availableCommands = attachAvailableCommandsCapture(testPage);
 
     const dialog = await openQuickChatWithAgent(testPage);
 
@@ -163,13 +138,9 @@ test.describe("Quick Chat", () => {
     // session/new during the HTTP request, but the agent emits commands
     // asynchronously after the response flushes — so the frame can arrive
     // moments after openQuickChatWithAgent resolves.
-    await testPage.waitForFunction(
-      () => {
-        const w = window as unknown as { __wsAvailableCommands?: unknown[] };
-        return (w.__wsAvailableCommands?.length ?? 0) > 0;
-      },
-      { timeout: 15_000 },
-    );
+    await expect
+      .poll(() => availableCommands.frames.some((frame) => frame.count > 0), { timeout: 15_000 })
+      .toBe(true);
 
     const editor = dialog.locator(".tiptap.ProseMirror");
     await editor.click();
@@ -179,6 +150,25 @@ test.describe("Quick Chat", () => {
     await expect(testPage.getByText("Commands").first()).toBeVisible({ timeout: 10_000 });
     await expect(testPage.getByText("/slow")).toBeVisible({ timeout: 5_000 });
     await expect(testPage.getByText("/error")).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("model selector shows dynamic session options before first message", async ({
+    testPage,
+  }) => {
+    const dialog = await openQuickChatWithAgent(testPage);
+
+    const trigger = dialog.getByRole("button", { name: "Session model settings" });
+    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+    await trigger.click();
+
+    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effortTrigger).toBeVisible({
+      timeout: 10_000,
+    });
+    await effortTrigger.click();
+    await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("supports multiple chat tabs and switching between them", async ({ testPage }) => {

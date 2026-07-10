@@ -5,9 +5,9 @@ import { RunsListView } from "./runs-list-view";
 type Props = { params: Promise<{ id: string }> };
 
 /**
- * Per-agent paginated runs list. Server Component fetches page 1 via
- * the SSR helper and hands the result to the client view; subsequent
- * pages are loaded on click via `listAgentRuns`.
+ * Per-agent paginated runs list. The route loader fetches page 1 and
+ * hands the result to the view; subsequent pages are loaded on click via
+ * `listAgentRuns`.
  */
 export default async function AgentRunsPage({ params }: Props) {
   const { id } = await params;

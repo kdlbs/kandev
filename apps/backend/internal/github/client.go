@@ -16,6 +16,9 @@ type Client interface {
 	// GetPR retrieves a single pull request by number.
 	GetPR(ctx context.Context, owner, repo string, number int) (*PR, error)
 
+	// GetIssue retrieves a single GitHub issue by number.
+	GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error)
+
 	// FindPRByBranch finds an open PR for the given head branch.
 	FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error)
 
@@ -34,6 +37,18 @@ type Client interface {
 
 	// SearchOrgRepos searches repositories in an organization, optionally filtered by a query string.
 	SearchOrgRepos(ctx context.Context, org, query string, limit int) ([]GitHubRepo, error)
+
+	// ListUserRepos lists repositories the authenticated user has access to,
+	// optionally filtered by a query string. limit is a per-page upper bound
+	// (clamped to GitHub's 100 max by implementations).
+	ListUserRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error)
+
+	// ListAccessibleRepos lists every repo the authenticated user can access —
+	// their own repos plus collaborator and org-member repos — in a single
+	// GET /user/repos call on the core REST quota (no per-org search fan-out).
+	// query is applied as a case-insensitive substring filter on full_name
+	// after fetching; limit bounds the page size (clamped to GitHub's 100 max).
+	ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error)
 
 	// ListPRReviews lists reviews on a pull request.
 	ListPRReviews(ctx context.Context, owner, repo string, number int) ([]PRReview, error)
@@ -62,8 +77,14 @@ type Client interface {
 	// event is one of "APPROVE", "COMMENT", "REQUEST_CHANGES".
 	SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error
 
+	// MergePR merges a pull request. mergeMethod is one of "merge", "squash", "rebase".
+	MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error
+
 	// ListRepoBranches lists branches for a repository.
 	ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error)
+
+	// GetRepoMergeMethods reports which merge methods a repository allows.
+	GetRepoMergeMethods(ctx context.Context, owner, repo string) (RepoMergeMethods, error)
 
 	// ListIssues searches for open issues (not PRs) matching the given query.
 	// filter is an optional additional search qualifier (e.g. "repo:owner/name" or "label:bug").
@@ -84,4 +105,12 @@ type Client interface {
 
 	// GetIssueState returns the state of a single issue ("open" or "closed").
 	GetIssueState(ctx context.Context, owner, repo string, number int) (string, error)
+
+	// CreateGist creates a new gist on the authenticated user's account.
+	// Set Public=false to create a secret (unlisted) gist.
+	CreateGist(ctx context.Context, in CreateGistInput) (*GistResponse, error)
+
+	// DeleteGist deletes a gist by ID. A 404 is wrapped in *GitHubAPIError
+	// so callers can distinguish "already gone" from transport failures.
+	DeleteGist(ctx context.Context, gistID string) error
 }

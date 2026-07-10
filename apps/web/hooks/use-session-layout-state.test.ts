@@ -1,0 +1,248 @@
+import { renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
+
+const mockSetTaskSession = vi.fn();
+const mockSetMobileSessionPanel = vi.fn();
+const mockSetMobileSessionTaskSwitcherOpen = vi.fn();
+
+type MockStoreState = {
+  tasks: {
+    activeTaskId: string | null;
+    activeSessionId: string | null;
+    lastSessionByTaskId: Record<string, string>;
+  };
+  taskSessions: {
+    items: Record<string, TaskSession>;
+  };
+  taskPlans: {
+    byTaskId: Record<string, unknown>;
+  };
+  mobileSession: {
+    activePanelBySessionId: Record<string, "chat" | "changes" | "terminal" | "plan">;
+    isTaskSwitcherOpen: boolean;
+  };
+  setTaskSession: typeof mockSetTaskSession;
+  setMobileSessionPanel: typeof mockSetMobileSessionPanel;
+  setMobileSessionTaskSwitcherOpen: typeof mockSetMobileSessionTaskSwitcherOpen;
+};
+
+let mockStoreState: MockStoreState;
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: MockStoreState) => unknown) => selector(mockStoreState),
+}));
+
+vi.mock("@/hooks/domains/session/use-session-changes-count", () => ({
+  useSessionChangesCount: () => 0,
+}));
+
+vi.mock("@/lib/local-storage", () => ({
+  getPlanLastSeen: () => null,
+}));
+
+vi.mock("@/lib/services/session-approve", () => ({
+  executeApprove: vi.fn(),
+}));
+
+vi.mock("@/lib/session/is-passthrough-session", () => ({
+  isPassthroughSession: () => false,
+}));
+
+import { useSessionLayoutState } from "./use-session-layout-state";
+
+const ACTIVE_TASK_ID = "task-active";
+const OTHER_TASK_ID = "task-other";
+const ACTIVE_SESSION_ID = "session-active";
+const ROUTE_SESSION_ID = "session-route";
+
+function makeSession(id: string, taskId: string): TaskSession {
+  return {
+    id: toSessionId(id),
+    task_id: toTaskId(taskId),
+    state: "WAITING_FOR_INPUT",
+    created_at: "",
+    started_at: "",
+    updated_at: "",
+  } as TaskSession;
+}
+
+function setupStore(overrides: Partial<MockStoreState> = {}) {
+  mockStoreState = {
+    tasks: {
+      activeTaskId: ACTIVE_TASK_ID,
+      activeSessionId: null,
+      lastSessionByTaskId: {},
+    },
+    taskSessions: {
+      items: {},
+    },
+    taskPlans: {
+      byTaskId: {},
+    },
+    mobileSession: {
+      activePanelBySessionId: {},
+      isTaskSwitcherOpen: false,
+    },
+    setTaskSession: mockSetTaskSession,
+    setMobileSessionPanel: mockSetMobileSessionPanel,
+    setMobileSessionTaskSwitcherOpen: mockSetMobileSessionTaskSwitcherOpen,
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  setupStore();
+});
+
+describe("useSessionLayoutState active session selection", () => {
+  it("uses the active session when it belongs to the active task", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: ACTIVE_TASK_ID,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: {
+          [ACTIVE_SESSION_ID]: makeSession(ACTIVE_SESSION_ID, ACTIVE_TASK_ID),
+        },
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+
+    expect(result.current.effectiveSessionId).toBe(ACTIVE_SESSION_ID);
+  });
+
+  it("falls back to the provided session when the active session belongs to another task", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: ACTIVE_TASK_ID,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: {
+          [ACTIVE_SESSION_ID]: makeSession(ACTIVE_SESSION_ID, OTHER_TASK_ID),
+        },
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+
+    expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
+  });
+
+  it("does not expose a stale active session when no session fallback exists", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: ACTIVE_TASK_ID,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: {
+          [ACTIVE_SESSION_ID]: makeSession(ACTIVE_SESSION_ID, OTHER_TASK_ID),
+        },
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState());
+
+    expect(result.current.effectiveSessionId).toBeNull();
+  });
+
+  it("does not expose an active session when no task is active", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: null,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: {
+          [ACTIVE_SESSION_ID]: makeSession(ACTIVE_SESSION_ID, ACTIVE_TASK_ID),
+        },
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState());
+
+    expect(result.current.effectiveSessionId).toBeNull();
+  });
+});
+
+describe("useSessionLayoutState rowless active sessions", () => {
+  it("uses a rowless active session when it was selected for the active task", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: ACTIVE_TASK_ID,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {
+          [ACTIVE_TASK_ID]: ACTIVE_SESSION_ID,
+        },
+      },
+      taskSessions: {
+        items: {},
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+
+    expect(result.current.effectiveSessionId).toBe(ACTIVE_SESSION_ID);
+  });
+
+  it("does not expose a rowless active session without task ownership evidence", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: ACTIVE_TASK_ID,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {
+          [OTHER_TASK_ID]: ACTIVE_SESSION_ID,
+        },
+      },
+      taskSessions: {
+        items: {},
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+
+    expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
+  });
+
+  it("falls back when no task is active", () => {
+    setupStore({
+      tasks: {
+        activeTaskId: null,
+        activeSessionId: ACTIVE_SESSION_ID,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: {
+          [ACTIVE_SESSION_ID]: makeSession(ACTIVE_SESSION_ID, ACTIVE_TASK_ID),
+        },
+      },
+    });
+
+    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+
+    expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
+  });
+});
+
+describe("useSessionLayoutState fallback sessions", () => {
+  it("uses the provided session when no active session exists", () => {
+    const { result } = renderHook(() => useSessionLayoutState({ sessionId: ROUTE_SESSION_ID }));
+
+    expect(result.current.effectiveSessionId).toBe(ROUTE_SESSION_ID);
+  });
+
+  it("returns null without an active or provided session", () => {
+    const { result } = renderHook(() => useSessionLayoutState());
+
+    expect(result.current.effectiveSessionId).toBeNull();
+  });
+});

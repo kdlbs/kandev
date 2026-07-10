@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useCallback } from "react";
-import dynamic from "next/dynamic";
+import dynamic from "@/lib/routing/client-dynamic";
 import type { BeforeMount, OnMount } from "@monaco-editor/react";
 import { KANDEV_MONACO_DARK } from "@/lib/theme/editor-theme";
 import {

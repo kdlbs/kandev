@@ -47,8 +47,14 @@ type Client struct {
 
 	mu       sync.RWMutex
 	index    map[string]shared.ModelPricing
+	info     map[string]ModelInfo
 	loadedAt time.Time
 	cacheBuf []byte // raw on-disk JSON (parsed lazily on miss)
+}
+
+// ModelInfo holds non-pricing metadata from models.dev for a model.
+type ModelInfo struct {
+	ContextWindow int64
 }
 
 // Config bundles construction parameters.
@@ -80,6 +86,7 @@ func New(cfg Config, log *logger.Logger) *Client {
 		httpClient: cfg.HTTPClient,
 		logger:     log.WithFields(zap.String("component", "modelsdev")),
 		index:      make(map[string]shared.ModelPricing),
+		info:       make(map[string]ModelInfo),
 	}
 }
 
@@ -111,6 +118,33 @@ func (c *Client) LookupForModel(ctx context.Context, modelID string) (shared.Mod
 
 	c.maybeRefresh(ctx)
 	return shared.ModelPricing{}, false
+}
+
+// LookupModelInfo returns model metadata from models.dev using the
+// same normalization, lazy disk warm, and stale-while-revalidate
+// behavior as LookupForModel.
+func (c *Client) LookupModelInfo(ctx context.Context, modelID string) (ModelInfo, bool) {
+	key, strategy := Normalize(modelID)
+	if strategy != StrategyLookup {
+		return ModelInfo{}, false
+	}
+	c.once.Do(func() { c.warmFromDisk(ctx) })
+
+	c.mu.RLock()
+	info, ok := c.info[key]
+	c.mu.RUnlock()
+	if ok {
+		c.maybeRefresh(ctx)
+		return info, true
+	}
+
+	if info, ok = c.parseModelInfoFromBuffer(key); ok {
+		c.maybeRefresh(ctx)
+		return info, true
+	}
+
+	c.maybeRefresh(ctx)
+	return ModelInfo{}, false
 }
 
 // warmFromDisk reads the cache file into cacheBuf so subsequent
@@ -164,6 +198,26 @@ func (c *Client) parseFromBuffer(key string) (shared.ModelPricing, bool) {
 	c.index[key] = pricing
 	c.mu.Unlock()
 	return pricing, true
+}
+
+// parseModelInfoFromBuffer pulls one model entry out of the on-disk
+// JSON and caches resulting metadata in the in-memory index. Returns
+// (zero, false) when the key or metadata is absent.
+func (c *Client) parseModelInfoFromBuffer(key string) (ModelInfo, bool) {
+	c.mu.RLock()
+	buf := c.cacheBuf
+	c.mu.RUnlock()
+	if len(buf) == 0 {
+		return ModelInfo{}, false
+	}
+	info, ok := lookupModelInfoInDataset(buf, key)
+	if !ok {
+		return ModelInfo{}, false
+	}
+	c.mu.Lock()
+	c.info[key] = info
+	c.mu.Unlock()
+	return info, true
 }
 
 // maybeRefresh fires a background refresh when the loaded buffer is
@@ -228,6 +282,13 @@ func (c *Client) Refresh(ctx context.Context) error {
 			delete(c.index, k)
 		}
 	}
+	for k := range c.info {
+		if info, ok := lookupModelInfoInDataset(buf, k); ok {
+			c.info[k] = info
+		} else {
+			delete(c.info, k)
+		}
+	}
 	c.mu.Unlock()
 	return nil
 }
@@ -262,6 +323,9 @@ type datasetEntry struct {
 		CacheRead  float64 `json:"cache_read"`
 		CacheWrite float64 `json:"cache_write"`
 	} `json:"cost"`
+	Limit struct {
+		Context int64 `json:"context"`
+	} `json:"limit"`
 }
 
 type datasetProvider struct {
@@ -298,6 +362,33 @@ func lookupInDataset(buf []byte, key string) (shared.ModelPricing, bool) {
 		}
 	}
 	return shared.ModelPricing{}, false
+}
+
+// lookupModelInfoInDataset searches the provider-keyed JSON for a
+// model id and returns metadata when models.dev exposes it.
+func lookupModelInfoInDataset(buf []byte, key string) (ModelInfo, bool) {
+	dataset := make(map[string]datasetProvider)
+	if err := json.Unmarshal(buf, &dataset); err != nil {
+		return ModelInfo{}, false
+	}
+
+	candidates := []string{key, swapHyphenDot(key)}
+	for _, candidate := range candidates {
+		if candidate == "" {
+			continue
+		}
+		for _, provider := range dataset {
+			entry, ok := provider.Models[candidate]
+			if !ok {
+				continue
+			}
+			if entry.Limit.Context <= 0 {
+				continue
+			}
+			return ModelInfo{ContextWindow: entry.Limit.Context}, true
+		}
+	}
+	return ModelInfo{}, false
 }
 
 // swapHyphenDot converts hyphens to dots and vice-versa so a key like

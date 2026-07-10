@@ -1,5 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
 import { TaskTopBar } from "./task-top-bar";
 
 afterEach(() => cleanup());
@@ -31,7 +32,11 @@ vi.mock("@/components/vcs-split-button", () => ({
 }));
 
 vi.mock("@/components/github/pr-topbar-button", () => ({
-  PRTopbarButton: () => null,
+  PRTopbarButton: () => <button data-testid="pr-topbar-button">#1472</button>,
+}));
+
+vi.mock("@/components/gitlab/mr-topbar-button", () => ({
+  MRTopbarButton: () => null,
 }));
 
 vi.mock("@/components/jira/jira-ticket-button", () => ({
@@ -39,17 +44,9 @@ vi.mock("@/components/jira/jira-ticket-button", () => ({
   extractJiraKey: () => null,
 }));
 
-vi.mock("@/components/jira/jira-link-button", () => ({
-  JiraLinkButton: () => null,
-}));
-
 vi.mock("@/components/linear/linear-issue-button", () => ({
   LinearIssueButton: () => null,
   extractLinearKey: () => null,
-}));
-
-vi.mock("@/components/linear/linear-link-button", () => ({
-  LinearLinkButton: () => null,
 }));
 
 vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
@@ -76,16 +73,6 @@ vi.mock("@/components/task/quick-chat-button", () => ({
   QuickChatButton: () => null,
 }));
 
-vi.mock("@/components/task/topbar-action-overflow", () => ({
-  TopbarActionOverflow: ({ items }: { items: Array<{ id: string; content: React.ReactNode }> }) => (
-    <div>
-      {items.map((item) => (
-        <div key={item.id}>{item.content}</div>
-      ))}
-    </div>
-  ),
-}));
-
 vi.mock("@/components/integrations/integrations-menu", () => ({
   IntegrationsMenu: () => null,
 }));
@@ -96,14 +83,40 @@ vi.mock("@/components/task/branch-path-popover", () => ({
 
 describe("TaskTopBar executor environment controls", () => {
   it("hides the executor environment button for filesystem executors", () => {
-    render(<TaskTopBar taskId="task-1" remoteExecutorType="worktree" />);
+    renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="worktree" />);
 
     expect(screen.queryByTestId("executor-settings-button")).toBeNull();
   });
 
   it("shows the executor environment button for Docker executors", () => {
-    render(<TaskTopBar taskId="task-1" remoteExecutorType="local_docker" />);
+    renderTopBar(<TaskTopBar taskId="task-1" remoteExecutorType="local_docker" />);
 
     expect(screen.getByTestId("executor-settings-button")).toBeTruthy();
   });
 });
+
+describe("TaskTopBar GitHub issue link", () => {
+  it("shows the linked issue before linked pull requests", () => {
+    renderTopBar(
+      <TaskTopBar
+        taskId="task-1"
+        issueUrl="https://github.com/kdlbs/kandev/issues/1470"
+        issueNumber={1470}
+      />,
+    );
+
+    const issue = screen.getByTestId("issue-topbar-button");
+    const pr = screen.getByTestId("pr-topbar-button");
+
+    expect(issue.textContent).toContain("#1470");
+    expect(screen.getByLabelText("Task status and attention").className).toContain(
+      "[&_[data-testid=issue-topbar-button]]:h-7",
+    );
+    expect(screen.getByLabelText("Task status and attention").className).not.toContain("[&_a]");
+    expect(issue.compareDocumentPosition(pr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+function renderTopBar(ui: React.ReactNode) {
+  return render(<StateProvider>{ui}</StateProvider>);
+}

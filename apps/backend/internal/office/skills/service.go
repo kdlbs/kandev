@@ -247,7 +247,7 @@ func (s *SkillService) GetSkillFromConfig(ctx context.Context, idOrSlug string) 
 			return sk, nil
 		}
 	}
-	return nil, fmt.Errorf("skill not found: %s", idOrSlug)
+	return nil, fmt.Errorf("%w: %s", ErrSkillNotFound, idOrSlug)
 }
 
 // ListSkillsFromConfig returns all skills for a workspace.

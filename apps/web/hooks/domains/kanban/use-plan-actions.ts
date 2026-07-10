@@ -14,7 +14,7 @@ const PLAN_CONTEXT_PATH = "plan:context";
 
 const AUTO_TRANSITION_ACTIONS = ["move_to_next", "move_to_previous", "move_to_step"];
 
-function useNextWorkflowStep(taskId: string | null) {
+export function useNextWorkflowStep(taskId: string | null) {
   const { toast } = useToast();
   const workflowId = useAppStore((s) => s.kanban.workflowId);
   const steps = useAppStore((s) => s.kanban.steps);

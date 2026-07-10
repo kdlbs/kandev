@@ -2,6 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
 
@@ -32,6 +33,10 @@ import { makeGitEnv } from "../../helpers/git-helper";
  * permanently pin their repo's default to that feature branch, and every
  * downstream merge-base lookup would be anchored wrong.
  */
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
+
 test.describe("Local executor branch split", () => {
   test.describe.configure({ retries: 1 });
 

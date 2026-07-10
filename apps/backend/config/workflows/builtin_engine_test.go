@@ -55,6 +55,25 @@ func TestOfficeDefault_TriggersCompileThroughEngine(t *testing.T) {
 		t.Errorf("Work.on_comment[0] target = %q, want primary", commentActions[0].QueueRun.Target)
 	}
 
+	done := findStep(tmpl.Steps, "Done")
+	if done == nil {
+		t.Fatal("Done step not present in template")
+	}
+	doneSpec := engine.CompileStep(stepFromDefinition(*done))
+	doneCommentActions := doneSpec.Events[engine.TriggerOnComment]
+	if len(doneCommentActions) != 1 {
+		t.Fatalf("Done.on_comment compiled to %d actions, want 1", len(doneCommentActions))
+	}
+	if doneCommentActions[0].Kind != engine.ActionQueueRun {
+		t.Errorf("Done.on_comment[0].Kind = %q, want queue_run", doneCommentActions[0].Kind)
+	}
+	if doneCommentActions[0].QueueRun == nil {
+		t.Fatal("Done.on_comment[0].QueueRun is nil")
+	}
+	if doneCommentActions[0].QueueRun.Target != engine.TargetPrimary {
+		t.Errorf("Done.on_comment[0] target = %q, want primary", doneCommentActions[0].QueueRun.Target)
+	}
+
 	review := findStep(tmpl.Steps, "Review")
 	if review == nil {
 		t.Fatal("Review step not present in template")

@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -40,6 +41,7 @@ func NewPiACP() *PiACP {
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
+				MCPStrategy:    mcpconfig.PiStrategy{},
 			},
 		},
 	}
@@ -86,12 +88,13 @@ func (a *PiACP) BuildCommand(opts CommandOptions) Command {
 func (a *PiACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd("npx", "-y", piACPPkg).Build(),
-		WorkingDir:     "{workspace}",
-		Env:            map[string]string{},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
-		UserSkillDir:   ".pi/agent/skills",
+		Cmd:                Cmd("npx", "-y", piACPPkg).Build(),
+		WorkingDir:         "{workspace}",
+		Env:                map[string]string{},
+		ResourceLimits:     ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:           agent.ProtocolACP,
+		UserSkillDir:       ".pi/agent/skills",
+		ProjectMCPStrategy: mcpconfig.PiStrategy{},
 		SessionConfig: SessionConfig{
 			// TODO: set SessionDirTemplate once the Pi session dir is
 			// confirmed. Without it, the Docker runtime skips mounting the

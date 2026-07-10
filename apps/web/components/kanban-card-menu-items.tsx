@@ -4,9 +4,14 @@ import { useMemo, type ReactNode } from "react";
 import {
   IconArchive,
   IconArrowRight,
+  IconBrandSentry,
+  IconCircleDot,
+  IconGitPullRequest,
+  IconLink,
   IconLoader,
   IconLogicBuffer,
   IconPencil,
+  IconTicket,
   IconTrash,
 } from "@tabler/icons-react";
 import {
@@ -78,6 +83,11 @@ type BuildKanbanCardMenuEntriesArgs = {
   onEdit?: () => void;
   onArchive?: () => void;
   onDelete?: () => void;
+  onLinkPullRequest?: () => void;
+  onLinkIssue?: () => void;
+  onLinkJiraTicket?: () => void;
+  onLinkLinearIssue?: () => void;
+  onLinkSentryIssue?: () => void;
   onMoveToStep?: (stepId: string) => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 };
@@ -213,6 +223,98 @@ function buildSendToWorkflowSubmenu({
   };
 }
 
+function buildLinkSubmenu({
+  disabled,
+  onLinkPullRequest,
+  onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
+}: {
+  disabled?: boolean;
+  onLinkPullRequest?: () => void;
+  onLinkIssue?: () => void;
+  onLinkJiraTicket?: () => void;
+  onLinkLinearIssue?: () => void;
+  onLinkSentryIssue?: () => void;
+}): KanbanCardMenuEntry | null {
+  if (
+    !onLinkPullRequest &&
+    !onLinkIssue &&
+    !onLinkJiraTicket &&
+    !onLinkLinearIssue &&
+    !onLinkSentryIssue
+  ) {
+    return null;
+  }
+  const children: KanbanCardMenuEntry[] = [];
+  if (onLinkPullRequest) {
+    children.push({
+      kind: "item",
+      key: "link-github-pull-request",
+      testId: "task-context-link-github-pull-request",
+      icon: <IconGitPullRequest className="mr-2 h-4 w-4" />,
+      label: "GitHub Pull Request",
+      disabled,
+      onSelect: onLinkPullRequest,
+    });
+  }
+  if (onLinkIssue) {
+    children.push({
+      kind: "item",
+      key: "link-github-issue",
+      testId: "task-context-link-github-issue",
+      icon: <IconCircleDot className="mr-2 h-4 w-4" />,
+      label: "GitHub Issue",
+      disabled,
+      onSelect: onLinkIssue,
+    });
+  }
+  if (onLinkJiraTicket) {
+    children.push({
+      kind: "item",
+      key: "link-jira-ticket",
+      testId: "task-context-link-jira-ticket",
+      icon: <IconTicket className="mr-2 h-4 w-4" />,
+      label: "Jira Ticket",
+      disabled,
+      onSelect: onLinkJiraTicket,
+    });
+  }
+  if (onLinkLinearIssue) {
+    children.push({
+      kind: "item",
+      key: "link-linear-issue",
+      testId: "task-context-link-linear-issue",
+      icon: <IconCircleDot className="mr-2 h-4 w-4" />,
+      label: "Linear Issue",
+      disabled,
+      onSelect: onLinkLinearIssue,
+    });
+  }
+  if (onLinkSentryIssue) {
+    children.push({
+      kind: "item",
+      key: "link-sentry-issue",
+      testId: "task-context-link-sentry-issue",
+      icon: <IconBrandSentry className="mr-2 h-4 w-4" />,
+      label: "Sentry Issue",
+      disabled,
+      onSelect: onLinkSentryIssue,
+    });
+  }
+  return {
+    kind: "submenu",
+    key: "link",
+    testId: "task-context-link",
+    icon: <IconLink className="mr-2 h-4 w-4" />,
+    label: "Link",
+    disabled,
+    className: "w-56",
+    children,
+  };
+}
+
 export function buildKanbanCardMenuEntries({
   currentWorkflowId,
   currentStepId,
@@ -224,6 +326,11 @@ export function buildKanbanCardMenuEntries({
   onEdit,
   onArchive,
   onDelete,
+  onLinkPullRequest,
+  onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   onMoveToStep,
   onSendToWorkflow,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
@@ -257,6 +364,16 @@ export function buildKanbanCardMenuEntries({
     onSendToWorkflow,
   });
   if (sendToEntry) entries.push(sendToEntry);
+
+  const linkEntry = buildLinkSubmenu({
+    disabled: isProcessing,
+    onLinkPullRequest,
+    onLinkIssue,
+    onLinkJiraTicket,
+    onLinkLinearIssue,
+    onLinkSentryIssue,
+  });
+  if (linkEntry) entries.push(linkEntry);
 
   entries.push({
     kind: "item",

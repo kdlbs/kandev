@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { updateTask } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
 import { launchSession } from "@/lib/services/session-launch-service";
@@ -10,16 +10,19 @@ import { useToast } from "@/components/toast-provider";
 import { linkToTask } from "@/lib/links";
 import type { SubmitHandlersDeps } from "@/components/task-create-dialog-types";
 import { useFreshBranchConsent } from "@/components/task-create-dialog-fresh-branch-consent";
+import { queueTaskCreateLastUsedFromPayload } from "@/components/task-create-dialog-handlers";
 
 import {
   activatePlanMode,
   buildCreateTaskPayload,
   buildRepositoriesPayload,
+  findDuplicateRemoteRepo,
   validateCreateInputs,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
 
 const GENERIC_ERROR_MESSAGE = "An error occurred";
+const DUPLICATE_REPO_TITLE = "Duplicate repository";
 
 // eslint-disable-next-line max-lines-per-function
 export function useTaskSubmitHandlers({
@@ -34,10 +37,9 @@ export function useTaskSubmitHandlers({
   repositories,
   discoveredRepositories,
   workspaceRepositories,
-  useGitHubUrl,
-  githubUrl,
-  githubPrHeadBranch,
-  githubBranch,
+  useRemote,
+  remoteRepos,
+  prInfoByUrl,
   agentProfileId,
   executorId,
   executorProfileId,
@@ -45,6 +47,7 @@ export function useTaskSubmitHandlers({
   onSuccess,
   onCreateSession,
   onOpenChange,
+  preserveTaskCreateLastUsedOnClose,
   taskId,
   parentTaskId,
   descriptionInputRef,
@@ -54,7 +57,7 @@ export function useTaskSubmitHandlers({
   setHasDescription,
   setTaskName,
   setRepositories,
-  setGitHubBranch,
+  setRemoteRepos,
   setAgentProfileId,
   setExecutorId,
   setSelectedWorkflowId,
@@ -73,7 +76,7 @@ export function useTaskSubmitHandlers({
   const setPlanMode = useAppStore((state) => state.setPlanMode);
 
   const isFreshBranchActive =
-    freshBranchEnabled && isLocalExecutor && !useGitHubUrl && repositoryLocalPath !== "";
+    freshBranchEnabled && isLocalExecutor && !useRemote && repositoryLocalPath !== "";
   const { pendingDiscard, ensureFreshBranchConsent, createTaskWithFreshBranchRetry } =
     useFreshBranchConsent({
       isFreshBranchActive,
@@ -92,19 +95,43 @@ export function useTaskSubmitHandlers({
         workspaceId,
         effectiveWorkflowId,
         repositories,
-        githubUrl,
+        remoteRepos: useRemote ? remoteRepos : undefined,
         agentProfileId,
         noRepository,
       }),
-    [workspaceId, effectiveWorkflowId, repositories, githubUrl, agentProfileId, noRepository],
+    [
+      workspaceId,
+      effectiveWorkflowId,
+      repositories,
+      useRemote,
+      remoteRepos,
+      agentProfileId,
+      noRepository,
+    ],
   );
+
+  // Blocks submit when two Remote rows resolve to the same GitHub repo (same
+  // PR URL twice, or two PRs of one repo). Surfaces a repo-named toast before
+  // the backend round-trip so the user never sees the raw-UUID dedup error.
+  // Returns true when a duplicate was found (caller should abort).
+  const checkRemoteDuplicates = useCallback((): boolean => {
+    if (!useRemote) return false;
+    const duplicate = findDuplicateRemoteRepo(remoteRepos);
+    if (!duplicate) return false;
+    toast({
+      title: DUPLICATE_REPO_TITLE,
+      description: `${duplicate} is added more than once — remove the duplicate row.`,
+      variant: "error",
+    });
+    return true;
+  }, [useRemote, remoteRepos, toast]);
 
   const resetForm = useCallback(() => {
     setHasTitle(false);
     setHasDescription(false);
     setTaskName("");
     setRepositories([]);
-    setGitHubBranch("");
+    setRemoteRepos([]);
     setAgentProfileId("");
     setExecutorId("");
     setSelectedWorkflowId(workflowId);
@@ -116,7 +143,7 @@ export function useTaskSubmitHandlers({
     setHasDescription,
     setTaskName,
     setRepositories,
-    setGitHubBranch,
+    setRemoteRepos,
     setAgentProfileId,
     setExecutorId,
     setSelectedWorkflowId,
@@ -127,10 +154,9 @@ export function useTaskSubmitHandlers({
     (consentedDirtyFiles: string[] = []) => {
       if (noRepository) return [];
       return buildRepositoriesPayload({
-        useGitHubUrl,
-        githubUrl,
-        githubBranch,
-        githubPrHeadBranch,
+        useRemote,
+        remoteRepos,
+        prInfoByUrl,
         repositories,
         discoveredRepositories,
         workspaceRepositories,
@@ -142,10 +168,9 @@ export function useTaskSubmitHandlers({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       noRepository,
-      useGitHubUrl,
-      githubUrl,
-      githubBranch,
-      githubPrHeadBranch,
+      useRemote,
+      remoteRepos,
+      prInfoByUrl,
       repositories,
       discoveredRepositories,
       workspaceRepositories,
@@ -159,7 +184,7 @@ export function useTaskSubmitHandlers({
     const trimmedDescription = description.trim();
     const attachments = descriptionInputRef.current?.getAttachments() ?? [];
     if (!agentProfileId) return;
-    if (!trimmedDescription && !isPassthroughProfile) return;
+    if (!trimmedDescription) return;
 
     if (onCreateSession) {
       onCreateSession({ prompt: trimmedDescription, agentProfileId, executorId });
@@ -194,7 +219,6 @@ export function useTaskSubmitHandlers({
     agentProfileId,
     executorId,
     executorProfileId,
-    isPassthroughProfile,
     onCreateSession,
     onOpenChange,
     router,
@@ -294,8 +318,9 @@ export function useTaskSubmitHandlers({
       attachments?: ReturnType<typeof toMessageAttachments>;
     }) => {
       if (!workspaceId || !effectiveWorkflowId) return;
-      const buildPayload = (c: string[]) =>
-        buildCreateTaskPayload({
+      let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
+      const buildPayload = (c: string[]) => {
+        const payload = buildCreateTaskPayload({
           workspaceId,
           effectiveWorkflowId,
           trimmedTitle: opts.trimmedTitle,
@@ -314,11 +339,18 @@ export function useTaskSubmitHandlers({
           // "empty path string" on the wire.
           workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
         });
+        submittedPayload = payload;
+        return payload;
+      };
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, opts.consented);
       if (!taskResponse) return;
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
-      onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId });
+      const willNavigate =
+        (opts.withAgent && isPassthroughProfile) || !!(opts.planMode && newSessionId);
+      onSuccess?.(taskResponse, "create", { taskSessionId: newSessionId, willNavigate });
       clearDraft();
+      queueTaskCreateLastUsedFromPayload(submittedPayload);
+      preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
       if (opts.planMode && newSessionId) {
         activatePlanMode({
@@ -344,6 +376,7 @@ export function useTaskSubmitHandlers({
       workspacePath,
       onSuccess,
       onOpenChange,
+      preserveTaskCreateLastUsedOnClose,
       clearDraft,
       setActiveDocument,
       setPlanMode,
@@ -421,6 +454,7 @@ export function useTaskSubmitHandlers({
     const trimmedDescription = description.trim();
     const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
     if (!validateForCreate(trimmedTitle)) return;
+    if (checkRemoteDuplicates()) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
     setIsCreatingTask(true);
@@ -447,6 +481,7 @@ export function useTaskSubmitHandlers({
     performEditWithPlanMode,
     taskName,
     validateForCreate,
+    checkRemoteDuplicates,
     ensureFreshBranchConsent,
     performCreate,
     toast,
@@ -460,11 +495,12 @@ export function useTaskSubmitHandlers({
     const trimmedDescription = description.trim();
     const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
     if (!validateForCreate(trimmedTitle)) return;
+    if (checkRemoteDuplicates()) return;
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
     setIsCreatingTask(true);
     try {
-      if (trimmedDescription || isPassthroughProfile) {
+      if (trimmedDescription) {
         const finalDescription = transformDescriptionBeforeSubmit
           ? await transformDescriptionBeforeSubmit(trimmedDescription)
           : trimmedDescription;
@@ -489,8 +525,8 @@ export function useTaskSubmitHandlers({
     }
   }, [
     taskName,
-    isPassthroughProfile,
     validateForCreate,
+    checkRemoteDuplicates,
     ensureFreshBranchConsent,
     performCreate,
     handleCreatePlanMode,
@@ -506,11 +542,13 @@ export function useTaskSubmitHandlers({
     if (!validateForCreate(trimmedTitle)) return;
     if (!trimmedDescription || !effectiveDefaultStepId || !workspaceId || !effectiveWorkflowId)
       return;
+    if (checkRemoteDuplicates()) return;
 
     const consent = await ensureFreshBranchConsent();
     if (consent === null) return;
     setIsCreatingTask(true);
     try {
+      let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
       const buildPayload = (c: string[]) => {
         const p = buildCreateTaskPayload({
           workspaceId,
@@ -525,12 +563,15 @@ export function useTaskSubmitHandlers({
           workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
         });
         p.workflow_step_id = effectiveDefaultStepId;
+        submittedPayload = p;
         return p;
       };
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consent);
       if (!taskResponse) return;
       onSuccess?.(taskResponse, "create");
       clearDraft();
+      queueTaskCreateLastUsedFromPayload(submittedPayload);
+      preserveTaskCreateLastUsedOnClose?.();
       onOpenChange(false);
     } catch (error) {
       toast({
@@ -552,11 +593,13 @@ export function useTaskSubmitHandlers({
     noRepository,
     workspacePath,
     validateForCreate,
+    checkRemoteDuplicates,
     getRepositoriesPayload,
     ensureFreshBranchConsent,
     createTaskWithFreshBranchRetry,
     onSuccess,
     onOpenChange,
+    preserveTaskCreateLastUsedOnClose,
     clearDraft,
     toast,
     descriptionInputRef,

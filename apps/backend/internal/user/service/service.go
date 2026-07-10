@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -21,6 +22,11 @@ var (
 	ErrValidation   = errors.New("validation error")
 )
 
+const (
+	changesPanelLayoutFlat = "flat"
+	changesPanelLayoutTree = "tree"
+)
+
 type Service struct {
 	repo        store.Repository
 	eventBus    bus.EventBus
@@ -33,6 +39,8 @@ type UpdateUserSettingsRequest struct {
 	KanbanViewMode              *string
 	WorkflowFilterID            *string
 	RepositoryIDs               *[]string
+	TasksListSort               *string
+	TasksListGroup              *string
 	InitialSetupComplete        *bool
 	PreferredShell              *string
 	DefaultEditorID             *string
@@ -46,12 +54,24 @@ type UpdateUserSettingsRequest struct {
 	LspServerConfigs            *map[string]map[string]interface{}
 	SavedLayouts                *[]models.SavedLayout
 	SidebarViews                *[]models.SidebarView
+	SidebarActiveViewID         *string
+	SidebarDraft                **models.SidebarViewDraft
+	SidebarTaskPrefs            *models.SidebarTaskPrefs
+	TaskCreateLastUsed          *models.TaskCreateLastUsed
+	JiraSavedViews              **json.RawMessage
+	JiraTaskPresets             **json.RawMessage
+	GitHubSavedPresets          **json.RawMessage
+	GitHubDefaultQueryPresets   **json.RawMessage
+	GitLabSavedPresets          **json.RawMessage
 	DefaultUtilityAgentID       *string
 	DefaultUtilityModel         *string
 	KeyboardShortcuts           *map[string]interface{}
 	TerminalLinkBehavior        *string
 	TerminalFontFamily          *string
 	TerminalFontSize            *int
+	ChangesPanelLayout          *string
+	SystemMetricsDisplay        *models.SystemMetricsDisplaySettings
+	VoiceMode                   *models.VoiceModeSettings
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -116,12 +136,49 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 	if err := applySidebarViews(settings, req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
+	if err := applySidebarViewState(settings, req); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	}
+	if err := applyUserPreferenceBlobs(settings, req); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	}
+	if err := applyVoiceMode(settings, req.VoiceMode); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
+	}
 	settings.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
+	var taskCreatePatch *models.TaskCreateLastUsed
+	if req.TaskCreateLastUsed != nil && !taskCreateLastUsedPatchEmpty(*req.TaskCreateLastUsed) {
+		taskCreatePatch = req.TaskCreateLastUsed
+	}
+	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, taskCreatePatch)
+	if err != nil {
 		return nil, err
 	}
 	s.publishUserSettingsEvent(ctx, settings)
 	return settings, nil
+}
+
+func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) error {
+	if taskCreateLastUsedPatchEmpty(patch) {
+		return nil
+	}
+	settings, err := s.updateTaskCreateLastUsed(ctx, patch)
+	if err != nil {
+		return err
+	}
+	s.publishUserSettingsEvent(ctx, settings)
+	return nil
+}
+
+func (s *Service) updateTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
+	return s.repo.UpdateTaskCreateLastUsed(ctx, s.defaultUser, patch)
+}
+
+func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
+	return patch.RepositoryID == "" &&
+		patch.Branch == "" &&
+		patch.AgentProfileID == "" &&
+		patch.ExecutorProfileID == ""
 }
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
@@ -137,6 +194,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	}
 	if req.RepositoryIDs != nil {
 		settings.RepositoryIDs = *req.RepositoryIDs
+	}
+	if err := applyTasksListPreferences(settings, req.TasksListSort, req.TasksListGroup); err != nil {
+		return err
 	}
 	if req.InitialSetupComplete != nil {
 		settings.InitialSetupComplete = *req.InitialSetupComplete
@@ -174,6 +234,12 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if err := applyTerminalLinkBehavior(settings, req.TerminalLinkBehavior); err != nil {
 		return err
 	}
+	if err := applyChangesPanelLayout(settings, req.ChangesPanelLayout); err != nil {
+		return err
+	}
+	if req.SystemMetricsDisplay != nil {
+		settings.SystemMetricsDisplay = *req.SystemMetricsDisplay
+	}
 	if req.TerminalFontFamily != nil {
 		settings.TerminalFontFamily = strings.TrimSpace(*req.TerminalFontFamily)
 	}
@@ -187,6 +253,30 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	return nil
 }
 
+func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupValue *string) error {
+	if sortValue != nil {
+		v := strings.TrimSpace(*sortValue)
+		if v == "" {
+			v = models.TasksListSortDefault
+		}
+		if !models.IsValidTasksListSort(v) {
+			return fmt.Errorf("tasks_list_sort must be one of %s", strings.Join(models.TasksListSortValues(), ", "))
+		}
+		settings.TasksListSort = v
+	}
+	if groupValue != nil {
+		v := strings.TrimSpace(*groupValue)
+		if v == "" {
+			v = models.TasksListGroupDefault
+		}
+		if !models.IsValidTasksListGroup(v) {
+			return fmt.Errorf("tasks_list_group must be one of %s", strings.Join(models.TasksListGroupValues(), ", "))
+		}
+		settings.TasksListGroup = v
+	}
+	return nil
+}
+
 func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) error {
 	if value == nil {
 		return nil
@@ -196,6 +286,78 @@ func applyTerminalLinkBehavior(settings *models.UserSettings, value *string) err
 		return errors.New("terminal_link_behavior must be 'new_tab' or 'browser_panel'")
 	}
 	settings.TerminalLinkBehavior = v
+	return nil
+}
+
+func applyChangesPanelLayout(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != changesPanelLayoutFlat && v != changesPanelLayoutTree {
+		return errors.New("changes_panel_layout must be 'flat' or 'tree'")
+	}
+	settings.ChangesPanelLayout = v
+	return nil
+}
+
+var (
+	validVoiceEngines = map[string]struct{}{
+		"auto":          {},
+		"webSpeech":     {},
+		"whisperWeb":    {},
+		"whisperServer": {},
+	}
+	validVoiceModes = map[string]struct{}{
+		"toggle": {},
+		"hold":   {},
+	}
+	validWhisperWebModels = map[string]struct{}{
+		"tiny":  {},
+		"base":  {},
+		"small": {},
+	}
+)
+
+// applyVoiceMode validates the inbound voice-mode settings and merges them
+// onto the user record. Each sub-field is validated independently so a
+// partial update (e.g. just `engine`) still works.
+//
+// `enabled` and `auto_send` are plain bools — every PATCH carries them. The
+// settings UI always sends the full VoiceMode object so partial updates that
+// would otherwise zero these are not a real concern.
+func applyVoiceMode(settings *models.UserSettings, value *models.VoiceModeSettings) error {
+	if value == nil {
+		return nil
+	}
+	current := settings.VoiceMode
+	if current.Engine == "" {
+		current.Engine = "auto"
+	}
+	if value.Engine != "" {
+		if _, ok := validVoiceEngines[value.Engine]; !ok {
+			return errors.New("voice_mode.engine must be 'auto', 'webSpeech', 'whisperWeb', or 'whisperServer'")
+		}
+		current.Engine = value.Engine
+	}
+	if value.Language != "" {
+		current.Language = strings.TrimSpace(value.Language)
+	}
+	if value.Mode != "" {
+		if _, ok := validVoiceModes[value.Mode]; !ok {
+			return errors.New("voice_mode.mode must be 'toggle' or 'hold'")
+		}
+		current.Mode = value.Mode
+	}
+	if value.WhisperWebModel != "" {
+		if _, ok := validWhisperWebModels[value.WhisperWebModel]; !ok {
+			return errors.New("voice_mode.whisper_web_model must be 'tiny', 'base', or 'small'")
+		}
+		current.WhisperWebModel = value.WhisperWebModel
+	}
+	current.AutoSend = value.AutoSend
+	current.Enabled = value.Enabled
+	settings.VoiceMode = current
 	return nil
 }
 
@@ -281,6 +443,87 @@ func applySidebarViews(settings *models.UserSettings, req *UpdateUserSettingsReq
 	return nil
 }
 
+func applySidebarViewState(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.SidebarActiveViewID != nil {
+		activeViewID := strings.TrimSpace(*req.SidebarActiveViewID)
+		if activeViewID == "" {
+			return errors.New("sidebar_active_view_id must not be empty")
+		}
+		if !sidebarViewIDExists(settings.SidebarViews, activeViewID) {
+			return fmt.Errorf("sidebar_active_view_id %q does not match any saved view", activeViewID)
+		}
+		settings.SidebarActiveViewID = activeViewID
+	}
+	if req.SidebarDraft != nil {
+		settings.SidebarDraft = *req.SidebarDraft
+	}
+	return nil
+}
+
+func sidebarViewIDExists(views []models.SidebarView, id string) bool {
+	for _, view := range views {
+		if view.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+const maxUserPreferenceBlobBytes = 64 * 1024
+
+func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if req.SidebarTaskPrefs != nil {
+		settings.SidebarTaskPrefs = *req.SidebarTaskPrefs
+	}
+	if err := applyUserPreferenceBlob("jira_saved_views", req.JiraSavedViews, &settings.JiraSavedViews); err != nil {
+		return err
+	}
+	if err := applyUserPreferenceBlob("jira_task_presets", req.JiraTaskPresets, &settings.JiraTaskPresets); err != nil {
+		return err
+	}
+	if err := applyUserPreferenceBlob("github_saved_presets", req.GitHubSavedPresets, &settings.GitHubSavedPresets); err != nil {
+		return err
+	}
+	if err := applyUserPreferenceBlob("github_default_query_presets", req.GitHubDefaultQueryPresets, &settings.GitHubDefaultQueryPresets); err != nil {
+		return err
+	}
+	if err := applyUserPreferenceBlob("gitlab_saved_presets", req.GitLabSavedPresets, &settings.GitLabSavedPresets); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyUserPreferenceBlob(field string, value **json.RawMessage, target *json.RawMessage) error {
+	if value == nil {
+		return nil
+	}
+	if *value == nil {
+		*target = nil
+		return nil
+	}
+	if err := validateUserPreferenceBlob(field, **value); err != nil {
+		return err
+	}
+	*target = **value
+	return nil
+}
+
+func validateUserPreferenceBlob(field string, value json.RawMessage) error {
+	if len(value) > maxUserPreferenceBlobBytes {
+		return fmt.Errorf("%s: max %d bytes allowed", field, maxUserPreferenceBlobBytes)
+	}
+	var decoded interface{}
+	if err := json.Unmarshal(value, &decoded); err != nil {
+		return fmt.Errorf("%s: must be valid JSON", field)
+	}
+	switch decoded.(type) {
+	case nil, []interface{}, map[string]interface{}:
+		return nil
+	default:
+		return fmt.Errorf("%s: must be a JSON object, array, or null", field)
+	}
+}
+
 func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings) {
 	if s.eventBus == nil || settings == nil {
 		return
@@ -291,6 +534,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"kanban_view_mode":                settings.KanbanViewMode,
 		"workflow_filter_id":              settings.WorkflowFilterID,
 		"repository_ids":                  settings.RepositoryIDs,
+		"tasks_list_sort":                 settings.TasksListSort,
+		"tasks_list_group":                settings.TasksListGroup,
 		"initial_setup_complete":          settings.InitialSetupComplete,
 		"preferred_shell":                 settings.PreferredShell,
 		"default_editor_id":               settings.DefaultEditorID,
@@ -304,12 +549,24 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_server_configs":              settings.LspServerConfigs,
 		"saved_layouts":                   settings.SavedLayouts,
 		"sidebar_views":                   settings.SidebarViews,
+		"sidebar_active_view_id":          settings.SidebarActiveViewID,
+		"sidebar_draft":                   settings.SidebarDraft,
+		"sidebar_task_prefs":              settings.SidebarTaskPrefs,
+		"task_create_last_used":           settings.TaskCreateLastUsed,
+		"jira_saved_views":                settings.JiraSavedViews,
+		"jira_task_presets":               settings.JiraTaskPresets,
+		"github_saved_presets":            settings.GitHubSavedPresets,
+		"github_default_query_presets":    settings.GitHubDefaultQueryPresets,
+		"gitlab_saved_presets":            settings.GitLabSavedPresets,
 		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
 		"default_utility_model":           settings.DefaultUtilityModel,
 		"keyboard_shortcuts":              settings.KeyboardShortcuts,
 		"terminal_link_behavior":          settings.TerminalLinkBehavior,
 		"terminal_font_family":            settings.TerminalFontFamily,
 		"terminal_font_size":              settings.TerminalFontSize,
+		"changes_panel_layout":            settings.ChangesPanelLayout,
+		"system_metrics_display":          settings.SystemMetricsDisplay,
+		"voice_mode":                      settings.VoiceMode,
 		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
@@ -365,7 +622,8 @@ func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) err
 	}
 	settings.DefaultEditorID = ""
 	settings.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
+	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, nil)
+	if err != nil {
 		return err
 	}
 	s.publishUserSettingsEvent(ctx, settings)

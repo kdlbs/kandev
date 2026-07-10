@@ -16,6 +16,7 @@ const (
 	RuntimeDocker       Runtime = "docker"
 	RuntimeRemoteDocker Runtime = "remote_docker"
 	RuntimeSprites      Runtime = "sprites"
+	RuntimeSSH          Runtime = "ssh"
 )
 
 // IsContainerized reports whether the runtime hosts the agent

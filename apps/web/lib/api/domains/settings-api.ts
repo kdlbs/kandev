@@ -16,11 +16,14 @@ import type {
   EditorOption,
   CustomPrompt,
   PromptsResponse,
-  SavedLayout,
-  SidebarViewApi,
   UserSettingsResponse,
+  UserSettingsUpdatePayload,
   DynamicModelsResponse,
 } from "@/lib/types/http";
+import type {
+  SystemMetricsGlobalSettings,
+  SystemMetricsSettingsResponse,
+} from "@/lib/types/system";
 
 // User settings
 export async function fetchUserSettings(options?: ApiRequestOptions) {
@@ -28,30 +31,7 @@ export async function fetchUserSettings(options?: ApiRequestOptions) {
 }
 
 export async function updateUserSettings(
-  payload: {
-    workspace_id?: string;
-    workflow_filter_id?: string;
-    kanban_view_mode?: string;
-    repository_ids?: string[];
-    preferred_shell?: string;
-    default_editor_id?: string;
-    enable_preview_on_click?: boolean;
-    chat_submit_key?: "enter" | "cmd_enter";
-    review_auto_mark_on_scroll?: boolean;
-    show_release_notification?: boolean;
-    release_notes_last_seen_version?: string;
-    lsp_auto_start_languages?: string[];
-    lsp_auto_install_languages?: string[];
-    lsp_server_configs?: Record<string, Record<string, unknown>>;
-    saved_layouts?: SavedLayout[];
-    sidebar_views?: SidebarViewApi[];
-    default_utility_agent_id?: string;
-    default_utility_model?: string;
-    keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
-    terminal_link_behavior?: "new_tab" | "browser_panel";
-    terminal_font_family?: string;
-    terminal_font_size?: number;
-  },
+  payload: UserSettingsUpdatePayload,
   options?: ApiRequestOptions,
 ) {
   return fetchJson<UserSettingsResponse>("/api/v1/user/settings", {
@@ -60,9 +40,64 @@ export async function updateUserSettings(
   });
 }
 
+export async function fetchSystemMetricsSettings(options?: ApiRequestOptions) {
+  return fetchJsonWithRetry<SystemMetricsSettingsResponse>(
+    "/api/v1/system/metrics/settings",
+    options,
+  );
+}
+
+export async function updateSystemMetricsSettings(
+  payload: SystemMetricsGlobalSettings,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<SystemMetricsSettingsResponse>("/api/v1/system/metrics/settings", {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(payload) },
+  });
+}
+
 // Executors
 export async function listExecutors(options?: ApiRequestOptions): Promise<ListExecutorsResponse> {
   return fetchJson<ListExecutorsResponse>("/api/v1/executors", options);
+}
+
+export async function fetchExecutor(
+  executorId: string,
+  options?: ApiRequestOptions,
+): Promise<{ id: string; name: string; type: string; config?: Record<string, string> }> {
+  return fetchJson<{ id: string; name: string; type: string; config?: Record<string, string> }>(
+    `/api/v1/executors/${executorId}`,
+    options,
+  );
+}
+
+export async function createExecutor(
+  payload: {
+    name: string;
+    type: string;
+    config?: Record<string, string>;
+  },
+  options?: ApiRequestOptions,
+): Promise<{ id: string; name: string; type: string; config?: Record<string, string> }> {
+  return fetchJson<{ id: string; name: string; type: string; config?: Record<string, string> }>(
+    "/api/v1/executors",
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
+}
+
+export async function updateExecutor(
+  executorId: string,
+  payload: { name?: string; config?: Record<string, string> },
+  options?: ApiRequestOptions,
+): Promise<void> {
+  await fetchJson<void>(`/api/v1/executors/${executorId}`, {
+    ...options,
+    init: { method: "PATCH", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+  });
 }
 
 // Executor profiles
@@ -294,7 +329,7 @@ export async function resizeAgentLogin(
  * Build the bi-directional WS URL for streaming a login session.
  * Derives the host from the backend config (NOT window.location) so dev mode
  * — where the browser is on :37429 and the API is on :38429 — routes to the
- * Go backend, not the Next dev server.
+ * Go backend, not the web dev server.
  */
 export function agentLoginStreamUrl(sessionID: string): string {
   const { apiBaseUrl } = getBackendConfig();

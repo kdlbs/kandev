@@ -18,6 +18,8 @@ function watch(id: string, overrides: Partial<LinearIssueWatch> = {}): LinearIss
     workspaceId: "ws-1",
     workflowId: "wf-1",
     workflowStepId: "step-1",
+    repositoryId: "",
+    baseBranch: "",
     filter: { teamKey: "ENG" },
     agentProfileId: "",
     executorProfileId: "",

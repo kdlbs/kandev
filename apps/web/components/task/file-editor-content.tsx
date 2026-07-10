@@ -16,6 +16,7 @@ export type FileEditorContentProps = {
   isSaving: boolean;
   sessionId?: string;
   worktreePath?: string;
+  repo?: string;
   enableComments?: boolean;
   markdownPreview?: boolean;
   onToggleMarkdownPreview?: () => void;

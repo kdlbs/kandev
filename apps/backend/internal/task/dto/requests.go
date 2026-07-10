@@ -68,37 +68,41 @@ type GetRepositoryRequest struct {
 }
 
 type CreateRepositoryRequest struct {
-	WorkspaceID          string
-	Name                 string
-	SourceType           string
-	LocalPath            string
-	Provider             string
-	ProviderRepoID       string
-	ProviderOwner        string
-	ProviderName         string
-	DefaultBranch        string
-	WorktreeBranchPrefix string
-	PullBeforeWorktree   *bool
-	SetupScript          string
-	CleanupScript        string
-	DevScript            string
+	WorkspaceID            string
+	Name                   string
+	SourceType             string
+	LocalPath              string
+	Provider               string
+	ProviderRepoID         string
+	ProviderOwner          string
+	ProviderName           string
+	DefaultBranch          string
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	PullBeforeWorktree     *bool
+	SetupScript            string
+	CleanupScript          string
+	DevScript              string
+	CopyFiles              string
 }
 
 type UpdateRepositoryRequest struct {
-	ID                   string
-	Name                 *string
-	SourceType           *string
-	LocalPath            *string
-	Provider             *string
-	ProviderRepoID       *string
-	ProviderOwner        *string
-	ProviderName         *string
-	DefaultBranch        *string
-	WorktreeBranchPrefix *string
-	PullBeforeWorktree   *bool
-	SetupScript          *string
-	CleanupScript        *string
-	DevScript            *string
+	ID                     string
+	Name                   *string
+	SourceType             *string
+	LocalPath              *string
+	Provider               *string
+	ProviderRepoID         *string
+	ProviderOwner          *string
+	ProviderName           *string
+	DefaultBranch          *string
+	WorktreeBranchPrefix   *string
+	WorktreeBranchTemplate *string
+	PullBeforeWorktree     *bool
+	SetupScript            *string
+	CleanupScript          *string
+	DevScript              *string
+	CopyFiles              *string
 }
 
 type DeleteRepositoryRequest struct {
@@ -248,6 +252,7 @@ type TaskRepositoryInput struct {
 	RepositoryID   string
 	BaseBranch     string
 	CheckoutBranch string
+	PRNumber       int // GitHub PR number when CheckoutBranch is a PR head; persisted into task_repositories.metadata["pr_number"].
 	LocalPath      string
 	Name           string
 	DefaultBranch  string
@@ -334,4 +339,8 @@ type BulkMoveTasksResponse struct {
 
 type TaskCountResponse struct {
 	TaskCount int `json:"task_count"`
+}
+
+type RepositoryActiveSessionCountResponse struct {
+	ActiveSessionCount int `json:"active_session_count"`
 }

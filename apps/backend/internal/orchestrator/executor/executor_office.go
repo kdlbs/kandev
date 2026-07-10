@@ -4,20 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
-
-// uniqueIndexErrFragment matches the SQLite uniqueness violation surfaced
-// when two concurrent EnsureSessionForAgent callers race past the SELECT and
-// both INSERT a row for the same (task_id, agent_profile_id) pair.
-const uniqueIndexErrFragment = "uniq_office_task_session"
 
 // EnsureSessionForAgent returns a persistent task session for the (task,
 // agent) pair, creating one when no row exists. This is the office run
@@ -56,7 +51,7 @@ func (e *Executor) EnsureSessionForAgent(
 	}
 
 	created, err := e.createOfficeSession(ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID)
-	if err != nil && strings.Contains(err.Error(), uniqueIndexErrFragment) {
+	if err != nil && errors.Is(err, taskrepo.ErrOfficeSessionRaceConflict) {
 		// Lost the race against a concurrent caller. Re-read and reuse.
 		raced, lookupErr := e.repo.GetTaskSessionByTaskAndAgent(ctx, task.ID, agentInstanceID)
 		if lookupErr == nil && raced != nil {

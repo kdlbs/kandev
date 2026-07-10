@@ -22,11 +22,12 @@ type MockController struct {
 	store    *Store
 	eventBus bus.EventBus
 	logger   *logger.Logger
+	service  *Service
 }
 
 // NewMockController creates a new MockController.
-func NewMockController(mock *MockClient, store *Store, eventBus bus.EventBus, log *logger.Logger) *MockController {
-	return &MockController{mock: mock, store: store, eventBus: eventBus, logger: log}
+func NewMockController(mock *MockClient, store *Store, eventBus bus.EventBus, svc *Service, log *logger.Logger) *MockController {
+	return &MockController{mock: mock, store: store, eventBus: eventBus, service: svc, logger: log}
 }
 
 // RegisterRoutes registers all mock control HTTP routes.
@@ -34,6 +35,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/github/mock")
 	api.PUT("/user", c.setUser)
 	api.POST("/prs", c.addPRs)
+	api.POST("/issues", c.addIssues)
 	api.POST("/orgs", c.addOrgs)
 	api.POST("/repos", c.addRepos)
 	api.POST("/reviews", c.addReviews)
@@ -45,7 +47,43 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/task-prs", c.associateTaskPR)
 	api.POST("/pr-feedback", c.seedPRFeedback)
 	api.PUT("/auth-health", c.setAuthHealth)
+	api.PUT("/repos-unavailable", c.setReposUnavailable)
 	api.DELETE("/reset", c.reset)
+}
+
+// setReposUnavailable toggles the mock client's "list accessible repos
+// unavailable" branch so e2e tests can drive the Remote-tab chip popover
+// into its "Connect GitHub" banner state. Also clears the service's
+// accessible-repos / user-orgs TTL caches so a previously-cached success
+// doesn't shadow the toggle for up to 60s.
+func (c *MockController) setReposUnavailable(ctx *gin.Context) {
+	var req struct {
+		Unavailable bool `json:"unavailable"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		respondInvalidPayload(ctx)
+		return
+	}
+	c.mock.SetReposUnavailable(req.Unavailable)
+	if c.service != nil {
+		c.service.ClearAccessibleReposCaches()
+	}
+	ctx.JSON(http.StatusOK, gin.H{"unavailable": req.Unavailable})
+}
+
+// errKey is the JSON key used for error responses in this controller. Pulled
+// into a constant so goconst (min-occurrences=3 on new code) stops flagging
+// every new gin.H{"error":...} the file grows. Mirrors `commitStatusError`
+// in scope-of-meaning but is distinct because that constant means a GitHub
+// commit-status state, not a generic JSON error key.
+const errKey = "error"
+
+// respondInvalidPayload is a tiny helper so callers in this file (and any
+// future mock handlers added here) don't each spell out the gin.H{<errKey>:
+// "invalid payload"} pair. Reuses the package-level errMsgInvalidPayload
+// constant from handlers.go to keep wording (and goconst) in sync.
+func respondInvalidPayload(ctx *gin.Context) {
+	ctx.JSON(http.StatusBadRequest, gin.H{errKey: errMsgInvalidPayload})
 }
 
 func (c *MockController) setUser(ctx *gin.Context) {
@@ -72,6 +110,20 @@ func (c *MockController) addPRs(ctx *gin.Context) {
 		c.mock.AddPR(&req.PRs[i])
 	}
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.PRs)})
+}
+
+func (c *MockController) addIssues(ctx *gin.Context) {
+	var req struct {
+		Issues []Issue `json:"issues"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	for i := range req.Issues {
+		c.mock.AddIssue(&req.Issues[i])
+	}
+	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Issues)})
 }
 
 func (c *MockController) addOrgs(ctx *gin.Context) {
@@ -302,21 +354,22 @@ func (c *MockController) ensureMockPRForRequest(ctx context.Context, req *associ
 		return
 	}
 	c.mock.AddPR(&PR{
-		Number:      req.PRNumber,
-		Title:       req.PRTitle,
-		URL:         req.PRURL,
-		HTMLURL:     req.PRURL,
-		State:       req.State,
-		HeadBranch:  req.HeadBranch,
-		HeadSHA:     mockHeadSHA(req.Owner, req.Repo, req.PRNumber),
-		BaseBranch:  req.BaseBranch,
-		AuthorLogin: req.AuthorLogin,
-		RepoOwner:   req.Owner,
-		RepoName:    req.Repo,
-		Additions:   req.Additions,
-		Deletions:   req.Deletions,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		Number:         req.PRNumber,
+		Title:          req.PRTitle,
+		URL:            req.PRURL,
+		HTMLURL:        req.PRURL,
+		State:          req.State,
+		HeadBranch:     req.HeadBranch,
+		HeadSHA:        mockHeadSHA(req.Owner, req.Repo, req.PRNumber),
+		BaseBranch:     req.BaseBranch,
+		AuthorLogin:    req.AuthorLogin,
+		MergeableState: req.MergeableState,
+		RepoOwner:      req.Owner,
+		RepoName:       req.Repo,
+		Additions:      req.Additions,
+		Deletions:      req.Deletions,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	})
 }
 
@@ -391,5 +444,8 @@ func mockHeadSHA(owner, repo string, prNumber int) string {
 
 func (c *MockController) reset(ctx *gin.Context) {
 	c.mock.Reset()
+	if c.service != nil {
+		c.service.ClearAccessibleReposCaches()
+	}
 	ctx.JSON(http.StatusOK, gin.H{"reset": true})
 }

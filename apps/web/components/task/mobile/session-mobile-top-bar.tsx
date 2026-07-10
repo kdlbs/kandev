@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconArrowLeft, IconMenu2, IconGitBranch, IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
@@ -113,7 +113,7 @@ function MobileTopBarActions({
   onMenuClick,
 }: MobileTopBarActionsProps) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MobileRepoPill taskId={taskId ?? null} workspaceId={workspaceId ?? null} />
       {isRemoteExecutor && (
         <RemoteCloudTooltip
@@ -153,7 +153,14 @@ function MobileTopBarActions({
         onRebase={onRebase}
         onMerge={onMerge}
       />
-      <Button variant="ghost" size="icon-sm" className="cursor-pointer" onClick={onMenuClick}>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="cursor-pointer"
+        onClick={onMenuClick}
+        data-testid="mobile-session-menu"
+        aria-label="Open task switcher"
+      >
         <IconMenu2 className="h-4 w-4" />
       </Button>
     </div>

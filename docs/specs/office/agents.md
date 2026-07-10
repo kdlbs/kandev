@@ -64,6 +64,8 @@ The executor is resolved automatically when the scheduler launches a session for
 
 `executor_preference` shape mirrors project executor config: `{ type, image, resource_limits, environment_id }`.
 
+When an agent creates another agent and omits `executor_preference`, the new agent inherits the creator's executor preference before defaults are applied. This keeps delegated child agents launchable in the same executor context unless the creator explicitly overrides the preference.
+
 Worktrees are automatic: when a task targets a repository, the system creates a git worktree (branch) using the existing `worktree.Manager`. Strategy (per-task or shared) comes from the project config.
 
 ## Data model
@@ -119,7 +121,7 @@ Before each session, instructions are written to `~/.kandev/runtime/<workspace-s
 
 ### Skills
 
-A skill is a directory containing `SKILL.md` (required: the markdown instructions the agent reads) plus optional scripts and reference files. The structure matches Claude Code's native skill discovery and other agent CLIs.
+A skill is a directory containing `SKILL.md` (required: the markdown instructions the agent reads) plus optional scripts and reference files. The structure matches Claude Code's native skill discovery and other agent CLIs. Materialized `SKILL.md` files must be valid Codex/Claude-style skill files: when stored content lacks YAML frontmatter, the runtime prepends generated `name` and `description` frontmatter from the skill slug before writing or uploading the file. Supporting files recorded in `file_inventory` are written beside `SKILL.md` so bundled skills can use progressive disclosure through `references/`. Decision: ADR-0030.
 
 `skill` DB row (workspace-scoped): `id` PK, `name`, `slug` (kebab-case, used as `kandev-<slug>` directory), `description`, `source_type` (`inline` | `local_path` | `git`), `source_locator` (path/URL), `content` (SKILL.md text for inline, null otherwise), `file_inventory` (JSON list of `{name, size}`), `workspace_id` FK, `created_by_agent_instance_id` (nullable; agents only edit skills they created), `is_system` (bool), `system_version` (kandev release).
 
@@ -127,7 +129,7 @@ System skills ship inside the kandev binary (`apps/backend/internal/office/confi
 
 System SKILL.md carries an optional `kandev:` frontmatter block with `system: true`, `version: "<release>"`, `default_for_roles: [<roles>]`. `default_for_roles` drives auto-attach: a new agent with role `R` automatically gets every system skill whose `default_for_roles` contains `R`, unless the caller passes an explicit `desired_skills`. Users can untick a default-attached system skill on any agent (role default is a soft suggestion).
 
-v1 system-skill set: `kandev-protocol` and `memory` (every role); `kandev-task-comment` (every role); `kandev-escalation` (worker, specialist, assistant, reviewer); `kandev-tasks` (ceo, worker, specialist); `kandev-team`, `kandev-hiring`, `kandev-agent-edit`, `kandev-routines`, `kandev-approvals`, `kandev-budget`, `kandev-config-export`, `kandev-config-import` (ceo).
+v1 system-skill set: `kandev-protocol`, `memory`, and `kandev-task-ops` (every role); `kandev-escalation` (worker, specialist, assistant, reviewer); `kandev-team-admin`, `kandev-routines`, `kandev-approvals`, and `kandev-config-sync` (ceo).
 
 ### Activity, runs, events
 
@@ -221,6 +223,7 @@ Injected before each agent session:
 | `KANDEV_WAKE_REASON` | Reason string | Why the agent was woken |
 | `KANDEV_WAKE_COMMENT_ID` | Comment ID (if applicable) | Which comment triggered wake |
 | `KANDEV_WAKE_PAYLOAD_JSON` | Inline JSON | Pre-computed task context |
+| `KANDEV_WAKE_PAYLOAD_PATH` | Workspace-relative JSON file path | Pre-computed task context when too large for inline env |
 | `KANDEV_CLI` | Path to agentctl | CLI binary for API operations |
 
 `KANDEV_CLI` resolves per executor:
@@ -230,7 +233,7 @@ Injected before each agent session:
 
 ### Wake payload
 
-`KANDEV_WAKE_PAYLOAD_JSON` carries pre-computed context. Fresh session: full task context (`task` object with id, identifier, title, status, priority, project, `blockedBy`, `childTasks`). Resume: only new comments since last run plus a `commentWindow` rollup (`{total, included, fetchMore}`). New comments include author, body, createdAt.
+`KANDEV_WAKE_PAYLOAD_JSON` carries pre-computed context. Fresh session: full task context (`task` object with id, identifier, title, status, priority, project, `blockedBy`, `childTasks`). Resume: only new comments since last run plus a `commentWindow` rollup (`{total, included, fetchMore}`). New comments include author, body, createdAt. If the serialized payload exceeds 64KB for inline environment delivery, Kandev writes it under the workspace and sets `KANDEV_WAKE_PAYLOAD_PATH` to that workspace-relative file path instead.
 
 ### Instructions delivery
 
@@ -254,7 +257,7 @@ Read them when referenced in these instructions.
 
 ### Skill injection
 
-Skill content is stored in the DB (source of truth). Before each session, each desired skill's `SKILL.md` is written into the agent's worktree CWD.
+Skill content is stored in the DB (source of truth). Before each session, each desired skill's `SKILL.md` is written into the agent's worktree CWD. If the stored content does not already begin with YAML frontmatter delimited by `---`, runtime materialization prepends generated `name` and `description` frontmatter from the skill slug so agent CLIs can load the file as a native skill.
 
 Each agent type defines `ProjectSkillDir` in its `RuntimeConfig`:
 
@@ -297,7 +300,7 @@ When the scheduler processes a wakeup:
 5. Clean `kandev-*` from the skill dir; write desired skills to `<worktree>/<ProjectSkillDir>/kandev-<slug>/SKILL.md`; ensure `.git/info/exclude` has `kandev-*` patterns.
 6. Build prompt: read `AGENTS.md` content, append path directive, prepend to user-turn prompt, add wake context. For CEO heartbeat: add workspace status section.
 7. Set env vars (`KANDEV_API_KEY`, `KANDEV_TASK_ID`, `KANDEV_CLI`, etc.).
-8. Set `KANDEV_WAKE_PAYLOAD_JSON` with pre-computed task context.
+8. Set `KANDEV_WAKE_PAYLOAD_JSON` with pre-computed task context, or `KANDEV_WAKE_PAYLOAD_PATH` when the payload is too large for inline env.
 9. Launch agent via the task starter (prompt + env, CWD = worktree). Skills are cleaned up automatically when the worktree is deleted at session end.
 
 ### Default instruction templates per role
@@ -555,7 +558,7 @@ There are no TTLs on agent rows, runtime rows, instructions, skills, run history
 
 - **GIVEN** a user on `/office/workspace/skills`, **WHEN** they click "Add Skill" and enter a name, description, and SKILL.md content, **THEN** the skill appears in the registry and is available for assignment.
 
-- **GIVEN** a skill assigned to a Claude Code worker, **WHEN** the worker starts a new session, **THEN** the skill's `SKILL.md` is written to `<worktree>/.claude/skills/kandev-<slug>/SKILL.md` (Claude's `ProjectSkillDir`). For non-Claude agents, the path is `<worktree>/.agents/skills/kandev-<slug>/SKILL.md`.
+- **GIVEN** a skill assigned to a Claude Code worker, **WHEN** the worker starts a new session, **THEN** the skill's `SKILL.md` is written to `<worktree>/.claude/skills/kandev-<slug>/SKILL.md` (Claude's `ProjectSkillDir`) and begins with YAML frontmatter. For non-Claude agents, the path is `<worktree>/.agents/skills/kandev-<slug>/SKILL.md`.
 
 - **GIVEN** a skill sourced from a git URL, **WHEN** the user creates the skill entry, **THEN** the repository is cloned and cached and the file inventory displays in the UI.
 

@@ -16,27 +16,3 @@ func GetInt(m map[string]any, key string) int {
 	}
 	return 0
 }
-
-// GetBool extracts a bool value from a map, returning false if not found or wrong type.
-func GetBool(m map[string]any, key string) bool {
-	if v, ok := m[key].(bool); ok {
-		return v
-	}
-	return false
-}
-
-// GetMap extracts a nested map from a map, returning nil if not found or wrong type.
-func GetMap(m map[string]any, key string) map[string]any {
-	if v, ok := m[key].(map[string]any); ok {
-		return v
-	}
-	return nil
-}
-
-// GetSlice extracts a slice from a map, returning nil if not found or wrong type.
-func GetSlice(m map[string]any, key string) []any {
-	if v, ok := m[key].([]any); ok {
-		return v
-	}
-	return nil
-}

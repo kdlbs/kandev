@@ -1,4 +1,5 @@
 import type { ExecutorType } from "./executor";
+import type { UserSettings } from "./http-user-settings";
 import type {
   AgentProfileId,
   RepositoryId,
@@ -10,6 +11,16 @@ import type {
 import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 
 export type { ExecutorType } from "./executor";
+export type {
+  SavedLayout,
+  SidebarViewApi,
+  SidebarViewDraftApi,
+  SidebarTaskPrefsApi,
+  TaskCreateLastUsedApi,
+  UserSettings,
+  UserSettingsResponse,
+  UserSettingsUpdatePayload,
+} from "./http-user-settings";
 export * from "./ids";
 export type {
   MoveToStepConfig,
@@ -39,6 +50,9 @@ export type TaskState =
 
 // Workflow Review Status
 export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
+
+// Reasons the backend tags on an auto-deleted task.deleted event.
+export type TaskDeletionReason = "pr_approved_by_user" | "pr_merged_or_closed" | "issue_closed";
 
 // Workflow Template - pre-defined workflow configurations
 export type WorkflowTemplate = {
@@ -82,6 +96,14 @@ export type WorkflowStep = {
    * frontend uses it to choose presentation (review/approval styling, etc).
    */
   stage_type?: "work" | "review" | "approval" | "custom";
+  /**
+   * ADR 0015: gate on_turn_complete transitions on an explicit
+   * `step_complete_kandev` MCP signal from the agent. When true, the
+   * step's auto-advance only fires once the agent (or the manual
+   * fallback button) signals completion. Default false preserves
+   * legacy "any turn-end advances" behaviour.
+   */
+  auto_advance_requires_signal?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -170,10 +192,12 @@ export type Repository = {
   default_branch: string;
   scripts?: RepositoryScript[];
   worktree_branch_prefix: string;
+  worktree_branch_template?: string;
   pull_before_worktree: boolean;
   setup_script: string;
   cleanup_script: string;
   dev_script: string;
+  copy_files: string;
   /** Files materialized into each new worktree, each with its own copy/symlink mode. */
   worktree_files: WorktreeFile[];
   created_at: string;
@@ -396,56 +420,6 @@ export type User = {
   updated_at: string;
 };
 
-export type SavedLayout = {
-  id: string;
-  name: string;
-  is_default: boolean;
-  layout: Record<string, unknown>;
-  created_at: string;
-};
-
-export type SidebarViewApi = {
-  id: string;
-  name: string;
-  filters: Array<{ id: string; dimension: string; op: string; value: unknown }>;
-  sort: { key: string; direction: string };
-  group: string;
-  collapsed_groups: string[];
-};
-
-export type UserSettings = {
-  user_id: string;
-  workspace_id: WorkspaceId;
-  kanban_view_mode?: string;
-  workflow_filter_id?: string;
-  repository_ids: string[];
-  initial_setup_complete?: boolean;
-  preferred_shell?: string;
-  default_editor_id?: string;
-  enable_preview_on_click?: boolean;
-  chat_submit_key?: "enter" | "cmd_enter";
-  review_auto_mark_on_scroll?: boolean;
-  show_release_notification?: boolean;
-  release_notes_last_seen_version?: string;
-  lsp_auto_start_languages?: string[];
-  lsp_auto_install_languages?: string[];
-  lsp_server_configs?: Record<string, Record<string, unknown>>;
-  saved_layouts?: SavedLayout[];
-  sidebar_views?: SidebarViewApi[];
-  default_utility_agent_id?: string;
-  default_utility_model?: string;
-  keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
-  terminal_link_behavior?: string;
-  terminal_font_family?: string;
-  terminal_font_size?: number;
-  updated_at: string;
-};
-
-export type UserSettingsResponse = {
-  settings: UserSettings;
-  shell_options?: Array<{ value: string; label: string }>;
-};
-
 export type EditorOption = {
   id: string;
   type: string;
@@ -658,6 +632,8 @@ export type Message = {
   metadata?: Record<string, unknown>;
   requests_input?: boolean;
   created_at: string;
+  /** Authoritative per-message change signal; advances on every content/metadata update. */
+  updated_at?: string;
 };
 
 export type Turn = {

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 
 // Regression test for the user-reported bug:
@@ -18,6 +19,10 @@ import { KanbanPage } from "../../pages/kanban-page";
 // owner/repo so the orchestrator's background `gh repo clone` fails - that
 // keeps local_path empty, proving the remote-first path is what's serving
 // the branches.
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
+
 test.describe("Create-task URL flow - branches after reopen", () => {
   test.describe.configure({ retries: 1 });
 
@@ -50,8 +55,13 @@ test.describe("Create-task URL flow - branches after reopen", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    await testPage.getByTestId("toggle-github-url").click();
-    await testPage.getByTestId("github-url-input").fill(`https://github.com/${repoFullName}`);
+    // Switch to Remote tab and paste via the chip popover (URL input moved
+    // inside the chip in Task 5/8).
+    await testPage.getByTestId("source-mode-remote").click();
+    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+    const pasteInput = testPage.getByTestId("remote-paste-url-input");
+    await pasteInput.fill(`https://github.com/${repoFullName}`);
+    await pasteInput.press("Enter");
 
     await testPage.getByTestId("task-title-input").fill(taskTitle);
     await testPage.getByTestId("task-description-input").fill("/e2e:simple-message");
@@ -78,6 +88,17 @@ test.describe("Create-task URL flow - branches after reopen", () => {
         { timeout: 15_000, intervals: [200, 500, 1000] },
       )
       .toBe(true);
+
+    // Reload before the second open. The URL-paste flow can transiently fetch
+    // branches for the freshly-registered repo while its background clone is
+    // still failing, and the branch cache (`useBranches`) treats that early
+    // empty result as terminal (`if (isLoaded) return`), so re-picking the repo
+    // would never re-list. A reload drops that in-memory cache so the second
+    // open lists branches fresh from the backend — which is the behaviour a
+    // user gets when reopening the dialog later. The provider-API path itself
+    // is unchanged; this only avoids racing a stale empty cache entry.
+    await kanban.goto();
+    await kanban.board.waitFor({ state: "visible" });
 
     // ── Second open: pick the same repo from the workspace dropdown ──
     await kanban.createTaskButton.first().click();

@@ -38,9 +38,9 @@ export const dockerTest = backendFixture.extend<
   ],
 
   seedData: [
-    async ({ apiClient, backend }, use, workerInfo) => {
+    async ({ apiClient, backend }, use, _workerInfo) => {
       if (!hasDocker()) {
-        workerInfo.skip(true, "Docker daemon not reachable; skipping Docker E2E worker");
+        test.skip(true, "Docker daemon not reachable; skipping Docker E2E worker");
         return;
       }
       buildE2EImage();

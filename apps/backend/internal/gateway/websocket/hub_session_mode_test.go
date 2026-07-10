@@ -35,6 +35,7 @@ func newTestClient(id string) *Client {
 		sessionSubscriptions: map[string]bool{},
 		sessionFocus:         map[string]bool{},
 		userSubscriptions:    map[string]bool{},
+		runSubscriptions:     map[string]bool{},
 		logger:               log,
 	}
 }

@@ -11,6 +11,7 @@ import {
 import {
   buildRecentTaskDisplayItems,
   buildRecentTaskEntry,
+  getInitialReverseSelectionIndex,
   getInitialSelectionIndex,
   getNextSelectionIndex,
   getPreviousSelectionIndex,
@@ -69,6 +70,7 @@ function buildContext(): RecentTaskBuildContext {
     setup_script: "",
     cleanup_script: "",
     dev_script: "",
+    copy_files: "",
     worktree_files: [],
     created_at: visitedAt,
     updated_at: visitedAt,
@@ -132,6 +134,26 @@ describe("recent task switcher model", () => {
     expect(getInitialSelectionIndex(items, CURRENT_TASK_ID)).toBe(1);
     expect(getInitialSelectionIndex(items, "task-missing")).toBe(0);
     expect(getInitialSelectionIndex([], CURRENT_TASK_ID)).toBe(-1);
+  });
+
+  it("starts reverse selection on the last non-current task", () => {
+    const items = [
+      { taskId: CURRENT_TASK_ID },
+      { taskId: PREVIOUS_TASK_ID },
+      { taskId: "task-older" },
+    ];
+
+    expect(getInitialReverseSelectionIndex(items, CURRENT_TASK_ID)).toBe(2);
+    // When the current task is the last item, skip back to the previous one.
+    expect(
+      getInitialReverseSelectionIndex(
+        [{ taskId: PREVIOUS_TASK_ID }, { taskId: CURRENT_TASK_ID }],
+        CURRENT_TASK_ID,
+      ),
+    ).toBe(0);
+    // All items are current -> fall back to the last index.
+    expect(getInitialReverseSelectionIndex([{ taskId: CURRENT_TASK_ID }], CURRENT_TASK_ID)).toBe(0);
+    expect(getInitialReverseSelectionIndex([], CURRENT_TASK_ID)).toBe(-1);
   });
 
   it("cycles through items and handles empty lists", () => {

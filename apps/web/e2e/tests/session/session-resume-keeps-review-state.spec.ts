@@ -46,7 +46,7 @@ test.describe("Session resume — task state stability", () => {
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 15_000 });
     await expect(session.taskInSection("Resume Stable", "Turn Finished")).toBeVisible({
       timeout: 15_000,
     });

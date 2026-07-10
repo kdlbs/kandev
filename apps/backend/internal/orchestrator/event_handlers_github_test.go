@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,21 +14,30 @@ import (
 
 // mockGitHubService implements GitHubService for testing.
 type mockGitHubService struct {
-	client              github.Client
-	taskPR              *github.TaskPR
-	taskPRErr           error
-	prWatch             *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
-	ensureWatchCalls    int
-	createWatchCalls    int
-	associateCalls      int
-	updateBranchCalls   int
-	updatePRNumberCalls int
-	resetWatchCalls     int
-	resetWatchBranch    string
-	ensureWatchBranch   string
-	createWatchBranch   string
-	updatedBranch       string
-	updatedPRNumber     int
+	mu sync.Mutex
+
+	client                github.Client
+	taskPR                *github.TaskPR
+	taskPRs               []*github.TaskPR
+	taskPRErr             error
+	triggerPRSyncAllPRs   []*github.TaskPR
+	triggerPRSyncAllErr   error
+	triggerPRSyncAllCalls int
+	getTaskPRCalls        int
+	exactTaskPRCalls      int
+	lastExactPRLookup     github.PRFeedbackEvent
+	prWatch               *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
+	ensureWatchCalls      int
+	createWatchCalls      int
+	associateCalls        int
+	updateBranchCalls     int
+	updatePRNumberCalls   int
+	resetWatchCalls       int
+	resetWatchBranch      string
+	ensureWatchBranch     string
+	createWatchBranch     string
+	updatedBranch         string
+	updatedPRNumber       int
 	// repository_id captured by the most recent CreatePRWatch /
 	// AssociatePRWithTask call. Used by the multi-repo push tests to assert
 	// the per-repo scoping (an empty value indicates the legacy single-repo
@@ -49,11 +59,154 @@ type mockGitHubService struct {
 	issueAssignCalls   int
 	issueAssignedID    string
 	issueReleaseCalls  int
+
+	// Self-heal tracking (soft-deleted-profile pre-flight).
+	disableIssueWatchCalls   int
+	lastDisableIssueWatchID  string
+	lastDisableIssueCause    string
+	disableReviewWatchCalls  int
+	lastDisableReviewWatchID string
+	lastDisableReviewCause   string
+
+	ciOptionsResp        *github.TaskCIOptionsResponse
+	ciOptionsCalls       int
+	ciOptionsStarted     chan struct{}
+	ciOptionsStartedOnce sync.Once
+	ciOptionsBlock       chan struct{}
+	ciPRState            *github.TaskCIPRAutomationState
+	ciPRStateErr         error
+	prFeedback           *github.PRFeedback
+	prFeedbackCalls      int
+	fixAttempts          []github.TaskCIFixAttempt
+	fixCheckpointRefresh []github.TaskCIFixAttempt
+	mergeAttempts        []github.TaskCIMergeAttempt
+	mergeCalls           int
+	mergeErr             error
+	ciErrors             []github.TaskCIPRAutomationState
+	ciExhausted          []github.TaskCIPRAutomationState
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
 func (m *mockGitHubService) GetTaskPR(_ context.Context, _ string) (*github.TaskPR, error) {
+	m.getTaskPRCalls++
 	return m.taskPR, m.taskPRErr
+}
+func (m *mockGitHubService) ListTaskPRs(_ context.Context, taskIDs []string) (map[string][]*github.TaskPR, error) {
+	if m.taskPRErr != nil {
+		return nil, m.taskPRErr
+	}
+	result := make(map[string][]*github.TaskPR, len(taskIDs))
+	for _, taskID := range taskIDs {
+		for _, pr := range m.taskPRs {
+			if pr.TaskID == taskID {
+				result[taskID] = append(result[taskID], pr)
+			}
+		}
+		if len(result[taskID]) == 0 && m.taskPR != nil && m.taskPR.TaskID == taskID {
+			result[taskID] = []*github.TaskPR{m.taskPR}
+		}
+	}
+	return result, nil
+}
+func (m *mockGitHubService) TriggerPRSyncAll(ctx context.Context, taskID string) ([]*github.TaskPR, error) {
+	m.triggerPRSyncAllCalls++
+	if m.triggerPRSyncAllPRs != nil {
+		return m.triggerPRSyncAllPRs, m.triggerPRSyncAllErr
+	}
+	if m.triggerPRSyncAllErr != nil {
+		return nil, m.triggerPRSyncAllErr
+	}
+	prsByTask, err := m.ListTaskPRs(ctx, []string{taskID})
+	if err != nil {
+		return nil, err
+	}
+	return prsByTask[taskID], nil
+}
+func (m *mockGitHubService) GetTaskPRByOwnerRepoNumber(_ context.Context, taskID, owner, repo string, prNumber int) (*github.TaskPR, error) {
+	m.exactTaskPRCalls++
+	m.lastExactPRLookup = github.PRFeedbackEvent{TaskID: taskID, Owner: owner, Repo: repo, PRNumber: prNumber}
+	if m.taskPRErr != nil {
+		return nil, m.taskPRErr
+	}
+	for _, pr := range m.taskPRs {
+		if pr.TaskID == taskID && pr.Owner == owner && pr.Repo == repo && pr.PRNumber == prNumber {
+			return pr, nil
+		}
+	}
+	return m.taskPR, nil
+}
+func (m *mockGitHubService) GetTaskCIOptionsResponse(context.Context, string) (*github.TaskCIOptionsResponse, error) {
+	m.mu.Lock()
+	m.ciOptionsCalls++
+	m.mu.Unlock()
+	if m.ciOptionsStarted != nil {
+		m.ciOptionsStartedOnce.Do(func() { close(m.ciOptionsStarted) })
+	}
+	if m.ciOptionsBlock != nil {
+		<-m.ciOptionsBlock
+	}
+	if m.ciOptionsResp != nil {
+		return m.ciOptionsResp, nil
+	}
+	return &github.TaskCIOptionsResponse{}, nil
+}
+func (m *mockGitHubService) GetTaskCIPRState(context.Context, string, string, int) (*github.TaskCIPRAutomationState, error) {
+	if m.ciPRStateErr != nil {
+		return nil, m.ciPRStateErr
+	}
+	return m.ciPRState, nil
+}
+func (m *mockGitHubService) RecordTaskCIFixAttempt(_ context.Context, attempt github.TaskCIFixAttempt) error {
+	m.fixAttempts = append(m.fixAttempts, attempt)
+	return nil
+}
+func (m *mockGitHubService) RefreshTaskCIFixCheckpoint(_ context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error {
+	m.fixCheckpointRefresh = append(m.fixCheckpointRefresh, github.TaskCIFixAttempt{
+		TaskID:         taskID,
+		RepositoryID:   repositoryID,
+		PRNumber:       prNumber,
+		Signature:      signature,
+		CheckpointJSON: checkpointJSON,
+	})
+	return nil
+}
+func (m *mockGitHubService) RecordTaskCIMergeAttempt(_ context.Context, attempt github.TaskCIMergeAttempt) error {
+	m.mergeAttempts = append(m.mergeAttempts, attempt)
+	return nil
+}
+func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	m.ciErrors = append(m.ciErrors, github.TaskCIPRAutomationState{
+		TaskID:       taskID,
+		RepositoryID: repositoryID,
+		PRNumber:     prNumber,
+		LastError:    &message,
+	})
+	return nil
+}
+func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	now := time.Now().UTC()
+	m.ciExhausted = append(m.ciExhausted, github.TaskCIPRAutomationState{
+		TaskID:             taskID,
+		RepositoryID:       repositoryID,
+		PRNumber:           prNumber,
+		AutoFixExhaustedAt: &now,
+		LastError:          &message,
+	})
+	return nil
+}
+func (m *mockGitHubService) ClearTaskCIError(context.Context, string, string, int) error {
+	return nil
+}
+func (m *mockGitHubService) GetPRFeedback(context.Context, string, string, int) (*github.PRFeedback, error) {
+	m.prFeedbackCalls++
+	if m.prFeedback != nil {
+		return m.prFeedback, nil
+	}
+	return &github.PRFeedback{}, nil
+}
+func (m *mockGitHubService) MergePR(context.Context, string, string, int, string) error {
+	m.mergeCalls++
+	return m.mergeErr
 }
 func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _, branch string) (*github.PRWatch, error) {
 	m.ensureWatchCalls++
@@ -64,6 +217,9 @@ func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*g
 	return m.prWatch, nil
 }
 func (m *mockGitHubService) GetPRWatchBySessionAndRepo(_ context.Context, _, _ string) (*github.PRWatch, error) {
+	return m.prWatch, nil
+}
+func (m *mockGitHubService) GetPRWatchBySessionRepoAndBranch(_ context.Context, _, _, _ string) (*github.PRWatch, error) {
 	return m.prWatch, nil
 }
 func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
@@ -119,6 +275,23 @@ func (m *mockGitHubService) AssignIssueWatchTaskID(_ context.Context, _, _, _ st
 }
 func (m *mockGitHubService) ReleaseIssueWatchTask(_ context.Context, _, _, _ string, _ int) error {
 	m.issueReleaseCalls++
+	return nil
+}
+
+// disableIssueWatchCalls / disableReviewWatchCalls track self-heal invocations
+// triggered by the soft-deleted-profile pre-flight in createIssueTask /
+// createReviewTask.
+func (m *mockGitHubService) DisableIssueWatchWithError(_ context.Context, watchID, cause string) error {
+	m.disableIssueWatchCalls++
+	m.lastDisableIssueWatchID = watchID
+	m.lastDisableIssueCause = cause
+	return nil
+}
+
+func (m *mockGitHubService) DisableReviewWatchWithError(_ context.Context, watchID, cause string) error {
+	m.disableReviewWatchCalls++
+	m.lastDisableReviewWatchID = watchID
+	m.lastDisableReviewCause = cause
 	return nil
 }
 

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { fetchWorkflowSnapshot } from "@/lib/api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -6,10 +6,20 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 export function useWorkflowSnapshot(workflowId: string | null) {
   const store = useAppStoreApi();
   const connectionStatus = useAppStore((state) => state.connection.status);
+  const skippedInitialHydratedRef = useRef(false);
 
   useEffect(() => {
     if (!workflowId) return;
     let cancelled = false;
+    const existing = store.getState().kanban;
+    if (
+      !skippedInitialHydratedRef.current &&
+      existing.workflowId === workflowId &&
+      (existing.steps.length > 0 || existing.tasks.length > 0)
+    ) {
+      skippedInitialHydratedRef.current = true;
+      return;
+    }
     const setLoading = store.getState().kanban.workflowId !== workflowId;
     if (setLoading) {
       store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));

@@ -97,6 +97,45 @@ test.describe("Workflow settings", () => {
     await expect(reloadedCard.getByText("New Step")).toBeVisible();
   });
 
+  test("configures an all child tasks complete transition", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Child Completion Settings",
+    );
+    const waitStep = await apiClient.createWorkflowStep(workflow.id, "Waiting for Children", 0);
+    const doneStep = await apiClient.createWorkflowStep(workflow.id, "All Children Done", 1);
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("Child Completion Settings");
+    await expect(card).toBeVisible();
+    await page.stepNodeByName(card, "Waiting for Children").click();
+
+    await card.getByTestId(`${waitStep.id}-children-completed-help`).hover();
+    await expect(
+      testPage.getByText("When every active direct child task is COMPLETED, FAILED, or CANCELLED"),
+    ).toBeVisible();
+
+    await card.getByTestId(`${waitStep.id}-children-completed-transition-select`).click();
+    await testPage.getByRole("option", { name: "Move to specific step" }).click();
+    await expect(card.getByTestId(`${waitStep.id}-children-completed-step-select`)).toContainText(
+      "All Children Done",
+    );
+
+    await page.saveButton(card).click();
+    await expect
+      .poll(async () => {
+        const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+        return steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed;
+      })
+      .toEqual([{ type: "move_to_step", config: { step_id: doneStep.id } }]);
+  });
+
   test("modifies a template step name and persists after save", async ({ testPage, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);

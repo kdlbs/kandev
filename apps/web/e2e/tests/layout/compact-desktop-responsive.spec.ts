@@ -1,8 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 const COMPACT_DESKTOP_VIEWPORT = { width: 900, height: 800 };
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
 
 test.describe("compact desktop responsive layout", () => {
   test("task page keeps the Dockview workbench at half-screen width", async ({

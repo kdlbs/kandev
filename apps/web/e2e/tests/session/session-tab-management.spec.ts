@@ -95,6 +95,65 @@ function starInTab(session: SessionPage, sessionId: string) {
 }
 
 test.describe("Session tab management — close behavior", () => {
+  test("tab close button shows delete confirmation and removes session on confirm", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task, session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Tab Close Deletes Session",
+    );
+
+    await session.sessionTabBySessionId(session1Id).click();
+    await expect(session.sessionTabCloseButton(session1Id)).toBeVisible({ timeout: 5_000 });
+
+    await session.sessionTabCloseButton(session1Id).click();
+
+    const dialog = session.alertDialog();
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await expect(dialog).toContainText("Delete session?");
+    await dialog.getByRole("button", { name: "Delete" }).click();
+
+    await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 15_000 });
+    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
+
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    expect(sessions.map((s) => s.id)).toEqual([session2Id]);
+  });
+
+  test("tab close button delete confirmation can be cancelled", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task, session, session1Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Tab Close Cancel Delete",
+    );
+
+    await session.sessionTabBySessionId(session1Id).click();
+    await expect(session.sessionTabCloseButton(session1Id)).toBeVisible({ timeout: 5_000 });
+    await session.sessionTabCloseButton(session1Id).click();
+
+    const dialog = session.alertDialog();
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).not.toBeVisible({ timeout: 5_000 });
+
+    await expect(session.sessionTabBySessionId(session1Id)).toBeVisible();
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    expect(sessions).toHaveLength(2);
+  });
+
   test("deleting a non-active session removes its tab and stays gone", async ({
     testPage,
     apiClient,
@@ -218,9 +277,13 @@ test.describe("Session tab management — close behavior", () => {
 
     await session.clickTaskInSidebar("Delete Then Switch A");
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-    await session.waitForLoad();
 
-    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 10_000 });
+    // After a delete-then-switch round-trip the restored env layout can land the
+    // chat panel as a non-active background tab in the right-column group, so the
+    // chat-visible `waitForLoad()` gate isn't reliable here. The test only cares
+    // that the remaining session tab is present (and the deleted one didn't come
+    // back), so gate on the surviving session tab instead.
+    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 15_000 });
     await testPage.waitForTimeout(800);
     await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
   });

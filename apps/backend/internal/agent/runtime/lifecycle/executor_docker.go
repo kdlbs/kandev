@@ -22,6 +22,8 @@ import (
 )
 
 const dockerWorkspacePath = "/workspace"
+const dockerStopContainerTimeout = 30 * time.Second
+const dockerFallbackCleanupTimeout = dockerStopContainerTimeout + 5*time.Second
 
 // getMetadataString retrieves a string value from metadata map.
 func getMetadataString(metadata map[string]interface{}, key string) string {
@@ -32,6 +34,39 @@ func getMetadataString(metadata map[string]interface{}, key string) string {
 		return v
 	}
 	return ""
+}
+
+// getMetadataStringMap extracts a map[string]string at key from metadata. The
+// value may have been deserialized as map[string]interface{} (e.g. when the
+// metadata round-tripped through JSON for a remote executor) or kept as a
+// concrete map; both are handled. Returns nil when the key is absent or the
+// value is not a string-keyed map of strings.
+func getMetadataStringMap(metadata map[string]interface{}, key string) map[string]string {
+	if metadata == nil {
+		return nil
+	}
+	switch v := metadata[key].(type) {
+	case map[string]string:
+		if len(v) == 0 {
+			return nil
+		}
+		return v
+	case map[string]interface{}:
+		if len(v) == 0 {
+			return nil
+		}
+		out := make(map[string]string, len(v))
+		for k, raw := range v {
+			if s, ok := raw.(string); ok {
+				out[k] = s
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	return nil
 }
 
 // DockerExecutor implements Runtime for Docker-based agent execution.
@@ -195,19 +230,22 @@ func (r *DockerExecutor) seedSessionDir(ctx context.Context, req *ExecutorCreate
 
 func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) ContainerConfig {
 	return ContainerConfig{
-		AgentConfig:       req.AgentConfig,
-		WorkspacePath:     "", // Empty = no workspace mount; we clone inside container.
-		TaskID:            req.TaskID,
-		TaskTitle:         req.TaskTitle,
-		TaskEnvironmentID: req.TaskEnvironmentID,
-		SessionID:         req.SessionID,
-		ExecutorProfileID: getMetadataString(req.Metadata, "executor_profile_id"),
-		InstanceID:        req.InstanceID,
-		Credentials:       req.Env,
-		McpServers:        req.McpServers,
-		PrepareScript:     r.resolvePrepareScript(req),
-		ImageTagOverride:  getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
-		LocalClonePath:    localCloneMountPath(req.Metadata),
+		AgentConfig:                    req.AgentConfig,
+		WorkspacePath:                  "", // Empty = no workspace mount; we clone inside container.
+		TaskID:                         req.TaskID,
+		TaskTitle:                      req.TaskTitle,
+		TaskEnvironmentID:              req.TaskEnvironmentID,
+		SessionID:                      req.SessionID,
+		ExecutorProfileID:              getMetadataString(req.Metadata, "executor_profile_id"),
+		InstanceID:                     req.InstanceID,
+		Credentials:                    req.Env,
+		AutoApprovePermissions:         req.AutoApprovePermissions,
+		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
+		McpServers:                     req.McpServers,
+		PrepareScript:                  r.resolvePrepareScript(req),
+		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
+		LocalClonePath:                 localCloneMountPath(req.Metadata),
+		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 }
 
@@ -443,25 +481,39 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 	agentType := ""
 	disableAskQuestion := false
 	assumeMcpSse := false
+	assumeMcpHttp := false
+	requiresProcessKill := false
+	var stripEnv []string
 	if req.AgentConfig != nil {
 		agentType = req.AgentConfig.ID()
 		disableAskQuestion = agents.IsPassthroughOnly(req.AgentConfig)
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
+			assumeMcpHttp = rt.AssumeMcpHttp
+			requiresProcessKill = rt.RequiresProcessKill
+			stripEnv = rt.StripEnv
 		}
 	}
 	return &agentctl.CreateInstanceRequest{
-		ID:                 instanceID,
-		WorkspacePath:      dockerWorkspacePath,
-		AgentType:          agentType,
-		Env:                req.Env,
-		AutoStart:          false,
-		McpServers:         req.McpServers,
-		SessionID:          req.SessionID,
-		TaskID:             req.TaskID,
-		DisableAskQuestion: disableAskQuestion,
-		AssumeMcpSse:       assumeMcpSse,
-		McpMode:            req.McpMode,
+		ID:            instanceID,
+		WorkspacePath: dockerWorkspacePath,
+		AgentType:     agentType,
+		Env:           req.Env,
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
+		AutoStart:           false,
+		McpServers:          req.McpServers,
+		SessionID:           req.SessionID,
+		TaskID:              req.TaskID,
+		DisableAskQuestion:  disableAskQuestion,
+		AssumeMcpSse:        assumeMcpSse,
+		AssumeMcpHttp:       assumeMcpHttp,
+		McpMode:             req.McpMode,
+		RequiresProcessKill: requiresProcessKill,
+		StripEnv:            stripEnv,
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 }
 
@@ -548,7 +600,8 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	// the kandev-managed per-container session dir so we don't leak GBs of
 	// agent state on disk. Plain stops preserve the dir so resume re-attaches
 	// to the same agent state, mirroring the Sprites preserve-on-stop rule.
-	if shouldRunExecutorCleanup(instance.StopReason) && r.kandevHomeDir != "" && instance.InstanceID != "" {
+	teardownContainer := shouldTeardownDockerContainer(instance.StopReason)
+	if teardownContainer && r.kandevHomeDir != "" && instance.InstanceID != "" {
 		CleanupAgentSessionDir(InstanceSessionRoot(r.kandevHomeDir, instance.InstanceID), r.logger)
 	}
 
@@ -556,15 +609,31 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		return nil // No container to stop
 	}
 
+	// Plain "stop the agent" runs (e.g. user clicks Stop, then later wants to
+	// resume) must not stop the Docker container after agentctl stopped cleanly.
+	// The container holds the cloned workspace and agentctl process for fast
+	// resume; destructive lifecycle events or failed agentctl stops should tear
+	// it down.
+	if !force && !instance.AgentStopFailed && !teardownContainer {
+		r.logger.Info("preserving docker container after agent stop",
+			zap.String("container_id", instance.ContainerID),
+			zap.String("instance_id", instance.InstanceID),
+			zap.String("stop_reason", instance.StopReason))
+		return nil
+	}
+
 	dockerClient, _, err := r.ensureClient()
 	if err != nil {
 		return fmt.Errorf("docker unavailable: %w", err)
 	}
 
+	cleanupCtx, cancel := dockerCleanupContext(ctx, instance.AgentStopFailed)
+	defer cancel()
+
 	if force {
-		err = dockerClient.KillContainer(ctx, instance.ContainerID, "SIGKILL")
+		err = dockerClient.KillContainer(cleanupCtx, instance.ContainerID, "SIGKILL")
 	} else {
-		err = dockerClient.StopContainer(ctx, instance.ContainerID, 30*time.Second)
+		err = dockerClient.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout)
 	}
 
 	if err != nil {
@@ -572,6 +641,25 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 	}
 
 	return nil
+}
+
+// shouldTeardownDockerContainer extends terminal cleanup with stale execution
+// cleanup for Docker only. A stale Docker execution owns a local container and
+// per-instance session dir that become untracked before retry/resume launches a
+// replacement. Sprites intentionally keep stale sandboxes; see
+// shouldRunExecutorCleanup for that shared runtime policy.
+func shouldTeardownDockerContainer(reason string) bool {
+	if shouldRunExecutorCleanup(reason) {
+		return true
+	}
+	return strings.ToLower(strings.TrimSpace(reason)) == stopReasonStaleExecutionCleanup
+}
+
+func dockerCleanupContext(ctx context.Context, agentStopFailed bool) (context.Context, context.CancelFunc) {
+	if agentStopFailed {
+		return context.WithTimeout(context.WithoutCancel(ctx), dockerFallbackCleanupTimeout)
+	}
+	return ctx, func() {}
 }
 
 func (r *DockerExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {

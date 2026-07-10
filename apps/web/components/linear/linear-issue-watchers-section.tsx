@@ -7,6 +7,7 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useToast } from "@/components/toast-provider";
 import { useLinearIssueWatches } from "@/hooks/domains/linear/use-linear-issue-watches";
+import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
 import { LinearIssueWatchTable } from "./linear-issue-watch-table";
 import { LinearIssueWatchDialog } from "./linear-issue-watch-dialog";
 import type { LinearIssueWatch } from "@/lib/types/linear";
@@ -20,9 +21,10 @@ type RawActions = {
   update: ReturnType<typeof useLinearIssueWatches>["update"];
   remove: ReturnType<typeof useLinearIssueWatches>["remove"];
   trigger: ReturnType<typeof useLinearIssueWatches>["trigger"];
+  reset: ReturnType<typeof useLinearIssueWatches>["reset"];
 };
 
-function useToastedActions({ create, update, remove, trigger }: RawActions) {
+function useToastedActions({ create, update, remove, trigger, reset }: RawActions) {
   const { toast } = useToast();
 
   const wrappedCreate = useCallback(
@@ -90,21 +92,47 @@ function useToastedActions({ create, update, remove, trigger }: RawActions) {
     [update, toast],
   );
 
+  const wrappedReset = useCallback(
+    async (w: LinearIssueWatch) => {
+      try {
+        const res = await reset(w.id, w.workspaceId);
+        const n = res?.tasksDeleted ?? 0;
+        toast({
+          description:
+            n > 0
+              ? `Reset complete — deleted ${n} task(s); next poll will re-import matches.`
+              : "Reset complete — next poll will re-import matches.",
+          variant: "success",
+        });
+      } catch (err) {
+        toast({ description: `Reset failed: ${String(err)}`, variant: "error" });
+        throw err;
+      }
+    },
+    [reset, toast],
+  );
+
   return {
     create: wrappedCreate,
     update: wrappedUpdate,
     remove: wrappedDelete,
     trigger: wrappedTrigger,
+    reset: wrappedReset,
     toggleEnabled,
   };
 }
 
 export function LinearIssueWatchersSection() {
-  const { items, loading, create, update, remove, trigger } = useLinearIssueWatches();
-  const actions = useToastedActions({ create, update, remove, trigger });
+  const { items, loading, create, update, remove, trigger, previewReset, reset } =
+    useLinearIssueWatches();
+  const actions = useToastedActions({ create, update, remove, trigger, reset });
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<LinearIssueWatch | null>(null);
+  const resetCtrl = useWatchResetController<LinearIssueWatch>({
+    preview: (w) => previewReset(w.id, w.workspaceId),
+    reset: (w) => actions.reset(w).then(() => undefined),
+  });
 
   const openCreate = useCallback(() => {
     setEditing(null);
@@ -132,6 +160,14 @@ export function LinearIssueWatchersSection() {
     },
     [items, actions],
   );
+  const { setResetting } = resetCtrl;
+  const handleReset = useCallback(
+    (id: string) => {
+      const w = items.find((item) => item.id === id);
+      if (w) setResetting(w);
+    },
+    [items, setResetting],
+  );
 
   return (
     <SettingsSection
@@ -156,6 +192,7 @@ export function LinearIssueWatchersSection() {
               onEdit={openEdit}
               onDelete={handleDelete}
               onTrigger={handleTrigger}
+              onReset={handleReset}
               onToggleEnabled={actions.toggleEnabled}
             />
           )}
@@ -172,6 +209,15 @@ export function LinearIssueWatchersSection() {
           return actions.update(id, req, w.workspaceId);
         }}
       />
+      {resetCtrl.resetting && (
+        <ResetWatchDialog
+          open
+          onOpenChange={resetCtrl.onOpenChange}
+          integrationLabel="Linear watcher"
+          previewLoader={resetCtrl.previewLoader}
+          onConfirm={resetCtrl.confirmReset}
+        />
+      )}
     </SettingsSection>
   );
 }

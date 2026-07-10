@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { Button } from "@kandev/ui/button";
 import {
   DropdownMenu,
@@ -11,17 +11,25 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconBrandGithub, IconHexagon, IconPlugConnected, IconTicket } from "@tabler/icons-react";
+import {
+  IconBrandGithub,
+  IconBrandGitlab,
+  IconHexagon,
+  IconPlugConnected,
+  IconTicket,
+} from "@tabler/icons-react";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
+import { useAppStore } from "@/components/state-provider";
 import type { GitHubStatus } from "@/lib/types/github";
 
 type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
 };
 
-type IntegrationId = "github" | "jira" | "linear";
+type IntegrationId = "github" | "gitlab" | "jira" | "linear";
 
 type IntegrationLink = {
   id: IntegrationId;
@@ -31,18 +39,21 @@ type IntegrationLink = {
 
 type IntegrationAvailability = {
   githubReady: boolean;
+  gitlabReady: boolean;
   jiraAvailable: boolean;
   linearAvailable: boolean;
 };
 
 const INTEGRATION_LINKS: IntegrationLink[] = [
   { id: "github", label: "GitHub", href: "/github" },
+  { id: "gitlab", label: "GitLab", href: "/gitlab" },
   { id: "jira", label: "Jira", href: "/jira" },
   { id: "linear", label: "Linear", href: "/linear" },
 ];
 
 const INTEGRATION_ICONS = {
   github: IconBrandGithub,
+  gitlab: IconBrandGitlab,
   jira: IconTicket,
   linear: IconHexagon,
 } satisfies Record<IntegrationId, typeof IconBrandGithub>;
@@ -51,11 +62,13 @@ const HOVER_CLOSE_DELAY_MS = 180;
 
 export function getAvailableIntegrationLinks({
   githubReady,
+  gitlabReady,
   jiraAvailable,
   linearAvailable,
 }: IntegrationAvailability): IntegrationLink[] {
   return INTEGRATION_LINKS.filter((link) => {
     if (link.id === "github") return githubReady;
+    if (link.id === "gitlab") return gitlabReady;
     if (link.id === "jira") return jiraAvailable;
     return linearAvailable;
   });
@@ -71,14 +84,31 @@ export function getGitHubIntegrationStatus(status: GitHubStatus | null, loading:
   return { ready: false, label: getStatusLabel(loading) };
 }
 
-function useConfiguredIntegrationLinks(): IntegrationLink[] {
+export function useConfiguredIntegrationLinks(): IntegrationLink[] {
+  // Jira and Linear are per-workspace integrations, so their availability must
+  // be checked against the active workspace. Omitting the id makes the backend
+  // fall back to a legacy default-workspace resolver that can point at the
+  // wrong workspace, hiding a configured integration from the sidebar. GitHub
+  // and GitLab are install-wide and don't need the workspace id.
+  const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
+  const activeWorkspaceExists = useAppStore((s) =>
+    s.workspaces.items.some((item) => item.id === s.workspaces.activeId),
+  );
+  // Guard against a stale active id: if the active workspace was removed but
+  // activeId was not reconciled (e.g. setWorkspaces keeps a non-null id),
+  // scoping to the deleted id would return no config and hide the links even
+  // when another workspace is configured. Fall back to null so the backend's
+  // default-workspace resolution applies instead.
+  const scopedWorkspaceId = activeWorkspaceExists ? activeWorkspaceId : null;
   const { status, loading } = useGitHubStatus();
-  const jiraAvailable = useJiraAvailable();
-  const linearAvailable = useLinearAvailable();
+  const gitlabAvailable = useGitLabAvailable();
+  const jiraAvailable = useJiraAvailable(scopedWorkspaceId);
+  const linearAvailable = useLinearAvailable(scopedWorkspaceId);
   const githubStatus = getGitHubIntegrationStatus(status, loading);
 
   return getAvailableIntegrationLinks({
     githubReady: githubStatus.ready,
+    gitlabReady: gitlabAvailable,
     jiraAvailable,
     linearAvailable,
   });

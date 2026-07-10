@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,6 +36,37 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, props, "title")
 	assert.Contains(t, props, "workspace_id")
 	assert.Contains(t, props, "workflow_id")
+	assert.Contains(t, props, "workflow_step_id")
+	assert.Contains(t, props, "workspace_mode")
+	assert.Contains(t, tool.Tool.Description, "explicit agent_profile_id > current/source task or parent task > workflow defaults > workspace default")
+	assert.Contains(t, tool.Tool.Description, "Do not rely on workspace defaults for follow-up work from an active task")
+	assert.Contains(t, tool.Tool.Description, "workspace_mode='new_workspace'")
+
+	agentProfileProp, ok := props["agent_profile_id"].(map[string]interface{})
+	require.True(t, ok, "agent_profile_id schema should be an object")
+	agentProfileDesc, ok := agentProfileProp["description"].(string)
+	require.True(t, ok, "agent_profile_id should have a description")
+	assert.Contains(t, agentProfileDesc, "explicit value > current/source task or parent task > workflow defaults > workspace default")
+
+	workflowProp, ok := props["workflow_id"].(map[string]interface{})
+	require.True(t, ok, "workflow_id schema should be an object")
+	workflowDesc, ok := workflowProp["description"].(string)
+	require.True(t, ok, "workflow_id should have a description")
+	assert.Contains(t, workflowDesc, "workspace_id is also omitted")
+	assert.Contains(t, workflowDesc, "must belong to the effective workspace_id")
+
+	workflowStepProp, ok := props["workflow_step_id"].(map[string]interface{})
+	require.True(t, ok, "workflow_step_id schema should be an object")
+	workflowStepDesc, ok := workflowStepProp["description"].(string)
+	require.True(t, ok, "workflow_step_id should have a description")
+	assert.Contains(t, workflowStepDesc, "pass only with an explicit workflow_id")
+
+	workspaceModeProp, ok := props["workspace_mode"].(map[string]interface{})
+	require.True(t, ok, "workspace_mode schema should be an object")
+	workspaceModeDesc, ok := workspaceModeProp["description"].(string)
+	require.True(t, ok, "workspace_mode should have a description")
+	assert.Contains(t, workspaceModeDesc, "inherit_parent")
+	assert.Contains(t, workspaceModeDesc, "new_workspace")
 
 	// parent_id, workspace_id, workflow_id, workflow_step_id should NOT be required
 	required, _ := parsed["required"].([]interface{})
@@ -98,6 +130,26 @@ func TestCreateTask_ExplicitParentID(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-abc", payload["parent_id"])
+}
+
+func TestCreateTask_ForwardsWorkspaceMode(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":          "Own workspace",
+		"parent_id":      "self",
+		"workspace_mode": "new_workspace",
+	})
+
+	assert.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["parent_id"])
+	assert.Equal(t, "new_workspace", payload["workspace_mode"])
 }
 
 func TestCreateTask_NoParentID_WithIDs_CreatesTopLevelTask(t *testing.T) {
@@ -252,6 +304,35 @@ func TestCreateTask_WithRepositoryURL(t *testing.T) {
 	assert.Equal(t, "main", repos[0]["base_branch"])
 }
 
+// TestCreateTask_BaseBranchOnly_ForwardsTopLevel pins the bug-fix wiring:
+// when the caller passes only base_branch (no repository_id / local_path /
+// repository_url), the MCP server forwards it at the top level of the WS
+// payload so the backend can apply it as an override on inherited
+// subtask repos. Previously base_branch was silently dropped when no
+// repo identifier was passed.
+func TestCreateTask_BaseBranchOnly_ForwardsTopLevel(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":       "Stacked PR child",
+		"parent_id":   "self",
+		"description": "branch off the parent's PR branch",
+		"base_branch": "feature/create-new-page-endp-05z",
+	})
+
+	assert.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "feature/create-new-page-endp-05z", payload["base_branch"],
+		"base_branch should be forwarded at the top level even when no repo identifier is supplied")
+	_, hasRepos := payload["repositories"]
+	assert.False(t, hasRepos, "no repositories slice should be produced when only base_branch is supplied")
+}
+
 func TestCreateTask_RepositoryURL_AllowedForSubtasks(t *testing.T) {
 	backend := &testBackend{
 		response: map[string]interface{}{"id": "task-new", "title": "Subtask with URL"},
@@ -302,6 +383,78 @@ func TestCreateTask_LocalPath_AllowedForSubtasks(t *testing.T) {
 	require.True(t, ok)
 	require.Len(t, repos, 1)
 	assert.Equal(t, "/Users/me/projects/sibling", repos[0]["local_path"])
+}
+
+// TestAddBranchToTask_ForwardsRepositoryURL verifies the agent-facing alias:
+// repository_url on the MCP tool surface translates to github_url on the WS
+// payload — mirroring create_task_kandev's wire format so the backend handler
+// can resolve through the same code path.
+func TestAddBranchToTask_ForwardsRepositoryURL(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "tr-1", "task_id": "task-current"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "add_branch_to_task_kandev", map[string]interface{}{
+		"repository_url":  "https://github.com/acme/widgets",
+		"checkout_branch": "feature/x",
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPAddBranchToTask, backend.lastAction)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"], "task_id should default to current task")
+	assert.Equal(t, "https://github.com/acme/widgets", payload["github_url"],
+		"repository_url should be forwarded as github_url to match create_task wire format")
+	assert.Equal(t, "feature/x", payload["checkout_branch"])
+	assert.Equal(t, "", payload["repository_id"])
+}
+
+// TestAddBranchToTask_ForwardsLocalPath verifies local_path is plumbed through
+// to the WS payload so the backend can find-or-create the repo in the task's
+// workspace.
+func TestAddBranchToTask_ForwardsLocalPath(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "tr-1", "task_id": "task-current"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "add_branch_to_task_kandev", map[string]interface{}{
+		"local_path":      "/Users/me/projects/sibling",
+		"checkout_branch": "feature/y",
+	})
+
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"], "task_id should default to current task")
+	assert.Equal(t, "/Users/me/projects/sibling", payload["local_path"])
+	assert.Equal(t, "feature/y", payload["checkout_branch"])
+	assert.Equal(t, "", payload["repository_id"])
+}
+
+// TestAddBranchToTask_RejectsMultipleLocators verifies the MCP-tier
+// mutual-exclusion check fires before the request hits the WS handler, so
+// the error names the agent-facing alias (repository_url) instead of the
+// wire field (github_url).
+func TestAddBranchToTask_RejectsMultipleLocators(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "add_branch_to_task_kandev", map[string]interface{}{
+		"repository_url": "https://github.com/acme/widgets",
+		"local_path":     "/Users/me/projects/sibling",
+	})
+
+	assert.True(t, result.IsError, "passing both repository_url and local_path should error at the MCP tier")
+	require.NotEmpty(t, result.Content)
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, "repository_url",
+		"MCP-tier error should name the agent-facing alias, not the wire key")
+	assert.Nil(t, backend.lastPayload, "request must not be forwarded to the backend")
 }
 
 func TestMessageTask_ForwardsToBackend(t *testing.T) {

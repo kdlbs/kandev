@@ -12,6 +12,9 @@ type Repository struct {
 	ID            string
 	SetupScript   string
 	CleanupScript string
+	// CopyFiles is the legacy newline/pattern list of gitignored files copied
+	// into new worktrees (copy-only).
+	CopyFiles string
 	// WorktreeFiles are files materialized into each new worktree, each carrying
 	// its own copy/symlink mode.
 	WorktreeFiles []FileSpec
@@ -79,6 +82,7 @@ func modelToWorktreeRepository(repo *models.Repository) *Repository {
 		ID:            repo.ID,
 		SetupScript:   repo.SetupScript,
 		CleanupScript: repo.CleanupScript,
+		CopyFiles:     repo.CopyFiles,
 		WorktreeFiles: files,
 	}
 }

@@ -2,6 +2,7 @@
 
 import { IconGitCommit } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { StatsResponse, TaskStatsDTO, RepositoryStatsDTO } from "@/lib/types/http";
 
 function formatDuration(ms: number): string {
@@ -88,7 +89,7 @@ function TimeSpentCard({ global }: { global: GlobalStats }) {
   );
 }
 
-function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_stats: GitStats }) {
+function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_stats?: GitStats }) {
   const hasGitStats =
     git_stats && (git_stats.total_commits > 0 || git_stats.total_files_changed > 0);
 
@@ -135,6 +136,33 @@ function GitOrAveragesCard({ global, git_stats }: { global: GlobalStats; git_sta
             <span className="text-sm text-muted-foreground">Messages per task</span>
             <span className="font-medium tabular-nums">
               {global.avg_messages_per_task.toFixed(1)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help">Turn duration</span>
+              </TooltipTrigger>
+              <TooltipContent>
+                Mean duration of completed turns, excluding turns &lt;1s, &gt;=1h, or with no
+                messages
+              </TooltipContent>
+            </Tooltip>
+            <span className="font-medium tabular-nums">
+              {formatDuration(global.avg_turn_duration_ms)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-sm text-muted-foreground cursor-help">Messages per turn</span>
+              </TooltipTrigger>
+              <TooltipContent>
+                Mean message count per turn, same exclusions as turn duration
+              </TooltipContent>
+            </Tooltip>
+            <span className="font-medium tabular-nums">
+              {global.avg_messages_per_turn === 0 ? "—" : global.avg_messages_per_turn.toFixed(1)}
             </span>
           </div>
           <div className="flex justify-between">
@@ -199,7 +227,13 @@ function SignalCard({ global }: { global: GlobalStats }) {
   );
 }
 
-export function OverviewCards({ global, git_stats }: { global: GlobalStats; git_stats: GitStats }) {
+export function OverviewCards({
+  global,
+  git_stats,
+}: {
+  global: GlobalStats;
+  git_stats?: GitStats;
+}) {
   return (
     <div id="overview" className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 scroll-mt-24">
       <TasksCard global={global} />

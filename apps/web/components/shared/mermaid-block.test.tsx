@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MermaidBlock } from "./mermaid-block";
 import { cleanupMermaidOrphans } from "./mermaid-utils";
 
-vi.mock("next-themes", () => ({
+vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => ({ resolvedTheme: "dark" }),
 }));
 

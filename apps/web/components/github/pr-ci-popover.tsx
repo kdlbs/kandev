@@ -26,6 +26,9 @@ import {
   type WorkflowGroup,
 } from "@/lib/github/check-buckets";
 import type { CheckRun, TaskPR } from "@/lib/types/github";
+import { PRCIAutomationControls } from "./pr-ci-automation-controls";
+import { PRMergeButton } from "./pr-merge-button";
+import { PRMergeabilityRow } from "./pr-mergeability-row";
 
 type CountsView = {
   passed: number;
@@ -35,24 +38,29 @@ type CountsView = {
 
 const CHECK_GROUP_ORDER: CheckBucket[] = ["passed", "in_progress", "failed"];
 
+export const PR_CI_DESKTOP_POPOVER_SCROLL_CLASS =
+  "max-h-[min(28rem,calc(100vh-8rem))] overflow-y-auto overscroll-contain";
+
 function countForBucket(counts: CountsView, kind: CheckBucket): number {
   if (kind === "passed") return counts.passed;
   if (kind === "in_progress") return counts.inProgress;
   return counts.failed;
 }
 
-function deriveAggregateCounts(pr: TaskPR): CountsView {
-  // Pre-load: if checks_total is populated, derive a coarse split using
-  // checks_state to attribute the "non-passing" remainder. This is good
-  // enough for the instant render — the lazy PRFeedback fetch refines.
-  const total = pr.checks_total;
-  const passing = pr.checks_passing;
+export function deriveAggregateCounts(pr: TaskPR): CountsView {
+  // Pre-load coarse split from aggregate fields; lazy PRFeedback fetch replaces it.
+  const total = Math.max(0, pr.checks_total);
+  const passing = Math.min(Math.max(0, pr.checks_passing), total);
   const remaining = Math.max(0, total - passing);
   if (pr.checks_state === "failure") {
-    return { passed: passing, failed: remaining, inProgress: 0 };
+    const failed = remaining > 0 ? remaining : 1;
+    const passed = total > 0 ? Math.max(0, total - failed) : 0;
+    return { passed, failed, inProgress: 0 };
   }
   if (pr.checks_state === "pending") {
-    return { passed: passing, failed: 0, inProgress: remaining };
+    const inProgress = remaining > 0 ? remaining : 1;
+    const passed = total > 0 ? Math.max(0, total - inProgress) : 0;
+    return { passed, failed: 0, inProgress };
   }
   if (pr.checks_state === "success") {
     return { passed: total, failed: 0, inProgress: 0 };
@@ -60,24 +68,77 @@ function deriveAggregateCounts(pr: TaskPR): CountsView {
   return { passed: passing, failed: 0, inProgress: remaining };
 }
 
-function PRCIPopoverHeader({ pr }: { pr: TaskPR }) {
-  const checksUrl = `${pr.pr_url}/checks`;
+export function hasNoChecksAtAll(
+  pr: TaskPR,
+  feedback: { checks?: CheckRun[] } | null,
+  isFetching: boolean,
+): boolean {
+  return (
+    !isFetching &&
+    pr.checks_state === "" &&
+    pr.checks_total === 0 &&
+    (!feedback || (feedback.checks?.length ?? 0) === 0)
+  );
+}
+
+function PRPopoverTitle({
+  title,
+  onOpenDetailPanel,
+}: {
+  title: string;
+  onOpenDetailPanel?: () => void;
+}) {
+  const className = "min-w-0 truncate text-sm font-medium";
+  if (!onOpenDetailPanel) {
+    return (
+      <span data-testid="pr-popover-title" className={className} title={title}>
+        {title}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid="pr-popover-title"
+      className={`${className} cursor-pointer text-left hover:underline`}
+      title={title}
+      aria-label={`Open ${title} details`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpenDetailPanel();
+      }}
+    >
+      {title}
+    </button>
+  );
+}
+
+function PRCIPopoverHeader({
+  pr,
+  onOpenDetailPanel,
+}: {
+  pr: TaskPR;
+  onOpenDetailPanel?: () => void;
+}) {
+  const title = `#${pr.pr_number} ${pr.pr_title || "Untitled PR"}`;
   return (
     <div
       data-testid="pr-popover-header"
       className="flex items-center justify-between gap-2 border-b border-border/50 pb-2"
     >
-      <span className="text-sm font-medium">CI status</span>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <PRPopoverTitle title={title} onOpenDetailPanel={onOpenDetailPanel} />
+      </div>
       <a
-        data-testid="pr-popover-external-link"
-        href={checksUrl}
+        data-testid="pr-popover-pr-link"
+        href={pr.pr_url}
         target="_blank"
         rel="noopener noreferrer"
         className="cursor-pointer text-muted-foreground hover:text-foreground"
-        aria-label="View all checks on GitHub"
+        aria-label="View pull request on GitHub"
         onClick={(e) => e.stopPropagation()}
       >
-        <IconExternalLink className="h-3.5 w-3.5" />
+        <IconGitPullRequest className="h-3.5 w-3.5" />
       </a>
     </div>
   );
@@ -327,9 +388,7 @@ function PRChecksSection({
   const counts = precise ?? aggregateCounts;
   // "No checks at all": the lazy fetch has settled (not isFetching) and there
   // are no checks anywhere — neither in PRFeedback nor in the aggregate.
-  const noChecksAtAll =
-    !isFetching && pr.checks_total === 0 && (!feedback || (feedback.checks?.length ?? 0) === 0);
-  if (noChecksAtAll) {
+  if (hasNoChecksAtAll(pr, feedback, isFetching)) {
     return (
       <div data-testid="pr-checks-section" className="flex flex-col">
         <div data-testid="pr-checks-empty" className="px-1 py-2 text-xs text-muted-foreground">
@@ -489,7 +548,7 @@ export function PRCIPopover({
   const authLost = ghStatus !== null && !ghStatus.authenticated;
   // Trigger an initial status load from the same hook the rest of the app uses.
   useGitHubStatus();
-  const { feedback, isFetching, lastUpdatedAt } = usePRCIPopover(pr, enabled && !authLost);
+  const { feedback, isFetching, lastUpdatedAt, refetch } = usePRCIPopover(pr, enabled && !authLost);
   const onAddAsContext = useAddCheckToContext(pr);
 
   return (
@@ -498,7 +557,7 @@ export function PRCIPopover({
       className="flex flex-col gap-2"
       onClick={(e) => e.stopPropagation()}
     >
-      <PRCIPopoverHeader pr={pr} />
+      <PRCIPopoverHeader pr={pr} onOpenDetailPanel={onOpenDetailPanel} />
       {authLost ? (
         <ReconnectGitHubBlock />
       ) : (
@@ -513,19 +572,10 @@ export function PRCIPopover({
             <PRReviewRow pr={pr} />
             <PRCommentsRow pr={pr} />
           </div>
+          <PRMergeabilityRow pr={pr} />
+          <PRCIAutomationControls pr={pr} />
+          <PRMergeButton taskPR={pr} onMerged={refetch} compact />
         </>
-      )}
-      {onOpenDetailPanel && (
-        <Button
-          data-testid="pr-popover-open-detail"
-          size="sm"
-          variant="ghost"
-          className="cursor-pointer justify-start gap-1.5 px-2"
-          onClick={onOpenDetailPanel}
-        >
-          <IconGitPullRequest className="h-3.5 w-3.5" />
-          <span>Open PR details</span>
-        </Button>
       )}
       <PRPopoverFooter lastUpdatedAt={lastUpdatedAt} />
     </div>
@@ -563,7 +613,3 @@ function useAddCheckToContext(pr: TaskPR): ((message: string) => void) | null {
   );
   return sessionId ? handler : null;
 }
-
-// Multi-PR aggregate popover deferred — multi-PR tasks currently keep the
-// existing DropdownMenu trigger (no hover popover). The aggregate component
-// will land alongside that hover variant when it ships, see follow-up.

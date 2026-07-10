@@ -1,6 +1,12 @@
 "use client";
 
-import { IconAlertCircle, IconRefresh, IconTerminal2 } from "@tabler/icons-react";
+import { useId } from "react";
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconRefresh,
+  IconTerminal2,
+} from "@tabler/icons-react";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
 import {
@@ -17,9 +23,20 @@ import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
-import { ModelCombobox } from "@/components/settings/model-combobox";
+import {
+  configOptionToModelOptions,
+  isModelConfigOption,
+  ModelConfigSelector,
+  type SelectConfigOption,
+  usableConfigOptions,
+} from "@/components/model-config-selector";
 import { useAgentCapabilities } from "@/hooks/domains/settings/use-dynamic-models";
-import { PERMISSION_KEYS, type PermissionKey } from "@/lib/agent-permissions";
+import {
+  PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
+  PERMISSION_KEYS,
+  readPermissionValue,
+  type PermissionKey,
+} from "@/lib/agent-permissions";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
 import type {
   CLIFlag,
@@ -35,6 +52,7 @@ export type ProfileFormData = {
   name: string;
   model: string;
   mode: string;
+  config_options?: Record<string, string>;
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
 } & Record<PermissionKey, boolean>;
@@ -68,6 +86,62 @@ type PermissionToggleProps = {
   lockPassthrough?: boolean;
 };
 
+function permissionToggleWrapperClass(isDanger: boolean, compact: boolean): string {
+  if (isDanger) {
+    return "flex items-center justify-between gap-3 rounded-md border border-destructive/40 bg-destructive/5 p-3";
+  }
+  if (compact) {
+    return "flex items-center justify-between gap-2";
+  }
+  return "flex items-center justify-between rounded-md border p-3";
+}
+
+function PermissionToggleRow({
+  settingKey,
+  setting,
+  checked,
+  onCheckedChange,
+  compact,
+}: {
+  settingKey: string;
+  setting: PermissionSetting;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  compact: boolean;
+}) {
+  const isDanger = setting.apply_method === PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE;
+  const switchSize = compact ? ("sm" as const) : ("default" as const);
+  const labelCls = compact ? "text-xs" : undefined;
+  const wrapperCls = permissionToggleWrapperClass(isDanger, compact);
+  const instanceId = useId();
+  const switchId = `${instanceId}-permission-toggle-${settingKey}`;
+
+  return (
+    <div
+      key={settingKey}
+      className={wrapperCls}
+      data-testid={isDanger ? "permission-auto-approve-danger" : `permission-toggle-${settingKey}`}
+    >
+      <div className={`flex-1 min-w-0 ${compact && !isDanger ? "space-y-0.5" : "space-y-1"}`}>
+        <Label htmlFor={switchId} className={`flex items-center gap-1.5 ${labelCls ?? ""}`}>
+          {isDanger && <IconAlertTriangle className="size-4 shrink-0 text-destructive" />}
+          {setting.label}
+        </Label>
+        <p
+          className={
+            compact
+              ? "text-[10px] text-muted-foreground leading-tight"
+              : "text-xs text-muted-foreground"
+          }
+        >
+          {setting.description}
+        </p>
+      </div>
+      <Switch id={switchId} size={switchSize} checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
+}
+
 function PermissionToggles({
   profile,
   onChange,
@@ -87,19 +161,14 @@ function PermissionToggles({
           if (!setting?.supported) return null;
           if (setting.apply_method === "cli_flag") return null;
           return (
-            <div key={key} className="flex items-center justify-between gap-2">
-              <div className="space-y-0.5">
-                <Label className="text-xs">{setting.label}</Label>
-                <p className="text-[10px] text-muted-foreground leading-tight">
-                  {setting.description}
-                </p>
-              </div>
-              <Switch
-                size={switchSize}
-                checked={profile[key]}
-                onCheckedChange={(checked) => onChange({ [key]: checked })}
-              />
-            </div>
+            <PermissionToggleRow
+              key={key}
+              settingKey={key}
+              setting={setting}
+              checked={readPermissionValue(profile, key, permissionSettings)}
+              onCheckedChange={(checked) => onChange({ [key]: checked })}
+              compact
+            />
           );
         })}
         {passthroughConfig?.supported && (
@@ -129,16 +198,14 @@ function PermissionToggles({
         if (!setting?.supported) return null;
         if (setting.apply_method === "cli_flag") return null;
         return (
-          <div key={key} className="flex items-center justify-between rounded-md border p-3">
-            <div className="space-y-1">
-              <Label>{setting.label}</Label>
-              <p className="text-xs text-muted-foreground">{setting.description}</p>
-            </div>
-            <Switch
-              checked={profile[key]}
-              onCheckedChange={(checked) => onChange({ [key]: checked })}
-            />
-          </div>
+          <PermissionToggleRow
+            key={key}
+            settingKey={key}
+            setting={setting}
+            checked={readPermissionValue(profile, key, permissionSettings)}
+            onCheckedChange={(checked) => onChange({ [key]: checked })}
+            compact={false}
+          />
         );
       })}
       {passthroughConfig?.supported && (
@@ -235,20 +302,44 @@ function ModelPicker({
   profile,
   models,
   currentModelId,
+  configOptions,
   onChange,
 }: {
   profile: ProfileFormData;
   models: ModelEntry[];
   currentModelId: string | undefined;
+  configOptions: SelectConfigOption[];
   onChange: (patch: Partial<ProfileFormData>) => void;
 }) {
+  const modelConfig = configOptions.find(isModelConfigOption);
+  const modelOptions = modelConfig
+    ? configOptionToModelOptions(modelConfig)
+    : models.map((model) => ({
+        id: model.id,
+        name: model.name,
+        description: model.description || (model.id !== model.name ? model.id : undefined),
+        usageMultiplier:
+          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
+      }));
+  const currentModel = profile.model || modelConfig?.currentValue || currentModelId || null;
+  const selectedConfigOptions = configOptions.map((option) => ({
+    ...option,
+    currentValue: isModelConfigOption(option)
+      ? profile.model || option.currentValue
+      : profile.config_options?.[option.id] || option.currentValue,
+  }));
+
   return (
-    <ModelCombobox
-      value={profile.model}
-      onChange={(value) => onChange({ model: value })}
-      models={models}
-      currentModelId={currentModelId}
+    <ModelConfigSelector
+      modelOptions={modelOptions}
+      currentModel={currentModel}
+      configOptions={selectedConfigOptions}
+      onModelChange={(value) => onChange({ model: value })}
+      onConfigChange={(configId, value) =>
+        onChange({ config_options: { ...(profile.config_options ?? {}), [configId]: value } })
+      }
       placeholder="Select a model..."
+      ariaLabel="Profile start model settings"
     />
   );
 }
@@ -271,6 +362,19 @@ function ModePicker({
       modes={modes}
       currentModeId={currentModeId}
     />
+  );
+}
+
+function modelConfigOptions(modelConfig: ModelConfig): SelectConfigOption[] {
+  return usableConfigOptions(
+    modelConfig.config_options?.map((option) => ({
+      type: option.type,
+      id: option.id,
+      name: option.name,
+      currentValue: option.current_value,
+      category: option.category,
+      options: option.options,
+    })),
   );
 }
 
@@ -342,6 +446,7 @@ function CapabilitiesRow({
   agentName: string;
 }) {
   const hasModes = modes.length > 0;
+  const configOptions = modelConfigOptions(modelConfig);
   const activeMode = hasModes
     ? modes.find((m) => m.id === (profile.mode || currentModeId || modes[0]?.id))
     : undefined;
@@ -352,7 +457,7 @@ function CapabilitiesRow({
     return (
       <div className={gapCls}>
         <Label className={labelCls}>Start model</Label>
-        <Skeleton className="h-9 w-full" />
+        <Skeleton className="h-7 w-full" />
       </div>
     );
   }
@@ -383,6 +488,7 @@ function CapabilitiesRow({
             profile={profile}
             models={models}
             currentModelId={currentModelId}
+            configOptions={configOptions}
             onChange={onChange}
           />
         </div>

@@ -3,9 +3,10 @@
 import { useState, useRef, useCallback, memo, useEffect } from "react";
 import { FileDiff } from "@pierre/diffs/react";
 import { cn } from "@kandev/ui/lib/utils";
-import type { FileDiffData, DiffComment } from "@/lib/diff/types";
+import type { FileDiffData, DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import { useHunkHover } from "./use-hunk-hover";
 import { useAnnotationRenderer } from "./use-diff-annotation-renderer";
+import { DEFAULT_DIFF_WORD_WRAP } from "./diff-defaults";
 import { useDiffOptions } from "./use-diff-options";
 import { useDiffViewerState } from "./use-diff-viewer-state";
 
@@ -24,12 +25,13 @@ interface DiffViewerProps {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   onCommentRun?: (comment: DiffComment) => void;
   comments?: DiffComment[];
   className?: string;
   compact?: boolean;
   hideHeader?: boolean;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   enableAcceptReject?: boolean;
@@ -50,6 +52,8 @@ interface DiffViewerProps {
 const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
   "enableComments",
   "sessionId",
+  "onCommentDelete",
+  "onCommentUpdate",
   "compact",
   "hideHeader",
   "className",
@@ -119,11 +123,37 @@ function NoDiffPlaceholder({ className }: { className?: string }) {
   );
 }
 
+function useScrollWalkthroughRangeIntoView(
+  wrapperRef: React.RefObject<HTMLDivElement | null>,
+  selectedLines: ReturnType<typeof useDiffViewerState>["walkthroughSelectedLines"],
+  filePath: string,
+) {
+  useEffect(() => {
+    if (!selectedLines) return;
+    let innerFrame: number | null = null;
+    const frame = requestAnimationFrame(() => {
+      innerFrame = requestAnimationFrame(() => {
+        const container = wrapperRef.current?.querySelector("diffs-container");
+        const shadow = container?.shadowRoot;
+        const selected = shadow?.querySelector<HTMLElement>(
+          '[data-selected-line="first"], [data-selected-line="single"], [data-selected-line]',
+        );
+        const fallback = shadow?.querySelector<HTMLElement>(`[data-line="${selectedLines.start}"]`);
+        (selected ?? fallback)?.scrollIntoView({ block: "center", behavior: "smooth" });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (innerFrame !== null) cancelAnimationFrame(innerFrame);
+    };
+  }, [wrapperRef, selectedLines, filePath]);
+}
+
 type WiringArgs = {
   data: FileDiffData;
   state: ReturnType<typeof useDiffViewerState>;
   onCommentRun?: (comment: DiffComment) => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   enableComments: boolean;
@@ -135,6 +165,7 @@ type WiringArgs = {
   expandUnchanged: boolean;
   toggleExpandUnchanged: () => void;
   wrapperRef: React.RefObject<HTMLDivElement | null>;
+  repo?: string;
 };
 
 /**
@@ -180,6 +211,7 @@ function useDiffViewerWiring(args: WiringArgs) {
     enableExpansion: canUseExpansion,
     expandUnchanged: args.expandUnchanged,
     onToggleExpandUnchanged: canUseExpansion ? args.toggleExpandUnchanged : undefined,
+    repo: args.repo,
   });
   return { ...opts, renderAnnotation };
 }
@@ -190,6 +222,7 @@ export const DiffViewer = memo(function DiffViewer({
   sessionId,
   onCommentAdd,
   onCommentDelete,
+  onCommentUpdate,
   onCommentRun,
   comments: externalComments,
   className,
@@ -207,7 +240,7 @@ export const DiffViewer = memo(function DiffViewer({
   onToggleExpandUnchanged: onToggleExpandUnchangedProp,
   repo,
 }: DiffViewerProps) {
-  const [wordWrapLocal, setWordWrap] = useState(false);
+  const [wordWrapLocal, setWordWrap] = useState(DEFAULT_DIFF_WORD_WRAP);
   const wordWrap = wordWrapProp ?? wordWrapLocal;
   const [expandUnchangedLocal, setExpandUnchangedLocal] = useState(false);
   const expandUnchanged = expandUnchangedProp ?? expandUnchangedLocal;
@@ -224,6 +257,7 @@ export const DiffViewer = memo(function DiffViewer({
     sessionId,
     onCommentAdd,
     onCommentDelete,
+    onCommentUpdate,
     onCommentRun,
     externalComments,
     onRevertBlock,
@@ -231,6 +265,7 @@ export const DiffViewer = memo(function DiffViewer({
     baseRef,
     repo,
   });
+  useScrollWalkthroughRangeIntoView(wrapperRef, state.walkthroughSelectedLines, data.filePath);
 
   const { options, renderHeaderMetadata, renderHoverUtility, renderAnnotation } =
     useDiffViewerWiring({
@@ -249,16 +284,23 @@ export const DiffViewer = memo(function DiffViewer({
       expandUnchanged,
       toggleExpandUnchanged,
       wrapperRef,
+      repo,
     });
 
-  const controlledSelection = state.showCommentForm ? state.selectedLines : null;
+  const controlledSelection = state.showCommentForm
+    ? state.selectedLines
+    : state.walkthroughSelectedLines;
 
   if (!state.fileDiffMetadata) {
     return <NoDiffPlaceholder className={className} />;
   }
 
   return (
-    <div ref={wrapperRef} className={cn("diff-viewer", className)}>
+    <div
+      ref={wrapperRef}
+      className={cn("diff-viewer", className)}
+      data-walkthrough-active={state.walkthroughSelectedLines ? "true" : undefined}
+    >
       <FileDiff
         fileDiff={state.fileDiffMetadata}
         options={options}

@@ -3,6 +3,8 @@ import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { applyFilters, applyGroup, applySort, applyView, mergeGroupOrder } from "./apply-view";
 import type { FilterClause, SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DEFAULT_VIEW } from "@/lib/state/slices/ui/sidebar-view-builtins";
+import type { Repository } from "@/lib/types/http";
+import { repositorySlug } from "@/lib/repository-slug";
 
 function task(overrides: Partial<TaskSwitcherItem>): TaskSwitcherItem {
   return {
@@ -147,6 +149,38 @@ describe("applyFilters — per-dimension", () => {
   });
 });
 
+describe("applyFilters — repository (#1213)", () => {
+  // The saved clause value is the filter option value, and the board sets each
+  // task's repositoryPath — BOTH via repositorySlug. For a local repo the slug
+  // is the repo name (not the full local_path). The bug was that the option
+  // value used local_path while the board used the name, so the clause matched
+  // nothing and the board went empty.
+  it("filters by a local repository (option value matches the board task field)", () => {
+    const localRepo = {
+      id: "r1",
+      workspace_id: "w1",
+      name: "kandev",
+      source_type: "local",
+      local_path: "/home/carlos/Projects/kandev",
+      provider: "",
+      provider_repo_id: "",
+      provider_owner: "",
+      provider_name: "",
+      default_branch: "main",
+    } as Repository;
+    const optionValue = repositorySlug(localRepo);
+    // The option value is the repo name, never the full filesystem path.
+    expect(optionValue).toBe("kandev");
+    expect(optionValue).not.toBe(localRepo.local_path);
+    const tasks = [
+      task({ id: "a", repositoryPath: repositorySlug(localRepo) }),
+      task({ id: "b", repositoryPath: "org/other" }),
+    ];
+    const out = applyFilters(tasks, [C({ dimension: "repository", op: "is", value: optionValue })]);
+    expect(out.map((t) => t.id)).toEqual(["a"]);
+  });
+});
+
 describe("applyFilters — titleMatch + combos", () => {
   it("filters by titleMatch matches (case-insensitive substring)", () => {
     const tasks = [
@@ -214,6 +248,54 @@ describe("applySort", () => {
     const z = task({ id: "z", state: "REVIEW" });
     const out = applySort([x, y, z], { key: "state", direction: "asc" });
     expect(out.map((t) => t.id)).toEqual(["x", "y", "z"]);
+  });
+});
+
+describe("applyGroup — state", () => {
+  it("groups by real task state instead of the action bucket", () => {
+    const tasks = [
+      task({ id: "done", state: "COMPLETED", sessionState: "COMPLETED" }),
+      task({ id: "review", state: "REVIEW", sessionState: "WAITING_FOR_INPUT" }),
+      task({ id: "not-started", sessionState: "IDLE" }),
+    ];
+    const groupsByKey = new Map(applyGroup(tasks, "state").groups.map((g) => [g.key, g]));
+
+    expect(groupsByKey.get("COMPLETED")?.label).toBe("Completed");
+    expect(groupsByKey.get("COMPLETED")?.tasks.map((t) => t.id)).toEqual(["done"]);
+    expect(groupsByKey.get("REVIEW")?.label).toBe("Review");
+    expect(groupsByKey.get("REVIEW")?.tasks.map((t) => t.id)).toEqual(["review"]);
+    expect(groupsByKey.get("__not_started__")?.label).toBe("Not started");
+    expect(groupsByKey.get("__not_started__")?.tasks.map((t) => t.id)).toEqual(["not-started"]);
+  });
+
+  it("sorts state groups by canonical status order", () => {
+    const tasks = [
+      task({ id: "cancelled", state: "CANCELLED" }),
+      task({ id: "completed", state: "COMPLETED" }),
+      task({ id: "failed", state: "FAILED" }),
+      task({ id: "blocked", state: "BLOCKED" }),
+      task({ id: "review", state: "REVIEW" }),
+      task({ id: "waiting", state: "WAITING_FOR_INPUT" }),
+      task({ id: "progress", state: "IN_PROGRESS" }),
+      task({ id: "todo", state: "TODO" }),
+      task({ id: "scheduling", state: "SCHEDULING" }),
+      task({ id: "created", state: "CREATED" }),
+      task({ id: "not-started" }),
+    ];
+
+    expect(applyGroup(tasks, "state").groups.map((g) => g.key)).toEqual([
+      "__not_started__",
+      "CREATED",
+      "SCHEDULING",
+      "TODO",
+      "IN_PROGRESS",
+      "WAITING_FOR_INPUT",
+      "REVIEW",
+      "BLOCKED",
+      "FAILED",
+      "COMPLETED",
+      "CANCELLED",
+    ]);
   });
 });
 
@@ -455,17 +537,16 @@ describe("applyView — custom sort", () => {
       task({ id: "c1", title: "C1", parentTaskId: "p1", createdAt: "2026-02-01" }),
       task({ id: "c2", title: "C2", parentTaskId: "p1", createdAt: "2026-02-02" }),
     ];
-    // Simulates a drag of P3 to the front: handleReorderGroup writes only
-    // root IDs into orderedTaskIds.
+    // Simulates a drag of P3 to the front. orderedTaskIds contains only root
+    // IDs here; subtasks fall back to "newest createdAt first".
     const out = applyView(tasks, customView, {
       pinnedTaskIds: [],
       orderedTaskIds: ["p3", "p1", "p2"],
     });
     // Root order matches the drag.
     expect(out.groups[0].tasks.map((t) => t.id)).toEqual(["p3", "p1", "p2"]);
-    // Subtasks stay attached to p1 — they're never in orderedTaskIds and they
-    // never appear in group.tasks, so dragging the parent doesn't separate
-    // them or reorder them relative to each other.
+    // Subtasks stay attached to p1 and use the createdAt fallback (newest
+    // first) since neither is in orderedTaskIds.
     expect(out.subTasksByParentId.get("p1")?.map((t) => t.id)).toEqual(["c2", "c1"]);
     expect(out.subTasksByParentId.get("p2")).toBeUndefined();
     expect(out.subTasksByParentId.get("p3")).toBeUndefined();
@@ -483,6 +564,74 @@ describe("applyView — custom sort", () => {
       orderedTaskIds: ["c", "b", "a"],
     });
     expect(out.groups[0].tasks.map((t) => t.id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("applyView — subtaskOrderByParentId", () => {
+  // Subtask ordering is independent of the view's sort: the global sort still
+  // determines root order, and per-parent overrides reorder *only* that parent's
+  // subtask list.
+  const titleAscView: SidebarView = {
+    id: "v",
+    name: "v",
+    filters: [],
+    sort: { key: "title", direction: "asc" },
+    group: "none",
+    collapsedGroups: [],
+  };
+  const parentId = "p1";
+  const sub = (id: string, parent: string) => task({ id, title: id, parentTaskId: parent });
+
+  it("reorders one parent's subtasks without flipping the root sort", () => {
+    const tasks = [
+      task({ id: "p1", title: "P1" }),
+      task({ id: "p2", title: "P2" }),
+      sub("c1", parentId),
+      sub("c2", parentId),
+      sub("c3", parentId),
+    ];
+    const out = applyView(tasks, titleAscView, {
+      pinnedTaskIds: [],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: { [parentId]: ["c1", "c3", "c2"] },
+    });
+    // Root order still follows title asc — untouched by the subtask reorder.
+    expect(out.groups[0].tasks.map((t) => t.id)).toEqual(["p1", "p2"]);
+    expect(out.subTasksByParentId.get(parentId)?.map((t) => t.id)).toEqual(["c1", "c3", "c2"]);
+  });
+
+  it("subtasks not in the override keep the active sort's order, after the listed ones", () => {
+    const tasks = [
+      task({ id: "p1", title: "P1" }),
+      sub("c1", parentId),
+      sub("c2", parentId),
+      sub("c3", parentId),
+    ];
+    // Title-asc fallback over the unordered subtasks: c1, c2 follow after c3.
+    const out = applyView(tasks, titleAscView, {
+      pinnedTaskIds: [],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: { [parentId]: ["c3"] },
+    });
+    expect(out.subTasksByParentId.get(parentId)?.map((t) => t.id)).toEqual(["c3", "c1", "c2"]);
+  });
+
+  it("override for parent A does not affect parent B's subtasks", () => {
+    const tasks = [
+      task({ id: "p1", title: "P1" }),
+      task({ id: "p2", title: "P2" }),
+      sub("a1", "p1"),
+      sub("a2", "p1"),
+      sub("b1", "p2"),
+      sub("b2", "p2"),
+    ];
+    const out = applyView(tasks, titleAscView, {
+      pinnedTaskIds: [],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: { p1: ["a2", "a1"] },
+    });
+    expect(out.subTasksByParentId.get("p1")?.map((t) => t.id)).toEqual(["a2", "a1"]);
+    expect(out.subTasksByParentId.get("p2")?.map((t) => t.id)).toEqual(["b1", "b2"]);
   });
 });
 

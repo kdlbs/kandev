@@ -6,6 +6,7 @@ import type { Message, TaskSessionState } from "@/lib/types/http";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { useAppStore } from "@/components/state-provider";
 import { GridSpinner } from "@/components/grid-spinner";
+import { resolveAgentErrorLabel } from "./agent-error-label";
 
 type AgentStatusProps = {
   sessionState?: TaskSessionState;
@@ -143,7 +144,7 @@ function AgentErrorStatus({
   const expanded = !!errorMessage && !userCollapsed;
   const toggle = useCallback(() => setUserCollapsed((v) => !v), []);
 
-  const displayLabel = errorMessage ? "Environment setup failed" : config.label;
+  const displayLabel = resolveAgentErrorLabel(errorMessage, config.label);
   const hasDetails = !!errorMessage;
 
   return (

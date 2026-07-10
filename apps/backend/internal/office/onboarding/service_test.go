@@ -12,6 +12,7 @@ import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/configloader"
+	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 )
@@ -93,6 +94,18 @@ func newMockWorkflowEnsurer() *mockWorkflowEnsurer {
 		officeID:  "wf-office",
 		defaultID: "wf-office",
 	}
+}
+
+type fakeSourceProfileReader struct {
+	profiles map[string]*models.AgentInstance
+}
+
+func (f fakeSourceProfileReader) GetAgentProfile(_ context.Context, id string) (*models.AgentInstance, error) {
+	profile := f.profiles[id]
+	if profile == nil {
+		return nil, os.ErrNotExist
+	}
+	return profile, nil
 }
 
 // newTestOnboardingServiceWithRepo is like newTestOnboardingService but
@@ -490,6 +503,117 @@ func TestCompleteOnboarding_SeedsWorkspaceRoutingTier(t *testing.T) {
 				t.Errorf("default tier = %q, want %q", cfg.DefaultTier, sc.wantTier)
 			}
 		})
+	}
+}
+
+func TestCompleteOnboarding_SeedsWorkspaceRoutingTierProfiles(t *testing.T) {
+	svc, _, repo, _ := newTestOnboardingServiceWithRepo(t)
+	svc.sourceProfile = fakeSourceProfileReader{profiles: map[string]*models.AgentInstance{
+		"profile-frontier": {
+			AgentID: "codex-acp",
+			Model:   "gpt-5.5-high",
+			Mode:    "max",
+		},
+		"profile-balanced": {
+			AgentID: "codex-acp",
+			Model:   "gpt-5.5-medium",
+			Mode:    "medium",
+		},
+		"profile-economy": {
+			AgentID: "codex-acp",
+			Model:   "gpt-5.5-low",
+			Mode:    "low",
+		},
+	}}
+	ctx := context.Background()
+
+	result, err := svc.CompleteOnboarding(ctx, CompleteRequest{
+		WorkspaceName:      "tier-profiles",
+		TaskPrefix:         "TP",
+		AgentName:          "CEO",
+		AgentProfileID:     "profile-balanced",
+		ExecutorPreference: "local_pc",
+		DefaultTier:        "balanced",
+		TierProfiles: TierProfileIDs{
+			Frontier: "profile-frontier",
+			Balanced: "profile-balanced",
+			Economy:  "profile-economy",
+		},
+	})
+	if err != nil {
+		t.Fatalf("complete onboarding: %v", err)
+	}
+
+	cfg, err := repo.GetWorkspaceRouting(ctx, result.WorkspaceID)
+	if err != nil {
+		t.Fatalf("get workspace routing: %v", err)
+	}
+	profile := cfg.ProviderProfiles["codex-acp"]
+	if profile.TierMap.Frontier != "gpt-5.5-high" {
+		t.Errorf("frontier tier map = %q", profile.TierMap.Frontier)
+	}
+	if profile.TierMap.Balanced != "gpt-5.5-medium" {
+		t.Errorf("balanced tier map = %q", profile.TierMap.Balanced)
+	}
+	if profile.TierMap.Economy != "gpt-5.5-low" {
+		t.Errorf("economy tier map = %q", profile.TierMap.Economy)
+	}
+	if profile.TierProfileIDs != (routing.TierProfileIDs{
+		Frontier: "profile-frontier",
+		Balanced: "profile-balanced",
+		Economy:  "profile-economy",
+	}) {
+		t.Errorf("tier profile ids = %+v", profile.TierProfileIDs)
+	}
+}
+
+func TestCompleteOnboarding_TierProfileLookupFailureKeepsValidSelections(t *testing.T) {
+	svc, _, repo, _ := newTestOnboardingServiceWithRepo(t)
+	svc.sourceProfile = fakeSourceProfileReader{profiles: map[string]*models.AgentInstance{
+		"profile-balanced": {
+			AgentID: "codex-acp",
+			Model:   "gpt-5.5-medium",
+			Mode:    "medium",
+		},
+		"profile-economy": {
+			AgentID: "codex-acp",
+			Model:   "gpt-5.5-low",
+			Mode:    "low",
+		},
+	}}
+	ctx := context.Background()
+
+	result, err := svc.CompleteOnboarding(ctx, CompleteRequest{
+		WorkspaceName:      "partial-tier-profiles",
+		TaskPrefix:         "PTP",
+		AgentName:          "CEO",
+		AgentProfileID:     "profile-balanced",
+		ExecutorPreference: "local_pc",
+		DefaultTier:        "balanced",
+		TierProfiles: TierProfileIDs{
+			Frontier: "missing-frontier",
+			Balanced: "profile-balanced",
+			Economy:  "profile-economy",
+		},
+	})
+	if err != nil {
+		t.Fatalf("complete onboarding: %v", err)
+	}
+
+	cfg, err := repo.GetWorkspaceRouting(ctx, result.WorkspaceID)
+	if err != nil {
+		t.Fatalf("get workspace routing: %v", err)
+	}
+	profile := cfg.ProviderProfiles["codex-acp"]
+	if profile.TierMap.Balanced != "gpt-5.5-medium" {
+		t.Errorf("balanced tier map = %q", profile.TierMap.Balanced)
+	}
+	if profile.TierMap.Economy != "gpt-5.5-low" {
+		t.Errorf("economy tier map = %q", profile.TierMap.Economy)
+	}
+	if profile.TierProfileIDs.Balanced != "profile-balanced" ||
+		profile.TierProfileIDs.Economy != "profile-economy" {
+		t.Errorf("valid tier profile ids were not preserved: %+v", profile.TierProfileIDs)
 	}
 }
 

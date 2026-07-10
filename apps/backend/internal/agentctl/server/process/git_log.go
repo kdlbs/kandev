@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -54,8 +55,27 @@ type CumulativeDiffResult struct {
 	HeadCommit   string                 `json:"head_commit"`
 	TotalCommits int                    `json:"total_commits"`
 	Files        map[string]interface{} `json:"files"`
-	Error        string                 `json:"error,omitempty"`
+	// TruncatedFilesCount is how many files were dropped from Files entirely
+	// because the cumulative range exceeded maxCumulativeDiffFiles. Zero
+	// (omitted) when the full file set fit. The frontend surfaces this as a
+	// "N more files hidden" banner — a mid-rebase cumulative diff can otherwise
+	// enumerate tens of thousands of files, one rendered row each.
+	//
+	// This counts only fully-dropped files. Files kept in the map but whose
+	// diff was emptied by the byte budget (diff_skip_reason "budget_exceeded")
+	// are NOT counted here — they remain listed and carry their own per-file
+	// skip reason that the diff viewer renders, so they are visible-but-capped
+	// rather than hidden.
+	TruncatedFilesCount int    `json:"truncated_files_count,omitempty"`
+	Error               string `json:"error,omitempty"`
 }
+
+// maxCumulativeDiffFiles bounds how many file entries GetCumulativeDiff returns.
+// This is a safety valve for the rebase pathology (base→working-tree across a
+// large range), not a UX limit — normal PRs stay well under it. Capping the
+// count bounds the number of rendered file rows on the frontend regardless of
+// the per-file/total byte budgets.
+const maxCumulativeDiffFiles = 500
 
 // Field and record separators for git log parsing.
 // Using non-printable ASCII separators to avoid collision with commit message content.
@@ -245,11 +265,40 @@ func (g *GitOperator) GetCumulativeDiff(ctx context.Context, baseCommit string) 
 		return result, nil
 	}
 
-	// Parse the diff output into files
-	result.Files = g.parseCommitDiff(diffOutput)
+	// Parse the diff output into files, capping per-file (256 KB) and total
+	// (2 MB) diff bytes. Unlike ShowCommit (single, bounded commit) a
+	// multi-commit cumulative range can produce tens of MB of patch text.
+	result.Files = g.parseCommitDiffWithOptions(diffOutput, parseCommitDiffOptions{
+		perFileMaxBytes: maxDiffOutputSize,
+		totalMaxBytes:   maxTotalDiffBytes,
+	})
+
+	// Cap the number of file entries too — the byte budget bounds payload size
+	// but not the row count, and the frontend renders one component per file.
+	result.Files, result.TruncatedFilesCount = capCumulativeDiffFiles(result.Files, maxCumulativeDiffFiles)
 
 	result.Success = true
 	return result, nil
+}
+
+// capCumulativeDiffFiles keeps at most maxFiles entries (deterministically, by
+// sorted path) and returns the kept map plus the number dropped.
+func capCumulativeDiffFiles(files map[string]interface{}, maxFiles int) (map[string]interface{}, int) {
+	if maxFiles <= 0 || len(files) <= maxFiles {
+		return files, 0
+	}
+
+	paths := make([]string, 0, len(files))
+	for path := range files {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+
+	capped := make(map[string]interface{}, maxFiles)
+	for _, path := range paths[:maxFiles] {
+		capped[path] = files[path]
+	}
+	return capped, len(files) - maxFiles
 }
 
 // CommitDiffResult represents the result of getting a commit's diff.
@@ -351,8 +400,29 @@ func (g *GitOperator) ShowCommit(ctx context.Context, commitSHA string) (*Commit
 	return result, nil
 }
 
-// parseCommitDiff parses git show output into file info map
+// parseCommitDiffOptions controls per-file and cumulative budget enforcement
+// while parsing a `git diff`/`git show` output into the file info map. The zero
+// value applies no caps, which preserves the ShowCommit contract (single-commit
+// detail views expect full diffs). The cumulative-diff path passes non-zero
+// budgets because a multi-commit range can produce tens of MB of patch text
+// that, JSON-encoded and shipped over the WS, grinds the browser.
+type parseCommitDiffOptions struct {
+	perFileMaxBytes int
+	totalMaxBytes   int
+}
+
+// parseCommitDiff parses git show output into file info map. No budget caps —
+// callers that need them use parseCommitDiffWithOptions.
 func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
+	return g.parseCommitDiffWithOptions(output, parseCommitDiffOptions{})
+}
+
+// parseCommitDiffWithOptions parses git diff/show output into a file info map,
+// applying the budgets in opts. Diffs are truncated (per-file) or dropped
+// (once the cumulative budget is exceeded); additions/deletions counts are
+// always computed from the full per-file content because they're cheap and
+// the frontend relies on them.
+func (g *GitOperator) parseCommitDiffWithOptions(output string, opts parseCommitDiffOptions) map[string]interface{} {
 	files := make(map[string]interface{})
 
 	// Split by "diff --git" to get individual file diffs
@@ -361,6 +431,7 @@ func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
 		return files
 	}
 
+	totalDiffBytes := 0
 	for _, part := range parts[1:] {
 		if part == "" {
 			continue
@@ -398,7 +469,7 @@ func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
 			status = "renamed"
 		}
 
-		// Count additions and deletions
+		// Count additions and deletions (always from the full content).
 		additions := 0
 		deletions := 0
 		for _, line := range strings.Split(diffContent, "\n") {
@@ -409,16 +480,54 @@ func (g *GitOperator) parseCommitDiff(output string) map[string]interface{} {
 			}
 		}
 
-		files[filePath] = map[string]interface{}{
+		diffOut, skipReason := applyDiffBudget(diffContent, totalDiffBytes, opts)
+		totalDiffBytes += len(diffOut)
+
+		fileEntry := map[string]interface{}{
 			"status":    status,
 			"staged":    false,
 			"additions": additions,
 			"deletions": deletions,
-			"diff":      diffContent,
+			"diff":      diffOut,
 		}
+		if skipReason != "" {
+			fileEntry["diff_skip_reason"] = skipReason
+		}
+		files[filePath] = fileEntry
 	}
 
 	return files
+}
+
+// applyDiffBudget enforces the per-file and cumulative byte budgets in opts and
+// returns the (possibly truncated/empty) diff content plus a skip reason. A zero
+// budget means "no cap" for that dimension. The cumulative budget is strict: the
+// running total never exceeds totalMaxBytes — a file that would cross the
+// boundary is clamped to the remaining budget rather than emitted in full.
+func applyDiffBudget(diffContent string, totalSoFar int, opts parseCommitDiffOptions) (diff, skipReason string) {
+	limit := len(diffContent)
+	truncated := false
+
+	if opts.totalMaxBytes > 0 {
+		remaining := opts.totalMaxBytes - totalSoFar
+		if remaining <= 0 {
+			return "", diffSkipReasonBudgetExceeded
+		}
+		if remaining < limit {
+			limit = remaining
+			truncated = true
+		}
+	}
+
+	if opts.perFileMaxBytes > 0 && opts.perFileMaxBytes < limit {
+		limit = opts.perFileMaxBytes
+		truncated = true
+	}
+
+	if truncated {
+		return diffContent[:limit], diffSkipReasonTruncated
+	}
+	return diffContent, ""
 }
 
 // GetMergeBase returns the merge-base commit SHA between two refs (e.g., HEAD and origin/main).
@@ -427,6 +536,18 @@ func (g *GitOperator) GetMergeBase(ctx context.Context, ref1, ref2 string) (stri
 	output, err := g.runGitCommand(ctx, "merge-base", ref1, ref2)
 	if err != nil {
 		return "", fmt.Errorf("failed to compute merge-base: %w", err)
+	}
+	return strings.TrimSpace(output), nil
+}
+
+// GetRevParse resolves a ref name to its commit SHA. Returns the empty
+// string when the ref doesn't exist; used as a no-common-ancestor fallback
+// for the commits panel so a base branch with unrelated history still
+// produces a stable anchor for `git log <tip>..HEAD`.
+func (g *GitOperator) GetRevParse(ctx context.Context, ref string) (string, error) {
+	output, err := g.runGitCommand(ctx, "rev-parse", ref)
+	if err != nil {
+		return "", fmt.Errorf("failed to rev-parse %q: %w", ref, err)
 	}
 	return strings.TrimSpace(output), nil
 }

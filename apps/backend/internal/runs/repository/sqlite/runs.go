@@ -2,13 +2,17 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 )
 
 // CreateRun creates a new run queue entry.
@@ -183,8 +187,10 @@ type CommentRunStatus struct {
 	ErrorMessage string
 }
 
-// GetRunsByCommentIDs returns the latest run associated with each
-// comment id by joining on idempotency_key = "task_comment:<comment_id>".
+// GetRunsByCommentIDs returns the latest run associated with each comment id.
+// The canonical same-task wake joins on idempotency_key =
+// "task_comment:<comment_id>"; salted fan-out keys join through the persisted
+// payload.comment_id so cross-task comment wakes still surface status.
 // Comments without a matching run are simply absent from the map.
 // When a comment has multiple matching rows (rare — would require the
 // idempotency window to lapse and the comment to re-trigger) the most
@@ -196,20 +202,41 @@ func (r *Repository) GetRunsByCommentIDs(
 	if len(commentIDs) == 0 {
 		return out, nil
 	}
-	keys := make([]string, len(commentIDs))
-	args := make([]interface{}, len(commentIDs))
-	placeholders := make([]string, len(commentIDs))
+	args := make([]interface{}, 0)
+	keyPlaceholders := make([]string, len(commentIDs))
+	commentPlaceholders := make([]string, len(commentIDs))
+	wanted := make(map[string]struct{}, len(commentIDs))
 	for i, id := range commentIDs {
-		keys[i] = "task_comment:" + id
-		args[i] = keys[i]
-		placeholders[i] = "?"
+		args = append(args, commentkeys.TaskComment(id))
+		keyPlaceholders[i] = "?"
+		wanted[id] = struct{}{}
 	}
+	for _, id := range commentIDs {
+		args = append(args, commentkeys.TaskComment(id))
+	}
+	args = append(args, commentkeys.TaskCommentPrefix+"%", commentkeys.TaskCommentReason)
+	for i, id := range commentIDs {
+		args = append(args, id)
+		commentPlaceholders[i] = "?"
+	}
+	commentIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "comment_id")
 	query := fmt.Sprintf(`
-		SELECT id, idempotency_key, status, error_message, requested_at
+		SELECT id, idempotency_key, status, error_message, requested_at, payload
 		FROM runs
 		WHERE idempotency_key IN (%s)
+		UNION ALL
+		SELECT id, idempotency_key, status, error_message, requested_at, payload
+		FROM runs
+		WHERE (idempotency_key IS NULL OR idempotency_key NOT IN (%s))
+		  AND (idempotency_key LIKE ? OR reason = ?)
+		  AND %s IN (%s)
 		ORDER BY requested_at DESC
-	`, strings.Join(placeholders, ","))
+	`,
+		strings.Join(keyPlaceholders, ","),
+		strings.Join(keyPlaceholders, ","),
+		commentIDExpr,
+		strings.Join(commentPlaceholders, ","),
+	)
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, err
@@ -217,13 +244,17 @@ func (r *Repository) GetRunsByCommentIDs(
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var (
-			id, idemKey, status, errMsg string
+			id, status, errMsg, payload string
+			idemKey                     sql.NullString
 			requestedAt                 time.Time
 		)
-		if err := rows.Scan(&id, &idemKey, &status, &errMsg, &requestedAt); err != nil {
+		if err := rows.Scan(&id, &idemKey, &status, &errMsg, &requestedAt, &payload); err != nil {
 			return nil, err
 		}
-		commentID := strings.TrimPrefix(idemKey, "task_comment:")
+		commentID := commentIDFromRun(idemKey.String, payload, wanted)
+		if commentID == "" {
+			continue
+		}
 		// First write wins — rows are ordered DESC so the first row per
 		// comment id is the most recent.
 		if _, ok := out[commentID]; ok {
@@ -236,6 +267,37 @@ func (r *Repository) GetRunsByCommentIDs(
 		}
 	}
 	return out, rows.Err()
+}
+
+func commentIDFromRun(idempotencyKey, payload string, wanted map[string]struct{}) string {
+	payloadID := commentIDFromPayload(payload, wanted)
+	if commentkeys.IsSaltedTaskCommentKey(idempotencyKey) && payloadID != "" {
+		return payloadID
+	}
+	if id := commentkeys.CommentIDFromKey(idempotencyKey); id != "" {
+		if _, found := wanted[id]; found {
+			return id
+		}
+	}
+	return payloadID
+}
+
+func commentIDFromPayload(payload string, wanted map[string]struct{}) string {
+	if payload == "" {
+		return ""
+	}
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(payload), &raw); err != nil {
+		return ""
+	}
+	id, ok := raw["comment_id"].(string)
+	if !ok {
+		return ""
+	}
+	if _, found := wanted[id]; !found {
+		return ""
+	}
+	return id
 }
 
 // GetClaimedTasklessRunForAgent returns the most recently claimed
@@ -305,10 +367,11 @@ func (r *Repository) CoalesceRun(
 			SELECT id FROM runs
 			WHERE agent_profile_id = ? AND reason = ? AND status = 'queued'
 			  AND requested_at > ?
+			  AND (idempotency_key IS NULL OR idempotency_key NOT LIKE ?)
 			ORDER BY requested_at DESC
 			LIMIT 1
 		)
-	`), payload, agentInstanceID, reason, cutoff)
+	`), payload, agentInstanceID, reason, cutoff, commentkeys.TaskCommentPrefix+"%")
 	if err != nil {
 		return false, err
 	}

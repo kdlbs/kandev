@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapPRFilesToChangedFiles } from "./changes-panel-helpers";
+import { buildPrByRepoMap, mapPRFilesToChangedFiles } from "./changes-panel-helpers";
 import type { PRDiffFile } from "@/lib/types/github";
 
 function diffFile(overrides: Partial<PRDiffFile>): PRDiffFile {
@@ -66,5 +66,104 @@ describe("mapPRFilesToChangedFiles", () => {
   it("returns an empty array for empty input", () => {
     expect(mapPRFilesToChangedFiles([])).toEqual([]);
     expect(mapPRFilesToChangedFiles([], "frontend")).toEqual([]);
+  });
+});
+
+describe("buildPrByRepoMap", () => {
+  it("does not copy a multi-repo TaskPR URL into the empty-key fallback", () => {
+    const map = buildPrByRepoMap(
+      [
+        { pr_url: "https://github.com/o/r/pull/1", repository_id: "id-b" },
+        { pr_url: "https://github.com/o/r/pull/2", repository_id: "id-a" },
+      ],
+      { "id-a": "repo-a", "id-b": "repo-b" },
+      undefined,
+    );
+    expect(map[""]).toBeUndefined();
+    expect(map["repo-a"]).toBe("https://github.com/o/r/pull/2");
+    expect(map["repo-b"]).toBe("https://github.com/o/r/pull/1");
+  });
+
+  it("uses empty-key fallback only for legacy TaskPR rows without repository_id", () => {
+    const map = buildPrByRepoMap(
+      [{ pr_url: "https://dev.azure.com/o/p/_git/r/pullrequest/9" }],
+      {},
+      undefined,
+    );
+    expect(map[""]).toBe("https://dev.azure.com/o/p/_git/r/pullrequest/9");
+  });
+});
+
+import { firstVisibleSection, PR_CHANGES_AUTO_EXPAND_MAX_FILES } from "./changes-panel-helpers";
+
+describe("firstVisibleSection", () => {
+  const flags = (over: Partial<Parameters<typeof firstVisibleSection>[0]>) => ({
+    hasPRFiles: false,
+    hasUnstaged: false,
+    hasStaged: false,
+    showCommitsList: false,
+    ...over,
+  });
+
+  it("returns null when nothing is shown", () => {
+    expect(firstVisibleSection(flags({}))).toBeNull();
+  });
+
+  it("review mode: PR is first when there are no local changes and few files", () => {
+    expect(
+      firstVisibleSection(
+        flags({
+          hasPRFiles: true,
+          showCommitsList: true,
+          prFileCount: PR_CHANGES_AUTO_EXPAND_MAX_FILES,
+        }),
+      ),
+    ).toBe("pr");
+  });
+
+  it("review mode: commits expand instead of PR when diff exceeds file threshold", () => {
+    expect(
+      firstVisibleSection(
+        flags({
+          hasPRFiles: true,
+          showCommitsList: true,
+          prFileCount: PR_CHANGES_AUTO_EXPAND_MAX_FILES + 1,
+        }),
+      ),
+    ).toBe("commits");
+  });
+
+  it("review mode: large PR with no commits list auto-expands nothing", () => {
+    expect(
+      firstVisibleSection(
+        flags({
+          hasPRFiles: true,
+          prFileCount: PR_CHANGES_AUTO_EXPAND_MAX_FILES + 1,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("commits is first when it is the only section", () => {
+    expect(firstVisibleSection(flags({ showCommitsList: true }))).toBe("commits");
+  });
+
+  it("unstaged wins over staged and commits", () => {
+    expect(
+      firstVisibleSection(flags({ hasUnstaged: true, hasStaged: true, showCommitsList: true })),
+    ).toBe("unstaged");
+  });
+
+  it("staged is first when there is no unstaged", () => {
+    expect(firstVisibleSection(flags({ hasStaged: true, showCommitsList: true }))).toBe("staged");
+  });
+
+  it("hybrid: local changes win over a PR (PR is not first)", () => {
+    expect(
+      firstVisibleSection(flags({ hasPRFiles: true, hasUnstaged: true, showCommitsList: true })),
+    ).toBe("unstaged");
+    expect(
+      firstVisibleSection(flags({ hasPRFiles: true, hasStaged: true, showCommitsList: true })),
+    ).toBe("staged");
   });
 });

@@ -3,6 +3,11 @@ import { executeUtilityPrompt } from "@/lib/api/domains/utility-api";
 import { listTaskSessionMessages } from "@/lib/api/domains/session-api";
 import type { Message } from "@/lib/types/http";
 
+export type SummarizeSessionResult = {
+  summary: string | null;
+  error?: string;
+};
+
 function formatTranscript(messages: Message[]): string {
   return messages
     .filter((m) => m.type === "message" || m.type === "content")
@@ -16,25 +21,32 @@ function formatTranscript(messages: Message[]): string {
 export function useSummarizeSession() {
   const [isSummarizing, setIsSummarizing] = useState(false);
 
-  const summarize = useCallback(async (sessionId: string): Promise<string | null> => {
+  const summarize = useCallback(async (sessionId: string): Promise<SummarizeSessionResult> => {
     setIsSummarizing(true);
     try {
       // Fetch messages from API — they may not be in the store for non-active sessions
       const resp = await listTaskSessionMessages(sessionId, { sort: "asc" });
       const messages = resp.messages ?? [];
-      if (!messages.length) return null;
+      if (!messages.length) return { summary: null };
 
       const transcript = formatTranscript(messages);
-      if (!transcript) return null;
+      if (!transcript) return { summary: null };
 
+      // Sessionless: handoff often runs against a completed session whose
+      // agentctl is gone. Host utility executes the builtin summarize agent.
       const result = await executeUtilityPrompt({
         utility_agent_id: "builtin-summarize-session",
-        session_id: sessionId,
         conversation_history: transcript,
       });
-      return result.success ? (result.response ?? null) : null;
-    } catch {
-      return null;
+      if (!result.success) {
+        return { summary: null, error: result.error || "Summarize utility returned no result" };
+      }
+      return { summary: result.response ?? null };
+    } catch (error) {
+      return {
+        summary: null,
+        error: error instanceof Error ? error.message : "Could not generate a summary",
+      };
     } finally {
       setIsSummarizing(false);
     }

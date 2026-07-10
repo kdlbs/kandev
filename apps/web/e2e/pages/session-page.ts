@@ -58,8 +58,29 @@ export class SessionPage {
   prMergedArchiveButton() {
     return this.page.getByTestId("pr-merged-archive-button");
   }
+  prMergedArchiveConfirmButton() {
+    return this.page.getByTestId("pr-merged-archive-confirm");
+  }
+  prMergedDismissButton() {
+    return this.page.getByTestId("pr-merged-dismiss-button");
+  }
+  prClosedBanner() {
+    return this.page.getByTestId("pr-closed-banner");
+  }
+  prClosedArchiveButton() {
+    return this.page.getByTestId("pr-closed-archive-button");
+  }
+  prClosedArchiveConfirmButton() {
+    return this.page.getByTestId("pr-closed-archive-confirm");
+  }
+  prClosedDismissButton() {
+    return this.page.getByTestId("pr-closed-dismiss-button");
+  }
+  prStatusChip() {
+    return this.activeChat().getByTestId("chat-status-bar").getByTestId("pr-status-chip");
+  }
   todoIndicator() {
-    return this.page.getByTestId("todo-indicator");
+    return this.activeChat().getByTestId("todo-indicator");
   }
   /** Span wrapper around the resume button — used to trigger tooltip on disabled state. */
   failedSessionResumeWrapper(): Locator {
@@ -82,6 +103,28 @@ export class SessionPage {
   }
 
   /**
+   * Foreground the session chat and wait for it to be visible.
+   *
+   * After the unified AppSidebar overhaul, switching tasks via the sidebar
+   * restores each task's saved dockview env layout. That restored layout can
+   * land the chat panel as a *non-active* background tab in the right-column
+   * group (e.g. behind Files/Changes), so the chat is mounted but not visible
+   * and a plain `waitForLoad()` (which gates on `session-chat:visible`) times
+   * out. Clicking the session tab brings the chat to the foreground — exactly
+   * what a user does to read the conversation after switching tasks — and then
+   * we wait for the now-visible chat. No-op (still waits) when the chat is
+   * already foregrounded.
+   */
+  async showSessionContext(timeout = 15_000): Promise<void> {
+    const tab = this.page.locator("[data-testid^='session-tab-']").first();
+    await tab.waitFor({ state: "visible", timeout });
+    // Clicking a tab that's already active is harmless; clicking a background
+    // one promotes its panel to the foreground.
+    await tab.click();
+    await this.activeChat().waitFor({ state: "visible", timeout });
+  }
+
+  /**
    * Wait for the chat to be idle (input placeholder visible, agent not busy).
    *
    * On mobile-chrome (and occasionally desktop), there's a WS subscribe race:
@@ -92,33 +135,50 @@ export class SessionPage {
    * never renders. SSR picks up the right state on the next page load, so
    * one targeted reload-and-retry is enough to recover.
    *
+   * After a backend restart, auto-resume can briefly surface the recovery
+   * prompt ("Environment setup failed"); click through it when visible.
+   *
    * This is the same race the office agent-run-live spec rides out with
    * `expect.poll`-based re-seeding.
    */
-  // opts.timeout is a soft cap on the *post-attempt* wait, not a hard cap
-  // on total elapsed time. Worst-case wall-clock is roughly
-  //   attemptTimeout + reload + activeChat-wait + remaining
-  // where `remaining` is at least `attemptTimeout` so the second wait isn't
-  // starved when `timeout - attemptTimeout` is too small. The race we're
-  // covering resolves on the reload's SSR, so the second wait normally
-  // returns in well under a second; the generous floor exists for the
-  // pathological "page didn't fully load yet" cases.
   async waitForChatIdle(opts: { timeout?: number; attemptTimeout?: number } = {}) {
     const softTotalTimeout = opts.timeout ?? 45_000;
-    const attemptTimeout = opts.attemptTimeout ?? 15_000;
-    const idle = this.idleInput();
-    try {
-      await idle.waitFor({ state: "visible", timeout: attemptTimeout });
-      return;
-    } catch {
-      // Reload once to re-SSR with the latest session state, then wait the
-      // remaining budget. If the placeholder still doesn't appear after a
-      // reload, fall through to the original error semantics.
+    const attemptTimeout =
+      opts.attemptTimeout ?? Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
+    const pollSlice = 1_500;
+    const idle = this.anyIdleInput();
+    const start = Date.now();
+    let reloaded = false;
+
+    while (Date.now() - start < softTotalTimeout) {
+      if (await idle.isVisible()) return;
+
+      const resumeButton = this.recoveryResumeButton();
+      if (await resumeButton.isVisible()) {
+        if (await resumeButton.isEnabled()) {
+          await resumeButton.click();
+        }
+        await resumeButton.waitFor({ state: "hidden", timeout: pollSlice }).catch(() => undefined);
+        continue;
+      }
+
+      const elapsed = Date.now() - start;
+      if (!reloaded && elapsed >= attemptTimeout) {
+        reloaded = true;
+        await this.page.reload();
+        await this.activeChat()
+          .waitFor({ state: "visible", timeout: attemptTimeout })
+          .catch(() => undefined);
+        continue;
+      }
+
+      const remaining = softTotalTimeout - elapsed;
+      await idle
+        .waitFor({ state: "visible", timeout: Math.min(pollSlice, remaining) })
+        .catch(() => undefined);
     }
-    await this.page.reload();
-    await this.activeChat().waitFor({ state: "visible", timeout: attemptTimeout });
-    const remaining = Math.max(attemptTimeout, softTotalTimeout - attemptTimeout);
-    await idle.waitFor({ state: "visible", timeout: remaining });
+
+    await idle.waitFor({ state: "visible", timeout: 1_000 });
   }
 
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
@@ -193,6 +253,10 @@ export class SessionPage {
     });
   }
 
+  activeSidebarTaskItem(title: string): Locator {
+    return this.sidebarTaskItem(title).and(this.sidebar.locator('[aria-current="true"]'));
+  }
+
   async openSidebarTaskContextMenu(title: string): Promise<void> {
     const taskRow = this.sidebarTaskItem(title).first();
     await taskRow.waitFor({ state: "visible" });
@@ -246,6 +310,14 @@ export class SessionPage {
     return this.page.locator('[data-placeholder="Continue working on the task..."]');
   }
 
+  /** Chat input placeholder when agent is idle in any current mode. */
+  anyIdleInput(): Locator {
+    return this.page
+      .locator('[data-placeholder="Continue working on the task..."]')
+      .or(this.page.locator('[data-placeholder="Continue working on the plan..."]'))
+      .or(this.page.locator('[data-placeholder="Continue working on the file..."]'));
+  }
+
   /** Chat input placeholder when agent is idle (plan mode). */
   planModeInput(): Locator {
     return this.page.locator('[data-placeholder="Continue working on the plan..."]');
@@ -280,6 +352,11 @@ export class SessionPage {
   /** Custom text input on the clarification overlay. */
   clarificationInput(): Locator {
     return this.page.getByTestId("clarification-input");
+  }
+
+  /** Inline Send button shown next to the custom input on touch devices. */
+  clarificationCustomSubmit(): Locator {
+    return this.page.getByTestId("clarification-custom-submit");
   }
 
   /** Deferred notice shown when agent has disconnected from clarification. */
@@ -363,7 +440,7 @@ export class SessionPage {
     return this.clarificationOverlay().getByTestId("clarification-next");
   }
 
-  /** Final "Submit answers" button (rendered only on the last step). */
+  /** Sticky "Submit" button in the overlay header (multi-question only). */
   clarificationSubmit(): Locator {
     return this.clarificationOverlay().getByTestId("clarification-submit");
   }
@@ -376,6 +453,12 @@ export class SessionPage {
   /** All "Approve" buttons for pending permission requests. */
   permissionApproveButtons(): Locator {
     return this.chat.getByTestId("permission-approve");
+  }
+
+  /** Kandev-MCP-only "Approve" buttons (excludes the generic ToolCallMessage
+   *  fallback row that may briefly duplicate the same pending_id). */
+  kandevPermissionApproveButtons(): Locator {
+    return this.chat.getByTestId("kandev-tool-permission").getByTestId("permission-approve");
   }
 
   /** Reset context button in the chat input toolbar. */
@@ -396,6 +479,16 @@ export class SessionPage {
   /** "Start fresh session" button shown after agent crash. */
   recoveryFreshButton(): Locator {
     return this.page.getByTestId("recovery-fresh-button");
+  }
+
+  /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */
+  recoveryCancelRetryButton(): Locator {
+    return this.page.getByTestId("recovery-cancel-retry-button");
+  }
+
+  /** The yellow "Provider overloaded — retrying…" status card text. */
+  transientRetryCard(): Locator {
+    return this.chat.getByText(/Provider overloaded — retrying/i);
   }
 
   /** Context reset divider shown in chat after resetting agent context. */
@@ -477,19 +570,56 @@ export class SessionPage {
     return this.page.getByTestId("pr-approve-button");
   }
 
-  // --- CI hover popover accessors (kept here so the spec stays declarative) ---
+  // --- PR CI accessors: desktop hover popover + chip + mobile chip drawer ---
 
   /** The single-PR hover popover content (visible after hovering the topbar button). */
   prTopbarPopover(): Locator {
     return this.page.getByTestId("pr-topbar-popover");
   }
 
-  /** Multi-PR aggregate popover content. */
-  prTopbarPopoverAggregate(): Locator {
-    return this.page.getByTestId("pr-topbar-popover-aggregate");
+  /** Compact PR/CI status chip rendered in the chat status bar. */
+  prStatusChip(): Locator {
+    return this.activeChat().getByTestId("chat-status-bar").getByTestId("pr-status-chip");
   }
 
-  /** A specific bucket group inside the popover by kind. */
+  /** Mobile bottom-sheet drawer that hosts the PR CI popover. */
+  prStatusChipDrawer(): Locator {
+    return this.page.getByTestId("pr-status-chip-drawer");
+  }
+
+  /** Close button inside the chip's mobile drawer. */
+  prStatusChipDrawerClose(): Locator {
+    return this.page.getByTestId("pr-status-chip-drawer-close");
+  }
+
+  /** PRCIPopover body when rendered inside the mobile chip drawer. */
+  prStatusChipPopoverInner(): Locator {
+    return this.prStatusChipDrawer().getByTestId("pr-topbar-popover-inner");
+  }
+
+  /** Tap the chip and wait for the mobile drawer to be visible. */
+  async tapPRStatusChip(): Promise<void> {
+    await this.prStatusChip().tap();
+    await expect(this.prStatusChipDrawer()).toBeVisible({ timeout: 5_000 });
+  }
+
+  /** Multi-PR aggregate popover content (segmented tabs + selected PR's CI). */
+  prTopbarPopoverAggregate(): Locator {
+    return this.page.getByTestId("pr-multi-popover");
+  }
+
+  /** A single PR tab inside the multi-PR aggregate popover, by owner + repo + PR number. */
+  prMultiPopoverTab(owner: string, repo: string, prNumber: number): Locator {
+    return this.page.getByTestId(`pr-popover-tab-${owner}-${repo}-${prNumber}`);
+  }
+
+  /**
+   * A specific bucket group inside the popover by kind.
+   *
+   * Scoped to the TOPBAR popover (`pr-topbar-popover`) — the chip's HoverCard
+   * renders the same inner content without that wrapper, so specs asserting
+   * check groups after hovering the status chip need a chip-scoped variant.
+   */
   prCheckGroup(kind: "passed" | "in_progress" | "failed"): Locator {
     return this.prTopbarPopover().locator(`[data-testid='pr-check-group'][data-kind='${kind}']`);
   }
@@ -526,6 +656,11 @@ export class SessionPage {
     return this.prTopbarPopover().getByTestId("pr-comments-row");
   }
 
+  /** Header PR-link icon (top-right corner of the popover). */
+  prPopoverPRLink(): Locator {
+    return this.prTopbarPopover().getByTestId("pr-popover-pr-link");
+  }
+
   /** Header external-link icon (top-right corner of the popover). */
   prPopoverExternalLink(): Locator {
     return this.prTopbarPopover().getByTestId("pr-popover-external-link");
@@ -555,8 +690,52 @@ export class SessionPage {
    * row inside the popover keeps the cursor in the open region).
    */
   async hoverPRTopbar(): Promise<void> {
-    await this.prTopbarButton().hover();
-    await expect(this.prTopbarPopover()).toBeVisible({ timeout: 5_000 });
+    await expect(async () => {
+      const button = this.prTopbarButton();
+      await button.scrollIntoViewIfNeeded();
+      const box = await button.boundingBox();
+      expect(box).not.toBeNull();
+      await button.focus();
+      await this.page.mouse.move(0, 0);
+      await this.page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await button.dispatchEvent("mouseover", { bubbles: true });
+      await button.dispatchEvent("mouseenter", { bubbles: false });
+      await button.dispatchEvent("mousemove", { bubbles: true });
+      await expect(this.prTopbarPopover()).toBeVisible({ timeout: 1_500 });
+    }).toPass({ timeout: 10_000 });
+  }
+
+  /**
+   * Desktop chip hover popover content. The chip's Popover renders PRCIPopover
+   * (test id `pr-topbar-popover-inner`) directly, without the topbar's
+   * `pr-topbar-popover` wrapper, so this is the chip-scoped accessor for the
+   * open hover card.
+   */
+  prChipPopover(): Locator {
+    // Scope to the visible instance: dock/mobile layouts can leave stale or
+    // hidden popover mounts in the DOM, and an unscoped getByTestId would bind
+    // to one of those and make hover assertions flaky.
+    return this.page.locator("[data-testid='pr-topbar-popover-inner']:visible").first();
+  }
+
+  /**
+   * Open the chip's hover popover by hovering the chat-status-bar CI chip.
+   * Mirrors {@link hoverPRTopbar}: moves the real cursor onto the chip and
+   * also dispatches the hover events so the open is reliable across browsers.
+   */
+  async hoverPRChip(): Promise<void> {
+    await expect(async () => {
+      const chip = this.prStatusChip();
+      await chip.scrollIntoViewIfNeeded();
+      const box = await chip.boundingBox();
+      expect(box).not.toBeNull();
+      await this.page.mouse.move(0, 0);
+      await this.page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await chip.dispatchEvent("mouseover", { bubbles: true });
+      await chip.dispatchEvent("mouseenter", { bubbles: false });
+      await chip.dispatchEvent("mousemove", { bubbles: true });
+      await expect(this.prChipPopover()).toBeVisible({ timeout: 1_500 });
+    }).toPass({ timeout: 10_000 });
   }
 
   /**
@@ -651,6 +830,44 @@ export class SessionPage {
     await this.page.locator('[data-testid^="session-tab-"]').first().click();
   }
 
+  /** Main Changes-panel button that asks the agent to create a walkthrough. */
+  changesRequestWalkthroughButton(): Locator {
+    return this.changes.getByTestId("changes-request-walkthrough");
+  }
+
+  /** Compact request button in the expanded Review Changes toolbar. */
+  reviewRequestWalkthroughButton(): Locator {
+    return this.page.getByTestId("review-request-walkthrough");
+  }
+
+  walkthroughLauncher(): Locator {
+    return this.page.getByTestId("walkthrough-launcher");
+  }
+
+  walkthroughDiscardButton(): Locator {
+    return this.page.getByTestId("walkthrough-discard");
+  }
+
+  walkthroughDiscardDialog(): Locator {
+    return this.page.getByRole("alertdialog", { name: "Discard walkthrough?" });
+  }
+
+  walkthroughFloating(): Locator {
+    return this.page.getByTestId("walkthrough-floating");
+  }
+
+  walkthroughStepHeader(): Locator {
+    return this.walkthroughFloating().getByTestId("walkthrough-step-header");
+  }
+
+  walkthroughStepBody(): Locator {
+    return this.walkthroughFloating().getByTestId("walkthrough-step-body");
+  }
+
+  walkthroughEditorRange(): Locator {
+    return this.page.getByTestId("walkthrough-editor-range");
+  }
+
   /** PR files section within the changes panel. */
   prFilesSection(): Locator {
     return this.changes.getByTestId("pr-files-section");
@@ -692,6 +909,40 @@ export class SessionPage {
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
+  }
+
+  /**
+   * Type and submit a chat message via the Send button. Mobile (touch) layouts
+   * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
+   */
+  async sendMessageViaButton(text: string) {
+    const editor = this.page.locator(".tiptap.ProseMirror").first();
+    await editor.click();
+    await editor.fill(text);
+    await this.page.getByTestId("submit-message-button").click();
+  }
+
+  /**
+   * Wait for the agent reply containing `text` at the given 0-based match
+   * `index` to be visible after a follow-up prompt. On first timeout, reload
+   * once so SSR re-fetches the persisted turn, then re-assert.
+   *
+   * This rides out the same WS-subscribe race `waitForChatIdle` handles, but
+   * for the reply message itself: a mid-session prompt's response event can be
+   * dropped when the client's WS subscription loses the race with the agent's
+   * reply (common after repeated restart/resume cycles). The reply is persisted
+   * server-side, so a single reload recovers it.
+   */
+  async expectChatResponseVisible(text: string, index = 0, opts: { timeout?: number } = {}) {
+    const timeout = opts.timeout ?? 30_000;
+    const target = () => this.chat.getByText(text, { exact: false }).nth(index);
+    try {
+      await expect(target()).toBeVisible({ timeout });
+    } catch {
+      await this.page.reload();
+      await this.waitForLoad();
+      await expect(target()).toBeVisible({ timeout });
+    }
   }
 
   /** Toggle plan mode on/off by clicking the plan mode toggle button in the toolbar.
@@ -913,24 +1164,60 @@ export class SessionPage {
     await this.newSessionMenuButton().click();
   }
 
+  /** New session or handoff dialog container. */
+  sessionLaunchDialog(): Locator {
+    return this.page.getByRole("dialog").filter({ hasText: /New agent in|Hand off to/ });
+  }
+
   /** The new session dialog container. */
   newSessionDialog(): Locator {
     return this.page.getByRole("dialog").filter({ hasText: "New agent in" });
   }
 
-  /** Prompt textarea inside the new session dialog. */
-  newSessionPromptInput(): Locator {
-    return this.newSessionDialog().locator("textarea");
+  /** Handoff dialog opened from session tab context menu. */
+  handoffDialog(): Locator {
+    return this.page.getByRole("dialog").filter({ hasText: "Hand off to" });
   }
 
-  /** Start Agent button inside the new session dialog. */
+  /** Prompt textarea inside the new session or handoff dialog. */
+  newSessionPromptInput(): Locator {
+    return this.sessionLaunchDialog().locator("textarea");
+  }
+
+  /** Start Agent button inside the new session or handoff dialog. */
   newSessionStartButton(): Locator {
-    return this.newSessionDialog().getByRole("button", { name: "Start Agent" });
+    return this.sessionLaunchDialog().getByRole("button", { name: "Start Agent" });
   }
 
   /** Environment info badges inside the new session dialog. */
   newSessionEnvironmentInfo(): Locator {
-    return this.newSessionDialog().getByText("Same environment as current session");
+    return this.sessionLaunchDialog().getByText("Same environment as current session");
+  }
+
+  /** Handoff submenu trigger in session context or actions menu. */
+  handoffSubmenu(): Locator {
+    return this.page.getByTestId("session-handoff-submenu");
+  }
+
+  /** Handoff profile item in the Handoff submenu. */
+  handoffProfileItem(profileId: string): Locator {
+    return this.page.getByTestId(`handoff-profile-${profileId}`);
+  }
+
+  /** Open handoff dialog via session tab right-click context menu. */
+  async openHandoffDialog(sessionId: string, profileId: string): Promise<void> {
+    await this.sessionTabBySessionId(sessionId).click({ button: "right" });
+    await this.handoffSubmenu().hover();
+    await this.handoffProfileItem(profileId).click();
+  }
+
+  /** Open handoff dialog via mobile session row actions menu. */
+  async openMobileHandoffDialog(sessionId: string, profileId: string): Promise<void> {
+    await this.page.getByTestId("mobile-sessions-pill").click();
+    const row = this.page.getByTestId(`mobile-session-row-${sessionId}`);
+    await row.getByRole("button", { name: "Session actions" }).click();
+    await this.handoffSubmenu().hover();
+    await this.handoffProfileItem(profileId).click();
   }
 
   /** Session tab in dockview by session label (e.g., "Session 1", "Session 2"). */
@@ -945,7 +1232,7 @@ export class SessionPage {
 
   /** All session reopen items in the + dropdown. */
   sessionReopenItems(): Locator {
-    return this.page.locator("[data-testid^='reopen-session-']");
+    return this.page.locator("[role='menuitem'][data-testid^='reopen-session-']");
   }
 
   /** All session tabs in dockview (panels using the sessionTab tab component). */
@@ -963,6 +1250,11 @@ export class SessionPage {
   /** Session tab container identified by session ID (data-testid="session-tab-{id}"). */
   sessionTabBySessionId(sessionId: string): Locator {
     return this.page.getByTestId(`session-tab-${sessionId}`);
+  }
+
+  /** Dockview close (X) button inside a session tab. */
+  sessionTabCloseButton(sessionId: string): Locator {
+    return this.page.getByTestId(`session-tab-close-${sessionId}`);
   }
 
   /** Context menu on a dockview tab — right-click the tab to trigger it. */

@@ -1,9 +1,30 @@
 import type { Repository, Task } from "@/lib/types/http";
+import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
+
+type ACPDebugInfo = {
+  sessionId: unknown;
+  title: unknown;
+  updatedAt: unknown;
+  meta: unknown;
+};
+
+function readACPDebugInfo(metadata: Record<string, unknown> | null | undefined): ACPDebugInfo {
+  const acp = metadata?.acp;
+  const acpObject =
+    acp && typeof acp === "object" && !Array.isArray(acp) ? (acp as Record<string, unknown>) : {};
+  return {
+    sessionId: acpObject.session_id ?? null,
+    title: acpObject.title ?? null,
+    updatedAt: acpObject.updated_at ?? null,
+    meta: acpObject.meta ?? null,
+  };
+}
 
 export function buildDebugEntries(params: {
   connectionStatus: string;
   task: Task | null;
   effectiveSessionId: string | null | undefined;
+  activeSessionMetadata?: Record<string, unknown> | null;
   taskSessionState: string | null;
   isAgentWorking: boolean;
   resumptionState: string;
@@ -24,6 +45,7 @@ export function buildDebugEntries(params: {
     connectionStatus,
     task,
     effectiveSessionId,
+    activeSessionMetadata,
     taskSessionState,
     isAgentWorking,
     resumptionState,
@@ -35,10 +57,15 @@ export function buildDebugEntries(params: {
     devProcessId,
     devProcessStatus,
   } = params;
+  const acp = readACPDebugInfo(activeSessionMetadata);
   return {
     ws_status: connectionStatus,
     task_id: task?.id ?? null,
     session_id: effectiveSessionId ?? null,
+    acp_session_id: acp.sessionId,
+    acp_session_title: acp.title,
+    acp_session_updated_at: acp.updatedAt,
+    acp_meta: acp.meta,
     task_state: task?.state ?? null,
     task_session_state: taskSessionState ?? null,
     is_agent_working: isAgentWorking,
@@ -77,6 +104,29 @@ export function buildArchivedValue(task: Task | null, repository: Repository | n
   };
 }
 
+export function resolveTaskContentState(params: {
+  isMounted: boolean;
+  hasTask: boolean;
+  hasTaskLoadError: boolean;
+}) {
+  if (!params.isMounted) return "loading";
+  if (params.hasTaskLoadError) return "error";
+  if (params.hasTask) return "ready";
+  return "loading";
+}
+
+export function hasResolvedTaskDetails(params: {
+  effectiveTaskId: string | null;
+  taskDetailsId?: string | null;
+  initialTaskId?: string | null;
+}) {
+  if (!params.effectiveTaskId) return false;
+  return (
+    params.taskDetailsId === params.effectiveTaskId ||
+    params.initialTaskId === params.effectiveTaskId
+  );
+}
+
 export function resolveTaskIds(task: Task | null) {
   return {
     taskId: task?.id ?? null,
@@ -90,10 +140,13 @@ export function resolveTaskIds(task: Task | null) {
 
 export function resolveTaskProps(task: Task | null, repository: Repository | null) {
   const ids = resolveTaskIds(task);
+  const issue = issueFieldsFromMetadata(task?.metadata);
   return {
     ...ids,
     taskTitle: task?.title,
     taskDescription: task?.description,
+    issueUrl: issue.issueUrl,
+    issueNumber: issue.issueNumber,
     repositoryPath: repository?.local_path ?? null,
     repositoryName: repository?.name ?? null,
     /**

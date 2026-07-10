@@ -1,6 +1,6 @@
 "use client";
 
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import { IconMoon, IconSun } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useSyncExternalStore } from "react";

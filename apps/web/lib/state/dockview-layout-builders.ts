@@ -1,44 +1,243 @@
 import type { DockviewApi, AddPanelOptions } from "dockview-react";
 import {
   SIDEBAR_LOCK,
-  SIDEBAR_GROUP,
   CENTER_GROUP,
-  LAYOUT_SIDEBAR_MAX_PX,
-  LAYOUT_RIGHT_MAX_PX,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
+  LAYOUT_PINNED_MIN_PX,
+  computeSidebarMaxPx,
+  computeRightMaxPx,
+  getPinnedWidth,
+  isCenterCandidateGroupId,
+  getRootSplitview as getRootSplitviewImpl,
   resolveGroupIds,
+  setPinnedTarget,
 } from "./layout-manager";
 import type { LayoutGroupIds } from "./layout-manager";
+import { getGlobalSidebarWidth } from "@/lib/local-storage";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 // Re-export for consumers that import from this module
 export { getRootSplitview } from "./layout-manager";
 
-/** After fromJSON() restores a session layout, apply fixups and return group IDs. */
-export function applyLayoutFixups(api: DockviewApi): LayoutGroupIds {
-  const sb = api.getPanel("sidebar");
-  if (sb) {
-    sb.group.locked = SIDEBAR_LOCK;
-    sb.group.header.hidden = false;
-    sb.group.api.setConstraints({ maximumWidth: LAYOUT_SIDEBAR_MAX_PX });
+const debugWidths = createDebugLogger("dockview:widths");
+
+/** Dockview's measured grid width, or undefined when not yet laid out — passed
+ *  to the cap helpers so they don't fall back to a possibly-stale
+ *  `window.innerWidth`. */
+function layoutWidth(api: DockviewApi): number | undefined {
+  return api.width > 0 ? api.width : undefined;
+}
+
+/** Best-effort caller chain for the fixups-capture debug log: pull the first
+ *  few stack frames above `applyLayoutFixups` so we can see WHICH layout path
+ *  (env-switch / restore / custom-layout / maximize) recorded a given target.
+ *  Debug-only — never called when isDebug() is false. */
+const CALLER_CHAIN_SKIP = new Set(["captureCallerChain", "applyLayoutFixups", "logFixupsCapture"]);
+
+function captureCallerChain(): string {
+  const stack = new Error().stack;
+  if (!stack) return "-";
+  const lines = stack.split("\n").slice(1);
+  const frames: string[] = [];
+  for (const line of lines) {
+    const m = /at (\S+)/.exec(line);
+    const name = m?.[1] ?? "";
+    if (!name || CALLER_CHAIN_SKIP.has(name)) continue;
+    const short = name.split(".").pop() ?? name;
+    frames.push(short);
+    if (frames.length >= 3) break;
   }
+  return frames.join("<") || "-";
+}
+
+/** After fromJSON() restores a session layout, apply fixups and return group IDs.
+ *
+ *  Apply loose runtime caps so the user can drag freely; the just-restored
+ *  widths become the new pinned targets, and `enforcePinnedTargets` restores
+ *  the column to that target on every subsequent rebalance. */
+export function applyLayoutFixups(api: DockviewApi, savedRightWidth?: number): LayoutGroupIds {
+  const sv = getRootSplitviewImpl(api);
+  captureSidebarTarget(api, sv);
 
   const oldChanges = api.getPanel("diff-files");
   if (oldChanges) oldChanges.api.setTitle("Changes");
   const oldFiles = api.getPanel("all-files");
   if (oldFiles) oldFiles.api.setTitle("Files");
 
-  // Constrain right column groups by their well-known IDs.
-  // Groups created from presets carry stable IDs (e.g. "group-right-top"),
-  // so this works regardless of which panels are in them.
+  captureRightTarget(api, sv, savedRightWidth);
+
+  logFixupsCapture(api, sv);
+
+  return resolveGroupIds(api);
+}
+
+/** Resolve the sidebar's target width (clamped to the cap): the GLOBAL width
+ *  pref when set, else the default width for the current measured layout. */
+function resolveSidebarTarget(cap: number, totalWidth: number | undefined): number | undefined {
+  const pref = getGlobalSidebarWidth();
+  if (pref !== null) return Math.min(pref, cap);
+  const width =
+    totalWidth ??
+    (typeof window !== "undefined" && window.innerWidth > 0 ? window.innerWidth : cap);
+  return Math.min(
+    getPinnedWidth({ id: "sidebar", pinned: true, groups: [] }, width, undefined),
+    cap,
+  );
+}
+
+/** Lock + constrain the sidebar group and record its target width, clamped to
+ *  the cap. The constraint pins the column at `sidebarCap`, so a target above
+ *  it is unreachable and makes `enforcePinnedTargets` spin forever. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function captureSidebarTarget(api: DockviewApi, sv: any): void {
+  const sb = api.getPanel("sidebar");
+  if (!sb) return;
+  // Derive the cap from dockview's measured grid width, not the implicit
+  // window.innerWidth fallback: innerWidth can read transiently stale during
+  // route transitions / devtools toggles, yielding a too-small cap that would
+  // clamp the captured target too narrow and persist it — the width drift this
+  // pipeline exists to prevent.
+  const measuredWidth = layoutWidth(api);
+  const sidebarCap = computeSidebarMaxPx(measuredWidth);
+  sb.group.locked = SIDEBAR_LOCK;
+  sb.group.header.hidden = false;
+  sb.group.api.setConstraints({ maximumWidth: sidebarCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
+  // Slow-path env restore: fromJSON brought back this env's saved sidebar
+  // pixel width, but the sidebar is a GLOBAL pref. Seed the target from the
+  // pref (clamped to fit) and resize the column so the restore honors it; fall
+  // back to the default sidebar width when no pref exists.
+  const target = resolveSidebarTarget(sidebarCap, measuredWidth);
+  if (target !== undefined) {
+    const cur = sv?.getViewSize?.(0);
+    if (typeof cur === "number" && cur > 0 && Math.abs(cur - target) > 1) {
+      try {
+        sv?.resizeView?.(0, target);
+      } catch {
+        /* dockview rejects unreachable sizes — ignore */
+      }
+    }
+    setPinnedTarget("sidebar", target);
+  }
+}
+
+/** Resolve the pinned right column's target width (clamped to the cap): the
+ *  per-env SAVED width when the restore supplies one, else the column default
+ *  for the current measured layout. Never the live splitview size — see
+ *  `captureRightTarget`. */
+function resolveRightTarget(
+  cap: number,
+  totalWidth: number | undefined,
+  savedRightWidth: number | undefined,
+): number {
+  if (savedRightWidth !== undefined && savedRightWidth > 0) return Math.min(savedRightWidth, cap);
+  const width =
+    totalWidth ??
+    (typeof window !== "undefined" && window.innerWidth > 0 ? window.innerWidth : cap);
+  return Math.min(getPinnedWidth({ id: "right", pinned: true, groups: [] }, width, undefined), cap);
+}
+
+/** Constrain the default layout's right column groups and record the side
+ *  column's target width, clamped to the cap.
+ *
+ *  For the DEFAULT preset (the right column is pinned — identified by the
+ *  well-known RIGHT_TOP_GROUP), the target is anchored to a STABLE width: the
+ *  per-env saved width passed by the restore, or the column default when none.
+ *  It is deliberately NOT read from the live splitview: dockview's
+ *  post-`fromJSON` proportional rebalance reports a transient/rescaled size,
+ *  and persisting that as the target ratcheted the right column wider on every
+ *  restore (the dockview-wrong-width drift). The sidebar is handled the same
+ *  way in `captureSidebarTarget` — neither pinned column captures its live size.
+ *
+ *  For the vscode/preview/plan presets the side column has a generated group id
+ *  and is NOT pinned, so there is no saved/default width to fall back on; there
+ *  we keep recording the just-restored live width so switching to one of those
+ *  tasks doesn't leak the previous task's right target. Identified by
+ *  `sv.length >= 3` (sidebar + center + side), since we have no stable group id
+ *  to key off.
+ *
+ *  The default-preset branch runs regardless of column count: a task with the
+ *  sidebar hidden has sv.length=2 but the LAST child IS the pinned right
+ *  column. Without per-env capture there, the stale global right target from a
+ *  previous task's drag leaks through `enforcePinnedTargets` and snaps the
+ *  restored column to the wrong width (per-task width persistence bug).
+ *
+ *  The 2-column global-fallback restore (sidebar + center, right panels
+ *  stripped) is excluded because neither right group exists in `api.groups`
+ *  and `sv.length < 3` — its last splitview child is the CENTER column. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function captureRightTarget(api: DockviewApi, sv: any, savedRightWidth?: number): void {
+  // Constrain the default preset's right column groups (stable well-known IDs).
+  // Other presets' side columns aren't pinned and carry no max-width cap.
+  // Use the measured grid width, not the window.innerWidth fallback (see
+  // captureSidebarTarget).
+  const measuredWidth = layoutWidth(api);
+  const rightCap = computeRightMaxPx(measuredWidth);
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((g) => g.id === gid);
     if (group) {
-      group.api.setConstraints({ maximumWidth: LAYOUT_RIGHT_MAX_PX });
+      group.api.setConstraints({ maximumWidth: rightCap, minimumWidth: LAYOUT_PINNED_MIN_PX });
     }
   }
+  if (!sv || sv.length < 2) return;
+  const idx = sv.length - 1;
+  // Default preset (pinned right column): anchor to saved-or-default, resize the
+  // column to it, and record it as the target. Never the live size. Works for
+  // both 3-column (sidebar+center+right) and 2-column (center+right, sidebar
+  // hidden) layouts since the right column is always at sv.length-1.
+  if (api.groups.some((g) => g.id === RIGHT_TOP_GROUP || g.id === RIGHT_BOTTOM_GROUP)) {
+    const target = resolveRightTarget(rightCap, measuredWidth, savedRightWidth);
+    const cur = sv.getViewSize(idx);
+    if (typeof cur === "number" && cur > 0 && Math.abs(cur - target) > 1) {
+      try {
+        sv?.resizeView?.(idx, target);
+      } catch {
+        /* dockview rejects unreachable sizes — ignore */
+      }
+    }
+    setPinnedTarget("right", target);
+    return;
+  }
+  // Non-default presets (vscode/preview/plan): side column has a generated
+  // group id, so we need `sv.length >= 3` to know the last splitview child is
+  // the side column (not the center in a 2-column fallback).
+  if (sv.length < 3) return;
+  const liveRight = sv.getViewSize(idx);
+  if (typeof liveRight === "number" && liveRight > 0) {
+    setPinnedTarget("right", Math.min(liveRight, rightCap));
+  }
+}
 
-  return resolveGroupIds(api);
+/** Emit the `fixups-capture` width snapshot. Pulled out of `applyLayoutFixups`
+ *  to keep that function under the complexity limit; no-op in prod. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function logFixupsCapture(api: DockviewApi, sv: any): void {
+  if (!isDebug()) return;
+  // Decisive fields: `sidebarOverCap=true` means the recorded target exceeds
+  // the cap that enforcement clamps the column to — i.e. an unreachable target
+  // that makes `enforcePinnedTargets` spin forever. `cols` shows whether the
+  // layout was complete at capture (cols<3 → no real right column). api.width
+  // vs window.innerWidth surfaces the window-fallback cap divergence.
+  const w = layoutWidth(api);
+  const sidebarCap = computeSidebarMaxPx(w);
+  const innerW = typeof window !== "undefined" ? window.innerWidth : -1;
+  const liveSidebar = sv?.getViewSize?.(0);
+  // A 2-column layout's last child is the right column only when the pinned
+  // right groups exist (default preset, sidebar hidden); otherwise it's the
+  // center (global-fallback restore). Mirrors captureRightTarget.
+  const hasPinnedRight = api.groups.some(
+    (g) => g.id === RIGHT_TOP_GROUP || g.id === RIGHT_BOTTOM_GROUP,
+  );
+  const rightIdxIsRight = sv && (sv.length >= 3 || (sv.length === 2 && hasPinnedRight));
+  const liveRight = rightIdxIsRight ? sv.getViewSize(sv.length - 1) : undefined;
+  const r = (n: number | undefined): string =>
+    typeof n === "number" ? String(Math.round(n)) : "-";
+  debugWidths(
+    `fixups-capture caller=${captureCallerChain()} apiW=${api.width} innerW=${innerW} ` +
+      `cols=${sv?.length ?? 0} sidebarCap=${Math.round(sidebarCap)} liveSidebar=${r(liveSidebar)} ` +
+      `rightCap=${Math.round(computeRightMaxPx(w))} liveRight=${r(liveRight)} ` +
+      `sidebarOverCap=${typeof liveSidebar === "number" && liveSidebar > sidebarCap + 1}`,
+  );
 }
 
 /**
@@ -62,14 +261,14 @@ export function fallbackGroupPosition(api: DockviewApi): { referenceGroup: strin
   if (centerGroup) return { referenceGroup: centerGroup.id };
 
   const chatGroupId = api.getPanel("chat")?.group?.id;
-  if (chatGroupId) return { referenceGroup: chatGroupId };
+  if (chatGroupId && isCenterCandidateGroupId(chatGroupId)) return { referenceGroup: chatGroupId };
 
   const sessionGroupId = api.panels.find((p) => p.id.startsWith("session:"))?.group?.id;
-  if (sessionGroupId) return { referenceGroup: sessionGroupId };
+  if (sessionGroupId && isCenterCandidateGroupId(sessionGroupId)) {
+    return { referenceGroup: sessionGroupId };
+  }
 
-  const centerish = api.groups.find(
-    (g) => g.id !== SIDEBAR_GROUP && g.id !== RIGHT_TOP_GROUP && g.id !== RIGHT_BOTTOM_GROUP,
-  );
+  const centerish = api.groups.find((g) => isCenterCandidateGroupId(g.id));
   if (centerish) return { referenceGroup: centerish.id };
 
   return undefined;

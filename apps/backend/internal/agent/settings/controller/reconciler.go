@@ -146,6 +146,29 @@ func (r *ProfileReconciler) reconcileAgent(ctx context.Context, ag agents.Agent)
 	}
 
 	if len(profiles) == 0 {
+		// Only seed for an agent that has never been provisioned. Soft-deleted
+		// rows mean the profile(s) were deliberately removed, so re-seeding
+		// would resurrect them on every boot (the bug this guards).
+		//
+		// A soft-deleted row here implies a *user* deletion, not system orphan
+		// cleanup: cleanupOrphans is the only system path that soft-deletes
+		// profiles, and it acts solely on agents absent from ListEnabled(),
+		// whereas reconcileAgent runs only for ListInferenceAgents(). Both gate
+		// on Enabled(), so the sets are disjoint — an enabled, reconciled agent
+		// is never orphan-cleaned. (If Enabled() ever becomes dynamic, revisit:
+		// a re-enabled agent reuses its DB id via ensureDBAgent and would then
+		// see its orphan-cleaned rows here.)
+		hadProfiles, err := r.store.HasDeletedAgentProfiles(ctx, dbAgent.ID)
+		if err != nil {
+			r.log.Warn("reconcile: check deleted profiles failed",
+				zap.String("agent_id", agentType), zap.Error(err))
+			return
+		}
+		if hadProfiles {
+			r.log.Debug("skipping seed: agent has user-deleted profiles",
+				zap.String("agent_id", agentType))
+			return
+		}
 		r.seedDefaultProfile(ctx, ag, dbAgent, caps)
 		return
 	}

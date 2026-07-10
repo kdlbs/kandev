@@ -48,6 +48,18 @@ func (f *fakeWSGroupRepo) GetWorkspaceGroup(_ context.Context, id string) (*orch
 	return f.groups[id], nil
 }
 
+func (f *fakeWSGroupRepo) ListWorkspaceGroupsByWorkspace(_ context.Context, workspaceID string) ([]*orchmodels.WorkspaceGroup, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []*orchmodels.WorkspaceGroup{}
+	for _, g := range f.groups {
+		if g.WorkspaceID == workspaceID {
+			out = append(out, g)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeWSGroupRepo) GetWorkspaceGroupForTask(_ context.Context, taskID string) (*orchmodels.WorkspaceGroup, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -225,6 +237,18 @@ func (f *fakeTaskRepo) GetTask(_ context.Context, id string) (*models.Task, erro
 	return f.tasks[id], nil
 }
 
+func (f *fakeTaskRepo) GetTasksByIDs(_ context.Context, ids []string) ([]*models.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*models.Task
+	for _, id := range ids {
+		if t, ok := f.tasks[id]; ok {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeTaskRepo) ListChildren(_ context.Context, parentID string) ([]*models.Task, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -235,6 +259,26 @@ func (f *fakeTaskRepo) ListChildren(_ context.Context, parentID string) ([]*mode
 		}
 	}
 	return out, nil
+}
+
+// ReparentDirectChildren mirrors the sqlite impl: every child of
+// oldParentID is updated to point at newParentID. Used by the
+// no-cascade delete tests to verify children are orphaned to root
+// rather than left dangling.
+func (f *fakeTaskRepo) ReparentDirectChildren(_ context.Context, oldParentID, newParentID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ids := f.children[oldParentID]
+	delete(f.children, oldParentID)
+	for _, id := range ids {
+		if t, ok := f.tasks[id]; ok {
+			t.ParentID = newParentID
+		}
+		if newParentID != "" {
+			f.children[newParentID] = append(f.children[newParentID], id)
+		}
+	}
+	return nil
 }
 
 func (f *fakeTaskRepo) ListChildrenIncludingArchived(_ context.Context, parentID string) ([]*models.Task, error) {
@@ -271,11 +315,17 @@ type phase4TaskRepo struct {
 func (r *phase4TaskRepo) GetTask(ctx context.Context, id string) (*models.Task, error) {
 	return r.base.GetTask(ctx, id)
 }
+func (r *phase4TaskRepo) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	return r.base.GetTasksByIDs(ctx, ids)
+}
 func (r *phase4TaskRepo) ListChildren(ctx context.Context, parentID string) ([]*models.Task, error) {
 	return r.base.ListChildren(ctx, parentID)
 }
 func (r *phase4TaskRepo) ListChildrenIncludingArchived(ctx context.Context, parentID string) ([]*models.Task, error) {
 	return r.base.ListChildrenIncludingArchived(ctx, parentID)
+}
+func (r *phase4TaskRepo) ReparentDirectChildren(ctx context.Context, oldParentID, newParentID string) error {
+	return r.base.ReparentDirectChildren(ctx, oldParentID, newParentID)
 }
 
 // All other TaskRepository methods panic — the AttachWorkspacePolicy
@@ -303,7 +353,7 @@ func (r *phase4TaskRepo) ListTasks(context.Context, string) ([]*models.Task, err
 	r.panicNotUsed("ListTasks")
 	return nil, nil
 }
-func (r *phase4TaskRepo) ListTasksByWorkspace(context.Context, string, string, string, string, int, int, bool, bool, bool, bool) ([]*models.Task, int, error) {
+func (r *phase4TaskRepo) ListTasksByWorkspace(context.Context, string, string, string, string, int, int, string, bool, bool, bool, bool) ([]*models.Task, int, error) {
 	r.panicNotUsed("ListTasksByWorkspace")
 	return nil, 0, nil
 }
@@ -325,9 +375,25 @@ func (r *phase4TaskRepo) ListTasksForAutoArchive(context.Context) ([]*models.Tas
 	r.panicNotUsed("ListTasksForAutoArchive")
 	return nil, nil
 }
+func (r *phase4TaskRepo) ListExpiredQuickChatTasks(context.Context, time.Time) ([]*models.Task, error) {
+	r.panicNotUsed("ListExpiredQuickChatTasks")
+	return nil, nil
+}
+func (r *phase4TaskRepo) DeleteExpiredQuickChatTask(context.Context, string, time.Time) (bool, error) {
+	r.panicNotUsed("DeleteExpiredQuickChatTask")
+	return false, nil
+}
+func (r *phase4TaskRepo) CountOpenWatcherCreatedTasks(context.Context, string, string) (int, error) {
+	r.panicNotUsed("CountOpenWatcherCreatedTasks")
+	return 0, nil
+}
 func (r *phase4TaskRepo) UpdateTaskState(context.Context, string, v1.TaskState) error {
 	r.panicNotUsed("UpdateTaskState")
 	return nil
+}
+func (r *phase4TaskRepo) UpdateTaskStateIfCurrentIn(context.Context, string, v1.TaskState, []v1.TaskState) (v1.TaskState, bool, error) {
+	r.panicNotUsed("UpdateTaskStateIfCurrentIn")
+	return "", false, nil
 }
 func (r *phase4TaskRepo) CountTasksByWorkflow(context.Context, string) (int, error) {
 	r.panicNotUsed("CountTasksByWorkflow")

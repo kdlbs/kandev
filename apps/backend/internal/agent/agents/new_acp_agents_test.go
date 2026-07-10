@@ -28,6 +28,8 @@ type acpAgentSpec struct {
 	inferenceArgv   []string // InferenceConfig.Command
 	passthroughArgv []string // PassthroughCmd (zero-args allowed)
 	installViaNpm   bool     // InstallScript starts with "npm install -g"
+	installScript   string   // expected InstallScript() value (empty = unchecked)
+	stripEnv        []string // expected Runtime().StripEnv (nil = unchecked)
 }
 
 var newACPAgentSpecs = []struct {
@@ -75,6 +77,16 @@ var newACPAgentSpecs = []struct {
 		inferenceArgv:   []string{"cursor-agent", "acp"},
 		passthroughArgv: []string{"cursor-agent"},
 		installViaNpm:   false,
+		// Multi-line installer: pulls the script to a tempfile, executes it,
+		// then exports + persists PATH so subsequent prepare-script steps see
+		// cursor-agent. Matches the script in CursorACP.InstallScript().
+		installScript: `set -e
+tmp="$(mktemp)"
+curl -fsS https://cursor.com/install -o "$tmp"
+bash "$tmp"
+rm -f "$tmp"
+export PATH="$HOME/.local/bin:$PATH"
+grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"`,
 	}},
 	{func() Agent { return NewKimiACP() }, acpAgentSpec{
 		id: "kimi-acp", displayName: "Kimi", detectBinaries: []string{"kimi"},
@@ -103,6 +115,21 @@ var newACPAgentSpecs = []struct {
 		inferenceArgv:   []string{"traecli", "acp", "serve"},
 		passthroughArgv: []string{"traecli"},
 		installViaNpm:   false,
+	}},
+	{func() Agent { return NewOmpACP() }, acpAgentSpec{
+		id: "omp-acp", displayName: "omp", detectBinaries: []string{"omp"},
+		expectedArgv:    []string{"omp", "acp"},
+		inferenceArgv:   []string{"omp", "acp"},
+		passthroughArgv: []string{"omp"},
+		installViaNpm:   false,
+	}},
+	{func() Agent { return NewDevinACP() }, acpAgentSpec{
+		id: "devin-acp", displayName: "Devin", detectBinaries: []string{"devin"},
+		expectedArgv:    []string{"devin", "acp"},
+		inferenceArgv:   []string{"devin", "acp"},
+		passthroughArgv: []string{"devin"},
+		installViaNpm:   false,
+		stripEnv:        []string{"ACP_BACKEND"},
 	}},
 }
 
@@ -142,6 +169,14 @@ func TestNewACPAgents_AllCommandSurfaces(t *testing.T) {
 			}
 			assertArgvEqual(t, "Runtime.Cmd", rt.Cmd.Args(), tc.spec.expectedArgv)
 
+			// RuntimeConfig.StripEnv is the single source of truth for the
+			// persistent session path; inference derives from it separately.
+			if tc.spec.stripEnv != nil {
+				if !slices.Equal(rt.StripEnv, tc.spec.stripEnv) {
+					t.Errorf("Runtime.StripEnv = %v, want %v", rt.StripEnv, tc.spec.stripEnv)
+				}
+			}
+
 			ia, ok := ag.(InferenceAgent)
 			if !ok {
 				t.Fatalf("%s does not implement InferenceAgent", tc.spec.id)
@@ -172,6 +207,9 @@ func TestNewACPAgents_InstallScript(t *testing.T) {
 			}
 			if !tc.spec.installViaNpm && hasNpm {
 				t.Errorf("InstallScript() should NOT use npm for native-binary agent: %q", got)
+			}
+			if tc.spec.installScript != "" && got != tc.spec.installScript {
+				t.Errorf("InstallScript() = %q, want %q", got, tc.spec.installScript)
 			}
 			// The primary detection binary must be referenced somewhere
 			// actionable — either argv (native binaries) or InstallScript

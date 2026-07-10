@@ -12,9 +12,44 @@ import type {
   McpServerDef,
   PermissionSetting,
   ModelConfig,
+  ProfileEnvVar,
 } from "@/lib/types/http";
-import { permissionsToProfilePatch, arePermissionsDirty } from "@/lib/agent-permissions";
+import { arePermissionsDirty, permissionsToProfilePatch } from "@/lib/agent-permissions";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
+import { areConfigOptionsEqual } from "@/lib/config-options";
+import type { ProfileFormData } from "@/components/settings/profile-form-fields";
+
+/**
+ * Translates a ProfileFormData patch (snake_case form keys) into a
+ * Partial<AgentProfile> (camelCase). Profiles in client state use the
+ * canonical camelCase AgentProfile shape, so without this translation
+ * patches like { cli_passthrough: true } would land as a new snake_case
+ * key and the camelCase reader would never see them.
+ */
+export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<AgentProfile> {
+  const next: Partial<AgentProfile> = {};
+  if (patch.name !== undefined) next.name = patch.name;
+  if (patch.model !== undefined) next.model = patch.model;
+  if (patch.mode !== undefined) next.mode = patch.mode;
+  if (patch.config_options !== undefined) next.configOptions = patch.config_options;
+  if (patch.allow_indexing !== undefined) next.allowIndexing = patch.allow_indexing;
+  if (patch.auto_approve !== undefined) next.autoApprove = patch.auto_approve;
+  if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
+  if (patch.cli_flags !== undefined) next.cliFlags = patch.cli_flags;
+  return next;
+}
+
+function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  return left.every(
+    (ev, i) =>
+      ev.key === right[i]?.key &&
+      (ev.value ?? "") === (right[i]?.value ?? "") &&
+      (ev.secret_id ?? "") === (right[i]?.secret_id ?? ""),
+  );
+}
 
 type DraftMcpConfig = {
   enabled: boolean;
@@ -35,6 +70,7 @@ type DraftMcpConfig = {
  */
 export type DraftProfile = AgentProfile & {
   allow_indexing?: boolean;
+  auto_approve?: boolean;
   isNew?: boolean;
   mcp_config?: DraftMcpConfig;
 };
@@ -135,9 +171,11 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       name: profile.name,
       model: profile.model,
       mode: profile.mode,
+      config_options: profile.configOptions ?? {},
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cliPassthrough ?? false,
       cli_flags: profile.cliFlags ?? [],
+      env_vars: profile.envVars ?? [],
     })),
   });
 
@@ -189,9 +227,11 @@ async function saveExistingProfiles(
         name: profile.name,
         model: profile.model,
         mode: profile.mode,
+        config_options: profile.configOptions ?? {},
         ...permissionsToProfilePatch(profile),
         cli_passthrough: profile.cliPassthrough ?? false,
         cli_flags: profile.cliFlags ?? [],
+        env_vars: profile.envVars ?? [],
       });
       await saveMcpForProfile({
         draftProfile: profile,
@@ -206,9 +246,11 @@ async function saveExistingProfiles(
         name: profile.name,
         model: profile.model,
         mode: profile.mode,
+        config_options: profile.configOptions ?? {},
         ...permissionsToProfilePatch(profile),
         cli_passthrough: profile.cliPassthrough ?? false,
         cli_flags: profile.cliFlags ?? [],
+        env_vars: profile.envVars ?? [],
       });
       nextProfiles.push(updatedProfile);
       continue;
@@ -268,14 +310,14 @@ export async function saveExistingAgent(
 
 export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boolean {
   if (!saved) return true;
-  const draftAllow = draft.allow_indexing ?? draft.allowIndexing ?? false;
-  const savedAllow = saved.allowIndexing ?? false;
   return (
     draft.name !== saved.name ||
     draft.model !== saved.model ||
     (draft.mode ?? "") !== (saved.mode ?? "") ||
-    arePermissionsDirty({ allow_indexing: draftAllow }, { allow_indexing: savedAllow }) ||
+    !areConfigOptionsEqual(draft.configOptions, saved.configOptions) ||
+    arePermissionsDirty(draft, saved) ||
     draft.cliPassthrough !== saved.cliPassthrough ||
-    !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? [])
+    !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? []) ||
+    !areEnvVarsEqual(draft.envVars, saved.envVars)
   );
 }

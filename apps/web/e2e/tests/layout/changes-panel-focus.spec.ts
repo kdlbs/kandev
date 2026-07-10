@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { SessionPage } from "../../pages/session-page";
 import { makeGitEnv } from "../../helpers/git-helper";
 import fs from "node:fs";
@@ -27,6 +28,141 @@ class GitHelper {
   commit(message: string) {
     this.exec(`git commit -m "${message}"`);
   }
+}
+
+function changesTab(testPage: Page) {
+  return testPage.locator(".dv-tab:visible", {
+    has: testPage.locator(".dv-default-tab:visible").filter({ hasText: /^Changes/ }),
+  });
+}
+
+async function changesCountForSession(testPage: Page, sessionId: string): Promise<number | null> {
+  return testPage.evaluate((sid) => {
+    type StoreWindow = Window & {
+      __KANDEV_E2E_STORE__?: {
+        getState: () => {
+          environmentIdBySessionId: Record<string, string>;
+          gitStatus: {
+            byEnvironmentRepo: Record<string, Record<string, { files?: Record<string, unknown> }>>;
+          };
+          sessionCommits: { byEnvironmentId: Record<string, unknown[]> };
+        };
+      };
+    };
+    const store = (window as StoreWindow).__KANDEV_E2E_STORE__;
+    if (!store) throw new Error("E2E store bridge missing");
+    const state = store.getState();
+    const envKey = state.environmentIdBySessionId[sid] ?? sid;
+    const hasRepoStatuses = envKey in state.gitStatus.byEnvironmentRepo;
+    const hasCommits = envKey in state.sessionCommits.byEnvironmentId;
+    if (!hasRepoStatuses && !hasCommits) return null;
+    const repoStatuses = state.gitStatus.byEnvironmentRepo[envKey] ?? {};
+    // Keep this count in sync with selectChangesMarkerByEnvironment.
+    let count = state.sessionCommits.byEnvironmentId[envKey]?.length ?? 0;
+    for (const status of Object.values(repoStatuses)) {
+      count += Object.keys(status.files ?? {}).length;
+    }
+    return count;
+  }, sessionId);
+}
+
+async function setGitStatusForSession(testPage: Page, sessionId: string, changedFiles: string[]) {
+  await testPage.evaluate(
+    ({ sid, files }) => {
+      type FileInfo = {
+        path: string;
+        status: "modified" | "added" | "deleted" | "untracked" | "renamed";
+        staged: boolean;
+        additions?: number;
+        deletions?: number;
+      };
+      type StoreWindow = Window & {
+        __KANDEV_E2E_STORE__?: {
+          getState: () => {
+            setGitStatus: (
+              sessionId: string,
+              status: {
+                branch: string;
+                remote_branch: string | null;
+                modified: string[];
+                added: string[];
+                deleted: string[];
+                untracked: string[];
+                renamed: string[];
+                ahead: number;
+                behind: number;
+                files: Record<string, FileInfo>;
+                timestamp: string;
+              },
+            ) => boolean;
+          };
+        };
+      };
+      const store = (window as StoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) throw new Error("E2E store bridge missing");
+      const fileMap = Object.fromEntries(
+        files.map((path): [string, FileInfo] => [
+          path,
+          { path, status: "untracked", staged: false, additions: 1, deletions: 0 },
+        ]),
+      );
+      store.getState().setGitStatus(sid, {
+        branch: "main",
+        remote_branch: null,
+        modified: [],
+        added: [],
+        deleted: [],
+        untracked: files,
+        renamed: [],
+        ahead: 0,
+        behind: 0,
+        files: fileMap,
+        timestamp: new Date().toISOString(),
+      });
+    },
+    { sid: sessionId, files: changedFiles },
+  );
+}
+
+async function moveChangesToTerminalGroupAndFocusTerminal(testPage: Page) {
+  await testPage.evaluate(() => {
+    type Group = { id: string };
+    type PanelApi = {
+      moveTo: (opts: { group: Group }) => void;
+      setActive: () => void;
+    };
+    type Panel = { id: string; api: PanelApi; group?: Group };
+    type Api = { getPanel: (id: string) => Panel | undefined };
+    const dockview = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+    const changes = dockview?.getPanel("changes");
+    const terminal = dockview?.getPanel("terminal-default");
+    if (!changes || !terminal?.group) {
+      throw new Error("Dockview changes or terminal panel was not available");
+    }
+    changes.api.moveTo({ group: terminal.group });
+    terminal.api.setActive();
+  });
+}
+
+async function moveChangesToChatGroupAndFocusChat(testPage: Page) {
+  await testPage.evaluate(() => {
+    type Group = { id: string };
+    type PanelApi = {
+      moveTo: (opts: { group: Group }) => void;
+      setActive: () => void;
+    };
+    type Panel = { id: string; api: PanelApi; group?: Group };
+    type Api = { panels: Panel[]; getPanel: (id: string) => Panel | undefined };
+    const dockview = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+    const changes = dockview?.getPanel("changes");
+    const chat =
+      dockview?.getPanel("chat") ?? dockview?.panels.find((p) => p.id.startsWith("session:"));
+    if (!changes || !chat?.group) {
+      throw new Error("Dockview changes or chat panel was not available");
+    }
+    changes.api.moveTo({ group: chat.group });
+    chat.api.setActive();
+  });
 }
 
 test.describe("Changes panel focus behavior", () => {
@@ -65,7 +201,7 @@ test.describe("Changes panel focus behavior", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Create a file and commit so there are existing changes
     git.createFile("test-file.txt", "hello world");
@@ -99,12 +235,7 @@ test.describe("Changes panel focus behavior", () => {
     await expect(session.chat).toBeVisible({ timeout: 5_000 });
   });
 
-  /**
-   * Verifies the changes panel does NOT auto-focus when it is in the center
-   * group (e.g. plan mode layout). Even when new changes appear, the chat
-   * panel should stay focused.
-   */
-  test("changes panel does not auto-focus when in center group", async ({
+  test("changes panel does not auto-focus when grouped with agent session panels", async ({
     testPage,
     apiClient,
     seedData,
@@ -129,18 +260,14 @@ test.describe("Changes panel focus behavior", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady();
 
-    // Toggle plan mode — this moves changes into the center group
-    await session.togglePlanMode();
-    await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
+    await moveChangesToChatGroupAndFocusChat(testPage);
     await expect(session.chat).toBeVisible();
 
-    // Verify the chat/session tab is active, not changes
-    const changesTab = testPage.locator(".dv-default-tab:has-text('Changes')");
-    await expect(changesTab).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
 
-    // Create new changes — this would previously trigger auto-activate
     git.createFile("new-file.txt", "new content");
     git.stageAll();
     git.commit("new commit");
@@ -153,10 +280,108 @@ test.describe("Changes panel focus behavior", () => {
     // Wait a bit for any async auto-activate to fire
     await testPage.waitForTimeout(2_000);
 
-    // Changes tab should NOT have stolen focus
-    await expect(changesTab).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
 
-    // Chat should still be visible (active)
     await expect(session.chat).toBeVisible();
+  });
+
+  test("new git updates focus the changes tab in its current non-agent group", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(90_000);
+
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    const git = new GitHelper(repoDir, gitEnv);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Moved changes panel focus test",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady();
+
+    git.createFile("first-change.txt", "one");
+    await expect(
+      testPage.locator(".dv-default-tab").filter({ hasText: /^Changes \(1\)$/ }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    await moveChangesToTerminalGroupAndFocusTerminal(testPage);
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
+
+    git.createFile("second-change.txt", "two");
+    await expect(
+      testPage.locator(".dv-default-tab").filter({ hasText: /^Changes \(2\)$/ }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    await expect(changesTab(testPage)).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
+    await expect(session.changesFileRow("second-change.txt")).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("new git updates focus changes after switching to an inactive task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Inactive Changes Focus A",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const taskB = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Inactive Changes Focus B",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!taskB.session_id) throw new Error("Task B did not start a session");
+
+    await testPage.goto(`/t/${taskA.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady();
+
+    await expect(session.taskInSidebar("Inactive Changes Focus B")).toBeVisible({
+      timeout: 15_000,
+    });
+    await setGitStatusForSession(testPage, taskB.session_id, []);
+    await expect
+      .poll(() => changesCountForSession(testPage, taskB.session_id!), { timeout: 15_000 })
+      .toBe(0);
+
+    await setGitStatusForSession(testPage, taskB.session_id, ["background-change.txt"]);
+    await expect
+      .poll(() => changesCountForSession(testPage, taskB.session_id!), { timeout: 15_000 })
+      .toBe(1);
+    await expect(session.activeChat()).toBeVisible();
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/);
+
+    await session.taskInSidebar("Inactive Changes Focus B").click();
+
+    await expect(changesTab(testPage)).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
   });
 });

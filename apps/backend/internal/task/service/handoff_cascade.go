@@ -149,6 +149,9 @@ type CascadeOutcome struct {
 // a single cascade ID. Already-archived descendants are skipped so the
 // later UnarchiveTaskTree restores exactly what this cascade owned.
 //
+// When cascade=false, only rootID is archived; descendants are left
+// alone (used when subtasks might still be in progress).
+//
 // Steps (in order):
 //  1. Collect the descendant set (BFS over parent_id).
 //  2. Cancel active sessions / runs for every task in the set before
@@ -158,7 +161,7 @@ type CascadeOutcome struct {
 //  4. Release workspace-group membership for the tasks this cascade
 //     archived, stamping the cascade ID on the released row.
 //  5. Evaluate cleanup once per affected group.
-func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string) (*CascadeOutcome, error) {
+func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error) {
 	if rootID == "" {
 		return nil, errors.New("rootID is required")
 	}
@@ -168,9 +171,15 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string) (*C
 	cascadeID := uuid.New().String()
 	out := &CascadeOutcome{CascadeID: cascadeID}
 
-	all, err := s.collectTaskTree(ctx, rootID)
-	if err != nil {
-		return nil, err
+	var all []string
+	if cascade {
+		descendants, err := s.collectTaskTree(ctx, rootID)
+		if err != nil {
+			return nil, err
+		}
+		all = descendants
+	} else {
+		all = []string{rootID}
 	}
 
 	// Cancel active runs first. Failures are logged and skipped — a
@@ -227,13 +236,18 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string) (*C
 // memberships with reason=deleted, and removes every task row. Unlike
 // archive, delete is permanent — there is no Undelete cascade.
 //
+// When cascade=false, only rootID is deleted; its direct children are
+// reparented to root (parent_id="") before the row is removed so the
+// orphaned subtasks stay queryable instead of holding a dangling
+// pointer.
+//
 // Group memberships are released with reason=deleted so the cleanup
 // evaluation runs the same path archive does (last active member gone
 // → cleanup_pending → optionally cleaned). Tasks the user manually
 // archived but not deleted before this cascade are still removed
 // because deletion is unconditional; the cascade ID is stamped only
 // for symmetry with archive.
-func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string) (*CascadeOutcome, error) {
+func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error) {
 	if rootID == "" {
 		return nil, errors.New("rootID is required")
 	}
@@ -243,10 +257,7 @@ func (s *HandoffService) DeleteTaskTree(ctx context.Context, rootID string) (*Ca
 	cascadeID := uuid.New().String()
 	out := &CascadeOutcome{CascadeID: cascadeID}
 
-	// Delete must walk archived descendants too: a parent with
-	// already-archived children must remove every row, not just the
-	// non-archived ones (post-review #4).
-	all, err := s.collectTaskTreeIncludingArchived(ctx, rootID)
+	all, err := s.resolveDeleteSet(ctx, rootID, cascade)
 	if err != nil {
 		return nil, err
 	}
@@ -381,6 +392,42 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 		s.restoreCleanedGroups(ctx, ids)
 	}
 	return out, nil
+}
+
+// resolveDeleteSet returns the set of task IDs DeleteTaskTree should
+// remove. When cascade is true that's the full descendant tree
+// (including archived rows). When cascade is false it's just rootID,
+// and the helper first reparents direct children to root so the
+// soon-deleted parent_id pointer doesn't dangle, then publishes a
+// task.updated event for each reparented child so WS-driven clients
+// refresh their cached parent_id.
+func (s *HandoffService) resolveDeleteSet(ctx context.Context, rootID string, cascade bool) ([]string, error) {
+	if cascade {
+		// Delete must walk archived descendants too: a parent with
+		// already-archived children must remove every row, not just
+		// the non-archived ones (post-review #4).
+		return s.collectTaskTreeIncludingArchived(ctx, rootID)
+	}
+	// Capture the affected children BEFORE the update so we can
+	// publish task.updated for each one after the row change —
+	// clients (kanban, sidebar) cache parent_id and would otherwise
+	// keep displaying the children nested under the deleted parent
+	// until a full reload.
+	children, err := s.tasks.ListChildrenIncludingArchived(ctx, rootID)
+	if err != nil {
+		return nil, fmt.Errorf("list direct children of %s: %w", rootID, err)
+	}
+	// Reparent MUST succeed before we touch the parent row —
+	// continuing past a reparent error would leave children pointing
+	// at a row we're about to delete, exactly the dangling-pointer
+	// state the no-cascade path is designed to avoid.
+	if err := s.tasks.ReparentDirectChildren(ctx, rootID, ""); err != nil {
+		return nil, fmt.Errorf("reparent direct children of %s: %w", rootID, err)
+	}
+	for _, c := range children {
+		s.publishUpdatedTask(ctx, c.ID)
+	}
+	return []string{rootID}, nil
 }
 
 // collectTaskTree returns rootID followed by every NON-ARCHIVED

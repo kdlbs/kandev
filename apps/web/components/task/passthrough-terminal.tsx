@@ -6,7 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { AttachAddon } from "@xterm/addon-attach";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
-import { GridSpinner } from "@/components/grid-spinner";
+import { PanelLoadingState } from "@/components/panel-loading-state";
 import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl";
@@ -22,10 +22,12 @@ import {
   useSendInput,
   useFitAndResize,
 } from "./use-passthrough-terminal";
+import { useTouchScroll } from "./use-touch-scroll";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useTerminalSearch } from "./use-terminal-search";
 import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
+import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -48,6 +50,10 @@ type BaseProps = {
    * Mobile uses this to register a key-bar sender that writes raw bytes
    * directly to this terminal's socket. */
   onWsReady?: (ws: WebSocket) => void;
+  /** Translate single-finger touch swipes on the terminal area into xterm
+   * scrollback navigation. Mobile callers set this so the xterm canvas no
+   * longer silently absorbs touch gestures. */
+  enableTouchScroll?: boolean;
 };
 type AgentTerminalProps = BaseProps & { mode: "agent"; sessionId?: string | null; label?: string };
 type ShellTerminalProps = BaseProps & {
@@ -146,6 +152,7 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     disableWebgl,
     manualInputRouting,
     onWsReady,
+    enableTouchScroll,
   } = props;
   const terminalId = mode === "shell" ? props.terminalId : undefined;
   const environmentId = mode === "shell" ? props.environmentId : undefined;
@@ -226,6 +233,14 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     keyboardShortcutsRef,
     onFindInPanelRef,
   });
+  useTerminalBusyTracking(terminalId, xtermRef, mode === "shell", isTerminalReady);
+
+  useTouchScroll({
+    terminalRef: refs.terminalRef,
+    xtermRef: refs.xtermRef,
+    enabled: !!enableTouchScroll,
+    isTerminalReady,
+  });
 
   useWebSocketConnection({
     taskId,
@@ -260,21 +275,15 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
       style={{ minWidth: MIN_WIDTH, minHeight: MIN_HEIGHT }}
     >
       <div className="h-full w-full p-2 pb-3">
-        <div ref={terminalRef} className="h-full w-full" />
+        <div ref={terminalRef} data-testid="terminal-xterm-host" className="h-full w-full" />
       </div>
       <TerminalSearchBar search={search} />
       {!isConnected && (
-        <div
-          data-testid="passthrough-loading"
-          className="absolute inset-0 flex items-start justify-center pt-12 bg-background"
-        >
-          <div className="flex flex-col items-center gap-3 text-muted-foreground">
-            <GridSpinner />
-            <span className="text-sm">
-              {mode === "agent" ? "Preparing workspace..." : "Connecting terminal..."}
-            </span>
-          </div>
-        </div>
+        <PanelLoadingState
+          testId="passthrough-loading"
+          className="absolute inset-0 bg-background"
+          label={mode === "agent" ? "Preparing workspace..." : "Connecting terminal..."}
+        />
       )}
     </div>
   );

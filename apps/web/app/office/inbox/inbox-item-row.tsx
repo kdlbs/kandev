@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { useState } from "react";
 import {
   IconShieldCheck,
@@ -15,7 +15,7 @@ import { Badge } from "@kandev/ui/badge";
 import { useAppStore } from "@/components/state-provider";
 import { dismissInboxItem, retryProvider } from "@/lib/api/domains/office-extended-api";
 import type { InboxItem } from "@/lib/state/slices/office/types";
-import { timeAgo } from "../components/shared/time-ago";
+import { timeAgo } from "@/lib/utils/time";
 
 const ICON_MAP: Record<string, typeof IconShieldCheck> = {
   "shield-check": IconShieldCheck,

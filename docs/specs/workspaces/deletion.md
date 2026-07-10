@@ -15,15 +15,15 @@ Users who create a workspace by mistake, finish an experiment, or consolidate wo
 - The workspace settings page shows a "Delete workspace" button in a danger zone section.
 - Clicking it opens a confirmation dialog that shows a summary of what will be deleted: number of tasks, agents, and skills. It also displays the full filesystem path that will be removed (e.g. `~/.kandev/workspaces/my-workspace/`). The user must type the workspace name to proceed.
 - Deletion stops all running agents in the workspace before removing data.
-- All workspace-owned data is removed: agents (+ memory, instructions, runtime), skills, projects, routines (+ triggers, runs), approvals, channels, labels, cost events, budget policies, wakeup queue entries, activity logs, governance settings, and the onboarding record.
+- All workspace-owned data is removed: agents (+ memory, instructions, runtime, runs), skills, projects, routines (+ triggers, runs), run events, run route attempts, run skill materializations, wakeup requests, continuation summaries, approvals, channels, labels, cost events, budget policies, routing settings, provider health, activity logs, governance settings, workspace groups, tree holds, workspace settings, and the onboarding record.
 - All tasks in the workspace are deleted, including their sessions, worktrees, blockers, and comments.
 - The filesystem config directory (`~/.kandev/workspaces/<slug>/`) and any quick-chat workspace directories created for the workspace's sessions are removed.
-- After deletion the user is redirected to `/office/setup` if no other workspaces remain, or to `/office` with the next available workspace selected.
+- After deletion the user is redirected to `/office/setup?mode=new` if no other workspaces remain. If workspaces remain, another Office workspace is preferred; otherwise the first remaining workspace is selected and the user is redirected to that workspace's native home route (`/office?workspaceId=<id>` for Office, `/?workspaceId=<id>` for Kanban).
 - The operation is irreversible. There is no soft-delete or undo.
 
 ## Scenarios
 
-- **GIVEN** a workspace with 3 agents, 10 tasks, and 2 running sessions, **WHEN** the user deletes the workspace, **THEN** running sessions are stopped, all tasks and agents are removed from the DB, the filesystem config directory is deleted, and the user lands on the dashboard of another workspace (or the setup page if none remain).
+- **GIVEN** a workspace with 3 agents, 10 tasks, and 2 running sessions, **WHEN** the user deletes the workspace, **THEN** running sessions are stopped, all tasks and agents are removed from the DB, the filesystem config directory is deleted, and the user lands on another workspace's native home route (or the new Office workspace setup page if none remain).
 
 - **GIVEN** the user is on the workspace settings page, **WHEN** they click "Delete workspace", **THEN** a confirmation dialog appears showing "This will delete 3 agents, 10 tasks, 5 skills" and the filesystem path, requiring them to type the workspace name before the delete button becomes active.
 

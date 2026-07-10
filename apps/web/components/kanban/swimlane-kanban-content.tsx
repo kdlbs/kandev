@@ -17,13 +17,18 @@ import { KanbanCardPreview } from "@/components/kanban-card-preview";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import { useTaskActions } from "@/hooks/use-task-actions";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { MobileColumnTabs } from "./mobile-column-tabs";
 import { SwipeableColumns } from "./swipeable-columns";
 import { MobileDropTargets } from "./mobile-drop-targets";
 import { getKanbanColumnGridTemplate } from "./kanban-grid-template";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import {
+  type KanbanExternalLinkAvailability,
+  useKanbanExternalLinkAvailability,
+} from "@/components/kanban-external-link-availability";
 
 export type SwimlaneKanbanContentProps = {
   workflowId: string;
@@ -40,6 +45,7 @@ export type SwimlaneKanbanContentProps = {
   showMaximizeButton?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
 };
 
@@ -80,13 +86,9 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
       const snapshot = state.kanbanMulti.snapshots[workflowId];
       if (!snapshot) return;
 
-      const targetTasks = snapshot.tasks
-        .filter(
-          (t: KanbanState["tasks"][number]) => t.workflowStepId === targetStepId && t.id !== taskId,
-        )
-        .sort((a: KanbanState["tasks"][number], b: KanbanState["tasks"][number]) =>
-          (a.createdAt ?? "").localeCompare(b.createdAt ?? ""),
-        );
+      const targetTasks = snapshot.tasks.filter(
+        (t: KanbanState["tasks"][number]) => t.workflowStepId === targetStepId && t.id !== taskId,
+      );
       const nextPosition = targetTasks.length;
       const originalTasks = snapshot.tasks;
 
@@ -166,9 +168,7 @@ function useMobileColumnIndex(steps: WorkflowStep[], tasks: Task[]) {
 function useTasksByStep(tasks: Task[]) {
   return useCallback(
     (stepId: string) =>
-      tasks
-        .filter((t) => t.workflowStepId === stepId)
-        .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? "")),
+      tasks.filter((t) => t.workflowStepId === stepId).sort(compareTasksByCreatedDesc),
     [tasks],
   );
 }
@@ -190,7 +190,9 @@ function MobileKanbanLayout({
   archivingTaskId,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
+  externalLinkAvailability,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -208,7 +210,9 @@ function MobileKanbanLayout({
   archivingTaskId?: string | null;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
+  externalLinkAvailability: KanbanExternalLinkAvailability;
 }) {
   const taskCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -244,7 +248,9 @@ function MobileKanbanLayout({
         archivingTaskId={archivingTaskId}
         selectedIds={selectedIds}
         onToggleSelect={onToggleSelect}
+        onSelectRange={onSelectRange}
         isMultiSelectMode={isMultiSelectMode}
+        externalLinkAvailability={externalLinkAvailability}
       />
       <MobileDropTargets steps={steps} currentStepId={currentStepId} isDragging={!!activeTask} />
     </div>
@@ -265,7 +271,9 @@ function TabletKanbanLayout({
   archivingTaskId,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
+  externalLinkAvailability,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -280,7 +288,9 @@ function TabletKanbanLayout({
   archivingTaskId?: string | null;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
+  externalLinkAvailability: KanbanExternalLinkAvailability;
 }) {
   const getTasksForStep = useTasksByStep(tasks);
 
@@ -306,7 +316,9 @@ function TabletKanbanLayout({
             archivingTaskId={archivingTaskId}
             selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
+            onSelectRange={onSelectRange}
             isMultiSelectMode={isMultiSelectMode}
+            externalLinkAvailability={externalLinkAvailability}
           />
         </div>
       ))}
@@ -328,8 +340,10 @@ function DesktopKanbanLayout({
   archivingTaskId,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
   isCompactDesktop,
+  externalLinkAvailability,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -344,8 +358,10 @@ function DesktopKanbanLayout({
   archivingTaskId?: string | null;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   isCompactDesktop: boolean;
+  externalLinkAvailability: KanbanExternalLinkAvailability;
 }) {
   const getTasksForStep = useTasksByStep(tasks);
 
@@ -374,7 +390,9 @@ function DesktopKanbanLayout({
           showMaximizeButton={showMaximizeButton}
           selectedIds={selectedIds}
           onToggleSelect={onToggleSelect}
+          onSelectRange={onSelectRange}
           isMultiSelectMode={isMultiSelectMode}
+          externalLinkAvailability={externalLinkAvailability}
         />
       ))}
     </div>
@@ -396,31 +414,59 @@ export function SwimlaneKanbanContent({
   showMaximizeButton,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
 }: SwimlaneKanbanContentProps) {
   const { isMobile, isTablet, isCompactDesktop } = useResponsiveBreakpoint();
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const externalLinkAvailability = useKanbanExternalLinkAvailability(activeWorkspaceId);
   const { activeIndex, setActiveIndex } = useMobileColumnIndex(steps, tasks);
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
     useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError });
 
-  if (steps.length === 0) return null;
+  // Memoized so the layout components don't re-render from a fresh props object
+  // on every parent render. Declared before the early return to keep hook order
+  // stable.
+  const sharedProps = useMemo(
+    () => ({
+      steps,
+      tasks,
+      onPreviewTask,
+      onOpenTask,
+      onEditTask,
+      onDeleteTask,
+      onArchiveTask,
+      moveTaskToStep,
+      showMaximizeButton,
+      deletingTaskId,
+      archivingTaskId,
+      selectedIds,
+      onToggleSelect,
+      onSelectRange,
+      isMultiSelectMode,
+      externalLinkAvailability,
+    }),
+    [
+      steps,
+      tasks,
+      onPreviewTask,
+      onOpenTask,
+      onEditTask,
+      onDeleteTask,
+      onArchiveTask,
+      moveTaskToStep,
+      showMaximizeButton,
+      deletingTaskId,
+      archivingTaskId,
+      selectedIds,
+      onToggleSelect,
+      onSelectRange,
+      isMultiSelectMode,
+      externalLinkAvailability,
+    ],
+  );
 
-  const sharedProps = {
-    steps,
-    tasks,
-    onPreviewTask,
-    onOpenTask,
-    onEditTask,
-    onDeleteTask,
-    onArchiveTask,
-    moveTaskToStep,
-    showMaximizeButton,
-    deletingTaskId,
-    archivingTaskId,
-    selectedIds,
-    onToggleSelect,
-    isMultiSelectMode,
-  };
+  if (steps.length === 0) return null;
 
   let layoutContent: React.ReactNode;
   if (isMobile) {

@@ -11,7 +11,7 @@ const (
 	// Backend is the default HTTP port for the kandev Go backend.
 	Backend = 38429
 
-	// Web is the default HTTP port for the Next.js web server.
+	// Web is the default HTTP port for the optional Vite dev server.
 	Web = 37429
 
 	// AgentCtl is the default control port for the agentctl sidecar.

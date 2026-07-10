@@ -2,12 +2,12 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
-import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
+import { useSessionChangesCount } from "@/hooks/domains/session/use-session-changes-count";
 import { getPlanLastSeen } from "@/lib/local-storage";
 import { executeApprove } from "@/lib/services/session-approve";
 import type { OpenFileTab } from "@/lib/types/backend";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
+import { isPassthroughSession } from "@/lib/session/is-passthrough-session";
 
 export type SelectedDiff = {
   path: string;
@@ -17,6 +17,21 @@ export type SelectedDiff = {
 type UseSessionLayoutStateOptions = {
   sessionId?: string | null;
 };
+
+function resolveEffectiveSessionId(
+  activeSessionId: string | null,
+  activeTaskId: string | null,
+  activeSessionTaskId: string | null | undefined,
+  lastSessionForActiveTask: string | null | undefined,
+  fallbackSessionId: string | null,
+) {
+  if (!activeSessionId) return fallbackSessionId ?? null;
+  if (activeTaskId && activeSessionTaskId === activeTaskId) return activeSessionId;
+  if (activeSessionTaskId == null && lastSessionForActiveTask === activeSessionId) {
+    return activeSessionId;
+  }
+  return fallbackSessionId ?? null;
+}
 
 function useSelectedDiffState() {
   const [selectedDiff, setSelectedDiff] = useState<SelectedDiff | null>(null);
@@ -52,7 +67,19 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   // --- Core session state ---
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const effectiveSessionId = activeSessionId ?? sessionId ?? null;
+  const activeSessionData = useAppStore((state) =>
+    activeSessionId ? (state.taskSessions.items[activeSessionId] ?? null) : null,
+  );
+  const lastSessionForActiveTask = useAppStore((state) =>
+    activeTaskId ? state.tasks.lastSessionByTaskId[activeTaskId] : null,
+  );
+  const effectiveSessionId = resolveEffectiveSessionId(
+    activeSessionId,
+    activeTaskId,
+    activeSessionData?.task_id,
+    lastSessionForActiveTask,
+    sessionId,
+  );
   const sessionKey = effectiveSessionId ?? "";
 
   const activeSession = useAppStore((state) =>
@@ -63,26 +90,16 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
   // --- Agent state ---
   const isAgentWorking = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
 
-  const isPassthroughMode = useMemo(() => {
-    if (!activeSession?.agent_profile_snapshot) return false;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const snapshot = activeSession.agent_profile_snapshot as any;
-    return snapshot?.cli_passthrough === true;
-  }, [activeSession?.agent_profile_snapshot]);
+  const isPassthroughMode = useMemo(() => isPassthroughSession(activeSession), [activeSession]);
 
   const { selectedDiff, handleSelectDiff, handleClearSelectedDiff } = useSelectedDiffState();
   const { openFileRequest, handleOpenFile, handleFileOpenHandled } = useOpenFileRequestState();
 
   // --- Git status for badges ---
-  const gitStatus = useSessionGitStatus(effectiveSessionId);
-  const { commits } = useSessionCommits(effectiveSessionId);
-
-  const uncommittedCount = useMemo(() => {
-    if (!gitStatus?.files) return 0;
-    return Object.keys(gitStatus.files).length;
-  }, [gitStatus]);
-
-  const totalChangesCount = uncommittedCount + commits.length;
+  // `useSessionChangesCount` reads the per-repo statuses so the badge count
+  // stays correct in multi-repo workspaces and doesn't flicker as sibling
+  // repos overwrite the legacy single-status map.
+  const totalChangesCount = useSessionChangesCount(effectiveSessionId);
 
   // --- Mobile session state (computed before plan badge to use in badge logic) ---
   const activePanelBySessionId = useAppStore((state) => state.mobileSession.activePanelBySessionId);
@@ -158,9 +175,6 @@ export function useSessionLayoutState(options: UseSessionLayoutStateOptions = {}
     handleFileOpenHandled,
 
     // Git status
-    gitStatus,
-    commits,
-    uncommittedCount,
     totalChangesCount,
 
     // Plan

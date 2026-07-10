@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { IconRotate } from "@tabler/icons-react";
+import { IconRotate, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Kbd } from "@kandev/ui/kbd";
@@ -9,6 +9,8 @@ import type { Key, KeyboardShortcut } from "@/lib/keyboard/constants";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import {
   CONFIGURABLE_SHORTCUTS,
+  UNBOUND_SHORTCUT,
+  isUnboundShortcut,
   resolveAllShortcuts,
   type ConfigurableShortcutId,
   type StoredShortcutOverrides,
@@ -17,20 +19,28 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 
-function ShortcutRecorder({
-  shortcutId,
-  current,
-  onChange,
-  onReset,
-}: {
+type ShortcutRecorderProps = {
   shortcutId: ConfigurableShortcutId;
   current: KeyboardShortcut;
   onChange: (id: ConfigurableShortcutId, shortcut: KeyboardShortcut) => void;
   onReset: (id: ConfigurableShortcutId) => void;
-}) {
+  // Optional: callers that don't support an explicit "unbind" (e.g. the voice
+  // settings recorder) omit this, and the Clear button is hidden for them.
+  onClear?: (id: ConfigurableShortcutId) => void;
+};
+
+export function ShortcutRecorder({
+  shortcutId,
+  current,
+  onChange,
+  onReset,
+  onClear,
+}: ShortcutRecorderProps) {
   const [recording, setRecording] = useState(false);
-  const isDefault =
-    JSON.stringify(current) === JSON.stringify(CONFIGURABLE_SHORTCUTS[shortcutId].default);
+  const defaultShortcut = CONFIGURABLE_SHORTCUTS[shortcutId].default;
+  const isDefault = JSON.stringify(current) === JSON.stringify(defaultShortcut);
+  const isUnbound = isUnboundShortcut(current);
+  const defaultIsUnbound = isUnboundShortcut(defaultShortcut);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -85,19 +95,28 @@ function ShortcutRecorder({
               : "border-border bg-background hover:bg-accent"
           }`}
         >
-          {recording ? (
-            <span className="animate-pulse">Press a key combo...</span>
-          ) : (
-            <Kbd>{formatShortcut(current)}</Kbd>
-          )}
+          {renderRecorderLabel({ recording, current, isUnbound })}
         </button>
+        {onClear && !isUnbound && !defaultIsUnbound && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 cursor-pointer"
+            onClick={() => onClear(shortcutId)}
+            aria-label="Clear shortcut"
+            title="Clear shortcut"
+          >
+            <IconX className="size-3.5" />
+          </Button>
+        )}
         {!isDefault && (
           <Button
             variant="ghost"
             size="icon"
             className="h-8 w-8 cursor-pointer"
             onClick={() => onReset(shortcutId)}
-            title="Reset to default"
+            aria-label={defaultIsUnbound ? "Reset (clear shortcut)" : "Reset to default"}
+            title={defaultIsUnbound ? "Reset (clear shortcut)" : "Reset to default"}
           >
             <IconRotate className="size-3.5" />
           </Button>
@@ -105,6 +124,20 @@ function ShortcutRecorder({
       </div>
     </div>
   );
+}
+
+function renderRecorderLabel({
+  recording,
+  current,
+  isUnbound,
+}: {
+  recording: boolean;
+  current: KeyboardShortcut;
+  isUnbound: boolean;
+}) {
+  if (recording) return <span className="animate-pulse">Press a key combo...</span>;
+  if (isUnbound) return <span className="text-muted-foreground italic">Unbound</span>;
+  return <Kbd>{formatShortcut(current)}</Kbd>;
 }
 
 export function KeyboardShortcutsCard() {
@@ -143,6 +176,14 @@ export function KeyboardShortcutsCard() {
     [storeOverrides, persistOverrides],
   );
 
+  const handleClear = useCallback(
+    (id: ConfigurableShortcutId) => {
+      const next = { ...storeOverrides, [id]: UNBOUND_SHORTCUT };
+      persistOverrides(next);
+    },
+    [storeOverrides, persistOverrides],
+  );
+
   const ids = Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[];
 
   return (
@@ -159,6 +200,7 @@ export function KeyboardShortcutsCard() {
               current={shortcuts[id]}
               onChange={handleChange}
               onReset={handleReset}
+              onClear={handleClear}
             />
           ))}
         </div>

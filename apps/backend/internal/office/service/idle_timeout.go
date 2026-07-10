@@ -50,12 +50,16 @@ func NewIdleTimeoutManager(svc *Service, timeout time.Duration) *IdleTimeoutMana
 // OnRunFinished is called after a run is marked as finished.
 // It checks if the task is in a terminal state and, if so, starts an
 // idle timer that will clean up the execution after the timeout.
-func (m *IdleTimeoutManager) OnRunFinished(sessionID, taskID string) {
+//
+// The provided context bounds the underlying task-state lookup; pass a
+// request-scoped context where one is available so that DB stalls do
+// not block the caller indefinitely.
+func (m *IdleTimeoutManager) OnRunFinished(ctx context.Context, sessionID, taskID string) {
 	if sessionID == "" || taskID == "" {
 		return
 	}
 
-	if !m.isTaskTerminal(taskID) {
+	if !m.isTaskTerminal(ctx, taskID) {
 		return
 	}
 
@@ -77,10 +81,20 @@ func (m *IdleTimeoutManager) OnViewerDisconnected(sessionID string, taskTerminal
 	m.startTimer(sessionID)
 }
 
+// isTaskTerminalLookupTimeout bounds the repository lookup performed by
+// isTaskTerminal so that a stalled database does not block the caller's
+// request handler indefinitely.
+const isTaskTerminalLookupTimeout = 5 * time.Second
+
 // isTaskTerminal checks if the task's current state is terminal by
-// querying the office repository.
-func (m *IdleTimeoutManager) isTaskTerminal(taskID string) bool {
-	fields, err := m.svc.repo.GetTaskExecutionFields(context.Background(), taskID)
+// querying the office repository. The lookup is bounded by
+// isTaskTerminalLookupTimeout and also respects the parent ctx so it
+// is safe to call from request-scoped paths.
+func (m *IdleTimeoutManager) isTaskTerminal(ctx context.Context, taskID string) bool {
+	lookupCtx, cancel := context.WithTimeout(ctx, isTaskTerminalLookupTimeout)
+	defer cancel()
+
+	fields, err := m.svc.repo.GetTaskExecutionFields(lookupCtx, taskID)
 	if err != nil {
 		m.logger.Debug("failed to check task state for idle timeout",
 			zap.String("task_id", taskID), zap.Error(err))

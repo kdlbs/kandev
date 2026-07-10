@@ -57,6 +57,11 @@ var (
 	// characters that survive sanitization (e.g. "!@#$%"), so it cannot be
 	// used as a directory segment.
 	ErrInvalidRepoName = errors.New("repo name has no usable characters after sanitization")
+
+	// ErrInvalidBranchSlug is returned when BranchSlug is set but contains no
+	// usable characters after sanitization. Callers that pass an explicit slug
+	// must populate something the filesystem can accept.
+	ErrInvalidBranchSlug = errors.New("branch slug has no usable characters after sanitization")
 )
 
 // containsAuthFailure checks if git output indicates an authentication failure.

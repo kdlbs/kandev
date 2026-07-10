@@ -19,6 +19,13 @@ const (
 	githubAPIVersion = "2022-11-28"
 )
 
+// accessibleReposAffiliation is the GitHub /user/repos affiliation filter that
+// returns every repo the authenticated user can reach in one call: their own
+// repos (owner), repos they collaborate on, and repos in orgs they belong to.
+// This replaces the per-org search/repositories fan-out (which burns the 30/min
+// search quota) with a single call on the 5000/min core quota.
+const accessibleReposAffiliation = "owner,collaborator,organization_member"
+
 // GitHubAPIError represents an error response from the GitHub API with a status code.
 type GitHubAPIError struct {
 	StatusCode int
@@ -158,17 +165,29 @@ func (c *PATClient) GetPR(ctx context.Context, owner, repo string, number int) (
 	return convertPatPR(&raw, owner, repo), nil
 }
 
-func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
-	var raw []patPR
-	endpoint := fmt.Sprintf("/repos/%s/%s/pulls?head=%s:%s&state=open&per_page=1",
-		owner, repo, owner, branch)
+func (c *PATClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	var raw patIssue
+	endpoint := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
 	if err := c.get(ctx, endpoint, &raw); err != nil {
-		return nil, fmt.Errorf("find PR by branch: %w", err)
+		return nil, fmt.Errorf("get issue #%d: %w", number, err)
 	}
-	if len(raw) == 0 {
+	return convertPatIssue(&raw, owner, repo), nil
+}
+
+func (c *PATClient) FindPRByBranch(ctx context.Context, owner, repo, branch string) (*PR, error) {
+	statuses, err := runBatchedBranchQuery(ctx, c, []graphQLBranchRef{{
+		Owner:  owner,
+		Repo:   repo,
+		Branch: branch,
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("find PR by branch %q: %w", branch, err)
+	}
+	status := statuses[graphqlBranchKey(owner, repo, branch)]
+	if status == nil {
 		return nil, nil
 	}
-	return convertPatPR(&raw[0], owner, repo), nil
+	return status.PR, nil
 }
 
 func (c *PATClient) ListAuthoredPRs(ctx context.Context, owner, repo string) ([]*PR, error) {
@@ -203,8 +222,8 @@ func (c *PATClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, c
 	for i, item := range result.Items {
 		prs[i] = convertSearchItemToPR(
 			item.Number, item.Title, item.HTMLURL, item.State,
-			item.User.Login, item.RepositoryURL, item.Draft,
-			item.CreatedAt, item.UpdatedAt,
+			item.User.Login, item.RepositoryURL, item.PullRequest.MergedAt,
+			item.Draft, item.CreatedAt, item.UpdatedAt,
 		)
 	}
 	return prs, nil
@@ -234,8 +253,8 @@ func (c *PATClient) SearchPRsPaged(ctx context.Context, filter, customQuery stri
 	for i, item := range result.Items {
 		prs[i] = convertSearchItemToPR(
 			item.Number, item.Title, item.HTMLURL, item.State,
-			item.User.Login, item.RepositoryURL, item.Draft,
-			item.CreatedAt, item.UpdatedAt,
+			item.User.Login, item.RepositoryURL, item.PullRequest.MergedAt,
+			item.Draft, item.CreatedAt, item.UpdatedAt,
 		)
 	}
 	return &PRSearchPage{PRs: prs, TotalCount: result.TotalCount, Page: page, PerPage: perPage}, nil
@@ -296,33 +315,157 @@ func (c *PATClient) SearchOrgRepos(ctx context.Context, org, query string, limit
 	if query != "" {
 		q += " " + query
 	}
-	if limit <= 0 {
-		limit = 20
+	limit = clampRepoSearchLimit(limit)
+	endpoint := fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(q), limit)
+	repos, err := c.fetchRepoSearch(ctx, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("search org repos: %w", err)
 	}
+	return repos, nil
+}
+
+func (c *PATClient) ListUserRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	user, err := c.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	q := "user:" + user
+	if query != "" {
+		q += " " + query
+	}
+	limit = clampRepoSearchLimit(limit)
+	endpoint := fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(q), limit)
+	repos, err := c.fetchRepoSearch(ctx, endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("list user repos: %w", err)
+	}
+	return repos, nil
+}
+
+// ListAccessibleRepos lists every repo the authenticated user can access via a
+// single GET /user/repos call on the core REST quota. The response is a flat
+// JSON array (not a search wrapper), so it decodes differently from
+// fetchRepoSearch.
+//
+// query is a BEST-EFFORT substring filter applied only over the first `limit`
+// repos returned by this single (un-paginated) page — a query matching a repo
+// beyond the cap returns nothing here. This is intentional: the picker fetches
+// limit=100 and the frontend performs the canonical, comprehensive client-side
+// filtering over that page, so the server filter is just an optional narrowing.
+// Do NOT rely on it for completeness, and do NOT add pagination to "fix" it
+// without revisiting the picker contract.
+func (c *PATClient) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
+	limit = clampRepoSearchLimit(limit)
+	endpoint := fmt.Sprintf("/user/repos?affiliation=%s&sort=pushed&per_page=%d",
+		url.QueryEscape(accessibleReposAffiliation), limit)
+	var items []repoListItem
+	if err := c.get(ctx, endpoint, &items); err != nil {
+		return nil, fmt.Errorf("list accessible repos: %w", err)
+	}
+	return filterReposByQuery(convertRepoListItems(items), query), nil
+}
+
+// repoListItem is the per-repo JSON shape returned by the flat-array endpoints
+// (GET /user/repos). The search endpoints wrap the same fields under `.items`.
+type repoListItem struct {
+	FullName string `json:"full_name"`
+	Owner    struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+	Name          string    `json:"name"`
+	Private       bool      `json:"private"`
+	DefaultBranch string    `json:"default_branch"`
+	Description   string    `json:"description"`
+	PushedAt      time.Time `json:"pushed_at"`
+}
+
+// convertRepoListItems maps the raw flat-array items into the lightweight
+// GitHubRepo shape, preserving PushedAt as a pointer so callers can sort by
+// recency (a zero pushed_at becomes nil).
+func convertRepoListItems(items []repoListItem) []GitHubRepo {
+	repos := make([]GitHubRepo, len(items))
+	for i, item := range items {
+		repos[i] = GitHubRepo{
+			FullName:      item.FullName,
+			Owner:         item.Owner.Login,
+			Name:          item.Name,
+			Private:       item.Private,
+			DefaultBranch: item.DefaultBranch,
+			Description:   item.Description,
+		}
+		if !item.PushedAt.IsZero() {
+			t := item.PushedAt
+			repos[i].PushedAt = &t
+		}
+	}
+	return repos
+}
+
+// filterReposByQuery returns the repos whose full_name contains query
+// (case-insensitive). An empty query returns the input unchanged. Best-effort:
+// it filters only the already-fetched (capped) slice — see ListAccessibleRepos.
+func filterReposByQuery(repos []GitHubRepo, query string) []GitHubRepo {
+	if query == "" {
+		return repos
+	}
+	needle := strings.ToLower(query)
+	filtered := make([]GitHubRepo, 0, len(repos))
+	for _, r := range repos {
+		if strings.Contains(strings.ToLower(r.FullName), needle) {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
+}
+
+// fetchRepoSearch executes a /search/repositories request and decodes the
+// items into the lightweight GitHubRepo shape used for autocomplete and the
+// list-accessible-repos endpoint. PushedAt is captured so callers can sort
+// merged results by recency.
+func (c *PATClient) fetchRepoSearch(ctx context.Context, endpoint string) ([]GitHubRepo, error) {
 	var result struct {
 		Items []struct {
 			FullName string `json:"full_name"`
 			Owner    struct {
 				Login string `json:"login"`
 			} `json:"owner"`
-			Name    string `json:"name"`
-			Private bool   `json:"private"`
+			Name          string    `json:"name"`
+			Private       bool      `json:"private"`
+			DefaultBranch string    `json:"default_branch"`
+			Description   string    `json:"description"`
+			PushedAt      time.Time `json:"pushed_at"`
 		} `json:"items"`
 	}
-	endpoint := fmt.Sprintf("/search/repositories?q=%s&per_page=%d", url.QueryEscape(q), limit)
 	if err := c.get(ctx, endpoint, &result); err != nil {
-		return nil, fmt.Errorf("search org repos: %w", err)
+		return nil, err
 	}
 	repos := make([]GitHubRepo, len(result.Items))
 	for i, item := range result.Items {
 		repos[i] = GitHubRepo{
-			FullName: item.FullName,
-			Owner:    item.Owner.Login,
-			Name:     item.Name,
-			Private:  item.Private,
+			FullName:      item.FullName,
+			Owner:         item.Owner.Login,
+			Name:          item.Name,
+			Private:       item.Private,
+			DefaultBranch: item.DefaultBranch,
+			Description:   item.Description,
+		}
+		if !item.PushedAt.IsZero() {
+			t := item.PushedAt
+			repos[i].PushedAt = &t
 		}
 	}
 	return repos, nil
+}
+
+// clampRepoSearchLimit applies the default and GitHub's per_page=100 cap.
+func clampRepoSearchLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	if limit > 100 {
+		return 100
+	}
+	return limit
 }
 
 func (c *PATClient) ListPRReviews(ctx context.Context, owner, repo string, number int) ([]PRReview, error) {
@@ -375,12 +518,18 @@ func (c *PATClient) ListPRComments(ctx context.Context, owner, repo string, numb
 }
 
 func (c *PATClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) ([]CheckRun, error) {
-	var checkRunsResult struct {
-		CheckRuns []ghCheckRun `json:"check_runs"`
-	}
-	endpoint := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs", owner, repo, ref)
-	if err := c.get(ctx, endpoint, &checkRunsResult); err != nil {
-		return nil, err
+	var checkRunsRaw []ghCheckRun
+	endpoint := fmt.Sprintf("/repos/%s/%s/commits/%s/check-runs?per_page=100", owner, repo, ref)
+	for endpoint != "" {
+		var page struct {
+			CheckRuns []ghCheckRun `json:"check_runs"`
+		}
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, err
+		}
+		checkRunsRaw = append(checkRunsRaw, page.CheckRuns...)
+		endpoint = next
 	}
 	var statusResult struct {
 		Statuses []ghStatusContext `json:"statuses"`
@@ -390,7 +539,7 @@ func (c *PATClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) 
 		return nil, err
 	}
 	return mergeChecks(
-		convertRawCheckRuns(checkRunsResult.CheckRuns),
+		convertRawCheckRuns(checkRunsRaw),
 		convertRawStatusContexts(statusResult.Statuses),
 	), nil
 }
@@ -440,6 +589,27 @@ func (c *PATClient) ListRepoBranches(ctx context.Context, owner, repo string) ([
 	return branches, nil
 }
 
+func (c *PATClient) GetRepoMergeMethods(ctx context.Context, owner, repo string) (RepoMergeMethods, error) {
+	var raw struct {
+		AllowMergeCommit *bool `json:"allow_merge_commit"`
+		AllowSquashMerge *bool `json:"allow_squash_merge"`
+		AllowRebaseMerge *bool `json:"allow_rebase_merge"`
+	}
+	if err := c.get(ctx, fmt.Sprintf("/repos/%s/%s", owner, repo), &raw); err != nil {
+		return RepoMergeMethods{}, fmt.Errorf("get repo merge methods: %w", err)
+	}
+	// Conservative read: missing field → false. A permission-gated response
+	// that omits allow_* would otherwise let us pick a disallowed method
+	// (e.g. "merge" on a rebase-only repo), reproducing the 405 this fix is
+	// designed to prevent.
+	allowed := func(p *bool) bool { return p != nil && *p }
+	return RepoMergeMethods{
+		Merge:  allowed(raw.AllowMergeCommit),
+		Squash: allowed(raw.AllowSquashMerge),
+		Rebase: allowed(raw.AllowRebaseMerge),
+	}, nil
+}
+
 func (c *PATClient) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/reviews", owner, repo, number)
 	payload := map[string]string{"event": event}
@@ -453,6 +623,60 @@ func (c *PATClient) SubmitReview(ctx context.Context, owner, repo string, number
 	return c.post(ctx, endpoint, jsonBody)
 }
 
+func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number)
+	payload := map[string]string{}
+	if mergeMethod != "" {
+		payload["merge_method"] = mergeMethod
+	}
+	jsonBody, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal merge payload: %w", err)
+	}
+	return c.put(ctx, endpoint, jsonBody)
+}
+
+func (c *PATClient) CreateGist(ctx context.Context, in CreateGistInput) (*GistResponse, error) {
+	payload := struct {
+		Description string                 `json:"description,omitempty"`
+		Public      bool                   `json:"public"`
+		Files       map[string]gistFileDTO `json:"files"`
+	}{
+		Description: in.Description,
+		Public:      in.Public,
+		Files:       make(map[string]gistFileDTO, len(in.Files)),
+	}
+	for name, f := range in.Files {
+		payload.Files[name] = gistFileDTO(f)
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("marshal gist payload: %w", err)
+	}
+	var resp GistResponse
+	if err := c.postJSON(ctx, "/gists", body, &resp); err != nil {
+		return nil, fmt.Errorf("create gist: %w", err)
+	}
+	return &resp, nil
+}
+
+func (c *PATClient) DeleteGist(ctx context.Context, gistID string) error {
+	if gistID == "" {
+		return fmt.Errorf("delete gist: empty id")
+	}
+	return c.delete(ctx, "/gists/"+gistID)
+}
+
+// gistFileDTO mirrors the GitHub API's per-file body shape.
+type gistFileDTO struct {
+	Content string `json:"content"`
+}
+
+// post makes an authenticated HTTP POST to the GitHub API.
+// Errors on non-2xx are returned as plain `fmt.Errorf` (not `*GitHubAPIError`),
+// so callers cannot recover the HTTP status via `errors.As`. Use `put` (or
+// switch to wrapping in `GitHubAPIError`) if the caller needs per-status
+// mapping like the merge endpoint does.
 func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) error {
 	u := githubAPIBase + endpoint
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
@@ -473,6 +697,84 @@ func (c *PATClient) post(ctx context.Context, endpoint string, body []byte) erro
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
 		return fmt.Errorf("GitHub API POST %s returned %d: %s", endpoint, resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// postJSON sends a POST and decodes the response body into result.
+// 2xx with no body returns nil; 4xx/5xx returns a *GitHubAPIError.
+func (c *PATClient) postJSON(ctx context.Context, endpoint string, body []byte, result interface{}) error {
+	u := githubAPIBase + endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	c.setGitHubHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request POST %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	c.recordRateHeaders(resp, endpoint)
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
+	}
+	if result == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(result)
+}
+
+// delete sends a DELETE request. 2xx and 404 both return nil-or-typed-error per caller intent.
+// Here we return a typed error on any non-2xx so callers can inspect for 404.
+func (c *PATClient) delete(ctx context.Context, endpoint string) error {
+	u := githubAPIBase + endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
+	if err != nil {
+		return err
+	}
+	c.setGitHubHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request DELETE %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	c.recordRateHeaders(resp, endpoint)
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
+	}
+	return nil
+}
+
+func (c *PATClient) put(ctx context.Context, endpoint string, body []byte) error {
+	u := githubAPIBase + endpoint
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	c.setGitHubHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request PUT %s: %w", endpoint, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	c.recordRateHeaders(resp, endpoint)
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
 	}
 	return nil
 }
@@ -618,6 +920,26 @@ type patPR struct {
 	} `json:"base"`
 }
 
+type patIssue struct {
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	HTMLURL   string    `json:"html_url"`
+	Body      string    `json:"body"`
+	State     string    `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	ClosedAt  *string   `json:"closed_at"`
+	User      struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Labels []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	Assignees []struct {
+		Login string `json:"login"`
+	} `json:"assignees"`
+}
+
 type patSearchItem struct {
 	Number        int       `json:"number"`
 	Title         string    `json:"title"`
@@ -630,6 +952,9 @@ type patSearchItem struct {
 	User          struct {
 		Login string `json:"login"`
 	} `json:"user"`
+	PullRequest struct {
+		MergedAt string `json:"merged_at"`
+	} `json:"pull_request"`
 }
 
 func convertPatPR(raw *patPR, owner, repo string) *PR {
@@ -669,6 +994,36 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		pr.ClosedAt = parseTimePtr(*raw.ClosedAt)
 	}
 	return pr
+}
+
+func convertPatIssue(raw *patIssue, owner, repo string) *Issue {
+	labels := make([]string, len(raw.Labels))
+	for i, label := range raw.Labels {
+		labels[i] = label.Name
+	}
+	assignees := make([]string, len(raw.Assignees))
+	for i, assignee := range raw.Assignees {
+		assignees[i] = assignee.Login
+	}
+	issue := &Issue{
+		Number:      raw.Number,
+		Title:       raw.Title,
+		URL:         raw.HTMLURL,
+		HTMLURL:     raw.HTMLURL,
+		State:       strings.ToLower(raw.State),
+		Body:        raw.Body,
+		AuthorLogin: raw.User.Login,
+		RepoOwner:   owner,
+		RepoName:    repo,
+		Labels:      labels,
+		Assignees:   assignees,
+		CreatedAt:   raw.CreatedAt,
+		UpdatedAt:   raw.UpdatedAt,
+	}
+	if raw.ClosedAt != nil {
+		issue.ClosedAt = parseTimePtr(*raw.ClosedAt)
+	}
+	return issue
 }
 
 func convertPatRequestedReviewers(raw *patPR) []RequestedReviewer {

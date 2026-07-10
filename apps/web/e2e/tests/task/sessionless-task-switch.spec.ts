@@ -52,7 +52,7 @@ test.describe("Sessionless task switching", () => {
     await session.waitForLoad();
 
     // Wait for parent agent to settle so the layout has stabilised.
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Poll the API until the MCP-created subtask exists. We need its ID for URL
     // assertions. The subtask is created by the agent asynchronously, so the

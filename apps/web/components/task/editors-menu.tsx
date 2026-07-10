@@ -45,13 +45,13 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
   }, [defaultEditorId, enabledEditors]);
 
   return (
-    <div className="inline-flex rounded-md border border-border overflow-hidden">
+    <div className="inline-flex h-7 rounded-md border border-border overflow-hidden">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button
             size="sm"
             variant="outline"
-            className="rounded-none border-0 cursor-pointer px-2"
+            className="rounded-none border-0 cursor-pointer px-2 focus-visible:ring-inset"
             onClick={() => {
               if (!resolvedEditorId) return;
               void openEditor.open({ editorId: resolvedEditorId });
@@ -74,7 +74,7 @@ export function EditorsMenu({ activeSessionId }: EditorsMenuProps) {
           <Button
             size="sm"
             variant="outline"
-            className="rounded-none border-0 border-l px-2 cursor-pointer"
+            className="rounded-none border-0 border-l px-2 cursor-pointer focus-visible:ring-inset"
             disabled={!activeSessionId || enabledEditors.length === 0}
           >
             <IconChevronDown className="h-4 w-4" />

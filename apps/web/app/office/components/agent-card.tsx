@@ -1,12 +1,12 @@
 "use client";
 
 import { memo } from "react";
-import Link from "next/link";
+import Link from "@/components/routing/app-link";
 import { IconExternalLink, IconLoader2 } from "@tabler/icons-react";
 import { Card } from "@kandev/ui/card";
 import type { AgentSummary, SessionSummary } from "@/lib/api/domains/office-api";
 import { AgentAvatar as RoleAwareAgentAvatar } from "./agent-avatar";
-import { timeAgo } from "./shared/time-ago";
+import { timeAgo } from "@/lib/utils/time";
 import { useNow } from "./shared/use-now";
 
 type Props = { summary: AgentSummary };

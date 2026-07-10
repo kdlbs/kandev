@@ -74,8 +74,18 @@ describe("usePanelActions", () => {
     });
 
     expect(dockActions.addPlanPanel).toHaveBeenCalledOnce();
-    expect(editorActions.openFile).toHaveBeenCalledWith("README.md");
+    expect(editorActions.openFile).toHaveBeenCalledWith("README.md", undefined);
     expect(layoutActions.openDocument).not.toHaveBeenCalled();
+  });
+
+  it("forwards the repo subpath when opening a multi-repo file", () => {
+    const { result } = renderHook(() => usePanelActions());
+
+    act(() => {
+      result.current.openFile("src/foo.ts", "enrichment-commons");
+    });
+
+    expect(editorActions.openFile).toHaveBeenCalledWith("src/foo.ts", "enrichment-commons");
   });
 
   it("keeps non-workbench tablet fallbacks on the legacy layout store", () => {

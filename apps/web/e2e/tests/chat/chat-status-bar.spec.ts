@@ -165,6 +165,236 @@ test.describe("Chat status bar", () => {
     );
   });
 
+  test("dismissed PR merged banner stays hidden across reload and task switch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Dismiss Banner Task A",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("dismiss banner alpha response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Dismiss Banner Task B",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("dismiss banner beta response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskA.id,
+      owner: "test-org",
+      repo: "test-repo",
+      pr_number: 404,
+      pr_url: "https://github.com/test-org/test-repo/pull/404",
+      pr_title: "Dismiss Test PR",
+      head_branch: "feature/dismiss",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "merged",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const cardA = kanban.taskCardByTitle("Dismiss Banner Task A");
+    await expect(cardA).toBeVisible({ timeout: 30_000 });
+    await cardA.click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.chat.getByText("dismiss banner alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Banner appears, then user dismisses it.
+    await expect(session.prMergedBanner()).toBeVisible({ timeout: 10_000 });
+    await session.prMergedDismissButton().click();
+    await expect(session.prMergedBanner()).not.toBeVisible();
+
+    // Persists across reload.
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.chat.getByText("dismiss banner alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.prMergedBanner()).not.toBeVisible();
+
+    // Switch to task B and back. Task B has no merged PR so it never shows
+    // the banner — the real proof of cross-task-switch persistence is that
+    // the banner is still hidden on the return trip to task A.
+    await session.taskInSidebar("Dismiss Banner Task B").first().click();
+    await expect(session.chat.getByText("dismiss banner beta response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await session.taskInSidebar("Dismiss Banner Task A").first().click();
+    await expect(session.chat.getByText("dismiss banner alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.prMergedBanner()).not.toBeVisible();
+  });
+
+  test("shows PR closed banner and hides the CI chip when the PR is closed", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "PR Closed Banner Task",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("pr closed banner response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "test-org",
+      repo: "test-repo",
+      pr_number: 505,
+      pr_url: "https://github.com/test-org/test-repo/pull/505",
+      pr_title: "Closed Test PR",
+      head_branch: "feature/closed",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "closed",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const card = kanban.taskCardByTitle("PR Closed Banner Task");
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await card.click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.chat.getByText("pr closed banner response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const statusBar = session.chatStatusBar();
+    await expect(statusBar).toBeVisible({ timeout: 10_000 });
+    await expect(session.prClosedBanner()).toBeVisible({ timeout: 10_000 });
+    await expect(session.prClosedBanner()).toContainText("PR #505 was closed without merging");
+    // The CI chip is redundant once the PR is terminal — the banner conveys it.
+    await expect(session.prStatusChip()).not.toBeVisible();
+    await expect(session.prMergedBanner()).not.toBeVisible();
+  });
+
+  test("dismissed PR closed banner stays hidden across reload and task switch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Dismiss Closed Banner Task A",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("dismiss closed alpha response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Dismiss Closed Banner Task B",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("dismiss closed beta response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskA.id,
+      owner: "test-org",
+      repo: "test-repo",
+      pr_number: 606,
+      pr_url: "https://github.com/test-org/test-repo/pull/606",
+      pr_title: "Dismiss Closed Test PR",
+      head_branch: "feature/dismiss-closed",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "closed",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    const cardA = kanban.taskCardByTitle("Dismiss Closed Banner Task A");
+    await expect(cardA).toBeVisible({ timeout: 30_000 });
+    await cardA.click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    await expect(session.chat.getByText("dismiss closed alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Banner appears, then user dismisses it.
+    await expect(session.prClosedBanner()).toBeVisible({ timeout: 10_000 });
+    await session.prClosedDismissButton().click();
+    await expect(session.prClosedBanner()).not.toBeVisible();
+
+    // Persists across reload.
+    await testPage.reload();
+    await session.waitForLoad();
+    await expect(session.chat.getByText("dismiss closed alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.prClosedBanner()).not.toBeVisible();
+
+    // Switch to task B (no closed PR, so never shows the banner) and back. The
+    // proof of cross-task-switch persistence is the banner still hidden on the
+    // return trip to task A.
+    await session.taskInSidebar("Dismiss Closed Banner Task B").first().click();
+    await expect(session.chat.getByText("dismiss closed beta response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await session.taskInSidebar("Dismiss Closed Banner Task A").first().click();
+    await expect(session.chat.getByText("dismiss closed alpha response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(session.prClosedBanner()).not.toBeVisible();
+  });
+
   test("archive via PR banner switches to next task", async ({ testPage, apiClient, seedData }) => {
     test.setTimeout(90_000);
 
@@ -224,8 +454,18 @@ test.describe("Chat status bar", () => {
 
     const urlBeforeArchive = testPage.url();
 
-    // Click archive in the PR merged banner
+    // Cancelling the confirmation dialog must not archive anything
     await session.prMergedArchiveButton().click();
+    await expect(session.prMergedArchiveConfirmButton()).toBeVisible({ timeout: 10_000 });
+    await testPage.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(session.prMergedArchiveConfirmButton()).not.toBeVisible();
+    await expect(session.prMergedBanner()).toBeVisible();
+    expect(testPage.url()).toBe(urlBeforeArchive);
+
+    // Click archive in the PR merged banner, then confirm in the dialog
+    await session.prMergedArchiveButton().click();
+    await expect(session.prMergedArchiveConfirmButton()).toBeVisible({ timeout: 10_000 });
+    await session.prMergedArchiveConfirmButton().click();
 
     // Should switch to task B
     await expect(session.taskInSidebar("Archive Banner Task A")).not.toBeVisible({

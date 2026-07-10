@@ -2,11 +2,17 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
+var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
+var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -14,6 +20,8 @@ type WorkspaceRepository interface {
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error
 	DeleteWorkspace(ctx context.Context, id string) error
+	DeleteWorkspaceCascade(ctx context.Context, id string) ([]*models.Task, []*models.Workflow, error)
+	DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error)
 	ListWorkspaces(ctx context.Context) ([]*models.Workspace, error)
 }
 
@@ -22,10 +30,11 @@ type WorkspaceRepository interface {
 type TaskRepository interface {
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
+	GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error)
 	UpdateTask(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
-	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
+	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
 	ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error)
 	ArchiveTask(ctx context.Context, id string) error
 	// ArchiveTaskIfActive is the CAS variant used by office task-handoffs
@@ -35,7 +44,21 @@ type TaskRepository interface {
 	// archived by the named cascade. Returns whether the row was updated.
 	UnarchiveTaskByCascade(ctx context.Context, id, cascadeID string) (bool, error)
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
+	ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error)
+	DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error)
+	// CountOpenWatcherCreatedTasks returns the number of open watcher-created
+	// tasks for a single watch, identified by the integration's task-metadata
+	// key (e.g. "sentry_issue_watch_id") and the watch id. Open = non-archived
+	// AND state NOT IN (COMPLETED, FAILED, CANCELLED). Used by the
+	// orchestrator's watcher throttle gate to enforce a per-watch cap. Keyed
+	// by metadata key (not integration name) so this layer stays agnostic of
+	// which integrations exist.
+	CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
+	// UpdateTaskStateIfCurrentIn atomically transitions state only when the
+	// task's current state is in allowed. Returns the pre-update state and
+	// whether a row was modified.
+	UpdateTaskStateIfCurrentIn(ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState) (v1.TaskState, bool, error)
 	CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error)
 	CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error)
 	AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error
@@ -49,6 +72,12 @@ type TaskRepository interface {
 	// including archived ones. Used by the office task-handoffs unarchive
 	// cascade (phase 6) to walk a previously-archived descendant tree.
 	ListChildrenIncludingArchived(ctx context.Context, parentID string) ([]*models.Task, error)
+	// ReparentDirectChildren updates every row whose parent_id matches
+	// oldParentID, replacing it with newParentID. Used by no-cascade
+	// delete so direct children of a deleted task become roots
+	// (newParentID="") instead of dangling pointers. Affects archived
+	// and active rows alike.
+	ReparentDirectChildren(ctx context.Context, oldParentID, newParentID string) error
 	// ListSiblings returns non-archived, non-ephemeral sibling tasks for taskID.
 	// A task is a sibling of taskID when it shares a non-empty parent_id and
 	// the same workspace_id, and is not taskID itself. Root tasks (empty
@@ -91,8 +120,10 @@ type MessageRepository interface {
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*models.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
+	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
 	ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error)
 	SearchMessages(ctx context.Context, sessionID string, opts models.SearchMessagesOptions) ([]*models.Message, error)
 	DeleteMessage(ctx context.Context, id string) error
@@ -118,24 +149,33 @@ type SessionRepository interface {
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
+	ResetTaskSessionBasesForRepository(ctx context.Context, taskID, repositoryID, baseBranch string) (int64, error)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) (int64, error)
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 	GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error)
 	HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error)
 	HasActiveTaskSessionsByEnvironment(ctx context.Context, environmentID string) (bool, error)
 	HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error)
+	CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error)
 	DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error)
 	DeleteTaskSession(ctx context.Context, id string) error
 	GetPrimarySessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
 	GetPrimarySessionIDsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]string, error)
 	GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error)
 	GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error)
+	// BatchGetSessionsByTaskIDs returns every session for the given task IDs
+	// grouped by task ID, ordered by started_at DESC within each task. One
+	// query (chunked to stay within SQLite's host-parameter limit) replaces
+	// per-task GetSession loops on the task-list path.
+	BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	UpdateSessionReviewStatus(ctx context.Context, sessionID string, status string) error
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
+	DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error)
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
 }
 
@@ -143,6 +183,7 @@ type SessionRepository interface {
 type SessionWorktreeRepository interface {
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
 	UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error
+	UpdateTaskSessionWorktreeBranchByRepository(ctx context.Context, sessionID, repositoryID, branch string) error
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
 	ListWorktreesBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]*models.TaskSessionWorktree, error)
 	DeleteTaskSessionWorktree(ctx context.Context, id string) error
@@ -194,6 +235,7 @@ type ExecutorRepository interface {
 	ListExecutorProfiles(ctx context.Context, executorID string) ([]*models.ExecutorProfile, error)
 	ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error)
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
+	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
@@ -206,6 +248,17 @@ type ExecutorRepository interface {
 	// and writes nothing. Use when persisting state from a specific execution that may have been
 	// replaced concurrently — typically resume tokens emitted by ACP session events.
 	UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error
+	// UpdateExecutorRunningStatus performs a narrow status update on the row.
+	// Used when the agent process is intentionally not being started (prepare-only
+	// launch) so the row doesn't sit on the misleading default "starting" forever.
+	// Returns models.ErrExecutorRunningNotFound if no row exists for the session.
+	UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error
+	// RepairExecutorRunningDead repairs a row in place to reflect a dead backing
+	// process (status=stopped, local_pid cleared, last_seen re-stamped) while
+	// preserving resume_token/worktree/endpoint. Used by cleanup paths to honor
+	// the resume-safety invariant instead of deleting a resumable row.
+	// Returns models.ErrExecutorRunningNotFound if no row exists for the session.
+	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
 }
 
 // EnvironmentRepository handles environment CRUD.

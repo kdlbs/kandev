@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -83,7 +85,7 @@ func TestResumeSession_LiveAgentReturnsAlreadyRunning(t *testing.T) {
 
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
-			return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, "exec-live")
+			return nil, fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, req.SessionID, "exec-live")
 		},
 		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
 			return true
@@ -111,20 +113,27 @@ func TestResumeSession_LiveAgentReturnsAlreadyRunning(t *testing.T) {
 	}
 }
 
-// TestResumeSession_StaleExecutionCleansUpAndRetries ensures the pre-existing
-// stale-cleanup path still works when LaunchAgent reports "already has an agent
-// running" but the lifecycle manager confirms no live agent exists.
+// TestResumeSession_StaleExecutionCleansUpAndRetries is the "row looks live but
+// the process is gone" half of the corrected pause→resume contract
+// (#1597 pause→resume recovery): the session sits at WAITING_FOR_INPUT with a
+// resumable executors_running row, but its agent process is dead. LaunchAgent
+// reports "already has an agent running" (stale in-memory execution), the
+// runtime-aware liveness probe confirms no live agent, so resume cleans the
+// stale execution and relaunches — using the row's resume_token rather than
+// wedging on ErrExecutionAlreadyRunning against a process that no longer exists.
 func TestResumeSession_StaleExecutionCleansUpAndRetries(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
 
 	var launchCalls int
+	var retryResumeToken string
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalls++
 			if launchCalls == 1 {
-				return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, "exec-stale")
+				return nil, fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, req.SessionID, "exec-stale")
 			}
+			retryResumeToken = req.ACPSessionID
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-new",
 				Status:           v1.AgentStatusStarting,
@@ -151,6 +160,13 @@ func TestResumeSession_StaleExecutionCleansUpAndRetries(t *testing.T) {
 	}
 	if agentMgr.launchAgentCallCount != 2 {
 		t.Errorf("expected LaunchAgent called twice, got %d", agentMgr.launchAgentCallCount)
+	}
+	// The relaunch must resume the same conversation: the retry carries the
+	// executors_running row's resume_token (setupLiveResumeTestFixture seeds
+	// "token-abc"), so the operator's context is preserved rather than starting
+	// a fresh session.
+	if retryResumeToken != "token-abc" {
+		t.Errorf("expected relaunch to reuse resume_token %q, got %q", "token-abc", retryResumeToken)
 	}
 }
 
@@ -229,6 +245,51 @@ func TestResumeSession_CancelledStateForceCleansUpStaleState(t *testing.T) {
 	}
 }
 
+// TestResumeSession_PropagatesIsPassthrough verifies the session's IsPassthrough
+// snapshot taken at session-creation time is carried through the resume request
+// to the lifecycle manager, so a profile that toggles CLIPassthrough after the
+// session was created cannot strand existing sessions in the wrong launch path.
+func TestResumeSession_PropagatesIsPassthrough(t *testing.T) {
+	cases := []struct {
+		name             string
+		sessionIsPasstru bool
+	}{
+		{name: "agent_session_keeps_acp", sessionIsPasstru: false},
+		{name: "passthrough_session_keeps_passthrough", sessionIsPasstru: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := newMockRepository()
+			setupLiveResumeTestFixture(repo)
+			repo.sessions["sess-1"].IsPassthrough = tc.sessionIsPasstru
+
+			var capturedReq *LaunchAgentRequest
+			agentMgr := &mockAgentManager{
+				launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+					capturedReq = req
+					return &LaunchAgentResponse{
+						AgentExecutionID: "exec-new",
+						Status:           v1.AgentStatusStarting,
+					}, nil
+				},
+				isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool { return false },
+			}
+			exec := newTestExecutor(t, agentMgr, repo)
+
+			if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+				t.Fatalf("expected resume success, got: %v", err)
+			}
+			if capturedReq == nil {
+				t.Fatal("expected LaunchAgent to be called with a request")
+			}
+			if capturedReq.IsPassthrough != tc.sessionIsPasstru {
+				t.Errorf("IsPassthrough = %v, want %v — without this the lifecycle manager would re-resolve live profile state and ignore the session's mode at creation time",
+					capturedReq.IsPassthrough, tc.sessionIsPasstru)
+			}
+		})
+	}
+}
+
 // TestResumeSession_PropagatesTaskEnvironmentID is a regression test for a
 // post-restart bug where `buildResumeRequest` did not copy
 // `session.TaskEnvironmentID` onto the LaunchAgentRequest. The lifecycle's
@@ -284,7 +345,7 @@ func TestResumeSession_TerminalStateSkipsLivenessProbeOnFallback(t *testing.T) {
 		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalls++
 			if launchCalls == 1 {
-				return nil, fmt.Errorf("session %q already has an agent running (execution: %s)", req.SessionID, "exec-stale")
+				return nil, fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, req.SessionID, "exec-stale")
 			}
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-new",
@@ -450,7 +511,7 @@ func TestApplyResumeRepoConfig_BaseBranchByExecutorType(t *testing.T) {
 				ExecutorType: tc.executorType,
 			}
 
-			if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req); err != nil {
+			if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
 				t.Fatalf("applyResumeRepoConfig: %v", err)
 			}
 
@@ -461,6 +522,200 @@ func TestApplyResumeRepoConfig_BaseBranchByExecutorType(t *testing.T) {
 				t.Fatalf("UseWorktree = %v, want %v", req.UseWorktree, tc.wantWorktreeApplied)
 			}
 		})
+	}
+}
+
+// TestApplyResumeRepoConfig_WorktreeStampsTaskDir locks in the fix for
+// resumes of single-repo worktree tasks: the lifecycle preparer hands the
+// request to worktree.Manager.Create, which rejects requests missing
+// TaskDirName or RepoName with ErrTaskDirRequired. The initial-launch path
+// (applyRepositoryConfig) sets both; the resume path must do the same, and
+// must also be able to regenerate TaskDirName when the original launch
+// failed before any task_environments row was stamped.
+func TestApplyResumeRepoConfig_WorktreeStampsTaskDir(t *testing.T) {
+	t.Run("reuses persisted TaskDirName when present", func(t *testing.T) {
+		repo := newMockRepository()
+		repo.repositories["repo-1"] = &models.Repository{
+			ID:        "repo-1",
+			Name:      "my-repo",
+			LocalPath: "/tmp/repo",
+		}
+		existingEnv := &models.TaskEnvironment{
+			ID:          "env-1",
+			TaskID:      "task-1",
+			TaskDirName: "previously-stamped_abc",
+		}
+		repo.taskEnvironments["env-1"] = existingEnv
+		repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+		task := &v1.Task{ID: "task-1", Title: "Fix login bug"}
+		session := &models.TaskSession{
+			ID:           "sess-1",
+			TaskID:       "task-1",
+			RepositoryID: "repo-1",
+			BaseBranch:   "main",
+		}
+		exec := newTestExecutor(t, &mockAgentManager{}, repo)
+		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, existingEnv); err != nil {
+			t.Fatalf("applyResumeRepoConfig: %v", err)
+		}
+
+		if req.TaskDirName != "previously-stamped_abc" {
+			t.Errorf("TaskDirName = %q, want %q", req.TaskDirName, "previously-stamped_abc")
+		}
+		if req.RepoName != "my-repo" {
+			t.Errorf("RepoName = %q, want %q", req.RepoName, "my-repo")
+		}
+	})
+
+	t.Run("regenerates TaskDirName when persisted value is empty", func(t *testing.T) {
+		// This is the failure mode from the bug report: the initial launch
+		// failed before stamping task_dir_name, so the env row exists with
+		// an empty TaskDirName. The resume must still be able to proceed.
+		repo := newMockRepository()
+		repo.repositories["repo-1"] = &models.Repository{
+			ID:        "repo-1",
+			Name:      "my-repo",
+			LocalPath: "/tmp/repo",
+		}
+		repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+		task := &v1.Task{ID: "task-1", Title: "Fix login bug"}
+		session := &models.TaskSession{
+			ID:           "sess-1",
+			TaskID:       "task-1",
+			RepositoryID: "repo-1",
+			BaseBranch:   "main",
+		}
+		exec := newTestExecutor(t, &mockAgentManager{}, repo)
+		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+		existingEnv := &models.TaskEnvironment{
+			ID:          "env-1",
+			TaskID:      "task-1",
+			TaskDirName: "",
+		}
+
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, existingEnv); err != nil {
+			t.Fatalf("applyResumeRepoConfig: %v", err)
+		}
+
+		if req.TaskDirName == "" {
+			t.Error("TaskDirName must not be empty; worktree.Manager.Create would reject the request")
+		}
+		// Semantic name format: {sanitized-title}_{suffix}, suffix is 3 chars.
+		if !strings.HasPrefix(req.TaskDirName, "fix-login-bug_") {
+			t.Errorf("TaskDirName = %q, want prefix %q", req.TaskDirName, "fix-login-bug_")
+		}
+		if req.RepoName != "my-repo" {
+			t.Errorf("RepoName = %q, want %q", req.RepoName, "my-repo")
+		}
+	})
+
+	t.Run("regenerates TaskDirName when no env row exists", func(t *testing.T) {
+		repo := newMockRepository()
+		repo.repositories["repo-1"] = &models.Repository{
+			ID:        "repo-1",
+			Name:      "my-repo",
+			LocalPath: "/tmp/repo",
+		}
+		repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+		task := &v1.Task{ID: "task-1", Title: "Fix login bug"}
+		session := &models.TaskSession{
+			ID:           "sess-1",
+			TaskID:       "task-1",
+			RepositoryID: "repo-1",
+			BaseBranch:   "main",
+		}
+		exec := newTestExecutor(t, &mockAgentManager{}, repo)
+		req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+
+		if _, err := exec.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+			t.Fatalf("applyResumeRepoConfig: %v", err)
+		}
+
+		if req.TaskDirName == "" {
+			t.Error("TaskDirName must not be empty even without an env row")
+		}
+		if req.RepoName != "my-repo" {
+			t.Errorf("RepoName = %q, want %q", req.RepoName, "my-repo")
+		}
+	})
+}
+
+// TestResumeSession_RefreshesStaleEnvironmentRow locks in the fix for the
+// post-restart bug where a resume of a session that had previously failed mid-
+// launch left task_environments stuck at status=stopped with empty
+// task_dir_name / worktree_path. The frontend polls that row to decide
+// whether the chat input is enabled, so the stale state stranded the UI on
+// "Executor environment is unavailable (stopped)" even after the resume
+// successfully prepared a fresh worktree.
+func TestResumeSession_RefreshesStaleEnvironmentRow(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-resume-env"
+	sessionID := "sess-resume-env"
+
+	repo.repositories["repo-1"] = &models.Repository{
+		ID: "repo-1", Name: "my-repo", LocalPath: "/repos/my-repo",
+	}
+	// Worktree executor: required for the resume to hit the worktree branch in
+	// applyResumeRepoConfig that stamps TaskDirName onto req.
+	repo.executors["exec-worktree"] = &models.Executor{
+		ID: "exec-worktree", Type: models.ExecutorTypeWorktree,
+	}
+	repo.tasks[taskID] = &models.Task{ID: taskID, Title: "Resume after failure"}
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:                sessionID,
+		TaskID:            taskID,
+		AgentProfileID:    "profile-1",
+		State:             models.TaskSessionStateFailed,
+		ExecutorID:        "exec-worktree",
+		RepositoryID:      "repo-1",
+		BaseBranch:        "main",
+		TaskEnvironmentID: "env-stale",
+	}
+	// Stale env row from the previous failed launch: status=stopped, no
+	// worktree_path, no task_dir_name. This is the exact shape produced when
+	// LaunchAgent fails before persistTaskEnvironment writes the worktree
+	// fields back.
+	repo.taskEnvironments["env-stale"] = &models.TaskEnvironment{
+		ID:           "env-stale",
+		TaskID:       taskID,
+		Status:       models.TaskEnvironmentStatusStopped,
+		WorktreePath: "",
+		TaskDirName:  "",
+	}
+
+	const newWorktreePath = "/home/u/.kandev/tasks/resume-after-failure_abc/my-repo"
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-new",
+				WorktreeID:       "wt-new",
+				WorktreePath:     newWorktreePath,
+				WorktreeBranch:   "kandev/resume-after-failure",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions[sessionID], true); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+
+	env := repo.taskEnvironments["env-stale"]
+	if env.Status != models.TaskEnvironmentStatusReady {
+		t.Errorf("env.Status = %q, want %q — without the refresh the frontend keeps showing the executor as unavailable",
+			env.Status, models.TaskEnvironmentStatusReady)
+	}
+	if env.WorktreePath != newWorktreePath {
+		t.Errorf("env.WorktreePath = %q, want %q", env.WorktreePath, newWorktreePath)
+	}
+	if env.WorktreeID != "wt-new" {
+		t.Errorf("env.WorktreeID = %q, want %q", env.WorktreeID, "wt-new")
+	}
+	if env.TaskDirName == "" {
+		t.Error("env.TaskDirName must not be empty after resume; the worktree manager needs it for the on-disk task root")
 	}
 }
 

@@ -20,8 +20,13 @@ import (
 const agentSessionsRootSubdir = "agent-sessions"
 
 // authMethodTypeFiles selects RemoteAuthMethod entries that copy local files
-// into the remote environment (vs env-var-based auth).
-const authMethodTypeFiles = "files"
+// into the remote environment, while authMethodTypeEnv covers env-var-based
+// auth (with an optional SetupScript that runs on the remote to provision
+// credential files from the env var).
+const (
+	authMethodTypeFiles = "files"
+	authMethodTypeEnv   = "env"
+)
 
 // AgentSessionsRoot returns the directory under the kandev home where
 // per-container session dirs are created (e.g. ~/.kandev/agent-sessions/).

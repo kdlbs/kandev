@@ -218,7 +218,7 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		if m.streamManager != nil {
 			m.logger.Info("connecting workspace stream for workspace-only execution",
 				zap.String("execution_id", execution.ID))
-			go m.streamManager.connectWorkspaceStream(execution, nil)
+			m.streamManager.ConnectWorkspaceStream(execution, nil)
 		}
 	}()
 
@@ -231,7 +231,7 @@ func (m *Manager) GetExecutionIDForSession(_ context.Context, sessionID string) 
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
 		return execution.ID, nil
 	}
-	return "", fmt.Errorf("no execution found for session %s", sessionID)
+	return "", fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 }
 
 // EnsurePassthroughExecution ensures an execution exists for a passthrough session
@@ -391,19 +391,54 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		return nil, fmt.Errorf("agent type %q not found in registry", info.AgentID)
 	}
 
+	// Forward AgentProfile.EnvVars to the runtime instance. The Launch /
+	// ResumeSession paths merge these into req.Env via buildEnvForExecution
+	// before calling LaunchAgent; the lazy workspace-only path (any
+	// GetOrEnsureExecution* caller after backend restart) lands here directly,
+	// so without this merge the runtime instance gets spawned with empty env
+	// and CLAUDE_CONFIG_DIR (and any other workspace profile var) is lost.
+	// The agent subprocess inherits the instance env via agentctl, and ACP
+	// session/load then looks under the wrong SDK root → -32002 Resource not
+	// found.
+	env := map[string]string{}
+	var profileInfo *AgentProfileInfo
+	if info.AgentProfileID != "" && m.profileResolver != nil {
+		resolvedProfile, err := m.profileResolver.ResolveProfile(ctx, info.AgentProfileID)
+		if err != nil {
+			m.logger.Warn("failed to resolve profile for workspace execution",
+				zap.String("agent_profile_id", info.AgentProfileID),
+				zap.Error(err))
+		} else {
+			profileInfo = resolvedProfile
+		}
+	}
+	m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
+	autoApprove := false
+	var autoApproveOverride *bool
+	if profileInfo != nil {
+		autoApprove = profileInfo.AutoApprove
+		autoApproveOverride = boolPtr(profileInfo.AutoApprove)
+	}
+	if len(env) == 0 {
+		env = nil
+	}
+
 	req := &ExecutorCreateRequest{
-		InstanceID:          executionID,
-		TaskID:              taskID,
-		SessionID:           info.SessionID,
-		TaskEnvironmentID:   info.TaskEnvironmentID,
-		AgentProfileID:      info.AgentProfileID,
-		WorkspacePath:       info.WorkspacePath,
-		Protocol:            string(agentConfig.Runtime().Protocol),
-		AgentConfig:         agentConfig,
-		Metadata:            info.Metadata,
-		PreviousExecutionID: info.AgentExecutionID,
-		AuthToken:           m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
-		BootstrapNonce:      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+		InstanceID:                     executionID,
+		TaskID:                         taskID,
+		SessionID:                      info.SessionID,
+		TaskEnvironmentID:              info.TaskEnvironmentID,
+		AgentProfileID:                 info.AgentProfileID,
+		WorkspacePath:                  info.WorkspacePath,
+		Protocol:                       string(agentConfig.Runtime().Protocol),
+		Env:                            env,
+		AutoApprovePermissions:         autoApprove,
+		AutoApprovePermissionsOverride: autoApproveOverride,
+		AgentConfig:                    agentConfig,
+		Metadata:                       info.Metadata,
+		PreviousExecutionID:            info.AgentExecutionID,
+		AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
+		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, req)
@@ -413,6 +448,14 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 
 	execution := runtimeInstance.ToAgentExecution(req)
 	execution.RuntimeName = rt.Name()
+
+	// Cache the resolved profile env on the execution so a subsequent
+	// configureAndStartAgent (when this workspace-only execution is promoted)
+	// reuses it via mergeAgentProfileEnvForExecution instead of doing another
+	// secret-store round-trip. Mirrors the Launch path (manager_launch.go).
+	if env != nil {
+		m.cacheResolvedProfileEnv(execution, env)
+	}
 
 	// Set the ACP session ID for session resumption
 	if info.ACPSessionID != "" {

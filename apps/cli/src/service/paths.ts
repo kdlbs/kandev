@@ -34,7 +34,7 @@ export function macosSystemPlistPath(): string {
   return path.join(MACOS_SYSTEM_DAEMON_DIR, `${LAUNCHD_LABEL}.plist`);
 }
 
-export type LauncherKind = "homebrew" | "npm" | "unknown";
+export type LauncherKind = "homebrew" | "npm" | "npx" | "local" | "unknown";
 
 export type LauncherInfo = {
   /** Absolute path to node executable (process.execPath at install time). */
@@ -43,19 +43,52 @@ export type LauncherInfo = {
   cliEntry: string;
   /** Best-guess of how kandev was installed. Used to seed env vars. */
   kind: LauncherKind;
-  /** KANDEV_BUNDLE_DIR if set (Homebrew sets this). */
+  /** KANDEV_BUNDLE_DIR if set (Homebrew and local checkout installs set this). */
   bundleDir?: string;
   /** KANDEV_VERSION if set (Homebrew sets this). */
   version?: string;
+  /**
+   * Absolute path to the floating Homebrew launcher shim
+   * (`<prefix>/bin/kandev`), set only for Homebrew installs where the shim
+   * exists on disk. When present, the unit is rendered to exec this shim
+   * instead of the version-pinned Cellar node + cli.js, so it survives
+   * `brew upgrade`. See {@link homebrewShimPath}.
+   */
+  shimPath?: string;
 };
+
+// Homebrew is POSIX-only, so the Cellar segment is a hardcoded "/Cellar/"
+// rather than `path.sep`-based. On a Windows CI runner `path.sep` would be
+// "\\", which would never match a POSIX Cellar path and silently break shim
+// derivation (and its tests).
+const HOMEBREW_CELLAR_SEGMENT = "/Cellar/";
+
+/**
+ * Derive the floating Homebrew launcher shim from a Cellar-installed cli.js path.
+ *
+ * Homebrew installs the CLI under `<prefix>/Cellar/kandev/<version>/...` and
+ * symlinks a version-independent shim at `<prefix>/bin/kandev`. That shim sets
+ * KANDEV_BUNDLE_DIR / KANDEV_VERSION itself and execs cli.js via the floating
+ * `opt/node` symlink, so it keeps working after `brew upgrade` deletes the old
+ * Cellar dir. Returns undefined when `cliEntry` isn't a Cellar layout (npm /
+ * unknown installs), so callers fall back to the version-pinned paths.
+ */
+export function homebrewShimPath(cliEntry: string): string | undefined {
+  const idx = cliEntry.indexOf(HOMEBREW_CELLAR_SEGMENT);
+  if (idx === -1) return undefined;
+  const prefix = cliEntry.slice(0, idx);
+  // Homebrew layout is POSIX; use path.posix.join so the result keeps forward
+  // slashes regardless of the host the install/tests run on.
+  return path.posix.join(prefix, "bin", SERVICE_NAME);
+}
 
 /**
  * Snapshot the current invocation so the service unit can faithfully reproduce it.
  *
  * The unit file hard-codes absolute paths because systemd/launchd start with an
  * empty PATH and may not see the user's `node` or `kandev` shim. By recording
- * `process.execPath` (node) and `process.argv[1]` (cli.js) at install time we
- * avoid any PATH lookups at service-run time.
+ * `process.execPath` (node) and the resolved CLI entry at install time we avoid
+ * any PATH lookups at service-run time.
  */
 export function captureLauncher(): LauncherInfo {
   const nodePath = process.execPath;
@@ -63,17 +96,34 @@ export function captureLauncher(): LauncherInfo {
   const bundleDir = process.env.KANDEV_BUNDLE_DIR;
   const version = process.env.KANDEV_VERSION;
   const kind: LauncherKind = bundleDir
-    ? "homebrew"
-    : cliEntry.includes(`${path.sep}node_modules${path.sep}`)
-      ? "npm"
-      : "unknown";
-  return { nodePath, cliEntry, kind, bundleDir, version };
+    ? homebrewShimPath(cliEntry)
+      ? "homebrew"
+      : "local"
+    : looksLikeNpxEntry(cliEntry)
+      ? "npx"
+      : cliEntry.includes(`${path.sep}node_modules${path.sep}`)
+        ? "npm"
+        : "unknown";
+  // For Homebrew installs, prefer the floating bin shim so the unit survives
+  // `brew upgrade` (which deletes the versioned Cellar dir baked into nodePath
+  // /cliEntry). Only adopt it when the shim actually exists on disk; otherwise
+  // fall back to the version-pinned paths below.
+  let shimPath: string | undefined;
+  if (kind === "homebrew") {
+    const candidate = homebrewShimPath(cliEntry);
+    if (candidate && fs.existsSync(candidate)) shimPath = candidate;
+  }
+  return { nodePath, cliEntry, kind, bundleDir, version, shimPath };
+}
+
+function looksLikeNpxEntry(cliEntry: string): boolean {
+  return cliEntry.includes(`${path.sep}_npx${path.sep}`);
 }
 
 function resolveCliEntry(): string {
   const argvEntry = process.argv[1];
   if (argvEntry && fs.existsSync(argvEntry)) {
-    return path.resolve(argvEntry);
+    return path.resolve(fs.realpathSync(argvEntry));
   }
   throw new Error(
     "could not resolve the kandev CLI entry path from process.argv[1]; " +

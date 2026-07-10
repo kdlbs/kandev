@@ -194,6 +194,7 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 		ExecutorProfileID: "ep1",
 		State:             models.TaskSessionStateCompleted,
 		IsPrimary:         false,
+		Metadata:          map[string]interface{}{"existing": "preserved"},
 		CompletedAt:       &completedAt,
 		StartedAt:         now.Add(-3 * time.Minute),
 		UpdatedAt:         completedAt,
@@ -270,6 +271,12 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 	}
 	if !reused.IsPrimary {
 		t.Error("reused session must be primary")
+	}
+	if got := reused.Metadata[models.SessionMetaKeyCreatedBy]; got != models.SessionCreatedByWorkflowSwitch {
+		t.Errorf("reused session created_by metadata = %v, want %q", got, models.SessionCreatedByWorkflowSwitch)
+	}
+	if got := reused.Metadata["existing"]; got != "preserved" {
+		t.Errorf("reused session existing metadata = %v, want preserved", got)
 	}
 
 	// The previous current session-b must now be COMPLETED, not primary.
@@ -375,6 +382,9 @@ func TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession(t *testing.T) {
 	reused, _ := repo.GetTaskSession(ctx, "session-a")
 	if reused.State != models.TaskSessionStateWaitingForInput {
 		t.Errorf("previously-launched reused session must be WAITING_FOR_INPUT (so PromptTask lazy-resumes via ResumeSession), got %s", reused.State)
+	}
+	if got := reused.Metadata[models.SessionMetaKeyCreatedBy]; got != models.SessionCreatedByWorkflowSwitch {
+		t.Errorf("reused session created_by metadata = %v, want %q", got, models.SessionCreatedByWorkflowSwitch)
 	}
 }
 
@@ -599,6 +609,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			AgentProfileID: "profile-a",
 			State:          models.TaskSessionStateRunning,
 			IsPrimary:      true,
+			Metadata:       map[string]interface{}{"existing": "preserved"},
 			StartedAt:      now,
 			UpdatedAt:      now,
 		}
@@ -623,6 +634,12 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 		if updatedSession.State == models.TaskSessionStateCompleted {
 			t.Error("session should not be completed when profile matches")
+		}
+		if got := updatedSession.Metadata[models.SessionMetaKeyCreatedBy]; got != models.SessionCreatedByWorkflowSwitch {
+			t.Errorf("matching workflow session created_by metadata = %v, want %q", got, models.SessionCreatedByWorkflowSwitch)
+		}
+		if got := updatedSession.Metadata["existing"]; got != "preserved" {
+			t.Errorf("matching workflow session existing metadata = %v, want preserved", got)
 		}
 
 		// No new sessions should be created
@@ -804,10 +821,10 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 	})
 
-	// Inverse of the above: when the current session was spawned by a
-	// previous step's agent_profile override, transitioning to a plain step
-	// SHOULD revert to the task default.
-	t.Run("reverts to task default when current session was workflow-spawned", func(t *testing.T) {
+	// Workflow-spawned sessions should behave like user-chosen sessions when
+	// the target step has no profile override: preserve the active session
+	// instead of silently reverting to the task default.
+	t.Run("keeps workflow-spawned session when step has no override", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		now := time.Now().UTC()
 
@@ -831,7 +848,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			ExecutorID:        "exec-local",
 			ExecutorProfileID: "ep1",
 			State:             models.TaskSessionStateWaitingForInput,
-			IsPrimary:         true,
+			IsPrimary:         false,
 			Metadata:          map[string]interface{}{models.SessionMetaKeyCreatedBy: models.SessionCreatedByWorkflowSwitch},
 			StartedAt:         now,
 			UpdatedAt:         now,
@@ -870,39 +887,26 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 
 		svc.processOnEnter(ctx, "t1", session, step, "desc")
 
-		oldSession, err := repo.GetTaskSession(ctx, "s1")
+		updated, err := repo.GetTaskSession(ctx, "s1")
 		if err != nil {
-			t.Fatalf("failed to get old session: %v", err)
+			t.Fatalf("failed to get session: %v", err)
 		}
-		if oldSession.State != models.TaskSessionStateCompleted {
-			t.Errorf("workflow-spawned session should be completed when reverting to default, got %s", oldSession.State)
+		if updated.State == models.TaskSessionStateCompleted {
+			t.Fatal("workflow-spawned session must not be completed when the target step has no override")
+		}
+		if updated.AgentProfileID != "profile-b" {
+			t.Fatalf("expected active profile-b session to be preserved, got %q", updated.AgentProfileID)
+		}
+		if !updated.IsPrimary {
+			t.Fatal("expected preserved profile-b session to become primary")
 		}
 
 		sessions, err := repo.ListTaskSessions(ctx, "t1")
 		if err != nil {
 			t.Fatalf("failed to list sessions: %v", err)
 		}
-		if len(sessions) != 2 {
-			t.Fatalf("expected exactly 2 sessions (old + reverted), got %d", len(sessions))
-		}
-		var newSession *models.TaskSession
-		profileACount := 0
-		for _, s := range sessions {
-			if s.AgentProfileID == "profile-a" {
-				profileACount++
-			}
-			if s.ID != "s1" {
-				newSession = s
-			}
-		}
-		if profileACount != 1 {
-			t.Fatalf("expected exactly one profile-a session after revert, got %d", profileACount)
-		}
-		if newSession == nil {
-			t.Fatal("expected a new session for task default profile")
-		}
-		if newSession.AgentProfileID != "profile-a" {
-			t.Errorf("expected reverted profile-a, got %q", newSession.AgentProfileID)
+		if len(sessions) != 1 {
+			t.Fatalf("expected no default-profile session to be spawned, got %d sessions", len(sessions))
 		}
 	})
 }

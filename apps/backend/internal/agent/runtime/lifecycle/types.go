@@ -59,6 +59,13 @@ type AgentExecution struct {
 	standaloneInstanceID string // Instance ID in standalone agentctl
 	standalonePort       int    // Port of the standalone execution
 
+	// IsPassthrough captures the session's mode as decided at session-creation
+	// time (TaskSession.IsPassthrough snapshot). StartAgentProcess uses this
+	// instead of re-resolving the live profile so a profile that toggles
+	// CLIPassthrough after the session was created cannot strand existing
+	// sessions in the wrong launch path.
+	IsPassthrough bool
+
 	// Passthrough mode info (CLI passthrough without ACP)
 	PassthroughProcessID string    // Process ID in the interactive runner (empty if not in passthrough mode)
 	PassthroughStartedAt time.Time // When the current passthrough process was launched; used to detect fast-fail exits and skip auto-restart loops
@@ -287,18 +294,30 @@ func (ae *AgentExecution) EndSessionSpan() {
 // the top level. When LaunchRequest.Repositories is set, each entry produces
 // one prepared worktree under the shared TaskDirName.
 type RepoLaunchSpec struct {
-	RepositoryID         string
-	RepositoryPath       string
-	RepositoryURL        string // Clone URL for remote executors that need to clone
-	RepoName             string // Repository name used as subdirectory inside TaskDirName
-	BaseBranch           string
-	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch       string
-	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
-	WorktreeBranchPrefix string
-	PullBeforeWorktree   bool
-	RepoSetupScript      string // Repository-level setup script (optional)
-	RepoCleanupScript    string // Repository-level cleanup script (optional)
+	RepositoryID           string
+	RepositoryPath         string
+	RepositoryURL          string // Clone URL for remote executors that need to clone
+	RepoName               string // Repository name used as subdirectory inside TaskDirName
+	BaseBranch             string
+	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch         string
+	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	WorktreeBranchTicket   string
+	PullBeforeWorktree     bool
+	RepoSetupScript        string // Repository-level setup script (optional)
+	RepoCleanupScript      string // Repository-level cleanup script (optional)
+	CopyFiles              string // Comma-separated paths/globs to copy from the source repo (gitignored .env / config files)
+	// BranchSlug, when set, suffixes the worktree directory as
+	// {RepoName}-{BranchSlug} so multi-branch tasks (same repo, multiple
+	// branches) don't collide.
+	BranchSlug string
+	// BranchIdentitySlug is the stable branch key used for worktree reuse and
+	// persisted environment metadata. It may differ from BranchSlug when a
+	// primary branch keeps the flat legacy path.
+	BranchIdentitySlug string
 }
 
 // RouteOverride carries a fully resolved provider profile for one
@@ -335,29 +354,52 @@ type LaunchRequest struct {
 	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.
 	IsEphemeral bool
 
+	// IsPassthrough is the session's mode snapshot taken when the session was
+	// created (TaskSession.IsPassthrough). When the launch request originates
+	// from an existing session, this is the source of truth for the launch
+	// path so a profile that toggles CLIPassthrough after the session was
+	// created does not strand the session in the wrong mode. Non-session
+	// launches (e.g. the low-level controller.LaunchAgent path) leave this
+	// false and fall back to live profile resolution.
+	IsPassthrough bool
+
 	// Executor configuration - determines which runtime to use
 	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
-	McpMode             string            // MCP tool mode: "config" activates config-mode tools
+	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
 
 	// Environment preparation
 	SetupScript string // Setup script to run before agent starts
 
+	// CopyFiles is the per-repository copy_files spec resolved from
+	// Repository.CopyFiles by the orchestrator. For worktree executors the
+	// worktree.Manager applies it host-side during Create. For remote
+	// executors (Docker, Sprites) the launch path ships the bytes via
+	// agentctl after CreateInstance. Empty disables the feature.
+	CopyFiles string
+
 	// Worktree configuration
-	UseWorktree          bool   // Whether to use a Git worktree for isolation
-	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID         string // Repository ID for worktree tracking
-	RepositoryPath       string // Path to the main repository (for worktree creation)
-	BaseBranch           string // Base branch for the worktree (e.g., "main")
-	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	WorktreeBranchPrefix string // Branch prefix for worktree branches
-	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
+	UseWorktree            bool   // Whether to use a Git worktree for isolation
+	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID           string // Repository ID for worktree tracking
+	RepositoryPath         string // Path to the main repository (for worktree creation)
+	BaseBranch             string // Base branch for the worktree (e.g., "main")
+	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	WorktreeBranchPrefix   string // Branch prefix for worktree branches
+	WorktreeBranchTemplate string // Branch name template for worktree branches
+	WorktreeBranchTicket   string // External ticket value for branch templates
+	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
 	RepoName    string // Repository name used as subdirectory inside the task directory
+	BranchSlug  string // Optional branch directory suffix for multi-branch tasks
+	// BranchIdentitySlug is the stable branch key used for single-repo reuse.
+	// It may be non-empty when BranchSlug is empty to preserve a flat path.
+	BranchIdentitySlug string
 
 	// Repositories carries one entry per repository when the launch is multi-repo.
 	// When non-empty it is the source of truth; the legacy single-repo top-level
@@ -378,24 +420,31 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		return nil
 	}
 	return []RepoLaunchSpec{{
-		RepositoryID:         r.RepositoryID,
-		RepositoryPath:       r.RepositoryPath,
-		RepoName:             r.RepoName,
-		BaseBranch:           r.BaseBranch,
-		DefaultBranch:        r.DefaultBranch,
-		CheckoutBranch:       r.CheckoutBranch,
-		WorktreeID:           r.WorktreeID,
-		WorktreeBranchPrefix: r.WorktreeBranchPrefix,
-		PullBeforeWorktree:   r.PullBeforeWorktree,
+		RepositoryID:           r.RepositoryID,
+		RepositoryPath:         r.RepositoryPath,
+		RepoName:               r.RepoName,
+		BaseBranch:             r.BaseBranch,
+		DefaultBranch:          r.DefaultBranch,
+		CheckoutBranch:         r.CheckoutBranch,
+		PRNumber:               r.PRNumber,
+		WorktreeID:             r.WorktreeID,
+		WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: r.WorktreeBranchTemplate,
+		WorktreeBranchTicket:   r.WorktreeBranchTicket,
+		PullBeforeWorktree:     r.PullBeforeWorktree,
+		CopyFiles:              r.CopyFiles,
+		BranchSlug:             r.BranchSlug,
+		BranchIdentitySlug:     r.BranchIdentitySlug,
 	}}
 }
 
 // MessageAttachment represents an image or file attachment for agent prompts.
 type MessageAttachment struct {
-	Type     string // "image", "audio", or "resource"
-	Data     string // base64-encoded data
-	MimeType string // MIME type
-	Name     string // optional filename for resource attachments
+	Type         string // "image", "audio", or "resource"
+	Data         string // base64-encoded data
+	MimeType     string // MIME type
+	Name         string // optional filename for resource attachments
+	DeliveryMode string // "prompt" (native/default) or "path"
 }
 
 // CredentialsManager interface for credential retrieval
@@ -409,15 +458,18 @@ type AgentProfileInfo struct {
 	ProfileName         string
 	AgentID             string
 	AgentName           string // e.g., "auggie", "claude", "codex"
-	Model               string // applied via ACP session/set_model at session start
+	Model               string // applied through ACP model selection at session start
 	Mode                string // applied via ACP session/set_mode at session start (empty = use agent default)
-	AllowIndexing       bool   // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
+	ConfigOptions       map[string]string
+	AllowIndexing       bool // Deprecated: legacy, kept so existing call sites compile; launch path reads CLIFlags.
 	CLIPassthrough      bool
 	NativeSessionResume bool // Agent supports ACP session/load for resume
 	SupportsMCP         bool
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
 	// profile. Passed verbatim to cliflags.Resolve at launch time.
 	CLIFlags []settingsmodels.CLIFlag
+	// EnvVars are user-configured environment variables for this profile.
+	EnvVars []settingsmodels.ProfileEnvVar
 
 	// Deprecated: legacy permission fields, no longer consulted by the launch
 	// path. Kept so existing call sites compile during the transition.
@@ -460,6 +512,17 @@ type WorkspaceInfo struct {
 	AgentProfileID    string // Optional - agent profile for the task
 	AgentID           string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
 	ACPSessionID      string // Agent's session ID for conversation resumption (from session metadata)
+	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
+	// from session metadata, declared via the set_session_mode workflow action or
+	// a user toggle. Applied as a mode override at ACP session init so a fresh
+	// launch starts in the declared mode before the first prompt. See issue #1183.
+	SessionMode string
+	// RuntimeModel/RuntimeConfigOptions are user-selected ACP session runtime
+	// settings persisted in task_sessions.metadata.runtime_config. They take
+	// precedence over profile defaults when resuming or recreating a session.
+	RuntimeModel            string
+	RuntimeConfigOptions    map[string]string
+	RuntimeConfigOptionsSet bool
 
 	// Executor-aware fields for correct runtime selection and remote reconnection
 	ExecutorType     string                 // Executor type (e.g., "local_pc", "sprites")

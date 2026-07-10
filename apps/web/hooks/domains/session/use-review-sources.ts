@@ -1,11 +1,14 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-git-status";
 import { useCumulativeDiff } from "./use-cumulative-diff";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { normalizeDiffContent } from "@/components/review/types";
+import { createDebugLogger } from "@/lib/debug/log";
 import type { ReviewFile } from "@/components/review/types";
 import type { PRDiffFile } from "@/lib/types/github";
+
+const debug = createDebugLogger("review:sources");
 
 export type ReviewSource = "uncommitted" | "committed" | "pr";
 
@@ -26,6 +29,12 @@ type CumulativeFile = {
   additions?: number;
   deletions?: number;
   repository_name?: string;
+  /**
+   * Repo-relative path. Stamped by the backend's multi-repo cumulative-diff
+   * merge (`mergeCumulativeFiles` in agentctl); single-repo payloads omit
+   * this and carry the path only on the map key.
+   */
+  path?: string;
 };
 
 function addUncommittedFiles(
@@ -57,7 +66,13 @@ function addCumulativeFiles(
   files: Record<string, CumulativeFile>,
   uncommittedPaths: Set<string>,
 ) {
-  for (const [path, file] of Object.entries(files)) {
+  for (const [mapKey, file] of Object.entries(files)) {
+    // Multi-repo cumulative payloads use a NUL-composite `<repo>\x00<path>`
+    // map key and stamp the clean repo-relative path on `file.path`.
+    // Single-repo keeps the bare path on the map key with no `file.path`.
+    // Prefer the stamped value so the composite key doesn't bleed into the
+    // displayed path; fall back to the map key for single-repo.
+    const path = file.path ?? mapKey;
     const key = file.repository_name ? `${file.repository_name}:${path}` : path;
     const hasRepoUnawareCollision = key !== path && fileMap.has(path);
     if (fileMap.has(key) || uncommittedPaths.has(key) || hasRepoUnawareCollision) continue;
@@ -212,6 +227,12 @@ export type UseReviewSourcesResult = {
   hasPR: boolean;
   cumulativeLoading: boolean;
   prDiffLoading: boolean;
+  /**
+   * Files the backend dropped from the cumulative diff because the range
+   * exceeded its file cap (large rebase). Zero when nothing was hidden;
+   * surfaced by TaskChangesPanel as a banner.
+   */
+  truncatedFilesCount: number;
   /** Raw single-repo gitStatus (kept for `useAutoCloseWhenEmpty` consumers). */
   gitStatus: ReturnType<typeof useSessionGitStatus>;
   /**
@@ -266,6 +287,35 @@ export function useReviewSources(sessionId: string | null | undefined): UseRevie
   // the GitHub PR diff hydrates.
   const hasPR = !!pr;
 
+  useEffect(() => {
+    if (!sessionId) return;
+    debug("merged", {
+      sessionId,
+      total: allFiles.length,
+      uncommitted: sourceCounts.uncommitted,
+      committed: sourceCounts.committed,
+      pr: sourceCounts.pr,
+      hasPR,
+      hasCumulativeDiff: !!cumulativeDiff,
+      cumulativeLoading,
+      prDiffLoading,
+      prRepo: pr?.repo ?? null,
+      prNumber: pr?.pr_number ?? null,
+    });
+  }, [
+    sessionId,
+    allFiles.length,
+    sourceCounts.uncommitted,
+    sourceCounts.committed,
+    sourceCounts.pr,
+    hasPR,
+    cumulativeDiff,
+    cumulativeLoading,
+    prDiffLoading,
+    pr?.repo,
+    pr?.pr_number,
+  ]);
+
   return {
     allFiles,
     sourceCounts,
@@ -274,7 +324,16 @@ export function useReviewSources(sessionId: string | null | undefined): UseRevie
     prDiffLoading,
     gitStatus,
     rawPRFiles,
+    truncatedFilesCount: readTruncatedFilesCount(cumulativeDiff),
   };
+}
+
+/** Cumulative-diff file-truncation count, defaulting to 0 when absent. Kept as
+ *  a module helper so the branches don't add to useReviewSources' complexity. */
+function readTruncatedFilesCount(
+  cumulativeDiff: { truncated_files_count?: number } | null | undefined,
+): number {
+  return cumulativeDiff?.truncated_files_count ?? 0;
 }
 
 export type { CumulativeFile, UncommittedFile };

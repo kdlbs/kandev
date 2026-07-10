@@ -2,29 +2,30 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { ensureExtracted, findBundleRoot, resolveWebServerPath } from "./bundle";
+import { ensureExtracted, findBundleRoot } from "./bundle";
 import {
-  CACHE_DIR,
-  DATA_DIR,
   DEFAULT_AGENTCTL_PORT,
   DEFAULT_BACKEND_PORT,
-  DEFAULT_WEB_PORT,
   HEALTH_TIMEOUT_MS_RELEASE,
+  resolveCacheDir,
+  resolveDataDir,
+  resolveDatabasePath,
+  resolveKandevHomeDir,
 } from "./constants";
 import { ensureAsset, getRelease } from "./github";
-import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
+import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName, getPlatformDir } from "./platform";
 import { sortVersionsDesc } from "./version";
 import { pickAvailablePort } from "./ports";
 import { createProcessSupervisor } from "./process";
 import { resolveRuntime, validateBundle } from "./runtime";
-import { attachBackendExitHandler, logStartupInfo } from "./shared";
-import { launchWebApp, openBrowser } from "./web";
+import { buildBackendEnv, logStartupInfo } from "./shared";
+import { launchRestartableBackend } from "./supervisor/backend";
+import { openBrowser } from "./web";
 
 export type RunOptions = {
   runtimeVersion?: string;
   backendPort?: number;
-  webPort?: number;
   /** Show info logs from backend + web */
   verbose?: boolean;
   /** Show debug logs + agent message dumps */
@@ -38,9 +39,7 @@ type PreparedBundle = {
   backendBin: string;
   backendUrl: string;
   backendEnv: NodeJS.ProcessEnv;
-  webEnv: NodeJS.ProcessEnv;
   releaseTag: string;
-  webPort: number;
   agentctlPort: number;
   dbPath: string;
   logLevel: string;
@@ -56,8 +55,9 @@ export function findCachedRelease(
   platformDir: string,
   version?: string,
 ): { cacheDir: string; tag: string } | null {
+  const rootCacheDir = resolveCacheDir();
   if (version) {
-    const cacheDir = path.join(CACHE_DIR, version, platformDir);
+    const cacheDir = path.join(rootCacheDir, version, platformDir);
     const bundleDir = path.join(cacheDir, "kandev");
     const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
     if (fs.existsSync(backendBin)) {
@@ -67,15 +67,15 @@ export function findCachedRelease(
   }
 
   // No version specified — scan for cached tags and pick the latest.
-  if (!fs.existsSync(CACHE_DIR)) return null;
+  if (!fs.existsSync(rootCacheDir)) return null;
 
-  const entries = fs.readdirSync(CACHE_DIR).filter((d) => d.startsWith("v"));
+  const entries = fs.readdirSync(rootCacheDir).filter((d) => d.startsWith("v"));
   if (entries.length === 0) return null;
 
   const sorted = sortVersionsDesc(entries);
 
   for (const tag of sorted) {
-    const cacheDir = path.join(CACHE_DIR, tag, platformDir);
+    const cacheDir = path.join(rootCacheDir, tag, platformDir);
     const bundleDir = path.join(cacheDir, "kandev");
     const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
     if (fs.existsSync(backendBin)) {
@@ -92,9 +92,10 @@ export function findCachedRelease(
  * The previous version is kept as a fallback for offline use.
  */
 export function cleanOldReleases(currentTag: string) {
+  const rootCacheDir = resolveCacheDir();
   try {
-    if (!fs.existsSync(CACHE_DIR)) return;
-    const entries = fs.readdirSync(CACHE_DIR).filter((d) => d.startsWith("v"));
+    if (!fs.existsSync(rootCacheDir)) return;
+    const entries = fs.readdirSync(rootCacheDir).filter((d) => d.startsWith("v"));
     if (entries.length <= 2) return;
 
     const sorted = sortVersionsDesc(entries);
@@ -103,7 +104,7 @@ export function cleanOldReleases(currentTag: string) {
     const keep = new Set<string>([currentTag, sorted[0], sorted[1]]);
     for (const entry of entries) {
       if (!keep.has(entry)) {
-        fs.rmSync(path.join(CACHE_DIR, entry), { recursive: true, force: true });
+        fs.rmSync(path.join(rootCacheDir, entry), { recursive: true, force: true });
       }
     }
   } catch {
@@ -120,7 +121,7 @@ async function downloadRuntimeVersion(runtimeVersion: string): Promise<string> {
   const release = await getRelease(runtimeVersion);
   const tag = release.tag_name;
   const assetName = `kandev-${platformDir}.tar.gz`;
-  const cacheDir = path.join(CACHE_DIR, tag, platformDir);
+  const cacheDir = path.join(resolveCacheDir(), tag, platformDir);
 
   const archivePath = await ensureAsset(tag, assetName, cacheDir, (downloaded, total) => {
     const percent = total ? Math.round((downloaded / total) * 100) : 0;
@@ -138,7 +139,6 @@ async function downloadRuntimeVersion(runtimeVersion: string): Promise<string> {
 async function prepareBundleForLaunch({
   runtimeVersion,
   backendPort,
-  webPort,
   verbose = false,
   debug = false,
 }: RunOptions): Promise<PreparedBundle> {
@@ -156,7 +156,7 @@ async function prepareBundleForLaunch({
     } else {
       try {
         tag = await downloadRuntimeVersion(runtimeVersion);
-        const cacheDir = path.join(CACHE_DIR, tag, platformDir);
+        const cacheDir = path.join(resolveCacheDir(), tag, platformDir);
         bundleDir = findBundleRoot(cacheDir);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
@@ -179,44 +179,38 @@ async function prepareBundleForLaunch({
   }
 
   const actualBackendPort = backendPort ?? (await pickAvailablePort(DEFAULT_BACKEND_PORT));
-  const actualWebPort = webPort ?? (await pickAvailablePort(DEFAULT_WEB_PORT));
   const agentctlPort = await pickAvailablePort(DEFAULT_AGENTCTL_PORT);
   const backendUrl = `http://localhost:${actualBackendPort}`;
   const showOutput = verbose || debug;
   const logLevel =
     process.env.KANDEV_LOG_LEVEL?.trim() || (debug ? "debug" : verbose ? "info" : "warn");
 
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  const dbPath = path.join(DATA_DIR, "kandev.db");
+  const dataDir = resolveDataDir();
+  fs.mkdirSync(dataDir, { recursive: true });
+  const dbPath = resolveDatabasePath();
 
   const backendBin = path.join(bundleDir, "bin", getBinaryName("kandev"));
 
-  const backendEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    KANDEV_SERVER_PORT: String(actualBackendPort),
-    KANDEV_WEB_INTERNAL_URL: `http://localhost:${actualWebPort}`,
-    KANDEV_AGENT_STANDALONE_PORT: String(agentctlPort),
-    KANDEV_DATABASE_PATH: dbPath,
-    KANDEV_LOG_LEVEL: logLevel,
-    ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true", KANDEV_DEBUG_PPROF_ENABLED: "true" } : {}),
-  };
-
-  const webEnv: NodeJS.ProcessEnv = {
-    ...process.env,
-    KANDEV_API_BASE_URL: backendUrl,
-    PORT: String(actualWebPort),
-    HOSTNAME: "127.0.0.1",
-  };
-  (webEnv as Record<string, string>).NODE_ENV = "production";
+  const backendEnv = buildBackendEnv({
+    ports: {
+      backendPort: actualBackendPort,
+      agentctlPort,
+      backendUrl,
+    },
+    logLevel,
+    webProxy: false,
+    extra: {
+      KANDEV_DATABASE_PATH: dbPath,
+      ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true", KANDEV_DEBUG_PPROF_ENABLED: "true" } : {}),
+    },
+  });
 
   return {
     bundleDir,
     backendBin,
     backendUrl,
     backendEnv,
-    webEnv,
     releaseTag,
-    webPort: actualWebPort,
     agentctlPort,
     dbPath,
     logLevel,
@@ -243,17 +237,15 @@ export function attachRingBuffer(
   return () => buf;
 }
 
-function launchBundle(prepared: PreparedBundle): {
+async function launchBundle(prepared: PreparedBundle): Promise<{
   supervisor: ReturnType<typeof createProcessSupervisor>;
   backendProc: ReturnType<typeof spawn>;
-  webServerPath: string;
   dumpBackendLogs: () => void;
-} {
+}> {
   logStartupInfo({
     header: `release: ${prepared.releaseTag}`,
     ports: {
       backendPort: Number(prepared.backendEnv.KANDEV_SERVER_PORT),
-      webPort: prepared.webPort,
       agentctlPort: prepared.agentctlPort,
       backendUrl: prepared.backendUrl,
     },
@@ -264,12 +256,22 @@ function launchBundle(prepared: PreparedBundle): {
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  const backendProc = spawn(prepared.backendBin, [], {
+  const backend = await launchRestartableBackend({
+    command: prepared.backendBin,
+    args: [],
     cwd: path.dirname(prepared.backendBin),
     env: prepared.backendEnv,
+    homeDir: resolveKandevHomeDir(),
+    ports: {
+      backendPort: Number(prepared.backendEnv.KANDEV_SERVER_PORT),
+      agentctlPort: prepared.agentctlPort,
+      backendUrl: prepared.backendUrl,
+    },
+    mode: "run",
     stdio: prepared.showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "pipe", "inherit"],
+    supervisor,
   });
-  supervisor.children.push(backendProc);
+  const backendProc = backend.proc;
 
   const readBuffered = prepared.showOutput ? () => "" : attachRingBuffer(backendProc.stdout);
   let dumped = false;
@@ -283,20 +285,12 @@ function launchBundle(prepared: PreparedBundle): {
     console.error("[kandev] --- end backend stdout ---");
   };
 
-  attachBackendExitHandler(backendProc, supervisor);
-
-  const webServerPath = resolveWebServerPath(prepared.bundleDir);
-  if (!webServerPath) {
-    throw new Error("Web server entry (server.js) not found in bundle");
-  }
-
-  return { supervisor, backendProc, webServerPath, dumpBackendLogs };
+  return { supervisor, backendProc, dumpBackendLogs };
 }
 
 export async function runRelease({
   runtimeVersion,
   backendPort,
-  webPort,
   verbose = false,
   debug = false,
   headless = false,
@@ -304,28 +298,15 @@ export async function runRelease({
   const prepared = await prepareBundleForLaunch({
     runtimeVersion,
     backendPort,
-    webPort,
     verbose,
     debug,
   });
-  const { supervisor, backendProc, webServerPath, dumpBackendLogs } = launchBundle(prepared);
+  const { backendProc, dumpBackendLogs } = await launchBundle(prepared);
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");
   await waitForHealth(prepared.backendUrl, backendProc, healthTimeoutMs, dumpBackendLogs);
   console.log(`[kandev] backend ready at ${prepared.backendUrl}`);
 
-  const webUrl = `http://localhost:${prepared.webPort}`;
-  console.log("[kandev] starting web...");
-  const webProc = launchWebApp({
-    command: "node",
-    args: [webServerPath],
-    cwd: path.dirname(webServerPath),
-    env: prepared.webEnv,
-    supervisor,
-    label: "web",
-    quiet: !prepared.showOutput,
-  });
-  await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
   if (headless) {
     console.log(`[kandev] ready (headless) at ${prepared.backendUrl}`);
     return;

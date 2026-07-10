@@ -31,6 +31,7 @@ type messageStore interface {
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
 	FindMessageByPendingID(ctx context.Context, pendingID string) (*taskmodels.Message, error)
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
+	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*taskmodels.Message, error)
 	UpdateMessage(ctx context.Context, message *taskmodels.Message) error
 }
 
@@ -139,14 +140,15 @@ func (h *Handlers) httpCreateRequest(c *gin.Context) {
 		Context:   body.Context,
 	}
 
-	pendingID := h.store.CreateRequest(req)
+	pendingID, isNew := h.store.CreateRequest(req)
 
 	// Create one message per question in the database; all share the same
 	// pending_id and are rendered as a stacked group on the frontend. The
 	// session.message.added WebSocket event fires per message. On failure we
 	// also cancel the in-store pending entry so any blocking WaitForResponse
 	// caller unblocks immediately rather than waiting for the MCP timeout.
-	if h.messageCreator != nil {
+	// When dedup fires (isNew=false) the messages already exist, so skip creation.
+	if isNew && h.messageCreator != nil {
 		_, err := h.messageCreator.CreateClarificationRequestMessages(
 			c.Request.Context(),
 			taskID,
@@ -307,9 +309,14 @@ func (h *Handlers) httpRespond(c *gin.Context) {
 	// If the user rejected (clicked X to dismiss), they're discarding a stale
 	// overlay — not continuing the conversation. Treat as a no-op so we don't
 	// surprise them by resuming the agent with "User declined to answer".
-	// The message status is already "expired" (set by the canceller), so the
-	// chat history will keep rendering the "Timed out" entry.
+	// The overlay is already detached (agent_disconnected, still pending), so
+	// dismissing it must not resume the agent with "User declined to answer".
+	// We still need to mark the bundle rejected in the DB; otherwise the durable
+	// pending-clarification guard would keep blocking future workflow transitions.
 	if body.Rejected {
+		writeCtx := context.WithoutCancel(c.Request.Context())
+		h.applyAnswersToMessages(c, pendingID, true, nil)
+		h.publishStaleDismissedEvent(writeCtx, pendingID)
 		h.logger.Info("clarification rejected after agent moved on; no-op",
 			zap.String("pending_id", pendingID))
 		c.JSON(http.StatusOK, gin.H{"success": true})
@@ -441,7 +448,9 @@ func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, reje
 	if h.messageCreator == nil {
 		return
 	}
-	sessionID := h.lookupSessionForPending(c, pendingID)
+	// Durable status writes must complete even if the HTTP request context is canceled.
+	writeCtx := context.WithoutCancel(c.Request.Context())
+	sessionID := h.lookupSessionForPendingCtx(writeCtx, pendingID)
 
 	if rejected {
 		// Mark every question in the bundle as rejected. Guard h.repo for
@@ -450,7 +459,7 @@ func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, reje
 		if h.repo == nil {
 			return
 		}
-		msgs, err := h.repo.FindMessagesByPendingID(c.Request.Context(), pendingID)
+		msgs, err := h.repo.FindMessagesByPendingID(writeCtx, pendingID)
 		if err != nil || len(msgs) == 0 {
 			h.logger.Debug("rejected clarification: no messages to update",
 				zap.String("pending_id", pendingID),
@@ -462,7 +471,7 @@ func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, reje
 			if questionID == "" {
 				continue
 			}
-			if err := h.messageCreator.UpdateClarificationMessage(c.Request.Context(), sessionID, pendingID, questionID, "rejected", nil); err != nil {
+			if err := h.messageCreator.UpdateClarificationMessage(writeCtx, sessionID, pendingID, questionID, "rejected", nil); err != nil {
 				h.logger.Warn("failed to mark clarification question rejected",
 					zap.String("pending_id", pendingID),
 					zap.String("question_id", questionID),
@@ -477,7 +486,7 @@ func (h *Handlers) applyAnswersToMessages(c *gin.Context, pendingID string, reje
 		if ans.QuestionID == "" {
 			continue
 		}
-		if err := h.messageCreator.UpdateClarificationMessage(c.Request.Context(), sessionID, pendingID, ans.QuestionID, "answered", &ans); err != nil {
+		if err := h.messageCreator.UpdateClarificationMessage(writeCtx, sessionID, pendingID, ans.QuestionID, "answered", &ans); err != nil {
 			h.logger.Warn("failed to update clarification question",
 				zap.String("pending_id", pendingID),
 				zap.String("question_id", ans.QuestionID),
@@ -575,19 +584,48 @@ func (h *Handlers) publishCancelledEvent(c *gin.Context, pendingID string, req *
 	}
 }
 
-// lookupSessionForPending returns the session ID for a pending clarification.
+// lookupSessionForPendingCtx returns the session ID for a pending clarification.
 // Falls back to finding it from the database message.
-func (h *Handlers) lookupSessionForPending(c *gin.Context, pendingID string) string {
-	// Try the in-memory store first
+func (h *Handlers) lookupSessionForPendingCtx(ctx context.Context, pendingID string) string {
 	if req, ok := h.store.GetRequest(pendingID); ok {
 		return req.SessionID
 	}
-	// Fall back to database
-	msg, err := h.repo.FindMessageByPendingID(c.Request.Context(), pendingID)
+	if h.repo == nil {
+		return ""
+	}
+	msg, err := h.repo.FindMessageByPendingID(ctx, pendingID)
 	if err != nil {
 		return ""
 	}
 	return msg.TaskSessionID
+}
+
+func (h *Handlers) publishStaleDismissedEvent(ctx context.Context, pendingID string) {
+	if h.eventBus == nil {
+		return
+	}
+	clarificationCtx, err := h.resolveClarificationEventContext(ctx, pendingID)
+	if err != nil || clarificationCtx.SessionID == "" || clarificationCtx.TaskID == "" {
+		h.logger.Warn("failed to resolve context for stale-dismissed clarification event",
+			zap.String("pending_id", pendingID),
+			zap.Error(err))
+		return
+	}
+	eventData := map[string]any{
+		"session_id": clarificationCtx.SessionID,
+		"task_id":    clarificationCtx.TaskID,
+		"pending_id": pendingID,
+	}
+	if err := h.eventBus.Publish(ctx, events.ClarificationStaleDismissed, bus.NewEvent(
+		events.ClarificationStaleDismissed,
+		"clarification-handlers",
+		eventData,
+	)); err != nil {
+		h.logger.Warn("failed to publish stale-dismissed clarification event",
+			zap.String("pending_id", pendingID),
+			zap.String("session_id", clarificationCtx.SessionID),
+			zap.Error(err))
+	}
 }
 
 func (h *Handlers) publishPrimaryAnsweredEvent(c *gin.Context, pendingID string, answers []Answer, rejected bool, rejectReason string) {

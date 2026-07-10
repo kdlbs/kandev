@@ -1,5 +1,4 @@
 import { test, expect } from "../../fixtures/test-base";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("PR watcher missing branch", () => {
@@ -82,15 +81,8 @@ test.describe("PR watcher missing branch", () => {
       state: "closed",
     });
 
-    // --- Navigate to the kanban and click the task ---
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardByTitle("PR #999: Already merged feature");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-
-    // Wait for navigation to session view
+    // --- Navigate to the task session view ---
+    await testPage.goto(`/t/${task.id}`);
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
     const session = new SessionPage(testPage);

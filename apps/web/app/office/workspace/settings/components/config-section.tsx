@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { IconArrowsLeftRight, IconDownload } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 

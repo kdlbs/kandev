@@ -20,10 +20,10 @@ func (r *Repository) createTreeHoldTables() error {
 		root_task_id TEXT NOT NULL,
 		mode TEXT NOT NULL,
 		release_policy TEXT NOT NULL DEFAULT '{"strategy":"manual"}',
-		released_at DATETIME,
+		released_at TIMESTAMP,
 		released_by TEXT DEFAULT '',
 		released_reason TEXT DEFAULT '',
-		created_at DATETIME NOT NULL,
+		created_at TIMESTAMP NOT NULL,
 		FOREIGN KEY (root_task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 

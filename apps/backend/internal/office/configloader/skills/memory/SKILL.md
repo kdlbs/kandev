@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Read and write persistent memory entries via agentctl
+description: Read, write, and summarize persistent Office memory when durable behavioral guidance or project knowledge should survive across agent sessions.
 kandev:
   system: true
   version: "0.42.0"

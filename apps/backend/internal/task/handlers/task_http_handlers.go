@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -52,6 +53,7 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	}
 
 	query := c.Query("query")
+	sort := usermodels.NormalizeTasksListSort(c.Query("sort"))
 	workflowID := c.Query("workflow_id")
 	repositoryID := c.Query("repository_id")
 	includeArchived := c.Query("include_archived") == queryValueTrue
@@ -60,7 +62,7 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	excludeConfig := c.Query("exclude_config") == queryValueTrue
 
 	tasks, total, err := h.service.ListTasksByWorkspace(
-		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
+		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
 	)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
@@ -80,8 +82,14 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	})
 }
 
-// buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary session IDs,
-// session counts, and review status using bulk queries.
+// buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary
+// session IDs, session counts, and review status. Uses BatchGetSessionsForTasks
+// to derive the primary session ID and session count in a single round trip,
+// then calls GetPrimarySessionInfoForTasks for the executor type/name fields
+// — those are populated by a LEFT JOIN to the executors table inside that
+// method (the persisted ExecutorSnapshot JSON uses different keys), so the
+// batch loader alone can't supply them without a regression. Two queries
+// total, down from three pre-batch.
 func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tasks []*models.Task) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
 		return []dto.TaskDTO{}, nil
@@ -90,11 +98,7 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	for i, t := range tasks {
 		taskIDs[i] = t.ID
 	}
-	primarySessionMap, err := svc.GetPrimarySessionIDsForTasks(ctx, taskIDs)
-	if err != nil {
-		return nil, err
-	}
-	sessionCountMap, err := svc.GetSessionCountsForTasks(ctx, taskIDs)
+	sessionsByTask, err := svc.BatchGetSessionsForTasks(ctx, taskIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -104,13 +108,18 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
+		sessions := sessionsByTask[task.ID]
 		var primarySessionID *string
-		if sid, ok := primarySessionMap[task.ID]; ok {
-			primarySessionID = &sid
+		for _, s := range sessions {
+			if s.IsPrimary {
+				id := s.ID
+				primarySessionID = &id
+				break
+			}
 		}
 		var sessionCount *int
-		if count, ok := sessionCountMap[task.ID]; ok {
-			sessionCount = &count
+		if n := len(sessions); n > 0 {
+			sessionCount = &n
 		}
 		si := extractSessionInfo(primarySessionInfoMap[task.ID])
 		result = append(result, dto.FromTaskWithSessionInfo(
@@ -250,6 +259,26 @@ func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
 	})
 }
 
+type dismissLastAgentErrorRequest struct {
+	Stamp string `json:"stamp"`
+}
+
+func (h *TaskHandlers) httpDismissLastAgentError(c *gin.Context) {
+	var req dismissLastAgentErrorRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	session, err := h.service.DismissLastAgentError(c.Request.Context(), c.Param("id"), req.Stamp)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task session not found")
+		return
+	}
+	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
+		Session: dto.FromTaskSession(session),
+	})
+}
+
 func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {
@@ -368,6 +397,7 @@ type httpTaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch"`
+	PRNumber       int    `json:"pr_number,omitempty"`
 	LocalPath      string `json:"local_path"`
 	Name           string `json:"name"`
 	DefaultBranch  string `json:"default_branch"`
@@ -409,6 +439,7 @@ type httpCreateTaskRequest struct {
 	ParentID          string                    `json:"parent_id,omitempty"`
 	WorkspacePath     string                    `json:"workspace_path,omitempty"`
 	BlockedBy         []string                  `json:"blocked_by,omitempty"`
+	ProjectID         string                    `json:"project_id,omitempty"`
 	// Office task-handoffs phase 5 — workspace policy. Optional; same
 	// shape as the MCP create_task_kandev fields.
 	WorkspaceMode         string `json:"workspace_mode,omitempty"`
@@ -453,6 +484,9 @@ func validateAttachments(items []v1.MessageAttachment) error {
 		if len(a.Data) > maxAttachmentDataBytes {
 			return fmt.Errorf("attachment[%d] data exceeds size limit", i)
 		}
+		if !a.HasValidDeliveryMode() {
+			return fmt.Errorf("attachment[%d] delivery_mode must be prompt or path", i)
+		}
 		totalSize += len(a.Data)
 	}
 	if totalSize > maxAttachmentDataBytes {
@@ -486,9 +520,9 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	}
 
 	// Always persist profile IDs in task metadata so they can be used as the
-	// task's "default" agent profile. This is needed both for deferred agent start
-	// (handleTaskMovedNoSession) and for reverting to the default agent when a
-	// workflow step has no agent_profile override.
+	// task's "default" agent profile. This is needed for deferred agent start
+	// (handleTaskMovedNoSession) and workflow steps that explicitly use the
+	// workflow/task default profile.
 	if body.AgentProfileID != "" {
 		if body.Metadata == nil {
 			body.Metadata = make(map[string]interface{})
@@ -527,6 +561,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		ParentID:       body.ParentID,
 		WorkspacePath:  body.WorkspacePath,
 		BlockedBy:      body.BlockedBy,
+		ProjectID:      body.ProjectID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -557,11 +592,60 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	// Use the backend-resolved workflow step ID (from the created task) instead of the request's
 	resolvedStepID := taskDTO.WorkflowStepID
 	h.handlePostCreateTaskSession(c, &response, taskDTO.ID, taskDTO.Description, body, resolvedStepID)
+	h.recordTaskCreateLastUsed(c.Request.Context(), body, repos)
 
 	// Associate PR with task if any repository input contains a PR URL
 	h.associatePRFromRepoInputs(taskDTO.ID, response.TaskSessionID, body.Repositories)
 
 	c.JSON(http.StatusOK, response)
+}
+
+func (h *TaskHandlers) recordTaskCreateLastUsed(ctx context.Context, body httpCreateTaskRequest, repos []dto.TaskRepositoryInput) {
+	if h.taskCreateLastUsedRecorder == nil {
+		return
+	}
+	patch := buildTaskCreateLastUsedPatch(body, repos)
+	if err := h.taskCreateLastUsedRecorder.RecordTaskCreateLastUsed(ctx, patch); err != nil {
+		h.logger.Warn("failed to record task-create last-used settings", zap.Error(err))
+	}
+}
+
+func buildTaskCreateLastUsedPatch(body httpCreateTaskRequest, repos []dto.TaskRepositoryInput) usermodels.TaskCreateLastUsed {
+	patch := usermodels.TaskCreateLastUsed{
+		AgentProfileID:    body.AgentProfileID,
+		ExecutorProfileID: body.ExecutorProfileID,
+	}
+	for i, repo := range repos {
+		if repo.RepositoryID == "" {
+			continue
+		}
+		branch := taskCreateLastUsedBranch(body, i, repo)
+		patch.RepositoryID = repo.RepositoryID
+		patch.Branch = branch
+		break
+	}
+	return patch
+}
+
+func taskCreateLastUsedBranch(
+	body httpCreateTaskRequest,
+	index int,
+	repo dto.TaskRepositoryInput,
+) string {
+	if index < len(body.Repositories) && body.Repositories[index].FreshBranch {
+		raw := body.Repositories[index]
+		return firstNonEmpty(raw.BaseBranch, raw.CheckoutBranch)
+	}
+	return firstNonEmpty(repo.CheckoutBranch, repo.BaseBranch)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // commitFreshBranch wraps the post-CreateTask fresh-branch sequence: run the
@@ -729,6 +813,7 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
 			DefaultBranch:  r.DefaultBranch,
@@ -768,6 +853,10 @@ func (h *TaskHandlers) handlePostCreateTaskSession(
 		return
 	}
 	if body.PrepareSession && !body.StartAgent {
+		// Prepare-only: no follow-up start is coming, so DeferredStart is
+		// intentionally omitted — a passthrough profile should be eagerly
+		// upgraded to a full launch here so the terminal has a PTY to attach to.
+		// (Contrast startAgentForNewTask below, which sets DeferredStart=true.)
 		resp, err := h.orchestrator.LaunchSession(c.Request.Context(), &orchestrator.LaunchSessionRequest{
 			TaskID:            taskID,
 			Intent:            orchestrator.IntentPrepare,
@@ -807,6 +896,10 @@ func (h *TaskHandlers) startAgentForNewTask(
 		ExecutorID:        body.ExecutorID,
 		ExecutorProfileID: body.ExecutorProfileID,
 		WorkflowStepID:    resolvedStepID,
+		// The async IntentStartCreated below carries the prompt. Mark this as a
+		// deferred start so a passthrough profile is not eagerly launched here
+		// with an empty prompt (which would pre-empt that prompt-bearing start).
+		DeferredStart: true,
 	})
 	if err != nil {
 		h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
@@ -814,6 +907,14 @@ func (h *TaskHandlers) startAgentForNewTask(
 	}
 	sessionID := prepResp.SessionID
 	response.TaskSessionID = sessionID
+	if updatedTask, updateErr := h.service.UpdateTaskState(ctx, taskID, v1.TaskStateScheduling); updateErr != nil {
+		h.logger.Warn("failed to mark task scheduling after preparing start session",
+			zap.Error(updateErr),
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+	} else {
+		response.State = updatedTask.State
+	}
 
 	// Launch agent asynchronously so the HTTP request can return immediately.
 	// The frontend will receive WebSocket updates when the agent actually starts.
@@ -900,6 +1001,52 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.FromTask(task))
 }
 
+type httpUpdateTaskRepositoryRequest struct {
+	BaseBranch string `json:"base_branch"`
+}
+
+// httpUpdateTaskRepository handles PATCH /tasks/:id/repositories/:repo_id.
+// Today it only mutates base_branch; future per-row fields can be added on
+// httpUpdateTaskRepositoryRequest. Mirrors the WS / MCP paths through the
+// same service method so all three surfaces stay in sync.
+func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
+	var body httpUpdateTaskRepositoryRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	taskRepo, err := h.service.UpdateRepositoryBaseBranch(c.Request.Context(), service.UpdateRepositoryBaseBranchRequest{
+		TaskID:           c.Param("id"),
+		TaskRepositoryID: c.Param("repo_id"),
+		BaseBranch:       body.BaseBranch,
+	})
+	if err != nil {
+		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		// Distinguish caller-fixable validation failures (required field
+		// missing, unsafe ref name, …) from server-side faults (DB write
+		// errors propagated up from the service). Anything that matches a
+		// known validation message stays at 400; everything else escalates
+		// to 500 so client retries don't mask backend regressions.
+		if isValidationError(err) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		// Avoid echoing raw service errors on the 500 path — DB / IO
+		// failures can carry connection strings, table names, or stack
+		// traces. Log the detail server-side; return an opaque message.
+		h.logger.Error("update task repository failed",
+			zap.String("task_id", c.Param("id")),
+			zap.String("repo_id", c.Param("repo_id")),
+			zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update task repository"})
+		return
+	}
+	c.JSON(http.StatusOK, taskRepo)
+}
+
 type httpMoveTaskRequest struct {
 	WorkflowID     string `json:"workflow_id"`
 	WorkflowStepID string `json:"workflow_step_id"`
@@ -916,9 +1063,10 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workflow_id and workflow_step_id are required"})
 		return
 	}
-	result, err := h.service.MoveTask(
+	result, err := h.service.MoveTaskWithOptions(
 		c.Request.Context(), c.Param("id"),
 		body.WorkflowID, body.WorkflowStepID, body.Position,
+		service.MoveTaskOptions{AllowActivePrimarySession: true},
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)
@@ -938,11 +1086,12 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	deleteCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
 	defer cancel()
 	taskID := c.Param("id")
+	cascade := cascadeQueryParam(c)
 	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
 	// when wired so descendant runs are cancelled, group memberships are
 	// released with reason=deleted, and the cleanup state machine fires.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID); err != nil {
+		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID, cascade); err != nil {
 			handleNotFound(c, h.logger, err, "task not deleted")
 			return
 		}
@@ -958,13 +1107,14 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 
 func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 	taskID := c.Param("id")
+	cascade := cascadeQueryParam(c)
 	// Office task-handoffs phase 6: when a HandoffService is wired,
 	// archive the whole subtree under a single cascade ID so
 	// descendants get tagged for scoped unarchive AND workspace-group
 	// memberships are released. When HandoffService is unconfigured
 	// (legacy / tests) fall back to the single-task path.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.ArchiveTaskTree(c.Request.Context(), taskID); err != nil {
+		if _, err := h.handoffSvc.ArchiveTaskTree(c.Request.Context(), taskID, cascade); err != nil {
 			handleNotFound(c, h.logger, err, "task not archived")
 			return
 		}
@@ -976,6 +1126,32 @@ func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
+}
+
+// cascadeQueryParam returns whether the archive/delete request asked to
+// cascade into subtasks. Default is false — subtasks are preserved
+// unless the client explicitly opts in via ?cascade=true.
+func cascadeQueryParam(c *gin.Context) bool {
+	return strings.EqualFold(c.Query("cascade"), "true")
+}
+
+// httpTaskSubtaskCount returns the count of direct, non-archived,
+// non-ephemeral subtasks for a task. Used by the frontend's archive /
+// delete confirmation dialogs to decide whether to render the
+// "Also archive/delete subtasks" checkbox.
+func (h *TaskHandlers) httpTaskSubtaskCount(c *gin.Context) {
+	taskID := c.Param("id")
+	children, err := h.repo.ListChildren(c.Request.Context(), taskID)
+	if err != nil {
+		// Don't surface the raw repo error to the client — it can leak
+		// driver / SQL details. Log the full reason server-side, return
+		// a generic 500 to the caller.
+		h.logger.Error("failed to list direct subtasks",
+			zap.String("task_id", taskID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count subtasks"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"count": len(children)})
 }
 
 // httpUnarchiveTask routes through HandoffService.UnarchiveTaskTree so
@@ -1060,10 +1236,10 @@ func (body *httpStartQuickChatRequest) resolveParams(workspace *models.Workspace
 
 	metadata := make(map[string]interface{})
 	if agentProfileID != "" {
-		metadata["agent_profile_id"] = agentProfileID
+		metadata[models.MetaKeyAgentProfileID] = agentProfileID
 	}
 	if executorID != "" {
-		metadata["executor_id"] = executorID
+		metadata[models.MetaKeyExecutorID] = executorID
 	}
 
 	title := body.Title
@@ -1181,11 +1357,11 @@ func resolveConfigChatDefaults(body httpStartConfigChatRequest, ws *models.Works
 		executorID = *ws.DefaultExecutorID
 	}
 	metadata = map[string]interface{}{
-		"config_mode":      true,
-		"agent_profile_id": agentProfileID,
+		"config_mode":                true,
+		models.MetaKeyAgentProfileID: agentProfileID,
 	}
 	if executorID != "" {
-		metadata["executor_id"] = executorID
+		metadata[models.MetaKeyExecutorID] = executorID
 	}
 	return agentProfileID, executorID, metadata
 }
@@ -1230,6 +1406,12 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 		Intent:         orchestrator.IntentPrepare,
 		AgentProfileID: agentProfileID,
 		ExecutorID:     executorID,
+		// When a prompt is present, launchConfigChatAgent below follows with a
+		// prompt-bearing IntentStartCreated. Defer the start so a passthrough
+		// profile isn't eagerly launched here with an empty prompt. With no
+		// prompt there is no follow-up, so keep the eager upgrade that gives the
+		// terminal a PTY to attach to.
+		DeferredStart: body.Prompt != "",
 	})
 	if err != nil {
 		h.deleteTaskOnError(task.ID, "config chat", err)

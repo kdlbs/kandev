@@ -3,6 +3,7 @@
 import { getBackendConfig } from "@/lib/config";
 import { defaultFeaturesState } from "@/lib/state/slices/features/features-slice";
 import type { FeatureFlags } from "@/lib/state/slices/features/types";
+import type { RuntimeFlagsResponse } from "@/lib/types/runtime-flags";
 
 const { apiBaseUrl } = getBackendConfig();
 
@@ -29,6 +30,20 @@ export async function getFeatureFlagsAction(): Promise<FeatureFlags> {
     return normalizeFlags(data, defaults);
   } catch {
     return defaults;
+  }
+}
+
+export async function getRuntimeDebugModeAction(): Promise<boolean> {
+  const url = `${apiBaseUrl}/api/v1/runtime-flags`;
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) {
+      return false;
+    }
+    const data = (await response.json()) as RuntimeFlagsResponse;
+    return data.flags.some((flag) => flag.key === "debug.devMode" && flag.effective_value);
+  } catch {
+    return false;
   }
 }
 

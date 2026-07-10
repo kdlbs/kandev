@@ -35,12 +35,19 @@ const (
 	WorkflowStepCreated = "workflow_step.created"
 	WorkflowStepUpdated = "workflow_step.updated"
 	WorkflowStepDeleted = "workflow_step.deleted"
+	// WorkflowStepCompletionSignaled fires when an agent (or the manual
+	// fallback button) signals that the current workflow step is complete
+	// for a given (task, session) — ADR 0015. The orchestrator subscriber
+	// reads the pending bag on TaskSession.Metadata and drives the
+	// transition.
+	WorkflowStepCompletionSignaled = "workflow.step_completion_signaled"
 )
 
 // Event types for comments
 const (
 	MessageAdded   = "message.added"
 	MessageUpdated = "message.updated"
+	MessageDeleted = "message.deleted"
 )
 
 // Event types for message queue
@@ -60,6 +67,13 @@ const (
 	TaskPlanDeleted         = "task_plan.deleted"
 	TaskPlanRevisionCreated = "task_plan.revision.created"
 	TaskPlanReverted        = "task_plan.reverted"
+)
+
+// Event types for task walkthroughs (agent-authored guided code tours)
+const (
+	TaskWalkthroughCreated = "task_walkthrough.created"
+	TaskWalkthroughUpdated = "task_walkthrough.updated"
+	TaskWalkthroughDeleted = "task_walkthrough.deleted"
 )
 
 // Event types for session turns
@@ -105,6 +119,13 @@ const (
 // Event types for users
 const (
 	UserSettingsUpdated = "user.settings.updated"
+)
+
+// Event types for system maintenance jobs (VACUUM, factory reset, snapshot
+// create/restore, disk walk). Published by internal/system/jobs.Tracker on
+// every state transition and broadcast to all WebSocket clients.
+const (
+	SystemJobUpdate = "system.job.update"
 )
 
 // Event types for environments
@@ -153,6 +174,7 @@ const (
 	ClarificationAnswered        = "clarification.answered"         // User answered agent's clarification question (fallback/new turn)
 	ClarificationPrimaryAnswered = "clarification.primary_answered" // User answered while agent is still waiting (same turn)
 	ClarificationCancelled       = "clarification.cancelled"        // User cancelled a pending clarification question
+	ClarificationStaleDismissed  = "clarification.stale_dismissed"  // User dismissed a detached overlay without resuming the agent
 )
 
 // Event types for workspace/git status
@@ -193,6 +215,7 @@ const (
 const (
 	AgentCapabilitiesUpdated = "agent_capabilities.updated" // Agent capabilities received
 	SessionModelsUpdated     = "session_models.updated"     // Session models received
+	SessionInfoUpdated       = "session_info.updated"       // ACP session info received
 )
 
 // Event types for session todos (ACP plan entries)
@@ -204,15 +227,32 @@ const (
 	SessionPromptUsageUpdated = "session_prompt_usage.updated" // Prompt token usage updated
 )
 
+// Event types for automations
+const (
+	AutomationTriggered  = "automation.triggered"   // A trigger fired
+	AutomationRunCreated = "automation.run.created" // Run outcome recorded
+)
+
 // Event types for GitHub integration
 const (
-	GitHubPRFeedback       = "github.pr_feedback"        // PR has new feedback (UI notification only)
-	GitHubPRStateChanged   = "github.pr_state_changed"   // PR state changed (merged, closed, etc.)
-	GitHubNewReviewPR      = "github.new_pr_to_review"   // New PR found needing review
-	GitHubNewIssue         = "github.new_issue"          // New issue found matching issue watch
-	GitHubTaskPRUpdated    = "github.task_pr.updated"    // TaskPR record updated (for UI refresh)
-	GitHubWatchEvent       = "github.watch.event"        // Watch created/deleted
-	GitHubRateLimitUpdated = "github.rate_limit.updated" // GitHub API rate-limit snapshot changed
+	GitHubPRFeedback           = "github.pr_feedback"             // PR has new feedback (UI notification only)
+	GitHubPRStateChanged       = "github.pr_state_changed"        // PR state changed (merged, closed, etc.)
+	GitHubNewReviewPR          = "github.new_pr_to_review"        // New PR found needing review
+	GitHubNewIssue             = "github.new_issue"               // New issue found matching issue watch
+	GitHubTaskPRUpdated        = "github.task_pr.updated"         // TaskPR record updated (for UI refresh)
+	GitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Task CI automation options updated
+	GitHubWatchEvent           = "github.watch.event"             // Watch created/deleted
+	GitHubRateLimitUpdated     = "github.rate_limit.updated"      // GitHub API rate-limit snapshot changed
+)
+
+// Event types for GitLab integration
+const (
+	GitLabMRFeedback     = "gitlab.mr_feedback"      // MR has new feedback (UI notification only)
+	GitLabMRStateChanged = "gitlab.mr_state_changed" // MR state changed (merged, closed, etc.)
+	GitLabNewReviewMR    = "gitlab.new_mr_to_review" // New MR found needing review
+	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch
+	GitLabTaskMRUpdated  = "gitlab.task_mr.updated"  // TaskMR record updated (for UI refresh)
+	GitLabWatchEvent     = "gitlab.watch.event"      // Watch created/deleted
 )
 
 // Event types for Jira integration
@@ -223,6 +263,11 @@ const (
 // Event types for Linear integration
 const (
 	LinearNewIssue = "linear.new_issue" // New issue found matching a Linear issue watch
+)
+
+// Event types for Sentry integration
+const (
+	SentryNewIssue = "sentry.new_issue" // New issue found matching a Sentry issue watch
 )
 
 // BuildShellOutputSubject creates a shell output subject for a specific session
@@ -364,6 +409,16 @@ func BuildSessionModelsSubject(sessionID string) string {
 // BuildSessionModelsWildcardSubject creates a wildcard subscription for all session models events
 func BuildSessionModelsWildcardSubject() string {
 	return SessionModelsUpdated + ".*"
+}
+
+// BuildSessionInfoSubject creates a session info subject for a specific session
+func BuildSessionInfoSubject(sessionID string) string {
+	return SessionInfoUpdated + "." + sessionID
+}
+
+// BuildSessionInfoWildcardSubject creates a wildcard subscription for all session info events
+func BuildSessionInfoWildcardSubject() string {
+	return SessionInfoUpdated + ".*"
 }
 
 // BuildSessionTodosSubject creates a session todos subject for a specific session

@@ -30,17 +30,6 @@ func NextCronTime(expression, timezone string, after time.Time) (time.Time, erro
 	return findNextMatch(spec, after.In(loc)), nil
 }
 
-// ParseCronExpression validates a cron expression string and returns an error
-// if it is malformed.
-func ParseCronExpression(expression string) error {
-	fields := strings.Fields(expression)
-	if len(fields) != 5 {
-		return fmt.Errorf("expected 5 cron fields, got %d", len(fields))
-	}
-	_, err := parseCronSpec(fields)
-	return err
-}
-
 type cronSpec struct {
 	minutes     []int
 	hours       []int

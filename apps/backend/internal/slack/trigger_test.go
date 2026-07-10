@@ -179,11 +179,13 @@ func (f fakeUtility) PreparePromptRequest(
 		return nil, err
 	}
 	agentCLI, model := a.AgentID, a.Model
-	if agentCLI == "" && defaults != nil {
-		agentCLI = defaults.AgentID
-	}
-	if model == "" && defaults != nil {
-		model = defaults.Model
+	if defaults != nil {
+		if model == "" {
+			agentCLI = defaults.AgentID
+			model = defaults.Model
+		} else if agentCLI == "" {
+			agentCLI = defaults.AgentID
+		}
 	}
 	return &utilityservice.PromptRequest{
 		UtilityID:      utilityID,
@@ -402,7 +404,7 @@ func TestTrigger_HandleOne_PostsAgentReplyInThread(t *testing.T) {
 	})
 
 	client := &fakeClient{thread: []SlackMessage{{TS: "100.0001", Text: "!kandev fix it"}}, permalink: "https://example/p100"}
-	svc.client = client
+	svc.clients["default"] = client
 
 	cfg, _ := svc.Store().GetConfig(ctx)
 	trig := NewTrigger(svc, logger.Default())
@@ -502,7 +504,7 @@ func TestTrigger_ProcessMatches_BreaksOnTransientError(t *testing.T) {
 	}
 	svc := NewService(store, nil, runner, factory, logger.Default())
 	client := &fakeClient{thread: []SlackMessage{{TS: "100.000001", Text: "!kandev a"}}}
-	svc.client = client
+	svc.clients["default"] = client
 
 	trig := NewTrigger(svc, logger.Default())
 	matches := []SlackMessage{
@@ -550,7 +552,7 @@ func TestTrigger_ProcessMatches_NoUtilityAgentSkipsWithoutBreak(t *testing.T) {
 
 	factory := func(_ *SlackConfig, _ string, _ string) Client { return &fakeClient{} }
 	svc := NewService(store, nil, noAgentRunner, factory, logger.Default())
-	svc.client = &fakeClient{}
+	svc.clients["default"] = &fakeClient{}
 
 	trig := NewTrigger(svc, logger.Default())
 	matches := []SlackMessage{
@@ -601,29 +603,32 @@ func TestComposePrompt_GenericTemplateGetsResolvedSubstitution(t *testing.T) {
 
 func TestTrigger_DueForScan(t *testing.T) {
 	trig := &Trigger{}
-	if !trig.dueForScan(30) {
+	if !trig.dueForScan("ws-a", 30) {
 		t.Error("expected fresh trigger to be due immediately")
 	}
-	trig.markScanned()
-	if trig.dueForScan(30) {
+	trig.markScanned("ws-a")
+	if trig.dueForScan("ws-a", 30) {
 		t.Error("expected trigger to not be due immediately after scan")
+	}
+	if !trig.dueForScan("ws-b", 30) {
+		t.Error("expected a different workspace to remain due")
 	}
 
 	// Backdate the marker to simulate enough elapsed time. Using a direct
 	// field write here rather than time.Sleep keeps the test deterministic.
 	trig.scannedMu.Lock()
-	trig.lastScannedAt = time.Now().Add(-31 * time.Second)
+	trig.lastScannedAt[normalizeWorkspaceID("ws-a")] = time.Now().Add(-31 * time.Second)
 	trig.scannedMu.Unlock()
-	if !trig.dueForScan(30) {
+	if !trig.dueForScan("ws-a", 30) {
 		t.Error("expected trigger to be due again after 31s with 30s interval")
 	}
 
 	// Bogus interval (below floor) falls back to the default — guards against
 	// a config row with 0 (or a corrupted row) holding the loop hostage.
 	trig.scannedMu.Lock()
-	trig.lastScannedAt = time.Now()
+	trig.lastScannedAt[normalizeWorkspaceID("ws-a")] = time.Now()
 	trig.scannedMu.Unlock()
-	if trig.dueForScan(0) {
+	if trig.dueForScan("ws-a", 0) {
 		t.Error("expected zero interval to behave as default 30s, not as 'always due'")
 	}
 }

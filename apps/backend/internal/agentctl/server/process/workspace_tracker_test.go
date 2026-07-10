@@ -514,6 +514,213 @@ func TestGetFileContent_BinaryDetection(t *testing.T) {
 	}
 }
 
+func TestGetFileContent_ExternalAbsolutePath(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	externalDir := t.TempDir()
+	externalPath := filepath.Join(externalDir, "sprite-doc.txt")
+	externalContent := "outside workspace\n"
+	if err := os.WriteFile(externalPath, []byte(externalContent), 0o644); err != nil {
+		t.Fatalf("failed to write external file: %v", err)
+	}
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+
+	content, size, isBinary, resolvedPath, err := wt.GetFileContent(externalPath)
+	if err != nil {
+		t.Fatalf("GetFileContent(external absolute path) error: %v", err)
+	}
+	if content != externalContent {
+		t.Fatalf("content = %q, want %q", content, externalContent)
+	}
+	if size != int64(len(externalContent)) {
+		t.Fatalf("size = %d, want %d", size, len(externalContent))
+	}
+	if isBinary {
+		t.Fatal("expected text file to not be binary")
+	}
+	if resolvedPath != "" {
+		t.Fatalf("resolvedPath = %q, want empty for external file", resolvedPath)
+	}
+
+	_, _, _, _, err = wt.GetFileContent(externalDir)
+	if err == nil {
+		t.Fatal("expected error for external absolute directory")
+	}
+
+	_, _, _, _, err = wt.GetFileContent(filepath.Join(externalDir, "missing.txt"))
+	if err == nil {
+		t.Fatal("expected error for missing external absolute file")
+	}
+}
+
+// TestGetFileContent_StripsReadSelector covers the file-open boundary fix: a
+// path carrying an omp read-selector (e.g. "<file>:43-94") must still open,
+// both for an in-workspace file and for an external absolute file (the
+// CLAUDE.md:93-113 "path traversal detected" repro).
+func TestGetFileContent_StripsReadSelector(t *testing.T) {
+	workDir, wt := setupTestDir(t)
+
+	inside := filepath.Join(workDir, "notes.txt")
+	insideContent := "l1\nl2\nl3\nl4\n"
+	if err := os.WriteFile(inside, []byte(insideContent), 0o644); err != nil {
+		t.Fatalf("write in-workspace file: %v", err)
+	}
+	content, _, _, _, err := wt.GetFileContent("notes.txt:2-3")
+	if err != nil {
+		t.Fatalf("GetFileContent(in-workspace + selector) error: %v", err)
+	}
+	if content != insideContent {
+		t.Fatalf("content = %q, want full file %q", content, insideContent)
+	}
+
+	externalDir := t.TempDir()
+	externalPath := filepath.Join(externalDir, "CLAUDE.md")
+	externalContent := "global config\n"
+	if err := os.WriteFile(externalPath, []byte(externalContent), 0o644); err != nil {
+		t.Fatalf("write external file: %v", err)
+	}
+	content, _, _, _, err = wt.GetFileContent(externalPath + ":93-113")
+	if err != nil {
+		t.Fatalf("GetFileContent(external absolute + selector) error: %v", err)
+	}
+	if content != externalContent {
+		t.Fatalf("content = %q, want %q", content, externalContent)
+	}
+}
+
+// TestGetFileContent_ExpandsTildeWithMultiRange covers OMP reads that arrive as
+// a "~"-prefixed home path with a multi-range selector
+// (e.g. "~/.kandev/x/README.md:16-20,32-40,69-69,85-96"): the tilde must be
+// expanded and the whole multi-range selector stripped for the open to succeed.
+func TestGetFileContent_ExpandsTildeWithMultiRange(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)        // os.UserHomeDir() on unix/macOS
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir() on Windows
+	sub := filepath.Join(home, "notes")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	want := "global config\n"
+	if err := os.WriteFile(filepath.Join(sub, "GLOBAL.md"), []byte(want), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, wt := setupTestDir(t)
+	got, _, _, _, err := wt.GetFileContent("~/notes/GLOBAL.md:16-20,32-40,69-69,85-96")
+	if err != nil {
+		t.Fatalf("GetFileContent(tilde + multi-range) error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("content = %q, want %q", got, want)
+	}
+}
+
+// TestGetFileContent_PrefersLiteralColonPath verifies a real workspace file
+// whose name literally contains a colon (e.g. "notes.txt:2-3") opens as-is and
+// is NOT mistaken for a "notes.txt" + read selector.
+func TestGetFileContent_PrefersLiteralColonPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("colon is not a legal filename character on Windows")
+	}
+	workDir, wt := setupTestDir(t)
+	if err := os.WriteFile(filepath.Join(workDir, "notes.txt"), []byte("plain\n"), 0o644); err != nil {
+		t.Fatalf("write notes.txt: %v", err)
+	}
+	literal := "literal-colon-file\n"
+	if err := os.WriteFile(filepath.Join(workDir, "notes.txt:2-3"), []byte(literal), 0o644); err != nil {
+		t.Fatalf("write literal: %v", err)
+	}
+	got, _, _, _, err := wt.GetFileContent("notes.txt:2-3")
+	if err != nil {
+		t.Fatalf("GetFileContent error: %v", err)
+	}
+	if got != literal {
+		t.Fatalf("expected literal colon file %q, got %q (selector wrongly stripped)", literal, got)
+	}
+}
+
+// TestGetFileContent_PrefersLiteralTildePath verifies a workspace file under a
+// literal "~" directory opens as-is and is NOT expanded to the user's home.
+func TestGetFileContent_PrefersLiteralTildePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	// Decoy at the home-expanded location to prove expansion is not used.
+	if err := os.WriteFile(filepath.Join(home, "config.txt"), []byte("home-decoy\n"), 0o644); err != nil {
+		t.Fatalf("write decoy: %v", err)
+	}
+	workDir, wt := setupTestDir(t)
+	tildeDir := filepath.Join(workDir, "~")
+	if err := os.MkdirAll(tildeDir, 0o755); err != nil {
+		t.Fatalf("mkdir ~: %v", err)
+	}
+	want := "workspace-tilde\n"
+	if err := os.WriteFile(filepath.Join(tildeDir, "config.txt"), []byte(want), 0o644); err != nil {
+		t.Fatalf("write tilde file: %v", err)
+	}
+	got, _, _, _, err := wt.GetFileContent("~/config.txt")
+	if err != nil {
+		t.Fatalf("GetFileContent error: %v", err)
+	}
+	if got != want {
+		t.Fatalf("expected workspace tilde file %q, got %q (path wrongly home-expanded)", want, got)
+	}
+}
+
+// TestGetFileContent_MissingTildePathReportsHomeLocation reproduces the
+// "Failed to open file" bug: clicking an agent read link like
+// "~/.kandev/.../account-mapping.spec.ts" for a file that does not exist must
+// not glue the tilde onto the workspace root
+// (".../<workspace>/~/.kandev/...: no such file"). The error must name the real
+// home-expanded location and must not read as a path-traversal attempt.
+func TestGetFileContent_MissingTildePathReportsHomeLocation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	_, wt := setupTestDir(t)
+
+	_, _, _, _, err := wt.GetFileContent("~/notes/missing/account-mapping.spec.ts:760-860")
+	if err == nil {
+		t.Fatal("expected error for missing tilde path, got nil")
+	}
+	// The tilde must never be path-joined onto the workspace root.
+	mangled := string(os.PathSeparator) + "~" + string(os.PathSeparator)
+	if strings.Contains(err.Error(), mangled) {
+		t.Fatalf("error joins tilde onto workspace (mangled path): %v", err)
+	}
+	// The error must name the real home-expanded location.
+	want := filepath.Join(home, "notes", "missing", "account-mapping.spec.ts")
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q does not name expanded home path %q", err.Error(), want)
+	}
+	// A missing file is not a traversal attempt.
+	if strings.Contains(err.Error(), "path traversal") {
+		t.Fatalf("missing tilde file reported as traversal: %v", err)
+	}
+}
+
+// TestGetFileContent_MissingAbsolutePathNotTraversal verifies that an absolute
+// path to a non-existent file (read-only external access per ADR 0016) reports
+// a plain "file not found" naming the path, not the alarming "path traversal
+// detected".
+func TestGetFileContent_MissingAbsolutePathNotTraversal(t *testing.T) {
+	_, wt := setupTestDir(t)
+	missing := filepath.Join(t.TempDir(), "nope", "file.txt")
+
+	_, _, _, _, err := wt.GetFileContent(missing)
+	if err == nil {
+		t.Fatal("expected error for missing absolute path, got nil")
+	}
+	if strings.Contains(err.Error(), "path traversal") {
+		t.Fatalf("missing absolute file reported as traversal: %v", err)
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Fatalf("error %q does not name the requested path %q", err.Error(), missing)
+	}
+}
+
 // setupTestDir creates a temp directory with a WorkspaceTracker (no git required).
 func setupTestDir(t *testing.T) (string, *WorkspaceTracker) {
 	t.Helper()
@@ -743,7 +950,7 @@ func TestApplyFileDiff_RegularFile(t *testing.T) {
 	// Build a unified diff that changes line2 -> modified
 	diff := "--- test.txt\n+++ test.txt\n@@ -1,3 +1,3 @@\n line1\n-line2\n+modified\n line3\n"
 
-	hash, resolution, err := wt.ApplyFileDiff("test.txt", diff, "", nil)
+	hash, resolution, err := wt.ApplyFileDiff(context.Background(), "test.txt", diff, "", nil)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff failed: %v", err)
 	}
@@ -798,7 +1005,7 @@ func TestApplyFileDiff_Symlink(t *testing.T) {
 	// Build a diff targeting the symlink path
 	diff := "--- LINK.md\n+++ LINK.md\n@@ -1,3 +1,3 @@\n line1\n-line2\n+patched\n line3\n"
 
-	hash, resolution, err := wt.ApplyFileDiff("LINK.md", diff, "", nil)
+	hash, resolution, err := wt.ApplyFileDiff(context.Background(), "LINK.md", diff, "", nil)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff through symlink failed: %v", err)
 	}
@@ -859,7 +1066,7 @@ func TestApplyFileDiff_ConflictDetection(t *testing.T) {
 
 	diff := "--- conflict.txt\n+++ conflict.txt\n@@ -1 +1 @@\n-original\n+patched\n"
 
-	_, _, err := wt.ApplyFileDiff("conflict.txt", diff, origHash, nil)
+	_, _, err := wt.ApplyFileDiff(context.Background(), "conflict.txt", diff, origHash, nil)
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -929,7 +1136,7 @@ func TestApplyFileDiff_ConflictWithDesiredContent(t *testing.T) {
 	diff := "--- file.txt\n+++ file.txt\n@@ -1 +1 @@\n-original\n+user-version\n"
 	desiredContent := "user-desired-content\n"
 
-	newHash, resolution, err := wt.ApplyFileDiff("file.txt", diff, origHash, &desiredContent)
+	newHash, resolution, err := wt.ApplyFileDiff(context.Background(), "file.txt", diff, origHash, &desiredContent)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff with desiredContent should not fail: %v", err)
 	}
@@ -968,7 +1175,7 @@ func TestApplyFileDiff_ConflictWithoutDesiredContent(t *testing.T) {
 	diff := "--- file.txt\n+++ file.txt\n@@ -1 +1 @@\n-original\n+user-version\n"
 
 	// Without desiredContent, conflict should still fail
-	_, _, err := wt.ApplyFileDiff("file.txt", diff, origHash, nil)
+	_, _, err := wt.ApplyFileDiff(context.Background(), "file.txt", diff, origHash, nil)
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -1008,7 +1215,7 @@ func TestApplyFileDiff_SymlinkConflictWithDesiredContent(t *testing.T) {
 	diff := "--- LINK.md\n+++ LINK.md\n@@ -1 +1 @@\n-original\n+user-version\n"
 	desiredContent := "user-content\n"
 
-	newHash, resolution, err := wt.ApplyFileDiff("LINK.md", diff, origHash, &desiredContent)
+	newHash, resolution, err := wt.ApplyFileDiff(context.Background(), "LINK.md", diff, origHash, &desiredContent)
 	if err != nil {
 		t.Fatalf("ApplyFileDiff with desiredContent through symlink should not fail: %v", err)
 	}

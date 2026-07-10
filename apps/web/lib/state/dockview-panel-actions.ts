@@ -1,4 +1,4 @@
-import type { DockviewApi } from "dockview-react";
+import type { DockviewApi, DockviewGroupPanel } from "dockview-react";
 import { focusOrAddPanel } from "./dockview-layout-builders";
 
 type StoreGet = () => {
@@ -67,6 +67,10 @@ function getFileName(path: string): string {
   return path.split("/").pop() || path;
 }
 
+export function buildRepoScopedItemId(path: string, repo?: string): string {
+  return repo ? `${repo}:${path}` : path;
+}
+
 type OpenPreviewArgs = {
   api: DockviewApi;
   type: PreviewType;
@@ -86,12 +90,29 @@ type OpenPreviewArgs = {
   pinnedTabComponent?: string;
 };
 
+/** Move the preview panel into the explicitly requested group when it currently
+ *  lives elsewhere — e.g. a saved env layout restored `preview:file-diff` into
+ *  the right column, but the user just clicked a file in the changes panel
+ *  expecting the diff to land in the center group. */
+function movePreviewToRequestedGroup(
+  preview: ReturnType<DockviewApi["getPanel"]> & object,
+  api: DockviewApi,
+  groupId: string,
+): void {
+  if (!groupId || preview.group?.id === groupId) return;
+  const target = api.getGroup(groupId);
+  if (!target) return;
+  // `api.getGroup` returns `IDockviewGroupPanel` but `moveTo` requires the
+  // concrete `DockviewGroupPanel`; at runtime they're the same object.
+  preview.api.moveTo({ group: target as DockviewGroupPanel });
+}
+
 /** Update an existing preview panel with new content, materializing promoted items first. */
 function updateExistingPreview(
   preview: ReturnType<DockviewApi["getPanel"]> & object,
   args: OpenPreviewArgs,
 ): void {
-  const { api, type, itemId, title, params, quiet, pinnedTabComponent } = args;
+  const { api, type, itemId, title, params, groupId, quiet, pinnedTabComponent } = args;
   const currentItemId = preview.params?.previewItemId as string | undefined;
   if (preview.params?.promoted && currentItemId && currentItemId !== itemId) {
     materializePromotedPreview(api, type, pinnedTabComponent ?? PINNED_TAB);
@@ -106,6 +127,7 @@ function updateExistingPreview(
     promoted: keepPromoted || undefined,
   });
   preview.setTitle(title);
+  movePreviewToRequestedGroup(preview, api, groupId);
   if (!quiet) preview.api.setActive();
 }
 
@@ -233,6 +255,9 @@ export type OpenPanelOpts = {
   quiet?: boolean;
   /** Force the per-item pinned panel instead of the shared preview slot. */
   pin?: boolean;
+  /** Multi-repo subpath (repository_name) recorded on the panel params so
+   *  FileEditorPanel's fallback content fetch resolves under the right repo. */
+  repo?: string;
 };
 
 export const PREVIEW_FILE_EDITOR_ID = "preview:file-editor";
@@ -242,12 +267,13 @@ function buildFileEditorAction(get: StoreGet) {
   return (path: string, name: string, opts?: OpenPanelOpts) => {
     const { api, centerGroupId } = get();
     if (!api) return;
+    const itemId = buildRepoScopedItemId(path, opts?.repo);
     openOrReplacePreview({
       api,
       type: "file-editor",
-      itemId: path,
+      itemId,
       title: name,
-      params: { path },
+      params: { path, ...(opts?.repo ? { repo: opts.repo } : {}) },
       groupId: centerGroupId,
       quiet: opts?.quiet,
       pin: opts?.pin,
@@ -268,10 +294,11 @@ function buildFileDiffAction(get: StoreGet) {
   ) => {
     const { api, centerGroupId } = get();
     if (!api) return;
+    const itemId = buildRepoScopedItemId(path, opts?.repositoryName);
     openOrReplacePreview({
       api,
       type: "file-diff",
-      itemId: path,
+      itemId,
       title: `Diff [${getFileName(path)}]`,
       params: {
         kind: "file",
@@ -438,6 +465,24 @@ export function buildExtraPanelActions(get: StoreGet) {
         opts?.quiet ?? false,
       );
     },
+    /**
+     * Opens the PR detail panel for a given key, or focuses the tab already
+     * showing that exact PR.
+     *
+     * @param prKey - `<owner>/<repo>/<pr_number>` identifying the PR to
+     *   show; `undefined` targets the legacy single-repo panel id
+     *   ("pr-detail").
+     * @param activeSessionId - Session to anchor the panel next to as a
+     *   tab; falls back to `centerGroupId` when omitted or when no matching
+     *   session panel exists.
+     *
+     * Reuses the legacy unkeyed "pr-detail" panel only when it's already
+     * showing this exact PR (tracked via its stamped `params.prKey` — see
+     * `runAutoPRPanelEffect` in dockview-session-tabs.ts, which keeps that
+     * key in sync with the task's current default PR). A different PR
+     * always gets its own `pr-detail|<prKey>` tab instead of overwriting
+     * the one already open.
+     */
     addPRPanel: (prKey?: string, activeSessionId?: string | null) => {
       const { api, centerGroupId } = get();
       if (!api) return;
@@ -446,12 +491,16 @@ export function buildExtraPanelActions(get: StoreGet) {
       // Legacy single-repo callers (no key) get the historical panel id.
       const id = prKey ? `pr-detail|${prKey}` : "pr-detail";
       // If a legacy "pr-detail" panel is already open (auto-shown on task
-      // open or restored from a saved layout), reuse it instead of adding a
-      // second tab. Update its params so it renders the requested PR.
+      // open or restored from a saved layout) AND it's currently showing
+      // this exact PR (see useAutoPRPanel, which stamps the panel's params
+      // with the PR it renders), reuse it instead of adding a second tab.
+      // A legacy panel showing a DIFFERENT PR (multi-repo "+" menu click)
+      // must NOT be repurposed — that would silently swap its content
+      // instead of opening a distinct tab for the newly requested PR.
       if (prKey && !api.getPanel(id)) {
         const legacy = api.getPanel("pr-detail");
-        if (legacy) {
-          legacy.api.updateParameters({ prKey });
+        const legacyKey = (legacy?.params as { prKey?: string } | undefined)?.prKey;
+        if (legacy && legacyKey === prKey) {
           legacy.api.setActive();
           return;
         }
@@ -471,18 +520,30 @@ export function buildExtraPanelActions(get: StoreGet) {
         params: prKey ? { prKey } : undefined,
       });
     },
-    addTerminalPanel: (terminalId?: string, groupId?: string, environmentId?: string) => {
+    addTerminalPanel: (
+      terminalId?: string,
+      groupId?: string,
+      environmentId?: string,
+      taskID?: string,
+      title?: string,
+    ) => {
       const { api, rightBottomGroupId } = get();
       if (!api) return;
       const id = terminalId ?? `terminal-${Date.now()}`;
-      // Stamp the env id into the panel's params so cleanup
-      // (dockview-layout-setup.onDidRemovePanel) can call stopUserShell with
-      // the correct env even when the user has switched tasks since open.
+      // Stamp env id + task id into the panel's params so cleanup
+      // (dockview-layout-setup.onDidRemovePanel) can call destroyUserShell
+      // with the correct task scope even after the user switches tasks.
+      // task_id is what the backend uses to verify ownership now — without
+      // it `requireOwnership` rejects with ErrTaskMismatch.
       addSimplePanel(api, groupId ?? rightBottomGroupId, {
         id,
         component: "terminal",
-        title: "Terminal",
-        params: { terminalId: id, environmentId },
+        // terminalTab is a custom dockview tab that adds the `#N` badge
+        // when there's more than one ordinary terminal in the task and
+        // exposes a context menu for rename / park / destroy.
+        tabComponent: "terminalTab",
+        title: title ?? "Terminal",
+        params: { terminalId: id, environmentId, taskID },
       });
     },
   };

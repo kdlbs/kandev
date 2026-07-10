@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -79,6 +80,7 @@ func (r *sqliteRepository) initSchema() error {
 		user_modified INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
 		cli_flags TEXT DEFAULT NULL,
+		env_vars TEXT NOT NULL DEFAULT '[]',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,
@@ -133,6 +135,7 @@ func (r *sqliteRepository) initSchema() error {
 	r.migrate.Apply("agent_profiles.migrated_from", `ALTER TABLE agent_profiles ADD COLUMN migrated_from TEXT DEFAULT NULL`)
 	// Rows where cli_flags IS NULL are backfilled on first read - see scanAgentProfile.
 	r.migrate.Apply("agent_profiles.cli_flags", `ALTER TABLE agent_profiles ADD COLUMN cli_flags TEXT DEFAULT NULL`)
+	r.migrate.Apply("agent_profiles.env_vars", `ALTER TABLE agent_profiles ADD COLUMN env_vars TEXT NOT NULL DEFAULT '[]'`)
 
 	// Migration: drop CHECK(model != '') constraint from agent_profiles.
 	//
@@ -201,6 +204,10 @@ func (r *sqliteRepository) migrateOfficeEnrichmentColumns() {
 // The migration is idempotent: it inspects sqlite_master for the CHECK keyword
 // and only proceeds when the constraint is present.
 func (r *sqliteRepository) migrateDropModelCheckConstraint() error {
+	if dialect.IsPostgres(r.db.DriverName()) {
+		return nil
+	}
+
 	var tableDDL string
 	err := r.db.QueryRow(
 		`SELECT sql FROM sqlite_master WHERE type='table' AND name='agent_profiles'`,
@@ -249,10 +256,11 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// The old table does not have cli_flags yet (the ADD COLUMN ran earlier in
+	// The old table does not have cli_flags/env_vars yet (the ADD COLUMN ran earlier in
 	// initSchema but on the old table, which is about to be dropped). So we
 	// include it in the copy only when it exists on the source table.
 	srcHasCLIFlags := columnExists(tx, "agent_profiles", "cli_flags")
+	srcHasEnvVars := columnExists(tx, "agent_profiles", "env_vars")
 	srcCols := `id, agent_id, name, agent_display_name, model, mode, migrated_from,
 		auto_approve, dangerously_skip_permissions, allow_indexing,
 		cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at`
@@ -260,6 +268,10 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	if srcHasCLIFlags {
 		srcCols += ", cli_flags"
 		dstCols += ", cli_flags"
+	}
+	if srcHasEnvVars {
+		srcCols += ", env_vars"
+		dstCols += ", env_vars"
 	}
 
 	if _, err := tx.Exec(`CREATE TABLE agent_profiles_new (
@@ -277,6 +289,7 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		user_modified INTEGER NOT NULL DEFAULT 0,
 		plan TEXT DEFAULT '',
 		cli_flags TEXT DEFAULT NULL,
+		env_vars TEXT NOT NULL DEFAULT '[]',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,
@@ -458,6 +471,10 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 	if err != nil {
 		return err
 	}
+	envVarsJSON, err := envVarsToJSON(profile.EnvVars)
+	if err != nil {
+		return err
+	}
 	enrich, err := enrichmentValues(profile)
 	if err != nil {
 		return err
@@ -466,7 +483,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		INSERT INTO agent_profiles (
 			id, agent_id, name, agent_display_name, model, mode, migrated_from,
 			auto_approve, dangerously_skip_permissions, allow_indexing, cli_passthrough,
-			user_modified, plan, cli_flags, created_at, updated_at, deleted_at,
+			user_modified, plan, cli_flags, env_vars, created_at, updated_at, deleted_at,
 			workspace_id, role, icon, reports_to,
 			skill_ids, desired_skills, custom_prompt,
 			status, pause_reason, last_run_finished_at,
@@ -476,7 +493,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
-			?, '', ?, ?, ?, ?,
+			?, '', ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
 			?, ?, ?,
 			?, ?, ?,
@@ -489,7 +506,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing), dialect.BoolToInt(profile.CLIPassthrough),
-		dialect.BoolToInt(profile.UserModified), cliFlagsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt,
+		dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.CreatedAt, profile.UpdatedAt, profile.DeletedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
 		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
 		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
@@ -541,6 +558,10 @@ func enrichmentValues(profile *models.AgentProfile) (profileEnrichmentValues, er
 	if settings == "" {
 		settings = "{}"
 	}
+	settings, err := settingsWithConfigOptions(settings, profile.ConfigOptions)
+	if err != nil {
+		return profileEnrichmentValues{}, err
+	}
 	permissions := profile.Permissions
 	if permissions == "" {
 		permissions = "{}"
@@ -561,6 +582,51 @@ func enrichmentValues(profile *models.AgentProfile) (profileEnrichmentValues, er
 		settings:              settings,
 		permissions:           permissions,
 	}, nil
+}
+
+const profileSettingsConfigOptionsKey = "config_options"
+
+func settingsWithConfigOptions(raw string, options map[string]string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		raw = "{}"
+	}
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+		return "", fmt.Errorf("parse profile settings: %w", err)
+	}
+	if settings == nil {
+		settings = map[string]json.RawMessage{}
+	}
+	clean := profileconfig.SanitizeConfigOptions(options)
+	if len(clean) == 0 {
+		delete(settings, profileSettingsConfigOptionsKey)
+	} else {
+		data, err := json.Marshal(clean)
+		if err != nil {
+			return "", fmt.Errorf("marshal profile config options: %w", err)
+		}
+		settings[profileSettingsConfigOptionsKey] = data
+	}
+	data, err := json.Marshal(settings)
+	if err != nil {
+		return "", fmt.Errorf("marshal profile settings: %w", err)
+	}
+	return string(data), nil
+}
+
+func configOptionsFromSettings(raw string) map[string]string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var payload struct {
+		ConfigOptions map[string]string `json:"config_options"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil
+	}
+	return profileconfig.SanitizeConfigOptions(payload.ConfigOptions)
 }
 
 // normalizeJSONArray returns "[]" for empty values; otherwise the input. Used
@@ -641,9 +707,24 @@ func cliFlagsToJSON(flags []models.CLIFlag) (string, error) {
 	return string(data), nil
 }
 
+func envVarsToJSON(envVars []models.ProfileEnvVar) (string, error) {
+	if envVars == nil {
+		envVars = []models.ProfileEnvVar{}
+	}
+	data, err := json.Marshal(envVars)
+	if err != nil {
+		return "", fmt.Errorf("marshal env_vars: %w", err)
+	}
+	return string(data), nil
+}
+
 func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *models.AgentProfile) error {
 	profile.UpdatedAt = time.Now().UTC()
 	cliFlagsJSON, err := cliFlagsToJSON(profile.CLIFlags)
+	if err != nil {
+		return err
+	}
+	envVarsJSON, err := envVarsToJSON(profile.EnvVars)
 	if err != nil {
 		return err
 	}
@@ -655,7 +736,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		UPDATE agent_profiles
 		SET name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?,
 			auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?,
-			cli_passthrough = ?, user_modified = ?, cli_flags = ?, updated_at = ?,
+			cli_passthrough = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
 			workspace_id = ?, role = ?, icon = ?, reports_to = ?,
 			skill_ids = ?, desired_skills = ?, custom_prompt = ?,
 			status = ?, pause_reason = ?, last_run_finished_at = ?,
@@ -668,7 +749,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing),
-		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, profile.UpdatedAt,
+		dialect.BoolToInt(profile.CLIPassthrough), dialect.BoolToInt(profile.UserModified), cliFlagsJSON, envVarsJSON, profile.UpdatedAt,
 		enrich.workspaceID, enrich.role, enrich.icon, enrich.reportsTo,
 		enrich.skillIDs, enrich.desiredSkills, enrich.customPrompt,
 		enrich.status, enrich.pauseReason, profile.LastRunFinishedAt,
@@ -702,24 +783,47 @@ func (r *sqliteRepository) DeleteAgentProfile(ctx context.Context, id string) er
 	return nil
 }
 
+// agentProfileSelectColumns is the SELECT projection used by every
+// AgentProfile read path. Extracted once so the next column added to
+// agent_profiles only has to land here — duplicating the list across
+// GetAgentProfile / GetAgentProfileIncludingDeleted / ListAgentProfiles
+// risks the soft-delete path silently scanning zero values for a freshly
+// added column, which is the same shape of bug this package fixes in
+// another layer (orphaned watchers vs. stale projection drift).
+const agentProfileSelectColumns = `
+	SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
+		auto_approve, dangerously_skip_permissions, allow_indexing,
+		cli_passthrough, user_modified, plan, cli_flags,
+		COALESCE(env_vars, '[]'),
+		created_at, updated_at, deleted_at,
+		COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
+		COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
+		COALESCE(desired_skills, '[]'), COALESCE(custom_prompt, ''),
+		COALESCE(status, 'idle'), COALESCE(pause_reason, ''),
+		last_run_finished_at,
+		COALESCE(max_concurrent_sessions, 1), COALESCE(cooldown_sec, 0),
+		COALESCE(skip_idle_runs, 0), COALESCE(consecutive_failures, 0),
+		COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
+		COALESCE(budget_monthly_cents, 0),
+		COALESCE(settings, '{}'), COALESCE(permissions, '{}')
+	FROM agent_profiles`
+
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
-			auto_approve, dangerously_skip_permissions, allow_indexing,
-			cli_passthrough, user_modified, plan, cli_flags,
-			created_at, updated_at, deleted_at,
-			COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
-			COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
-			COALESCE(desired_skills, '[]'), COALESCE(custom_prompt, ''),
-			COALESCE(status, 'idle'), COALESCE(pause_reason, ''),
-			last_run_finished_at,
-			COALESCE(max_concurrent_sessions, 1), COALESCE(cooldown_sec, 0),
-			COALESCE(skip_idle_runs, 0), COALESCE(consecutive_failures, 0),
-			COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
-			COALESCE(budget_monthly_cents, 0),
-			COALESCE(settings, '{}'), COALESCE(permissions, '{}')
-		FROM agent_profiles WHERE id = ? AND deleted_at IS NULL
-	`), id)
+	row := r.ro.QueryRowContext(ctx,
+		r.ro.Rebind(agentProfileSelectColumns+` WHERE id = ? AND deleted_at IS NULL`), id)
+	profile, err := scanAgentProfile(row)
+	if err != nil {
+		return nil, err
+	}
+	return r.applyLegacyBackfill(ctx, profile), nil
+}
+
+// GetAgentProfileIncludingDeleted returns the row even when soft-deleted.
+// Resolver and watcher self-heal callers use this to disambiguate
+// "row removed" (recoverable: orphan reference) from "row never existed".
+func (r *sqliteRepository) GetAgentProfileIncludingDeleted(ctx context.Context, id string) (*models.AgentProfile, error) {
+	row := r.ro.QueryRowContext(ctx,
+		r.ro.Rebind(agentProfileSelectColumns+` WHERE id = ?`), id)
 	profile, err := scanAgentProfile(row)
 	if err != nil {
 		return nil, err
@@ -728,23 +832,9 @@ func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*mod
 }
 
 func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string) ([]*models.AgentProfile, error) {
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, agent_id, name, agent_display_name, model, mode, migrated_from,
-			auto_approve, dangerously_skip_permissions, allow_indexing,
-			cli_passthrough, user_modified, plan, cli_flags,
-			created_at, updated_at, deleted_at,
-			COALESCE(workspace_id, ''), COALESCE(role, ''), COALESCE(icon, ''),
-			COALESCE(reports_to, ''), COALESCE(skill_ids, '[]'),
-			COALESCE(desired_skills, '[]'), COALESCE(custom_prompt, ''),
-			COALESCE(status, 'idle'), COALESCE(pause_reason, ''),
-			last_run_finished_at,
-			COALESCE(max_concurrent_sessions, 1), COALESCE(cooldown_sec, 0),
-			COALESCE(skip_idle_runs, 0), COALESCE(consecutive_failures, 0),
-			COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
-			COALESCE(budget_monthly_cents, 0),
-			COALESCE(settings, '{}'), COALESCE(permissions, '{}')
-		FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC
-	`), agentID)
+	rows, err := r.ro.QueryContext(ctx,
+		r.ro.Rebind(agentProfileSelectColumns+` WHERE agent_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`),
+		agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -761,6 +851,24 @@ func (r *sqliteRepository) ListAgentProfiles(ctx context.Context, agentID string
 		result = append(result, r.applyLegacyBackfill(ctx, profile))
 	}
 	return result, rows.Err()
+}
+
+// HasDeletedAgentProfiles reports whether the agent has any soft-deleted
+// profile rows (deleted_at IS NOT NULL). It is the "has been provisioned
+// before" signal the boot-time seeders consult before recreating a default
+// profile, so a profile the user deleted is not silently resurrected.
+func (r *sqliteRepository) HasDeletedAgentProfiles(ctx context.Context, agentID string) (bool, error) {
+	var exists int
+	err := r.ro.QueryRowContext(ctx,
+		r.ro.Rebind(`SELECT 1 FROM agent_profiles WHERE agent_id = ? AND deleted_at IS NOT NULL LIMIT 1`),
+		agentID).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // applyLegacyBackfill returns the profile with CLIFlags populated from the
@@ -865,6 +973,7 @@ func scanAgentProfile(scanner interface {
 	var userModified int
 	var plan string // unused, kept for backwards compatibility
 	var cliFlagsRaw sql.NullString
+	var envVarsRaw sql.NullString
 	var role, status string
 	var skipIdleRuns int
 	var failureThreshold int
@@ -883,6 +992,7 @@ func scanAgentProfile(scanner interface {
 		&userModified,
 		&plan,
 		&cliFlagsRaw,
+		&envVarsRaw,
 		&profile.CreatedAt,
 		&profile.UpdatedAt,
 		&profile.DeletedAt,
@@ -922,6 +1032,7 @@ func scanAgentProfile(scanner interface {
 	profile.SkipIdleRuns = skipIdleRuns == 1
 	profile.Role = models.AgentRole(role)
 	profile.Status = models.AgentStatus(status)
+	profile.ConfigOptions = configOptionsFromSettings(profile.Settings)
 	if failureThreshold > 0 {
 		ft := failureThreshold
 		profile.FailureThreshold = &ft
@@ -929,6 +1040,11 @@ func scanAgentProfile(scanner interface {
 	if cliFlagsRaw.Valid && cliFlagsRaw.String != "" {
 		if err := json.Unmarshal([]byte(cliFlagsRaw.String), &profile.CLIFlags); err != nil {
 			return nil, fmt.Errorf("failed to parse cli_flags for profile %s: %w", profile.ID, err)
+		}
+	}
+	if envVarsRaw.Valid && envVarsRaw.String != "" {
+		if err := json.Unmarshal([]byte(envVarsRaw.String), &profile.EnvVars); err != nil {
+			return nil, fmt.Errorf("failed to parse env_vars for profile %s: %w", profile.ID, err)
 		}
 	}
 	// When cli_flags is NULL the caller (GetAgentProfile / ListAgentProfiles)

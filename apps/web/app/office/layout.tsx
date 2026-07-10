@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound } from "@/lib/routing/server-navigation";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateHydrator } from "@/components/state-hydrator";
 import { getFeatureFlagsAction } from "@/app/actions/features";
@@ -11,10 +11,22 @@ import {
   listProjects,
 } from "@/lib/api/domains/office-api";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { readCookies } from "@/lib/server/cookies";
 import type { AppState } from "@/lib/state/store";
-import { WorkspaceRail } from "./components/workspace-rail";
-import { OfficeSidebar } from "./components/office-sidebar";
 import { OfficeTopbar } from "./components/office-topbar";
+
+function resolveActiveOfficeWorkspaceId(
+  workspaceItems: { id: string }[],
+  cookieWorkspaceId: string | null,
+  settingsWorkspaceId: string | null,
+): string | null {
+  return (
+    workspaceItems.find((w) => w.id === cookieWorkspaceId)?.id ??
+    workspaceItems.find((w) => w.id === settingsWorkspaceId)?.id ??
+    workspaceItems[0]?.id ??
+    null
+  );
+}
 
 function mapWorkspaceItem(ws: {
   id: string;
@@ -25,6 +37,7 @@ function mapWorkspaceItem(ws: {
   default_environment_id?: string | null;
   default_agent_profile_id?: string | null;
   default_config_agent_profile_id?: string | null;
+  office_workflow_id?: string | null;
   created_at: string;
   updated_at: string;
 }) {
@@ -37,6 +50,7 @@ function mapWorkspaceItem(ws: {
     default_environment_id: ws.default_environment_id ?? null,
     default_agent_profile_id: ws.default_agent_profile_id ?? null,
     default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
+    office_workflow_id: ws.office_workflow_id ?? null,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
   };
@@ -64,19 +78,29 @@ export default async function OfficeLayout({ children }: { children: React.React
     return <>{children}</>;
   }
 
-  const [workspacesResponse, userSettingsResponse, metaResponse] = await Promise.all([
+  const [workspacesResponse, userSettingsResponse, metaResponse, cookieStore] = await Promise.all([
     listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
     fetchUserSettings({ cache: "no-store" }).catch(() => null),
     getMeta({ cache: "no-store" }).catch(() => null),
+    readCookies().catch(() => null),
   ]);
 
-  // Only show office workspaces (those with an office_workflow_id) in the rail.
-  // The kanban's "Default Workspace" has no office_workflow_id and should not appear.
-  const officeWorkspaces = workspacesResponse.workspaces.filter((ws) => ws.office_workflow_id);
-  const workspaceItems = officeWorkspaces.map(mapWorkspaceItem);
+  // Only office workspaces can be active inside /office, but hydrate every
+  // workspace into the shared sidebar picker so users can switch back to Kanban.
+  const officeWorkspaceItems = workspacesResponse.workspaces
+    .filter((ws) => ws.office_workflow_id)
+    .map(mapWorkspaceItem);
+  const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
   const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id || null;
-  const activeWorkspaceId =
-    workspaceItems.find((w) => w.id === settingsWorkspaceId)?.id ?? workspaceItems[0]?.id ?? null;
+  // office-active-workspace cookie is set by the setup wizard and workspace rail so the
+  // layout can load the correct workspace even when userSettings.workspace_id still points
+  // to a kanban workspace (we never write to userSettings from office).
+  const cookieWorkspaceId = cookieStore?.get("office-active-workspace")?.value ?? null;
+  const activeWorkspaceId = resolveActiveOfficeWorkspaceId(
+    officeWorkspaceItems,
+    cookieWorkspaceId,
+    settingsWorkspaceId,
+  );
 
   // Fetch agents + projects + inbox for the active workspace so the
   // sidebar renders them — including the inbox count badge — on first
@@ -141,17 +165,9 @@ export default async function OfficeLayout({ children }: { children: React.React
   return (
     <TooltipProvider>
       <StateHydrator initialState={initialState} />
-      <div className="flex h-screen">
-        <WorkspaceRail workspaces={workspaceItems} activeWorkspaceId={activeWorkspaceId} />
-        <OfficeSidebar
-          workspaceName={
-            workspaceItems.find((w) => w.id === activeWorkspaceId)?.name || "Workspace"
-          }
-        />
-        <div className="flex-1 min-w-0 flex flex-col">
-          <OfficeTopbar />
-          <main className="flex-1 min-h-0 overflow-y-auto">{children}</main>
-        </div>
+      <div className="flex h-full min-h-0 flex-col">
+        <OfficeTopbar />
+        <main className="flex-1 min-h-0 overflow-y-auto">{children}</main>
       </div>
     </TooltipProvider>
   );

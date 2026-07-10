@@ -2,36 +2,8 @@ import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
-
-// ---------------------------------------------------------------------------
-// Shared helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Type text into the TipTap editor while the agent is busy.
- * fill() silently fails on TipTap when the busy placeholder is shown,
- * so we retry clicking and typing until text appears in the editor.
- */
-async function typeWhileBusy(page: Page, editor: Locator, text: string): Promise<void> {
-  const modifier = process.platform === "darwin" ? "Meta" : "Control";
-  await editor.scrollIntoViewIfNeeded();
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const box = await editor.boundingBox();
-    if (!box) throw new Error("Editor bounding box not found");
-    await page.mouse.click(box.x + 20, box.y + box.height / 2);
-    await page.waitForTimeout(200);
-    await page.keyboard.type(text);
-    await page.waitForTimeout(100);
-    const content = await editor.textContent();
-    if (content?.includes(text)) return;
-    // Text wasn't entered; select all and clear for retry
-    await page.keyboard.press(`${modifier}+a`);
-    await page.keyboard.press("Backspace");
-    await page.waitForTimeout(200);
-  }
-  throw new Error(`Failed to type "${text}" into editor after 3 attempts`);
-}
 
 // ---------------------------------------------------------------------------
 // Quick Chat queue tests
@@ -75,8 +47,19 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   // Wait for chat input to appear AND become editable. Eager init means the
   // agent starts during the picker → tab transition; the input is briefly
   // disabled while the FE store catches up to the RUNNING session state.
+  //
+  // Race fix: `contenteditable="true"` was observed as a momentary flicker
+  // before the session settled into STARTING/RUNNING and flipped the input
+  // back to false. Callers then hit `editor.fill()` against a non-editable
+  // node and the test failed. Wait for the agent-status indicator to clear
+  // (STARTING/RUNNING both render a "Agent is …" status; IDLE renders none),
+  // then assert editability — by that point the input has reached its
+  // stable, ready state.
   const editor = dialog.locator(".tiptap.ProseMirror");
   await expect(editor).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("status", { name: /Agent is (starting|running)/ })).not.toBeVisible({
+    timeout: 30_000,
+  });
   await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
   return dialog;
 }
@@ -95,8 +78,7 @@ test.describe("Quick chat queue", () => {
 
     // Send a slow command so the agent stays busy for 10 seconds.
     const editor = dialog.locator(".tiptap.ProseMirror");
-    await editor.click();
-    await editor.fill("/slow 10s");
+    await typeWhileBusy(testPage, editor, "/slow 10s");
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
 
@@ -137,8 +119,7 @@ test.describe("Quick chat queue", () => {
 
     // Send a slow command so the agent stays busy for 10 seconds.
     const editor = dialog.locator(".tiptap.ProseMirror");
-    await editor.click();
-    await editor.fill("/slow 10s");
+    await typeWhileBusy(testPage, editor, "/slow 10s");
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
     await editor.press(`${modifier}+Enter`);
 
@@ -205,7 +186,7 @@ async function seedTaskAndWaitForIdle(
 
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  await session.waitForChatIdle({ timeout: 30_000 });
 
   return session;
 }

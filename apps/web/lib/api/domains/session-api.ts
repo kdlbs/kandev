@@ -45,6 +45,20 @@ export async function fetchTaskSession(taskSessionId: string, options?: ApiReque
   return fetchJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}`, options);
 }
 
+export async function dismissLastAgentError(
+  taskSessionId: string,
+  stamp: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskSessionResponse>(
+    `/api/v1/task-sessions/${taskSessionId}/last-agent-error/dismiss`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ stamp }) },
+    },
+  );
+}
+
 export async function listTaskSessionMessages(
   taskSessionId: string,
   params?: { limit?: number; before?: string; after?: string; sort?: "asc" | "desc" },
@@ -97,6 +111,12 @@ export async function setSessionMode(sessionId: string, modeId: string) {
 export async function setSessionModel(sessionId: string, modelId: string) {
   return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-model`, {
     init: { method: "POST", body: JSON.stringify({ model_id: modelId }) },
+  });
+}
+
+export async function setSessionConfigOption(sessionId: string, configId: string, value: string) {
+  return fetchJson<{ ok: boolean }>(`/api/v1/task-sessions/${sessionId}/set-config-option`, {
+    init: { method: "POST", body: JSON.stringify({ config_id: configId, value }) },
   });
 }
 

@@ -1,12 +1,14 @@
 package integration
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -18,13 +20,18 @@ func setupMCPTestServer(t *testing.T) (*TestServer, string, string, string, stri
 	ts := NewTestServer(t)
 
 	// Register MCP handlers on the gateway dispatcher
-	mcpH := mcphandlers.NewHandlers(ts.TaskSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, ts.Logger)
+	mcpH := mcphandlers.NewHandlers(ts.TaskSvc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, ts.Logger)
 	mcpH.RegisterHandlers(ts.Gateway.Dispatcher)
 
 	client := NewWSClient(t, ts.Server.URL)
 	t.Cleanup(func() { client.Close() })
 
 	workspaceID := createWorkspace(t, client)
+	defaultProfileID := "default-agent-profile"
+	_, err := ts.TaskSvc.UpdateWorkspace(context.Background(), workspaceID, &taskservice.UpdateWorkspaceRequest{
+		DefaultAgentProfileID: &defaultProfileID,
+	})
+	require.NoError(t, err)
 
 	// Create workflow
 	workflowResp, err := client.SendRequest("wf-1", ws.ActionWorkflowCreate, map[string]interface{}{

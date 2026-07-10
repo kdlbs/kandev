@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -32,6 +33,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -72,7 +74,7 @@ type MessageCreator interface {
 	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string, normalized *streams.NormalizedPayload) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
-	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error
+	UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error
 	// CreateAgentMessageStreaming creates a new agent message with a pre-generated ID for streaming updates
 	CreateAgentMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error
 	// AppendAgentMessage appends additional content to an existing streaming message
@@ -90,7 +92,9 @@ type MessageCreator interface {
 type TurnService interface {
 	StartTurn(ctx context.Context, sessionID string) (*models.Turn, error)
 	CompleteTurn(ctx context.Context, turnID string) error
+	GetTurn(ctx context.Context, turnID string) (*models.Turn, error)
 	GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error)
+	UpdateTurn(ctx context.Context, turn *models.Turn) error
 	// AbandonOpenTurns buries any open turns for a session by setting
 	// completed_at = started_at (zero duration), so a subsequent prompt starts
 	// a fresh turn instead of adopting one that was orphaned by a crash or
@@ -105,6 +109,7 @@ type TurnService interface {
 // payloads itself.
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task)
+	PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState)
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.
@@ -129,13 +134,16 @@ type repoStore interface {
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
 	ListSessionsWithBranches(ctx context.Context) ([]models.SessionBranchInfo, error)
 	GetRepository(ctx context.Context, id string) (*models.Repository, error)
 	UpdateRepository(ctx context.Context, repository *models.Repository) error
+	ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error)
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 	// Multi-repo task environment children
 	CreateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	ListTaskEnvironmentRepos(ctx context.Context, envID string) ([]*models.TaskEnvironmentRepo, error)
+	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	// Session history + plan (for context handover)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
@@ -145,6 +153,7 @@ type sessionExecutorStore interface {
 	// Session
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
 	GetActiveTaskSessionByTaskID(ctx context.Context, taskID string) (*models.TaskSession, error)
+	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	SetSessionPrimary(ctx context.Context, sessionID string) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
@@ -161,11 +170,18 @@ type sessionExecutorStore interface {
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error
+	UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error
+	// RepairExecutorRunningDead repairs a row in place (status=stopped, local_pid
+	// cleared, last_seen re-stamped) while preserving resume_token/worktree — used
+	// by reconciliation to honor the resume-safety invariant instead of deleting a
+	// resumable row.
+	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
 	// Executor
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	// Task
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	UpdateTask(ctx context.Context, task *models.Task) error
+	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
@@ -178,6 +194,11 @@ type sessionExecutorStore interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListNonTerminalSessionsByAgentInstance(ctx context.Context, agentInstanceID string) ([]*models.TaskSession, error)
 	DeleteTaskSession(ctx context.Context, id string) error
+	// Messages — used by resume to backfill the initial user prompt when a
+	// prior launch failed before recordInitialMessage ran.
+	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	// Pending clarification rows — durable guard for on_turn_complete while the user is answering.
+	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
 	// Workspace
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	// Task environment
@@ -221,6 +242,12 @@ type Service struct {
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
 	workflowStore  *workflowStore
+	// childCompletionLocks serializes duplicate on_children_completed deliveries.
+	childCompletionLocksMu sync.Mutex
+	childCompletionLocks   map[string]*childCompletionOperationLock
+	// onProcessOnEnterComplete is a package-test hook for synchronizing with
+	// applyEngineTransition's asynchronous processOnEnter goroutine.
+	onProcessOnEnterComplete func()
 	// engineOptions are applied each time initWorkflowEngine runs. Wired
 	// from cmd/kandev (Phase 3.2) to plug Phase 2 ADR-0004 dependencies
 	// — RunQueueAdapter, ParticipantStore, DecisionStore, and the CEO /
@@ -244,6 +271,9 @@ type Service struct {
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
+	// ciAutomationInFlight prevents PR feedback and task-PR update events from
+	// racing duplicate auto-fix prompts or merge calls for the same PR.
+	ciAutomationInFlight sync.Map
 
 	// Office task-handoffs materializer (phase 6 wiring) — invoked from
 	// PrepareTaskSession to flip workspace groups to materialized once
@@ -257,14 +287,72 @@ type Service struct {
 	// Issue task creator for auto-creating tasks from issue watch events
 	issueTaskCreator IssueTaskCreator
 
+	// Watcher dispatch coordinator: single seam for the watcher→task pipeline.
+	// Constructed lazily once issueTaskCreator is wired (see SetIssueTaskCreator).
+	watcherCoordinator *WatcherDispatchCoordinator
+
+	// Watcher throttle state. watcherTaskCount counts committed open watcher-
+	// created tasks (DB-backed source of truth across restarts). pendingByWatch
+	// tracks in-process events whose dedup row has not yet been written —
+	// without it, a burst of events read the same stale COUNT(*) before any
+	// goroutine commits, and the cap is silently overshot. Both reads and the
+	// pending increment happen under watcherMu to prevent the burst race.
+	watcherTaskCount WatcherTaskCounter
+	watcherMu        sync.Mutex
+	pendingByWatch   map[string]int
+	// watcherSaturated tracks per-watch whether the last gate result was
+	// "deferred", so we log the state-transition Warn ("cap reached" /
+	// "cap cleared") only once per transition instead of every event.
+	watcherSaturated map[string]bool
+
+	// profileLookup answers "is this agent profile still live?" for the
+	// dispatch pre-flight. Set via SetProfileLookup from main; nil-safe so
+	// the legacy code path (and tests without profile wiring) keep working.
+	profileLookup ProfileLookup
+	// repoChecker answers "does this bound repository still exist?" for the
+	// dispatch pre-flight. Set via SetRepositoryChecker from main; nil-safe.
+	repoChecker RepositoryChecker
+	// modelInfoLookup resolves optional model metadata from models.dev. Nil-safe;
+	// ACP context-window events remain authoritative when they include a size.
+	modelInfoMu           sync.RWMutex
+	modelInfoLookup       ModelInfoLookup
+	runtimeModelBySession sync.Map
+
 	// Jira service for issue watch dedup operations
 	jiraService JiraService
+	// jiraSource adapts jiraService onto WatcherSource. Built once in
+	// SetJiraService so handlers don't allocate per bus event.
+	jiraSource *JiraWatcherSource
 
 	// Linear service for issue watch dedup operations
 	linearService LinearService
+	// linearSource adapts linearService onto WatcherSource. Built once in
+	// SetLinearService so handlers don't allocate per bus event.
+	linearSource *LinearWatcherSource
+
+	// Sentry service for issue watch dedup operations
+	sentryService SentryService
+	// sentrySource adapts sentryService onto WatcherSource. Built once in
+	// SetSentryService so handlers don't allocate per bus event.
+	sentrySource *SentryWatcherSource
+	// GitLab service + task creators for auto-creating tasks from review /
+	// issue watch events. When the task creators are nil the events are
+	// logged but no tasks are created — matches the GitHub flow when a
+	// workspace has no task creator wired.
+	gitlabService           *gitlab.Service
+	gitlabReviewTaskCreator GitLabReviewTaskCreator
+	gitlabIssueTaskCreator  GitLabIssueTaskCreator
 
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
+
+	// Automation service for handling automation triggers
+	automationService AutomationService
+
+	// Worktree manager — used to clean up ephemeral worktrees for run-mode
+	// automation tasks immediately on completion rather than waiting for
+	// the 24h Office GC. Nil-safe.
+	worktreeMgr *worktree.Manager
 
 	// Clarification canceller — cancels pending clarifications when agent's turn completes
 	clarificationCanceller ClarificationCanceller
@@ -284,6 +372,19 @@ type Service struct {
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
 
+	// taskRuntimeStateMu serializes task-state flips derived from session
+	// runtime state. Without it, a completion/cancel path can check for active
+	// sibling sessions just before another handler marks one RUNNING, then
+	// clobber the task back to REVIEW while work is active.
+	taskRuntimeStateMu sync.Mutex
+
+	// completedExecutions records execution IDs that have reached a terminal
+	// agent lifecycle event. Buffered stream/tool events for these executions
+	// must not wake their session back to RUNNING after the terminal path makes
+	// it promptable again. Entries expire after a short grace window so the
+	// guard does not grow without bound in long-running backend processes.
+	completedExecutions sync.Map
+
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
@@ -302,13 +403,21 @@ type Service struct {
 	clarificationWatchdogTimeout time.Duration
 
 	// cancelInFlight tracks sessionIDs whose CancelAgent call is currently in
-	// progress. Used to deduplicate impatient retries from the UI: while the
-	// first cancel is still propagating through the agent (which can take several
-	// seconds when a long-running tool like Claude's Monitor is being torn down),
-	// the user often clicks the button repeatedly. Without this guard each click
-	// would create another "Turn cancelled by user" message and lazily start a
-	// phantom turn just to host it.
+	// progress. It deduplicates impatient retries from the UI and lets late
+	// agent.ready/boot_ready events from the cancelled turn return before they
+	// evaluate workflow transitions or drain queued messages.
 	cancelInFlight sync.Map
+
+	// transientRetries tracks in-progress transient-provider-error (529
+	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
+	// A backoff timer per session re-drives the failed prompt; cancelled on
+	// success, user-cancel, or service shutdown.
+	transientRetries sync.Map
+
+	// lastTurnPrompt caches the most recent outbound prompt per session so a
+	// transient-failure retry can re-drive the same turn without the caller's
+	// context. key: sessionID, value: capturedPrompt. Replaced every turn.
+	lastTurnPrompt sync.Map
 
 	// Service state
 	mu        sync.RWMutex
@@ -381,11 +490,21 @@ func NewService(
 	// (e.g. WebSocket notifications to the frontend). Must be set after service
 	// construction so the session callback can reference s.updateTaskSessionState.
 	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
-		return taskRepo.UpdateTaskState(ctx, taskID, state)
+		if err := taskRepo.UpdateTaskState(ctx, taskID, state); err != nil {
+			return err
+		}
+		s.processParentChildrenCompletedForTaskState(ctx, taskID, state)
+		return nil
 	})
 	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
+	})
+	exec.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+		return s.setSessionStarting(ctx, taskID, session, promoteTask)
+	})
+	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
+		s.writeTaskReviewState(ctx, taskID, completedSessionID)
 	})
 	exec.SetOnLaunchFailed(s.handleSessionLaunchFailed)
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
@@ -396,6 +515,7 @@ func NewService(
 	// Create the watcher with event handlers that wire everything together
 	handlers := watcher.EventHandlers{
 		OnTaskDeleted:          s.handleTaskDeleted,
+		OnTaskStateChanged:     s.handleTaskStateChanged,
 		OnAgentRunning:         s.handleAgentRunning,
 		OnAgentBootReady:       s.handleAgentBootReady,
 		OnAgentReady:           s.handleAgentReady,
@@ -491,6 +611,50 @@ func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task) {
 	s.taskEvents.PublishTaskUpdated(ctx, task)
 }
 
+func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {
+	if s.taskEvents == nil || task == nil {
+		return
+	}
+	s.taskEvents.PublishTaskStateChanged(ctx, task, oldState)
+}
+
+// StepRequiresCompletionSignal reports whether the workflow step bound to taskID
+// has `auto_advance_requires_signal = true` (ADR 0015). Used by sysprompt
+// injection sites to decide whether to expose the `step_complete_kandev` MCP
+// tool to the agent. Returns false (without error) when the getter is unset,
+// the task has no workflow step, or the step lookup fails — the caller treats
+// "unknown" the same as "no signal required" so a flaky workflow lookup never
+// silently enables the tool.
+//
+// Call sites that already have the task or step ID in scope should prefer
+// [WorkflowStepRequiresCompletionSignal] to skip the extra GetTask round-trip.
+func (s *Service) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
+	if s.workflowStepGetter == nil {
+		return false
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil {
+		return false
+	}
+	return s.WorkflowStepRequiresCompletionSignal(ctx, task.WorkflowStepID)
+}
+
+// WorkflowStepRequiresCompletionSignal reports whether the given workflow step
+// has `auto_advance_requires_signal = true` (ADR 0015). Cheaper alternative to
+// [StepRequiresCompletionSignal] for callers that already loaded the task and
+// can pass `task.WorkflowStepID` directly — avoids a redundant GetTask round-trip
+// at hot first-turn launch sites. Same "unknown ⇒ false" contract.
+func (s *Service) WorkflowStepRequiresCompletionSignal(ctx context.Context, stepID string) bool {
+	if s.workflowStepGetter == nil || stepID == "" {
+		return false
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil || step == nil {
+		return false
+	}
+	return step.AutoAdvanceRequiresSignal
+}
+
 // SetWorkflowStepGetter sets the workflow step getter for prompt building.
 //
 // When workflow_step_id is provided to StartTask, the orchestrator uses this getter
@@ -503,9 +667,10 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.initWorkflowEngine()
 }
 
-// ClarificationCanceller cancels pending clarifications when an agent's turn completes.
+// ClarificationCanceller detaches in-memory clarification waiters when an agent's
+// turn completes while questions are still pending in the DB.
 type ClarificationCanceller interface {
-	CancelSessionAndNotify(ctx context.Context, sessionID string) int
+	DetachSessionAndNotify(ctx context.Context, sessionID string) int
 }
 
 // SetClarificationCanceller sets the canceller for cleaning up pending clarifications on turn complete.
@@ -775,17 +940,30 @@ func (s *Service) Start(ctx context.Context) error {
 	// Subscribe to GitHub integration events
 	s.subscribeGitHubEvents()
 
+	// Subscribe to GitLab integration events
+	s.subscribeGitLabEvents()
+
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()
 
 	// Subscribe to Linear integration events
 	s.subscribeLinearEvents()
 
+	// Subscribe to Sentry integration events
+	s.subscribeSentryEvents()
+
+	// Subscribe to automation events
+	s.subscribeAutomationEvents()
+
 	// Subscribe to clarification events (cancel-and-resume flow)
 	s.subscribeClarificationEvents()
 
 	// Subscribe to prepare events (persist result in session metadata)
 	s.subscribePrepareEvents()
+
+	// Subscribe to ADR-0015 step-completion signals (out-of-band path:
+	// signal arrives after turn-end).
+	s.subscribeStepCompletionEvents()
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil
@@ -817,6 +995,7 @@ func (s *Service) Stop() error {
 	}
 
 	s.cancelAllClarificationWatchdogs()
+	s.cancelAllTransientRetries()
 
 	if len(errs) > 0 {
 		return errs[0]
@@ -832,7 +1011,8 @@ func (s *Service) Stop() error {
 //
 // Strategy:
 //
-//  1. Terminal states (Completed/Cancelled/Failed) → clean up executor record
+//  1. Terminal states (Completed/Cancelled/Failed) → stop any persisted runtime handle,
+//     then clean up executor record only after a confirmed stop
 //  2. Never-started (Created) → clean up executor record
 //  3. Active states (Starting/Running/WaitingForInput) → set session to WAITING_FOR_INPUT,
 //     clear stale execution IDs, fix task state, preserve ExecutorRunning record
@@ -881,7 +1061,11 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		s.logger.Warn("failed to load session for reconciliation",
+		if isTaskSessionNotFound(err) {
+			s.handleMissingSessionOnStartup(ctx, running)
+			return
+		}
+		s.logger.Warn("failed to load session for reconciliation; preserving executor record",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return
@@ -896,11 +1080,10 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	if previousState == models.TaskSessionStateCreated {
 		s.logger.Info("session was never started; cleaning up",
 			zap.String("session_id", sessionID))
-		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-			s.logger.Warn("failed to remove executor record for unstarted session",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
+		// A never-started session has no conversation to lose, so its row is
+		// prunable — but route through the invariant so the rare case of a
+		// Created row that still carries a resume_token is repaired, not deleted.
+		s.pruneOrRepairExecutorRow(ctx, running, previousState)
 		return
 	}
 
@@ -912,6 +1095,15 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	// the chat UI render as "working" because the office session shape
 	// uses IDLE specifically to avoid that.
 	if previousState == models.TaskSessionStateIdle {
+		// Keep the IDLE session state (no flip to WAITING_FOR_INPUT), but still
+		// make the ROW true: an office turn writes IDLE and then tears down, so a
+		// crash/restart in that window leaves a row claiming status=running with a
+		// dead local_pid. If the local process is confirmed dead, repair the row
+		// in place — resume_token/worktree are preserved (RowMustBePreserved
+		// treats IDLE as resumable). Remote rows report Unknown and are untouched.
+		if s.rowLiveness(running) == models.ProcessLivenessDead {
+			s.repairDeadRowLiveness(ctx, running)
+		}
 		s.logger.Info("session reconciled for lazy recovery (idle, no state change)",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
@@ -929,6 +1121,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 				zap.Error(err))
 		}
 	}
+	s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")
 
 	// PRESERVE executors_running.agent_execution_id post-restart. The in-memory
 	// process is gone, but the stored ID still serves as a "this session was
@@ -954,7 +1147,15 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	}
 
 	// PRESERVE the ExecutorRunning record — it holds the resume token and worktree info
-	// needed for lazy recovery when the user opens the session.
+	// needed for lazy recovery when the user opens the session. But make the row
+	// TRUE: after a restart the spawned process is normally gone, so if the local
+	// liveness handle is confirmed dead, repair the row (status=stopped, local_pid
+	// cleared) so it never keeps claiming a live process (#1597 expected behavior).
+	// resume_token/worktree are preserved by the repair. Remote rows report Unknown
+	// and are left to their own runtime's status poll.
+	if s.rowLiveness(running) == models.ProcessLivenessDead {
+		s.repairDeadRowLiveness(ctx, running)
+	}
 
 	s.logger.Info("session reconciled for lazy recovery",
 		zap.String("session_id", sessionID),
@@ -964,21 +1165,74 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 		zap.Bool("has_worktree", running.WorktreePath != ""))
 }
 
+func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *models.ExecutorRunning) {
+	sessionID := running.SessionID
+	executionID := strings.TrimSpace(running.AgentExecutionID)
+	if executionID == "" || s.agentManager == nil {
+		s.logger.Warn("executor record has no session and no stoppable runtime handle; preserving record",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", running.TaskID))
+		return
+	}
+	if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup missing session cleanup", true); err != nil {
+		s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", running.TaskID),
+			zap.String("execution_id", executionID),
+			zap.Error(err))
+		return
+	}
+	if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+		s.logger.Warn("failed to remove executor record for missing session",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", running.TaskID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) abandonOpenTurnsOnStartup(ctx context.Context, sessionID, reason string) {
+	if s.turnService == nil {
+		return
+	}
+	s.activeTurns.Delete(sessionID)
+	if err := s.turnService.AbandonOpenTurns(ctx, sessionID); err != nil {
+		s.logger.Warn("failed to abandon open turns during startup reconciliation",
+			zap.String("session_id", sessionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+	}
+}
+
+func isTaskSessionNotFound(err error) bool {
+	return errors.Is(err, models.ErrTaskSessionNotFound)
+}
+
 // handleTerminalSessionOnStartup processes sessions in terminal states during startup.
 // Returns true if the session should be skipped (no further processing needed).
 func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning, previousState models.TaskSessionState) bool {
 	sessionID := session.ID
 	switch previousState {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateCancelled:
-		s.logger.Info("session in terminal state; cleaning up executor record",
+		s.logger.Info("session in terminal state; stopping runtime before cleaning up executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID),
 			zap.String("state", string(previousState)))
-		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-			s.logger.Warn("failed to remove executor record for terminal session",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+		s.abandonOpenTurnsOnStartup(ctx, sessionID, "terminal session cleanup")
+		executionID := strings.TrimSpace(running.AgentExecutionID)
+		if executionID != "" && s.agentManager != nil {
+			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup terminal session cleanup", true); err != nil {
+				s.logger.Warn("failed to stop terminal session runtime; preserving executor record",
+					zap.String("session_id", sessionID),
+					zap.String("execution_id", executionID),
+					zap.Error(err))
+				return true
+			}
 		}
+		// Resume-safety invariant: prune the row only if it is not still resumable
+		// (no resume_token). A terminal session that kept a resume_token — e.g. an
+		// office run that COMPLETED a turn but stays resumable — is repaired in
+		// place instead of deleted.
+		s.pruneOrRepairExecutorRow(ctx, running, previousState)
 		return true
 	case models.TaskSessionStateFailed:
 		s.handleFailedSessionOnStartup(ctx, session, running)
@@ -990,10 +1244,11 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 // handleFailedSessionOnStartup handles a failed session during startup recovery.
 func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning) {
 	sessionID := session.ID
+	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if session.TaskID != "" {
 		task, taskErr := s.taskRepo.GetTask(ctx, session.TaskID)
-		if taskErr == nil && task.State == v1.TaskStateInProgress {
+		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress {
 			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
 				zap.String("task_id", session.TaskID),
 				zap.String("session_id", sessionID))
@@ -1009,14 +1264,22 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
 	} else {
-		s.logger.Info("cleaning up executor record for non-resumable failed session",
+		s.logger.Info("stopping failed session runtime before cleaning up executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
-		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-			s.logger.Warn("failed to remove executor record for failed session",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
+		executionID := strings.TrimSpace(running.AgentExecutionID)
+		if executionID != "" && s.agentManager != nil {
+			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup failed session cleanup", true); err != nil {
+				s.logger.Warn("failed to stop failed session runtime; preserving executor record",
+					zap.String("session_id", sessionID),
+					zap.String("execution_id", executionID),
+					zap.Error(err))
+				return
+			}
 		}
+		// Prune only subject to the resume-safety invariant (a lingering
+		// resume_token is repaired in place rather than deleted).
+		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateFailed)
 	}
 }
 
@@ -1079,19 +1342,19 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 		"missing_branch": branch,
 		"actions": []map[string]interface{}{
 			{
-				"type":    "archive_task",
-				"label":   "Archive task",
-				"tooltip": "Keep task history and hide it from active work",
-				"icon":    "archive",
-				"test_id": "missing-branch-archive-button",
+				actionMetaKeyType:    "archive_task",
+				actionMetaKeyLabel:   "Archive task",
+				actionMetaKeyTooltip: "Keep task history and hide it from active work",
+				actionMetaKeyIcon:    "archive",
+				actionMetaKeyTestID:  "missing-branch-archive-button",
 			},
 			{
-				"type":    "delete_task",
-				"label":   "Delete task",
-				"tooltip": "Permanently remove this task",
-				"variant": "destructive",
-				"icon":    "trash",
-				"test_id": "missing-branch-delete-button",
+				actionMetaKeyType:    "delete_task",
+				actionMetaKeyLabel:   "Delete task",
+				actionMetaKeyTooltip: "Permanently remove this task",
+				"variant":            "destructive",
+				actionMetaKeyIcon:    "trash",
+				actionMetaKeyTestID:  "missing-branch-delete-button",
 			},
 		},
 	}

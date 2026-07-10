@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os/exec"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
@@ -150,7 +151,7 @@ func resolvePermissionDefaults(permSettings map[string]agents.PermissionSetting)
 	if permSettings == nil {
 		return
 	}
-	if s, exists := permSettings["auto_approve"]; exists {
+	if s, exists := permSettings[agents.PermissionKeyAutoApprove]; exists {
 		autoApprove = s.Default
 	}
 	if s, exists := permSettings["allow_indexing"]; exists {
@@ -198,9 +199,10 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		})
 	} else {
 		cmd = agentConfig.BuildCommand(agents.CommandOptions{
-			Model:            req.Model,
-			PermissionValues: req.PermissionSettings,
-			CLIFlagTokens:    cliFlagTokens,
+			Model:              req.Model,
+			PermissionValues:   req.PermissionSettings,
+			CLIFlagTokens:      cliFlagTokens,
+			PreferNativeBinary: previewPrefersNativeBinary(agentConfig),
 		})
 		if len(cliFlagTokens) > 0 {
 			cmd = cmd.With().Flag(cliFlagTokens...).Build()
@@ -212,6 +214,26 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 		Command:       cmd.Args(),
 		CommandString: buildCommandString(cmd.Args()),
 	}, nil
+}
+
+// previewPrefersNativeBinary reports whether the command preview should show a
+// NativeBinaryAgent's standalone CLI (e.g. "copilot --acp") instead of
+// `npx -y <pkg>`. The preview is not bound to an executor, so it assumes the
+// local (standalone) host — the default executor — and probes this machine's
+// PATH, mirroring the standalone branch of lifecycle.preferNativeBinary.
+// Containerized executors keep npx at launch regardless; the preview reflects
+// the common local case.
+func previewPrefersNativeBinary(agentConfig agents.Agent) bool {
+	nb, ok := agentConfig.(agents.NativeBinaryAgent)
+	if !ok {
+		return false
+	}
+	name := nb.NativeBinaryName()
+	if name == "" {
+		return false
+	}
+	_, err := exec.LookPath(name)
+	return err == nil
 }
 
 // FetchDynamicModels returns models and modes for an agent from the host

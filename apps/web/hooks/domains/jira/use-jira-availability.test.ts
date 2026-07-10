@@ -36,6 +36,7 @@ function makeConfig(overrides: Partial<JiraConfig>): JiraConfig {
     siteUrl: "https://example.atlassian.net",
     email: "u@example.com",
     authMethod: "api_token",
+    instanceType: "cloud",
     defaultProjectKey: "PROJ",
     hasSecret: true,
     lastOk: true,

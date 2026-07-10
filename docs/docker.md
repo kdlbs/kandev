@@ -132,7 +132,7 @@ docker run -p 38429:38429 \
 
 ## Port
 
-Kandev exposes a single port. The Go backend serves the API, WebSocket, and reverse-proxies the Next.js frontend — all on one port:
+Kandev exposes a single port. The Go backend serves the API, WebSocket, static SPA assets, and page boot data — all on one port:
 
 | Port | Service |
 |------|---------|

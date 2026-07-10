@@ -81,6 +81,17 @@ func TestInitSchema_AllTablesExist(t *testing.T) {
 			t.Errorf("table %s not found (count=%d)", table, count)
 		}
 	}
+
+	var indexCount int
+	err = db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_run_payload_comment_id'`,
+	).Scan(&indexCount)
+	if err != nil {
+		t.Fatalf("query idx_run_payload_comment_id: %v", err)
+	}
+	if indexCount != 1 {
+		t.Fatalf("idx_run_payload_comment_id not found (count=%d)", indexCount)
+	}
 }
 
 func TestInitSchema_Idempotent(t *testing.T) {

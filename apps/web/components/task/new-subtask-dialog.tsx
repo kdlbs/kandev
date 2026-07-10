@@ -12,12 +12,12 @@ import {
 import { useDialogHandlers } from "@/components/task-create-dialog-handlers";
 import {
   useDiscoverReposEffect,
-  useGitHubUrlBranchesEffect,
+  useGitHubUrlErrorEffect,
 } from "@/components/task-create-dialog-effects";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
-import { useSummarizeSession } from "@/hooks/use-summarize-session";
+import { useSummarizeSession, type SummarizeSessionResult } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
@@ -29,6 +29,7 @@ import {
   useSubtaskFormState,
 } from "./new-subtask-form-state";
 import { PromptZone, SubtaskFormBody } from "./new-subtask-form-parts";
+import { applySummarizeSessionResult, type SummaryToastFn } from "./session-context-summary";
 import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
 
 type NewSubtaskDialogProps = {
@@ -166,9 +167,10 @@ function useContextChangeHandler(opts: {
   setHasPrompt: (v: boolean) => void;
   promptRef: React.RefObject<HTMLTextAreaElement | null>;
   initialPrompt: string | null;
-  summarize: (sessionId: string) => Promise<string | null>;
+  summarize: (sessionId: string) => Promise<SummarizeSessionResult>;
+  toast: SummaryToastFn;
 }) {
-  const { setContextValue, setHasPrompt, promptRef, initialPrompt, summarize } = opts;
+  const { setContextValue, setHasPrompt, promptRef, initialPrompt, summarize, toast } = opts;
   return useCallback(
     async (value: string) => {
       if (!value) return;
@@ -187,13 +189,10 @@ function useContextChangeHandler(opts: {
       }
       if (value.startsWith("summarize:")) {
         const result = await summarize(value.slice("summarize:".length));
-        if (result && promptRef.current) {
-          promptRef.current.value = result;
-          setHasPrompt(true);
-        }
+        applySummarizeSessionResult({ result, promptRef, setContextValue, setHasPrompt, toast });
       }
     },
-    [setContextValue, setHasPrompt, promptRef, initialPrompt, summarize],
+    [setContextValue, setHasPrompt, promptRef, initialPrompt, summarize, toast],
   );
 }
 
@@ -248,7 +247,7 @@ function NewSubtaskForm({
   useSeedParentRepository(fs, parentRepositoryId, baseBranch);
   useSeedAgentProfileId(fs, defaultProfileId);
   const handlers = useDialogHandlers(fs, availableRepositories);
-  useGitHubUrlBranchesEffect(fs, isOpen);
+  useGitHubUrlErrorEffect(fs, isOpen);
   useDiscoverReposEffect(fs, isOpen, workspaceId, false, toast);
   const profileOptions = useAgentProfileOptions(agentProfiles);
   const sessionOptions = useSessionOptions(parentTaskId);
@@ -268,6 +267,7 @@ function NewSubtaskForm({
     promptRef: promptZone.promptRef,
     initialPrompt,
     summarize,
+    toast,
   });
   const { handleSubmit } = useSubtaskSubmit({
     fs,
@@ -360,10 +360,10 @@ export function NewSubtaskDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="new-subtask-dialog"
-        className="w-full h-full max-w-full max-h-full rounded-none sm:w-[800px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
+        className="w-full h-full min-w-0 max-w-full max-h-full overflow-hidden rounded-none sm:w-[800px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <DialogHeader>
-          <DialogTitle className="text-sm font-medium">
+          <DialogTitle className="min-w-0 wrap-break-word pr-6 text-sm font-medium">
             New subtask for <span className="text-foreground">{parentTaskTitle}</span>
           </DialogTitle>
         </DialogHeader>

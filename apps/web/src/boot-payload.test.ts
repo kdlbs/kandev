@@ -1,0 +1,106 @@
+import { describe, expect, it, vi } from "vitest";
+import { loadBootPayload, readBootPayload } from "./boot-payload";
+
+describe("readBootPayload", () => {
+  it("returns an empty initial state when Go has not injected boot data yet", () => {
+    const win = {} as Window;
+
+    expect(readBootPayload(win)).toEqual({ initialState: {} });
+  });
+
+  it("normalizes the injected Go boot payload shape", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        version: 1,
+        route: {
+          kind: "spa",
+          route: "taskDetail",
+          path: "/t/task-1",
+          params: { taskId: "task-1" },
+        },
+        runtime: {
+          apiPrefix: "/api/v1",
+          webSocketPath: "/ws",
+        },
+        initialState: {
+          tasks: { activeTaskId: "task-1" },
+        },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win)).toMatchObject({
+      version: 1,
+      route: {
+        kind: "spa",
+        route: "taskDetail",
+        path: "/t/task-1",
+        params: { taskId: "task-1" },
+      },
+      runtime: {
+        apiPrefix: "/api/v1",
+        webSocketPath: "/ws",
+      },
+      initialState: {
+        tasks: { activeTaskId: "task-1" },
+      },
+    });
+  });
+
+  it("drops invalid route params instead of exposing mixed values", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        route: {
+          params: { taskId: "task-1", bad: 3 },
+        },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).route?.params).toBeUndefined();
+  });
+
+  it("enables the runtime debug global when boot payload debug is true", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        runtime: {
+          debug: true,
+        },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.debug).toBe(true);
+    expect(win.__KANDEV_DEBUG).toBe(true);
+  });
+});
+
+describe("loadBootPayload", () => {
+  it("uses the injected Go boot payload without fetching", async () => {
+    const win = Object.assign(new Window(), {
+      __KANDEV_BOOT_PAYLOAD__: { version: 1, initialState: { features: { office: true } } },
+    }) as Window;
+    const fetcher = vi.fn();
+
+    await expect(loadBootPayload(win, fetcher)).resolves.toMatchObject({
+      initialState: { features: { office: true } },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("fetches app-state before mount when no boot payload was injected", async () => {
+    const win = new Window();
+    Object.defineProperty(win, "location", {
+      value: { pathname: "/", search: "?workspaceId=ws-1" },
+    });
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ version: 1, initialState: { workflows: { activeId: "wf-1" } } }),
+    });
+
+    await expect(loadBootPayload(win, fetcher)).resolves.toMatchObject({
+      initialState: { workflows: { activeId: "wf-1" } },
+    });
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/app-state?path=%2F%3FworkspaceId%3Dws-1"),
+      expect.objectContaining({ cache: "no-store", credentials: "include" }),
+    );
+  });
+});

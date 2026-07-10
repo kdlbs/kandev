@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,15 +29,28 @@ func newSessionTestLogger() *logger.Logger {
 	return log
 }
 
+// newTestStopCh returns a stopCh shared with t.Cleanup so any background
+// StreamManager retry loop that races past the test body's return drains
+// cleanly. Closing on cleanup is what lets goleak.VerifyTestMain stay green
+// for tests that exercise connectWorkspaceStream's backoff.
+func newTestStopCh(t *testing.T) chan struct{} {
+	t.Helper()
+	stopCh := make(chan struct{})
+	t.Cleanup(func() { closeStopChOnce(stopCh) })
+	return stopCh
+}
+
 // mockAgentServer creates a test WebSocket server simulating agentctl.
 // It responds to agent stream requests and tracks which actions were called and in what order.
 type mockAgentServer struct {
-	server      *httptest.Server
-	mu          sync.Mutex
-	actionLog   []string // ordered log of actions received
-	upgrader    websocket.Upgrader
-	handler     func(msg ws.Message) *ws.Message
-	wsConnected chan struct{} // closed when WS stream connects
+	server               *httptest.Server
+	mu                   sync.Mutex
+	actionLog            []string // ordered log of actions received
+	rejectStreamAttempts int
+	agentStatus          string
+	upgrader             websocket.Upgrader
+	handler              func(msg ws.Message) *ws.Message
+	wsConnected          chan struct{} // closed when WS stream connects
 }
 
 func newMockAgentServer(t *testing.T) *mockAgentServer {
@@ -49,9 +63,28 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		status := m.agentStatus
+		m.mu.Unlock()
+		if status == "" {
+			status = "running"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"agent_status":%q}`, status)
+	})
 
 	// Agent stream WebSocket endpoint
 	mux.HandleFunc("/api/v1/agent/stream", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		if m.rejectStreamAttempts > 0 {
+			m.rejectStreamAttempts--
+			m.mu.Unlock()
+			http.Error(w, "stream temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		m.mu.Unlock()
+
 		conn, err := m.upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -128,6 +161,12 @@ func (m *mockAgentServer) buildResponse(msg ws.Message) *ws.Message {
 	return m.defaultHandler(msg)
 }
 
+func (m *mockAgentServer) rejectNextStreamAttempts(count int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rejectStreamAttempts = count
+}
+
 func (m *mockAgentServer) defaultHandler(msg ws.Message) *ws.Message {
 	switch msg.Action {
 	case "agent.initialize":
@@ -152,6 +191,11 @@ func (m *mockAgentServer) defaultHandler(msg ws.Message) *ws.Message {
 		})
 		return resp
 	case "agent.prompt":
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"success": true,
+		})
+		return resp
+	case "agent.session.set_model", "agent.session.set_mode", "agent.session.set_config_option":
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success": true,
 		})
@@ -196,12 +240,14 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 	defer mock.Close()
 
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	// Set up real stream manager with callbacks
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
 	client := createTestClient(t, mock.server.URL)
@@ -234,7 +280,7 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -265,20 +311,99 @@ func TestInitializeAndPrompt_StreamBeforeInitialize(t *testing.T) {
 	}
 }
 
+func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	sm.SetDependencies(nil, streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	execution := &AgentExecution{
+		ID:            "exec-1",
+		TaskID:        "task-1",
+		SessionID:     "session-1",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	agentConfig := &testAgent{
+		id:      "test-agent",
+		enabled: true,
+		runtimeConfig: &agents.RuntimeConfig{
+			Cmd:            agents.NewCommand("test-agent"),
+			Protocol:       agent.ProtocolACP,
+			SessionConfig:  agents.SessionConfig{},
+			ResourceLimits: agents.ResourceLimits{MemoryMB: 512, CPUCores: 0.5, Timeout: time.Hour},
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
+		return nil
+	}, "sonnet", "plan", map[string]string{
+		"effort": "high",
+		"model":  "ignored",
+		"mode":   "ignored",
+	})
+	if err != nil {
+		t.Fatalf("InitializeAndPrompt failed: %v", err)
+	}
+
+	actions := mock.getActionLog()
+	for _, want := range []string{
+		"agent.session.set_model",
+		"agent.session.set_mode",
+		"agent.session.set_config_option",
+	} {
+		if !containsAction(actions, want) {
+			t.Fatalf("actions = %v, missing %s", actions, want)
+		}
+	}
+}
+
+func containsAction(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	// This test verifies that InitializeAndPrompt returns an error if
 	// the stream fails to connect within the timeout.
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	// Create a stream manager that will try to connect to a server that doesn't exist
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
-	// Point client at a port that doesn't exist
-	badClient := agentctl.NewClient("127.0.0.1", 1, log)
+	// Bind to a random port and immediately close it so the port is guaranteed
+	// to be closed and returns connection refused quickly on every system.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if cerr := ln.Close(); cerr != nil {
+		t.Fatalf("failed to close listener: %v", cerr)
+	}
+	badClient := agentctl.NewClient("127.0.0.1", port, log)
 	defer badClient.Close()
 
 	execution := &AgentExecution{
@@ -304,9 +429,9 @@ func TestInitializeAndPrompt_StreamTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
+	err = sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 
 	// Should fail because stream couldn't connect and Initialize fails
 	if err == nil {
@@ -322,11 +447,13 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 	defer mock.Close()
 
 	log := newSessionTestLogger()
-	sm := NewSessionManager(log, make(chan struct{}))
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
 
 	streamMgr := NewStreamManager(log, StreamCallbacks{
 		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
-	}, nil)
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
 	sm.SetDependencies(nil, streamMgr, nil, nil)
 
 	client := createTestClient(t, mock.server.URL)
@@ -359,7 +486,7 @@ func TestInitializeAndPrompt_WithTaskDescription(t *testing.T) {
 
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "Build a feature", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 	if err != nil {
 		t.Fatalf("InitializeAndPrompt failed: %v", err)
 	}
@@ -427,7 +554,7 @@ func TestInitializeAndPrompt_NoStreamManager(t *testing.T) {
 	// But it should NOT panic due to nil streamManager.
 	err := sm.InitializeAndPrompt(ctx, execution, agentConfig, "", nil, nil, func(executionID string) error {
 		return nil
-	}, "", "")
+	}, "", "", nil)
 
 	// Expect error because Initialize call over WS will fail (stream not connected)
 	if err == nil {
@@ -522,6 +649,74 @@ func TestIsMethodNotFoundErr(t *testing.T) {
 	}
 }
 
+func TestIsTransportDeadErr(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{
+			name:     "peer disconnected before response",
+			err:      fmt.Errorf("session/load failed: %w", fmt.Errorf("peer disconnected before response")),
+			expected: true,
+		},
+		{
+			name:     "peer disconnected while waiting for pre-response notifications",
+			err:      fmt.Errorf("peer disconnected while waiting for pre-response notifications"),
+			expected: true,
+		},
+		{
+			name:     "connection closed cause",
+			err:      fmt.Errorf("load session failed: connection closed"),
+			expected: true,
+		},
+		{
+			name:     "notification queue overflow",
+			err:      fmt.Errorf("load session failed: notification queue overflow"),
+			expected: true,
+		},
+		{
+			name:     "context canceled",
+			err:      context.Canceled,
+			expected: true,
+		},
+		{
+			name:     "context deadline exceeded wrapped",
+			err:      fmt.Errorf("load session failed: %w", context.DeadlineExceeded),
+			expected: true,
+		},
+		{
+			name:     "method not found is not transport-dead",
+			err:      &acp.RequestError{Code: -32601, Message: "Method not found"},
+			expected: false,
+		},
+		{
+			name:     "session unknown is not transport-dead",
+			err:      &acp.RequestError{Code: -32002, Message: "Resource not found"},
+			expected: false,
+		},
+		{
+			name:     "nil error",
+			err:      nil,
+			expected: false,
+		},
+		{
+			name:     "unrelated error",
+			err:      fmt.Errorf("some other failure"),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTransportDeadErr(tt.err)
+			if got != tt.expected {
+				t.Errorf("isTransportDeadErr(%v) = %v, want %v", tt.err, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestInitializeSession_LoadsExistingSession(t *testing.T) {
 	mock := newMockAgentServer(t)
 	defer mock.Close()
@@ -590,6 +785,50 @@ func waitForWSConnected(t *testing.T, mock *mockAgentServer) {
 	case <-mock.wsConnected:
 	case <-time.After(2 * time.Second):
 		t.Fatal("agent stream did not connect within 2s")
+	}
+}
+
+func TestSendPrompt_RetriesUntilUpdateStreamReconnects(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	mock.rejectNextStreamAttempts(1)
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	sm.SetDependencies(nil, streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	execution := &AgentExecution{
+		ID:            "test-exec",
+		TaskID:        "test-task",
+		SessionID:     "test-session",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	result, err := sm.SendPrompt(ctx, execution, "hello after resume", false, nil, true)
+	if err != nil {
+		t.Fatalf("SendPrompt should retry after a transient stream reconnect failure: %v", err)
+	}
+	if result == nil || result.StopReason != PromptStopReasonDispatched {
+		t.Fatalf("expected StopReason=%q, got %+v", PromptStopReasonDispatched, result)
+	}
+
+	actions := mock.getActionLog()
+	if len(actions) != 1 || actions[0] != "agent.prompt" {
+		t.Fatalf("expected one prompt after reconnect, got actions: %v", actions)
 	}
 }
 

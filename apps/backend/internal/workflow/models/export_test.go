@@ -137,6 +137,34 @@ func TestValidate(t *testing.T) {
 		assert.NoError(t, e.Validate())
 	})
 
+	t.Run("set_session_mode with mode passes", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnEnter: []OnEnterAction{
+				{Type: OnEnterSetSessionMode, Config: map[string]any{"mode": "acceptEdits"}},
+			},
+		}
+		assert.NoError(t, e.Validate())
+	})
+
+	t.Run("set_session_mode without mode fails", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnEnter: []OnEnterAction{{Type: OnEnterSetSessionMode}},
+		}
+		assert.ErrorContains(t, e.Validate(), "set_session_mode requires a non-empty string")
+	})
+
+	t.Run("set_session_mode with non-string mode fails", func(t *testing.T) {
+		e := validExport()
+		e.Workflows[0].Steps[0].Events = StepEvents{
+			OnEnter: []OnEnterAction{
+				{Type: OnEnterSetSessionMode, Config: map[string]any{"mode": 3}},
+			},
+		}
+		assert.ErrorContains(t, e.Validate(), "set_session_mode requires a non-empty string")
+	})
+
 	t.Run("invalid move_to_step position ref fails", func(t *testing.T) {
 		e := validExport()
 		e.Workflows[0].Steps[0].Events = StepEvents{
@@ -332,6 +360,25 @@ func TestRoundTrip(t *testing.T) {
 					"Done should now reference new In Progress ID")
 			}
 		}
+	})
+}
+
+func TestAutoAdvanceRequiresSignalExport(t *testing.T) {
+	t.Run("preserves auto_advance_requires_signal in export", func(t *testing.T) {
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "WF"}
+		steps := []*WorkflowStep{
+			{ID: "s1", Name: "Legacy", Position: 0, Color: "gray", AutoAdvanceRequiresSignal: false},
+			{ID: "s2", Name: "Gated", Position: 1, Color: "blue", AutoAdvanceRequiresSignal: true},
+		}
+		export := BuildWorkflowExport(
+			[]*taskmodels.Workflow{wf},
+			map[string][]*WorkflowStep{"wf-1": steps},
+			nil,
+		)
+
+		require.Len(t, export.Workflows[0].Steps, 2)
+		assert.False(t, export.Workflows[0].Steps[0].AutoAdvanceRequiresSignal)
+		assert.True(t, export.Workflows[0].Steps[1].AutoAdvanceRequiresSignal)
 	})
 }
 

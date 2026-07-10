@@ -4,7 +4,11 @@ import (
 	"time"
 
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
+
+// ProfileEnvVar is an environment variable entry on an agent profile.
+type ProfileEnvVar = taskmodels.ProfileEnvVar
 
 type Agent struct {
 	ID            string         `json:"id"`
@@ -37,7 +41,7 @@ type AgentProfile struct {
 	// Values: "api_key" | "subscription".
 	BillingType string `json:"billing_type,omitempty" db:"-"`
 
-	// Model is the ACP model ID applied via session/set_model at session start.
+	// Model is the ACP model ID applied through session model selection at session start.
 	// Validated against the host utility capability cache by the reconciler.
 	Model string `json:"model" db:"model"`
 
@@ -47,6 +51,11 @@ type AgentProfile struct {
 	// conversion via sql.NullString in scan/insert paths, so callers see a
 	// regular string here.
 	Mode string `json:"mode,omitempty" db:"-"`
+
+	// ConfigOptions are dynamic ACP session config options applied through
+	// session/set_config_option at session start. Model and mode stay in their
+	// dedicated fields.
+	ConfigOptions map[string]string `json:"config_options,omitempty" db:"-"`
 
 	// MigratedFrom records the agent_id this profile was migrated from, if any.
 	// Same db:"-" treatment as Mode (nullable column, settings repo handles).
@@ -69,10 +78,14 @@ type AgentProfile struct {
 	// settings repo handles the conversion via manual scan.
 	CLIFlags []CLIFlag `json:"cli_flags" db:"-"`
 
-	// Deprecated legacy permission fields: retained in the DB schema so rows
-	// load cleanly, but no longer read by the launch path. ACP session modes
-	// and interactive permission_request prompts replace them.
-	AutoApprove                bool `json:"-" db:"auto_approve"`
+	// EnvVars are injected into the agent subprocess when this profile runs.
+	// Stored as a JSON-encoded TEXT column; settings repo handles conversion.
+	EnvVars []ProfileEnvVar `json:"env_vars,omitempty" db:"-"`
+
+	// AutoApprove enables Kandev agentctl-side ACP permission auto-approval at
+	// launch (AGENTCTL_AUTO_APPROVE_PERMISSIONS). DangerouslySkipPermissions is
+	// a deprecated legacy column retained so existing rows load cleanly.
+	AutoApprove                bool `json:"auto_approve" db:"auto_approve"`
 	DangerouslySkipPermissions bool `json:"-" db:"dangerously_skip_permissions"`
 
 	UserModified bool       `json:"user_modified" db:"user_modified"`

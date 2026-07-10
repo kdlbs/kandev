@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"sync"
@@ -62,6 +63,13 @@ type interactiveProcess struct {
 	// race with stdin echo (which would otherwise duplicate the command in output).
 	firstOutputOnce sync.Once
 	firstOutputCh   chan struct{}
+
+	// firstIdleCh is closed the first time the idle detector fires for this
+	// process — i.e. the CLI has finished its startup output and is ready for
+	// input. Used by the lifecycle manager to auto-inject the task description
+	// at the right moment when AutoInjectPrompt is enabled.
+	firstIdleOnce sync.Once
+	firstIdleCh   chan struct{}
 }
 
 // Start creates an interactive process entry and defers PTY creation until first resize.
@@ -124,6 +132,7 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		stopSignal:    make(chan struct{}),
 		waitDone:      make(chan struct{}),
 		firstOutputCh: make(chan struct{}),
+		firstIdleCh:   make(chan struct{}),
 		// Store start parameters for deferred initialization
 		started:  false,
 		startCmd: req.Command,
@@ -145,7 +154,7 @@ func (r *InteractiveRunner) Start(ctx context.Context, req InteractiveStartReque
 		r.logger.Info("interactive process created (waiting for terminal dimensions)",
 			zap.String("process_id", id),
 			zap.String("session_id", req.SessionID),
-			zap.Strings("command", req.Command),
+			zap.Strings("command", req.commandForLog()),
 			zap.String("working_dir", req.WorkingDir),
 		)
 	}
@@ -200,7 +209,7 @@ func (r *InteractiveRunner) immediateStartProcess(req InteractiveStartRequest, p
 	r.logger.Info("interactive process started immediately",
 		zap.String("process_id", id),
 		zap.String("session_id", req.SessionID),
-		zap.Strings("command", req.Command),
+		zap.Strings("command", req.commandForLog()),
 		zap.String("working_dir", req.WorkingDir),
 	)
 	return nil
@@ -216,7 +225,7 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 	if proc.startDir != "" {
 		cmd.Dir = proc.startDir
 	}
-	cmd.Env = mergeEnv(proc.startEnv)
+	cmd.Env = mergeEnvWithStrip(proc.startEnv, req.StripEnv)
 	// Note: Do NOT set Setpgid when using PTY - it conflicts with terminal control
 	// The PTY session handles process group management
 
@@ -266,9 +275,17 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 	r.logger.Info("interactive process started at exact dimensions",
 		zap.String("process_id", proc.info.ID),
 		zap.String("session_id", proc.info.SessionID),
+		zap.String("scope_id", req.ScopeID),
+		zap.String("terminal_id", req.TerminalID),
+		zap.String("label", req.Label),
+		zap.Bool("is_user_shell", proc.isUserShell),
+		zap.Strings("command", proc.startCmd),
+		zap.String("working_dir", proc.startDir),
+		zap.Int("parent_pid", os.Getpid()),
 		zap.Int("cols", cols),
 		zap.Int("rows", rows),
-		zap.Int("pid", pid),
+		zap.Int("os_pid", pid),
+		zap.Bool("has_initial_command", req.InitialCommand != ""),
 	)
 
 	// Start output reading and process waiting goroutines
@@ -349,6 +366,23 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 		return fmt.Errorf("process not found: %s", processID)
 	}
 
+	pid := proc.osPID()
+	r.logger.Info("stopping interactive process",
+		zap.String("process_id", processID),
+		zap.String("session_id", proc.info.SessionID),
+		zap.Bool("is_user_shell", proc.isUserShell),
+		zap.String("scope_id", proc.startReq.ScopeID),
+		zap.String("terminal_id", proc.startReq.TerminalID),
+		zap.Strings("command", proc.info.Command),
+		zap.String("working_dir", proc.info.WorkingDir),
+		zap.Int("os_pid", pid),
+		zap.Bool("started", proc.started))
+
+	// Unblock anyone waiting on first-idle — the process is going away.
+	proc.firstIdleOnce.Do(func() {
+		close(proc.firstIdleCh)
+	})
+
 	// Signal output reader to exit
 	proc.stopOnce.Do(func() {
 		close(proc.stopSignal)
@@ -370,14 +404,32 @@ func (r *InteractiveRunner) Stop(ctx context.Context, processID string) error {
 
 	// Terminate the process directly (PTY handles its own session management)
 	if proc.cmd != nil && proc.cmd.Process != nil {
+		r.logger.Debug("interactive process terminate requested",
+			zap.String("process_id", processID),
+			zap.Int("pid", pid))
 		_ = terminateProcess(proc.cmd.Process)
 
 		// Wait for the wait() goroutine to finish (it calls cmd.Wait).
 		// If it doesn't exit in time, force-kill the process.
 		select {
 		case <-ctx.Done():
+			r.logger.Warn("interactive process stop context canceled; killing process",
+				zap.String("process_id", processID),
+				zap.Int("os_pid", pid),
+				zap.Error(ctx.Err()))
+			r.logger.Debug("interactive process SIGKILL requested",
+				zap.String("process_id", processID),
+				zap.Int("pid", pid),
+				zap.String("reason", "context_canceled"))
 			_ = proc.cmd.Process.Kill()
 		case <-time.After(2 * time.Second):
+			r.logger.Warn("interactive process stop timed out; killing process",
+				zap.String("process_id", processID),
+				zap.Int("os_pid", pid))
+			r.logger.Debug("interactive process SIGKILL requested",
+				zap.String("process_id", processID),
+				zap.Int("pid", pid),
+				zap.String("reason", "grace_expired"))
 			_ = proc.cmd.Process.Kill()
 		case <-proc.waitDone:
 			// Process exited cleanly
@@ -462,6 +514,17 @@ func (r *InteractiveRunner) IsProcessReadyOrPending(processID string) bool {
 	return r.isProcessAlive(proc)
 }
 
+// GetOSPID returns the underlying OS process ID for a started interactive
+// process. Deferred-start processes return (0, true) until their first resize
+// spawns the PTY child.
+func (r *InteractiveRunner) GetOSPID(processID string) (int, bool) {
+	proc, ok := r.get(processID)
+	if !ok {
+		return 0, false
+	}
+	return proc.osPID(), true
+}
+
 // GetBuffer returns the buffered output for a process.
 func (r *InteractiveRunner) GetBuffer(processID string) ([]ProcessOutputChunk, bool) {
 	proc, ok := r.get(processID)
@@ -486,6 +549,11 @@ func (r *InteractiveRunner) get(id string) (*interactiveProcess, bool) {
 // 3. Adding a timeout here would leave the process unreachable and create leaks
 func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 	defer close(proc.waitDone)
+	// Unblock first-idle waiters on exit so an early crash doesn't strand
+	// callers (e.g. autoInjectInitialPrompt) until their context times out.
+	// Callers can't distinguish "idle and ready" from "process exited" — the
+	// subsequent WriteStdin returns "process not found" which is logged.
+	defer proc.firstIdleOnce.Do(func() { close(proc.firstIdleCh) })
 
 	proc.mu.Lock()
 	ptyHandle := proc.ptmx
@@ -500,6 +568,12 @@ func (r *InteractiveRunner) wait(proc *interactiveProcess) {
 	r.logger.Info("interactive process exited",
 		zap.String("process_id", proc.info.ID),
 		zap.String("session_id", proc.info.SessionID),
+		zap.String("scope_id", proc.startReq.ScopeID),
+		zap.String("terminal_id", proc.startReq.TerminalID),
+		zap.Bool("is_user_shell", proc.isUserShell),
+		zap.Strings("command", proc.info.Command),
+		zap.String("working_dir", proc.info.WorkingDir),
+		zap.Int("os_pid", proc.osPID()),
 		zap.String("status", string(status)),
 		zap.Int("exit_code", exitCode),
 		zap.String("signal", signalName),
@@ -624,8 +698,22 @@ func (p *interactiveProcess) snapshot(includeOutput bool) InteractiveProcessInfo
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	info := p.info
+	info.OSPID = p.osPIDLocked()
 	if includeOutput && p.buffer != nil {
 		info.Output = p.buffer.snapshot()
 	}
 	return info
+}
+
+func (p *interactiveProcess) osPID() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.osPIDLocked()
+}
+
+func (p *interactiveProcess) osPIDLocked() int {
+	if p.cmd == nil || p.cmd.Process == nil {
+		return 0
+	}
+	return p.cmd.Process.Pid
 }

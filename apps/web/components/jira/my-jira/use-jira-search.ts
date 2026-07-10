@@ -41,11 +41,14 @@ export function useJiraSearch(workspaceId: string | null | undefined, jql: strin
       setLoading(true);
       setError(null);
       try {
-        const res = await searchJiraTickets({
-          jql,
-          pageToken: token,
-          maxResults: PAGE_SIZE,
-        });
+        const res = await searchJiraTickets(
+          {
+            jql,
+            pageToken: token,
+            maxResults: PAGE_SIZE,
+          },
+          { workspaceId },
+        );
         if (reqId !== reqRef.current) return;
         setItems(res.tickets ?? []);
         setIsLast(res.isLast ?? true);

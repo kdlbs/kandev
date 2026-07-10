@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { useAppStoreApi } from "@/components/state-provider";
 import { useTaskCRUD } from "@/hooks/use-task-crud";
 import type { Task as BackendTask } from "@/lib/types/http";
@@ -13,6 +13,21 @@ type UseKanbanActionsOptions = {
 };
 
 type KanbanTask = KanbanState["tasks"][number];
+
+function isTaskDetailPath(): boolean {
+  if (typeof window === "undefined") return false;
+  return /^\/(?:t|tasks)\/[^/]+\/?$/.test(window.location.pathname);
+}
+
+function kanbanWorkspaceHref(workspaceId: string): string {
+  if (typeof window === "undefined") return `/?workspaceId=${workspaceId}`;
+  const current = new URLSearchParams(window.location.search);
+  const next = new URLSearchParams();
+  const workflowId = current.get("workflowId");
+  if (workflowId) next.set("workflowId", workflowId);
+  next.set("workspaceId", workspaceId);
+  return `/?${next.toString()}`;
+}
 
 /** Handle creating a new task in the kanban board, merging with any WS-provided data. */
 function hydrateCreatedTask(
@@ -121,8 +136,11 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
         return;
       }
       store.getState().setActiveWorkspace(nextWorkspaceId);
+      if (isTaskDetailPath()) {
+        return;
+      }
       if (nextWorkspaceId) {
-        router.push(`/?workspaceId=${nextWorkspaceId}`);
+        router.push(kanbanWorkspaceHref(nextWorkspaceId));
       } else {
         router.push("/");
       }
@@ -137,6 +155,9 @@ export function useKanbanActions({ workspaceState, workflowsState }: UseKanbanAc
         return;
       }
       store.getState().setActiveWorkflow(nextWorkflowId);
+      if (isTaskDetailPath()) {
+        return;
+      }
       if (nextWorkflowId) {
         const workspaceId = workflowsState.items.find(
           (workflow: WorkflowsState["items"][number]) => workflow.id === nextWorkflowId,

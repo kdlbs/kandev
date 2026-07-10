@@ -8,21 +8,13 @@ import type {
   Message,
   Turn,
   TaskSession,
+  TaskWalkthrough,
 } from "@/lib/types/http";
-import type {
-  GitHubStatus,
-  GitHubRateLimitUpdate,
-  TaskPR,
-  PRWatch,
-  ReviewWatch as GitHubReviewWatch,
-  IssueWatch as GitHubIssueWatch,
-  GitHubActionPresets,
-  PRFeedback,
-} from "@/lib/types/github";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
 import { mergeInitialState } from "./default-state";
+import { buildStateOverrides } from "./store-overrides";
 import {
   createKanbanSlice,
   createWorkspaceSlice,
@@ -31,10 +23,13 @@ import {
   createSessionRuntimeSlice,
   createUISlice,
   createGitHubSlice,
+  createGitLabSlice,
   createJiraSlice,
   createLinearSlice,
   createOfficeSlice,
   createFeaturesSlice,
+  createAutomationsSlice,
+  createSystemSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -42,10 +37,13 @@ import {
   defaultSessionRuntimeState,
   defaultUIState,
   defaultGitHubState,
+  defaultGitLabState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultAutomationsState,
+  defaultSystemState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -69,6 +67,10 @@ import {
   type PreviewViewMode,
   type PreviewDevicePreset,
   type ConnectionState,
+  type SystemSliceActions,
+  type AutomationsSliceActions,
+  type FeaturesSliceActions,
+  type GitHubSliceActions,
 } from "./slices";
 import type {
   AvailableCommand,
@@ -82,9 +84,10 @@ import type {
   UserShellInfo,
 } from "./slices/session-runtime/types";
 
-// Re-export all types from slices for backwards compatibility (split out
-// to keep this file under the max-lines limit).
+// Re-export all types from slices for backwards compatibility.
 export type * from "./store-reexports";
+import type { TaskMR } from "@/lib/types/gitlab";
+import type { GitLabSliceActions } from "./slices/gitlab/types";
 import type { JiraIssueWatch } from "@/lib/types/jira";
 import type { LinearIssueWatch } from "@/lib/types/linear";
 import type {
@@ -153,6 +156,7 @@ export type AppState = {
   pendingModel: (typeof defaultSessionState)["pendingModel"];
   activeModel: (typeof defaultSessionState)["activeModel"];
   taskPlans: (typeof defaultSessionState)["taskPlans"];
+  walkthroughs: (typeof defaultSessionState)["walkthroughs"];
   queue: (typeof defaultSessionState)["queue"];
 
   // Session Runtime slice
@@ -177,11 +181,22 @@ export type AppState = {
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
   taskPRs: (typeof defaultGitHubState)["taskPRs"];
+  pendingPrUrlByTaskId: (typeof defaultGitHubState)["pendingPrUrlByTaskId"];
   prWatches: (typeof defaultGitHubState)["prWatches"];
   reviewWatches: (typeof defaultGitHubState)["reviewWatches"];
   issueWatches: (typeof defaultGitHubState)["issueWatches"];
   actionPresets: (typeof defaultGitHubState)["actionPresets"];
   prFeedbackCache: (typeof defaultGitHubState)["prFeedbackCache"];
+  taskCIAutomation: (typeof defaultGitHubState)["taskCIAutomation"];
+
+  // GitLab slice
+  taskMRs: (typeof defaultGitLabState)["taskMRs"];
+  gitlabReviewWatches: (typeof defaultGitLabState)["gitlabReviewWatches"];
+  gitlabIssueWatches: (typeof defaultGitLabState)["gitlabIssueWatches"];
+  gitlabMRWatches: (typeof defaultGitLabState)["gitlabMRWatches"];
+  gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
+  gitlabStats: (typeof defaultGitLabState)["gitlabStats"];
+  gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
 
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
@@ -194,7 +209,13 @@ export type AppState = {
 
   // Feature flags slice
   features: (typeof defaultFeaturesState)["features"];
-  setFeatures: (features: (typeof defaultFeaturesState)["features"]) => void;
+
+  // Automations slice
+  automations: (typeof defaultAutomationsState)["automations"];
+  automationRuns: (typeof defaultAutomationsState)["automationRuns"];
+
+  // System slice (actions merged via SystemSliceActions intersection on AppState)
+  system: (typeof defaultSystemState)["system"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -209,35 +230,39 @@ export type AppState = {
   quickChat: (typeof defaultUIState)["quickChat"];
   configChat: (typeof defaultUIState)["configChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
+  taskDeletedNotification: (typeof defaultUIState)["taskDeletedNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
   kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];
   sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
+  appSidebar: (typeof defaultUIState)["appSidebar"];
+  acknowledgedAgentErrors: (typeof defaultUIState)["acknowledgedAgentErrors"];
+  dismissedAgentErrors: (typeof defaultUIState)["dismissedAgentErrors"];
 
-  // GitHub actions
-  setGitHubStatus: (status: GitHubStatus | null) => void;
-  setGitHubStatusLoading: (loading: boolean) => void;
-  setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
-  setTaskPR: (taskId: string, pr: TaskPR) => void;
-  setPRWatches: (watches: PRWatch[]) => void;
-  setPRWatchesLoading: (loading: boolean) => void;
-  removePRWatch: (id: string) => void;
-  setReviewWatches: (watches: GitHubReviewWatch[]) => void;
-  setReviewWatchesLoading: (loading: boolean) => void;
-  addReviewWatch: (watch: GitHubReviewWatch) => void;
-  updateReviewWatch: (watch: GitHubReviewWatch) => void;
-  removeReviewWatch: (id: string) => void;
-  setIssueWatches: (watches: GitHubIssueWatch[]) => void;
-  setIssueWatchesLoading: (loading: boolean) => void;
-  addIssueWatch: (watch: GitHubIssueWatch) => void;
-  updateIssueWatch: (watch: GitHubIssueWatch) => void;
-  removeIssueWatch: (id: string) => void;
-  setActionPresets: (workspaceId: string, presets: GitHubActionPresets) => void;
-  setActionPresetsLoading: (workspaceId: string, loading: boolean) => void;
-  applyGitHubRateLimitUpdate: (update: GitHubRateLimitUpdate) => void;
-  setPRFeedbackCacheEntry: (key: string, feedback: PRFeedback) => void;
-  removePRFeedbackCacheEntry: (key: string) => void;
+  // GitLab actions
+  setTaskMRs: (mrs: Record<string, TaskMR[]>) => void;
+  setTaskMR: (taskId: string, mr: TaskMR) => void;
+  resetTaskMRs: () => void;
+  setGitLabReviewWatches: GitLabSliceActions["setGitLabReviewWatches"];
+  setGitLabReviewWatchesLoading: GitLabSliceActions["setGitLabReviewWatchesLoading"];
+  addGitLabReviewWatch: GitLabSliceActions["addGitLabReviewWatch"];
+  updateGitLabReviewWatchInStore: GitLabSliceActions["updateGitLabReviewWatchInStore"];
+  removeGitLabReviewWatch: GitLabSliceActions["removeGitLabReviewWatch"];
+  setGitLabIssueWatches: GitLabSliceActions["setGitLabIssueWatches"];
+  setGitLabIssueWatchesLoading: GitLabSliceActions["setGitLabIssueWatchesLoading"];
+  addGitLabIssueWatch: GitLabSliceActions["addGitLabIssueWatch"];
+  updateGitLabIssueWatchInStore: GitLabSliceActions["updateGitLabIssueWatchInStore"];
+  removeGitLabIssueWatch: GitLabSliceActions["removeGitLabIssueWatch"];
+  setGitLabMRWatches: GitLabSliceActions["setGitLabMRWatches"];
+  setGitLabMRWatchesLoading: GitLabSliceActions["setGitLabMRWatchesLoading"];
+  removeGitLabMRWatch: GitLabSliceActions["removeGitLabMRWatch"];
+  setGitLabActionPresets: GitLabSliceActions["setGitLabActionPresets"];
+  setGitLabActionPresetsLoading: GitLabSliceActions["setGitLabActionPresetsLoading"];
+  setGitLabStats: GitLabSliceActions["setGitLabStats"];
+  setGitLabStatsLoading: GitLabSliceActions["setGitLabStatsLoading"];
+  setGitLabStatus: GitLabSliceActions["setGitLabStatus"];
+  setGitLabStatusLoading: GitLabSliceActions["setGitLabStatusLoading"];
 
   // JIRA actions
   setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;
@@ -339,6 +364,7 @@ export type AppState = {
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
+  setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
@@ -358,6 +384,7 @@ export type AppState = {
   setActiveConfigChatSession: (sessionId: string) => void;
   renameConfigChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
+  setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;
@@ -367,10 +394,21 @@ export type AppState = {
     meta?: { hasMore?: boolean; oldestCursor?: string | null },
   ) => void;
   addMessage: (message: Message) => void;
+  mergeMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  ) => void;
   addTurn: (turn: Turn) => void;
-  completeTurn: (sessionId: string, turnId: string, completedAt: string) => void;
+  completeTurn: (
+    sessionId: string,
+    turnId: string,
+    completedAt: string,
+    metadata?: Record<string, unknown>,
+  ) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
   updateMessage: (message: Message) => void;
+  removeMessage: (sessionId: string, messageId: string) => void;
   prependMessages: (
     sessionId: string,
     messages: Message[],
@@ -393,14 +431,21 @@ export type AppState = {
   setSessionAgentctlStatus: (sessionId: string, status: SessionAgentctlStatus) => void;
   setWorktree: (worktree: Worktree) => void;
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
-  setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => void;
+  setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => boolean;
   clearGitStatus: (sessionId: string) => void;
+  clearLegacyGitStatusEntry: (sessionId: string) => void;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
-  setSessionCommits: (sessionId: string, commits: SessionCommit[]) => void;
+  setSessionCommits: (
+    sessionId: string,
+    commits: SessionCommit[],
+    opts?: { allowEmpty?: boolean },
+  ) => void;
   setSessionCommitsLoading: (sessionId: string, loading: boolean) => void;
   addSessionCommit: (sessionId: string, commit: SessionCommit) => void;
   clearSessionCommits: (sessionId: string) => void;
+  bumpSessionCommitsRefetch: (sessionId: string) => void;
   setContextWindow: (sessionId: string, contextWindow: ContextWindowEntry) => void;
+  clearContextWindow: (sessionId: string) => void;
   bumpAgentProfilesVersion: () => void;
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;
@@ -426,6 +471,10 @@ export type AppState = {
   setPreviewRevision: (taskId: string, revisionId: string | null) => void;
   toggleComparePair: (taskId: string, revisionId: string) => void;
   clearComparePair: (taskId: string) => void;
+  // Walkthrough actions
+  setWalkthrough: (taskId: string, walkthrough: TaskWalkthrough | null) => void;
+  setWalkthroughActiveStep: (taskId: string, stepIndex: number) => void;
+  markWalkthroughSeen: (taskId: string) => void;
   // Queue actions
   setQueueEntries: (
     sessionId: string,
@@ -461,6 +510,11 @@ export type AppState = {
   setUserShellsLoading: (sessionId: string, loading: boolean) => void;
   addUserShell: (sessionId: string, shell: UserShellInfo) => void;
   removeUserShell: (sessionId: string, terminalId: string) => void;
+  updateUserShell: (
+    environmentId: string,
+    terminalId: string,
+    patch: Partial<Omit<UserShellInfo, "terminalId">>,
+  ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   updateSidebarDraft: UIA["updateSidebarDraft"];
@@ -474,11 +528,22 @@ export type AppState = {
   toggleSidebarGroupCollapsed: UIA["toggleSidebarGroupCollapsed"];
   toggleSubtaskCollapsed: UIA["toggleSubtaskCollapsed"];
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
+  clearSidebarTaskPrefsSyncError: UIA["clearSidebarTaskPrefsSyncError"];
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
   setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
   togglePinnedTask: UIA["togglePinnedTask"];
+  pinTasks: UIA["pinTasks"];
+  unpinTasks: UIA["unpinTasks"];
   setSidebarTaskOrder: UIA["setSidebarTaskOrder"];
+  setSubtaskOrder: UIA["setSubtaskOrder"];
   removeTaskFromSidebarPrefs: UIA["removeTaskFromSidebarPrefs"];
+  toggleAppSidebar: UIA["toggleAppSidebar"];
+  setAppSidebarCollapsed: UIA["setAppSidebarCollapsed"];
+  toggleAppSidebarSection: UIA["toggleAppSidebarSection"];
+  setAppSidebarWidth: UIA["setAppSidebarWidth"];
+  toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
+  acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
+  dismissAgentError: UIA["dismissAgentError"];
   // Office actions
   setOfficeAgentProfiles: (agents: AgentProfile[]) => void;
   addOfficeAgentProfile: (agent: AgentProfile) => void;
@@ -522,9 +587,10 @@ export type AppState = {
   setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
-};
-
-export type AppStore = ReturnType<typeof createAppStore>;
+} & GitHubSliceActions &
+  SystemSliceActions &
+  FeaturesSliceActions &
+  AutomationsSliceActions;
 
 export function createAppStore(initialState?: Partial<AppState>) {
   const merged = mergeInitialState(initialState);
@@ -532,7 +598,6 @@ export function createAppStore(initialState?: Partial<AppState>) {
   return createStore<AppState>()(
     immer((set, get, api) => ({
       ...merged,
-      // Compose all slices
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createKanbanSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -546,6 +611,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createGitHubSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createGitLabSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createJiraSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createLinearSlice(set as any, get as any, api as any),
@@ -554,76 +621,13 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createFeaturesSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createSystemSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
-      // Override state with merged initial state
-      kanban: merged.kanban,
-      kanbanMulti: merged.kanbanMulti,
-      workflows: merged.workflows,
-      tasks: merged.tasks,
-      workspaces: merged.workspaces,
-      repositories: merged.repositories,
-      repositoryBranches: merged.repositoryBranches,
-      repositoryScripts: merged.repositoryScripts,
-      executors: merged.executors,
-      settingsAgents: merged.settingsAgents,
-      agentDiscovery: merged.agentDiscovery,
-      availableAgents: merged.availableAgents,
-      agentProfiles: merged.agentProfiles,
-      editors: merged.editors,
-      prompts: merged.prompts,
-      secrets: merged.secrets,
-      notificationProviders: merged.notificationProviders,
-      settingsData: merged.settingsData,
-      userSettings: merged.userSettings,
-      messages: merged.messages,
-      turns: merged.turns,
-      taskSessions: merged.taskSessions,
-      taskSessionsByTask: merged.taskSessionsByTask,
-      sessionAgentctl: merged.sessionAgentctl,
-      worktrees: merged.worktrees,
-      sessionWorktreesBySessionId: merged.sessionWorktreesBySessionId,
-      pendingModel: merged.pendingModel,
-      activeModel: merged.activeModel,
-      queue: merged.queue,
-      terminal: merged.terminal,
-      shell: merged.shell,
-      processes: merged.processes,
-      gitStatus: merged.gitStatus,
-      contextWindow: merged.contextWindow,
-      agents: merged.agents,
-      sessionMode: merged.sessionMode,
-      userShells: merged.userShells,
-      prepareProgress: merged.prepareProgress,
-      sessionTodos: merged.sessionTodos,
-      agentCapabilities: merged.agentCapabilities,
-      sessionModels: merged.sessionModels,
-      promptUsage: merged.promptUsage,
-      sessionPollMode: merged.sessionPollMode,
-      githubStatus: merged.githubStatus,
-      taskPRs: merged.taskPRs,
-      prWatches: merged.prWatches,
-      reviewWatches: merged.reviewWatches,
-      issueWatches: merged.issueWatches,
-      actionPresets: merged.actionPresets,
-      jiraIssueWatches: merged.jiraIssueWatches,
-      linearIssueWatches: merged.linearIssueWatches,
-      office: merged.office,
-      features: merged.features,
-      previewPanel: merged.previewPanel,
-      rightPanel: merged.rightPanel,
-      diffs: merged.diffs,
-      connection: merged.connection,
-      mobileKanban: merged.mobileKanban,
-      mobileSession: merged.mobileSession,
-      chatInput: merged.chatInput,
-      documentPanel: merged.documentPanel,
-      systemHealth: merged.systemHealth,
-      quickChat: merged.quickChat,
-      sessionFailureNotification: merged.sessionFailureNotification,
-      bottomTerminal: merged.bottomTerminal,
-      // Note: collapsedSubtaskParents is intentionally not overridden here —
-      // createUISlice hydrates it from sessionStorage and we want that to win.
-      // Add hydrate method
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createAutomationsSlice(set as any, get as any, api as any),
+      // Re-assert merged initial state so caller-supplied values win over slice defaults.
+      ...buildStateOverrides(merged),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),
     })),

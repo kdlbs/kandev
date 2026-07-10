@@ -40,25 +40,27 @@ type WorkspaceDTO struct {
 }
 
 type RepositoryDTO struct {
-	ID                   string                `json:"id"`
-	WorkspaceID          string                `json:"workspace_id"`
-	Name                 string                `json:"name"`
-	SourceType           string                `json:"source_type"`
-	LocalPath            string                `json:"local_path"`
-	Provider             string                `json:"provider"`
-	ProviderRepoID       string                `json:"provider_repo_id"`
-	ProviderOwner        string                `json:"provider_owner"`
-	ProviderName         string                `json:"provider_name"`
-	DefaultBranch        string                `json:"default_branch"`
-	WorktreeBranchPrefix string                `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   bool                  `json:"pull_before_worktree"`
-	SetupScript          string                `json:"setup_script"`
-	CleanupScript        string                `json:"cleanup_script"`
-	DevScript            string                `json:"dev_script"`
-	WorktreeFiles        []WorktreeFileDTO     `json:"worktree_files"`
-	CreatedAt            time.Time             `json:"created_at"`
-	UpdatedAt            time.Time             `json:"updated_at"`
-	Scripts              []RepositoryScriptDTO `json:"scripts,omitempty"`
+	ID                     string                `json:"id"`
+	WorkspaceID            string                `json:"workspace_id"`
+	Name                   string                `json:"name"`
+	SourceType             string                `json:"source_type"`
+	LocalPath              string                `json:"local_path"`
+	Provider               string                `json:"provider"`
+	ProviderRepoID         string                `json:"provider_repo_id"`
+	ProviderOwner          string                `json:"provider_owner"`
+	ProviderName           string                `json:"provider_name"`
+	DefaultBranch          string                `json:"default_branch"`
+	WorktreeBranchPrefix   string                `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string                `json:"worktree_branch_template"`
+	PullBeforeWorktree     bool                  `json:"pull_before_worktree"`
+	SetupScript            string                `json:"setup_script"`
+	CleanupScript          string                `json:"cleanup_script"`
+	DevScript              string                `json:"dev_script"`
+	CopyFiles              string                `json:"copy_files"`
+	WorktreeFiles          []WorktreeFileDTO     `json:"worktree_files"`
+	CreatedAt              time.Time             `json:"created_at"`
+	UpdatedAt              time.Time             `json:"updated_at"`
+	Scripts                []RepositoryScriptDTO `json:"scripts,omitempty"`
 }
 
 // WorktreeFileDTO is a single file materialized into new worktrees, with its own
@@ -164,6 +166,12 @@ type TaskDTO struct {
 	// kanban-board tasks. Use this to gate office-only UI (e.g. the
 	// "Open in office view" topbar link).
 	IsFromOffice bool `json:"is_from_office,omitempty"`
+
+	// PRs lists the GitHub pull requests associated with this task, when the
+	// github service is wired and any association exists. Surfaced through the
+	// task-listing MCP tools so agents can reason about PR status (e.g. find
+	// tasks whose PRs are merged). Omitted when empty.
+	PRs []v1.TaskPRSummary `json:"prs,omitempty"`
 }
 
 type TaskRepositoryDTO struct {
@@ -436,24 +444,26 @@ func FromWorkspace(workspace *models.Workspace) WorkspaceDTO {
 
 func FromRepository(repository *models.Repository) RepositoryDTO {
 	return RepositoryDTO{
-		ID:                   repository.ID,
-		WorkspaceID:          repository.WorkspaceID,
-		Name:                 repository.Name,
-		SourceType:           repository.SourceType,
-		LocalPath:            repository.LocalPath,
-		Provider:             repository.Provider,
-		ProviderRepoID:       repository.ProviderRepoID,
-		ProviderOwner:        repository.ProviderOwner,
-		ProviderName:         repository.ProviderName,
-		DefaultBranch:        repository.DefaultBranch,
-		WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
-		PullBeforeWorktree:   repository.PullBeforeWorktree,
-		SetupScript:          repository.SetupScript,
-		CleanupScript:        repository.CleanupScript,
-		DevScript:            repository.DevScript,
-		WorktreeFiles:        worktreeFilesToDTO(repository.WorktreeFiles),
-		CreatedAt:            repository.CreatedAt,
-		UpdatedAt:            repository.UpdatedAt,
+		ID:                     repository.ID,
+		WorkspaceID:            repository.WorkspaceID,
+		Name:                   repository.Name,
+		SourceType:             repository.SourceType,
+		LocalPath:              repository.LocalPath,
+		Provider:               repository.Provider,
+		ProviderRepoID:         repository.ProviderRepoID,
+		ProviderOwner:          repository.ProviderOwner,
+		ProviderName:           repository.ProviderName,
+		DefaultBranch:          repository.DefaultBranch,
+		WorktreeBranchPrefix:   repository.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: repository.WorktreeBranchTemplate,
+		PullBeforeWorktree:     repository.PullBeforeWorktree,
+		SetupScript:            repository.SetupScript,
+		CleanupScript:          repository.CleanupScript,
+		DevScript:              repository.DevScript,
+		CopyFiles:              repository.CopyFiles,
+		WorktreeFiles:          worktreeFilesToDTO(repository.WorktreeFiles),
+		CreatedAt:              repository.CreatedAt,
+		UpdatedAt:              repository.UpdatedAt,
 	}
 }
 
@@ -712,8 +722,17 @@ type WorkflowStepDTO struct {
 
 // StepEventsDTO represents step events for API responses
 type StepEventsDTO struct {
-	OnEnter        []StepActionDTO `json:"on_enter,omitempty"`
-	OnTurnComplete []StepActionDTO `json:"on_turn_complete,omitempty"`
+	OnEnter             []StepActionDTO `json:"on_enter,omitempty"`
+	OnTurnStart         []StepActionDTO `json:"on_turn_start,omitempty"`
+	OnTurnComplete      []StepActionDTO `json:"on_turn_complete,omitempty"`
+	OnExit              []StepActionDTO `json:"on_exit,omitempty"`
+	OnComment           []StepActionDTO `json:"on_comment,omitempty"`
+	OnBlockerResolved   []StepActionDTO `json:"on_blocker_resolved,omitempty"`
+	OnChildrenCompleted []StepActionDTO `json:"on_children_completed,omitempty"`
+	OnApprovalResolved  []StepActionDTO `json:"on_approval_resolved,omitempty"`
+	OnHeartbeat         []StepActionDTO `json:"on_heartbeat,omitempty"`
+	OnBudgetAlert       []StepActionDTO `json:"on_budget_alert,omitempty"`
+	OnAgentError        []StepActionDTO `json:"on_agent_error,omitempty"`
 }
 
 // StepActionDTO represents a step action for API responses

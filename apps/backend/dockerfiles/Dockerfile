@@ -43,7 +43,6 @@ WORKDIR /workspace
 # Environment variables (passed at runtime)
 # TASK_ID - The task identifier
 # TASK_TITLE - Task title/name
-# TASK_DESCRIPTION - Full task description
 #
 # For Auggie:
 # AUGMENT_SESSION_AUTH - Session auth JSON for Augment (from ~/.augment/session.json)
@@ -62,4 +61,3 @@ EXPOSE 39429
 
 # Run agentctl HTTP server
 ENTRYPOINT ["/agent/entrypoint.sh"]
-

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import { getBackendConfig } from "@/lib/config";
 
 interface AgentLogoProps {
@@ -84,8 +84,5 @@ function AgentLogoImage({ agentName, size = 16, className }: AgentLogoProps) {
     );
   }
 
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt="" width={size} height={size} className={className} />
-  );
+  return <img src={src} alt="" width={size} height={size} className={className} />;
 }

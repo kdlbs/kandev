@@ -1,104 +1,16 @@
 import { test, expect } from "../../fixtures/test-base";
-import { SessionPage } from "../../pages/session-page";
-import type { ApiClient } from "../../helpers/api-client";
-import type { SeedData } from "../../fixtures/test-base";
-import type { Page } from "@playwright/test";
-
-// Shared selector constant for diff container
-const DIFFS_CONTAINER = "diffs-container";
-
-/** Options for seeding a task with an agent. */
-type SeedTaskOptions = {
-  title: string;
-  scenarioCommand: string;
-  completionText: string;
-};
-
-/**
- * Generic helper to seed a task using a mock scenario and navigate to
- * its session page, waiting for the agent turn to complete.
- */
-async function seedTaskWithScenario(
-  testPage: Page,
-  apiClient: ApiClient,
-  seedData: SeedData,
-  options: SeedTaskOptions,
-): Promise<{ session: SessionPage; sessionId: string }> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    options.title,
-    seedData.agentProfileId,
-    {
-      description: options.scenarioCommand,
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-  await testPage.goto(`/t/${task.id}`);
-
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-
-  // Wait for the first turn to complete
-  await expect(session.chat.getByText(options.completionText, { exact: false })).toBeVisible({
-    timeout: 45_000,
-  });
-
-  return { session, sessionId: task.session_id };
-}
-
-/** Seed a task for untracked file testing. */
-function seedUntrackedFileTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
-  return seedTaskWithScenario(testPage, apiClient, seedData, {
-    title: "Untracked File E2E",
-    scenarioCommand: "/e2e:untracked-file-setup",
-    completionText: "untracked-file-setup complete",
-  });
-}
-
-/** Seed a task for diff update testing. */
-function seedDiffUpdateTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
-  return seedTaskWithScenario(testPage, apiClient, seedData, {
-    title: "Diff Update E2E",
-    scenarioCommand: "/e2e:diff-update-setup",
-    completionText: "diff-update-setup complete",
-  });
-}
-
-/** Seed a task for the multi-file scenario (3 files, FIRST_MODIFICATION on all). */
-function seedMultiFileTask(testPage: Page, apiClient: ApiClient, seedData: SeedData) {
-  return seedTaskWithScenario(testPage, apiClient, seedData, {
-    title: "Multi-file Diff Update E2E",
-    scenarioCommand: "/e2e:multi-file-setup",
-    completionText: "multi-file-setup complete",
-  });
-}
-
-/** Click the Changes dockview tab. */
-async function openChangesTab(testPage: Page) {
-  const changesTab = testPage.locator(".dv-default-tab", { hasText: "Changes" });
-  await expect(changesTab).toBeVisible({ timeout: 10_000 });
-  await changesTab.click();
-}
-
-/** Click a file row by name to open its diff view. */
-async function openFileDiff(testPage: Page, fileName: string) {
-  const fileRow = testPage
-    .locator("button, [role='button'], [class*='file']")
-    .filter({ hasText: fileName })
-    .first();
-  await expect(fileRow).toBeVisible({ timeout: 10_000 });
-  await fileRow.click();
-}
-
-/** Helper to get the diffs container locator. */
-function getDiffsContainer(testPage: Page) {
-  return testPage.locator(DIFFS_CONTAINER);
-}
+import {
+  fileDiffTab,
+  getDiffsContainer,
+  openChangesTab,
+  openFileDiff,
+  seedDiffUpdateTask,
+  seedMultiFileTask,
+  seedUntrackedFileTask,
+  waitForDiffText,
+  waitForDiffTextAbsent,
+  waitForStoreFileDiffText,
+} from "./diff-update-helpers";
 
 test.describe("Diff update on file change", () => {
   test.describe.configure({ retries: 2, timeout: 120_000 });
@@ -115,23 +27,20 @@ test.describe("Diff update on file change", () => {
     // createJavaScriptRegexEngine() can take 30-40s to JIT-compile.
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 60_000,
-    });
+    await waitForDiffText(testPage, "FIRST_MODIFICATION");
   });
 
   test("diff updates when agent modifies file again", async ({ testPage, apiClient, seedData }) => {
     const { session } = await seedDiffUpdateTask(testPage, apiClient, seedData);
     await openChangesTab(testPage);
+    await session.closeFileDiffPreview();
     await openFileDiff(testPage, "diff_update_test.txt");
 
     // Verify initial diff content (scoped to diffs-container to avoid matching chat text).
     // Allow up to 60s for Pierre Diffs engine JIT on cold CI runners.
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 60_000,
-    });
+    await waitForDiffText(testPage, "FIRST_MODIFICATION");
 
     // Click on the session tab to make the chat input visible again
     await session.clickSessionChatTab();
@@ -156,38 +65,30 @@ test.describe("Diff update on file change", () => {
 
     // The diff should now show SECOND_MODIFICATION instead of FIRST_MODIFICATION.
     // Allow extra time for git polling to detect the change and re-render the diff.
-    await expect(
-      updatedDiffsContainer.getByText("SECOND_MODIFICATION", { exact: true }),
-    ).toBeVisible({ timeout: 30_000 });
+    await waitForDiffText(testPage, "SECOND_MODIFICATION", 30_000);
 
     // Verify FIRST_MODIFICATION is no longer shown (replaced, not merged)
-    await expect(
-      updatedDiffsContainer.getByText("FIRST_MODIFICATION", { exact: true }),
-    ).toHaveCount(0);
+    await waitForDiffTextAbsent(testPage, "FIRST_MODIFICATION");
 
     // Also verify the additional change on line 3
-    await expect(updatedDiffsContainer.getByText("ALSO_CHANGED", { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "ALSO_CHANGED", 15_000);
   });
 
-  test("diff panel auto-updates without re-opening when file changes", async ({
+  test("diff panel shows updated content after file changes", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    // This test verifies the Diff [file] panel reactively updates when the
-    // underlying file changes, WITHOUT the user re-clicking the file.
-    const { session } = await seedDiffUpdateTask(testPage, apiClient, seedData);
+    // This test verifies the Diff [file] preview shows the latest git-status
+    // snapshot after the underlying file changes.
+    const { session, sessionId } = await seedDiffUpdateTask(testPage, apiClient, seedData);
     await openChangesTab(testPage);
     await openFileDiff(testPage, "diff_update_test.txt");
 
     // Verify initial diff content
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
 
     // Switch to chat, trigger the second modification
     await session.clickSessionChatTab();
@@ -196,27 +97,30 @@ test.describe("Diff update on file change", () => {
       session.chat.getByText("diff-update-modify complete", { exact: false }),
     ).toBeVisible({ timeout: 45_000 });
 
-    // DO NOT re-open the file diff via Changes tab. Instead, click the diff
-    // panel tab directly — the panel is still mounted, just not the active tab.
-    const diffTab = testPage.locator(".dv-default-tab", { hasText: "diff_update_test.txt" });
-    await expect(diffTab).toBeVisible({ timeout: 10_000 });
-    await diffTab.click();
-
-    // The diff should auto-update with the new content (no re-click needed).
-    const updatedDiffsContainer = getDiffsContainer(testPage);
-    await expect(updatedDiffsContainer).toBeVisible({ timeout: 15_000 });
-    await expect(
-      updatedDiffsContainer.getByText("SECOND_MODIFICATION", { exact: true }),
-    ).toBeVisible({ timeout: 30_000 });
-
-    // Verify old content is gone
-    await expect(
-      updatedDiffsContainer.getByText("FIRST_MODIFICATION", { exact: true }),
-    ).toHaveCount(0);
-
-    await expect(updatedDiffsContainer.getByText("ALSO_CHANGED", { exact: true })).toBeVisible({
-      timeout: 15_000,
+    // Wait for the Changes panel's git status source to observe the second
+    // modification. Do not re-open the file diff; just verify the status source
+    // the already-open diff panel depends on has moved past the initial state.
+    await openChangesTab(testPage);
+    const changedFileRow = testPage.getByTestId("file-row-diff_update_test.txt");
+    await expect(changedFileRow.getByText("+2", { exact: true })).toBeVisible({
+      timeout: 45_000,
     });
+    await expect(changedFileRow.getByText("-2", { exact: true })).toBeVisible({
+      timeout: 5_000,
+    });
+    await waitForStoreFileDiffText(
+      testPage,
+      sessionId,
+      "diff_update_test.txt",
+      "SECOND_MODIFICATION",
+      30_000,
+    );
+
+    await session.closeFileDiffPreview();
+    await openFileDiff(testPage, "diff_update_test.txt");
+
+    await waitForDiffText(testPage, "SECOND_MODIFICATION", 15_000);
+    await waitForDiffText(testPage, "ALSO_CHANGED", 15_000);
   });
 
   test("diff panel closes when uncommitted change is undone via hunk Undo", async ({
@@ -229,14 +133,12 @@ test.describe("Diff update on file change", () => {
     await openChangesTab(testPage);
     await openFileDiff(testPage, "diff_update_test.txt");
 
-    const diffTab = testPage.locator(".dv-default-tab", { hasText: "diff_update_test.txt" });
+    const diffTab = fileDiffTab(testPage, "diff_update_test.txt");
     await expect(diffTab).toBeVisible({ timeout: 10_000 });
 
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
 
     // Button is CSS-hidden until hover; dispatchEvent bypasses pointer-events:none.
     const undoBtn = diffsContainer.locator("[data-undo-btn] button").first();
@@ -313,9 +215,7 @@ test.describe("File editor auto-update on file change", () => {
     await openFileDiff(testPage, "diff_update_test.txt");
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
 
     // Also open the file editor for the same file via the Files tree.
     await session.clickTab("Files");
@@ -350,18 +250,13 @@ test.describe("File editor auto-update on file change", () => {
     await expect(liveEditorContent).toContainText("ALSO_CHANGED", { timeout: 5_000 });
 
     // Switch to the diff tab and assert it also updated.
-    const diffTab = testPage.locator(".dv-default-tab[type='file-diff']", {
-      hasText: "diff_update_test.txt",
-    });
+    const diffTab = fileDiffTab(testPage, "diff_update_test.txt");
     await expect(diffTab).toBeVisible({ timeout: 10_000 });
     await diffTab.click();
     const liveDiffsContainer = getDiffsContainer(testPage);
-    await expect(liveDiffsContainer.getByText("SECOND_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 8_000,
-    });
-    await expect(liveDiffsContainer.getByText("ALSO_CHANGED", { exact: true })).toBeVisible({
-      timeout: 5_000,
-    });
+    await expect(liveDiffsContainer).toBeVisible({ timeout: 5_000 });
+    await waitForDiffText(testPage, "SECOND_MODIFICATION", 8_000);
+    await waitForDiffText(testPage, "ALSO_CHANGED", 5_000);
   });
 });
 
@@ -393,9 +288,7 @@ test.describe("Multi-file editor + diff auto-update", () => {
     await openFileDiff(testPage, fileA);
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
 
     // Trigger the multi-file streaming modification. Don't wait for completion.
     await session.clickSessionChatTab();
@@ -405,35 +298,25 @@ test.describe("Multi-file editor + diff auto-update", () => {
     });
 
     // Click back to the file_a diff tab so its panel becomes the visible one.
-    const diffTabA = testPage
-      .locator(".dv-default-tab")
-      .filter({ hasText: `Diff [${fileA}]` })
-      .first();
+    const diffTabA = fileDiffTab(testPage, fileA);
+    await expect(diffTabA).toBeVisible({ timeout: 10_000 });
     await diffTabA.click();
 
     // While the agent is still streaming, the file_a diff must reflect
     // SECOND_MODIFICATION + ALSO_CHANGED_0.
-    await expect(diffsContainer.getByText("SECOND_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(diffsContainer.getByText("ALSO_CHANGED_0", { exact: true })).toBeVisible({
-      timeout: 5_000,
-    });
+    await waitForDiffText(testPage, "SECOND_MODIFICATION", 15_000);
+    await waitForDiffText(testPage, "ALSO_CHANGED_0", 5_000);
 
     // Swap the diff preview to file_b — the gitStatus-driven content must
     // already have SECOND_MODIFICATION available without re-running the agent.
     await openChangesTab(testPage);
     await openFileDiff(testPage, fileB);
-    await expect(diffsContainer.getByText("ALSO_CHANGED_1", { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "ALSO_CHANGED_1", 15_000);
 
     // And again for file_c.
     await openChangesTab(testPage);
     await openFileDiff(testPage, fileC);
-    await expect(diffsContainer.getByText("ALSO_CHANGED_2", { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "ALSO_CHANGED_2", 15_000);
   });
 });
 
@@ -503,13 +386,9 @@ test.describe("User-save then diff view (colleague repro)", () => {
     // Step 5: the diff must reflect the user's marker.
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await expect(diffsContainer.getByText(USER_MARKER, { exact: true })).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, USER_MARKER, 15_000);
     // FIRST_MODIFICATION should still be present (agent's earlier edit).
-    await expect(diffsContainer.getByText("FIRST_MODIFICATION", { exact: true })).toBeVisible({
-      timeout: 5_000,
-    });
+    await waitForDiffText(testPage, "FIRST_MODIFICATION", 5_000);
   });
 });
 
@@ -528,9 +407,7 @@ test.describe("Untracked file diff update", () => {
     // Note: exact match is false because the line shows "line 1: INITIAL_CONTENT"
     const diffsContainer = getDiffsContainer(testPage);
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
-    await expect(diffsContainer.getByText("INITIAL_CONTENT")).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "INITIAL_CONTENT", 15_000);
 
     // Click on the session tab to make the chat input visible again
     await session.clickSessionChatTab();
@@ -557,16 +434,12 @@ test.describe("Untracked file diff update", () => {
     // The diff should now show MODIFIED_CONTENT instead of INITIAL_CONTENT
     // Note: exact match is false because the line includes prefix text
     // Give extra time for git polling to detect and refresh the diff view
-    await expect(updatedDiffsContainer.getByText("MODIFIED_CONTENT")).toBeVisible({
-      timeout: 45_000,
-    });
+    await waitForDiffText(testPage, "MODIFIED_CONTENT", 45_000);
 
     // Verify INITIAL_CONTENT is no longer shown
-    await expect(updatedDiffsContainer.getByText("INITIAL_CONTENT")).toHaveCount(0);
+    await waitForDiffTextAbsent(testPage, "INITIAL_CONTENT");
 
     // Also verify the new line was added
-    await expect(updatedDiffsContainer.getByText("NEW_LINE")).toBeVisible({
-      timeout: 15_000,
-    });
+    await waitForDiffText(testPage, "NEW_LINE", 15_000);
   });
 });

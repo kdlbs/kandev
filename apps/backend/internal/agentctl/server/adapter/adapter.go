@@ -267,6 +267,15 @@ type Config struct {
 
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool
+
+	// AssumeMcpHttp overrides MCP capability filtering to assume HTTP support.
+	AssumeMcpHttp bool
+
+	// RequiresProcessKill is read by the transport adapter's RequiresProcessKill()
+	// method. Set true for agents whose subprocess does not exit on stdin close
+	// (opencode acp). The process manager uses the adapter's return value to
+	// decide whether to kill the entire process group on shutdown.
+	RequiresProcessKill bool
 }
 
 // ToSharedConfig converts this Config to the shared.Config used by transport adapters.
@@ -284,17 +293,19 @@ func (c *Config) ToSharedConfig() *shared.Config {
 		}
 	}
 	return &shared.Config{
-		WorkDir:        c.WorkDir,
-		AutoApprove:    c.AutoApprove,
-		ApprovalPolicy: c.ApprovalPolicy,
-		McpServers:     mcpServers,
-		AgentID:        c.AgentID,
-		AgentName:      c.AgentName,
-		BaseURL:        c.BaseURL,
-		AuthHeader:     c.AuthHeader,
-		AuthValue:      c.AuthValue,
-		Headers:        c.Headers,
-		Extra:          c.Extra,
-		AssumeMcpSse:   c.AssumeMcpSse,
+		WorkDir:             c.WorkDir,
+		AutoApprove:         c.AutoApprove,
+		ApprovalPolicy:      c.ApprovalPolicy,
+		McpServers:          mcpServers,
+		AgentID:             c.AgentID,
+		AgentName:           c.AgentName,
+		BaseURL:             c.BaseURL,
+		AuthHeader:          c.AuthHeader,
+		AuthValue:           c.AuthValue,
+		Headers:             c.Headers,
+		Extra:               c.Extra,
+		AssumeMcpSse:        c.AssumeMcpSse,
+		AssumeMcpHttp:       c.AssumeMcpHttp,
+		RequiresProcessKill: c.RequiresProcessKill,
 	}
 }

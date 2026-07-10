@@ -1,7 +1,7 @@
 import { createRef } from "react";
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useChatInputContainer } from "./use-chat-input-container";
+import { shouldShowChatFocusHint, useChatInputContainer } from "./use-chat-input-container";
 import type { ChatInputContainerHandle } from "./chat-input-container";
 
 function renderInputState(overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {}) {
@@ -53,5 +53,37 @@ describe("useChatInputContainer", () => {
     });
 
     expect(result.current.submitDisabledReason).toBe("The agent is still being set up.");
+  });
+});
+
+describe("shouldShowChatFocusHint", () => {
+  it("hides the hint when a blurred editor has draft text", () => {
+    expect(
+      shouldShowChatFocusHint({
+        isInputFocused: false,
+        value: "halle from chat input",
+        hasClarification: false,
+        hasPendingComments: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("shows the hint only for an empty blurred editor without blocking overlays", () => {
+    expect(
+      shouldShowChatFocusHint({
+        isInputFocused: false,
+        value: "   ",
+        hasClarification: false,
+        hasPendingComments: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowChatFocusHint({
+        isInputFocused: true,
+        value: "",
+        hasClarification: false,
+        hasPendingComments: false,
+      }),
+    ).toBe(false);
   });
 });

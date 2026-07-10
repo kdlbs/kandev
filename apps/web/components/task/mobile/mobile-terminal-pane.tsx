@@ -70,6 +70,7 @@ function TerminalSlot({
         autoFocus={isActive}
         disableWebgl
         manualInputRouting
+        enableTouchScroll
         onXtermReady={setXterm}
         onWsReady={handleWsReady}
       />

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"go.uber.org/zap"
 
@@ -38,6 +39,24 @@ type ContainerLiveStatus struct {
 	ExitCode    int    `json:"exit_code,omitempty"`
 	Health      string `json:"health,omitempty"`
 	Missing     bool   `json:"missing,omitempty"`
+}
+
+// SSHLiveStatus surfaces the SSH-runtime fields needed by the Executor
+// Settings popover for an SSH-backed task: where the agent is running
+// (host/user/workdir), the local port forward we set up for the agent
+// stream, and the remote agentctl process info. Sourced from the latest
+// running ExecutorRunning row for the task's most recent session — the
+// SSH executor writes these metadata keys in CreateInstance and we just
+// project them back out here.
+type SSHLiveStatus struct {
+	Host               string `json:"host,omitempty"`
+	Port               int    `json:"port,omitempty"`
+	User               string `json:"user,omitempty"`
+	RemoteTaskDir      string `json:"remote_task_dir,omitempty"`
+	RemoteAgentctlPID  int    `json:"remote_agentctl_pid,omitempty"`
+	RemoteAgentctlPort int    `json:"remote_agentctl_port,omitempty"`
+	LocalForwardPort   int    `json:"local_forward_port,omitempty"`
+	Fingerprint        string `json:"fingerprint,omitempty"`
 }
 
 // ResetOptions controls destructive behavior of ResetTaskEnvironment.
@@ -85,6 +104,114 @@ func (s *Service) GetTaskEnvironmentLiveStatus(ctx context.Context, taskID strin
 		return nil, nil
 	}
 	return s.envDestroyer.GetContainerLiveStatus(ctx, env.ContainerID)
+}
+
+// GetSSHLiveStatus returns the SSH-specific runtime info for the task's
+// most recent session, or (nil, nil) when the task has no environment yet
+// or the environment isn't SSH-backed. The SSH executor writes these
+// fields into ExecutorRunning.Metadata in CreateInstance; here we just
+// look up the latest session's row and project the keys back out. We
+// don't probe the remote here — that's GetRemoteStatus's job — because
+// the popover polls this endpoint and a per-poll SSH dial would be both
+// slow and a lot of TCP traffic.
+func (s *Service) GetSSHLiveStatus(ctx context.Context, taskID string) (*SSHLiveStatus, error) {
+	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil || env == nil {
+		return nil, err
+	}
+	if env.ExecutorType != string(models.ExecutorTypeSSH) {
+		return nil, nil
+	}
+	running, err := s.latestRunningForTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if running == nil || running.Metadata == nil {
+		return nil, nil
+	}
+	return buildSSHLiveStatus(running.Metadata), nil
+}
+
+// latestRunningForTask picks the newest ExecutorRunning row across the
+// task's sessions. Sessions are returned newest-first by the repository
+// today; if that ever changes the popover would silently surface stale
+// data, so this helper is defensive: it walks every session and keeps
+// the row with the latest StartedAt.
+//
+// Repository errors are surfaced so the popover handler can log + omit
+// the ssh block instead of silently rendering "no SSH live status" on
+// every poll after a transient storage blip. The one "expected
+// missing" case (a session with no running row) is matched against
+// models.ErrExecutorRunningNotFound and skipped quietly.
+func (s *Service) latestRunningForTask(ctx context.Context, taskID string) (*models.ExecutorRunning, error) {
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task sessions: %w", err)
+	}
+	var latest *models.ExecutorRunning
+	for _, sess := range sessions {
+		if sess == nil {
+			continue
+		}
+		running, err := s.executors.GetExecutorRunningBySessionID(ctx, sess.ID)
+		if err != nil {
+			if errors.Is(err, models.ErrExecutorRunningNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("get executor running for session %s: %w", sess.ID, err)
+		}
+		if running == nil {
+			continue
+		}
+		if latest == nil || running.CreatedAt.After(latest.CreatedAt) {
+			latest = running
+		}
+	}
+	return latest, nil
+}
+
+// buildSSHLiveStatus projects the SSH metadata keys onto the live-status
+// shape. Pure function so the projection contract is unit-testable.
+func buildSSHLiveStatus(md map[string]interface{}) *SSHLiveStatus {
+	status := &SSHLiveStatus{
+		Host:          mdString(md, "ssh_host"),
+		User:          mdString(md, "ssh_user"),
+		RemoteTaskDir: mdString(md, "ssh_remote_task_dir"),
+		Fingerprint:   mdString(md, "ssh_host_fingerprint"),
+	}
+	status.Port = mdInt(md, "ssh_port")
+	status.RemoteAgentctlPID = mdInt(md, "ssh_remote_agentctl_pid")
+	status.RemoteAgentctlPort = mdInt(md, "ssh_remote_agentctl_port")
+	status.LocalForwardPort = mdInt(md, "ssh_local_forward_port")
+	return status
+}
+
+func mdString(md map[string]interface{}, key string) string {
+	if v, ok := md[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func mdInt(md map[string]interface{}, key string) int {
+	switch v := md[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case string:
+		// SSH executor stores numeric metadata as strings (strconv.Itoa) so
+		// every JSON round-trip preserves the value verbatim. Tolerate both.
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return 0
+		}
+		return n
+	default:
+		return 0
+	}
 }
 
 // checkAnySessionRunning delegates to the configured checker or falls back to

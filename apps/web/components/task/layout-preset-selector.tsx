@@ -130,9 +130,6 @@ function SaveLayoutDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder="My layout"
               autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleSave();
-              }}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -208,6 +205,29 @@ function SavedLayoutItems({
   ));
 }
 
+/** The built-in preset menu items. Applying any preset resets widths
+ *  (resetWidths=true), which is how a user clears a custom sidebar width. */
+function BuiltInPresetItems({ onApply }: { onApply: (presetId: BuiltInPreset) => void }) {
+  return BUILT_IN_PRESETS.map((preset) => {
+    const Icon = preset.icon;
+    return (
+      <DropdownMenuItem
+        key={preset.id}
+        data-testid="layout-preset-item"
+        data-preset-id={preset.id}
+        onClick={() => onApply(preset.id)}
+        className="cursor-pointer"
+      >
+        <Icon className="h-4 w-4 mr-2 shrink-0" />
+        <div className="flex flex-col min-w-0">
+          <span className="text-xs font-medium">{preset.label}</span>
+          <span className="text-[10px] text-muted-foreground truncate">{preset.description}</span>
+        </div>
+      </DropdownMenuItem>
+    );
+  });
+}
+
 export function LayoutPresetSelector() {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -261,7 +281,12 @@ export function LayoutPresetSelector() {
         <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
-              <Button size="sm" variant="outline" className="cursor-pointer px-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="cursor-pointer px-2"
+                data-testid="layout-preset-trigger"
+              >
                 <IconLayout className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -271,24 +296,7 @@ export function LayoutPresetSelector() {
         <DropdownMenuContent align="end" className="w-60">
           <DropdownMenuGroup>
             <DropdownMenuLabel className="text-xs">Presets</DropdownMenuLabel>
-            {BUILT_IN_PRESETS.map((preset) => {
-              const Icon = preset.icon;
-              return (
-                <DropdownMenuItem
-                  key={preset.id}
-                  onClick={() => applyBuiltInPreset(preset.id)}
-                  className="cursor-pointer"
-                >
-                  <Icon className="h-4 w-4 mr-2 shrink-0" />
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs font-medium">{preset.label}</span>
-                    <span className="text-[10px] text-muted-foreground truncate">
-                      {preset.description}
-                    </span>
-                  </div>
-                </DropdownMenuItem>
-              );
-            })}
+            <BuiltInPresetItems onApply={(id) => applyBuiltInPreset(id, true)} />
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
           <DropdownMenuGroup>

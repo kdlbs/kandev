@@ -27,20 +27,29 @@ const (
 
 // LaunchSessionRequest is the unified request for session.launch.
 type LaunchSessionRequest struct {
-	TaskID            string                 `json:"task_id"`
-	Intent            SessionIntent          `json:"intent,omitempty"`
-	SessionID         string                 `json:"session_id,omitempty"`
-	AgentProfileID    string                 `json:"agent_profile_id,omitempty"`
-	ExecutorID        string                 `json:"executor_id,omitempty"`
-	ExecutorProfileID string                 `json:"executor_profile_id,omitempty"`
-	Prompt            string                 `json:"prompt,omitempty"`
-	PlanMode          bool                   `json:"plan_mode,omitempty"`
-	WorkflowStepID    string                 `json:"workflow_step_id,omitempty"`
-	Priority          string                 `json:"priority,omitempty"`
-	LaunchWorkspace   bool                   `json:"launch_workspace,omitempty"`
-	SkipMessageRecord bool                   `json:"skip_message_record,omitempty"`
-	AutoStart         bool                   `json:"auto_start,omitempty"`
-	Attachments       []v1.MessageAttachment `json:"attachments,omitempty"`
+	TaskID            string        `json:"task_id"`
+	Intent            SessionIntent `json:"intent,omitempty"`
+	SessionID         string        `json:"session_id,omitempty"`
+	AgentProfileID    string        `json:"agent_profile_id,omitempty"`
+	ExecutorID        string        `json:"executor_id,omitempty"`
+	ExecutorProfileID string        `json:"executor_profile_id,omitempty"`
+	Prompt            string        `json:"prompt,omitempty"`
+	PlanMode          bool          `json:"plan_mode,omitempty"`
+	WorkflowStepID    string        `json:"workflow_step_id,omitempty"`
+	Priority          string        `json:"priority,omitempty"`
+	LaunchWorkspace   bool          `json:"launch_workspace,omitempty"`
+	SkipMessageRecord bool          `json:"skip_message_record,omitempty"`
+	AutoStart         bool          `json:"auto_start,omitempty"`
+	// DeferredStart marks a prepare whose caller will follow up with an explicit
+	// IntentStartCreated that carries the prompt (the two-phase create flow:
+	// cheap sync prepare + async start). It suppresses the passthrough
+	// launchPrepare→launchStart upgrade so the eager launch doesn't spawn a
+	// promptless PTY and pre-empt the prompt-bearing start. It is an internal
+	// server-side coordination flag set by the deferred-start handlers, so it is
+	// kept off the wire protocol (`json:"-"`) — a client must not be able to
+	// suppress the upgrade and strand a passthrough session without a PTY.
+	DeferredStart bool                   `json:"-"`
+	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
 }
 
 // LaunchSessionResponse is the unified response for session.launch.
@@ -105,8 +114,14 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 // AutoStart=true means we arrived here from launchStart's blocked-auto-start
 // downgrade path; skipping the upgrade in that case avoids a launchStart ↔
 // launchPrepare bounce.
+//
+// DeferredStart=true means a prompt-bearing IntentStartCreated will follow this
+// prepare (the two-phase create flow); skipping the upgrade there leaves the
+// session CREATED so that follow-up start launches the passthrough agent WITH
+// the prompt — eagerly launching here would spawn a promptless PTY and the
+// later start would be rejected against the now-running session.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if !req.AutoStart && s.isPassthroughProfile(ctx, req.AgentProfileID) {
+	if s.shouldUpgradePassthroughPrepare(ctx, req) {
 		return s.launchStart(ctx, req)
 	}
 	sessionID, err := s.PrepareTaskSession(
@@ -122,6 +137,16 @@ func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) 
 		SessionID: sessionID,
 		State:     string(models.TaskSessionStateCreated),
 	}, nil
+}
+
+// shouldUpgradePassthroughPrepare reports whether a prepare request for a
+// passthrough profile should be eagerly upgraded to a full launch so a PTY
+// exists for the terminal to attach to. It is the single decision point for the
+// upgrade documented on launchPrepare: only genuine prepare-only callers (no
+// imminent prompt-bearing start) get the eager launch. See launchPrepare for
+// why AutoStart and DeferredStart each suppress it.
+func (s *Service) shouldUpgradePassthroughPrepare(ctx context.Context, req *LaunchSessionRequest) bool {
+	return !req.AutoStart && !req.DeferredStart && s.isPassthroughProfile(ctx, req.AgentProfileID)
 }
 
 func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bool {
@@ -148,7 +173,7 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 	execution, err := s.StartTask(
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
-		req.WorkflowStepID, req.PlanMode, req.Attachments,
+		req.WorkflowStepID, req.PlanMode, req.AutoStart, req.Attachments,
 	)
 	if err != nil {
 		return nil, err
@@ -190,7 +215,7 @@ func (s *Service) shouldBlockAutoStart(ctx context.Context, req *LaunchSessionRe
 func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	execution, err := s.StartCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
-		req.Prompt, req.SkipMessageRecord, req.PlanMode, req.Attachments,
+		req.Prompt, req.SkipMessageRecord, req.PlanMode, req.AutoStart, req.Attachments,
 	)
 	if err != nil {
 		return nil, err

@@ -25,7 +25,13 @@ vi.mock("@/hooks/use-multi-select", () => ({
   }),
 }));
 
-import { FileListSection, CommitsSection } from "./changes-panel-timeline";
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (
+    selector: (state: { userSettings: { changesPanelLayout: "flat" | "tree" } }) => unknown,
+  ) => selector({ userSettings: { changesPanelLayout: "flat" } }),
+}));
+
+import { FileListSection, CommitsSection, PRFilesSection } from "./changes-panel-timeline";
 
 const REPO_HEADER_TID = "changes-repo-header";
 const COMMIT_ROW_TID = "commit-row";
@@ -35,8 +41,9 @@ const ARIA_EXPANDED = "aria-expanded";
 afterEach(cleanup);
 
 type Props = ComponentProps<typeof FileListSection>;
+type CommitProps = ComponentProps<typeof CommitsSection>;
 
-const baseProps: Omit<Props, "files" | "variant" | "isLast" | "actionLabel" | "onAction"> = {
+const baseProps: Omit<Props, "files" | "variant" | "actionLabel" | "onAction"> = {
   pendingStageFiles: new Set(),
   onOpenDiff: vi.fn(),
   onEditFile: vi.fn(),
@@ -57,6 +64,17 @@ function file(path: string, repo?: string): Props["files"][number] {
   };
 }
 
+function commit(sha: string, message: string, repo?: string): CommitProps["commits"][number] {
+  return {
+    commit_sha: sha,
+    commit_message: message,
+    insertions: 1,
+    deletions: 0,
+    pushed: false,
+    repository_name: repo,
+  };
+}
+
 describe("FileListSection — multi-repo grouping", () => {
   it("renders a flat file list (no per-repo header) for single-repo workspaces", () => {
     // Single-repo: drop the redundant per-repo sub-header above a flat file
@@ -66,7 +84,6 @@ describe("FileListSection — multi-repo grouping", () => {
       <FileListSection
         {...baseProps}
         variant="unstaged"
-        isLast={false}
         actionLabel="Stage all"
         onAction={() => undefined}
         onRepoAction={() => undefined}
@@ -84,7 +101,6 @@ describe("FileListSection — multi-repo grouping", () => {
       <FileListSection
         {...baseProps}
         variant="unstaged"
-        isLast={false}
         actionLabel="Stage all"
         onAction={() => undefined}
         files={[
@@ -107,7 +123,6 @@ describe("FileListSection — multi-repo grouping", () => {
       <FileListSection
         {...baseProps}
         variant="unstaged"
-        isLast={false}
         actionLabel="Stage all"
         onAction={() => undefined}
         files={[file("a.ts", "only-repo")]}
@@ -121,7 +136,6 @@ describe("FileListSection — multi-repo grouping", () => {
       <FileListSection
         {...baseProps}
         variant="unstaged"
-        isLast={false}
         actionLabel="Stage all"
         onAction={() => undefined}
         files={[
@@ -153,21 +167,8 @@ describe("FileListSection — multi-repo grouping", () => {
 });
 
 describe("CommitsSection", () => {
-  type CommitProps = ComponentProps<typeof CommitsSection>;
-
-  function commit(sha: string, message: string, repo?: string): CommitProps["commits"][number] {
-    return {
-      commit_sha: sha,
-      commit_message: message,
-      insertions: 1,
-      deletions: 0,
-      pushed: false,
-      repository_name: repo,
-    };
-  }
-
   it("renders the commits section header collapsed by default", () => {
-    render(<CommitsSection commits={[commit("abc123", "first")]} isLast />);
+    render(<CommitsSection commits={[commit("abc123", "first")]} />);
     // Commits section is collapsed by default; the toggle reflects that and
     // the commit rows are not in the DOM until the user expands the section.
     const toggle = screen.getByTestId(COMMITS_SECTION_TOGGLE_TID);
@@ -187,7 +188,6 @@ describe("CommitsSection", () => {
           commit("c2", "backend change", "backend"),
           commit("c3", "another frontend", "frontend"),
         ]}
-        isLast
       />,
     );
     fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
@@ -206,13 +206,45 @@ describe("CommitsSection", () => {
     render(
       <CommitsSection
         commits={[commit("c1", "msg"), commit("c2", "msg")]}
-        isLast
         onRepoPush={() => undefined}
       />,
     );
     fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
     expect(screen.queryAllByTestId("commits-repo-header")).toHaveLength(0);
     expect(screen.getAllByTestId(COMMIT_ROW_TID)).toHaveLength(2);
+  });
+});
+
+describe("CommitsSection actions", () => {
+  it("does not show Push when commits are already on the tracked remote", () => {
+    render(
+      <CommitsSection
+        commits={[commit("c1", "already pushed"), commit("c2", "also pushed")]}
+        onRepoPush={() => undefined}
+        perRepoStatus={[{ repository_name: "", ahead: 0 }]}
+      />,
+    );
+
+    expect(screen.queryByTestId("commits-repo-push")).toBeNull();
+
+    fireEvent.click(screen.getByTestId(COMMITS_SECTION_TOGGLE_TID));
+    expect(screen.getAllByTestId(COMMIT_ROW_TID)).toHaveLength(2);
+    expect(screen.queryByTestId("commits-repo-push")).toBeNull();
+  });
+
+  it("labels Push with the actual ahead count instead of the commit list count", () => {
+    render(
+      <CommitsSection
+        commits={[commit("c1", "newest"), commit("c2", "middle"), commit("c3", "oldest")]}
+        onRepoPush={() => undefined}
+        perRepoStatus={[{ repository_name: "", ahead: 1 }]}
+      />,
+    );
+
+    const push = screen.getByTestId("commits-repo-push");
+    expect(push.textContent).toContain("Push");
+    expect(push.textContent).toContain("1");
+    expect(push.textContent).not.toContain("3");
   });
 
   // Regression: previously isLatest was computed against the merged list, so
@@ -229,7 +261,6 @@ describe("CommitsSection", () => {
           commit("frontend-old", "frontend older", "frontend"),
           commit("backend-only", "backend latest", "backend"),
         ]}
-        isLast
         onRevertCommit={() => undefined}
       />,
     );
@@ -239,5 +270,48 @@ describe("CommitsSection", () => {
       .filter((r) => r.getAttribute("data-is-latest") === "true")
       .map((r) => r.getAttribute("data-sha"));
     expect(latestByShas.sort()).toEqual(["backend-only", "frontend-new"]);
+  });
+});
+
+describe("section auto-expand (defaultCollapsed prop)", () => {
+  const PR_TOGGLE_TID = "pr-changes-section-collapse-toggle";
+
+  function prFile(path: string) {
+    return { path, status: "modified" as const, plus: 1, minus: 0, oldPath: undefined };
+  }
+
+  it("PR Changes is collapsed by default (no prop)", () => {
+    render(<PRFilesSection files={[prFile("a.ts")]} onOpenDiff={vi.fn()} />);
+    expect(screen.getByTestId(PR_TOGGLE_TID).getAttribute(ARIA_EXPANDED)).toBe("false");
+    expect(screen.queryByTestId("pr-files-list")).toBeNull();
+  });
+
+  it("PR Changes is expanded when defaultCollapsed={false}", () => {
+    render(
+      <PRFilesSection files={[prFile("a.ts")]} onOpenDiff={vi.fn()} defaultCollapsed={false} />,
+    );
+    expect(screen.getByTestId(PR_TOGGLE_TID).getAttribute(ARIA_EXPANDED)).toBe("true");
+    expect(screen.getByTestId("pr-files-list")).toBeTruthy();
+  });
+
+  it("Commits is expanded when defaultCollapsed={false}", () => {
+    render(
+      <CommitsSection
+        commits={[
+          {
+            commit_sha: "abc123",
+            commit_message: "first",
+            insertions: 1,
+            deletions: 0,
+            pushed: false,
+            repository_name: undefined,
+          },
+        ]}
+        defaultCollapsed={false}
+      />,
+    );
+    const toggle = screen.getByTestId(COMMITS_SECTION_TOGGLE_TID);
+    expect(toggle.getAttribute(ARIA_EXPANDED)).toBe("true");
+    expect(screen.getByTestId(COMMIT_ROW_TID)).toBeTruthy();
   });
 });

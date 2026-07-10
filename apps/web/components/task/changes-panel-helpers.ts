@@ -16,6 +16,35 @@ export type ChangedFile = {
   repositoryName?: string;
 };
 
+/**
+ * Picks the group label stamped onto each PR's files so the changes panel
+ * can show one section per PR for multi-branch tasks.
+ *
+ * Rules:
+ * - Only one PR on the task -> no stamp (the section header is enough).
+ * - Multi-repo, one PR per repo -> stamp the repo name (legacy behavior).
+ * - Any repo has multiple PRs -> append the branch / PR number so the
+ *   group label disambiguates which PR each file belongs to.
+ */
+export function computePRGroupStamp(args: {
+  needsStamp: boolean;
+  taskHasMultipleRepos: boolean;
+  anyRepoMultiPR: boolean;
+  repoName: string;
+  branch: string;
+  prNumber: number;
+}): string {
+  if (!args.needsStamp) return "";
+  const label = args.branch || `PR #${args.prNumber}`;
+  if (args.anyRepoMultiPR && args.taskHasMultipleRepos) {
+    return `${args.repoName} · ${label}`;
+  }
+  if (args.anyRepoMultiPR) {
+    return label;
+  }
+  return args.repoName;
+}
+
 export function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
   return files.map((file) => ({
     path: file.path,
@@ -138,6 +167,41 @@ export function filterUnpushedCommits<T extends { commit_sha: string }>(
   );
 }
 
+/** Which timeline section, if any, renders first (topmost) in the Changes panel. */
+type FirstVisibleSection = "pr" | "unstaged" | "staged" | "commits" | null;
+
+/** PR Changes auto-expands only when the diff is small enough to scan inline. */
+export const PR_CHANGES_AUTO_EXPAND_MAX_FILES = 5;
+
+/**
+ * Computes the first (topmost) visible section so the panel can auto-expand it,
+ * mirroring the render precedence in `ChangesPanelTimeline`:
+ *   PR (review mode, no local changes) → Unstaged → Staged → Commits.
+ *
+ * The "review mode" PR section only sits at the top when there are no local
+ * working-tree changes; with local changes the PR section moves below Staged and
+ * is therefore never first. Large PR diffs (>5 files) skip auto-expanding PR
+ * Changes and expand Commits instead. Returns null when nothing is shown.
+ */
+export function firstVisibleSection(flags: {
+  hasPRFiles: boolean;
+  hasUnstaged: boolean;
+  hasStaged: boolean;
+  showCommitsList: boolean;
+  prFileCount?: number;
+}): FirstVisibleSection {
+  const { hasPRFiles, hasUnstaged, hasStaged, showCommitsList, prFileCount = 0 } = flags;
+  if (hasPRFiles && !hasUnstaged && !hasStaged) {
+    if (prFileCount <= PR_CHANGES_AUTO_EXPAND_MAX_FILES) return "pr";
+    if (showCommitsList) return "commits";
+    return null;
+  }
+  if (hasUnstaged) return "unstaged";
+  if (hasStaged) return "staged";
+  if (showCommitsList) return "commits";
+  return null;
+}
+
 type MergedCommit = {
   commit_sha: string;
   commit_message: string;
@@ -146,6 +210,7 @@ type MergedCommit = {
   pushed: boolean;
   /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
   repository_name?: string;
+  committed_at?: string;
 };
 
 /**
@@ -168,8 +233,15 @@ export function mergeCommits(
     /** Multi-repo: name of the repo this commit was made in. */
     repository_name?: string;
     pushed?: boolean;
+    committed_at?: string;
   }[],
-  prCommits: { sha: string; message: string; additions: number; deletions: number }[],
+  prCommits: {
+    sha: string;
+    message: string;
+    additions: number;
+    deletions: number;
+    author_date?: string;
+  }[],
 ): MergedCommit[] {
   const shaMatches = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
   const unpushed: MergedCommit[] = [];
@@ -199,6 +271,7 @@ export function mergeCommits(
         insertions: pr.additions,
         deletions: pr.deletions,
         pushed: true,
+        committed_at: pr.author_date,
       });
     }
   }
@@ -211,4 +284,48 @@ export function getBaseBranchDisplay(baseBranch: string | undefined): string {
 
 export function isMultiRepoCommits(commits: { repository_name?: string }[]): boolean {
   return commits.some((c) => !!c.repository_name);
+}
+
+type TaskPRUrlInput = {
+  pr_url?: string;
+  repository_id?: string;
+};
+
+/** Workspace repository id → display name for multi-repo PR/commit grouping. */
+export function buildRepoNameById(
+  reposByWorkspace: Record<string, Array<{ id: string; name: string }>>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const list of Object.values(reposByWorkspace)) {
+    for (const r of list) {
+      out[r.id] = r.name;
+    }
+  }
+  return out;
+}
+
+/** Merge synced TaskPR URLs and client-only pending PR URLs by repo display name. */
+export function buildPrByRepoMap(
+  taskPRs: TaskPRUrlInput[] | undefined,
+  repoNameById: Record<string, string>,
+  pendingByRepo: Record<string, string> | undefined,
+): Record<string, string | undefined> {
+  const map: Record<string, string | undefined> = {};
+  if (taskPRs) {
+    for (const pr of taskPRs) {
+      if (!pr.pr_url) continue;
+      const repoKey = pr.repository_id ? (repoNameById[pr.repository_id] ?? "") : "";
+      map[repoKey] = map[repoKey] ?? pr.pr_url;
+    }
+  }
+  if (pendingByRepo) {
+    for (const [repoKey, url] of Object.entries(pendingByRepo)) {
+      if (url) map[repoKey] = map[repoKey] ?? url;
+    }
+  }
+  const legacySingleRepo = taskPRs?.find((p) => p.pr_url && !p.repository_id);
+  if (!map[""] && legacySingleRepo?.pr_url) {
+    map[""] = legacySingleRepo.pr_url;
+  }
+  return map;
 }

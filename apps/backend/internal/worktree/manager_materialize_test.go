@@ -10,19 +10,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// fakeRepoProvider returns a fixed repository config for materialization tests.
-type fakeRepoProvider struct {
-	repo *Repository
-	err  error
-}
-
-func (f *fakeRepoProvider) GetRepository(_ context.Context, _ string) (*Repository, error) {
-	return f.repo, f.err
-}
-
-func (f *fakeRepoProvider) GetRepositoryByPath(_ context.Context, _ string) (*Repository, error) {
-	return f.repo, f.err
-}
+// fakeRepoProvider (shared with manager_copyfiles_test.go) returns a fixed
+// repository config for materialization tests.
 
 func newMaterializeManager(t *testing.T, repo *Repository) *Manager {
 	t.Helper()

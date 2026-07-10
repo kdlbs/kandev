@@ -5,13 +5,20 @@ import type {
   DiffComment,
   PlanComment,
   PRFeedbackComment,
+  WalkthroughComment,
 } from "@/lib/state/slices/comments";
-import { isDiffComment, isPlanComment, isPRFeedbackComment } from "@/lib/state/slices/comments";
+import {
+  isDiffComment,
+  isPlanComment,
+  isPRFeedbackComment,
+  isWalkthroughComment,
+} from "@/lib/state/slices/comments";
 
 const EMPTY_COMMENTS: Comment[] = [];
 const EMPTY_DIFF_COMMENTS: DiffComment[] = [];
 const EMPTY_PLAN_COMMENTS: PlanComment[] = [];
 const EMPTY_PR_FEEDBACK_COMMENTS: PRFeedbackComment[] = [];
+const EMPTY_WALKTHROUGH_COMMENTS: WalkthroughComment[] = [];
 
 /**
  * Get all pending comments (any source).
@@ -92,5 +99,27 @@ export function usePendingPRFeedback(sessionId?: string | null): PRFeedbackComme
       }
     }
     return pending.length === 0 ? EMPTY_PR_FEEDBACK_COMMENTS : pending;
+  }, [byId, pendingForChat, sessionId]);
+}
+
+/**
+ * Get all pending walkthrough comments.
+ * If sessionId is provided, only returns comments belonging to that session.
+ */
+export function usePendingWalkthroughComments(sessionId?: string | null): WalkthroughComment[] {
+  const byId = useCommentsStore((state) => state.byId);
+  const pendingForChat = useCommentsStore((state) => state.pendingForChat);
+
+  return useMemo(() => {
+    if (pendingForChat.length === 0) return EMPTY_WALKTHROUGH_COMMENTS;
+    const pending: WalkthroughComment[] = [];
+    for (const id of pendingForChat) {
+      const comment = byId[id];
+      if (comment && isWalkthroughComment(comment)) {
+        if (sessionId && comment.sessionId !== sessionId) continue;
+        pending.push(comment);
+      }
+    }
+    return pending.length === 0 ? EMPTY_WALKTHROUGH_COMMENTS : pending;
   }, [byId, pendingForChat, sessionId]);
 }

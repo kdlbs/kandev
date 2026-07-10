@@ -90,6 +90,13 @@ describe("useWorkflowSnapshot — kanban.isLoading", () => {
     expect(mockState.kanban.isLoading).toBe(false);
   });
 
+  it("does not fetch on initial mount if the requested workflow snapshot is boot-hydrated", () => {
+    resetState({ workflowId: "wf-1", steps: [{ id: "step-1" }], tasks: [], isLoading: false });
+    renderHook(() => useWorkflowSnapshot("wf-1"));
+    expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
+    expect(mockState.kanban.isLoading).toBe(false);
+  });
+
   it("does not clear isLoading on settle when it didn't raise the flag (already-hydrated re-fetch)", async () => {
     // Mimic a workspace switch having set isLoading=true after the snapshot
     // hydrated for this workflowId. A silent re-fetch (e.g. WS reconnect)

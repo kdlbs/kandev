@@ -16,14 +16,15 @@ type MockPanel = {
   api: {
     setActive: () => void;
     updateParameters: (p: Record<string, unknown>) => void;
+    moveTo: (opts: { group: { id: string } }) => void;
   };
   setTitle: (t: string) => void;
 };
 
-function makeApi(options: { centerGroupId?: string } = {}): DockviewApi {
+function makeApi(options: { centerGroupId?: string; extraGroupIds?: string[] } = {}): DockviewApi {
   const centerId = options.centerGroupId ?? CENTER_GROUP;
   const panels: MockPanel[] = [];
-  const groups = [{ id: centerId }];
+  const groups = [{ id: centerId }, ...(options.extraGroupIds ?? []).map((id) => ({ id }))];
 
   function makePanel(add: AddPanelOptions & { id: string }): MockPanel {
     const groupId =
@@ -46,6 +47,9 @@ function makeApi(options: { centerGroupId?: string } = {}): DockviewApi {
         updateParameters(p: Record<string, unknown>) {
           Object.assign(panel.params, p);
         },
+        moveTo({ group }: { group: { id: string } }) {
+          panel.group = { id: group.id };
+        },
       },
     };
     return panel;
@@ -60,6 +64,9 @@ function makeApi(options: { centerGroupId?: string } = {}): DockviewApi {
     },
     getPanel(id: string) {
       return panels.find((p) => p.id === id);
+    },
+    getGroup(id: string) {
+      return groups.find((g) => g.id === id);
     },
     addPanel(opts: AddPanelOptions & { id: string }) {
       const p = makePanel(opts);
@@ -118,8 +125,10 @@ function build(api: DockviewApi) {
 const PATH_A = "src/a.ts";
 const PATH_B = "src/b.ts";
 const PATH_NESTED_B = "src/nested/b.ts";
+const SHARED_PATH = "README.md";
 const NAME_A = "a.ts";
 const NAME_B = "b.ts";
+const SHARED_NAME = "README.md";
 const PINNED_FILE_A_ID = "file:src/a.ts";
 const PREVIEW_FILE_ID = "preview:file-editor";
 const PREVIEW_DIFF_ID = "preview:file-diff";
@@ -263,6 +272,21 @@ describe("addFileEditorPanel — preview behavior", () => {
   });
 });
 
+describe("addFileEditorPanel — multi-repo identity", () => {
+  it("does not reuse a pinned editor for the same path in a different repo", () => {
+    const { api, actions } = build(makeApi());
+
+    actions.addFileEditorPanel(SHARED_PATH, SHARED_NAME, { pin: true, repo: "frontend" });
+    actions.addFileEditorPanel(SHARED_PATH, SHARED_NAME, { repo: "backend" });
+
+    const preview = api.getPanel(PREVIEW_FILE_ID) as unknown as MockPanel;
+    expect(preview).toBeDefined();
+    expect(preview.params.path).toBe(SHARED_PATH);
+    expect(preview.params.repo).toBe("backend");
+    expect(preview.isActive).toBe(true);
+  });
+});
+
 describe("addFileDiffPanel — preview behavior", () => {
   let api: DockviewApi;
   let actions: ReturnType<typeof buildPanelActions>;
@@ -305,6 +329,18 @@ describe("addFileDiffPanel — preview behavior", () => {
     expect(preview.params.path).toBe(PATH_B);
   });
 
+  it("does not reuse a pinned diff for the same path in a different repo", () => {
+    actions.addFileDiffPanel(SHARED_PATH, { pin: true, repositoryName: "frontend" });
+
+    actions.addFileDiffPanel(SHARED_PATH, { repositoryName: "backend" });
+
+    const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
+    expect(preview).toBeDefined();
+    expect(preview.params.path).toBe(SHARED_PATH);
+    expect(preview.params.repositoryName).toBe("backend");
+    expect(preview.isActive).toBe(true);
+  });
+
   it("promotePreviewToPinned sets promoted flag on the preview diff", () => {
     actions.addFileDiffPanel(PATH_A);
     actions.promotePreviewToPinned("file-diff");
@@ -324,6 +360,32 @@ describe("addFileDiffPanel — preview behavior", () => {
     const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
     expect(preview.params.path).toBe(PATH_B);
     expect(preview.params.promoted).toBeUndefined();
+  });
+
+  // Regression: a saved env layout can restore `preview:file-diff` into the
+  // right column. A subsequent click on a file in the Changes panel should
+  // relocate the preview into the explicitly requested (center) group rather
+  // than silently reusing the restored slot.
+  it("moves an existing preview to the requested group when groupId differs", () => {
+    const rightTopId = "group-right-top";
+    ({ api, actions } = build(makeApi({ extraGroupIds: [rightTopId] })));
+
+    actions.addFileDiffPanel(PATH_A, { groupId: rightTopId });
+    const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
+    expect(preview.group.id).toBe(rightTopId);
+
+    actions.addFileDiffPanel(PATH_B); // defaults to centerGroupId
+    expect(preview.group.id).toBe(CENTER_GROUP);
+    expect(preview.params.path).toBe(PATH_B);
+  });
+
+  it("leaves the preview in place when groupId already matches", () => {
+    actions.addFileDiffPanel(PATH_A);
+    const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
+    expect(preview.group.id).toBe(CENTER_GROUP);
+
+    actions.addFileDiffPanel(PATH_B);
+    expect(preview.group.id).toBe(CENTER_GROUP);
   });
 });
 
@@ -395,22 +457,36 @@ describe("preview slots are independent across types", () => {
 
 describe("addPRPanel — dedup with legacy auto-shown panel", () => {
   const PR_KEY = "testorg/testrepo/101";
+  const OTHER_PR_KEY = "testorg/testrepo/202";
   const LEGACY_PR_ID = "pr-detail";
   const KEYED_PR_ID = `pr-detail|${PR_KEY}`;
+  const OTHER_KEYED_PR_ID = `pr-detail|${OTHER_PR_KEY}`;
 
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
     return { api, actions: buildExtraPanelActions(store.get) };
   }
 
-  it("focuses the legacy auto-shown panel instead of creating a keyed duplicate", () => {
+  /**
+   * Mirrors how useAutoPRPanel seeds the legacy panel in production: same
+   * unkeyed "pr-detail" id, but stamped with the PR it's currently showing
+   * so later `addPRPanel` calls can tell whether a menu click targets that
+   * same PR (reuse the tab) or a different one (open a distinct tab).
+   */
+  function seedLegacyPanel(api: DockviewApi, prKey: string): void {
+    api.addPanel({
+      id: LEGACY_PR_ID,
+      component: "pr-detail",
+      title: "Pull Request",
+      params: { prKey },
+      position: { referenceGroup: CENTER_GROUP },
+    });
+  }
+
+  it("reuses the legacy panel when the requested PR is what it's already showing", () => {
     const { api, actions } = buildExtra(makeApi());
+    seedLegacyPanel(api, PR_KEY);
 
-    // Auto-show creates the legacy (unkeyed) panel.
-    actions.addPRPanel();
-    expect(api.getPanel(LEGACY_PR_ID)).toBeDefined();
-
-    // Topbar click with a prKey must reuse the legacy panel, not add a second tab.
     actions.addPRPanel(PR_KEY);
 
     const prPanels = api.panels.filter(
@@ -418,11 +494,28 @@ describe("addPRPanel — dedup with legacy auto-shown panel", () => {
     );
     expect(prPanels).toHaveLength(1);
     expect(api.getPanel(KEYED_PR_ID)).toBeUndefined();
+    expect((api.getPanel(LEGACY_PR_ID) as unknown as MockPanel).isActive).toBe(true);
+  });
 
-    // Legacy panel was updated with the prKey so it renders the requested PR.
+  it("opens a distinct tab for a different PR instead of overwriting the legacy tab", () => {
+    const { api, actions } = buildExtra(makeApi());
+    seedLegacyPanel(api, PR_KEY);
+
+    // Multi-repo "+" menu click for a PR other than the one the legacy tab
+    // is showing must NOT repurpose that tab — it must open its own tab.
+    actions.addPRPanel(OTHER_PR_KEY);
+
     const legacy = api.getPanel(LEGACY_PR_ID) as unknown as MockPanel;
     expect(legacy.params.prKey).toBe(PR_KEY);
-    expect(legacy.isActive).toBe(true);
+
+    const other = api.getPanel(OTHER_KEYED_PR_ID) as unknown as MockPanel;
+    expect(other).toBeDefined();
+    expect(other.isActive).toBe(true);
+
+    const prPanels = api.panels.filter(
+      (p) => p.id === LEGACY_PR_ID || p.id.startsWith(`${LEGACY_PR_ID}|`),
+    );
+    expect(prPanels).toHaveLength(2);
   });
 
   it("creates a new keyed panel when no legacy panel exists", () => {

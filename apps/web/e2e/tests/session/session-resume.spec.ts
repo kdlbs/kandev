@@ -71,7 +71,7 @@ test.describe("Session resume (ACP mode)", () => {
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 15_000 });
 
     // 3. Verify the "Started agent Mock" boot message appeared on initial launch
     await expect(session.chat.getByText("Started agent Mock", { exact: false })).toBeVisible({
@@ -95,7 +95,7 @@ test.describe("Session resume (ACP mode)", () => {
     //    needs_resume=true and relaunches the agent via session.launch.
     //    The full cycle (backend restart → health check → page reload → SSR →
     //    WS reconnect → auto-resume → agent turn) can be slow under CI load.
-    await expect(session.idleInput()).toBeVisible({ timeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
     // 8. Verify the "Resumed agent Mock" boot message appeared after resume
     await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
@@ -106,9 +106,7 @@ test.describe("Session resume (ACP mode)", () => {
     await session.sendMessage("/e2e:simple-message");
 
     // 10. The agent should respond to the new prompt
-    await expect(
-      session.chat.getByText("simple mock response", { exact: false }).nth(1),
-    ).toBeVisible({ timeout: 30_000 });
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
   });
 });
 
@@ -146,7 +144,7 @@ test.describe("Task status during resume", () => {
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 15_000 });
 
     // 3. Confirm the task moved to the "Turn Finished" section after the turn completed
     await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
@@ -173,7 +171,7 @@ test.describe("Task status during resume", () => {
     });
 
     // 7. Wait for auto-resume to complete (agent relaunches and becomes idle)
-    await expect(session.idleInput()).toBeVisible({ timeout: 60_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
     // 8. After resume completes, the task must still be in "Turn Finished"
     await expect(session.taskInSection("Status Stable Task", "Turn Finished")).toBeVisible({
@@ -351,7 +349,7 @@ test.describe("Session resume (multi-session)", () => {
     await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 15_000 });
 
     // 2. Open second session via the new-session dialog
     await session.openNewSessionDialog();
@@ -462,14 +460,12 @@ test.describe("Session resume (active turn interrupted)", () => {
     //    the safety-net path: post-restart, no live agent process exists, so
     //    UpdateTaskSessionState moves RUNNING → WAITING_FOR_INPUT and
     //    CompletePendingToolCallsForTurn closes any dangling tool calls.
-    await expect(session.idleInput()).toBeVisible({ timeout: 90_000 });
+    await session.waitForChatIdle({ timeout: 90_000 });
 
     // 6. Send a fresh prompt — proves the resume path produced a usable
     //    execution (not stuck "Agent is not running") even though the previous
     //    turn was interrupted.
     await session.sendMessage("/e2e:simple-message");
-    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
+    await session.expectChatResponseVisible("simple mock response", 0, { timeout: 30_000 });
   });
 });

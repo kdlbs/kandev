@@ -18,6 +18,18 @@ const (
 	TaskStateCancelled       TaskState = "CANCELLED"
 )
 
+// TaskPRSummary is a compact view of a GitHub pull request associated with a
+// task. Surfaced through the task-listing MCP tools so agents can reason about
+// PR status. State is one of "open", "closed", "merged"; MergedAt is set only
+// when the PR has merged, so agents can report when the work landed.
+type TaskPRSummary struct {
+	Number   int        `json:"number"`
+	URL      string     `json:"url"`
+	Title    string     `json:"title,omitempty"`
+	State    string     `json:"state"`
+	MergedAt *time.Time `json:"merged_at,omitempty"`
+}
+
 // TaskSessionState represents the state of an agent session.
 type TaskSessionState string
 
@@ -126,10 +138,15 @@ type TaskEvent struct {
 // Type determines the ACP content block: "image" → ImageBlock, "audio" → AudioBlock,
 // "resource" → ResourceBlock (text or blob based on MIME type).
 type MessageAttachment struct {
-	Type     string `json:"type"`                // "image", "audio", "resource"
-	Data     string `json:"data,omitempty"`      // Base64-encoded data
-	MimeType string `json:"mime_type,omitempty"` // MIME type (e.g., "image/png")
-	Name     string `json:"name,omitempty"`      // Display name (e.g., filename)
+	Type         string `json:"type"`                    // "image", "audio", "resource"
+	Data         string `json:"data,omitempty"`          // Base64-encoded data
+	MimeType     string `json:"mime_type,omitempty"`     // MIME type (e.g., "image/png")
+	Name         string `json:"name,omitempty"`          // Display name (e.g., filename)
+	DeliveryMode string `json:"delivery_mode,omitempty"` // "prompt" (native/default) or "path"
+}
+
+func (a MessageAttachment) HasValidDeliveryMode() bool {
+	return a.DeliveryMode == "" || a.DeliveryMode == "prompt" || a.DeliveryMode == "path"
 }
 
 // ContextFileMeta represents a context file reference attached to a message
@@ -152,6 +169,7 @@ type Message struct {
 	RequestsInput bool                   `json:"requests_input"` // True if agent is requesting user input
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt     time.Time              `json:"created_at"`
+	UpdatedAt     time.Time              `json:"updated_at,omitempty"` // Authoritative per-message change signal
 }
 
 // CreateMessageRequest for adding a message to a task session

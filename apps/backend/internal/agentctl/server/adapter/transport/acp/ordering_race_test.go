@@ -16,6 +16,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// waitForChunks blocks until len(*chunks) reaches want, or fails the test after a
+// generous timeout. The ACP SDK (coder/acp-go-sdk) dispatches received notifications
+// from an internal queue that drains asynchronously *after* conn.Done() fires (see
+// shutdownReceive / notificationQueueDrainTimeout), so notifications already read can be
+// delivered late. A fixed sleep races under CI load; polling with require.Eventually is
+// deterministic. The condition takes mu when reading the shared slice. The wait uses >=
+// so that over-delivery surfaces as a clear count mismatch in the caller's exact-count
+// assertion rather than as a timeout here (the writer closes the pipe after exactly
+// `want` frames, so more than `want` chunks cannot legitimately arrive).
+func waitForChunks(t *testing.T, mu *sync.Mutex, chunks *[]string, want int) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(*chunks) >= want
+	}, 10*time.Second, 5*time.Millisecond, "All chunks should be received")
+}
+
 // makeACPSessionUpdateNotification creates a valid ACP session/update JSON-RPC notification
 // with an agent_message_chunk update containing the given text.
 func makeACPSessionUpdateNotification(sessionID, text string) []byte {
@@ -56,6 +74,12 @@ func TestACPMessageChunkOrdering(t *testing.T) {
 	// Create pipes for stdin/stdout simulation
 	agentStdinReader, agentStdinWriter := io.Pipe()
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	// Track received chunks with ordering
 	var mu sync.Mutex
@@ -89,8 +113,8 @@ func TestACPMessageChunkOrdering(t *testing.T) {
 	// Wait for connection to close
 	<-conn.Done()
 
-	// Allow some buffer time for any remaining processing
-	time.Sleep(50 * time.Millisecond)
+	// Wait for the SDK's async notification queue to finish draining (see waitForChunks).
+	waitForChunks(t, &mu, &receivedChunks, numChunks)
 
 	// Check results
 	mu.Lock()
@@ -119,10 +143,6 @@ func TestACPMessageChunkOrdering(t *testing.T) {
 		t.Log("All chunks arrived in order (race condition not triggered this run)")
 		t.Log("Note: Race conditions are non-deterministic - try running with -count=10")
 	}
-
-	// Clean up
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // TestACPUpdateHandlerOrdering tests if adding serialization in our handler fixes ordering.
@@ -133,6 +153,12 @@ func TestACPUpdateHandlerOrdering(t *testing.T) {
 
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
 	agentStdinReader, agentStdinWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	var mu sync.Mutex
 	var receivedChunks []string
@@ -166,7 +192,7 @@ func TestACPUpdateHandlerOrdering(t *testing.T) {
 	}()
 
 	<-conn.Done()
-	time.Sleep(50 * time.Millisecond)
+	waitForChunks(t, &mu, &receivedChunks, numChunks)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -185,10 +211,6 @@ func TestACPUpdateHandlerOrdering(t *testing.T) {
 	if outOfOrder > 0 {
 		t.Log("Handler mutex doesn't fully fix the issue - ordering lost before handler is called")
 	}
-
-	// Clean up
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // Helper to verify AdapterEvent type (unused variable fix)
@@ -202,6 +224,12 @@ func TestNotificationOrderingFix(t *testing.T) {
 
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
 	agentStdinReader, agentStdinWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	var mu sync.Mutex
 	var receivedChunks []string
@@ -229,7 +257,7 @@ func TestNotificationOrderingFix(t *testing.T) {
 	}()
 
 	<-conn.Done()
-	time.Sleep(50 * time.Millisecond)
+	waitForChunks(t, &mu, &receivedChunks, numChunks)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -241,9 +269,6 @@ func TestNotificationOrderingFix(t *testing.T) {
 		expected := fmt.Sprintf("chunk_%03d", i)
 		assert.Equal(t, expected, chunk, "Chunk at position %d should be in order", i)
 	}
-
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // TestNotificationOrderingWithMultipleSessions verifies ordering is maintained
@@ -254,6 +279,12 @@ func TestNotificationOrderingWithMultipleSessions(t *testing.T) {
 
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
 	agentStdinReader, agentStdinWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	var mu sync.Mutex
 	receivedBySession := make(map[string][]string)
@@ -284,7 +315,18 @@ func TestNotificationOrderingWithMultipleSessions(t *testing.T) {
 	}()
 
 	<-conn.Done()
-	time.Sleep(50 * time.Millisecond)
+	// The SDK drains received notifications asynchronously after Done() (see
+	// waitForChunks). Poll until every session has all its chunks before asserting.
+	require.Eventually(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, session := range sessions {
+			if len(receivedBySession[session]) < chunksPerSession {
+				return false
+			}
+		}
+		return true
+	}, 10*time.Second, 5*time.Millisecond, "All chunks should be received")
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -299,9 +341,6 @@ func TestNotificationOrderingWithMultipleSessions(t *testing.T) {
 			assert.Equal(t, expected, chunk, "Session %s chunk at position %d should be in order", session, i)
 		}
 	}
-
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // TestNotificationOrderingWithLargePayloads verifies ordering with varying payload sizes.
@@ -311,6 +350,12 @@ func TestNotificationOrderingWithLargePayloads(t *testing.T) {
 
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
 	agentStdinReader, agentStdinWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	var mu sync.Mutex
 	var receivedChunks []string
@@ -349,7 +394,7 @@ func TestNotificationOrderingWithLargePayloads(t *testing.T) {
 	}()
 
 	<-conn.Done()
-	time.Sleep(50 * time.Millisecond)
+	waitForChunks(t, &mu, &receivedChunks, numChunks)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -360,9 +405,6 @@ func TestNotificationOrderingWithLargePayloads(t *testing.T) {
 		expected := fmt.Sprintf("chunk_%03d", i)
 		assert.Equal(t, expected, chunk, "Chunk at position %d should be in order", i)
 	}
-
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // TestNotificationOrderingStressTest runs multiple iterations to ensure
@@ -379,6 +421,12 @@ func TestNotificationOrderingStressTest(t *testing.T) {
 		t.Run(fmt.Sprintf("iteration_%d", iter), func(t *testing.T) {
 			agentStdoutReader, agentStdoutWriter := io.Pipe()
 			agentStdinReader, agentStdinWriter := io.Pipe()
+			t.Cleanup(func() {
+				_ = agentStdinReader.Close()
+				_ = agentStdinWriter.Close()
+				_ = agentStdoutReader.Close()
+				_ = agentStdoutWriter.Close()
+			})
 
 			var mu sync.Mutex
 			var receivedChunks []string
@@ -405,7 +453,7 @@ func TestNotificationOrderingStressTest(t *testing.T) {
 			}()
 
 			<-conn.Done()
-			time.Sleep(50 * time.Millisecond)
+			waitForChunks(t, &mu, &receivedChunks, chunksPerIteration)
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -421,9 +469,6 @@ func TestNotificationOrderingStressTest(t *testing.T) {
 			}
 
 			assert.Zero(t, outOfOrder, "No chunks should be out of order")
-
-			_ = agentStdinReader.Close()
-			_ = agentStdinWriter.Close()
 		})
 	}
 }
@@ -433,6 +478,12 @@ func TestNotificationOrderingStressTest(t *testing.T) {
 func TestMixedNotificationTypes(t *testing.T) {
 	agentStdoutReader, agentStdoutWriter := io.Pipe()
 	agentStdinReader, agentStdinWriter := io.Pipe()
+	t.Cleanup(func() {
+		_ = agentStdinReader.Close()
+		_ = agentStdinWriter.Close()
+		_ = agentStdoutReader.Close()
+		_ = agentStdoutWriter.Close()
+	})
 
 	var mu sync.Mutex
 	var receivedEvents []string
@@ -469,7 +520,7 @@ func TestMixedNotificationTypes(t *testing.T) {
 	}()
 
 	<-conn.Done()
-	time.Sleep(50 * time.Millisecond)
+	waitForChunks(t, &mu, &receivedEvents, 40)
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -486,9 +537,6 @@ func TestMixedNotificationTypes(t *testing.T) {
 		}
 		assert.Equal(t, expected, event, "Event at position %d should be in order", i)
 	}
-
-	_ = agentStdinReader.Close()
-	_ = agentStdinWriter.Close()
 }
 
 // makeACPToolCallNotification creates a valid ACP session/update JSON-RPC notification

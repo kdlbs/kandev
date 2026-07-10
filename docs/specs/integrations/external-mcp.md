@@ -12,12 +12,12 @@ Users want to operate on Kandev workspaces, workflows, agents, and tasks from co
 
 ## What
 
-- The Kandev backend exposes an MCP server on its existing HTTP port (default `38429`). The MCP routes are protected by a loopback-only middleware that rejects any request whose source IP is not `127.0.0.1` / `::1`, regardless of the listen address the backend is bound to.
+- The Kandev backend exposes an MCP server on its existing HTTP port (default `38429`). The MCP routes are reachable from any network that can reach the Kandev backend.
 - Users register Kandev as an MCP server in their external coding agent using one of:
   - Streamable HTTP: `http://localhost:38429/mcp`
   - SSE: `http://localhost:38429/mcp/sse`
 - The external endpoint exposes the **config-mode tool surface** plus `create_task_kandev` (no plan tools, no `ask_user_question_kandev`).
-- The endpoint requires no authentication in v1.
+- The endpoint requires no authentication, matching the current Kandev app surface.
 - The Settings UI shows the URL and ready-to-paste config snippets for popular agents.
 - The existing per-`agentctl` MCP behavior is unchanged — the same tool definitions back both endpoints.
 
@@ -30,8 +30,7 @@ Users want to operate on Kandev workspaces, workflows, agents, and tasks from co
 
 ## Out of scope
 
-- Authentication / bearer tokens / OAuth (v1 relies on `127.0.0.1`-only binding).
-- Binding to non-loopback addresses for remote access.
+- Authentication / bearer tokens / OAuth.
 - Session-scoped tools (`create_task_plan_kandev`, `ask_user_question_kandev`, plan get/update/delete).
 - Per-workspace scoping of the endpoint.
 - Exposing `agentctl`'s per-session MCP externally — architectural mismatch (per-session, ephemeral, no auth boundary).

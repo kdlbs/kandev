@@ -85,10 +85,11 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 
 // NewSession creates a new conversation session.
 // MCP servers from the ACP request are registered so callMCPTool can use them.
-// The Models and Modes fields advertise available capabilities so the host
-// utility capability probe can populate them in the cache — this is what makes
-// the utility-agents settings page show model and mode options for mock-agent
-// in E2E, and lets profile-mode tests select a non-default mode.
+// The Modes field and the model-shaped entry in ConfigOptions advertise
+// available capabilities so the host utility capability probe can populate
+// them in the cache — this is what makes the utility-agents settings page
+// show model and mode options for mock-agent in E2E, and lets profile-mode
+// tests select a non-default mode.
 func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	sid := acp.SessionId(fmt.Sprintf("mock-session-%d", os.Getpid()))
 	a.mu.Lock()
@@ -105,25 +106,16 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	go a.emitAvailableCommandsAfterDelay(sid)
 
 	return acp.NewSessionResponse{
-		SessionId: sid,
-		Models:    mockSessionModels(),
-		Modes:     mockSessionModes(),
+		SessionId:     sid,
+		Modes:         mockSessionModes(),
+		ConfigOptions: mockSessionConfigOptions(),
 	}, nil
 }
 
-// mockSessionModels returns the mock agent's advertised model list for ACP
-// session responses. Two models are exposed so tests can verify both
-// selection and default behavior (mock-fast is the default).
-func mockSessionModels() *acp.SessionModelState {
-	fastDesc := "Fast mock model for testing"
-	smartDesc := "Smart mock model for testing"
-	return &acp.SessionModelState{
-		CurrentModelId: "mock-fast",
-		AvailableModels: []acp.ModelInfo{
-			{ModelId: "mock-fast", Name: "Mock Fast", Description: &fastDesc},
-			{ModelId: "mock-smart", Name: "Mock Smart", Description: &smartDesc},
-		},
-	}
+// Logout terminates the current authenticated session. The mock agent has no
+// persistent auth state so this is a no-op.
+func (a *mockAgent) Logout(_ context.Context, _ acp.LogoutRequest) (acp.LogoutResponse, error) {
+	return acp.LogoutResponse{}, nil
 }
 
 // mockSessionModes returns the mock agent's advertised session-mode list for
@@ -140,6 +132,52 @@ func mockSessionModes() *acp.SessionModeState {
 			{Id: "plan-mock", Name: "Plan Mock", Description: &planDesc},
 		},
 	}
+}
+
+func mockSessionConfigOptions() []acp.SessionConfigOption {
+	modelCat := acp.SessionConfigOptionCategoryModel
+	modeCat := acp.SessionConfigOptionCategoryMode
+	thoughtCat := acp.SessionConfigOptionCategoryThoughtLevel
+	return []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{
+			Category:     &modelCat,
+			CurrentValue: "mock-fast",
+			Id:           "model",
+			Name:         "Model",
+			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+				{Value: "mock-fast", Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
+				{Value: "mock-smart", Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+			}},
+			Type: "select",
+		}},
+		{Select: &acp.SessionConfigOptionSelect{
+			Category:     &modeCat,
+			CurrentValue: "default",
+			Id:           "mode",
+			Name:         "Mode",
+			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+				{Value: "default", Name: "Default", Description: ptr("Default mock mode")},
+				{Value: "plan-mock", Name: "Plan Mock", Description: ptr("Plan-style mock mode for testing")},
+			}},
+			Type: "select",
+		}},
+		{Select: &acp.SessionConfigOptionSelect{
+			Category:     &thoughtCat,
+			CurrentValue: "medium",
+			Id:           "effort",
+			Name:         "Effort",
+			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
+				{Value: "low", Name: "Low"},
+				{Value: "medium", Name: "Medium"},
+				{Value: "high", Name: "High"},
+			}},
+			Type: "select",
+		}},
+	}
+}
+
+func ptr(s string) *string {
+	return &s
 }
 
 // LoadSession restores a previous session for resume.
@@ -168,6 +206,12 @@ func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	a.emitAvailableCommandsOnce(ctx, req.SessionId)
 	prompt := extractPromptText(req.Prompt)
+	// The /overloaded scenario must surface a real prompt-time ACP *error*
+	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
+	// so intercept it here and return the error from Prompt directly.
+	if resp, err, handled := a.handleOverloaded(ctx, req.SessionId, prompt); handled {
+		return resp, err
+	}
 	e := &emitter{ctx: ctx, conn: a.conn, sid: req.SessionId}
 	handlePrompt(e, prompt, a.model)
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
@@ -196,6 +240,7 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	delete(a.sessions, req.SessionId)
 	delete(a.commandsEmitted, req.SessionId)
 	a.mu.Unlock()
+	_ = os.Remove(overloadedCounterPath(req.SessionId))
 	return acp.CloseSessionResponse{}, nil
 }
 
@@ -254,12 +299,14 @@ func mockAvailableCommands() []acp.AvailableCommand {
 	return []acp.AvailableCommand{
 		{Name: "slow", Description: "Run a slow response (default 5s)", Input: hint("duration (e.g. 10s)")},
 		{Name: "error", Description: "Simulate an error"},
+		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},
 		{Name: "crash", Description: "Simulate agent crash"},
 		{Name: "all", Description: "Demonstrate all message types"},
 		{Name: "todo", Description: "Emit a todo list"},
 		{Name: "mermaid", Description: "Emit a mermaid diagram"},
 		{Name: "subagent", Description: "Emit a subagent sequence"},
+		{Name: "subtask", Description: "Create a subtask of the current task via MCP", Input: hint("subtask title (optional)")},
 		{Name: "tool:read", Description: "Emit a read file tool call"},
 		{Name: "tool:edit", Description: "Emit an edit file tool call"},
 		{Name: "tool:exec", Description: "Emit a shell exec tool call"},

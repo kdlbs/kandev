@@ -1,8 +1,10 @@
 "use client";
 
-import { useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
+import type { EditorView } from "@codemirror/view";
 import { Button } from "@kandev/ui/button";
+import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import {
   IconDeviceFloppy,
   IconLoader2,
@@ -21,6 +23,7 @@ import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
 import { CommentViewPopover } from "@/components/task/comment-view-popover";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { useCodeMirrorEditorState } from "./use-codemirror-editor-state";
+import { useCodeMirrorWalkthroughRange } from "./use-codemirror-walkthrough-range";
 
 const SAVE_SHORTCUT =
   typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "\u2318" : "Ctrl";
@@ -35,6 +38,7 @@ type FileEditorContentProps = {
   isSaving: boolean;
   sessionId?: string;
   worktreePath?: string;
+  repo?: string;
   enableComments?: boolean;
   onToggleMarkdownPreview?: () => void;
   onChange: (newContent: string) => void;
@@ -228,10 +232,12 @@ function CodeMirrorToolbar({
   return (
     <PanelHeaderBarSplit
       left={
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
+        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <ScrollOnOverflow className="min-w-0 font-mono">
+            {toRelativePath(path, worktreePath)}
+          </ScrollOnOverflow>
           {isDirty && diffStats && (
-            <span className="text-xs text-yellow-500">
+            <span className="shrink-0 text-xs text-yellow-500">
               {formatDiffStats(diffStats.additions, diffStats.deletions)}
             </span>
           )}
@@ -309,6 +315,7 @@ export function CodeMirrorCodeEditor({
   isSaving,
   sessionId,
   worktreePath,
+  repo,
   enableComments = false,
   onToggleMarkdownPreview,
   onChange,
@@ -317,7 +324,9 @@ export function CodeMirrorCodeEditor({
   onDelete,
 }: FileEditorContentProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const editorAreaRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const [editorView, setEditorView] = useState<EditorView | null>(null);
   const state = useCodeMirrorEditorState({
     path,
     content,
@@ -331,6 +340,15 @@ export function CodeMirrorCodeEditor({
     wrapperRef,
     editorRef,
   });
+  const walkthroughRange = useCodeMirrorWalkthroughRange({
+    view: editorView,
+    editorAreaRef,
+    path,
+    repo,
+  });
+  const handleCreateEditor = useCallback((view: EditorView) => {
+    setEditorView(view);
+  }, []);
 
   return (
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
@@ -351,7 +369,7 @@ export function CodeMirrorCodeEditor({
         onDelete={onDelete}
         onToggleMarkdownPreview={onToggleMarkdownPreview}
       />
-      <div className="flex-1 overflow-hidden relative">
+      <div ref={editorAreaRef} className="flex-1 overflow-hidden relative">
         <CodeMirror
           ref={editorRef}
           value={content}
@@ -366,8 +384,23 @@ export function CodeMirrorCodeEditor({
             highlightSelectionMatches: true,
             searchKeymap: true,
           }}
+          onCreateEditor={handleCreateEditor}
           className="h-full overflow-auto text-xs"
         />
+        {walkthroughRange ? (
+          <div
+            aria-hidden="true"
+            data-testid="walkthrough-editor-range"
+            data-line-range={`${walkthroughRange.startLine}-${walkthroughRange.endLine}`}
+            className="pointer-events-none absolute z-20 rounded-sm border-l-2 border-primary/70 bg-primary/10 shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.18)]"
+            style={{
+              top: walkthroughRange.top,
+              left: walkthroughRange.left,
+              width: walkthroughRange.width,
+              height: walkthroughRange.height,
+            }}
+          />
+        ) : null}
         <CodeMirrorOverlays state={state} />
       </div>
     </div>

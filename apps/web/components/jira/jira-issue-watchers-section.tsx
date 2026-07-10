@@ -7,6 +7,7 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useToast } from "@/components/toast-provider";
 import { useJiraIssueWatches } from "@/hooks/domains/jira/use-jira-issue-watches";
+import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
 import { JiraIssueWatchTable } from "./jira-issue-watch-table";
 import { JiraIssueWatchDialog } from "./jira-issue-watch-dialog";
 import type { JiraIssueWatch } from "@/lib/types/jira";
@@ -20,12 +21,13 @@ type RawActions = {
   update: ReturnType<typeof useJiraIssueWatches>["update"];
   remove: ReturnType<typeof useJiraIssueWatches>["remove"];
   trigger: ReturnType<typeof useJiraIssueWatches>["trigger"];
+  reset: ReturnType<typeof useJiraIssueWatches>["reset"];
 };
 
 // useToastedActions wraps the raw create/update/delete/trigger callbacks with
 // success/failure toasts. Per-row mutations need each watch's own workspaceId,
 // so the wrappers take the watch (not just an id) and pass it through.
-function useToastedActions({ create, update, remove, trigger }: RawActions) {
+function useToastedActions({ create, update, remove, trigger, reset }: RawActions) {
   const { toast } = useToast();
 
   const wrappedCreate = useCallback(
@@ -95,22 +97,52 @@ function useToastedActions({ create, update, remove, trigger }: RawActions) {
     [update, toast],
   );
 
+  const wrappedReset = useCallback(
+    async (w: JiraIssueWatch) => {
+      try {
+        const res = await reset(w.id, w.workspaceId);
+        const n = res?.tasksDeleted ?? 0;
+        toast({
+          description:
+            n > 0
+              ? `Reset complete — deleted ${n} task(s); next poll will re-import matches.`
+              : "Reset complete — next poll will re-import matches.",
+          variant: "success",
+        });
+      } catch (err) {
+        toast({ description: `Reset failed: ${String(err)}`, variant: "error" });
+        throw err;
+      }
+    },
+    [reset, toast],
+  );
+
   return {
     create: wrappedCreate,
     update: wrappedUpdate,
     remove: wrappedDelete,
     trigger: wrappedTrigger,
+    reset: wrappedReset,
     toggleEnabled,
   };
 }
 
 export function JiraIssueWatchersSection() {
   // Pass undefined to fetch every watch across every workspace.
-  const { items, loading, create, update, remove, trigger } = useJiraIssueWatches();
-  const actions = useToastedActions({ create, update, remove, trigger });
+  const { items, loading, create, update, remove, trigger, previewReset, reset } =
+    useJiraIssueWatches();
+  const actions = useToastedActions({ create, update, remove, trigger, reset });
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<JiraIssueWatch | null>(null);
+  // resetCtrl owns the watch awaiting reset confirmation and the stable
+  // preview/confirm callbacks for ResetWatchDialog. The whole row is kept
+  // (not just the id) so workspaceId stays available even if the list
+  // re-renders mid-dialog.
+  const resetCtrl = useWatchResetController<JiraIssueWatch>({
+    preview: (w) => previewReset(w.id, w.workspaceId),
+    reset: (w) => actions.reset(w).then(() => undefined),
+  });
 
   const openCreate = useCallback(() => {
     setEditing(null);
@@ -138,6 +170,14 @@ export function JiraIssueWatchersSection() {
     },
     [items, actions],
   );
+  const { setResetting } = resetCtrl;
+  const handleReset = useCallback(
+    (id: string) => {
+      const w = items.find((item) => item.id === id);
+      if (w) setResetting(w);
+    },
+    [items, setResetting],
+  );
 
   return (
     <SettingsSection
@@ -162,6 +202,7 @@ export function JiraIssueWatchersSection() {
               onEdit={openEdit}
               onDelete={handleDelete}
               onTrigger={handleTrigger}
+              onReset={handleReset}
               onToggleEnabled={actions.toggleEnabled}
             />
           )}
@@ -180,6 +221,15 @@ export function JiraIssueWatchersSection() {
           return actions.update(id, req, w.workspaceId);
         }}
       />
+      {resetCtrl.resetting && (
+        <ResetWatchDialog
+          open
+          onOpenChange={resetCtrl.onOpenChange}
+          integrationLabel="JIRA watcher"
+          previewLoader={resetCtrl.previewLoader}
+          onConfirm={resetCtrl.confirmReset}
+        />
+      )}
     </SettingsSection>
   );
 }

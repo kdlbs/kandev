@@ -4,6 +4,8 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
+const TERMINAL_SETTINGS_PATH = "/settings/general/terminal";
+
 // The full font stack value for "JetBrains Mono" preset
 const JB_MONO_STACK = '"JetBrains Mono", "Fira Code", Menlo, Consolas, monospace';
 
@@ -33,7 +35,10 @@ async function seedTaskWithSession(
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
-  await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+  // waitForChatIdle (not a raw idleInput wait) rides out the WS-subscribe race:
+  // the auto-started agent can settle RUNNING->WAITING_FOR_INPUT before the
+  // client subscribes, so the idle composer never renders without a reload.
+  await session.waitForChatIdle({ timeout: 30_000 });
   return session;
 }
 
@@ -113,11 +118,13 @@ test.describe("Terminal font settings", () => {
   });
 
   test("settings page shows font and size controls", async ({ testPage }) => {
-    await testPage.goto("/settings/general");
+    await testPage.goto(TERMINAL_SETTINGS_PATH);
+
+    await expect(testPage.getByText("Preferred Shell")).toBeVisible({ timeout: 10_000 });
 
     // Font family selector
     const fontSelect = testPage.getByTestId("terminal-font-select");
-    await expect(fontSelect).toBeVisible({ timeout: 10_000 });
+    await expect(fontSelect).toBeVisible();
     await fontSelect.click();
 
     // Verify a preset is listed (exact match to avoid matching Nerd Font variant)
@@ -169,7 +176,7 @@ test.describe("Terminal link settings", () => {
   });
 
   test("settings page shows terminal links card and allows toggling", async ({ testPage }) => {
-    await testPage.goto("/settings");
+    await testPage.goto(TERMINAL_SETTINGS_PATH);
 
     // Terminal Links section visible
     await expect(testPage.locator("text=Terminal Links").first()).toBeVisible({ timeout: 10_000 });

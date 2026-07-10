@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 

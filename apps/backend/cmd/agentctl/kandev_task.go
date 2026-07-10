@@ -99,6 +99,10 @@ func taskCreate(args []string) int {
 	assignee := fs.String("assignee", "", "Assignee agent ID")
 	priority := fs.String("priority", "", "Priority value")
 	blockedBy := fs.String("blocked-by", "", "Comma-separated task IDs that must complete before this task")
+	workspaceMode := fs.String("workspace-mode", "", "Workspace mode for this task: inherit_parent, new_workspace, or shared_group")
+	workspaceGroupID := fs.String("workspace-group-id", "", "Workspace group ID to join (required when --workspace-mode=shared_group)")
+	defaultChildWorkspace := fs.String("default-child-workspace", "", "Parent-only: default workspace mode for children (inherit_parent or new_workspace)")
+	defaultChildOrdering := fs.String("default-child-ordering", "", "Parent-only ordering policy for children. 'sequential' records dependency edges between siblings; 'parallel' records none. Note: recording an edge does NOT by itself defer when a child starts.")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1
@@ -106,6 +110,10 @@ func taskCreate(args []string) int {
 
 	if *title == "" {
 		cliError("--title is required")
+		return 1
+	}
+	if strings.TrimSpace(*workspaceMode) == workspaceModeSharedGroup && strings.TrimSpace(*workspaceGroupID) == "" {
+		cliError("--workspace-group-id is required when --workspace-mode=%s", workspaceModeSharedGroup)
 		return 1
 	}
 
@@ -131,6 +139,20 @@ func taskCreate(args []string) int {
 			ids[i] = strings.TrimSpace(id)
 		}
 		payload["blocked_by"] = ids
+	}
+	// Workspace-policy fields (office task-handoffs). Empty values fall
+	// through so the backend resolves defaults / parent inheritance.
+	if m := strings.TrimSpace(*workspaceMode); m != "" {
+		payload["workspace_mode"] = m
+	}
+	if gid := strings.TrimSpace(*workspaceGroupID); gid != "" {
+		payload["workspace_group_id"] = gid
+	}
+	if dcw := strings.TrimSpace(*defaultChildWorkspace); dcw != "" {
+		payload["default_child_workspace"] = dcw
+	}
+	if dco := strings.TrimSpace(*defaultChildOrdering); dco != "" {
+		payload["default_child_ordering"] = dco
 	}
 
 	body, status, err := client.do(http.MethodPost, "/api/v1/tasks", payload)

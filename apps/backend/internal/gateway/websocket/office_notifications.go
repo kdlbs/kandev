@@ -34,7 +34,14 @@ func RegisterOfficeNotifications(ctx context.Context, eventBus bus.EventBus, hub
 	// Task lifecycle events
 	b.subscribe(eventBus, events.TaskUpdated, ws.ActionOfficeTaskUpdated)
 	b.subscribe(eventBus, events.TaskCreated, ws.ActionOfficeTaskCreated)
-	b.subscribe(eventBus, events.TaskMoved, ws.ActionOfficeTaskMoved)
+	// task.moved → office.task.moved is a WORKSPACE-scoped notification (clients
+	// filter by workspace_id). The underlying task.moved event carries a
+	// session_id for the orchestrator's on_exit/on_enter wiring, but no office
+	// consumer reads it. Forwarding it verbatim makes the FE WS-account stamp
+	// the envelope as session-routed, so the bridge audit then expects a
+	// per-session cache mutation that an office handler legitimately never makes
+	// on a non-office page. Drop the session-scoped fields from the re-broadcast.
+	b.subscribeWithout(eventBus, events.TaskMoved, ws.ActionOfficeTaskMoved, "session_id")
 	b.subscribe(eventBus, events.OfficeTaskStatusChanged, ws.ActionOfficeTaskStatus)
 	b.subscribe(eventBus, events.OfficeTaskUpdated, ws.ActionOfficeTaskUpdated)
 	b.subscribe(eventBus, events.OfficeTaskDecisionRecorded, ws.ActionOfficeTaskDecision)
@@ -83,8 +90,39 @@ func (b *OfficeEventBroadcaster) Close() {
 }
 
 func (b *OfficeEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action string) {
+	b.subscribeWithout(eventBus, subject, action)
+}
+
+// stripPayloadKeys returns the event payload with the named keys removed. When
+// no keys are requested (or the payload isn't a map) the original value is
+// returned unchanged. Always clones before deleting so the source event payload
+// — shared with every other subscriber — is never mutated.
+func stripPayloadKeys(data interface{}, dropKeys []string) interface{} {
+	if len(dropKeys) == 0 {
+		return data
+	}
+	m, ok := data.(map[string]interface{})
+	if !ok {
+		return data
+	}
+	cp := make(map[string]interface{}, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	for _, key := range dropKeys {
+		delete(cp, key)
+	}
+	return cp
+}
+
+// subscribeWithout is like subscribe but strips the named payload keys from the
+// re-broadcast notification. Office notifications are workspace-scoped (clients
+// filter by workspace_id); session-scoped fields leaked from the source event
+// would otherwise mis-classify the envelope as session-routed for accounting.
+func (b *OfficeEventBroadcaster) subscribeWithout(eventBus bus.EventBus, subject, action string, dropKeys ...string) {
 	sub, err := eventBus.Subscribe(subject, func(_ context.Context, event *bus.Event) error {
-		msg, err := ws.NewNotification(action, event.Data)
+		data := stripPayloadKeys(event.Data, dropKeys)
+		msg, err := ws.NewNotification(action, data)
 		if err != nil {
 			b.logger.Error("failed to build office ws notification",
 				zap.String("action", action), zap.Error(err))

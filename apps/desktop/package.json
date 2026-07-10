@@ -1,0 +1,19 @@
+{
+  "name": "@kandev/desktop",
+  "version": "0.76.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev --features desktop-runtime",
+    "dev:vite": "vite --host 127.0.0.1 --port 1420",
+    "build": "tauri build --features desktop-runtime --bundles deb,rpm",
+    "build:vite": "vite build",
+    "e2e": "pnpm build && node e2e/desktop-launch-smoke.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.8.4",
+    "typescript": "^5",
+    "vite": "^8.0.16"
+  }
+}

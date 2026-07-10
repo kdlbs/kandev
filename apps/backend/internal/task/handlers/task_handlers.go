@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -21,16 +22,25 @@ type handlerRepo interface {
 	DeleteSessionFileReviews(ctx context.Context, sessionID string) error
 	ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error)
 	CountToolCallMessagesBySession(ctx context.Context, sessionIDs []string) (map[string]int, error)
+	// ListChildren returns the direct, non-archived, non-ephemeral
+	// subtasks of parentID. Used by httpTaskSubtaskCount to drive the
+	// "Also archive/delete subtasks" checkbox in the frontend dialog.
+	ListChildren(ctx context.Context, parentID string) ([]*models.Task, error)
 }
 
 type TaskHandlers struct {
-	service             *service.Service
-	orchestrator        OrchestratorStarter
-	repo                handlerRepo
-	planService         *service.PlanService
-	handoffSvc          *service.HandoffService
-	onTaskCreatedWithPR func(ctx context.Context, taskID, sessionID, prURL, branch string)
-	logger              *logger.Logger
+	service                    *service.Service
+	orchestrator               OrchestratorStarter
+	repo                       handlerRepo
+	planService                *service.PlanService
+	handoffSvc                 *service.HandoffService
+	taskCreateLastUsedRecorder taskCreateLastUsedRecorder
+	onTaskCreatedWithPR        func(ctx context.Context, taskID, sessionID, prURL, branch string)
+	logger                     *logger.Logger
+}
+
+type taskCreateLastUsedRecorder interface {
+	RecordTaskCreateLastUsed(ctx context.Context, patch usermodels.TaskCreateLastUsed) error
 }
 
 // SetHandoffService wires the office task-handoffs service used by the
@@ -39,6 +49,10 @@ type TaskHandlers struct {
 // post-create attachment, matching the pre-handoffs behaviour.
 func (h *TaskHandlers) SetHandoffService(svc *service.HandoffService) {
 	h.handoffSvc = svc
+}
+
+func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsedRecorder) {
+	h.taskCreateLastUsedRecorder = recorder
 }
 
 // SetOnTaskCreatedWithPR sets a callback invoked when a task is created with a PR URL
@@ -79,6 +93,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/tasks/:id", h.httpGetTask)
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
+	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
 	api.POST("/tasks/:id/sessions/ensure", h.httpEnsureTaskSession)
 	api.GET("/tasks/:id/environment", h.httpGetTaskEnvironment)
@@ -87,10 +102,12 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
 	api.POST("/tasks", h.httpCreateTask)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
+	api.PATCH("/tasks/:id/repositories/:repo_id", h.httpUpdateTaskRepository)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)
 	api.POST("/tasks/:id/archive", h.httpArchiveTask)
 	api.POST("/tasks/:id/unarchive", h.httpUnarchiveTask)
+	api.GET("/tasks/:id/subtask-count", h.httpTaskSubtaskCount)
 
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
@@ -111,6 +128,7 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskCreate, h.wsCreateTask)
 	dispatcher.RegisterFunc(ws.ActionTaskGet, h.wsGetTask)
 	dispatcher.RegisterFunc(ws.ActionTaskUpdate, h.wsUpdateTask)
+	dispatcher.RegisterFunc(ws.ActionTaskRepoUpdate, h.wsUpdateTaskRepository)
 	dispatcher.RegisterFunc(ws.ActionTaskDelete, h.wsDeleteTask)
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
@@ -140,6 +158,7 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
 			DefaultBranch:  r.DefaultBranch,

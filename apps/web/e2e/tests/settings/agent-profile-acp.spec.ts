@@ -4,9 +4,8 @@ import { SessionPage } from "../../pages/session-page";
 /**
  * Verifies the ACP-first profile editor:
  *
- * - Legacy permission toggles (`auto_approve`, `dangerously_skip_permissions`)
- *   are no longer rendered. They were removed when profile permission stance
- *   moved to ACP session modes + per-tool-call permission_request prompts.
+ * - Universal agentctl auto-approve toggle renders with danger styling.
+ * - Codex curated `-c` config toggles render (off by default).
  * - Profile name edits persist across reload (exercises the new AgentProfile
  *   DTO shape with `mode` / `migrated_from` columns).
  * - Mode picker renders when the agent's capability cache advertises modes.
@@ -15,7 +14,7 @@ import { SessionPage } from "../../pages/session-page";
  *   correct active mode after launching a task with a non-default profile mode.
  */
 test.describe("Agent profile — ACP-first", () => {
-  test("profile editor loads with model picker and without legacy permission toggles", async ({
+  test("profile editor loads with model picker and permission toggles", async ({
     testPage,
     apiClient,
   }) => {
@@ -30,14 +29,20 @@ test.describe("Agent profile — ACP-first", () => {
     // Profile name input is present (from the shared ProfileFormFields component).
     await expect(testPage.getByTestId("profile-name-input")).toBeVisible({ timeout: 15_000 });
 
-    // The old permission toggle labels must NOT render. These were backed by
-    // the removed AgentProfile.auto_approve and .dangerously_skip_permissions
-    // fields; the corresponding PermissionSetting entries are gone from the
-    // shared agents so the PermissionToggles iterator emits nothing for them.
-    await expect(testPage.getByText(/Auto-approve/i)).toHaveCount(0);
-    await expect(testPage.getByText(/YOLO/i)).toHaveCount(0);
+    await expect(testPage.getByTestId("permission-auto-approve-danger")).toBeVisible({
+      timeout: 10_000,
+    });
     await expect(testPage.getByText(/Skip Permissions/i)).toHaveCount(0);
     await expect(testPage.getByText(/dangerously skip/i)).toHaveCount(0);
+
+    if (agent.name === "codex-acp") {
+      await expect(
+        testPage.getByTestId("cli-flag-curated-config_approval_policy_never"),
+      ).toBeVisible();
+      await expect(
+        testPage.getByTestId("cli-flag-curated-config_sandbox_disk_full_read"),
+      ).toBeVisible();
+    }
 
     // The mock agent advertises modes, so the mode picker is rendered.
     await expect(testPage.getByTestId("profile-mode-field")).toBeVisible({ timeout: 10_000 });
@@ -65,9 +70,9 @@ test.describe("Agent profile — ACP-first", () => {
       const newName = `${originalName} Renamed`;
       await nameInput.fill(newName);
 
-      // Save via the dirty-state save button (card header). The save
-      // dispatches a Next.js server action, so we wait for the dirty badge
-      // to disappear as the signal that the round-trip completed.
+      // Save via the dirty-state save button (card header). The save dispatches
+      // an action wrapper, so we wait for the dirty badge to disappear as the
+      // signal that the round-trip completed.
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
       await expect(saveButton).toBeEnabled({ timeout: 10_000 });
       await saveButton.click();
@@ -85,6 +90,78 @@ test.describe("Agent profile — ACP-first", () => {
       // fixture stays valid for subsequent tests — even if an assertion
       // above failed.
       await apiClient.updateAgentProfile(profile.id, { name: originalName });
+    }
+  });
+
+  test("profile model selector shows and saves dynamic config options", async ({
+    testPage,
+    apiClient,
+    backend,
+  }) => {
+    test.setTimeout(60_000);
+
+    await expect
+      .poll(
+        async () => {
+          const resp = await testPage.request.get(`${backend.baseUrl}/api/v1/agents/available`);
+          if (!resp.ok()) return false;
+          const data = (await resp.json()) as {
+            agents?: {
+              name: string;
+              model_config?: { config_options?: { id: string }[] };
+            }[];
+          };
+          const mock = data.agents?.find((a) => a.name === "mock-agent");
+          return Boolean(
+            mock?.model_config?.config_options?.some((option) => option.id === "effort"),
+          );
+        },
+        { timeout: 20_000, intervals: [250, 500, 1000] },
+      )
+      .toBe(true);
+
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "Config Option Test Profile", {
+      model: "mock-fast",
+      config_options: { effort: "high" },
+    });
+
+    try {
+      await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+      const selector = testPage.getByRole("button", { name: "Profile start model settings" });
+      await expect(selector).toBeVisible({ timeout: 15_000 });
+      await expect(selector).toContainText("High", { timeout: 10_000 });
+
+      await selector.click();
+      const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+      await expect(effortTrigger).toBeVisible();
+      await effortTrigger.click();
+      await testPage.getByRole("button", { name: "Low", exact: true }).click();
+      await expect(selector).toContainText("Low");
+
+      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      await expect(saveButton).toBeEnabled({ timeout: 10_000 });
+      await saveButton.click();
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+
+      await expect
+        .poll(
+          async () => {
+            const saved = (await apiClient.getAgentProfile(profile.id)) as unknown as {
+              configOptions?: Record<string, string>;
+              config_options?: Record<string, string>;
+            };
+            return saved.configOptions?.effort ?? saved.config_options?.effort ?? "";
+          },
+          { timeout: 10_000, intervals: [250, 500, 1000] },
+        )
+        .toBe("low");
+
+      await testPage.reload();
+      await expect(selector).toContainText("Low", { timeout: 15_000 });
+    } finally {
+      await apiClient.deleteAgentProfile(profile.id, true);
     }
   });
 
@@ -134,11 +211,15 @@ test.describe("Agent profile — ACP-first", () => {
       await testPage.goto(`/t/${task.id}`);
       const session = new SessionPage(testPage);
       await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 45_000 });
 
-      // 5. Assert the mode selector is visible and shows the profile mode
-      const modeSelector = testPage.getByTestId("session-mode-selector");
+      // 5. Assert the mode selector is visible and shows the profile mode.
+      const overflowToggle = testPage.getByTestId("toolbar-overflow-menu");
+      if (await overflowToggle.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        await overflowToggle.click();
+      }
+      const modeSelector = testPage.getByRole("button", { name: "Plan Mock" });
       await expect(modeSelector).toBeVisible({ timeout: 15_000 });
-      await expect(modeSelector).toContainText("Plan Mock");
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
     }

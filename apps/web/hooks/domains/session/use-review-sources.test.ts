@@ -413,6 +413,36 @@ describe("buildReviewSources", () => {
     expect(result.sourceCounts).toEqual({ uncommitted: 2, committed: 0, pr: 0 });
   });
 
+  // Regression for the multi-repo cumulative-diff bug: backend's
+  // `mergeCumulativeFiles` uses a `<repo>\x00<path>` map key and stamps the
+  // clean repo-relative path on `file.path`. The old code read the path from
+  // the map key, so the displayed path contained the embedded NUL+repo and
+  // the dedup key was `<repo>:<repo>\x00<path>` (mismatched against any
+  // other source). Verify we now use `file.path` when present.
+  it("multi-repo cumulative: NUL-composite map key + stamped path renders clean path", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: undefined,
+      cumulativeDiff: {
+        files: {
+          "frontend\u0000src/x.ts": {
+            diff: "@@x@@",
+            status: "modified",
+            additions: 1,
+            deletions: 0,
+            repository_name: "frontend",
+            path: "src/x.ts",
+          },
+        },
+      },
+      prDiffFiles: undefined,
+    });
+    expect(result.allFiles).toHaveLength(1);
+    expect(result.allFiles[0].path).toBe("src/x.ts");
+    expect(result.allFiles[0].repository_name).toBe("frontend");
+    expect(result.allFiles[0].source).toBe("committed");
+  });
+
   it("sorts files by repository_name then path", () => {
     const result = buildReviewSources({
       gitStatus: undefined,

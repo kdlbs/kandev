@@ -1,0 +1,73 @@
+import type { Repository, RepositoryScript, WorktreeFile } from "@/lib/types/http";
+import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
+
+export type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
+
+const repositoryFields: Array<keyof RepositoryWithScripts> = [
+  "name",
+  "source_type",
+  "local_path",
+  "provider",
+  "provider_repo_id",
+  "provider_owner",
+  "provider_name",
+  "default_branch",
+  "worktree_branch_prefix",
+  "pull_before_worktree",
+  "setup_script",
+  "cleanup_script",
+  "dev_script",
+  "copy_files",
+];
+
+function branchTemplate(repo: RepositoryWithScripts): string {
+  return repo.worktree_branch_template || defaultWorktreeBranchTemplate;
+}
+
+function areWorktreeFilesEqual(
+  a: WorktreeFile[] | undefined,
+  b: WorktreeFile[] | undefined,
+): boolean {
+  const left = a ?? [];
+  const right = b ?? [];
+  if (left.length !== right.length) return false;
+  return left.every(
+    (file, index) => file.path === right[index].path && file.mode === right[index].mode,
+  );
+}
+
+export function cloneRepository(repo: RepositoryWithScripts): RepositoryWithScripts {
+  return { ...repo, scripts: repo.scripts.map((script) => ({ ...script })) };
+}
+
+export function isRepositoryDirty(
+  repo: RepositoryWithScripts,
+  saved: RepositoryWithScripts | undefined,
+): boolean {
+  if (!saved) return true;
+  return (
+    repositoryFields.some((field) => repo[field] !== saved[field]) ||
+    branchTemplate(repo) !== branchTemplate(saved) ||
+    !areWorktreeFilesEqual(repo.worktree_files, saved.worktree_files)
+  );
+}
+
+export function areRepositoryScriptsDirty(
+  repo: RepositoryWithScripts,
+  saved: RepositoryWithScripts | undefined,
+): boolean {
+  if (!saved) return repo.scripts.length > 0;
+  if (repo.scripts.length !== saved.scripts.length) return true;
+  const savedScripts = new Map(saved.scripts.map((script) => [script.id, script]));
+  for (const script of repo.scripts) {
+    const savedScript = savedScripts.get(script.id);
+    if (
+      !savedScript ||
+      script.name !== savedScript.name ||
+      script.command !== savedScript.command ||
+      script.position !== savedScript.position
+    )
+      return true;
+  }
+  return false;
+}

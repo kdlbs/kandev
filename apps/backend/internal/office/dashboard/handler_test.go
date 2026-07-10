@@ -21,6 +21,8 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
+	"github.com/kandev/kandev/internal/workflow/engine"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
 
@@ -53,6 +55,35 @@ func (s *stubSettingsProvider) UpdatePermissionHandlingMode(_ string, mode strin
 
 func (s *stubSettingsProvider) UpdateRecoveryLookbackHours(_ string, _ int) error {
 	return nil
+}
+
+type recordingEngineDispatcher struct {
+	calls   []recordedEngineDispatch
+	err     error
+	handled bool
+}
+
+type recordedEngineDispatch struct {
+	taskID  string
+	trigger engine.Trigger
+	payload any
+	opID    string
+}
+
+func (r *recordingEngineDispatcher) HandleTrigger(
+	ctx context.Context, taskID string, trigger engine.Trigger, payload any, opID string,
+) error {
+	_, err := r.HandleTriggerHandled(ctx, taskID, trigger, payload, opID)
+	return err
+}
+
+func (r *recordingEngineDispatcher) HandleTriggerHandled(
+	_ context.Context, taskID string, trigger engine.Trigger, payload any, opID string,
+) (bool, error) {
+	r.calls = append(r.calls, recordedEngineDispatch{
+		taskID: taskID, trigger: trigger, payload: payload, opID: opID,
+	})
+	return r.handled, r.err
 }
 
 // testDeps wires a real in-memory dashboard service for testing.
@@ -287,6 +318,94 @@ func TestCreateComment_PublishesOfficeCommentCreated(t *testing.T) {
 	}
 	if got["task_id"] != "task-comment-event" || got["comment_id"] == "" || got["author_type"] != "user" {
 		t.Fatalf("event data = %#v, want task/comment/user fields", got)
+	}
+}
+
+func TestCreateComment_SuppressesLegacyAssigneeWakeAfterEngineDispatch(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "task-comment-run", "ws-1", "Comment Run", "todo", 1)
+
+	rt := &recordingReactivity{result: &dashboard.TaskReactivityResult{}}
+	disp := &recordingEngineDispatcher{handled: true}
+	eb := bus.NewMemoryEventBus(logger.Default())
+	var eventData map[string]string
+	if _, err := eb.Subscribe(events.OfficeCommentCreated, func(_ context.Context, event *bus.Event) error {
+		raw, ok := event.Data.(map[string]string)
+		if !ok {
+			t.Fatalf("event data type = %T, want map[string]string", event.Data)
+		}
+		eventData = raw
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	deps.svc.SetReactivityApplier(rt)
+	deps.svc.SetWorkflowEngineDispatcher(disp)
+	deps.svc.SetEventBus(eb)
+	comment := &models.TaskComment{
+		ID:         "comment-existing",
+		TaskID:     "task-comment-run",
+		AuthorType: "user",
+		AuthorID:   "user-1",
+		Body:       "Please take a look",
+		CreatedAt:  time.Now().UTC(),
+	}
+
+	if err := deps.svc.CreateComment(context.Background(), comment); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if len(disp.calls) != 1 {
+		t.Fatalf("dispatcher calls = %d, want 1", len(disp.calls))
+	}
+	if disp.calls[0].trigger != engine.TriggerOnComment {
+		t.Fatalf("trigger = %q, want on_comment", disp.calls[0].trigger)
+	}
+	if disp.calls[0].opID != "task_comment:comment-existing" {
+		t.Fatalf("operation id = %q, want task_comment:comment-existing", disp.calls[0].opID)
+	}
+	if eventData["engine_dispatched"] != commentkeys.EngineDispatchedValue {
+		t.Fatalf("engine_dispatched = %q, want %q", eventData["engine_dispatched"], commentkeys.EngineDispatchedValue)
+	}
+	if len(rt.calls) != 1 {
+		t.Fatalf("reactivity calls = %d, want 1", len(rt.calls))
+	}
+	got := rt.calls[0]
+	if got.Comment == nil || got.Comment.ID != "comment-existing" {
+		t.Fatalf("reactivity comment = %+v, want comment-existing", got.Comment)
+	}
+	if !got.SkipAssigneeCommentWake {
+		t.Fatal("SkipAssigneeCommentWake = false, want true after synchronous engine dispatch")
+	}
+}
+
+func TestCreateComment_KeepsLegacyWakeAfterNoopEngineDispatch(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "task-comment-noop", "ws-1", "Comment Noop", "todo", 1)
+
+	rt := &recordingReactivity{result: &dashboard.TaskReactivityResult{}}
+	disp := &recordingEngineDispatcher{handled: false}
+	deps.svc.SetReactivityApplier(rt)
+	deps.svc.SetWorkflowEngineDispatcher(disp)
+	comment := &models.TaskComment{
+		ID:         "comment-noop",
+		TaskID:     "task-comment-noop",
+		AuthorType: "user",
+		AuthorID:   "user-1",
+		Body:       "Please take a look",
+		CreatedAt:  time.Now().UTC(),
+	}
+
+	if err := deps.svc.CreateComment(context.Background(), comment); err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if len(disp.calls) != 1 {
+		t.Fatalf("dispatcher calls = %d, want 1", len(disp.calls))
+	}
+	if len(rt.calls) != 1 {
+		t.Fatalf("reactivity calls = %d, want 1", len(rt.calls))
+	}
+	if rt.calls[0].SkipAssigneeCommentWake {
+		t.Fatal("SkipAssigneeCommentWake = true, want false after no-op engine dispatch")
 	}
 }
 

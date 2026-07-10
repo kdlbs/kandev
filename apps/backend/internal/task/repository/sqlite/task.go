@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -20,6 +23,39 @@ import (
 // the `tasks` table directly rather than through a join alias.
 const defaultTaskAlias = "tasks"
 
+type taskScanColumn struct {
+	name       string
+	selectExpr func(alias string) string
+}
+
+var taskScanColumns = []taskScanColumn{
+	{name: "id"},
+	{name: "workspace_id"},
+	{name: "workflow_id"},
+	{name: "workflow_step_id"},
+	{name: "title"},
+	{name: "description"},
+	{name: "state"},
+	{name: "priority"},
+	{name: "position"},
+	{name: "metadata"},
+	{name: "is_ephemeral"},
+	{name: "parent_id"},
+	{name: "archived_at"},
+	{name: "created_at"},
+	{name: "updated_at"},
+	{name: "assignee_agent_profile_id", selectExpr: func(alias string) string {
+		return runnerProjection(alias) + ` AS assignee_agent_profile_id`
+	}},
+	{name: "origin"},
+	{name: "project_id"},
+	{name: "labels"},
+	{name: "identifier"},
+	{name: "is_from_office", selectExpr: func(alias string) string {
+		return isFromOfficeProjection(alias) + ` AS is_from_office`
+	}},
+}
+
 // taskSelectColumns returns the column projection (with runner subquery)
 // for a SELECT against tasks aliased as `alias`. The output column order
 // matches scanSingleTask / scanTasks.
@@ -27,14 +63,27 @@ func taskSelectColumns(alias string) string {
 	if alias == "" {
 		alias = defaultTaskAlias
 	}
+	return taskScanColumnSQL(alias, true)
+}
+
+func taskProjectedColumns(alias string) string {
+	if alias == "" {
+		alias = defaultTaskAlias
+	}
+	return taskScanColumnSQL(alias, false)
+}
+
+func taskScanColumnSQL(alias string, useExpressions bool) string {
 	prefix := alias + "."
-	return prefix + "id, " + prefix + "workspace_id, " + prefix + "workflow_id, " + prefix + "workflow_step_id, " +
-		prefix + "title, " + prefix + "description, " + prefix + "state, " + prefix + "priority, " + prefix + "position, " +
-		prefix + "metadata, " + prefix + "is_ephemeral, " + prefix + "parent_id, " + prefix + "archived_at, " +
-		prefix + "created_at, " + prefix + "updated_at, " +
-		runnerProjection(alias) + ` AS assignee_agent_profile_id, ` +
-		prefix + "origin, " + prefix + "project_id, " + prefix + "labels, " + prefix + "identifier, " +
-		isFromOfficeProjection(alias) + ` AS is_from_office`
+	cols := make([]string, 0, len(taskScanColumns))
+	for _, col := range taskScanColumns {
+		if useExpressions && col.selectExpr != nil {
+			cols = append(cols, col.selectExpr(alias))
+			continue
+		}
+		cols = append(cols, prefix+col.name)
+	}
+	return strings.Join(cols, ", ")
 }
 
 // isFromOfficeProjection returns a SQL boolean expression that is true
@@ -55,6 +104,15 @@ func isFromOfficeProjection(alias string) string {
 			  AND w.office_workflow_id = ` + alias + `.workflow_id
 		)
 	)`
+}
+
+func excludeConfigModePredicate(driver, col string) string {
+	if dialect.IsPostgres(driver) {
+		// Repository writes always marshal metadata as JSON; dirty Postgres rows
+		// with malformed JSON should fail loudly instead of being silently skipped.
+		return fmt.Sprintf("COALESCE(%s, '') NOT IN ('true', '1')", dialect.JSONExtract(driver, col, "config_mode"))
+	}
+	return fmt.Sprintf("%s IS NOT 1", dialect.JSONExtract(driver, col, "config_mode"))
 }
 
 // runnerProjection produces the correlated subquery (without alias) that
@@ -185,7 +243,7 @@ func (r *Repository) GetTask(ctx context.Context, id string) (*models.Task, erro
 		`SELECT `+taskSelectColumns("t")+` FROM tasks t WHERE t.id = ?`), id)
 	task, err := r.scanSingleTask(row)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("task not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return task, err
 }
@@ -217,7 +275,7 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task not found: %s", task.ID)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
 
 	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
@@ -236,7 +294,7 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return nil
 }
@@ -299,6 +357,25 @@ func (r *Repository) ListChildren(ctx context.Context, parentID string) ([]*mode
 	return r.scanTasks(rows)
 }
 
+// ListChildCompletionRows returns active direct children with the compact
+// fields needed for on_children_completed readiness and operation idempotency.
+func (r *Repository) ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error) {
+	if parentID == "" {
+		return []models.ChildCompletionRow{}, nil
+	}
+	var rows []models.ChildCompletionRow
+	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
+		SELECT id, state, title, workflow_step_id, updated_at
+		FROM tasks
+		WHERE parent_id = ? AND archived_at IS NULL AND is_ephemeral = 0
+		ORDER BY created_at ASC, id ASC
+	`), parentID)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // ListChildrenIncludingArchived returns every child task of parentID
 // regardless of archived state. Used by the office task-handoffs
 // unarchive cascade (phase 6) to walk a previously-archived descendant
@@ -318,6 +395,21 @@ func (r *Repository) ListChildrenIncludingArchived(ctx context.Context, parentID
 	}
 	defer func() { _ = rows.Close() }()
 	return r.scanTasks(rows)
+}
+
+// ReparentDirectChildren swaps the parent_id of every row matching
+// oldParentID (archived or not) to newParentID. Used by no-cascade
+// delete so the soon-to-be-orphaned direct children become roots
+// instead of pointing at a row that's about to vanish.
+func (r *Repository) ReparentDirectChildren(ctx context.Context, oldParentID, newParentID string) error {
+	if oldParentID == "" {
+		return nil
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET parent_id = ?, updated_at = ?
+		WHERE parent_id = ?
+	`), newParentID, time.Now().UTC(), oldParentID)
+	return err
 }
 
 // ListSiblings returns non-archived, non-ephemeral sibling tasks. A task
@@ -369,7 +461,7 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 // If includeArchived is false, archived tasks are excluded
 // If includeEphemeral is false, ephemeral tasks are excluded
 // If onlyEphemeral is true, only ephemeral tasks are returned
-func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -377,6 +469,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 	if offset < 0 {
 		offset = 0
 	}
+	sort = usermodels.NormalizeTasksListSort(sort)
 
 	// Build filter conditions
 	filter := ""
@@ -394,7 +487,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 	}
 
 	if excludeConfig {
-		filter += " AND (metadata IS NULL OR json_extract(metadata, '$.config_mode') IS NOT 1)"
+		filter += " AND " + excludeConfigModePredicate(r.ro.DriverName(), "metadata")
 	}
 
 	var rows *sql.Rows
@@ -402,9 +495,9 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 	var err error
 
 	if query == "" {
-		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset)
+		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset, sort)
 	} else {
-		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
+		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
 	}
 
 	if err != nil {
@@ -421,7 +514,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 }
 
 // queryAllTasks fetches all tasks (no search) for a workspace with pagination.
-func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int) (*sql.Rows, int, error) {
+func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
 	args := []interface{}{workspaceID}
 	if workflowID != "" {
 		taskFilter += " AND workflow_id = ?"
@@ -439,10 +532,37 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter,
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
 		WHERE t.workspace_id = ?`+rewriteFilterForAlias(taskFilter, "t")+`
-		ORDER BY t.updated_at DESC
+		ORDER BY `+taskListOrderBy(r.ro.DriverName(), "t", sort)+`
 		LIMIT ? OFFSET ?
 	`), append(append([]interface{}{}, args...), pageSize, offset)...)
 	return rows, total, err
+}
+
+func taskListOrderBy(driver, alias, sort string) string {
+	prefix := alias + "."
+	switch sort {
+	case usermodels.TasksListSortUpdatedAsc:
+		return prefix + "updated_at ASC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
+	case usermodels.TasksListSortCreatedDesc:
+		return prefix + "created_at DESC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
+	case usermodels.TasksListSortCreatedAsc:
+		return prefix + "created_at ASC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
+	case usermodels.TasksListSortTitleAsc:
+		return taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "updated_at DESC, " + prefix + "id ASC"
+	case usermodels.TasksListSortTitleDesc:
+		return taskTitleOrder(driver, prefix, "DESC") + ", " + prefix + "updated_at DESC, " + prefix + "id ASC"
+	case usermodels.TasksListSortUpdatedDesc:
+		fallthrough
+	default:
+		return prefix + "updated_at DESC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
+	}
+}
+
+func taskTitleOrder(driver, prefix, direction string) string {
+	if dialect.IsPostgres(driver) {
+		return "LOWER(" + prefix + "title) " + direction + ", " + prefix + "title " + direction
+	}
+	return prefix + "title COLLATE NOCASE " + direction
 }
 
 // rewriteFilterForAlias prefixes bare column references in `filter` with
@@ -512,7 +632,7 @@ func isWordByte(b byte) bool {
 }
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
-func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) (*sql.Rows, int, error) {
+func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) (*sql.Rows, int, error) {
 	searchPattern := "%" + query + "%"
 	like := dialect.Like(r.ro.DriverName())
 
@@ -527,7 +647,7 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 		tFilter += " AND t.archived_at IS NULL"
 	}
 	if excludeConfig {
-		tFilter += " AND (t.metadata IS NULL OR json_extract(t.metadata, '$.config_mode') IS NOT 1)"
+		tFilter += " AND " + excludeConfigModePredicate(r.ro.DriverName(), "t.metadata")
 	}
 
 	// Collect extra filter args in query-argument order
@@ -559,24 +679,31 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 		return nil, 0, err
 	}
 
-	selectQuery := fmt.Sprintf(`
-		SELECT DISTINCT %s
-		FROM tasks t
-		LEFT JOIN task_repositories tr ON t.id = tr.task_id
-		LEFT JOIN repositories r ON tr.repository_id = r.id
-		WHERE t.workspace_id = ?%s
-		AND (
-			t.title %s ? OR
-			t.description %s ? OR
-			r.name %s ? OR
-			r.local_path %s ?
-		)
-		ORDER BY t.updated_at DESC
-		LIMIT ? OFFSET ?
-	`, taskSelectColumns("t"), tFilter, like, like, like, like)
+	selectQuery := taskSearchSelectQuery(r.ro.DriverName(), tFilter, like, sort)
 	selectArgs := append(append([]interface{}{}, countArgs...), pageSize, offset)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(selectQuery), selectArgs...)
 	return rows, total, err
+}
+
+func taskSearchSelectQuery(driver, tFilter, like, sort string) string {
+	return fmt.Sprintf(`
+		SELECT %s
+		FROM (
+			SELECT DISTINCT %s
+			FROM tasks t
+			LEFT JOIN task_repositories tr ON t.id = tr.task_id
+			LEFT JOIN repositories r ON tr.repository_id = r.id
+			WHERE t.workspace_id = ?%s
+			AND (
+				t.title %s ? OR
+				t.description %s ? OR
+				r.name %s ? OR
+				r.local_path %s ?
+			)
+		) task_search
+		ORDER BY %s
+		LIMIT ? OFFSET ?
+	`, taskProjectedColumns("task_search"), taskSelectColumns("t"), tFilter, like, like, like, like, taskListOrderBy(driver, "task_search", sort))
 }
 
 // scanSingleTask scans a single row into a Task.
@@ -637,6 +764,29 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 	return result, rows.Err()
 }
 
+// GetTasksByIDs fetches multiple tasks in a single query. Missing IDs are
+// silently omitted; result order is not guaranteed, so callers that need a
+// specific order should reorder by ID themselves.
+func (r *Repository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf(`SELECT %s FROM tasks t WHERE t.id IN (%s)`,
+		taskSelectColumns("t"), strings.Join(placeholders, ","))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
 // ArchiveTask sets the archived_at timestamp on a task
 func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	now := time.Now().UTC()
@@ -646,7 +796,7 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return nil
 }
@@ -715,6 +865,156 @@ func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Tas
 	return r.scanTasks(rows)
 }
 
+// ListExpiredQuickChatTasks returns quick-chat tasks whose last task/session
+// activity is older than cutoff. Active sessions are excluded so in-use chats
+// are never deleted by the idle sweeper.
+func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
+	drv := r.ro.DriverName()
+	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
+	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
+	query := fmt.Sprintf(`
+		WITH candidates AS (
+			SELECT t.id, %s AS last_activity
+			FROM tasks t
+			LEFT JOIN task_sessions ts ON ts.task_id = t.id
+			WHERE t.is_ephemeral = 1
+				AND COALESCE(t.workflow_id, '') = ''
+				AND COALESCE(t.origin, '') != ?
+				AND %s
+				AND t.archived_at IS NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM task_sessions active
+					WHERE active.task_id = t.id
+						AND active.state IN (?, ?)
+				)
+			GROUP BY t.id, t.updated_at
+			HAVING %s < ?
+		)
+		SELECT %s
+		FROM tasks t
+		JOIN candidates c ON c.id = t.id
+		ORDER BY c.last_activity ASC
+	`,
+		lastActivity,
+		excludeConfigModePredicate(drv, "t.metadata"),
+		lastActivity,
+		taskSelectColumns("t"),
+	)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
+		models.TaskOriginAutomationRun,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateIdle,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
+// DeleteExpiredQuickChatTask deletes id only when it still matches the expired
+// quick-chat predicate at delete time.
+func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	drv := r.db.DriverName()
+	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
+	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
+	query := fmt.Sprintf(`
+		WITH candidate AS (
+			SELECT t.id, %s AS last_activity
+			FROM tasks t
+			LEFT JOIN task_sessions ts ON ts.task_id = t.id
+			WHERE t.id = ?
+				AND t.is_ephemeral = 1
+				AND COALESCE(t.workflow_id, '') = ''
+				AND COALESCE(t.origin, '') != ?
+				AND %s
+				AND t.archived_at IS NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM task_sessions active
+					WHERE active.task_id = t.id
+						AND active.state IN (?, ?)
+				)
+			GROUP BY t.id, t.updated_at
+			HAVING %s < ?
+		)
+		DELETE FROM tasks
+		WHERE id = ?
+			AND EXISTS (SELECT 1 FROM candidate)
+	`,
+		lastActivity,
+		excludeConfigModePredicate(drv, "t.metadata"),
+		lastActivity,
+	)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query),
+		id,
+		models.TaskOriginAutomationRun,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateIdle,
+		cutoff,
+		id,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
+// isSafeMetadataKey reports whether s is a safe JSON metadata key to splice
+// into a json_extract path. The key is concatenated into the SQL text (it
+// cannot be a bind parameter inside the '$.<key>' path literal), so it must be
+// constrained to a fixed identifier alphabet to keep the query injection-safe.
+// Callers pass compile-time constants today (WatcherSource.WatchMetadataKey),
+// but validating here keeps the repository safe regardless of caller.
+func isSafeMetadataKey(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// CountOpenWatcherCreatedTasks returns the number of open watcher-created tasks
+// for a single watch, identified by the task-metadata key the integration
+// writes (metadataKey, e.g. "sentry_issue_watch_id") and the watch id. "Open"
+// means non-archived AND not in a terminal state (COMPLETED, FAILED,
+// CANCELLED). Distinct integrations use distinct metadata keys, so counts are
+// naturally scoped per integration without this repository knowing which
+// integrations exist — the caller supplies the key.
+//
+// An empty watchID returns (0, nil) — no watch to count. A malformed
+// metadataKey (not a bare [A-Za-z0-9_] identifier) returns an error rather
+// than silently counting nothing, so a wiring bug surfaces in the logs (the
+// throttle gate fails open on the error).
+func (r *Repository) CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error) {
+	if watchID == "" {
+		return 0, nil
+	}
+	if !isSafeMetadataKey(metadataKey) {
+		return 0, fmt.Errorf("invalid watcher metadata key %q", metadataKey)
+	}
+	query := r.ro.Rebind(fmt.Sprintf(`
+		SELECT COUNT(*) FROM tasks
+		WHERE archived_at IS NULL
+			AND state NOT IN (?, ?, ?)
+			AND %s = ?
+	`, dialect.JSONExtract(r.ro.DriverName(), "metadata", metadataKey)))
+	var n int
+	if err := r.ro.QueryRowxContext(ctx, query,
+		v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled, watchID,
+	).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // UpdateTaskState updates the state of a task
 func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET state = ?, updated_at = ? WHERE id = ?`), state, time.Now().UTC(), id)
@@ -724,9 +1024,63 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
 	return nil
+}
+
+// UpdateTaskStateIfCurrentIn transitions state inside a transaction, re-checking
+// the current state on write so concurrent handlers cannot clobber a task that
+// moved out of allowed between read and update.
+func (r *Repository) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState,
+) (v1.TaskState, bool, error) {
+	if len(allowed) == 0 {
+		return "", false, nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var currentState v1.TaskState
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state FROM tasks WHERE id = ?`), id).Scan(&currentState)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+		}
+		return "", false, err
+	}
+	if !taskStateInSet(currentState, allowed) {
+		return currentState, false, nil
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET state = ?, updated_at = ?
+		WHERE id = ? AND state = ?
+	`), state, time.Now().UTC(), id, currentState)
+	if err != nil {
+		return "", false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return currentState, false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, err
+	}
+	return currentState, true, nil
+}
+
+func taskStateInSet(state v1.TaskState, allowed []v1.TaskState) bool {
+	for _, candidate := range allowed {
+		if state == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // ListTasksByProject returns all non-archived, non-ephemeral tasks for a project.

@@ -67,6 +67,12 @@ func (a *taskRepositoryAdapter) UpdateTaskState(ctx context.Context, taskID stri
 	return err
 }
 
+func (a *taskRepositoryAdapter) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	return a.svc.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
+}
+
 // testMessageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface for tests
 type testMessageCreatorAdapter struct {
 	svc *taskservice.Service
@@ -160,7 +166,7 @@ func (a *testMessageCreatorAdapter) CreatePermissionRequestMessage(ctx context.C
 	return msg.ID, nil
 }
 
-func (a *testMessageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error {
+func (a *testMessageCreatorAdapter) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
 	return a.svc.UpdatePermissionMessage(ctx, sessionID, pendingID, status)
 }
 
@@ -213,8 +219,16 @@ func (a *testTurnServiceAdapter) CompleteTurn(ctx context.Context, turnID string
 	return a.svc.CompleteTurn(ctx, turnID)
 }
 
+func (a *testTurnServiceAdapter) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
+	return a.svc.GetTurn(ctx, turnID)
+}
+
 func (a *testTurnServiceAdapter) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
 	return a.svc.GetActiveTurn(ctx, sessionID)
+}
+
+func (a *testTurnServiceAdapter) UpdateTurn(ctx context.Context, turn *models.Turn) error {
+	return a.svc.UpdateTurn(ctx, turn)
 }
 
 func (a *testTurnServiceAdapter) AbandonOpenTurns(ctx context.Context, sessionID string) error {

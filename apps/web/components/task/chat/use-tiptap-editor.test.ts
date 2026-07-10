@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { decideSubmitShortcut } from "./use-tiptap-editor";
+import { TIPTAP_EDITOR_TEXT_SIZE_CLASS, decideSubmitShortcut } from "./use-tiptap-editor";
+import { decideHistoryNav } from "./tiptap-editor-history";
+
+describe("TIPTAP_EDITOR_TEXT_SIZE_CLASS", () => {
+  it("keeps 16px text until the lg breakpoint", () => {
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("text-base");
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("lg:text-sm");
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toContain("md:text-sm");
+  });
+});
 
 describe("decideSubmitShortcut", () => {
   describe("submitKey=enter", () => {
@@ -99,6 +108,87 @@ describe("decideSubmitShortcut", () => {
           isSuggestionMenuOpen: false,
         }),
       ).toBe("consume-noop");
+    });
+  });
+});
+
+describe("decideHistoryNav", () => {
+  const base = {
+    disabled: false,
+    isSuggestionMenuOpen: false,
+    isReverseSearchOpen: false,
+    atBoundary: true,
+    historyLength: 3,
+    state: { index: null as number | null },
+  };
+
+  it("defers when disabled", () => {
+    expect(decideHistoryNav({ ...base, direction: "up", disabled: true })).toEqual({
+      kind: "defer",
+    });
+  });
+
+  it("defers when the slash/@ menu is open", () => {
+    expect(decideHistoryNav({ ...base, direction: "up", isSuggestionMenuOpen: true })).toEqual({
+      kind: "defer",
+    });
+  });
+
+  it("defers when the reverse-search overlay owns focus", () => {
+    expect(decideHistoryNav({ ...base, direction: "up", isReverseSearchOpen: true })).toEqual({
+      kind: "defer",
+    });
+  });
+
+  it("defers when history is empty", () => {
+    expect(decideHistoryNav({ ...base, direction: "up", historyLength: 0 })).toEqual({
+      kind: "defer",
+    });
+  });
+
+  it("defers when caret is not at the textblock boundary", () => {
+    expect(decideHistoryNav({ ...base, direction: "up", atBoundary: false })).toEqual({
+      kind: "defer",
+    });
+  });
+
+  it("applies index 0 on first ArrowUp", () => {
+    expect(decideHistoryNav({ ...base, direction: "up" })).toEqual({
+      kind: "apply",
+      index: 0,
+    });
+  });
+
+  it("walks back on subsequent ArrowUp", () => {
+    expect(decideHistoryNav({ ...base, direction: "up", state: { index: 1 } })).toEqual({
+      kind: "apply",
+      index: 2,
+    });
+  });
+
+  it("consumes ArrowUp at the oldest entry (no cursor escape)", () => {
+    expect(decideHistoryNav({ ...base, direction: "up", state: { index: 2 } })).toEqual({
+      kind: "consume-noop",
+    });
+  });
+
+  it("defers ArrowDown when not in history mode (let cursor move normally)", () => {
+    expect(decideHistoryNav({ ...base, direction: "down" })).toEqual({
+      kind: "defer",
+    });
+  });
+
+  it("walks forward on ArrowDown while in history", () => {
+    expect(decideHistoryNav({ ...base, direction: "down", state: { index: 2 } })).toEqual({
+      kind: "apply",
+      index: 1,
+    });
+  });
+
+  it("exits history (restores draft) on ArrowDown from index 0", () => {
+    expect(decideHistoryNav({ ...base, direction: "down", state: { index: 0 } })).toEqual({
+      kind: "apply",
+      index: null,
     });
   });
 });

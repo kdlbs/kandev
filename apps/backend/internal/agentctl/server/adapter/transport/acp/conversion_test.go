@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/coder/acp-go-sdk"
@@ -466,6 +467,39 @@ func TestConvertMessageChunk_TextAssistant(t *testing.T) {
 	}
 }
 
+func TestConvertMessageChunk_PreservesAssistantWhitespaceOnlyText(t *testing.T) {
+	a := newTestAdapter()
+	cases := []string{" ", "\n", "\n\n"}
+
+	for _, text := range cases {
+		result := a.convertMessageChunk("session-1", acp.TextBlock(text), "assistant")
+
+		if result == nil {
+			t.Errorf("expected non-nil result for %q", text)
+			continue
+		}
+		if result.Text != text {
+			t.Errorf("Text = %q, want %q", result.Text, text)
+		}
+	}
+}
+
+func TestConvertMessageChunk_MonitorEnvelopeRemovedLeavesWhitespace_DropsChunk(t *testing.T) {
+	a := newTestAdapter()
+	seedMonitor(t, a, "s1", "t1", "tc-monitor")
+
+	// The envelope is the only non-whitespace content; after stripping it only
+	// "\n\n" remains. Because monitorTextRemoved is true and the remainder is
+	// whitespace-only, the chunk should be suppressed (return nil).
+	chunk := acp.TextBlock(
+		"<task-notification><task-id>t1</task-id><event>x</event></task-notification>\n\n",
+	)
+	ev := a.convertMessageChunk("s1", chunk, "assistant")
+	if ev != nil {
+		t.Errorf("expected nil (envelope stripped to whitespace-only should drop), got %+v", ev)
+	}
+}
+
 func TestConvertMessageChunk_TextUser(t *testing.T) {
 	a := newTestAdapter()
 	cb := acp.TextBlock("Hello from user")
@@ -795,6 +829,33 @@ func TestTryConvertUntypedUpdate_UsageUpdate(t *testing.T) {
 	}
 }
 
+func TestTryConvertUntypedUpdate_SessionInfoUpdate(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"session_info_update","title":"Linux File Guide","updatedAt":"2026-06-13T19:37:46Z","_meta":{"cursor":{"requestId":"req-1"}}}}`)
+
+	result := a.tryConvertUntypedUpdate(raw, "s1")
+
+	if result == nil {
+		t.Fatal("expected non-nil result for session_info_update")
+	}
+	if result.Type != streams.EventTypeSessionInfo {
+		t.Errorf("Type = %q, want %q", result.Type, streams.EventTypeSessionInfo)
+	}
+	if result.SessionID != "s1" {
+		t.Errorf("SessionID = %q, want %q", result.SessionID, "s1")
+	}
+	if result.SessionTitle != "Linux File Guide" {
+		t.Errorf("SessionTitle = %q, want Linux File Guide", result.SessionTitle)
+	}
+	if result.SessionUpdatedAt != "2026-06-13T19:37:46Z" {
+		t.Errorf("SessionUpdatedAt = %q, want timestamp", result.SessionUpdatedAt)
+	}
+	if got := result.SessionMeta["cursor"].(map[string]any)["requestId"]; got != "req-1" {
+		t.Errorf("SessionMeta cursor.requestId = %v, want req-1", got)
+	}
+}
+
 func TestTryConvertUntypedUpdate_ZeroUsed(t *testing.T) {
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":200000,"used":0}}`)
@@ -856,6 +917,97 @@ func TestTryConvertUntypedUpdate_ZeroSize(t *testing.T) {
 	if result != nil {
 		t.Errorf("expected nil for zero size (division by zero guard), got %+v", result)
 	}
+}
+
+func usageUpdateRaw(size, used int64) []byte {
+	return []byte(fmt.Sprintf(
+		`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":%d,"used":%d}}`,
+		size, used,
+	))
+}
+
+func TestTryConvertUntypedUpdate_StickyMaxSize(t *testing.T) {
+	t.Run("default turn raises max from 200K to 1M", func(t *testing.T) {
+		a := newTestAdapter()
+
+		first := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1")
+		if first == nil || first.ContextWindowSize != 200_000 {
+			t.Fatalf("first size = %d, want 200000", sizeOrZero(first))
+		}
+
+		second := a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1")
+		if second == nil || second.ContextWindowSize != 1_000_000 {
+			t.Fatalf("second size = %d, want 1000000", sizeOrZero(second))
+		}
+	})
+
+	t.Run("stale 200K start-frame cannot shrink after 1M end-frame", func(t *testing.T) {
+		a := newTestAdapter()
+		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1"), a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1")
+
+		stale := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 233_900), "s1")
+		if stale == nil {
+			t.Fatal("expected non-nil stale frame result")
+		}
+		if stale.ContextWindowSize != 1_000_000 {
+			t.Errorf("ContextWindowSize = %d, want 1000000", stale.ContextWindowSize)
+		}
+		expectedEff := float64(233_900) / float64(1_000_000) * 100
+		if stale.ContextEfficiency != expectedEff {
+			t.Errorf("ContextEfficiency = %f, want %f", stale.ContextEfficiency, expectedEff)
+		}
+		if stale.ContextWindowRemaining != 766_100 {
+			t.Errorf("ContextWindowRemaining = %d, want 766100", stale.ContextWindowRemaining)
+		}
+	})
+
+	t.Run("sonnet stays at 200K", func(t *testing.T) {
+		a := newTestAdapter()
+		first := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1")
+		second := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 7_000), "s1")
+		if first.ContextWindowSize != 200_000 || second.ContextWindowSize != 200_000 {
+			t.Fatalf("sizes = %d, %d; want 200000 both", first.ContextWindowSize, second.ContextWindowSize)
+		}
+	})
+
+	t.Run("sonnet[1m] is 1M from first frame", func(t *testing.T) {
+		a := newTestAdapter()
+		result := a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1")
+		if result == nil || result.ContextWindowSize != 1_000_000 {
+			t.Fatalf("size = %d, want 1000000", sizeOrZero(result))
+		}
+	})
+
+	t.Run("sessions track max independently", func(t *testing.T) {
+		a := newTestAdapter()
+		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1"), a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s2")
+		s1 := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 10_000), "s1")
+		s2 := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 10_000), "s2")
+		if s1.ContextWindowSize != 1_000_000 {
+			t.Errorf("s1 size = %d, want 1000000", s1.ContextWindowSize)
+		}
+		if s2.ContextWindowSize != 200_000 {
+			t.Errorf("s2 size = %d, want 200000", s2.ContextWindowSize)
+		}
+	})
+
+	t.Run("reset after model switch allows downshift to 200K", func(t *testing.T) {
+		a := newTestAdapter()
+		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1"), a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1")
+
+		a.resetContextWindowMaxSize("s1")
+		afterSwitch := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 26_000), "s1")
+		if afterSwitch == nil || afterSwitch.ContextWindowSize != 200_000 {
+			t.Fatalf("after switch size = %d, want 200000", sizeOrZero(afterSwitch))
+		}
+	})
+}
+
+func sizeOrZero(ev *AgentEvent) int64 {
+	if ev == nil {
+		return 0
+	}
+	return ev.ContextWindowSize
 }
 
 // --- emitInitialModeState ---

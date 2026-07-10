@@ -1,3 +1,4 @@
+import type { ProfileEnvVar } from "./http";
 import type { AgentProfileId, WorkspaceId } from "./ids";
 
 // Canonical AgentProfile (ADR 0005, Wave E):
@@ -60,14 +61,20 @@ export type AgentProfile = {
   agentDisplayName: string;
 
   // --- CLI subprocess config ---
-  /** Model ID applied via ACP `session/set_model` at session start. */
+  /** Model ID applied through ACP session model selection at session start. */
   model: string;
   /** Optional ACP session mode applied via `session/set_mode`. */
   mode?: string;
+  /** Dynamic ACP session config options applied via `session/set_config_option`. */
+  configOptions?: Record<string, string>;
   /** @deprecated Use cliFlags. Retained for legacy clients. */
   allowIndexing: boolean;
+  /** Kandev agentctl auto-approves ACP permission_request prompts when true. */
+  autoApprove: boolean;
   /** User-configurable CLI flags passed to the agent subprocess. */
   cliFlags: CLIFlag[];
+  /** Environment variables injected when this profile starts an agent session. */
+  envVars?: ProfileEnvVar[];
   cliPassthrough: boolean;
   userModified?: boolean;
 
@@ -133,8 +140,11 @@ export type AgentProfilePayload = {
   agent_display_name: string;
   model: string;
   mode?: string;
+  config_options?: Record<string, string>;
   allow_indexing: boolean;
+  auto_approve: boolean;
   cli_flags: CLIFlag[];
+  env_vars?: ProfileEnvVar[];
   cli_passthrough: boolean;
   user_modified?: boolean;
   created_at: string;

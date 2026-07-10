@@ -1,5 +1,12 @@
 import { useAppStore } from "@/components/state-provider";
+import type { KanbanState } from "@/lib/state/slices";
 import { useTask } from "@/hooks/use-task";
+
+type RepoBearingTask = Pick<KanbanState["tasks"][number], "repositories" | "repositoryId">;
+
+export function taskHasRepositories(task: RepoBearingTask | null | undefined): boolean {
+  return Boolean(task?.repositoryId || (task?.repositories && task.repositories.length > 0));
+}
 
 /**
  * Repo-status of the active task, distinguishing three states:
@@ -17,5 +24,5 @@ export function useActiveTaskHasRepos(): boolean | null {
   const taskId = useAppStore((s) => s.tasks.activeTaskId);
   const task = useTask(taskId);
   if (!task) return null;
-  return Boolean(task.repositories && task.repositories.length > 0);
+  return taskHasRepositories(task);
 }

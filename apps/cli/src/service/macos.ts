@@ -6,6 +6,12 @@ import path from "node:path";
 import type { ServiceArgs } from "./args";
 import { dumpLaunchdLogs, waitForServiceHealth } from "./health_check";
 import { commandExists, writeUnitFile } from "./install_helpers";
+import { reloadService } from "./launchctl";
+import {
+  buildServiceInstallMetadata,
+  serviceMetadataPath,
+  writeServiceInstallMetadata,
+} from "./metadata";
 import {
   captureLauncher,
   LAUNCHD_LABEL,
@@ -64,6 +70,9 @@ export async function runMacosService(args: ServiceArgs): Promise<void> {
     case "config":
       // Handled by the dispatcher in index.ts before reaching the platform layer.
       throw new Error("unreachable: config action handled in service/index.ts");
+    case "self-update":
+      // Handled by the dispatcher in index.ts before reaching the platform layer.
+      throw new Error("unreachable: self-update action handled in service/index.ts");
     default: {
       const _exhaustive: never = args.action;
       throw new Error(`unhandled service action: ${_exhaustive as string}`);
@@ -80,6 +89,9 @@ function installSync(ctx: Ctx): { logDir: string } {
   const launcher = captureLauncher();
   const homeDir = resolveHomeDir(ctx.args.homeDir, ctx.isSystem);
   const logDir = resolveLogDir(homeDir);
+  const metadataPath = serviceMetadataPath(homeDir);
+  const mode = ctx.isSystem ? "system" : "user";
+  const systemUser = ctx.isSystem ? resolveServiceUser(true) : undefined;
   fs.mkdirSync(logDir, { recursive: true });
 
   const plist = renderLaunchdPlist({
@@ -87,19 +99,37 @@ function installSync(ctx: Ctx): { logDir: string } {
     homeDir,
     logDir,
     port: ctx.args.port,
-    systemUser: ctx.isSystem ? resolveServiceUser(true) : undefined,
-    mode: ctx.isSystem ? "system" : "user",
+    systemUser,
+    mode,
+    serviceMetadataPath: metadataPath,
   });
 
   fs.mkdirSync(path.dirname(ctx.plistPath), { recursive: true });
   const outcome = writeUnitFile(ctx.plistPath, plist);
+  writeServiceInstallMetadata(
+    metadataPath,
+    buildServiceInstallMetadata({
+      manager: "launchd",
+      mode,
+      launcher,
+      homeDir,
+      logDir,
+      servicePath: ctx.plistPath,
+      port: ctx.args.port,
+      systemUser,
+    }),
+  );
 
   // launchctl bootstrap fails if the label is already loaded — bootout first
   // (ignoring its error if nothing was loaded). This means 'install' is
   // idempotent: re-running it reloads the unit even if the file is unchanged,
   // which is how we recover from a user manually unloading the service.
-  spawnSync("launchctl", ["bootout", ctx.target], { stdio: "ignore" });
-  runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
+  //
+  // `reloadService` waits for bootout's async teardown before bootstrapping and
+  // retries the transient EIO ("Bootstrap failed: 5") that launchd returns while
+  // a still-running instance is torn down — the failure that broke self-update,
+  // where this install runs against a live service. See launchctl.ts.
+  reloadService(ctx.target, ctx.domain, ctx.plistPath);
   runLaunchctl(["enable", ctx.target], { allowFailure: true });
   console.log(
     outcome === "unchanged"
@@ -131,9 +161,9 @@ function uninstall(ctx: Ctx): void {
 // so each begins with a bootout-then-bootstrap dance similar to installSync.
 function startService(ctx: Ctx): void {
   // Idempotent: if the label is already loaded, bootstrap would fail. Bootout
-  // first so start works whether the service was previously running or stopped.
-  spawnSync("launchctl", ["bootout", ctx.target], { stdio: "ignore" });
-  runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
+  // first (waiting for teardown) so start works whether the service was
+  // previously running or stopped.
+  reloadService(ctx.target, ctx.domain, ctx.plistPath);
 }
 
 function stopService(ctx: Ctx): void {
@@ -146,7 +176,9 @@ function stopService(ctx: Ctx): void {
 function restartService(ctx: Ctx): void {
   const res = spawnSync("launchctl", ["kickstart", "-k", ctx.target], { stdio: "inherit" });
   if (res.status === 0) return;
-  runLaunchctl(["bootstrap", ctx.domain, ctx.plistPath]);
+  // kickstart fails when the job isn't loaded — reload it (waiting for any
+  // residual teardown and retrying the transient bootstrap EIO).
+  reloadService(ctx.target, ctx.domain, ctx.plistPath);
 }
 
 function showStatus(ctx: Ctx): void {

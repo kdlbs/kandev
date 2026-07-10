@@ -1,5 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
 
 test.describe("Kanban board", () => {
   test("displays a seeded task card", async ({ testPage, apiClient, seedData }) => {
@@ -48,11 +52,20 @@ test.describe("Kanban board", () => {
   // previewWidth`); the header narrows along with it. Below ~1100px there is
   // no longer room between the left/right action groups for the centered
   // search, so the header hides it (see useIsHeaderNarrow in kanban-header).
+  //
+  // Post-overhaul: the always-on AppSidebar (~320px expanded) permanently eats
+  // horizontal space, so the header's own clientWidth is viewport − sidebar.
+  // The default Desktop Chrome 1280px viewport now leaves the header below the
+  // 1100px narrow threshold even with no preview open, so this test forces a
+  // viewport wide enough that the centered search shows with the sidebar
+  // present (1500 - ~320 = ~1180 >= 800), and opening the 500px preview drops
+  // it below the threshold (1500 - ~320 - 500 = ~680 < 800).
   test("hides header search when preview panel narrows the kanban area", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
+    await testPage.setViewportSize({ width: 1500, height: 800 });
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
 
     const task = await apiClient.createTask(seedData.workspaceId, "Header Squeeze Task", {
@@ -62,13 +75,13 @@ test.describe("Kanban board", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    // With no preview open, the kanban area uses the full viewport width
-    // (Desktop Chrome = 1280px) so the centered search is visible.
+    // With no preview open, the header is wide enough (viewport - sidebar >=
+    // 800px) that the centered search is visible.
     const search = testPage.getByTestId("kanban-header-search");
     await expect(search).toBeVisible();
 
-    // Open the preview — kanban width drops below 1100px (1280 - 500 default
-    // preview width = 780px) and the search must hide.
+    // Open the preview - the header width drops below 800px and the centered
+    // search must hide.
     const card = kanban.taskCard(task.id);
     await expect(card).toBeVisible();
     await card.click();

@@ -48,7 +48,7 @@ RUN pnpm install --frozen-lockfile
 # Copy full source for build
 COPY apps/ ./
 
-# Build web app (produces .next/standalone/ needed by E2E fixture)
+# Build web app (produces Vite dist/ used by the E2E fixture)
 RUN pnpm --filter @kandev/web build
 
 # ---------------------------------------------------------------------------
@@ -78,11 +78,6 @@ COPY --from=go-builder /out/kandev ./apps/backend/bin/kandev
 COPY --from=go-builder /out/mock-agent ./apps/backend/bin/mock-agent
 # agentctl must be in PATH — kandev spawns it as a subprocess
 COPY --from=go-builder /out/agentctl /usr/local/bin/agentctl
-
-# Create static/public symlinks for standalone server (mirrors global-setup.ts)
-RUN mkdir -p /app/apps/web/.next/standalone/web/.next && \
-    ln -sf /app/apps/web/.next/static /app/apps/web/.next/standalone/web/.next/static && \
-    ln -sf /app/apps/web/public /app/apps/web/.next/standalone/web/public
 
 # Store Playwright browsers in a shared location accessible by all users
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers

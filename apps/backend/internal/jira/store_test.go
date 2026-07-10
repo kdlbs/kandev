@@ -114,6 +114,83 @@ func TestStore_HasConfig(t *testing.T) {
 	}
 }
 
+func TestStore_MigrateSingletonConfigToActiveWorkspace(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	checkedAt := now.Add(-5 * time.Minute).Truncate(time.Second)
+	if _, err := db.Exec(`
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			settings TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE jira_configs (
+			id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+			site_url TEXT NOT NULL,
+			email TEXT NOT NULL DEFAULT '',
+			auth_method TEXT NOT NULL,
+			default_project_key TEXT NOT NULL DEFAULT '',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		);
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+			VALUES ('ws-first', 'First', ?, ?), ('ws-active', 'Active', ?, ?);
+		INSERT INTO users (id, email, settings, created_at, updated_at)
+			VALUES ('default-user', 'default@kandev.local', '{"workspace_id":"ws-active"}', ?, ?);
+		INSERT INTO jira_configs
+			(id, site_url, email, auth_method, default_project_key, last_checked_at, last_ok, last_error, created_at, updated_at)
+			VALUES ('singleton', 'https://acme.atlassian.net', 'user@example.com', ?, 'ENG', ?, 1, 'healthy', ?, ?);
+	`, now.Add(-time.Hour), now.Add(-time.Hour), now, now, now, now, AuthMethodAPIToken, checkedAt, now, now); err != nil {
+		t.Fatalf("seed singleton schema: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	if got := store.MigratedFromWorkspace(); got != "ws-active" {
+		t.Fatalf("expected singleton config migrated to active workspace, got %q", got)
+	}
+	cfg, err := store.GetConfigForWorkspace(context.Background(), "ws-active")
+	if err != nil {
+		t.Fatalf("get active workspace config: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected migrated config")
+	}
+	if cfg.SiteURL != "https://acme.atlassian.net" || cfg.DefaultProjectKey != "ENG" {
+		t.Errorf("unexpected migrated config: %+v", cfg)
+	}
+	if cfg.Email != "user@example.com" || cfg.AuthMethod != AuthMethodAPIToken {
+		t.Errorf("unexpected migrated auth fields: %+v", cfg)
+	}
+	if !cfg.LastOk || cfg.LastError != "healthy" {
+		t.Errorf("unexpected migrated health state: %+v", cfg)
+	}
+	if cfg.LastCheckedAt == nil || !cfg.LastCheckedAt.Equal(checkedAt) {
+		t.Errorf("expected last_checked_at=%v, got %v", checkedAt, cfg.LastCheckedAt)
+	}
+}
+
 func TestStore_UpdateAuthHealth(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -213,18 +290,18 @@ func TestStore_MigrateLegacyPerWorkspaceTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	if got := store.MigratedFromWorkspace(); got != "ws-new" {
-		t.Errorf("expected migration source ws-new, got %q", got)
+	if got := store.MigratedFromWorkspace(); got != "" {
+		t.Errorf("expected no singleton migration, got %q", got)
 	}
-	cfg, err := store.GetConfig(context.Background())
+	cfg, err := store.GetConfigForWorkspace(context.Background(), "ws-new")
 	if err != nil {
-		t.Fatalf("get singleton: %v", err)
+		t.Fatalf("get workspace config: %v", err)
 	}
 	if cfg == nil {
-		t.Fatal("expected singleton row after migration")
+		t.Fatal("expected workspace row after schema init")
 	}
 	if cfg.SiteURL != "https://new.atlassian.net" {
-		t.Errorf("expected newest row promoted, got SiteURL=%q", cfg.SiteURL)
+		t.Errorf("expected workspace row preserved, got SiteURL=%q", cfg.SiteURL)
 	}
 }
 
@@ -312,15 +389,15 @@ func TestStore_MigrateLegacyPerWorkspaceTable_PreHealthColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore on pre-health-columns schema: %v", err)
 	}
-	if got := store.MigratedFromWorkspace(); got != "ws-1" {
-		t.Errorf("expected migration source ws-1, got %q", got)
+	if got := store.MigratedFromWorkspace(); got != "" {
+		t.Errorf("expected no singleton migration, got %q", got)
 	}
-	cfg, err := store.GetConfig(context.Background())
+	cfg, err := store.GetConfigForWorkspace(context.Background(), "ws-1")
 	if err != nil {
-		t.Fatalf("get singleton: %v", err)
+		t.Fatalf("get workspace config: %v", err)
 	}
 	if cfg == nil {
-		t.Fatal("expected singleton row after migration")
+		t.Fatal("expected workspace row after schema init")
 	}
 	if cfg.SiteURL != "https://acme.atlassian.net" {
 		t.Errorf("expected SiteURL preserved, got %q", cfg.SiteURL)
@@ -330,5 +407,59 @@ func TestStore_MigrateLegacyPerWorkspaceTable_PreHealthColumns(t *testing.T) {
 	}
 	if cfg.LastCheckedAt != nil {
 		t.Errorf("expected LastCheckedAt=nil (default), got %v", cfg.LastCheckedAt)
+	}
+}
+
+// TestStore_AddsInstanceTypeColumn_OnExistingSingleton covers the upgrade path
+// where a singleton-shaped jira_configs already exists (no workspace_id
+// migration needed) but predates the instance_type column. The ALTER TABLE
+// must run and seed the legacy row to 'cloud'.
+func TestStore_AddsInstanceTypeColumn_OnExistingSingleton(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Pre-instance_type schema: singleton id, no instance_type column.
+	if _, err := db.Exec(`
+		CREATE TABLE jira_configs (
+			id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+			site_url TEXT NOT NULL,
+			email TEXT NOT NULL DEFAULT '',
+			auth_method TEXT NOT NULL,
+			default_project_key TEXT NOT NULL DEFAULT '',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		)`); err != nil {
+		t.Fatalf("legacy schema: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := db.Exec(`INSERT INTO jira_configs
+		(id, site_url, email, auth_method, default_project_key, created_at, updated_at)
+		VALUES ('singleton', ?, ?, ?, ?, ?, ?)`,
+		"https://acme.atlassian.net", "u@example.com", AuthMethodAPIToken, "PROJ", now, now); err != nil {
+		t.Fatalf("seed singleton row: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("NewStore on pre-instance_type schema: %v", err)
+	}
+	cfg, err := store.GetConfig(context.Background())
+	if err != nil {
+		t.Fatalf("get singleton: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected singleton row after migration")
+	}
+	if cfg.InstanceType != InstanceTypeCloud {
+		t.Errorf("expected legacy row to default to cloud, got %q", cfg.InstanceType)
 	}
 }

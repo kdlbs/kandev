@@ -44,7 +44,7 @@ func TestArchiveTaskTree_FreshTask_PreservesCascadeColumn(t *testing.T) {
 	// that condition precisely.
 	handoff := NewHandoffService(repo, repo, nil, nil, nil, nil)
 
-	outcome, err := handoff.ArchiveTaskTree(ctx, task.ID)
+	outcome, err := handoff.ArchiveTaskTree(ctx, task.ID, true)
 	if err != nil {
 		t.Fatalf("ArchiveTaskTree returned error (this would surface as 500 from httpArchiveTask): %v", err)
 	}

@@ -1,0 +1,80 @@
+import { describe, it, expect, afterEach, vi } from "vitest";
+import {
+  computeSidebarMaxPx,
+  computeRightMaxPx,
+  computePinnedMaxPxFor,
+  LAYOUT_PINNED_MIN_PX,
+} from "./caps";
+
+describe("computeSidebarMaxPx", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("hits the 350px floor when vw * 0.3 falls below the minimum", () => {
+    // vw=1000 → 30%=300 < floor 350; viewport reserve = 700 (plenty).
+    expect(computeSidebarMaxPx(1000)).toBe(350);
+  });
+
+  it("scales to viewport * 0.3 above the floor", () => {
+    expect(computeSidebarMaxPx(2000)).toBe(600);
+    expect(computeSidebarMaxPx(3000)).toBe(900);
+  });
+
+  it("never exceeds viewport - reserve so the center column survives", () => {
+    // vw=500 → 30%=150 < floor 350; viewport reserve = 200. So 350 clamps to 200.
+    // floor below LAYOUT_PINNED_MIN_PX is also enforced.
+    expect(computeSidebarMaxPx(500)).toBeLessThanOrEqual(500 - 300);
+    expect(computeSidebarMaxPx(500)).toBeGreaterThanOrEqual(LAYOUT_PINNED_MIN_PX);
+  });
+
+  it("uses 1440 fallback when window is undefined", () => {
+    vi.stubGlobal("window", undefined);
+    // vw=1440 → 30%=432 > floor 350.
+    expect(computeSidebarMaxPx()).toBe(432);
+  });
+});
+
+describe("computeRightMaxPx", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("hits the 800px floor on mid viewports", () => {
+    // vw=1024 → 70%=716 < floor 800; viewport reserve = 724. Clamp 800 → 724.
+    // (The viewport reserve protects narrow screens from over-allocation.)
+    expect(computeRightMaxPx(1024)).toBeLessThan(800);
+  });
+
+  it("scales to viewport * 0.7 above the floor on roomy viewports", () => {
+    expect(computeRightMaxPx(2000)).toBe(1400);
+    expect(computeRightMaxPx(3000)).toBe(2100);
+  });
+
+  it("never collapses the center column on narrow viewports", () => {
+    // vw=900 → 70%=630 < floor 800; reserve 300 → viewport bound 600.
+    expect(computeRightMaxPx(900)).toBe(600);
+  });
+
+  it("reads window.innerWidth when no argument passed", () => {
+    vi.stubGlobal("window", { innerWidth: 1800 } as Window);
+    expect(computeRightMaxPx()).toBe(Math.round(1800 * 0.7));
+  });
+});
+
+describe("computePinnedMaxPxFor", () => {
+  it("picks the sidebar cap for the sidebar column", () => {
+    expect(computePinnedMaxPxFor("sidebar", 2000)).toBe(600);
+  });
+
+  it("picks the right cap for any other column", () => {
+    expect(computePinnedMaxPxFor("right", 2000)).toBe(1400);
+    expect(computePinnedMaxPxFor("plan", 2000)).toBe(1400);
+  });
+});
+
+describe("LAYOUT_PINNED_MIN_PX", () => {
+  it("keeps pinned panels usable", () => {
+    expect(LAYOUT_PINNED_MIN_PX).toBeGreaterThanOrEqual(150);
+  });
+});

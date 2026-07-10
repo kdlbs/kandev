@@ -31,6 +31,12 @@ type AgentctlEventPayload struct {
 	WorktreeID        string `json:"worktree_id,omitempty"`
 	WorktreePath      string `json:"worktree_path,omitempty"`
 	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	// TaskWorkspacePath is the task root that contains every per-repo
+	// worktree as a sibling subdir, populated when the event signals a
+	// sibling worktree being added (multi-branch add_branch flow) rather
+	// than the initial session ready. The frontend uses this to repoint the
+	// file browser at the task root once the task becomes multi-branch.
+	TaskWorkspacePath string `json:"task_workspace_path,omitempty"`
 }
 
 // ACPSessionCreatedPayload is the payload when an ACP session is created.
@@ -155,6 +161,11 @@ type AgentStreamEventData struct {
 	CurrentModelID string                     `json:"current_model_id,omitempty"`
 	SessionModels  []streams.SessionModelInfo `json:"session_models,omitempty"`
 	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+
+	// Session info (from "session_info" event)
+	SessionTitle     string         `json:"session_title,omitempty"`
+	SessionUpdatedAt string         `json:"session_updated_at,omitempty"`
+	SessionMeta      map[string]any `json:"session_meta,omitempty"`
 
 	// Usage (attached to "complete" event)
 	Usage *streams.PromptUsage `json:"usage,omitempty"`
@@ -479,6 +490,23 @@ type SessionModelsEventPayload struct {
 
 // GetSessionID returns the session ID for this event (used by event routing).
 func (p SessionModelsEventPayload) GetSessionID() string {
+	return p.SessionID
+}
+
+// SessionInfoEventPayload is the payload for ACP session info updates.
+type SessionInfoEventPayload struct {
+	TaskID           string         `json:"task_id"`
+	SessionID        string         `json:"session_id"`
+	AgentID          string         `json:"agent_id"`
+	ACPSessionID     string         `json:"acp_session_id,omitempty"`
+	SessionTitle     string         `json:"session_title,omitempty"`
+	SessionUpdatedAt string         `json:"session_updated_at,omitempty"`
+	SessionMeta      map[string]any `json:"session_meta,omitempty"`
+	Timestamp        string         `json:"timestamp"`
+}
+
+// GetSessionID returns the session ID for this event (used by event routing).
+func (p SessionInfoEventPayload) GetSessionID() string {
 	return p.SessionID
 }
 

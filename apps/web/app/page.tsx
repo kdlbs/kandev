@@ -13,10 +13,13 @@ import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
+import { ACTIVE_WORKSPACE_COOKIE } from "@/lib/routing/route-bootstrap";
+import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
+import { readCookies } from "@/lib/server/cookies";
 import type { AppState } from "@/lib/state/store";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 
-// Server Component: runs on the server for SSR and data hydration.
+// Root page loader: keeps the old route shape while SPA boot data owns hydration.
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
@@ -36,6 +39,7 @@ function mapWorkspaceItem(ws: WorkspaceItem) {
     default_environment_id: ws.default_environment_id ?? null,
     default_agent_profile_id: ws.default_agent_profile_id ?? null,
     default_config_agent_profile_id: ws.default_config_agent_profile_id ?? null,
+    office_workflow_id: ws.office_workflow_id ?? null,
     created_at: ws.created_at,
     updated_at: ws.updated_at,
   };
@@ -56,16 +60,24 @@ function readAgentProfileId(
   return typeof value === "string" ? value : undefined;
 }
 
-function resolveActiveId<T extends { id: string }>(
-  items: T[],
-  preferredId?: string,
-  fallbackId?: string | null,
-): string | null {
+type QuickChatTask = Awaited<ReturnType<typeof listQuickChatSessions>>["tasks"][number];
+
+function mapQuickChatSessions(tasks: QuickChatTask[]): AppState["quickChat"]["sessions"] {
+  const quickChatUpdatedAt = (task: QuickChatTask) => Date.parse(task.updated_at ?? "") || 0;
+
   return (
-    items.find((i) => i.id === preferredId)?.id ??
-    items.find((i) => i.id === fallbackId)?.id ??
-    items[0]?.id ??
-    null
+    tasks
+      .filter((task) => task.primary_session_id)
+      .filter((task) => task.origin !== "automation_run")
+      // Legacy Next.js path only receives task.updated_at. The Go boot payload
+      // sorts by max(task/session updated_at) and is the authoritative SPA path.
+      .sort((a, b) => quickChatUpdatedAt(b) - quickChatUpdatedAt(a))
+      .map((task) => ({
+        sessionId: task.primary_session_id!,
+        workspaceId: task.workspace_id,
+        name: task.title !== "Quick Chat" ? task.title : undefined,
+        agentProfileId: readAgentProfileId(task.metadata),
+      }))
   );
 }
 
@@ -81,6 +93,16 @@ function buildBaseState(
     },
     userSettings: buildUserSettingsState(userSettingsResponse, activeWorkspaceId),
   };
+}
+
+export function resolveActiveKanbanWorkspaceId(
+  workspaces: WorkspaceItem[],
+  workspaceId: string | undefined,
+  cookieWorkspaceId: string | null,
+  settingsWorkspaceId: string | null,
+): string | null {
+  const kanbanWorkspaces = workspaces.filter((workspace) => !workspace.office_workflow_id);
+  return resolveActiveId(kanbanWorkspaces, workspaceId, cookieWorkspaceId, settingsWorkspaceId);
 }
 
 async function loadSnapshotState(
@@ -124,15 +146,28 @@ export default async function Page({ searchParams }: PageProps) {
     const taskId = resolveParam(resolvedParams.taskId);
     const sessionId = resolveParam(resolvedParams.sessionId);
 
-    const [workspaces, userSettingsResponse] = await Promise.all([
+    const [workspaces, userSettingsResponse, cookieStore] = await Promise.all([
       listWorkspaces({ cache: "no-store" }),
       fetchUserSettings({ cache: "no-store" }).catch(() => null),
+      readCookies().catch((error) => {
+        console.error("Failed to read cookies on Kanban page:", error);
+        return null;
+      }),
     ]);
     const settingsWorkspaceId = userSettingsResponse?.settings?.workspace_id || null;
     const settingsWorkflowId = userSettingsResponse?.settings?.workflow_filter_id || null;
-    const activeWorkspaceId = resolveActiveId(
+    // The sidebar picker writes the selected workspace to this cookie so the
+    // choice survives a refresh even when userSettings is not updated on select.
+    // Kanban home only resolves against kanban workspaces; office workspaces
+    // belong under /office.
+    const cookieWorkspaceId = cookieStore?.get(ACTIVE_WORKSPACE_COOKIE)?.value ?? null;
+    // `readCookies()` is client-only in this code path; during SSR this is empty.
+    // Workspace selection still works because spa-routes.tsx re-hydrates from
+    // `readActiveWorkspaceCookie()` and the generic resolver on first client render.
+    const activeWorkspaceId = resolveActiveKanbanWorkspaceId(
       workspaces.workspaces,
       workspaceId,
+      cookieWorkspaceId,
       settingsWorkspaceId,
     );
 
@@ -167,15 +202,7 @@ export default async function Page({ searchParams }: PageProps) {
       workspaceWorkflows: workflowList.workflows,
     });
 
-    // Map quick chat tasks to sessions
-    const quickChatSessions = quickChatResponse.tasks
-      .filter((t) => t.primary_session_id) // Only include tasks with active sessions
-      .map((t) => ({
-        sessionId: t.primary_session_id!,
-        workspaceId: t.workspace_id,
-        name: t.title !== "Quick Chat" ? t.title : undefined,
-        agentProfileId: readAgentProfileId(t.metadata),
-      }));
+    const quickChatSessions = mapQuickChatSessions(quickChatResponse.tasks);
 
     initialState = {
       ...initialState,

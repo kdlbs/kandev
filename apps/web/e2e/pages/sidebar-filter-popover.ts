@@ -1,18 +1,44 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 
+/**
+ * Page object for the sidebar filter / view system.
+ *
+ * After the unified AppSidebar overhaul, the filter UI no longer renders the
+ * legacy `sidebar-filter-bar`. It now lives in the AppSidebar Tasks section
+ * header as the `TasksViewPicker`:
+ *   - `tasks-view-picker`  — a dropdown trigger button labelled with the active
+ *     view name. Opening it lists the saved views as `sidebar-view-chip` items
+ *     (radix DropdownMenu, portaled). Selecting a chip switches the active view.
+ *   - `sidebar-filter-gear` — opens the `sidebar-filter-popover` (filters, sort,
+ *     group, save/rename/delete). Unchanged from before the overhaul.
+ *
+ * Notes on what changed vs. the old bar:
+ *   - The old always-visible `sidebar-view-chip-row` is gone; chips are only in
+ *     the open view-picker dropdown. Chip-reading helpers open it first.
+ *   - The active-view label is shown on the picker trigger button.
+ *   - Drag-to-reorder views was removed (the dropdown items are not sortable).
+ */
 export class SidebarFilterPopoverPage {
+  /** The always-visible filter affordance (view picker) in the section header. */
   readonly bar: Locator;
   readonly gear: Locator;
-  readonly chipRow: Locator;
+  /** The view-picker dropdown trigger (shows the active view name). */
+  readonly viewPicker: Locator;
 
   constructor(private readonly page: Page) {
-    this.bar = page.getByTestId("sidebar-filter-bar");
+    this.bar = page.getByTestId("tasks-view-picker");
+    this.viewPicker = page.getByTestId("tasks-view-picker");
     this.gear = page.getByTestId("sidebar-filter-gear");
-    this.chipRow = page.getByTestId("sidebar-view-chip-row");
   }
 
   get popover(): Locator {
     return this.page.getByTestId("sidebar-filter-popover");
+  }
+
+  /** Open radix dropdown menu hosting the view chips. Scoped to the menu that
+   *  actually contains the view chips so it can't match another sidebar menu. */
+  get chipMenu(): Locator {
+    return this.page.getByRole("menu").filter({ has: this.page.getByTestId("sidebar-view-chip") });
   }
 
   async open(): Promise<void> {
@@ -29,58 +55,53 @@ export class SidebarFilterPopoverPage {
     }
   }
 
+  /** Open the view-picker dropdown (no-op if already open). */
+  async openViewPicker(): Promise<void> {
+    if (!(await this.chipMenu.isVisible())) {
+      await this.viewPicker.click();
+      await expect(this.chipMenu).toBeVisible();
+    }
+  }
+
+  async closeViewPicker(): Promise<void> {
+    if (await this.chipMenu.isVisible()) {
+      await this.page.keyboard.press("Escape");
+      await expect(this.chipMenu).toBeHidden();
+    }
+  }
+
+  /** Select a view by name from the picker dropdown. */
   async selectViewByName(name: string): Promise<void> {
+    await this.openViewPicker();
     await this.chipByName(name).click();
+    // Selecting closes the menu.
+    await expect(this.chipMenu).toBeHidden();
   }
 
+  /**
+   * Assert the active view by name. The active view label is rendered on the
+   * picker trigger button, so this works without opening the dropdown.
+   */
   async expectActiveViewChip(name: string): Promise<void> {
-    const chip = this.chipRow
-      .locator(`[data-testid='sidebar-view-chip'][data-active='true']`)
-      .first();
-    await expect(chip).toContainText(name);
+    await this.closeViewPicker();
+    await expect(this.viewPicker).toContainText(name);
   }
 
+  /** A view chip in the (open) picker dropdown by name. */
   chipByName(name: string): Locator {
-    return this.chipRow.getByTestId("sidebar-view-chip").filter({ hasText: name }).first();
+    return this.chipMenu.getByTestId("sidebar-view-chip").filter({ hasText: name }).first();
   }
 
+  /** Read the chip names in dropdown order (opens the picker to read them). */
   async expectChipOrder(names: string[]): Promise<void> {
+    await this.openViewPicker();
     await expect
       .poll(async () => {
-        const texts = await this.chipRow.getByTestId("sidebar-view-chip").allTextContents();
+        const texts = await this.chipMenu.getByTestId("sidebar-view-chip").allTextContents();
         return texts.map((text) => text.trim());
       })
       .toEqual(names);
-  }
-
-  async dragViewBefore(sourceName: string, targetName: string): Promise<void> {
-    const source = this.chipByName(sourceName);
-    const target = this.chipByName(targetName);
-    await source.scrollIntoViewIfNeeded();
-    await target.scrollIntoViewIfNeeded();
-    await expect(source).toBeVisible();
-
-    const sourceBox = await source.boundingBox();
-    const targetBox = await target.boundingBox();
-    if (!sourceBox || !targetBox) throw new Error("Missing sidebar view chip drag geometry");
-    const targetLeftHalfX = targetBox.x + targetBox.width * 0.25;
-
-    await this.page.mouse.move(
-      sourceBox.x + sourceBox.width / 2,
-      sourceBox.y + sourceBox.height / 2,
-    );
-    await this.page.mouse.down();
-    // Move far enough to exceed the 8px PointerSensor activation threshold,
-    // then slide toward the target.
-    await this.page.mouse.move(
-      sourceBox.x + sourceBox.width / 2 - 16,
-      sourceBox.y + sourceBox.height / 2,
-      { steps: 4 },
-    );
-    await this.page.mouse.move(targetLeftHalfX, targetBox.y + targetBox.height / 2, {
-      steps: 20,
-    });
-    await this.page.mouse.up();
+    await this.closeViewPicker();
   }
 
   async addFilterRow(): Promise<void> {
@@ -112,6 +133,15 @@ export class SidebarFilterPopoverPage {
 
   async setClauseTextValue(index: number, value: string): Promise<void> {
     await this.clauseRow(index).getByTestId("filter-value-input").fill(value);
+  }
+
+  /** Pick a single-select enum clause value (e.g. repository) by its option label. */
+  async setClauseEnumValue(index: number, optionLabel: string): Promise<void> {
+    const trigger = this.clauseRow(index).getByTestId("filter-value-select");
+    await trigger.click();
+    // No .first(): exact:true + unique slugs mean a single match, so Playwright's
+    // strict mode surfaces a duplicate-option regression instead of masking it.
+    await this.page.getByRole("option", { name: optionLabel, exact: true }).click();
   }
 
   async removeClause(index: number): Promise<void> {

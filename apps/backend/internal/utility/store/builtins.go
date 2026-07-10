@@ -40,6 +40,11 @@ var builtinDefs = []builtinDef{
 	{"builtin-summarize-session", "summarize-session", "Summarize a session conversation for context handover", "summarize-session"},
 }
 
+// builtinSeedAgentID is the inference-agent ID embedded in seeded built-in
+// rows. Kept aligned with the schema DEFAULT so a row that survives every
+// migration path still maps to a registered inference agent.
+const builtinSeedAgentID = "claude-acp"
+
 // getBuiltinAgents returns the predefined built-in utility agents with prompts from embedded files.
 func getBuiltinAgents() []*models.UtilityAgent {
 	now := time.Now().UTC()
@@ -50,6 +55,7 @@ func getBuiltinAgents() []*models.UtilityAgent {
 			Name:        d.name,
 			Description: d.description,
 			Prompt:      utilcfg.Get(d.promptFile),
+			AgentID:     builtinSeedAgentID,
 			Builtin:     true,
 			Enabled:     false,
 			CreatedAt:   now,

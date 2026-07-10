@@ -104,12 +104,14 @@ export function SkillsPageClient({ initialSkills }: SkillsPageClientProps) {
     officeApi
       .listSkills(activeWorkspaceId)
       .then((res) => {
-        if (res.skills && res.skills.length > 0) {
-          setSkills(res.skills);
-        }
+        setSkills(res.skills ?? []);
       })
       .catch(() => {});
   }, [activeWorkspaceId, setSkills]);
+
+  useEffect(() => {
+    fetchSkills();
+  }, [fetchSkills]);
 
   const selectedSkill = skills.find((s) => s.id === selectedId) ?? null;
   const { handleCreate, handleSave, handleDelete, handleImport } = useSkillActions(

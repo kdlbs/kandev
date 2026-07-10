@@ -6,6 +6,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import { cn } from "./lib/utils";
 import { Button } from "./button";
 import { IconX } from "@tabler/icons-react";
+import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
 
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   React.useEffect(() => {
@@ -57,11 +58,19 @@ function DialogContent({
   children,
   showCloseButton = true,
   overlayClassName,
+  enterConfirms = true,
+  onKeyDown,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
   overlayClassName?: string;
+  /** Pressing Enter activates the semantic action button. Default: true. */
+  enterConfirms?: boolean;
 }) {
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    onKeyDown?.(event);
+    if (enterConfirms) handleDialogDefaultActionKeyDown(event);
+  };
   return (
     <DialogPortal>
       <DialogOverlay className={overlayClassName} />
@@ -71,6 +80,7 @@ function DialogContent({
           "border-border bg-popover text-popover-foreground data-open:animate-in data-closed:animate-out data-closed:fade-out-0 data-open:fade-in-0 data-closed:zoom-out-95 data-open:zoom-in-95 grid max-w-[calc(100%-2rem)] gap-4 rounded-lg border p-4 text-xs/relaxed shadow-md duration-100 sm:max-w-lg fixed top-1/2 left-1/2 z-50 w-full -translate-x-1/2 -translate-y-1/2",
           className,
         )}
+        onKeyDown={handleKeyDown}
         {...props}
       >
         {children}

@@ -132,6 +132,24 @@ func TestFeatureFlagDefaults_LowercasesShortName(t *testing.T) {
 	}
 }
 
+func TestMarkApplied_OnlyAllowsKnownDerivedEnvVars(t *testing.T) {
+	clearAppliedEnvVars(t)
+
+	MarkApplied("KANDEV_DEBUG_AGENT_MESSAGES")
+	if !WasApplied("KANDEV_DEBUG_AGENT_MESSAGES") {
+		t.Fatal("KANDEV_DEBUG_AGENT_MESSAGES was not marked applied")
+	}
+	MarkApplied("KANDEV_DEBUG_PPROF_ENABLED")
+	if !WasApplied("KANDEV_DEBUG_PPROF_ENABLED") {
+		t.Fatal("KANDEV_DEBUG_PPROF_ENABLED was not marked applied")
+	}
+
+	MarkApplied("KANDEV_UNRELATED")
+	if WasApplied("KANDEV_UNRELATED") {
+		t.Fatal("KANDEV_UNRELATED was marked applied")
+	}
+}
+
 // TestProfilesYAML_ContainsRequiredSections is a smoke test that
 // catches a zero-byte or truncated embed — an embed that silently
 // picks up an empty file would make every var default to empty,
@@ -171,4 +189,17 @@ func clearProfilesYAMLVars(t *testing.T) {
 		_ = os.Unsetenv(name)
 		t.Cleanup(func() { _ = os.Unsetenv(name) })
 	}
+}
+
+func clearAppliedEnvVars(t *testing.T) {
+	t.Helper()
+	appliedEnvVars.Lock()
+	previous := appliedEnvVars.names
+	appliedEnvVars.names = map[string]bool{}
+	appliedEnvVars.Unlock()
+	t.Cleanup(func() {
+		appliedEnvVars.Lock()
+		appliedEnvVars.names = previous
+		appliedEnvVars.Unlock()
+	})
 }

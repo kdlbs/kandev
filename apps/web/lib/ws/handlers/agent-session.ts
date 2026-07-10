@@ -1,4 +1,5 @@
 import type { StoreApi } from "zustand";
+import { createDebugLogger } from "@/lib/debug/log";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import {
@@ -9,6 +10,9 @@ import {
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
+import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
+
+const debug = createDebugLogger("session:state");
 
 const TERMINAL_SESSION_STATES: ReadonlySet<TaskSessionState> = new Set([
   "COMPLETED",
@@ -23,6 +27,63 @@ const AGENT_LIVE_STATES: ReadonlySet<TaskSessionState> = new Set(["RUNNING", "WA
 
 export function isTerminalSessionState(state: TaskSessionState | undefined): boolean {
   return !!state && TERMINAL_SESSION_STATES.has(state);
+}
+
+function findSessionForTask(state: AppState, taskId: string, sessionId: string) {
+  const byTask = state.taskSessionsByTask;
+  const sessionsForTask = byTask?.itemsByTaskId?.[taskId];
+  if (byTask?.loadedByTaskId?.[taskId]) {
+    return sessionsForTask?.find((session) => session.id === sessionId) ?? null;
+  }
+  // Some task-update call sites use partial stores before taskSessions hydrates.
+  const byId = state.taskSessions?.items?.[sessionId];
+  if (byId) return byId.task_id === taskId ? byId : null;
+  return sessionsForTask?.find((session) => session.id === sessionId) ?? null;
+}
+
+function isTaskSessionListHydrating(state: AppState, taskId: string): boolean {
+  const byTask = state.taskSessionsByTask;
+  if (!byTask) return true;
+  if (byTask.loadingByTaskId?.[taskId]) return true;
+  return !byTask.loadedByTaskId?.[taskId];
+}
+
+/**
+ * Manual session selection pins a task-scoped session. Background WS events
+ * may only override that pin once the pinned session is known terminal, or
+ * when the terminal event is for the pinned session itself.
+ */
+export function shouldPreservePinnedSessionForTask(
+  state: AppState,
+  taskId: string,
+  incoming?: { sessionId: string; newState: TaskSessionState | undefined },
+): boolean {
+  const pinnedSessionId = state.tasks.pinnedSessionId;
+  if (!pinnedSessionId || state.tasks.activeTaskId !== taskId) return false;
+  if (
+    incoming?.sessionId === pinnedSessionId &&
+    incoming.newState &&
+    isTerminalSessionState(incoming.newState)
+  ) {
+    return false;
+  }
+
+  const pinnedSession = findSessionForTask(state, taskId, pinnedSessionId);
+  if (!pinnedSession) {
+    // Preserve missing rows only while the per-task list is still hydrating.
+    // Once loaded, absence means the pinned session was deleted or went stale.
+    return isTaskSessionListHydrating(state, taskId);
+  }
+  return !isTerminalSessionState(pinnedSession.state);
+}
+
+export function clearPinnedSessionIfOverridden(store: StoreApi<AppState>, sessionId: string): void {
+  const pinnedSessionId = store.getState().tasks.pinnedSessionId;
+  if (!pinnedSessionId || pinnedSessionId === sessionId) return;
+  store.setState((state) => ({
+    ...state,
+    tasks: { ...state.tasks, pinnedSessionId: null },
+  }));
 }
 
 /** Promote agentctl status to "ready" when the session enters a live state.
@@ -88,12 +149,25 @@ export function pickReplacementSessionId(state: AppState, taskId: string): strin
   return null;
 }
 
+/** Ignore subscribe snapshots that were read before a newer state landed. */
+export function isStaleSessionStateEvent(
+  existing: { updated_at?: string } | null | undefined,
+  payloadUpdatedAt: string | undefined,
+): boolean {
+  if (!payloadUpdatedAt || !existing?.updated_at) return false;
+  const payloadTime = Date.parse(payloadUpdatedAt);
+  const existingTime = Date.parse(existing.updated_at);
+  if (Number.isNaN(payloadTime) || Number.isNaN(existingTime)) return false;
+  // Strict less-than: equal timestamps are treated as not-stale so identical
+  // events upsert idempotently rather than being silently dropped.
+  return payloadTime < existingTime;
+}
+
 /** Build a session update object from the state_changed payload. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildSessionUpdate(payload: any): Record<string, unknown> {
   const update: Record<string, unknown> = {};
   if (payload.new_state) update.state = payload.new_state;
-  if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.agent_profile_id) update.agent_profile_id = payload.agent_profile_id;
   if (payload.review_status !== undefined) update.review_status = payload.review_status;
   if (payload.error_message !== undefined) update.error_message = payload.error_message;
@@ -102,6 +176,7 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.is_passthrough !== undefined) update.is_passthrough = payload.is_passthrough;
   if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
+  if (payload.updated_at) update.updated_at = payload.updated_at;
   return update;
 }
 
@@ -126,7 +201,7 @@ function upsertTaskSessionList(
     task_id: taskId,
     state: (newState ?? existing?.state) as TaskSessionState,
     started_at: existing?.started_at ?? "",
-    updated_at: existing?.updated_at ?? "",
+    updated_at: (sessionUpdate.updated_at as string | undefined) ?? existing?.updated_at ?? "",
     ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
     ...sessionUpdate,
   });
@@ -182,38 +257,49 @@ function inheritAgentctlStatus(state: AppState, fromSessionId: string, toSession
  *   2. The current active session transitions to a terminal state — hand off
  *      to the newest non-terminal session for the same task, if any.
  */
+// eslint-disable-next-line max-params -- newState/previousState/wasKnownToStore are all needed by downstream branches
 function maybeAdoptSessionOnTransition(
   store: StoreApi<AppState>,
   taskId: string,
   sessionId: string,
   newState: TaskSessionState | undefined,
   wasKnownToStore: boolean,
+  previousState: TaskSessionState | undefined,
 ): void {
   const state = store.getState();
+  if (
+    state.tasks.pinnedSessionId !== sessionId &&
+    shouldPreservePinnedSessionForTask(state, taskId, { sessionId, newState })
+  ) {
+    return;
+  }
 
   if (!wasKnownToStore && shouldAdoptNewSession(state, taskId, newState)) {
     const oldSessionId = state.tasks.activeSessionId;
-    // Reverse-ordering guard: if the events arrive as old=COMPLETED then
-    // new=STARTING (instead of the typical new=STARTING then old=COMPLETED),
-    // shouldAdoptNewSession returns true on the second event because the old
-    // session is now terminal. But the user may have pinned the old session —
-    // in that case the symmetric guard below was skipped (no terminal event
-    // for the new session), and we'd auto-yank them off their pinned session
-    // here. Match the terminal-handoff path's pinning check.
-    if (oldSessionId && state.tasks.pinnedSessionId === oldSessionId) return;
     if (oldSessionId) inheritAgentctlStatus(state, oldSessionId, sessionId);
+    clearPinnedSessionIfOverridden(store, sessionId);
     state.setActiveSessionAuto(taskId, sessionId);
     return;
   }
 
   const isActive = state.tasks.activeSessionId === sessionId;
   if (isActive && newState && isTerminalSessionState(newState)) {
-    // If the user explicitly pinned this session (manual click), don't yank
-    // them away just because the workflow moved it to a terminal state.
-    if (state.tasks.pinnedSessionId === sessionId) return;
+    // When the user clicked open a terminal session (e.g. to review a
+    // completed run), setActiveSession pins it. If the backend then
+    // re-emits the same terminal state_changed (a replay — the previous
+    // stored state was already terminal), honor the pin and do NOT hand
+    // off to a running session. A genuine RUNNING→COMPLETED transition
+    // (previousState non-terminal) still hands off normally.
+    if (
+      state.tasks.pinnedSessionId === sessionId &&
+      previousState &&
+      isTerminalSessionState(previousState)
+    )
+      return;
     const replacement = pickReplacementSessionId(state, taskId);
     if (replacement && replacement !== sessionId) {
       inheritAgentctlStatus(state, sessionId, replacement);
+      clearPinnedSessionIfOverridden(store, replacement);
       state.setActiveSessionAuto(taskId, replacement);
     }
   }
@@ -244,37 +330,93 @@ function syncEnvFromAgentctlPayload(
     started_at: existing?.started_at ?? "",
     updated_at: existing?.updated_at ?? "",
     task_environment_id: envId,
+    worktree_id: payload.worktree_id,
+    worktree_path: payload.worktree_path,
+    worktree_branch: payload.worktree_branch,
   });
 }
 
-/** Handle the agentctl_ready event: update session worktree info. */
+/** Builds the partial-session patch applied for an agentctl_ready event.
+ *  On sibling materialize we repoint worktree_path to the task root and keep
+ *  the primary's id/branch; the initial ready event sets id/path/branch
+ *  straight from the payload. */
+function buildAgentctlReadySessionUpdate(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  isSibling: boolean,
+): Record<string, unknown> {
+  const update: Record<string, unknown> = {};
+  if (isSibling) {
+    if (payload.task_workspace_path) update.worktree_path = payload.task_workspace_path;
+    return update;
+  }
+  if (payload.worktree_id) update.worktree_id = payload.worktree_id;
+  if (payload.worktree_path) update.worktree_path = payload.worktree_path;
+  if (payload.worktree_branch) update.worktree_branch = payload.worktree_branch;
+  return update;
+}
+
+/** Adds the materialized worktree to the worktrees map + the per-session list. */
+function recordAgentctlReadyWorktree(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  existingSession: { repository_id?: string; worktree_path?: string; worktree_branch?: string },
+): void {
+  if (!payload.worktree_id) return;
+  store.getState().setWorktree({
+    id: payload.worktree_id,
+    sessionId: payload.session_id,
+    repositoryId: existingSession.repository_id ?? undefined,
+    path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
+    branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
+  });
+  const existing =
+    store.getState().sessionWorktreesBySessionId.itemsBySessionId[payload.session_id] ?? [];
+  if (!existing.includes(payload.worktree_id)) {
+    store.getState().setSessionWorktrees(payload.session_id, [...existing, payload.worktree_id]);
+  }
+}
+
+/** Handle the agentctl_ready event: update session worktree info.
+ *
+ *  Two shapes share this event:
+ *    1. Initial session ready — payload describes the session's primary
+ *       worktree; we set worktree_id/path/branch on the session row.
+ *    2. Sibling materialized (multi-branch add_branch flow) — payload
+ *       describes a NEW worktree being added alongside the primary. The
+ *       primary's worktree_id/branch must NOT be clobbered (they still own
+ *       the chat/agent process); only worktree_path moves to the task root
+ *       so the file browser repoints from "primary worktree" to "task root
+ *       containing both worktree siblings". A commits refetch is bumped so
+ *       the Commits panel re-queries with the new multi-repo subpaths
+ *       (each commit then carries its repo/branch slug for grouping).
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   const existingSession = store.getState().taskSessions.items[payload.session_id];
   if (!existingSession) return;
 
-  const sessionUpdate: Record<string, unknown> = {};
-  if (payload.worktree_id) sessionUpdate.worktree_id = payload.worktree_id;
-  if (payload.worktree_path) sessionUpdate.worktree_path = payload.worktree_path;
-  if (payload.worktree_branch) sessionUpdate.worktree_branch = payload.worktree_branch;
+  const isSibling =
+    !!payload.worktree_id &&
+    !!existingSession.worktree_id &&
+    payload.worktree_id !== existingSession.worktree_id;
 
+  const sessionUpdate = buildAgentctlReadySessionUpdate(payload, isSibling);
   if (Object.keys(sessionUpdate).length > 0) {
     store.getState().setTaskSession({ ...existingSession, ...sessionUpdate });
   }
 
-  if (payload.worktree_id) {
-    store.getState().setWorktree({
-      id: payload.worktree_id,
-      sessionId: payload.session_id,
-      repositoryId: existingSession.repository_id ?? undefined,
-      path: payload.worktree_path ?? existingSession.worktree_path ?? undefined,
-      branch: payload.worktree_branch ?? existingSession.worktree_branch ?? undefined,
-    });
-    const existing =
-      store.getState().sessionWorktreesBySessionId.itemsBySessionId[payload.session_id] ?? [];
-    if (!existing.includes(payload.worktree_id)) {
-      store.getState().setSessionWorktrees(payload.session_id, [...existing, payload.worktree_id]);
-    }
+  recordAgentctlReadyWorktree(store, payload, existingSession);
+
+  if (isSibling) {
+    // Drop the pre-multi-repo git-status snapshot — the backend just
+    // transitioned this session from single-repo to multi-repo and the legacy
+    // (empty-repo-name) tracker is gone. Without this the Changes panel keeps
+    // surfacing the frozen snapshot until the user reloads the tab, masking
+    // the per-repo updates streaming in for both the primary and the sibling.
+    store.getState().clearLegacyGitStatusEntry(payload.session_id);
+    store.getState().bumpSessionCommitsRefetch(payload.session_id);
   }
 }
 
@@ -338,11 +480,41 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       const sessionUpdate = buildSessionUpdate(payload);
       const existingSession = store.getState().taskSessions.items[sessionId];
 
+      if (isStaleSessionStateEvent(existingSession, payload.updated_at)) {
+        debug("state_changed ignored stale snapshot", {
+          sessionId,
+          task_id: taskId,
+          existingUpdatedAt: existingSession?.updated_at,
+          payloadUpdatedAt: payload.updated_at,
+          newState: newState ?? "-",
+        });
+        return;
+      }
+
+      debug("state_changed", {
+        sessionId,
+        // Logged before upsertTaskSessionList below, so on the first event for a
+        // session the store has no row yet and the auto-resolver can't map it —
+        // exactly the oldState="-" anchor line. taskId is already in scope, so
+        // pass it directly (rendered as task_id=, matching the auto-annotation).
+        task_id: taskId,
+        oldState: existingSession?.state ?? "-",
+        newState: newState ?? "-",
+      });
+
       upsertTaskSessionList(store, taskId, sessionId, payload, sessionUpdate);
+      syncKanbanPrimarySessionState(store, taskId, sessionId, newState);
       extractContextWindow(store, sessionId, payload);
       maybePromoteAgentctlReady(store, sessionId, newState, message.timestamp);
 
-      maybeAdoptSessionOnTransition(store, taskId, sessionId, newState, !!existingSession);
+      maybeAdoptSessionOnTransition(
+        store,
+        taskId,
+        sessionId,
+        newState,
+        !!existingSession,
+        existingSession?.state,
+      );
 
       maybeNotifySessionFailure(store, {
         taskId,

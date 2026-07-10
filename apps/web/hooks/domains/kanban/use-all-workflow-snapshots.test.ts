@@ -67,6 +67,23 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
   });
 
+  it("does not fetch on initial mount when all workflow snapshots are boot-hydrated", () => {
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": { workflowId: "wf-A", workflowName: "A", steps: [], tasks: [] },
+    };
+
+    renderHook(
+      ({ workspaceId }: { workspaceId: string | null }) => useAllWorkflowSnapshots(workspaceId),
+      {
+        initialProps: { workspaceId: "ws-A" },
+      },
+    );
+
+    expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
+    expect(mockSetKanbanMultiLoading).not.toHaveBeenCalledWith(true);
+    expect(mockClearKanbanMulti).not.toHaveBeenCalled();
+  });
+
   it("clears snapshots when workspaceId changes", async () => {
     const { rerender } = renderHook(
       ({ workspaceId }: { workspaceId: string | null }) => useAllWorkflowSnapshots(workspaceId),

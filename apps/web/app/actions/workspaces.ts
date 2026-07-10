@@ -37,13 +37,22 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
       ...(options?.headers ?? {}),
     },
   });
+  const text = response.status === 204 ? "" : await response.text();
   if (!response.ok) {
-    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+    let message = `Request failed: ${response.status} ${response.statusText}`;
+    if (text) {
+      try {
+        const body = JSON.parse(text) as { error?: string; message?: string };
+        const detail = body.error ?? body.message;
+        if (detail) {
+          message = detail;
+        }
+      } catch {
+        // body was not JSON, fall back to status text
+      }
+    }
+    throw new Error(message);
   }
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  const text = await response.text();
   if (!text) {
     return undefined as T;
   }
@@ -88,8 +97,11 @@ export async function updateWorkspaceAction(
   });
 }
 
-export async function deleteWorkspaceAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/office/workspaces/${id}`, { method: "DELETE" });
+export async function deleteWorkspaceAction(id: string, confirmName: string) {
+  await fetchJson<void>(`${apiBaseUrl}/api/v1/office/workspaces/${id}`, {
+    method: "DELETE",
+    body: JSON.stringify({ confirm_name: confirmName }),
+  });
 }
 
 export async function listWorkflowsAction(workspaceId: string): Promise<ListWorkflowsResponse> {
@@ -104,19 +116,21 @@ type ListTasksOptions = {
   query?: string;
   workflowId?: string | null;
   repositoryId?: string | null;
+  sort?: string;
 };
 
 export async function listTasksByWorkspaceAction(
   workspaceId: string,
   options: ListTasksOptions = {},
 ): Promise<ListTasksResponse> {
-  const { page = 1, pageSize = 50, query, workflowId, repositoryId } = options;
+  const { page = 1, pageSize = 50, query, workflowId, repositoryId, sort } = options;
   const url = new URL(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/tasks`);
   url.searchParams.set("page", String(page));
   url.searchParams.set("page_size", String(pageSize));
   if (query) url.searchParams.set("query", query);
   if (workflowId) url.searchParams.set("workflow_id", workflowId);
   if (repositoryId) url.searchParams.set("repository_id", repositoryId);
+  if (sort) url.searchParams.set("sort", sort);
   return fetchJson<ListTasksResponse>(url.toString());
 }
 
@@ -210,10 +224,12 @@ export async function createRepositoryAction(payload: {
   provider_name: string;
   default_branch: string;
   worktree_branch_prefix: string;
+  worktree_branch_template: string;
   pull_before_worktree: boolean;
   setup_script: string;
   cleanup_script: string;
   dev_script: string;
+  copy_files: string;
   worktree_files: WorktreeFile[];
 }) {
   return fetchJson<Repository>(
@@ -230,10 +246,12 @@ export async function createRepositoryAction(payload: {
         provider_name: payload.provider_name,
         default_branch: payload.default_branch,
         worktree_branch_prefix: payload.worktree_branch_prefix,
+        worktree_branch_template: payload.worktree_branch_template,
         pull_before_worktree: payload.pull_before_worktree,
         setup_script: payload.setup_script,
         cleanup_script: payload.cleanup_script,
         dev_script: payload.dev_script,
+        copy_files: payload.copy_files,
         worktree_files: payload.worktree_files,
       }),
     },
@@ -347,6 +365,7 @@ type BackendWorkflowStep = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  auto_advance_requires_signal?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -364,6 +383,7 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   show_in_command_panel: step.show_in_command_panel,
   auto_archive_after_hours: step.auto_archive_after_hours,
   agent_profile_id: step.agent_profile_id,
+  auto_advance_requires_signal: step.auto_advance_requires_signal,
   created_at: step.created_at,
   updated_at: step.updated_at,
 });
@@ -436,6 +456,7 @@ export async function updateWorkflowStepAction(
       | "show_in_command_panel"
       | "auto_archive_after_hours"
       | "agent_profile_id"
+      | "auto_advance_requires_signal"
     >
   >,
 ): Promise<WorkflowStep> {
@@ -452,6 +473,8 @@ export async function updateWorkflowStepAction(
   if (payload.auto_archive_after_hours !== undefined)
     body.auto_archive_after_hours = payload.auto_archive_after_hours;
   if (payload.agent_profile_id !== undefined) body.agent_profile_id = payload.agent_profile_id;
+  if (payload.auto_advance_requires_signal !== undefined)
+    body.auto_advance_requires_signal = payload.auto_advance_requires_signal;
   const response = await fetchJson<BackendWorkflowStep>(
     `${apiBaseUrl}/api/v1/workflow/steps/${stepId}`,
     {
@@ -503,6 +526,14 @@ export async function getWorkflowTaskCount(workflowId: string): Promise<{ task_c
   );
 }
 
+export async function getRepositoryActiveSessionCountAction(
+  repositoryId: string,
+): Promise<{ active_session_count: number }> {
+  return fetchJson<{ active_session_count: number }>(
+    `${apiBaseUrl}/api/v1/repositories/${repositoryId}/active-session-count`,
+  );
+}
+
 export async function getStepTaskCount(stepId: string): Promise<{ task_count: number }> {
   return fetchJson<{ task_count: number }>(
     `${apiBaseUrl}/api/v1/workflow/steps/${stepId}/task-count`,
@@ -536,8 +567,22 @@ export async function exportWorkflowAction(workflowId: string): Promise<string> 
   return response.text();
 }
 
-export async function exportAllWorkflowsAction(workspaceId: string): Promise<string> {
-  const response = await fetch(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/workflows/export`);
+export async function exportAllWorkflowsAction(
+  workspaceId: string,
+  workflowIds?: string[],
+): Promise<string> {
+  // When workflowIds is provided, restrict the export to exactly that set
+  // (the settings UI passes its kanban workflows, excluding office ones). An
+  // empty list is sent intentionally as `ids=` so nothing is exported, rather
+  // than omitting the param and falling back to exporting every workflow.
+  // Encode the user-provided values that flow into the request URL (workspace
+  // ID in the path, workflow IDs in the query) so they can't alter the request
+  // target — clears CodeQL's js/request-forgery (SSRF) check on this path.
+  const query =
+    workflowIds !== undefined ? `?ids=${encodeURIComponent(workflowIds.join(","))}` : "";
+  const response = await fetch(
+    `${apiBaseUrl}/api/v1/workspaces/${encodeURIComponent(workspaceId)}/workflows/export${query}`,
+  );
   if (!response.ok) throw new Error(`Export failed: ${response.statusText}`);
   return response.text();
 }

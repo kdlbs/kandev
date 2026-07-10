@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -20,15 +19,6 @@ const codexUsageURL = "https://chatgpt.com/backend-api/wham/usage"
 type CodexUsageClient struct {
 	authPath   string
 	httpClient *http.Client
-}
-
-// NewCodexUsageClient creates a client that reads from the default auth path.
-func NewCodexUsageClient() *CodexUsageClient {
-	home, _ := os.UserHomeDir()
-	return &CodexUsageClient{
-		authPath:   filepath.Join(home, ".config", "codex", "auth.json"),
-		httpClient: &http.Client{Timeout: 10 * time.Second},
-	}
 }
 
 // NewCodexUsageClientWithPath creates a client with an explicit auth path (for tests).

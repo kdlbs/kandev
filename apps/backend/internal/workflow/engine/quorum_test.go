@@ -395,6 +395,24 @@ func TestEngine_RecordParticipantDecision_RequiresIDs(t *testing.T) {
 
 func TestConfigTransitionGuard_ParsesWaitForQuorum(t *testing.T) {
 	cfg := map[string]any{
+		"if": map[string]any{
+			"wait_for_quorum": map[string]any{
+				"role":      "reviewer",
+				"threshold": "all_approve",
+			},
+		},
+	}
+	g := ConfigTransitionGuard(cfg)
+	if g == nil || g.WaitForQuorum == nil {
+		t.Fatalf("expected wait_for_quorum guard")
+	}
+	if g.WaitForQuorum.Role != "reviewer" || g.WaitForQuorum.Threshold != "all_approve" {
+		t.Fatalf("unexpected guard: %+v", g.WaitForQuorum)
+	}
+}
+
+func TestConfigTransitionGuard_ParsesLegacyTopLevelWaitForQuorum(t *testing.T) {
+	cfg := map[string]any{
 		"wait_for_quorum": map[string]any{
 			"role":      "reviewer",
 			"threshold": "all_approve",

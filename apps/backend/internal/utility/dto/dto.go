@@ -170,11 +170,33 @@ type InferenceModelDTO struct {
 }
 
 // InferenceAgentDTO represents an agent that supports inference.
+//
+// Status reflects the host-utility probe outcome at the time of the request.
+// The frontend uses it to render a contextual note ("sign in to Claude",
+// "Claude CLI not installed", "setting up Claude…") and a Refresh button when
+// Models is empty, instead of showing a silently-disabled Model picker.
 type InferenceAgentDTO struct {
-	ID          string              `json:"id"`
-	Name        string              `json:"name"`
-	DisplayName string              `json:"display_name"`
-	Models      []InferenceModelDTO `json:"models"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	DisplayName   string              `json:"display_name"`
+	Models        []InferenceModelDTO `json:"models"`
+	ConfigOptions []ConfigOptionDTO   `json:"config_options,omitempty"`
+	Status        string              `json:"status"`
+	StatusMessage string              `json:"status_message,omitempty"`
+}
+
+type ConfigOptionDTO struct {
+	Type         string                  `json:"type"`
+	ID           string                  `json:"id"`
+	Name         string                  `json:"name"`
+	CurrentValue string                  `json:"current_value"`
+	Category     string                  `json:"category,omitempty"`
+	Options      []ConfigOptionChoiceDTO `json:"options,omitempty"`
+}
+
+type ConfigOptionChoiceDTO struct {
+	Value string `json:"value"`
+	Name  string `json:"name"`
 }
 
 // InferenceAgentsResponse is the response for listing inference agents.

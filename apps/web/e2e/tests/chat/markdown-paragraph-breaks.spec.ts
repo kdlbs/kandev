@@ -35,7 +35,7 @@ test.describe("Markdown paragraph breaks", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     // Wait for the agent to finish processing the prompt and become idle.
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Wait for the agent response containing our paragraphs to appear.
     await expect(session.chat.getByText("Paragraph three.").last()).toBeVisible({

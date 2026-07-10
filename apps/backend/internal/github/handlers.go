@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,7 @@ import (
 const (
 	errMsgInvalidPayload = "invalid payload"
 	errMsgIDRequired     = "id required"
+	respKeyDeleted       = "deleted"
 )
 
 // RegisterRoutes registers HTTP and WebSocket routes for GitHub integration.
@@ -30,7 +32,7 @@ func RegisterMockRoutes(router *gin.Engine, svc *Service, log *logger.Logger) {
 	if !ok {
 		return
 	}
-	ctrl := NewMockController(mock, svc.TestStore(), svc.TestEventBus(), log)
+	ctrl := NewMockController(mock, svc.TestStore(), svc.TestEventBus(), svc, log)
 	ctrl.RegisterRoutes(router)
 	log.Info("registered GitHub mock control endpoints")
 }
@@ -65,6 +67,34 @@ func registerWSHandlers(dispatcher *ws.Dispatcher, svc *Service, log *logger.Log
 	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsList, wsListActionPresets(svc))
 	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsUpdate, wsUpdateActionPresets(svc))
 	dispatcher.RegisterFunc(ws.ActionGitHubActionPresetsReset, wsResetActionPresets(svc))
+
+	// Manual cleanup sweeps
+	dispatcher.RegisterFunc(ws.ActionGitHubCleanupReviewTasks, wsCleanupReviewTasks(svc))
+	dispatcher.RegisterFunc(ws.ActionGitHubCleanupIssueTasks, wsCleanupIssueTasks(svc))
+}
+
+// wsCleanupReviewTasks runs the manual full sweep and returns the count
+// deleted. Manual users want everything drained now, so this skips the
+// poller's "orphans only" optimization.
+func wsCleanupReviewTasks(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		deleted, err := svc.CleanupAllReviewTasks(ctx)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]int{respKeyDeleted: deleted})
+	}
+}
+
+// wsCleanupIssueTasks mirrors wsCleanupReviewTasks for issue watches.
+func wsCleanupIssueTasks(svc *Service) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+		deleted, err := svc.CleanupAllIssueTasks(ctx)
+		if err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		return ws.NewResponse(msg.ID, msg.Action, map[string]int{respKeyDeleted: deleted})
+	}
 }
 
 // parseMap parses the WS message payload into a map for simple field lookups.
@@ -113,7 +143,7 @@ func wsDeleteByID(deleteFn func(ctx context.Context, id string) error) func(ctx 
 		if err := deleteFn(ctx, id); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"deleted": true})
+		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{respKeyDeleted: true})
 	}
 }
 
@@ -221,16 +251,30 @@ func wsGetTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *
 // PR yet"); multi-repo callers iterate and call setTaskPR for each so the
 // per-repo PR icon stays in sync. The legacy single-PR shape would have
 // silently dropped every repo's PR except the most-recently-updated one.
+//
+// permanent=true on the response signals the frontend's 5s retry loop to
+// stop. It's set when every watch on the task points at a repository
+// classified as unresolvable (missing, deleted, or inaccessible to the
+// authenticated principal) — without this, the frontend keeps re-polling
+// dead repos every 5s for the lifetime of the task, which was the
+// dominant signal in the production SyncWatchesBatched storm.
 func wsSyncTaskPR(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return wsWithField("task_id", func(ctx context.Context, taskID string) (interface{}, error) {
-		prs, err := svc.TriggerPRSyncAll(ctx, taskID)
+		prs, permanent, err := svc.TriggerPRSyncAllPermanent(ctx, taskID)
 		if err != nil {
-			return nil, err
+			var partial *PartialPRSyncError
+			if !permanent && (!errors.As(err, &partial) || len(prs) == 0) {
+				return nil, err
+			}
 		}
 		// Return an envelope so the frontend always gets a deterministic
-		// shape even on empty results (`{prs: []}`); a bare `nil` would
-		// confuse the WS handler's success/error branching.
-		return map[string]interface{}{"prs": prs}, nil
+		// shape even on empty results (`{prs: []}`); a bare `nil` slice
+		// would serialize to `prs: null` and confuse the WS handler's
+		// success/error branching, so normalize to an empty slice here.
+		if prs == nil {
+			prs = []*TaskPR{}
+		}
+		return map[string]interface{}{"prs": prs, "permanent": permanent}, nil
 	})
 }
 
@@ -296,18 +340,26 @@ func wsTriggerReviewWatch(svc *Service, _ *logger.Logger) func(ctx context.Conte
 		if id == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgIDRequired, nil)
 		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id is required", nil)
+		}
 		watch, err := svc.GetReviewWatch(ctx, id)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		if watch == nil {
+		if watch == nil || watch.WorkspaceID != workspaceID {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "review watch not found", nil)
 		}
-		newPRs, err := svc.CheckReviewWatch(ctx, watch)
+		newPRs, err := svc.TriggerReviewWatch(ctx, watch)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"new_prs": len(newPRs), "prs": newPRs})
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+			"new_prs":       len(newPRs),
+			"new_prs_found": len(newPRs),
+			"prs":           newPRs,
+		})
 	}
 }
 
@@ -432,11 +484,15 @@ func wsTriggerIssueWatch(svc *Service, log *logger.Logger) func(ctx context.Cont
 		if id == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgIDRequired, nil)
 		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id is required", nil)
+		}
 		watch, err := svc.GetIssueWatch(ctx, id)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		if watch == nil {
+		if watch == nil || watch.WorkspaceID != workspaceID {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "issue watch not found", nil)
 		}
 		newIssues, err := svc.CheckIssueWatch(ctx, watch)

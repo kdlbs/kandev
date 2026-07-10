@@ -1,21 +1,5 @@
 import { GeneralSettings } from "@/components/settings/general-settings";
-import { StateProvider } from "@/components/state-provider";
-import { fetchUserSettings } from "@/lib/api";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 
-export default async function GeneralSettingsPage() {
-  let initialState = {};
-  try {
-    const response = await fetchUserSettings({ cache: "no-store" });
-    const mapped = mapUserSettingsResponse(response);
-    initialState = { userSettings: mapped.loaded ? mapped : undefined };
-  } catch {
-    initialState = {};
-  }
-
-  return (
-    <StateProvider initialState={initialState}>
-      <GeneralSettings />
-    </StateProvider>
-  );
+export default function GeneralSettingsPage() {
+  return <GeneralSettings />;
 }

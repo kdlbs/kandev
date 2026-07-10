@@ -1,46 +1,25 @@
 "use client";
 
 import { memo, type ReactNode } from "react";
-import Link from "next/link";
-import { IconBug, IconDots, IconHome, IconSettings } from "@tabler/icons-react";
+import Link from "@/components/routing/app-link";
+import { IconBug, IconCircleDot } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@kandev/ui/breadcrumb";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
+import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@kandev/ui/breadcrumb";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { EditorsMenu } from "@/components/task/editors-menu";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { DocumentControls } from "@/components/task/document/document-controls";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
+import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { JiraTicketButton, extractJiraKey } from "@/components/jira/jira-ticket-button";
-import { JiraLinkButton } from "@/components/jira/jira-link-button";
 import { LinearIssueButton, extractLinearKey } from "@/components/linear/linear-issue-button";
-import { LinearLinkButton } from "@/components/linear/linear-link-button";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
-import { QuickChatButton } from "@/components/task/quick-chat-button";
-import {
-  TopbarActionOverflow,
-  type TopbarOverflowItem,
-} from "@/components/task/topbar-action-overflow";
-import { IntegrationsMenu } from "@/components/integrations/integrations-menu";
-import { DEBUG_UI } from "@/lib/config";
+import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
+import { isDebugUI } from "@/lib/config";
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -56,6 +35,8 @@ type TaskTopBarProps = {
   currentStepId?: string | null;
   workflowId?: string | null;
   workspaceId?: string | null;
+  issueUrl?: string;
+  issueNumber?: number;
   isArchived?: boolean;
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
@@ -84,13 +65,15 @@ const TaskTopBar = memo(function TaskTopBar({
   isArchived,
   isRemoteExecutor,
   isAgentctlReady,
+  issueUrl,
+  issueNumber,
   remoteExecutorType,
   officeTaskHref,
 }: TaskTopBarProps) {
   return (
     <header
       data-testid="task-topbar"
-      className="@container/topbar grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-2 overflow-hidden px-3 py-1 border-b border-border"
+      className="@container/topbar grid h-10 shrink-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)_auto] items-center gap-2 overflow-hidden px-3 py-1 border-b border-border"
     >
       <TopBarLeft
         taskId={taskId}
@@ -99,7 +82,7 @@ const TaskTopBar = memo(function TaskTopBar({
         remoteExecutorType={remoteExecutorType}
         isArchived={isArchived}
       />
-      <div className="min-w-0 justify-self-center overflow-hidden">
+      <div className="min-w-0 justify-self-stretch overflow-hidden">
         {workflowSteps && workflowSteps.length > 0 && (
           <WorkflowStepper
             steps={workflowSteps}
@@ -111,7 +94,6 @@ const TaskTopBar = memo(function TaskTopBar({
         )}
       </div>
       <TopBarRight
-        taskId={taskId}
         activeSessionId={activeSessionId}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
@@ -120,29 +102,29 @@ const TaskTopBar = memo(function TaskTopBar({
         isRemoteExecutor={isRemoteExecutor}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
+        issueUrl={issueUrl}
+        issueNumber={issueNumber}
         officeTaskHref={officeTaskHref}
       />
     </header>
   );
 });
 
-// IssueTrackerButtons picks the right ticket button for a task. Jira and
-// Linear use the same TEAM-NUMBER identifier shape, so both `extract` calls
-// would match "ENG-123" — we resolve ambiguity by preferring whichever
-// integration is currently available for the workspace, with Jira winning the
-// tie-break since it shipped first. When the title carries no identifier,
-// both link buttons are offered (each gated on its own availability).
+// IssueTrackerButtons picks the right ticket status button for a task whose
+// title already carries an external issue key. Jira and Linear use the same
+// TEAM-NUMBER identifier shape, so both `extract` calls would match
+// "ENG-123" — we resolve ambiguity by preferring whichever integration is
+// currently available for the workspace, with Jira winning the tie-break since
+// it shipped first. Creating new links lives in the task Link menu.
 function IssueTrackerButtons({
-  taskId,
   workspaceId,
   taskTitle,
 }: {
-  taskId: string | null | undefined;
   workspaceId: string | null | undefined;
   taskTitle: string | null | undefined;
 }) {
-  const jiraAvailable = useJiraAvailable();
-  const linearAvailable = useLinearAvailable();
+  const jiraAvailable = useJiraAvailable(workspaceId);
+  const linearAvailable = useLinearAvailable(workspaceId);
   const jiraKey = extractJiraKey(taskTitle);
   const linearKey = extractLinearKey(taskTitle);
 
@@ -152,15 +134,11 @@ function IssueTrackerButtons({
   if (linearKey && linearAvailable) {
     return <LinearIssueButton workspaceId={workspaceId} taskTitle={taskTitle} />;
   }
-  return (
-    <>
-      <JiraLinkButton taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
-      <LinearLinkButton taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
-    </>
-  );
+  return null;
 }
 
-/** Left section: home → task name breadcrumb, integrations menu, executor info */
+/** Left section: task name breadcrumb + executor info. Home + integrations
+ *  moved to the unified AppSidebar in the UI overhaul. */
 function TopBarLeft({
   taskId,
   activeSessionId,
@@ -170,25 +148,13 @@ function TopBarLeft({
 }: TopBarLeftProps) {
   const showExecutorSettings = shouldShowExecutorEnvironmentControls(remoteExecutorType);
   return (
-    <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
-      <Breadcrumb className="min-w-0">
-        <BreadcrumbList className="flex-nowrap text-sm min-w-0">
-          <BreadcrumbItem className="shrink-0">
-            <BreadcrumbLink asChild>
-              <Link
-                href="/"
-                className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
-                data-testid="task-breadcrumb-home"
-              >
-                <IconHome className="h-4 w-4" />
-              </Link>
-            </BreadcrumbLink>
-          </BreadcrumbItem>
-          <BreadcrumbSeparator className="shrink-0" />
-          <BreadcrumbItem className="min-w-0">
+    <div className="flex min-w-0 max-w-[min(44rem,45vw)] items-center gap-2.5 overflow-hidden">
+      <Breadcrumb className="min-w-0 max-w-full">
+        <BreadcrumbList className="min-w-0 max-w-full flex-nowrap text-sm">
+          <BreadcrumbItem className="min-w-0 max-w-full">
             <Tooltip>
               <TooltipTrigger asChild>
-                <BreadcrumbPage className="font-medium truncate">
+                <BreadcrumbPage className="block max-w-full truncate font-medium">
                   {taskTitle ?? "Task details"}
                 </BreadcrumbPage>
               </TooltipTrigger>
@@ -197,8 +163,6 @@ function TopBarLeft({
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-
-      <IntegrationsMenu />
 
       {!isArchived && showExecutorSettings && (
         <ExecutorSettingsButton taskId={taskId} sessionId={activeSessionId ?? null} />
@@ -226,89 +190,63 @@ function TopbarCluster({
   );
 }
 
-function MoreToolsMenu({
+function DebugOverlayToggle({
   showDebugOverlay,
   onToggleDebugOverlay,
 }: {
   showDebugOverlay?: boolean;
-  onToggleDebugOverlay?: () => void;
+  onToggleDebugOverlay: () => void;
 }) {
-  const showDebugItem = DEBUG_UI && onToggleDebugOverlay;
-  const debugLabel = showDebugOverlay ? "Hide Debug Info" : "Show Debug Info";
-
-  return (
-    <DropdownMenu>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <DropdownMenuTrigger asChild>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 cursor-pointer px-2"
-              aria-label="More task tools"
-            >
-              <IconDots className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-        </TooltipTrigger>
-        <TooltipContent>More tools</TooltipContent>
-      </Tooltip>
-      <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuLabel className="text-xs">More tools</DropdownMenuLabel>
-        {showDebugItem && (
-          <>
-            <DropdownMenuItem className="cursor-pointer gap-2" onClick={onToggleDebugOverlay}>
-              <IconBug className="h-4 w-4 text-muted-foreground" />
-              <span>{debugLabel}</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-          </>
-        )}
-        <DropdownMenuItem asChild className="cursor-pointer gap-2">
-          <Link href="/settings/general">
-            <IconSettings className="h-4 w-4 text-muted-foreground" />
-            <span>Settings</span>
-          </Link>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
-function SettingsButton() {
+  const label = showDebugOverlay ? "Hide Debug Info" : "Show Debug Info";
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button asChild size="sm" variant="outline" className="h-8 cursor-pointer px-2">
-          <Link href="/settings/general" aria-label="Settings">
-            <IconSettings className="h-4 w-4" />
-          </Link>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 cursor-pointer px-2"
+          onClick={onToggleDebugOverlay}
+          aria-label={label}
+        >
+          <IconBug className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Settings</TooltipContent>
+      <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
 }
 
 function AttentionStatusGroup({
-  taskId,
   activeSessionId,
   isArchived,
   workspaceId,
   isRemoteExecutor,
   isAgentctlReady,
   taskTitle,
+  issueUrl,
+  issueNumber,
 }: {
-  taskId?: string | null;
   activeSessionId?: string | null;
   isArchived?: boolean;
   workspaceId?: string | null;
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
   taskTitle?: string;
+  issueUrl?: string;
+  issueNumber?: number;
 }) {
   return (
-    <TopbarCluster label="Task status and attention" className="[&_button]:h-8 [&_button]:text-xs">
+    <TopbarCluster
+      label="Task status and attention"
+      className={[
+        "[&_button]:h-7",
+        "[&_button]:text-xs",
+        "[&_[data-testid=issue-topbar-button]]:h-7",
+        "[&_[data-testid=issue-topbar-button]]:text-xs",
+        "[&_[data-testid=mr-topbar-button]]:h-7",
+        "[&_[data-testid=mr-topbar-button]]:text-xs",
+      ].join(" ")}
+    >
       <DocumentControls activeSessionId={activeSessionId ?? null} />
       {!isArchived && (
         <>
@@ -317,11 +255,48 @@ function AttentionStatusGroup({
             sessionId={activeSessionId}
             isAgentctlReady={isAgentctlReady}
           />
+          {/* PR (GitHub) and MR (GitLab) buttons each render nothing when no
+              rows match, so showing both covers GitHub-only, GitLab-only, and
+              multi-repo tasks without needing an explicit provider switch. */}
+          <GitHubIssueTopbarButton issueUrl={issueUrl} issueNumber={issueNumber} />
           <PRTopbarButton />
-          <IssueTrackerButtons taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
+          <MRTopbarButton />
+          <IssueTrackerButtons workspaceId={workspaceId} taskTitle={taskTitle} />
         </>
       )}
     </TopbarCluster>
+  );
+}
+
+function GitHubIssueTopbarButton({
+  issueUrl,
+  issueNumber,
+}: {
+  issueUrl?: string;
+  issueNumber?: number;
+}) {
+  if (!issueUrl) return null;
+  const label = issueNumber ? `#${issueNumber}` : "Issue";
+  const tooltip = issueNumber ? `GitHub issue #${issueNumber}` : "GitHub issue";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          asChild
+          data-testid="issue-topbar-button"
+          data-issue-number={issueNumber}
+          size="sm"
+          variant="outline"
+          className="cursor-pointer gap-1.5 px-2"
+        >
+          <Link href={issueUrl} target="_blank" rel="noopener noreferrer">
+            <IconCircleDot className="h-4 w-4 text-green-500" />
+            <span className="text-xs font-medium">{label}</span>
+          </Link>
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -336,31 +311,30 @@ function TopbarToolsGroup({
   onToggleDebugOverlay?: () => void;
   isArchived?: boolean;
 }) {
-  const showDebugMenu = DEBUG_UI && onToggleDebugOverlay;
+  const showDebugToggle = isDebugUI() && onToggleDebugOverlay;
 
   return (
-    <TopbarCluster label="Task tools" className="[&_button]:h-8 [&_button]:text-xs">
+    <TopbarCluster label="Task tools" className="[&_button]:h-7 [&_button]:text-xs">
       {!isArchived && (
         <>
           <LayoutPresetSelector />
           <EditorsMenu activeSessionId={activeSessionId ?? null} />
         </>
       )}
-      {showDebugMenu ? (
-        <MoreToolsMenu
+      {showDebugToggle && (
+        <DebugOverlayToggle
           showDebugOverlay={showDebugOverlay}
           onToggleDebugOverlay={onToggleDebugOverlay}
         />
-      ) : (
-        <SettingsButton />
       )}
     </TopbarCluster>
   );
 }
 
-/** Right section: status/attention, tools menu */
+/** Right section: status/attention + tools rendered inline.
+ *  The former overflow popover was removed in the UI overhaul — every cluster
+ *  is always visible so users don't have to discover the dots menu. */
 function TopBarRight({
-  taskId,
   activeSessionId,
   showDebugOverlay,
   onToggleDebugOverlay,
@@ -369,9 +343,10 @@ function TopBarRight({
   isRemoteExecutor,
   isAgentctlReady,
   taskTitle,
+  issueUrl,
+  issueNumber,
   officeTaskHref,
 }: {
-  taskId?: string | null;
   activeSessionId?: string | null;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
@@ -380,71 +355,37 @@ function TopBarRight({
   isRemoteExecutor?: boolean;
   isAgentctlReady?: boolean;
   taskTitle?: string;
+  issueUrl?: string;
+  issueNumber?: number;
   officeTaskHref?: string | null;
 }) {
-  const items: TopbarOverflowItem[] = [];
-
-  if (officeTaskHref) {
-    items.push({
-      id: "office-view",
-      label: "Open in office view",
-      priority: 90,
-      content: (
-        <TopbarCluster label="Open in office view" className="[&_a]:h-8 [&_a]:text-xs">
-          <Button asChild size="sm" variant="outline" className="h-8 cursor-pointer px-2">
+  return (
+    <div className="flex items-center justify-self-end gap-2 [&_button]:whitespace-nowrap">
+      <TopbarMetrics activeSessionId={activeSessionId} />
+      {officeTaskHref && (
+        <TopbarCluster label="Open in office view" className="[&_a]:h-7 [&_a]:text-xs">
+          <Button asChild size="sm" variant="outline" className="h-7 cursor-pointer px-2">
             <Link href={officeTaskHref}>Open in office view</Link>
           </Button>
         </TopbarCluster>
-      ),
-    });
-  }
-
-  if (!isArchived && workspaceId) {
-    items.push({
-      id: "quick-chat",
-      label: "Quick chat",
-      priority: 20,
-      content: (
-        <TopbarCluster label="Quick chat" className="[&_button]:h-8 [&_button]:text-xs">
-          <QuickChatButton workspaceId={workspaceId} />
-        </TopbarCluster>
-      ),
-    });
-  }
-
-  items.push({
-    id: "attention",
-    label: "Task status and attention",
-    priority: 80,
-    content: (
+      )}
       <AttentionStatusGroup
-        taskId={taskId}
         activeSessionId={activeSessionId}
         isArchived={isArchived}
         workspaceId={workspaceId}
         isRemoteExecutor={isRemoteExecutor}
         isAgentctlReady={isAgentctlReady}
         taskTitle={taskTitle}
+        issueUrl={issueUrl}
+        issueNumber={issueNumber}
       />
-    ),
-  });
-
-  items.push({
-    id: "tools",
-    label: "Task tools",
-    priority: 10,
-    content: (
       <TopbarToolsGroup
         activeSessionId={activeSessionId}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
       />
-    ),
-  });
-
-  return (
-    <TopbarActionOverflow items={items} className="justify-self-end [&_button]:whitespace-nowrap" />
+    </div>
   );
 }
 
@@ -453,6 +394,7 @@ function shouldShowExecutorEnvironmentControls(executorType?: string | null): bo
     case "local_docker":
     case "remote_docker":
     case "sprites":
+    case "ssh":
       return true;
     default:
       return false;

@@ -150,6 +150,114 @@ func TestHTTPListStates_RoutesThroughService(t *testing.T) {
 	}
 }
 
+func TestHTTPListLabels_RequiresTeamKey(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/labels", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHTTPListLabels_RoutesThroughService(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	ctx := context.Background()
+	if err := ctrl.service.store.UpsertConfig(ctx, &LinearConfig{
+		AuthMethod: AuthMethodAPIKey,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
+		t.Fatalf("set secret: %v", err)
+	}
+	var seenTeam string
+	client.listLabelsFn = func(teamKey string) ([]LinearLabel, error) {
+		seenTeam = teamKey
+		return []LinearLabel{{ID: "l1", Name: "bug"}}, nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/labels?team_key=ENG", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if seenTeam != "ENG" {
+		t.Errorf("team key forwarded to client = %q, want ENG", seenTeam)
+	}
+}
+
+func TestHTTPListUsers_RequiresTeamKey(t *testing.T) {
+	_, router, _ := newTestController(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/users", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHTTPListUsers_RoutesThroughService(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	ctx := context.Background()
+	if err := ctrl.service.store.UpsertConfig(ctx, &LinearConfig{
+		AuthMethod: AuthMethodAPIKey,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
+		t.Fatalf("set secret: %v", err)
+	}
+	var seenTeam string
+	client.listUsersFn = func(teamKey string) ([]LinearUser, error) {
+		seenTeam = teamKey
+		return []LinearUser{{ID: "u1", Name: "Alice"}}, nil
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/users?team_key=ENG", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if seenTeam != "ENG" {
+		t.Errorf("team key forwarded to client = %q, want ENG", seenTeam)
+	}
+}
+
+func TestHTTPSearchIssues_RejectsBadNumericParams(t *testing.T) {
+	ctrl, router, _ := newTestController(t)
+	ctx := context.Background()
+	if err := ctrl.service.store.UpsertConfig(ctx, &LinearConfig{
+		AuthMethod: AuthMethodAPIKey,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	if err := ctrl.service.secrets.Set(ctx, SecretKey, "linear", "tok"); err != nil {
+		t.Fatalf("set secret: %v", err)
+	}
+	cases := map[string]string{
+		"priorities out of range":        "priorities=99",
+		"priorities mixed valid/invalid": "priorities=1,99",
+		"priorities not a number":        "priorities=abc",
+		"estimate_min not a number":      "estimate_min=abc",
+		"estimate_min NaN":               "estimate_min=NaN",
+		"estimate_min +Inf":              "estimate_min=%2BInf",
+		"estimate_max -Inf":              "estimate_max=-Inf",
+		"estimate_min negative":          "estimate_min=-1",
+		"estimate_min > max":             "estimate_min=5&estimate_max=1",
+	}
+	for name, query := range cases {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/linear/issues?"+query, nil)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("status = %d, want 400; body=%s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestRegisterRoutes_RegistersWSHandlers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

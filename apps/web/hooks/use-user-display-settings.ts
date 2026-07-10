@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { fetchUserSettings, updateUserSettings } from "@/lib/api";
+import { updateUserSettings } from "@/lib/api";
+import { useSearchParams } from "@/lib/routing/client-router";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
 import { repositoryId, type Repository } from "@/lib/types/http";
-import type { UserSettingsState } from "@/lib/state/slices/settings/types";
+import { DEFAULT_TASKS_LIST_GROUP, DEFAULT_TASKS_LIST_SORT } from "@/lib/tasks/tasks-list-options";
+import {
+  DEFAULT_VOICE_MODE_STATE,
+  type UserSettingsState,
+} from "@/lib/state/slices/settings/types";
 
 type DisplaySettings = UserSettingsState;
 
@@ -36,7 +41,15 @@ function carryForwardTerminalSettings(current: DisplaySettings) {
   };
 }
 
-function carryForwardSettings(current: DisplaySettings) {
+function carryForwardLspSettings(current: DisplaySettings) {
+  return {
+    lspAutoStartLanguages: current.lspAutoStartLanguages ?? [],
+    lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
+    lspServerConfigs: current.lspServerConfigs ?? {},
+  };
+}
+
+function carryForwardCoreSettings(current: DisplaySettings) {
   return {
     shellOptions: current.shellOptions ?? [],
     defaultEditorId: current.defaultEditorId ?? null,
@@ -44,13 +57,52 @@ function carryForwardSettings(current: DisplaySettings) {
     reviewAutoMarkOnScroll: current.reviewAutoMarkOnScroll ?? true,
     showReleaseNotification: current.showReleaseNotification ?? true,
     releaseNotesLastSeenVersion: current.releaseNotesLastSeenVersion ?? null,
-    lspAutoStartLanguages: current.lspAutoStartLanguages ?? [],
-    lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
-    lspServerConfigs: current.lspServerConfigs ?? {},
     savedLayouts: current.savedLayouts ?? [],
-    sidebarViews: current.sidebarViews ?? [],
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
+    tasksListSort: current.tasksListSort ?? DEFAULT_TASKS_LIST_SORT,
+    tasksListGroup: current.tasksListGroup ?? DEFAULT_TASKS_LIST_GROUP,
+    changesPanelLayout: current.changesPanelLayout ?? "tree",
+    systemMetricsDisplay: current.systemMetricsDisplay ?? { showInTopbar: false },
+    voiceMode: current.voiceMode ?? { ...DEFAULT_VOICE_MODE_STATE },
+  };
+}
+
+function carryForwardSidebarSettings(current: DisplaySettings) {
+  return {
+    sidebarViews: current.sidebarViews ?? [],
+    sidebarActiveViewId: current.sidebarActiveViewId ?? null,
+    sidebarDraft: current.sidebarDraft ?? null,
+    sidebarTaskPrefs: current.sidebarTaskPrefs ?? {
+      pinnedTaskIds: [],
+      orderedTaskIds: [],
+      subtaskOrderByParentId: {},
+    },
+  };
+}
+
+function carryForwardSyncedLocalSettings(current: DisplaySettings) {
+  return {
+    taskCreateLastUsed: current.taskCreateLastUsed ?? {
+      repositoryId: null,
+      branch: null,
+      agentProfileId: null,
+      executorProfileId: null,
+    },
+    jiraSavedViews: current.jiraSavedViews,
+    jiraTaskPresets: current.jiraTaskPresets,
+    githubSavedPresets: current.githubSavedPresets,
+    githubDefaultQueryPresets: current.githubDefaultQueryPresets,
+    gitlabSavedPresets: current.gitlabSavedPresets,
+  };
+}
+
+function carryForwardSettings(current: DisplaySettings) {
+  return {
+    ...carryForwardCoreSettings(current),
+    ...carryForwardSidebarSettings(current),
+    ...carryForwardSyncedLocalSettings(current),
+    ...carryForwardLspSettings(current),
     ...carryForwardTerminalSettings(current),
   };
 }
@@ -104,25 +156,6 @@ function useUserSettingsRef(userSettings: DisplaySettings) {
   return userSettingsRef;
 }
 
-function useLoadUserSettings(
-  loaded: boolean,
-  setUserSettings: (settings: DisplaySettings) => void,
-) {
-  useEffect(() => {
-    if (loaded) return;
-    fetchUserSettings({ cache: "no-store" })
-      .then((data) => {
-        if (!data?.settings) return;
-        const mapped = mapUserSettingsResponse(data);
-        if (!mapped.loaded) return;
-        setUserSettings(mapped);
-      })
-      .catch(() => {
-        /* Ignore settings fetch errors for now. */
-      });
-  }, [loaded, setUserSettings]);
-}
-
 function usePruneStaleRepositoryIds(
   userSettings: DisplaySettings,
   repositories: Repository[],
@@ -166,6 +199,7 @@ export function useUserDisplaySettings({
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, true);
   const userSettingsRef = useUserSettingsRef(userSettings);
+  const routeWorkflowId = useSearchParams().get("workflowId");
 
   const settingsLoadedOnMountRef = useRef(userSettings.loaded);
 
@@ -187,16 +221,23 @@ export function useUserDisplaySettings({
     [setUserSettings, userSettingsRef],
   );
 
-  useLoadUserSettings(userSettings.loaded, setUserSettings);
+  useEnsureUserSettings();
 
   useEffect(() => {
     if (!userSettings.loaded) return;
+    if (routeWorkflowId) return;
     if (settingsLoadedOnMountRef.current) return;
     settingsLoadedOnMountRef.current = true;
     if (userSettings.workspaceId && userSettings.workspaceId !== workspaceId) {
       onWorkspaceChange?.(userSettings.workspaceId);
     }
-  }, [onWorkspaceChange, userSettings.loaded, userSettings.workspaceId, workspaceId]);
+  }, [
+    onWorkspaceChange,
+    routeWorkflowId,
+    userSettings.loaded,
+    userSettings.workspaceId,
+    workspaceId,
+  ]);
 
   useEffect(() => {
     if (!userSettings.loaded || !(!userSettings.workspaceId && workspaceId)) return;
@@ -218,11 +259,12 @@ export function useUserDisplaySettings({
 
   useEffect(() => {
     if (!userSettings.loaded) return;
+    if (routeWorkflowId) return;
     if (settingsLoadedOnMountRef.current) return;
     if (userSettings.workflowId && userSettings.workflowId !== workflowId) {
       onWorkflowChange?.(userSettings.workflowId);
     }
-  }, [workflowId, onWorkflowChange, userSettings.workflowId, userSettings.loaded]);
+  }, [workflowId, onWorkflowChange, routeWorkflowId, userSettings.workflowId, userSettings.loaded]);
 
   usePruneStaleRepositoryIds(userSettings, repositories, commitSettings);
 

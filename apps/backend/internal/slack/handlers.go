@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -32,12 +33,49 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/config", c.httpSetConfig)
 	api.DELETE("/config", c.httpDeleteConfig)
 	api.POST("/config/test", c.httpTestConfig)
+	api.POST("/config/copy", c.httpCopyConfig)
+}
+
+// copyConfigRequest is the payload for the copy-config endpoint. The source
+// workspace is taken from the workspace_id query param (like every other
+// handler here); the body carries the target.
+type copyConfigRequest struct {
+	TargetWorkspaceID string `json:"targetWorkspaceId"`
+}
+
+func (c *Controller) httpCopyConfig(ctx *gin.Context) {
+	sourceWorkspaceID := c.workspaceID(ctx)
+	if sourceWorkspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	var req copyConfigRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	targetWorkspaceID := strings.TrimSpace(req.TargetWorkspaceID)
+	if targetWorkspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "targetWorkspaceId required"})
+		return
+	}
+	cfg, err := c.service.CopyConfigToWorkspace(ctx.Request.Context(), sourceWorkspaceID, targetWorkspaceID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrNothingToCopy), errors.Is(err, ErrInvalidConfig):
+			status = http.StatusBadRequest
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, cfg)
 }
 
 // --- HTTP handlers ---
 
 func (c *Controller) httpGetConfig(ctx *gin.Context) {
-	cfg, err := c.service.GetConfig(ctx.Request.Context())
+	cfg, err := c.service.GetConfigForWorkspace(ctx.Request.Context(), c.workspaceID(ctx))
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -55,7 +93,7 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	cfg, err := c.service.SetConfig(ctx.Request.Context(), &req)
+	cfg, err := c.service.SetConfigForWorkspace(ctx.Request.Context(), c.workspaceID(ctx), &req)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrInvalidConfig) {
@@ -68,7 +106,7 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 }
 
 func (c *Controller) httpDeleteConfig(ctx *gin.Context) {
-	if err := c.service.DeleteConfig(ctx.Request.Context()); err != nil {
+	if err := c.service.DeleteConfigForWorkspace(ctx.Request.Context(), c.workspaceID(ctx)); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -81,12 +119,16 @@ func (c *Controller) httpTestConfig(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	result, err := c.service.TestConnection(ctx.Request.Context(), &req)
+	result, err := c.service.TestConnectionForWorkspace(ctx.Request.Context(), c.workspaceID(ctx), &req)
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, result)
+}
+
+func (c *Controller) workspaceID(ctx *gin.Context) string {
+	return strings.TrimSpace(ctx.Query("workspace_id"))
 }
 
 // errCodeSlackNotConfigured is the wire-level code surfaced to the UI when

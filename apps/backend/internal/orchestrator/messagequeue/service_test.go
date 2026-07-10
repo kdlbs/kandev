@@ -126,6 +126,64 @@ func TestAppendContent(t *testing.T) {
 	})
 }
 
+func TestQueueMessageWithCoalesceKey(t *testing.T) {
+	t.Run("replaces matching entry without changing FIFO position", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		first, err := svc.QueueMessage(ctx, "s", "t", "first", "", "user", false, nil)
+		require.NoError(t, err)
+		ci, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "old ci", "", QueuedByWorkflow, false, nil, map[string]interface{}{"origin": "ci"}, "ci-key", true)
+		require.NoError(t, err)
+		require.False(t, replaced)
+		_, err = svc.QueueMessage(ctx, "s", "t", "tail", "", "user", false, nil)
+		require.NoError(t, err)
+
+		updated, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "new ci", "", QueuedByWorkflow, false, nil, map[string]interface{}{"origin": "ci-new"}, "ci-key", true)
+		require.NoError(t, err)
+		require.True(t, replaced)
+		require.Equal(t, ci.ID, updated.ID)
+
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 3, status.Count)
+		assert.Equal(t, first.ID, status.Entries[0].ID)
+		assert.Equal(t, ci.ID, status.Entries[1].ID)
+		assert.Equal(t, "new ci", status.Entries[1].Content)
+		assert.Equal(t, "ci-new", status.Entries[1].Metadata["origin"])
+		assert.Equal(t, "tail", status.Entries[2].Content)
+	})
+
+	t.Run("does not mutate caller metadata or retag existing entries", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		metadata := map[string]interface{}{"origin": "ci"}
+
+		first, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "first ci", "", QueuedByWorkflow, false, nil, metadata, "ci-key", true)
+		require.NoError(t, err)
+		require.False(t, replaced)
+		second, replaced, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "second ci", "", QueuedByWorkflow, false, nil, metadata, "other-key", true)
+		require.NoError(t, err)
+		require.False(t, replaced)
+
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 2, status.Count)
+		assert.Equal(t, first.ID, status.Entries[0].ID)
+		assert.Equal(t, second.ID, status.Entries[1].ID)
+		assert.Equal(t, "ci-key", status.Entries[0].Metadata[MetadataCoalesceKey])
+		assert.Equal(t, "other-key", status.Entries[1].Metadata[MetadataCoalesceKey])
+		assert.NotContains(t, metadata, MetadataCoalesceKey)
+	})
+
+	t.Run("returns entry not found when insert disabled and no match exists", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, _, err := svc.QueueMessageWithCoalesceKey(ctx, "s", "t", "ci", "", QueuedByWorkflow, false, nil, nil, "ci-key", false)
+		assert.ErrorIs(t, err, ErrEntryNotFound)
+		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
+	})
+}
+
 func TestTakeQueued(t *testing.T) {
 	t.Run("returns entries in FIFO order", func(t *testing.T) {
 		svc := setupService(t)
@@ -327,6 +385,39 @@ func TestTransferSession(t *testing.T) {
 		_, ok := svc.TakeQueued(ctx, "new")
 		assert.False(t, ok)
 	})
+}
+
+func TestRestoreSession(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	original, err := svc.QueueMessageWithMetadata(ctx, "s", "task-1", "original", "model-a", "agent", true, []MessageAttachment{
+		{Type: "image", Data: "abc", MimeType: "image/png"},
+	}, map[string]interface{}{"sender": "task-a"})
+	require.NoError(t, err)
+	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-a"})
+
+	_, err = svc.QueueMessage(ctx, "s", "task-1", "mutated", "", "user", false, nil)
+	require.NoError(t, err)
+	svc.SetPendingMove(ctx, "s", &PendingMove{TaskID: "task-1", WorkflowStepID: "step-b"})
+
+	require.NoError(t, svc.RestoreSession(ctx, "s", []QueuedMessage{*original}, &PendingMove{
+		TaskID:         "task-1",
+		WorkflowStepID: "step-a",
+		QueuedAt:       original.QueuedAt,
+	}))
+
+	status := svc.GetStatus(ctx, "s")
+	require.Equal(t, 1, status.Count)
+	restored := status.Entries[0]
+	assert.Equal(t, original.ID, restored.ID)
+	assert.Equal(t, original.Position, restored.Position)
+	assert.Equal(t, original.QueuedAt, restored.QueuedAt)
+	assert.Equal(t, original.Content, restored.Content)
+	assert.Equal(t, original.Metadata, restored.Metadata)
+	move, ok := svc.TakePendingMove(ctx, "s")
+	require.True(t, ok)
+	assert.Equal(t, "step-a", move.WorkflowStepID)
 }
 
 func TestPendingMove(t *testing.T) {

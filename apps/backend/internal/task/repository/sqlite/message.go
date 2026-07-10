@@ -24,6 +24,9 @@ func (r *Repository) CreateMessage(ctx context.Context, message *models.Message)
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now().UTC()
 	}
+	if message.UpdatedAt.IsZero() {
+		message.UpdatedAt = message.CreatedAt
+	}
 	if message.AuthorType == "" {
 		message.AuthorType = models.MessageAuthorUser
 	}
@@ -48,9 +51,9 @@ func (r *Repository) CreateMessage(ctx context.Context, message *models.Message)
 	}
 
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt)
+		INSERT INTO task_session_messages (id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), message.ID, message.TaskSessionID, message.TaskID, message.TurnID, message.AuthorType, message.AuthorID, message.Content, requestsInput, messageType, metadataJSON, message.CreatedAt, message.UpdatedAt)
 
 	return err
 }
@@ -62,9 +65,9 @@ func (r *Repository) GetMessage(ctx context.Context, id string) (*models.Message
 	var messageType string
 	var metadataJSON string
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages WHERE id = ?
-	`), id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+	`), id).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -83,39 +86,31 @@ func (r *Repository) GetMessage(ctx context.Context, id string) (*models.Message
 // ListMessages returns all messages for a session ordered by creation time.
 func (r *Repository) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages WHERE task_session_id = ? ORDER BY created_at ASC
 	`), sessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
+	msgs, _, err := scanMessageRows(rows, 0)
+	return msgs, err
+}
 
-	var result []*models.Message
-	for rows.Next() {
-		message := &models.Message{}
-		var requestsInput int
-		var messageType string
-		var metadataJSON string
-		err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
-		if err != nil {
-			return nil, err
-		}
-		message.RequestsInput = requestsInput == 1
-		message.Type = models.MessageType(messageType)
-
-		if metadataJSON != "" && metadataJSON != "{}" {
-			if err := json.Unmarshal([]byte(metadataJSON), &message.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to deserialize message metadata: %w", err)
-			}
-		}
-
-		result = append(result, message)
-	}
-	if err := rows.Err(); err != nil {
+// ListMessagesByTurnID returns all messages for a single turn ordered by
+// creation time. Backed by idx_messages_turn_id, so it reads only the turn's
+// own rows rather than the whole session's history.
+func (r *Repository) ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
+		FROM task_session_messages WHERE turn_id = ? ORDER BY created_at ASC
+	`), turnID)
+	if err != nil {
 		return nil, err
 	}
-	return result, nil
+	defer func() { _ = rows.Close() }()
+	msgs, _, err := scanMessageRows(rows, 0)
+	return msgs, err
 }
 
 // ListMessagesPaginated returns messages for a session ordered by creation time with pagination.
@@ -170,7 +165,7 @@ func (r *Repository) resolveMessageCursor(ctx context.Context, sessionID string,
 
 func buildListMessagesQuery(sessionID string, opts models.ListMessagesOptions, cursor *models.Message, sortDir string, limit int) (string, []interface{}) {
 	query := `
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
 	if cursor != nil {
@@ -200,7 +195,7 @@ func scanMessageRows(rows interface {
 		var requestsInput int
 		var messageType string
 		var metadataJSON string
-		if err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID, &message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt); err != nil {
 			return nil, false, err
 		}
 		message.RequestsInput = requestsInput == 1
@@ -241,7 +236,7 @@ func (r *Repository) SearchMessages(ctx context.Context, sessionID string, opts 
 	escaper := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	pattern := "%" + escaper.Replace(query) + "%"
 	sql := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages
 		WHERE task_session_id = ? AND content %s ? ESCAPE '\'
 		ORDER BY created_at DESC, id DESC
@@ -277,12 +272,12 @@ func (r *Repository) getMessageByMetadataField(ctx context.Context, sessionID, f
 	var metadataJSON string
 	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages WHERE task_session_id = ? AND %s = ?
 		%s
 	`, dialect.JSONExtract(drv, "metadata", fieldName), orderSuffix)
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID, fieldValue).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
-		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -323,12 +318,12 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 	var metadataJSON string
 	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages WHERE %s = ?
 		ORDER BY created_at DESC LIMIT 1
 	`, dialect.JSONExtract(drv, "metadata", "pending_id"))
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), pendingID).Scan(&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
-		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt)
+		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -348,11 +343,32 @@ func (r *Repository) FindMessageByPendingID(ctx context.Context, pendingID strin
 func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error) {
 	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages WHERE %s = ?
 		ORDER BY created_at ASC
 	`, dialect.JSONExtract(drv, "metadata", "pending_id"))
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), pendingID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	result, _, err := scanMessageRows(rows, 0)
+	return result, err
+}
+
+// FindPendingClarificationMessagesBySessionID returns every clarification_request
+// message for the session whose metadata.status is still "pending". Used by the
+// canceller as a fallback when the in-memory store entry has already been drained
+// by a racing timeout path.
+func (r *Repository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
+	drv := r.ro.DriverName()
+	query := fmt.Sprintf(`
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
+		FROM task_session_messages
+		WHERE task_session_id = ? AND type = 'clarification_request' AND %s = 'pending'
+		ORDER BY created_at ASC
+	`, dialect.JSONExtract(drv, "metadata", "status"))
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -369,7 +385,7 @@ func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID stri
 func (r *Repository) FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error) {
 	drv := r.ro.DriverName()
 	query := fmt.Sprintf(`
-		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at
+		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages
 		WHERE task_session_id = ? AND %s = ? AND %s = ?
 		ORDER BY created_at ASC LIMIT 1
@@ -383,7 +399,7 @@ func (r *Repository) FindMessageByPendingIDAndQuestion(ctx context.Context, sess
 	var metadataJSON string
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(query), sessionID, pendingID, questionID).Scan(
 		&message.ID, &message.TaskSessionID, &message.TaskID, &message.TurnID, &message.AuthorType, &message.AuthorID,
-		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt,
+		&message.Content, &requestsInput, &messageType, &metadataJSON, &message.CreatedAt, &message.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -407,7 +423,7 @@ func (r *Repository) CompletePendingToolCallsForTurn(ctx context.Context, turnID
 	drv := r.db.DriverName()
 	query := fmt.Sprintf(`
 		UPDATE task_session_messages
-		SET metadata = %s
+		SET metadata = %s, updated_at = CURRENT_TIMESTAMP
 		WHERE turn_id = ?
 		  AND type != 'permission_request'
 		  AND %s NOT IN ('complete', 'error')
@@ -436,10 +452,11 @@ func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message)
 		requestsInput = 1
 	}
 
+	message.UpdatedAt = time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?
+		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, updated_at = ?
 		WHERE id = ?
-	`), message.Content, requestsInput, string(message.Type), string(metadataJSON), message.ID)
+	`), message.Content, requestsInput, string(message.Type), string(metadataJSON), message.UpdatedAt, message.ID)
 	if err != nil {
 		return err
 	}

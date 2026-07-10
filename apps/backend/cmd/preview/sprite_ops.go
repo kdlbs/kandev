@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kandev/kandev/internal/common/ports"
 	sprites "github.com/superfly/sprites-go"
 )
 
@@ -107,6 +106,7 @@ chmod +x /app/apps/backend/bin/kandev \
          /app/apps/backend/bin/mock-agent
 ln -sf /app/apps/backend/bin/agentctl    /usr/local/bin/agentctl
 ln -sf /app/apps/backend/bin/mock-agent  /usr/local/bin/mock-agent
+ln -sf /app/apps/backend/bin/kandev      /usr/local/bin/kandev
 # Reset data directory on each deploy so the DB starts fresh (preview env only).
 rm -rf /data
 mkdir -p /data /var/log
@@ -120,27 +120,27 @@ mkdir -p /data
 
 # Kill any agentctl orphans from previous runs.
 pkill -f agentctl || true
-# Kill any stale web (node) process — nohup'd node survives StopService since
-# it detaches from the process group, and would hold the web port on redeploy.
-pkill -f '/app/apps/web/.next/standalone/web/server.js' || true
 sleep 1
+cd /app
 
-# Start Next.js web server in background.
-PORT=%d HOSTNAME=0.0.0.0 NODE_ENV=production \
-  nohup node /app/apps/web/.next/standalone/web/server.js \
-  > /var/log/kandev-web.log 2>&1 &
-
-# Start Go backend (main process — Sprites HTTPPort proxies here).
 export KANDEV_HOME_DIR=/data
 export KANDEV_DOCKER_ENABLED=false
 export KANDEV_LOG_LEVEL=info
-export KANDEV_SERVER_PORT=%d
-export KANDEV_WEB_INTERNAL_URL=http://localhost:%d
+export KANDEV_WEB_DIST_DIR=/app/apps/web/dist
 # Preview mode: only register the mock agent, suppress real agent discovery.
 export KANDEV_MOCK_AGENT=only
-/app/apps/backend/bin/kandev > /var/log/kandev.log 2>&1
+# The preview service runs from /app, so the backend's relative dist probes do
+# not reach the packaged Vite build under /app/apps/web/dist.
+export KANDEV_WEB_DIST_DIR=/app/apps/web/dist
+
+# Launch through the CLI so the backend runs under the restart supervisor.
+exec kandev start \
+  --backend-port %d \
+  --verbose \
+  --headless \
+  > /var/log/kandev.log 2>&1
 STARTSCRIPT
-chmod +x /app/start-kandev.sh`, ports.Web, backendPort, ports.Web)
+chmod +x /app/start-kandev.sh`, backendPort)
 }
 
 // deployService stops any running kandev service, registers (or updates) its
@@ -278,7 +278,7 @@ func fetchSpriteLogs(ctx context.Context, sprite *sprites.Sprite) string {
 	logCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	script := `echo "=== /var/log/kandev.log ==="; tail -50 /var/log/kandev.log 2>/dev/null || echo "(empty)"; echo "=== /var/log/kandev-web.log ==="; tail -20 /var/log/kandev-web.log 2>/dev/null || echo "(empty)"`
+	script := `echo "=== /var/log/kandev.log ==="; tail -50 /var/log/kandev.log 2>/dev/null || echo "(empty)"`
 	out, err := sprite.CommandContext(logCtx, "bash", "-c", script).CombinedOutput()
 	if err != nil {
 		return fmt.Sprintf("[log fetch error: %v]\n%s", err, string(out))

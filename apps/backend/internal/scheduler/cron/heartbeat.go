@@ -78,7 +78,7 @@ type HeartbeatAgentRuntime interface {
 // (engine state is keyed on session id) and forward to
 // engine.HandleTrigger.
 //
-// Mirrors office/service.WorkflowEngineDispatcher to keep wiring
+// Mirrors office/shared.WorkflowEngineDispatcher to keep wiring
 // trivial — the office's existing engine_dispatcher.Dispatcher
 // satisfies this interface unchanged.
 type HeartbeatEngineDispatcher interface {

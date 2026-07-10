@@ -13,6 +13,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -97,6 +98,10 @@ func newMockTaskRepo() *mockTaskRepo {
 	}
 }
 
+func seedMockTaskState(repo *mockTaskRepo, taskID string, state v1.TaskState) {
+	repo.tasks[taskID] = &v1.Task{ID: taskID, State: state}
+}
+
 func (m *mockTaskRepo) GetTask(_ context.Context, taskID string) (*v1.Task, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -114,13 +119,47 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 	defer m.mu.Unlock()
 	m.updatedStates[taskID] = state
 	m.stateWrites[taskID]++
+	if t, ok := m.tasks[taskID]; ok {
+		t.State = state
+	}
 	return nil
+}
+
+func (m *mockTaskRepo) UpdateTaskStateIfCurrentIn(
+	_ context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tasks[taskID]
+	if !ok {
+		return false, fmt.Errorf("%w: %s", sqliterepo.ErrTaskNotFound, taskID)
+	}
+	for _, candidate := range allowed {
+		if t.State != candidate {
+			continue
+		}
+		m.updatedStates[taskID] = state
+		m.stateWrites[taskID]++
+		t.State = state
+		return true, nil
+	}
+	return false, nil
 }
 
 // mockAgentManager is a minimal mock of executor.AgentManagerClient for testing.
 type mockAgentManager struct {
-	isPassthrough       bool
-	isAgentRunning      bool
+	isPassthrough  bool
+	isAgentRunning bool
+	// isAgentRunningFn, when non-nil, overrides isAgentRunning for
+	// IsAgentRunningForSession. Lets tests model state changes mid-sequence
+	// (e.g. stream disconnect between PromptAgent call and queue write).
+	isAgentRunningFn func(context.Context, string) bool
+	isAgentReadyFn   func(context.Context, string) bool
+	// rowLivenessFn, when non-nil, makes the mock satisfy the orchestrator's
+	// optional rowLivenessProber so reconciliation tests can drive runtime-aware
+	// liveness per row. Nil → the mock is not a prober and reconciliation treats
+	// every row as Unknown.
+	rowLivenessFn       func(*models.ExecutorRunning) models.ProcessLiveness
 	resolveProfileErr   error
 	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
 	restartProcessErr   error
@@ -130,6 +169,8 @@ type mockAgentManager struct {
 
 	mu                      sync.Mutex
 	stopAgentWithReasonArgs []stopAgentCall // tracks StopAgentWithReason calls
+	stopAgentWithReasonErr  error           // optional error to return from StopAgentWithReason
+	stopAgentWithReasonFunc func(context.Context, string, string, bool) error
 	stopAgentArgs           []stopAgentCall // tracks StopAgent calls (no reason)
 	stopAgentErr            error           // optional error to return from StopAgent
 
@@ -147,6 +188,12 @@ type mockAgentManager struct {
 	passthroughStdinErr   error
 	markPassthroughCalls  []string // session IDs
 	markPassthroughErr    error
+
+	// Passthrough config resolution. When zero-valued and isPassthrough is true,
+	// the mock returns a default config with SubmitSequence == "\r".
+	passthroughConfig    agents.PassthroughConfig
+	passthroughConfigSet bool
+	passthroughConfigErr error
 
 	// Optional override for GetExecutionIDForSession. When unset, the default
 	// implementation reads from repoForExecutionLookup if provided so tests that
@@ -167,6 +214,25 @@ type mockAgentManager struct {
 	cancelAgentCalls   atomic.Int32
 	cancelAgentBlock   chan struct{}
 	cancelAgentEntered chan struct{}
+
+	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
+	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
+	// returned to simulate "no running agent".
+	setSessionModeCalls      []sessionModeCall
+	setSessionModeErr        error
+	setSessionModelCalls     []sessionModelCall
+	setSessionModelSupported bool
+	setSessionModelErr       error
+}
+
+type sessionModelCall struct {
+	SessionID string
+	ModelID   string
+}
+
+type sessionModeCall struct {
+	SessionID string
+	ModeID    string
 }
 
 type stopAgentCall struct {
@@ -177,8 +243,9 @@ type stopAgentCall struct {
 
 // promptCall records one PromptAgent invocation with its target execution ID.
 type promptCall struct {
-	ExecutionID string
-	Prompt      string
+	ExecutionID  string
+	Prompt       string
+	DispatchOnly bool
 }
 
 type passthroughStdinCall struct {
@@ -199,21 +266,26 @@ func (m *mockAgentManager) StopAgent(_ context.Context, agentExecutionID string,
 	m.stopAgentArgs = append(m.stopAgentArgs, stopAgentCall{ExecutionID: agentExecutionID, Force: force})
 	return m.stopAgentErr
 }
-func (m *mockAgentManager) StopAgentWithReason(_ context.Context, agentExecutionID, reason string, force bool) error {
+func (m *mockAgentManager) StopAgentWithReason(ctx context.Context, agentExecutionID, reason string, force bool) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.stopAgentWithReasonArgs = append(m.stopAgentWithReasonArgs, stopAgentCall{
 		ExecutionID: agentExecutionID,
 		Reason:      reason,
 		Force:       force,
 	})
-	return nil
+	hook := m.stopAgentWithReasonFunc
+	err := m.stopAgentWithReasonErr
+	m.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, agentExecutionID, reason, force)
+	}
+	return err
 }
-func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*executor.PromptResult, error) {
+func (m *mockAgentManager) PromptAgent(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
 	m.mu.Lock()
 	first := len(m.capturedPrompts) == 0
 	m.capturedPrompts = append(m.capturedPrompts, prompt)
-	m.capturedPromptCalls = append(m.capturedPromptCalls, promptCall{ExecutionID: executionID, Prompt: prompt})
+	m.capturedPromptCalls = append(m.capturedPromptCalls, promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly})
 	promptErr := m.promptErr
 	promptResult := m.promptResult
 	doneCh := m.promptDone
@@ -245,8 +317,27 @@ func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error {
 func (m *mockAgentManager) RespondToPermissionBySessionID(_ context.Context, _, _, _ string, _ bool) error {
 	return nil
 }
-func (m *mockAgentManager) IsAgentRunningForSession(_ context.Context, _ string) bool {
+func (m *mockAgentManager) IsAgentRunningForSession(ctx context.Context, sessionID string) bool {
+	if m.isAgentRunningFn != nil {
+		return m.isAgentRunningFn(ctx, sessionID)
+	}
 	return m.isAgentRunning
+}
+func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
+	if m.isAgentReadyFn != nil {
+		return m.isAgentReadyFn(ctx, sessionID)
+	}
+	return m.IsAgentRunningForSession(ctx, sessionID)
+}
+
+// RowLiveness makes the mock satisfy the orchestrator's optional
+// rowLivenessProber. It delegates to rowLivenessFn when set, else reports Unknown
+// so tests that don't care about liveness see the safe default.
+func (m *mockAgentManager) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
+	if m.rowLivenessFn != nil {
+		return m.rowLivenessFn(row)
+	}
+	return models.ProcessLivenessUnknown
 }
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
 	if m.resolveProfileErr != nil {
@@ -272,8 +363,23 @@ func (m *mockAgentManager) SetExecutionDescription(_ context.Context, _, _ strin
 func (m *mockAgentManager) SetExecutionEnv(_ context.Context, _ string, _ map[string]string) error {
 	return nil
 }
-func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
-	return fmt.Errorf("not supported")
+func (m *mockAgentManager) SetSessionModelBySessionID(_ context.Context, sessionID, modelID string) error {
+	if !m.setSessionModelSupported {
+		return fmt.Errorf("not supported")
+	}
+	m.mu.Lock()
+	m.setSessionModelCalls = append(m.setSessionModelCalls, sessionModelCall{SessionID: sessionID, ModelID: modelID})
+	m.mu.Unlock()
+	if m.setSessionModelErr != nil {
+		return m.setSessionModelErr
+	}
+	return nil
+}
+func (m *mockAgentManager) SetSessionModeBySessionID(_ context.Context, sessionID, modeID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setSessionModeCalls = append(m.setSessionModeCalls, sessionModeCall{SessionID: sessionID, ModeID: modeID})
+	return m.setSessionModeErr
 }
 func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {
 	return nil
@@ -290,6 +396,20 @@ func (m *mockAgentManager) WritePassthroughStdin(_ context.Context, sessionID st
 	defer m.mu.Unlock()
 	m.passthroughStdinCalls = append(m.passthroughStdinCalls, passthroughStdinCall{SessionID: sessionID, Data: data})
 	return m.passthroughStdinErr
+}
+func (m *mockAgentManager) ResolvePassthroughConfig(_ context.Context, _ string) (agents.PassthroughConfig, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.passthroughConfigErr != nil {
+		return agents.PassthroughConfig{}, m.passthroughConfigErr
+	}
+	if m.passthroughConfigSet {
+		return m.passthroughConfig, nil
+	}
+	if !m.isPassthrough {
+		return agents.PassthroughConfig{Supported: false}, nil
+	}
+	return agents.PassthroughConfig{Supported: true, SubmitSequence: "\r"}, nil
 }
 func (m *mockAgentManager) MarkPassthroughRunning(sessionID string) error {
 	m.mu.Lock()
@@ -595,10 +715,39 @@ func TestHandleAgentReadyGuards(t *testing.T) {
 		}
 	})
 
+	t.Run("ignores ready while cancel is in flight", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		}
+		agentMgr := &mockAgentManager{isAgentRunning: true}
+		svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
+
+		if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "queued", "", messagequeue.QueuedByUser, false, nil); err != nil {
+			t.Fatalf("failed to queue message: %v", err)
+		}
+		svc.cancelInFlight.Store("s1", struct{}{})
+		defer svc.cancelInFlight.Delete("s1")
+
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		status := svc.messageQueue.GetStatus(ctx, "s1")
+		if status.Count != 1 {
+			t.Fatalf("expected queued message to remain parked during cancel, count=%d entries=%+v", status.Count, status.Entries)
+		}
+		if len(agentMgr.capturedPrompts) != 0 {
+			t.Fatalf("expected no queued prompt dispatch during cancel, got %d prompts", len(agentMgr.capturedPrompts))
+		}
+	})
+
 	t.Run("moves STARTING session to waiting for input", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")
 		taskRepo := newMockTaskRepo()
+		seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 
 		// Register the workflow step so processOnTurnComplete can resolve it.
 		stepGetter := newMockStepGetter()
@@ -701,6 +850,59 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	}
 	if status.Entries[0].Content != "hello" {
 		t.Fatalf("expected queued content to be preserved, got %q", status.Entries[0].Content)
+	}
+}
+
+func TestExecuteQueuedMessage_RequeuesCoalescedMessageWithOriginalSender(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		promptErr:      errors.New("agent stream disconnected: read tcp [::1]:56463->[::1]:10002: use of closed network connection"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	queuedMsg := &messagequeue.QueuedMessage{
+		ID:        "q1",
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "hello",
+		Metadata:  map[string]interface{}{messagequeue.MetadataCoalesceKey: "ci-key"},
+		QueuedBy:  messagequeue.QueuedByWorkflow,
+	}
+	if _, _, err := svc.messageQueue.QueueMessageWithCoalesceKey(ctx, "s1", "t1", "newer ci feedback", "", messagequeue.QueuedByWorkflow, false, nil, map[string]interface{}{messagequeue.MetadataCoalesceKey: "ci-key"}, "ci-key", true); err != nil {
+		t.Fatalf("seed newer coalesced message: %v", err)
+	}
+
+	svc.executeQueuedMessage("s1", queuedMsg)
+
+	status := svc.messageQueue.GetStatus(ctx, "s1")
+	if status.Count != 1 {
+		t.Fatalf("expected coalesced retry to replace existing pending entry, count=%d", status.Count)
+	}
+	if status.Entries[0].Content != "hello" {
+		t.Fatalf("expected transient retry to remain coalesced, got %q", status.Entries[0].Content)
+	}
+	if status.Entries[0].QueuedBy != messagequeue.QueuedByWorkflow {
+		t.Fatalf("expected original queued_by to be preserved, got %q", status.Entries[0].QueuedBy)
+	}
+	if status.Entries[0].Metadata[messagequeue.MetadataCoalesceKey] != "ci-key" {
+		t.Fatalf("expected coalesce metadata to be preserved, got %+v", status.Entries[0].Metadata)
 	}
 }
 
@@ -870,6 +1072,250 @@ func TestHandleAgentCompleted_CleansUpExecution(t *testing.T) {
 	}
 }
 
+func TestHandleAgentCompleted_MarksRotatedExecutionCompleted(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-live")
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "exec-old",
+	})
+	waitForStopCall(t, agentMgr)
+
+	if !svc.isExecutionCompleted("s1", "exec-old") {
+		t.Fatal("rotated agent.completed events must still block late tool events from the old execution")
+	}
+}
+
+func TestHandleAgentCompleted_DoesNotMoveTaskToReviewWhileSiblingRuns(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s-finishing", "")
+	seedExecutorRunning(t, repo, "s-finishing", "t1", "exec-finishing")
+
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "s-running",
+		TaskID:    "t1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Second),
+		UpdatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("failed to create running sibling session: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s-finishing",
+		AgentExecutionID: "exec-finishing",
+	})
+	waitForStopCall(t, agentMgr)
+
+	if got := taskRepo.stateWrites["t1"]; got != 0 {
+		t.Fatalf("agent completion must not move the task to REVIEW while another session is running, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+
+	updatedFinishing, err := repo.GetTaskSession(ctx, "s-finishing")
+	if err != nil {
+		t.Fatalf("failed to load finishing session: %v", err)
+	}
+	if updatedFinishing.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected finishing session to leave RUNNING, got %q", updatedFinishing.State)
+	}
+}
+
+func TestHandleAgentCompleted_MovesTaskToReviewWhenLastSiblingFinishes(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s-first", "step1")
+	seedExecutorRunning(t, repo, "s-first", "t1", "exec-first")
+
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "s-last",
+		TaskID:    "t1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Second),
+		UpdatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("failed to create running sibling session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "s-last", "t1", "exec-last")
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID:         "step1",
+		WorkflowID: "wf1",
+		Name:       "Step 1",
+		Position:   0,
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s-first",
+		AgentExecutionID: "exec-first",
+	})
+
+	if got := taskRepo.stateWrites["t1"]; got != 0 {
+		t.Fatalf("first completion must not move task to REVIEW while sibling runs, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s-last",
+		AgentExecutionID: "exec-last",
+	})
+
+	if got := taskRepo.stateWrites["t1"]; got != 1 {
+		t.Fatalf("last sibling completion must move task to REVIEW once, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+	if state := taskRepo.updatedStates["t1"]; state != v1.TaskStateReview {
+		t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, state)
+	}
+}
+
+func TestHandleAgentCompleted_NoWorkflowStepLastSiblingMovesTaskToReview(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s-first", "")
+	seedExecutorRunning(t, repo, "s-first", "t1", "exec-first")
+
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "s-last",
+		TaskID:    "t1",
+		State:     models.TaskSessionStateRunning,
+		StartedAt: now.Add(time.Second),
+		UpdatedAt: now.Add(time.Second),
+	}); err != nil {
+		t.Fatalf("failed to create running sibling session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "s-last", "t1", "exec-last")
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s-first",
+		AgentExecutionID: "exec-first",
+	})
+
+	if got := taskRepo.stateWrites["t1"]; got != 0 {
+		t.Fatalf("first no-step completion must not move task to REVIEW while sibling runs, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+	updatedFirst, err := repo.GetTaskSession(ctx, "s-first")
+	if err != nil {
+		t.Fatalf("failed to load first session: %v", err)
+	}
+	if updatedFirst.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected first session state %q, got %q", models.TaskSessionStateWaitingForInput, updatedFirst.State)
+	}
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s-last",
+		AgentExecutionID: "exec-last",
+	})
+
+	if got := taskRepo.stateWrites["t1"]; got != 1 {
+		t.Fatalf("last no-step sibling completion must move task to REVIEW once, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+	updatedFirst, err = repo.GetTaskSession(ctx, "s-first")
+	if err != nil {
+		t.Fatalf("failed to reload first session: %v", err)
+	}
+	if updatedFirst.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected first session to remain %q, got %q", models.TaskSessionStateWaitingForInput, updatedFirst.State)
+	}
+	updatedLast, err := repo.GetTaskSession(ctx, "s-last")
+	if err != nil {
+		t.Fatalf("failed to load last session: %v", err)
+	}
+	if updatedLast.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected last session state %q, got %q", models.TaskSessionStateWaitingForInput, updatedLast.State)
+	}
+}
+
+func TestHandleAgentCompleted_ExitOnlyCompletesActiveTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "")
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+
+	if _, err := svc.turnService.StartTurn(ctx, "session1"); err != nil {
+		t.Fatalf("failed to seed active turn: %v", err)
+	}
+	if open := openTurnCount(t, repo, "session1"); open != 1 {
+		t.Fatalf("expected 1 open turn before completion, got %d", open)
+	}
+
+	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+		TaskID:           "task1",
+		SessionID:        "session1",
+		AgentExecutionID: "exec-1",
+	})
+	waitForStopCall(t, agentMgr)
+
+	if open := openTurnCount(t, repo, "session1"); open != 0 {
+		t.Fatalf("expected agent.completed to close the active turn, got %d open turns", open)
+	}
+	updated, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
+	}
+}
+
+func TestHandleAgentFailedWithoutSession_DoesNotMoveTaskToReviewWhileSessionRuns(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s-running", "")
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+	svc.handleAgentFailed(ctx, watcher.AgentEventData{
+		TaskID:       "t1",
+		ErrorMessage: "agent failed before session binding",
+	})
+
+	if got := taskRepo.stateWrites["t1"]; got != 0 {
+		t.Fatalf("sessionless failure must not move the task to REVIEW while a session is running, writes=%d state=%q",
+			got, taskRepo.updatedStates["t1"])
+	}
+}
+
 func TestHandleAgentFailed_CleansUpExecution(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -991,6 +1437,60 @@ func TestHandleAgentRunning_PassthroughGuard(t *testing.T) {
 	})
 }
 
+// TestHandleAgentRunning_DoesNotWakeWaitingAcpSession is the regression guard for
+// the silent-resume flicker (session-resume-keeps-review-state e2e). On resume,
+// the agent.running boot event fires for the reconnecting ACP session; it must
+// NOT wake a settled WAITING_FOR_INPUT session to RUNNING (which would displace
+// the task into the Running sidebar bucket). ACP turns drive RUNNING via the
+// prompt path instead. Passthrough sessions, which have no prompt path, must
+// still wake on agent.running.
+func TestHandleAgentRunning_DoesNotWakeWaitingAcpSession(t *testing.T) {
+	ctx := context.Background()
+
+	settleWaiting := func(t *testing.T, repo *sqliterepo.Repository) {
+		t.Helper()
+		if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+			t.Fatalf("failed to settle session to WAITING_FOR_INPUT: %v", err)
+		}
+	}
+
+	t.Run("ACP boot does not wake session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		settleWaiting(t, repo)
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(),
+			&mockAgentManager{isPassthrough: false})
+		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		sess, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if sess.State != models.TaskSessionStateWaitingForInput {
+			t.Errorf("ACP agent.running boot must keep session WAITING_FOR_INPUT, got %q", sess.State)
+		}
+	})
+
+	t.Run("passthrough turn wakes session", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		settleWaiting(t, repo)
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(),
+			&mockAgentManager{isPassthrough: true})
+		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+		sess, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("failed to get session: %v", err)
+		}
+		if sess.State != models.TaskSessionStateRunning {
+			t.Errorf("passthrough agent.running must wake session to RUNNING, got %q", sess.State)
+		}
+	})
+}
+
 func TestDeliverPassthroughPrompt(t *testing.T) {
 	ctx := context.Background()
 
@@ -1042,9 +1542,12 @@ func TestDeliverPassthroughPrompt(t *testing.T) {
 		agentMgr.mu.Lock()
 		defer agentMgr.mu.Unlock()
 
-		// Should not call markPassthroughRunning when stdin write fails
-		if len(agentMgr.markPassthroughCalls) != 0 {
-			t.Errorf("markPassthroughRunning should not be called when stdin fails, got %d calls", len(agentMgr.markPassthroughCalls))
+		// markPassthroughRunning now fires BEFORE any writes so concurrent
+		// PromptTask calls are blocked during the inter-chunk SubmitDelay
+		// window (Greptile P1). Expect exactly one mark call even when the
+		// subsequent write fails.
+		if len(agentMgr.markPassthroughCalls) != 1 {
+			t.Errorf("markPassthroughRunning should fire once before the write; got %d calls", len(agentMgr.markPassthroughCalls))
 		}
 	})
 }
@@ -1263,6 +1766,7 @@ func TestHandleRecoverableFailure(t *testing.T) {
 		seedSession(t, repo, "t1", "s1", "step1")
 
 		taskRepo := newMockTaskRepo()
+		seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 
@@ -1370,6 +1874,7 @@ func TestHandleResumeFailure(t *testing.T) {
 		})
 
 		taskRepo := newMockTaskRepo()
+		seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
 		svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
 		result := svc.handleResumeFailure(ctx, watcher.AgentEventData{
@@ -1433,6 +1938,14 @@ func TestHandleAgentFailed_RecoverableWithSession(t *testing.T) {
 		}
 		if session.State != models.TaskSessionStateWaitingForInput {
 			t.Errorf("expected recoverable state %q, got %q", models.TaskSessionStateWaitingForInput, session.State)
+		}
+		lastErrRaw := session.Metadata[models.SessionMetaKeyLastAgentError]
+		lastErr, ok := lastErrRaw.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected last agent error metadata map, got %#v", lastErrRaw)
+		}
+		if got := lastErr["message"]; got != "agent process exited" {
+			t.Fatalf("expected last agent error message to persist, got %#v", got)
 		}
 	})
 
@@ -1548,6 +2061,44 @@ func TestHandleAgentStopped_PreservesRecoveryState(t *testing.T) {
 		if updated.State != models.TaskSessionStateIdle {
 			t.Errorf("expected state to remain %q, got %q (would break next office run)",
 				models.TaskSessionStateIdle, updated.State)
+		}
+	})
+
+	// Rotated-execution regression: a previous cycle's agent.stopped event must
+	// not flip the session to CANCELLED when a fresh resume cycle has already
+	// taken over (executors_running.agent_execution_id rotated). Without this
+	// guard, an intermittent ACP notification-queue overflow on cycle 1
+	// produces a late stopped event whose state mutation poisons the in-
+	// progress cycle 2 — the user sees the task transition to FAILED even
+	// though cycle 2 loaded the session cleanly. See discussion in the cycle
+	// 1/2/3 analysis (task a263caf5).
+	t.Run("drops stopped events from rotated executions", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		// Make sure session is in RUNNING — the state we'd clobber if the
+		// guard didn't fire.
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.State = models.TaskSessionStateRunning
+		_ = repo.UpdateTaskSession(ctx, session)
+
+		// Live execution is exec-2 (cycle 2). The stale event below carries
+		// exec-1 (cycle 1).
+		seedExecutorRunning(t, repo, "s1", "t1", "exec-2")
+
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+		svc.handleAgentStopped(ctx, watcher.AgentEventData{
+			TaskID:           "t1",
+			SessionID:        "s1",
+			AgentExecutionID: "exec-1",
+		})
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.State != models.TaskSessionStateRunning {
+			t.Errorf("expected state to remain %q (rotated event ignored), got %q",
+				models.TaskSessionStateRunning, updated.State)
 		}
 	})
 }

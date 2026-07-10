@@ -1,0 +1,79 @@
+// Shared helpers for the mobile terminal specs (keybar + scroll). Both specs
+// run on the mobile-chrome Playwright project and share the same lazy-mount +
+// shell-connect path, so the connect/readiness helpers live here to avoid
+// drift between the two files.
+import { type Page, expect } from "@playwright/test";
+
+export async function tapTerminalTab(testPage: Page): Promise<void> {
+  await testPage.getByRole("button", { name: "Terminal" }).tap();
+}
+
+export async function switchToTerminalPanel(testPage: Page): Promise<void> {
+  // Confirm the panel actually mounted rather than firing a single tap. On
+  // mobile the bottom-nav button can be tapped before hydration wires its
+  // handler; a lost tap leaves the terminal panel unmounted, which would later
+  // strand waitForShellReady polling an element that never appears. Re-tap once
+  // if the first tap didn't take.
+  const panel = testPage.getByTestId("terminal-panel");
+  await tapTerminalTab(testPage);
+  if (!(await panel.isVisible())) {
+    await tapTerminalTab(testPage);
+  }
+  await expect(panel).toBeVisible({ timeout: 10_000 });
+}
+
+export async function readTerminalBuffer(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const panels = Array.from(document.querySelectorAll('[data-testid="terminal-panel"]'));
+    const visiblePanels = panels.filter((panel) => panel.getClientRects().length > 0);
+    const panel = visiblePanels.at(-1) ?? panels.at(-1);
+    type XC = HTMLElement & { __xtermReadBuffer?: () => string };
+    const container = panel?.querySelector('[data-testid="terminal-xterm-host"]') as XC | null;
+    return container?.__xtermReadBuffer?.() ?? "";
+  });
+}
+
+export async function focusTerminalForTyping(testPage: Page): Promise<void> {
+  await testPage.getByTestId("terminal-panel").last().getByTestId("terminal-xterm-host").click();
+}
+
+async function remountTerminalPanel(testPage: Page): Promise<void> {
+  const chatTab = testPage.getByRole("button", { name: "Chat" });
+  if (await chatTab.isVisible()) {
+    await chatTab.tap();
+    await testPage.waitForTimeout(250);
+  }
+  await switchToTerminalPanel(testPage);
+}
+
+/**
+ * Wait for the mobile shell to be ready by tailing xterm's buffer until it has
+ * any content (a prompt is enough). Mobile mounts the terminal lazily on tab
+ * switch so this can take longer than desktop.
+ *
+ * The shell WS connect can be missed under CI load (the auto-create guard only
+ * retries on a WS reconnect). If the panel falls out of view we re-tap it,
+ * which forces a remount and kicks the reconnect loop — so we don't blindly
+ * wait out the whole budget on a dead connection.
+ */
+export async function waitForShellReady(testPage: Page, timeout = 45_000): Promise<void> {
+  const panel = testPage.getByTestId("terminal-panel");
+  const deadline = Date.now() + timeout;
+  let remounts = 0;
+  let nextRemountAt = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    if ((await readTerminalBuffer(testPage)).length > 0) return;
+    if (!(await panel.isVisible())) {
+      await switchToTerminalPanel(testPage);
+    } else if (remounts < 2 && Date.now() >= nextRemountAt) {
+      await remountTerminalPanel(testPage);
+      remounts += 1;
+      nextRemountAt = Date.now() + 15_000;
+    }
+    await testPage.waitForTimeout(1_000);
+  }
+  expect(
+    (await readTerminalBuffer(testPage)).length,
+    "Waiting for mobile terminal shell to connect",
+  ).toBeGreaterThan(0);
+}

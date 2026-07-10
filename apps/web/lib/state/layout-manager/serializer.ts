@@ -1,13 +1,7 @@
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import type { LayoutState, LayoutColumn, LayoutGroup, LayoutPanel, LayoutNode } from "./types";
 import { computeColumnWidths, computeGroupHeights } from "./sizing";
-import {
-  SIDEBAR_LOCK,
-  KNOWN_PANEL_IDS,
-  STRUCTURAL_COMPONENTS,
-  LAYOUT_SIDEBAR_MAX_PX,
-  LAYOUT_RIGHT_MAX_PX,
-} from "./constants";
+import { SIDEBAR_LOCK, KNOWN_PANEL_IDS, STRUCTURAL_COMPONENTS } from "./constants";
 
 // Dockview serialized grid node types (internal format)
 type SerializedLeafNode = {
@@ -287,12 +281,7 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
 
     columns.push({
       id: columnId,
-      ...(isPinned
-        ? {
-            pinned: true,
-            maxWidth: columnId === "right" ? LAYOUT_RIGHT_MAX_PX : LAYOUT_SIDEBAR_MAX_PX,
-          }
-        : {}),
+      ...(isPinned ? { pinned: true } : {}),
       width,
       groups: flatGroups,
       // Only store tree for columns with nested structure (branches)
@@ -312,17 +301,52 @@ function isStructuralPanel(p: LayoutPanel): boolean {
 
 /**
  * Normalize dynamic panel IDs so they get fresh sessions on restore.
+ *
+ * DB-backed ordinary terminals (id shape `shell-<uuid>`) are preserved
+ * intact — the row survives in the backend across reloads and the panel
+ * must keep its id + params (environmentId, taskID) so the WS reattach
+ * lands on the live PTY and the store lookup finds the matching shell
+ * record (so the badge renders).
+ *
+ * Tab presentation is also coerced for every terminal panel — the
+ * registry was updated to use the custom `terminalTab` and a plain
+ * `"Terminal"` title, but layouts persisted before that change carry
+ * the old plain tab + `"Terminal {seq}"` title text and would render
+ * wrong on restore.
  */
+function isDbBackedTerminalId(id: string): boolean {
+  // shell-<uuid> — 36-char hex+dashes after the prefix. Excludes the
+  // legacy `shell-default` passthrough id and any `terminal-saved-*`
+  // ids from older layouts.
+  return /^shell-[0-9a-f-]{36}$/.test(id);
+}
+
 function normalizePanel(
   p: LayoutPanel,
   counters: { terminal: number; browser: number },
 ): LayoutPanel {
+  if (p.component === "terminal") {
+    if (KNOWN_PANEL_IDS.has(p.id) || isDbBackedTerminalId(p.id)) {
+      // Default panel (terminal-default) and user-created DB-backed
+      // terminals (shell-<uuid>) — preserve id + params so the live PTY
+      // and store record match on restore. Coerce presentation in case
+      // the saved layout predates the custom tab + plain title.
+      return { ...p, tabComponent: "terminalTab", title: "Terminal" };
+    }
+    // Legacy ephemeral terminal id (e.g. `terminal-saved-1` from older
+    // layouts) — mint a fresh id so it reconnects to a new PTY.
+    const id = `terminal-saved-${++counters.terminal}`;
+    return {
+      ...p,
+      id,
+      params: { terminalId: id },
+      tabComponent: "terminalTab",
+      title: "Terminal",
+    };
+  }
+
   if (KNOWN_PANEL_IDS.has(p.id)) return p;
 
-  if (p.component === "terminal") {
-    const id = `terminal-saved-${++counters.terminal}`;
-    return { ...p, id, params: { terminalId: id } };
-  }
   if (p.component === "browser") {
     const url = (p.params?.url as string) ?? "";
     const id = url ? `browser:${url}` : `browser-saved-${++counters.browser}`;

@@ -103,9 +103,16 @@ type TaskWorkspaceService interface {
 	GetWorkspace(ctx context.Context, id string) (*taskmodels.Workspace, error)
 	ListWorkspaces(ctx context.Context) ([]*taskmodels.Workspace, error)
 	DeleteWorkspace(ctx context.Context, id string) error
-	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
+	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*taskmodels.Task, int, error)
 	DeleteTask(ctx context.Context, id string) error
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
+	GetLastAgentMessageForTurn(ctx context.Context, turnID string) (string, error)
+}
+
+// WorkspaceGroupCleaner removes Kandev-owned materialized task workspaces
+// before the office repository deletes the rows holding their cleanup handles.
+type WorkspaceGroupCleaner interface {
+	CleanupWorkspaceGroups(ctx context.Context, workspaceID string) error
 }
 
 // TaskStarterFunc adapts a function to the TaskStarter interface.
@@ -200,6 +207,7 @@ type ServiceOptions struct {
 	TaskStarter             TaskStarter
 	TaskCanceller           TaskCanceller
 	TaskWorkspace           TaskWorkspaceService
+	WorkspaceGroupCleaner   WorkspaceGroupCleaner
 	TaskCreator             TaskCreator
 	WorkspaceCreator        WorkspaceCreator
 	AgentTypeResolver       AgentTypeResolver
@@ -224,6 +232,7 @@ type Service struct {
 	routingDispatcher       RoutingDispatcher
 	taskCanceller           TaskCanceller
 	taskWorkspace           TaskWorkspaceService
+	workspaceGroupCleaner   WorkspaceGroupCleaner
 	taskCreator             TaskCreator
 	workspaceCreator        WorkspaceCreator
 	taskPRs                 TaskPRLister
@@ -239,7 +248,7 @@ type Service struct {
 	// engine. There is no legacy fallback path — if the engine cannot
 	// evaluate the trigger (no session yet) the trigger is dropped with
 	// a debug log.
-	engineDispatcher WorkflowEngineDispatcher
+	engineDispatcher shared.WorkflowEngineDispatcher
 
 	// pricingLookup resolves per-model pricing for the cost subscriber's
 	// Layer B fallback (models.dev). Optional — nil means Layer B always
@@ -338,6 +347,7 @@ func NewService(opts ServiceOptions) *Service {
 		taskStarter:             opts.TaskStarter,
 		taskCanceller:           opts.TaskCanceller,
 		taskWorkspace:           opts.TaskWorkspace,
+		workspaceGroupCleaner:   opts.WorkspaceGroupCleaner,
 		taskCreator:             opts.TaskCreator,
 		workspaceCreator:        opts.WorkspaceCreator,
 		taskPRs:                 opts.TaskPRs,
@@ -348,6 +358,12 @@ func NewService(opts ServiceOptions) *Service {
 	}
 	svc.relay = NewChannelRelay(svc)
 	return svc
+}
+
+// SetWorkspaceGroupCleaner wires the handoff cleanup service after startup
+// constructs the shared HandoffService instance.
+func (s *Service) SetWorkspaceGroupCleaner(cleaner WorkspaceGroupCleaner) {
+	s.workspaceGroupCleaner = cleaner
 }
 
 // SetAgentctlBinaryPath overrides the host path to the agentctl binary.

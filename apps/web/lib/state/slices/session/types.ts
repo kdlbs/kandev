@@ -1,4 +1,11 @@
-import type { Message, TaskSession, Turn, TaskPlan, TaskPlanRevision } from "@/lib/types/http";
+import type {
+  Message,
+  TaskSession,
+  Turn,
+  TaskPlan,
+  TaskPlanRevision,
+  TaskWalkthrough,
+} from "@/lib/types/http";
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -83,6 +90,26 @@ export type TaskPlansState = {
   lastSeenUpdatedAtByTaskId: Record<string, string>;
 };
 
+export type WalkthroughsState = {
+  /** The current walkthrough per task (null = explicitly none). */
+  byTaskId: Record<string, TaskWalkthrough | null>;
+  /** The active step index per task (drives the popover position). */
+  activeStepByTaskId: Record<string, number>;
+  /** The last `updated_at` the user has opened, for the unseen-dot indicator. */
+  lastSeenUpdatedAtByTaskId: Record<string, string>;
+};
+
+export type QueuedMessageMetadata = Record<string, unknown> & {
+  workflow_message?: boolean;
+  workflow_auto_start?: boolean;
+  workflow_step_id?: string;
+  workflow_step_name?: string;
+  workflow_step_color?: string;
+  sender_task_id?: string;
+  sender_task_title?: string;
+  sender_session_id?: string;
+};
+
 export type QueuedMessage = {
   id: string;
   session_id: string;
@@ -91,8 +118,14 @@ export type QueuedMessage = {
   content: string;
   model?: string;
   plan_mode: boolean;
-  attachments?: Array<{ type: string; data: string; mime_type: string }>;
-  metadata?: Record<string, unknown>;
+  attachments?: Array<{
+    type: string;
+    data: string;
+    mime_type: string;
+    name?: string;
+    delivery_mode?: "prompt" | "path";
+  }>;
+  metadata?: QueuedMessageMetadata;
   queued_at: string;
   queued_by?: string;
 };
@@ -128,6 +161,7 @@ export type SessionSliceState = {
   pendingModel: PendingModelState;
   activeModel: ActiveModelState;
   taskPlans: TaskPlansState;
+  walkthroughs: WalkthroughsState;
   queue: QueueState;
 };
 
@@ -139,6 +173,18 @@ export type SessionSliceActions = {
   ) => void;
   addMessage: (message: Message) => void;
   updateMessage: (message: Message) => void;
+  removeMessage: (sessionId: string, messageId: string) => void;
+  /**
+   * Idempotent full-snapshot merge: reconciles `messages` against the current
+   * stored array, preserving object identity for unchanged messages and the
+   * array reference itself when nothing changed (see `reconcileMessages`). Used
+   * by periodic refetches so a no-op tick triggers zero re-renders.
+   */
+  mergeMessages: (
+    sessionId: string,
+    messages: Message[],
+    meta?: { hasMore?: boolean; oldestCursor?: string | null },
+  ) => void;
   prependMessages: (
     sessionId: string,
     messages: Message[],
@@ -150,7 +196,12 @@ export type SessionSliceActions = {
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   addTurn: (turn: Turn) => void;
-  completeTurn: (sessionId: string, turnId: string, completedAt: string) => void;
+  completeTurn: (
+    sessionId: string,
+    turnId: string,
+    completedAt: string,
+    metadata?: Record<string, unknown>,
+  ) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
   setTaskSession: (session: TaskSession) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
@@ -178,6 +229,10 @@ export type SessionSliceActions = {
   setPreviewRevision: (taskId: string, revisionId: string | null) => void;
   toggleComparePair: (taskId: string, revisionId: string) => void;
   clearComparePair: (taskId: string) => void;
+  // Walkthrough actions
+  setWalkthrough: (taskId: string, walkthrough: TaskWalkthrough | null) => void;
+  setWalkthroughActiveStep: (taskId: string, stepIndex: number) => void;
+  markWalkthroughSeen: (taskId: string) => void;
   // Queue actions
   setQueueEntries: (sessionId: string, entries: QueuedMessage[], meta: QueueMeta) => void;
   removeQueueEntry: (sessionId: string, entryId: string) => void;

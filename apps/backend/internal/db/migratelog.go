@@ -1,8 +1,6 @@
 package db
 
 import (
-	"strings"
-
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
@@ -34,7 +32,7 @@ func NewMigrateLogger(db *sqlx.DB, log *logger.Logger) *MigrateLogger {
 // `_, _ = db.Exec(...)` pattern, with observability added.
 func (m *MigrateLogger) Apply(name, stmt string) {
 	if _, err := m.db.Exec(stmt); err != nil {
-		if isAlreadyExists(err) {
+		if IsAlreadyExistsError(err) {
 			return
 		}
 		if m.log != nil {
@@ -46,13 +44,4 @@ func (m *MigrateLogger) Apply(name, stmt string) {
 	if m.log != nil {
 		m.log.Info("migration applied", zap.String("name", name))
 	}
-}
-
-// isAlreadyExists returns true when err describes a condition that means
-// the migration has already been applied. SQLite uses these error strings
-// for idempotent schema operations.
-func isAlreadyExists(err error) bool {
-	s := err.Error()
-	return strings.Contains(s, "duplicate column name") ||
-		strings.Contains(s, "already exists")
 }

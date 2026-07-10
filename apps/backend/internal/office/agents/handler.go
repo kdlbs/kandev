@@ -563,4 +563,13 @@ func applyAgentUpdates(agent *models.AgentInstance, req *UpdateAgentRequest) {
 	if req.PauseReason != nil {
 		agent.PauseReason = *req.PauseReason
 	}
+	if req.AutoApprove != nil {
+		agent.AutoApprove = *req.AutoApprove
+	}
+	if req.AllowIndexing != nil {
+		agent.AllowIndexing = *req.AllowIndexing
+	}
+	if req.CLIPassthrough != nil {
+		agent.CLIPassthrough = *req.CLIPassthrough
+	}
 }

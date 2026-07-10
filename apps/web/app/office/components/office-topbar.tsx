@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname } from "@/lib/routing/client-router";
 
 const PAGE_TITLES: Record<string, string> = {
   "/office": "Dashboard",
@@ -14,20 +14,20 @@ const PAGE_TITLES: Record<string, string> = {
   "/office/workspace/costs": "Costs",
   "/office/workspace/activity": "Activity",
   "/office/workspace/routing": "Provider Routing",
-  "/office/workspace/settings": "Settings",
+  "/office/workspace/settings": "Preferences",
 };
 
 function resolveTitle(pathname: string): string | null {
   const exact = PAGE_TITLES[pathname];
   if (exact) return exact;
-  if (pathname.startsWith("/office/workspace/settings")) return "Settings";
+  if (pathname.startsWith("/office/workspace/settings")) return "Preferences";
   return null;
 }
 
 function isDetailPage(pathname: string): boolean {
   return (
     /^\/office\/tasks\/[^/]+$/.test(pathname) ||
-    /^\/office\/agents\/[^/]+$/.test(pathname) ||
+    /^\/office\/agents\/[^/]+(?:\/.*)?$/.test(pathname) ||
     /^\/office\/projects\/[^/]+$/.test(pathname) ||
     /^\/office\/routines\/[^/]+$/.test(pathname)
   );
@@ -44,15 +44,14 @@ export function OfficeTopbar() {
   const detail = isDetailPage(pathname);
 
   return (
-    <div className="flex items-center gap-2 px-4 h-12 border-b border-border bg-background shrink-0">
+    <div
+      data-testid="office-topbar"
+      className="flex items-center gap-2 px-4 h-10 border-b border-border bg-background shrink-0"
+    >
       {detail ? (
         <div id="office-topbar-slot" className="flex items-center gap-2 flex-1 min-w-0" />
       ) : (
-        title && (
-          <h1 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            {title}
-          </h1>
-        )
+        title && <h1 className="truncate text-sm font-medium text-foreground">{title}</h1>
       )}
     </div>
   );

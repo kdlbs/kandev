@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import Link from "@/components/routing/app-link";
+import { useRouter } from "@/lib/routing/client-router";
 import { IconGitBranch } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
@@ -36,19 +36,17 @@ import {
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
 import {
   areRepositoryScriptsDirty,
+  cloneRepository,
   isRepositoryDirty,
-} from "@/app/settings/workspace/repository-dirty";
+  type RepositoryWithScripts,
+} from "@/app/settings/workspace/workspace-repositories-dirty";
+import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 
-type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
 type WorkspaceRepositoriesClientProps = {
   workspace: Workspace | null;
   repositories: RepositoryWithScripts[];
 };
-
-function cloneRepository(repo: RepositoryWithScripts): RepositoryWithScripts {
-  return { ...repo, scripts: repo.scripts.map((script) => ({ ...script })) };
-}
 
 function buildDraftRepo(
   workspace: Workspace,
@@ -71,10 +69,12 @@ function buildDraftRepo(
     provider_name: "",
     default_branch: selectedRepo?.default_branch ?? "",
     worktree_branch_prefix: "feature/",
+    worktree_branch_template: defaultWorktreeBranchTemplate,
     pull_before_worktree: true,
     setup_script: "",
     cleanup_script: "",
     dev_script: "",
+    copy_files: "",
     worktree_files: [],
     created_at: "",
     updated_at: "",
@@ -110,10 +110,12 @@ async function saveNewRepository(
     provider_name: repo.provider_name,
     default_branch: repo.default_branch,
     worktree_branch_prefix: repo.worktree_branch_prefix,
+    worktree_branch_template: repo.worktree_branch_template ?? defaultWorktreeBranchTemplate,
     pull_before_worktree: repo.pull_before_worktree,
     setup_script: repo.setup_script,
     cleanup_script: repo.cleanup_script,
     dev_script: repo.dev_script,
+    copy_files: repo.copy_files,
     worktree_files: repo.worktree_files,
   });
   const scripts = await Promise.all(
@@ -158,10 +160,12 @@ async function saveExistingRepository({
     provider_name: repo.provider_name,
     default_branch: repo.default_branch,
     worktree_branch_prefix: repo.worktree_branch_prefix,
+    worktree_branch_template: repo.worktree_branch_template ?? defaultWorktreeBranchTemplate,
     pull_before_worktree: repo.pull_before_worktree,
     setup_script: repo.setup_script,
     cleanup_script: repo.cleanup_script,
     dev_script: repo.dev_script,
+    copy_files: repo.copy_files,
     worktree_files: repo.worktree_files,
   });
   const savedScripts = savedRepositoriesById.get(repoId)?.scripts ?? [];

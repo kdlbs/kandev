@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
-import Link from "next/link";
+import { useCallback, useEffect, useRef } from "react";
+import Link from "@/components/routing/app-link";
 import {
   IconRobot,
   IconCircleDot,
@@ -21,7 +21,7 @@ import { ActivityRow } from "./workspace/activity/activity-row";
 import { RunActivityChart, SuccessRateChart } from "./components/dashboard-charts";
 import { AgentCardsPanel } from "./components/agent-cards-panel";
 import { ProviderHealthCard } from "./components/routing/provider-health-card";
-import { timeAgo } from "./components/shared/time-ago";
+import { timeAgo } from "@/lib/utils/time";
 
 import { UtilizationBars } from "./components/utilization-bars";
 import { formatDollars } from "@/lib/utils";
@@ -217,6 +217,9 @@ export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
   const dashboard = useAppStore((s) => s.office.dashboard);
   const agents = useAppStore((s) => s.office.agentProfiles);
   const setDashboard = useAppStore((s) => s.setDashboard);
+  const dashboardWorkspaceIdRef = useRef<string | null>(
+    (dashboard || initialDashboard) && workspaceId ? workspaceId : null,
+  );
 
   // Hydrate from SSR exactly once on first mount; subsequent updates flow
   // through the WS-driven refetch below. Skipping the unconditional mount
@@ -232,7 +235,18 @@ export function OfficePageClient({ initialDashboard }: OfficePageClientProps) {
     if (!workspaceId) return;
     const data = await officeApi.getDashboard(workspaceId);
     setDashboard(data);
+    dashboardWorkspaceIdRef.current = workspaceId;
   }, [workspaceId, setDashboard]);
+
+  useEffect(() => {
+    if (!workspaceId || dashboardWorkspaceIdRef.current === workspaceId) return;
+    dashboardWorkspaceIdRef.current = workspaceId;
+    void fetchDashboard().catch(() => {
+      if (dashboardWorkspaceIdRef.current === workspaceId) {
+        dashboardWorkspaceIdRef.current = null;
+      }
+    });
+  }, [fetchDashboard, workspaceId]);
 
   // Refetch dashboard on any office event that affects metrics. The
   // dashboard payload now includes per-agent summaries so a single fetch

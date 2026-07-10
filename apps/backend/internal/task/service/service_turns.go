@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,7 +43,8 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		return nil, err
 	}
 
-	s.publishTurnEvent(events.TurnStarted, turn)
+	// had_output is only meaningful on turn.completed; omit it from turn.started.
+	s.publishTurnEvent(events.TurnStarted, turn, nil)
 
 	s.logger.Debug("started turn",
 		zap.String("turn_id", turn.ID),
@@ -50,6 +52,11 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 		zap.String("task_id", turn.TaskID))
 
 	return turn, nil
+}
+
+// GetTurn returns a turn by ID.
+func (s *Service) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
+	return s.turns.GetTurn(ctx, turnID)
 }
 
 // CompleteTurn marks a turn as completed and publishes the turn.completed event.
@@ -80,7 +87,8 @@ func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 		return nil
 	}
 
-	s.publishTurnEvent(events.TurnCompleted, turn)
+	hadOutput := s.turnHadOutput(ctx, turn)
+	s.publishTurnEvent(events.TurnCompleted, turn, &hadOutput)
 
 	s.logger.Debug("completed turn",
 		zap.String("turn_id", turnID),
@@ -98,6 +106,14 @@ func (s *Service) GetActiveTurn(ctx context.Context, sessionID string) (*models.
 		return nil, nil
 	}
 	return turn, err
+}
+
+// UpdateTurn persists changes to an existing turn.
+func (s *Service) UpdateTurn(ctx context.Context, turn *models.Turn) error {
+	if turn == nil {
+		return nil
+	}
+	return s.turns.UpdateTurn(ctx, turn)
 }
 
 // AbandonOpenTurns closes any open turns for a session by setting their
@@ -148,7 +164,11 @@ func (s *Service) AbandonOpenTurns(ctx context.Context, sessionID string) error 
 				zap.String("turn_id", turn.ID),
 				zap.Error(err))
 		} else {
-			s.publishTurnEvent(events.TurnCompleted, refreshed)
+			// Abandoned turns are orphans swept on resume, not live completions.
+			// Report had_output=true so the frontend never shows an "empty turn"
+			// notice for them — only genuine live completions should trigger it.
+			hadOutput := true
+			s.publishTurnEvent(events.TurnCompleted, refreshed, &hadOutput)
 		}
 		s.logger.Info("abandoned orphan turn on session resume",
 			zap.String("turn_id", turn.ID),
@@ -187,8 +207,12 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 	return s.StartTurn(ctx, sessionID)
 }
 
-// publishTurnEvent publishes a turn event to the event bus.
-func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
+// publishTurnEvent publishes a turn event to the event bus. hadOutput reports
+// whether the turn produced any agent output; it is only meaningful for
+// turn.completed events (the frontend uses it to surface an "empty turn"
+// notice). Pass nil for turn.started so the field is omitted entirely rather
+// than carrying a misleading "false" on a turn that has not completed.
+func (s *Service) publishTurnEvent(eventType string, turn *models.Turn, hadOutput *bool) {
 	if s.eventBus == nil {
 		return
 	}
@@ -196,7 +220,7 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
 		s.logger.Warn("publishTurnEvent: turn is nil, skipping", zap.String("event_type", eventType))
 		return
 	}
-	_ = s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", map[string]interface{}{
+	payload := map[string]interface{}{
 		"id":           turn.ID,
 		"session_id":   turn.TaskSessionID,
 		"task_id":      turn.TaskID,
@@ -205,7 +229,55 @@ func (s *Service) publishTurnEvent(eventType string, turn *models.Turn) {
 		"metadata":     turn.Metadata,
 		"created_at":   turn.CreatedAt,
 		"updated_at":   turn.UpdatedAt,
-	}))
+	}
+	if hadOutput != nil {
+		payload["had_output"] = *hadOutput
+	}
+	_ = s.eventBus.Publish(context.Background(), eventType, bus.NewEvent(eventType, "task-service", payload))
+}
+
+// turnHadOutput reports whether a completed turn produced any agent output.
+// It reads only the turn's own persisted messages (indexed by turn_id; all
+// agent text/tool messages are written before the turn is completed, so the DB
+// is authoritative even for streaming agents whose text is drained via chunk
+// events). A read failure defaults to true so a transient DB error never
+// produces a spurious "empty turn" notice.
+func (s *Service) turnHadOutput(ctx context.Context, turn *models.Turn) bool {
+	msgs, err := s.messages.ListMessagesByTurnID(ctx, turn.ID)
+	if err != nil {
+		s.logger.Debug("failed to list messages for had_output; assuming output",
+			zap.String("turn_id", turn.ID),
+			zap.Error(err))
+		return true
+	}
+	return turnHadAgentOutput(msgs, turn.ID)
+}
+
+// turnHadAgentOutput returns true when any message belonging to turnID is
+// agent-authored, user-visible output: a tool call, a native plan/todo, a
+// permission or clarification prompt (both render inline in chat), or a
+// non-empty text response. It is an allowlist on purpose — incidental,
+// non-answer messages the runtime attaches to a turn (lifecycle "status" /
+// "script_execution" notices, logs, progress, thinking) must NOT count, so a
+// turn that only emits those (or nothing at all) is still treated as empty.
+// User messages never count.
+func turnHadAgentOutput(msgs []*models.Message, turnID string) bool {
+	for _, m := range msgs {
+		if m == nil || m.TurnID != turnID || m.AuthorType != models.MessageAuthorAgent {
+			continue
+		}
+		switch m.Type {
+		case models.MessageTypeToolCall, models.MessageTypeToolEdit, models.MessageTypeToolRead,
+			models.MessageTypeToolExecute, models.MessageTypeAgentPlan, models.MessageTypeTodo,
+			models.MessageTypePermissionRequest, models.MessageTypeClarificationRequest:
+			return true
+		case models.MessageTypeMessage, models.MessageTypeContent, "":
+			if strings.TrimSpace(m.Content) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // GetGitSnapshots retrieves git snapshots for a session
@@ -314,22 +386,38 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 	}
 
-	// Get ACP session ID from metadata
-	var acpSessionID string
+	// Get ACP session ID and persisted session runtime settings from metadata.
+	var acpSessionID, sessionMode string
+	var runtimeConfig models.SessionRuntimeConfig
+	runtimeConfigOptionsSet := false
 	if session.Metadata != nil {
 		if id, ok := session.Metadata["acp_session_id"].(string); ok {
 			acpSessionID = id
 		}
+		if mode, ok := session.Metadata[models.SessionMetaKeySessionMode].(string); ok {
+			sessionMode = mode
+		}
+		if cfg, ok := models.LoadSessionRuntimeConfig(session.Metadata); ok {
+			runtimeConfig = cfg
+			runtimeConfigOptionsSet = cfg.ConfigOptions != nil
+			if sessionMode == "" {
+				sessionMode = cfg.Mode
+			}
+		}
 	}
 
 	info := &lifecycle.WorkspaceInfo{
-		TaskID:            taskID,
-		SessionID:         sessionID,
-		TaskEnvironmentID: session.TaskEnvironmentID,
-		WorkspacePath:     workspacePath,
-		AgentProfileID:    session.AgentProfileID,
-		AgentID:           agentID,
-		ACPSessionID:      acpSessionID,
+		TaskID:                  taskID,
+		SessionID:               sessionID,
+		TaskEnvironmentID:       session.TaskEnvironmentID,
+		WorkspacePath:           workspacePath,
+		AgentProfileID:          session.AgentProfileID,
+		AgentID:                 agentID,
+		ACPSessionID:            acpSessionID,
+		SessionMode:             sessionMode,
+		RuntimeModel:            runtimeConfig.Model,
+		RuntimeConfigOptions:    runtimeConfig.ConfigOptions,
+		RuntimeConfigOptionsSet: runtimeConfigOptionsSet,
 	}
 
 	var taskEnv *models.TaskEnvironment
@@ -388,10 +476,89 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 				zap.Error(err))
 		} else if exec != nil {
 			info.ExecutorType = string(exec.Type)
+			// Project the executor record's connection config (e.g. ssh_host,
+			// ssh_host_fingerprint, ssh_user) into the workspace metadata as a
+			// fallback. The agent-launch path gets these via the orchestrator's
+			// executor-config merge, but the workspace-restore / terminal path
+			// only carries them forward from a live ExecutorRunning record. When
+			// no running record exists — terminal-state sessions (completed /
+			// failed / cancelled), post-restart, or after agentctl cleanup — the
+			// SSH executor would otherwise fail with "host (or host_alias) is
+			// required in executor config" when opening a terminal or restoring
+			// the workspace. Existing values (from the running record) win.
+			// Scoped to SSH: this fallback only makes sense for the SSH executor
+			// and the projected keys are SSH connection/profile keys.
+			if exec.Type == models.ExecutorTypeSSH {
+				mergeExecutorConfigMetadata(info, exec.Config)
+			}
 		}
 	}
 
 	return info, nil
+}
+
+// PersistSessionRuntimeModel records the session's selected ACP model.
+func (s *Service) PersistSessionRuntimeModel(ctx context.Context, sessionID, modelID string) error {
+	if modelID == "" {
+		return nil
+	}
+	if err := s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+		cfg.Model = modelID
+	}); err != nil {
+		return err
+	}
+	return s.sessions.SetSessionMetadataKey(ctx, sessionID, "context_window", nil)
+}
+
+// PersistSessionRuntimeMode records the session's selected ACP permission mode.
+func (s *Service) PersistSessionRuntimeMode(ctx context.Context, sessionID, modeID string) error {
+	if modeID == "" {
+		return nil
+	}
+	if err := s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeySessionMode, modeID); err != nil {
+		return err
+	}
+	return s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+		cfg.Mode = modeID
+	})
+}
+
+// PersistSessionRuntimeConfigOption records a selected dynamic ACP config option.
+func (s *Service) PersistSessionRuntimeConfigOption(ctx context.Context, sessionID, configID, value string) error {
+	if configID == "" {
+		return nil
+	}
+	if err := s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+		if cfg.ConfigOptions == nil {
+			cfg.ConfigOptions = make(map[string]string)
+		}
+		cfg.ConfigOptions[configID] = value
+		if configID == "model" {
+			cfg.Model = value
+		}
+	}); err != nil {
+		return err
+	}
+	if configID == "model" {
+		return s.sessions.SetSessionMetadataKey(ctx, sessionID, "context_window", nil)
+	}
+	return nil
+}
+
+func (s *Service) updateSessionRuntimeConfig(ctx context.Context, sessionID string, mutate func(*models.SessionRuntimeConfig)) error {
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil {
+		return fmt.Errorf("agent session not found: %s", sessionID)
+	}
+	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
+	mutate(&cfg)
+	if cfg.IsZero() {
+		return nil
+	}
+	return s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg)
 }
 
 func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *models.TaskEnvironment) {
@@ -430,6 +597,33 @@ func ensureWorkspaceMetadata(info *lifecycle.WorkspaceInfo) map[string]interface
 		info.Metadata = make(map[string]interface{})
 	}
 	return info.Metadata
+}
+
+// mergeExecutorConfigMetadata projects an SSH executor record's stable
+// connection/profile config keys (e.g. ssh_host, ssh_host_alias,
+// ssh_host_fingerprint, ssh_user) into the workspace metadata WITHOUT
+// overwriting values already present — a live ExecutorRunning record carries
+// authoritative per-session values (remote dirs/ports) and must win. This is
+// the fallback that lets terminal-state SSH sessions open a terminal / restore
+// the workspace when no running record exists.
+//
+// It filters through lifecycle.FilterSSHWorkspaceFallbackConfig rather than the
+// general persistent-metadata allowlist so that (a) alias-only executors
+// (ssh_host_alias, no ssh_host) are preserved, and (b) session-scoped runtime
+// keys (remote agentctl port/PID/session dir) can never be projected — those
+// would make a restore reattach to a stale/dead remote instance.
+func mergeExecutorConfigMetadata(info *lifecycle.WorkspaceInfo, config map[string]string) {
+	filtered := lifecycle.FilterSSHWorkspaceFallbackConfig(config)
+	if filtered == nil {
+		return
+	}
+	dst := ensureWorkspaceMetadata(info)
+	for k, v := range filtered {
+		if _, exists := dst[k]; exists {
+			continue
+		}
+		dst[k] = v
+	}
 }
 
 // GetWorkspaceInfoForEnvironment returns workspace information for a task environment.

@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@kandev/ui/button";
-import { Switch } from "@kandev/ui/switch";
+import { Separator } from "@kandev/ui/separator";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
-import { Badge } from "@kandev/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -17,24 +16,43 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { CliModeIcon } from "@/components/cli-mode-icon";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, stepPlaceholder } from "@/hooks/use-workflow-steps";
-import { listLinearTeams, listLinearStates } from "@/lib/api/domains/linear-api";
 import {
   ScriptEditor,
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
 import {
-  LINEAR_ISSUE_WATCH_PLACEHOLDERS,
-  DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
-} from "./linear-issue-watch-placeholders";
+  LabelMultiSelect,
+  PriorityMultiSelect,
+  SettingsFields,
+  StateMultiSelect,
+  useTeamsAndStates,
+} from "./linear-issue-watch-fields";
+import { LINEAR_ISSUE_WATCH_PLACEHOLDERS } from "./linear-issue-watch-placeholders";
+import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
+import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
+import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
+import {
+  ASSIGNED_ANY,
+  CREATOR_ANY,
+  type FormState,
+  type LinearPriority,
+  buildWatchPayload,
+  creatorPlaceholder,
+  formStateFromWatch,
+  isWatchFormReady,
+  makeEmptyForm,
+  userOptionLabel,
+} from "./linear-issue-watch-form";
 import type {
   CreateLinearIssueWatchInput,
   LinearIssueWatch,
   LinearTeam,
-  LinearWorkflowState,
+  LinearUser,
   UpdateLinearIssueWatchInput,
 } from "@/lib/types/linear";
 
@@ -46,57 +64,6 @@ type Props = {
   onCreate: (req: CreateLinearIssueWatchInput) => Promise<unknown>;
   onUpdate: (id: string, req: UpdateLinearIssueWatchInput) => Promise<unknown>;
 };
-
-type FormState = {
-  workspaceId: string;
-  query: string;
-  teamKey: string;
-  stateIds: string[];
-  assigned: string;
-  workflowId: string;
-  workflowStepId: string;
-  agentProfileId: string;
-  executorProfileId: string;
-  prompt: string;
-  enabled: boolean;
-  pollInterval: number;
-};
-
-const ASSIGNED_ANY = "__any__";
-
-function makeEmptyForm(workspaceId: string): FormState {
-  return {
-    workspaceId,
-    query: "",
-    teamKey: "",
-    stateIds: [],
-    assigned: "",
-    workflowId: "",
-    workflowStepId: "",
-    agentProfileId: "",
-    executorProfileId: "",
-    prompt: DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
-    enabled: true,
-    pollInterval: 300,
-  };
-}
-
-function formStateFromWatch(w: LinearIssueWatch): FormState {
-  return {
-    workspaceId: w.workspaceId,
-    query: w.filter?.query ?? "",
-    teamKey: w.filter?.teamKey ?? "",
-    stateIds: w.filter?.stateIds ?? [],
-    assigned: w.filter?.assigned ?? "",
-    workflowId: w.workflowId,
-    workflowStepId: w.workflowStepId,
-    agentProfileId: w.agentProfileId,
-    executorProfileId: w.executorProfileId,
-    prompt: w.prompt || DEFAULT_LINEAR_ISSUE_WATCH_PROMPT,
-    enabled: w.enabled,
-    pollInterval: w.pollIntervalSeconds,
-  };
-}
 
 function useFormData(workspaceId: string) {
   useSettingsData(true);
@@ -112,12 +79,10 @@ function useFormData(workspaceId: string) {
         .flatMap((e) => e.profiles ?? []),
     [executors],
   );
-  const filteredAgentProfiles = useMemo(
-    () => agentProfiles.filter((p) => !p.cli_passthrough),
-    [agentProfiles],
-  );
-  return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
+  return { workflows, agentProfiles, allExecutorProfiles };
 }
+
+type SelectFieldItem = { id: string; label: string; icon?: React.ReactNode };
 
 function SelectField(props: {
   label: string;
@@ -125,7 +90,7 @@ function SelectField(props: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
-  items: { id: string; label: string }[];
+  items: SelectFieldItem[];
   disabled?: boolean;
 }) {
   return (
@@ -143,107 +108,20 @@ function SelectField(props: {
         <SelectContent>
           {props.items.map((item) => (
             <SelectItem key={item.id} value={item.id}>
-              {item.label}
+              {item.icon ? (
+                <span className="flex items-center gap-1.5">
+                  <span>{item.label}</span>
+                  {item.icon}
+                </span>
+              ) : (
+                item.label
+              )}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
     </div>
   );
-}
-
-function StateMultiSelect({
-  states,
-  loading,
-  selected,
-  onToggle,
-  disabled,
-}: {
-  states: LinearWorkflowState[];
-  loading: boolean;
-  selected: string[];
-  onToggle: (id: string) => void;
-  disabled: boolean;
-}) {
-  if (disabled) {
-    return (
-      <p className="text-xs text-muted-foreground">
-        Pick a team to choose specific workflow states.
-      </p>
-    );
-  }
-  if (loading) {
-    return <p className="text-xs text-muted-foreground">Loading states…</p>;
-  }
-  if (states.length === 0) {
-    return <p className="text-xs text-muted-foreground">No workflow states available.</p>;
-  }
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {states.map((s) => {
-        const active = selected.includes(s.id);
-        return (
-          <Badge
-            key={s.id}
-            variant={active ? "default" : "outline"}
-            className="cursor-pointer"
-            onClick={() => onToggle(s.id)}
-          >
-            {s.name}
-          </Badge>
-        );
-      })}
-    </div>
-  );
-}
-
-// useTeamsAndStates loads the team list once Linear is configured, plus the
-// states for the currently-selected team. The states map is keyed by teamKey
-// so switching teams renders an empty list without us having to setState in
-// an effect — only the lookup expression changes.
-function useTeamsAndStates(teamKey: string) {
-  const [teams, setTeams] = useState<LinearTeam[]>([]);
-  const [statesByTeam, setStatesByTeam] = useState<Record<string, LinearWorkflowState[]>>({});
-  // Track which teams we've already kicked off a fetch for so the effect
-  // doesn't list `statesByTeam` as a dep (which would re-fire whenever any
-  // team's states load). A ref mutation isn't reactive, so the sole input
-  // that schedules a fetch is `teamKey`.
-  const fetchedTeams = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    let cancelled = false;
-    listLinearTeams()
-      .then((res) => {
-        if (!cancelled) setTeams(res.teams ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setTeams([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!teamKey || fetchedTeams.current.has(teamKey)) return;
-    fetchedTeams.current.add(teamKey);
-    let cancelled = false;
-    listLinearStates(teamKey)
-      .then((res) => {
-        if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: res.states ?? [] }));
-      })
-      .catch(() => {
-        if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: [] }));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [teamKey]);
-
-  const states = teamKey ? (statesByTeam[teamKey] ?? []) : [];
-  // "loading" = a team is selected but we haven't received a result yet.
-  const loadingStates = !!teamKey && statesByTeam[teamKey] === undefined;
-  return { teams, states, loadingStates };
 }
 
 function FilterFields({
@@ -253,7 +131,8 @@ function FilterFields({
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
 }) {
-  const { teams, states, loadingStates } = useTeamsAndStates(form.teamKey);
+  const { teams, states, labels, users, loadingStates, loadingLabels, loadingUsers } =
+    useTeamsAndStates(form.workspaceId, form.teamKey);
   const toggleState = useCallback(
     (id: string) =>
       setForm((p) => ({
@@ -264,35 +143,49 @@ function FilterFields({
       })),
     [setForm],
   );
+  const toggleLabel = useCallback(
+    (id: string) =>
+      setForm((p) => ({
+        ...p,
+        labelIds: p.labelIds.includes(id)
+          ? p.labelIds.filter((l) => l !== id)
+          : [...p.labelIds, id],
+      })),
+    [setForm],
+  );
+  const togglePriority = useCallback(
+    (priority: LinearPriority) =>
+      setForm((p) => ({
+        ...p,
+        priorities: p.priorities.includes(priority)
+          ? p.priorities.filter((x) => x !== priority)
+          : [...p.priorities, priority],
+      })),
+    [setForm],
+  );
 
   return (
     <>
-      <div className="grid grid-cols-2 gap-4">
-        <SelectField
-          label="Team"
-          description="Restrict matches to one team."
-          value={form.teamKey}
-          onChange={(v) => setForm((p) => ({ ...p, teamKey: v, stateIds: [] }))}
-          placeholder="(any team)"
-          items={teams.map((t) => ({ id: t.key, label: `${t.name} (${t.key})` }))}
-        />
-        <SelectField
-          label="Assignee"
-          description="Filter by who an issue is assigned to."
-          value={form.assigned || ASSIGNED_ANY}
-          onChange={(v) => setForm((p) => ({ ...p, assigned: v === ASSIGNED_ANY ? "" : v }))}
-          placeholder="(any)"
-          items={[
-            { id: ASSIGNED_ANY, label: "(any)" },
-            { id: "me", label: "Me" },
-            { id: "unassigned", label: "Unassigned" },
-          ]}
-        />
+      <TeamRow form={form} setForm={setForm} teams={teams} />
+      <AssigneeAndCreatorRow
+        form={form}
+        setForm={setForm}
+        users={users}
+        loadingUsers={loadingUsers}
+      />
+      <div className="space-y-1.5">
+        <Label>Priority</Label>
+        <p className="text-xs text-muted-foreground">
+          Click to toggle. Matches issues at ANY of the selected priorities.
+        </p>
+        <PriorityMultiSelect selected={form.priorities} onToggle={togglePriority} />
       </div>
       <div className="space-y-1.5">
         <Label>States</Label>
         <p className="text-xs text-muted-foreground">
-          Click states to toggle. Empty matches every state on the team.
+          {form.teamKey
+            ? "Click states to toggle. Empty matches every state on the team."
+            : "Pick a team to choose specific workflow states."}
         </p>
         <StateMultiSelect
           states={states}
@@ -303,17 +196,136 @@ function FilterFields({
         />
       </div>
       <div className="space-y-1.5">
-        <Label>Query</Label>
+        <Label>Labels</Label>
         <p className="text-xs text-muted-foreground">
-          Free-text match across title and description (optional).
+          {form.teamKey
+            ? "Click to toggle. Matches ANY of the selected labels."
+            : "Pick a team to choose specific labels."}
         </p>
-        <Input
-          value={form.query}
-          onChange={(e) => setForm((p) => ({ ...p, query: e.target.value }))}
-          placeholder="auth bug"
+        <LabelMultiSelect
+          labels={labels}
+          loading={loadingLabels}
+          selected={form.labelIds}
+          onToggle={toggleLabel}
+          disabled={!form.teamKey}
         />
       </div>
+      <EstimateRow form={form} setForm={setForm} />
+      <QueryField form={form} setForm={setForm} />
     </>
+  );
+}
+
+type FormSetter = React.Dispatch<React.SetStateAction<FormState>>;
+
+function TeamRow({
+  form,
+  setForm,
+  teams,
+}: {
+  form: FormState;
+  setForm: FormSetter;
+  teams: LinearTeam[];
+}) {
+  return (
+    <SelectField
+      label="Team"
+      description="Restrict matches to one team."
+      value={form.teamKey}
+      onChange={(v) =>
+        setForm((p) => ({ ...p, teamKey: v, stateIds: [], labelIds: [], creatorId: "" }))
+      }
+      placeholder="(any team)"
+      items={teams.map((t) => ({ id: t.key, label: `${t.name} (${t.key})` }))}
+    />
+  );
+}
+
+function AssigneeAndCreatorRow({
+  form,
+  setForm,
+  users,
+  loadingUsers,
+}: {
+  form: FormState;
+  setForm: FormSetter;
+  users: LinearUser[];
+  loadingUsers: boolean;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <SelectField
+        label="Assignee"
+        description="Filter by who an issue is assigned to."
+        value={form.assigned || ASSIGNED_ANY}
+        onChange={(v) => setForm((p) => ({ ...p, assigned: v === ASSIGNED_ANY ? "" : v }))}
+        placeholder="(any)"
+        items={[
+          { id: ASSIGNED_ANY, label: "(any)" },
+          { id: "me", label: "Me" },
+          { id: "unassigned", label: "Unassigned" },
+        ]}
+      />
+      <SelectField
+        label="Creator"
+        description="Match issues created by one user."
+        value={form.creatorId || CREATOR_ANY}
+        onChange={(v) => setForm((p) => ({ ...p, creatorId: v === CREATOR_ANY ? "" : v }))}
+        placeholder={creatorPlaceholder(form.teamKey, loadingUsers)}
+        items={[
+          { id: CREATOR_ANY, label: "(any)" },
+          ...users.map((u) => ({ id: u.id, label: userOptionLabel(u) })),
+        ]}
+        disabled={!form.teamKey || loadingUsers}
+      />
+    </div>
+  );
+}
+
+function EstimateRow({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-1.5">
+        <Label>Estimate min</Label>
+        <p className="text-xs text-muted-foreground">Lower bound in points (optional).</p>
+        <Input
+          type="number"
+          value={form.estimateMin}
+          onChange={(e) => setForm((p) => ({ ...p, estimateMin: e.target.value }))}
+          min={0}
+          step="0.5"
+          placeholder="e.g. 1"
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Estimate max</Label>
+        <p className="text-xs text-muted-foreground">Upper bound in points (optional).</p>
+        <Input
+          type="number"
+          value={form.estimateMax}
+          onChange={(e) => setForm((p) => ({ ...p, estimateMax: e.target.value }))}
+          min={0}
+          step="0.5"
+          placeholder="e.g. 5"
+        />
+      </div>
+    </div>
+  );
+}
+
+function QueryField({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+  return (
+    <div className="space-y-1.5">
+      <Label>Query</Label>
+      <p className="text-xs text-muted-foreground">
+        Free-text match across title and description (optional).
+      </p>
+      <Input
+        value={form.query}
+        onChange={(e) => setForm((p) => ({ ...p, query: e.target.value }))}
+        placeholder="auth bug"
+      />
+    </div>
   );
 }
 
@@ -417,59 +429,41 @@ function AutomationFields({
           disabled={!form.workflowId || stepsLoading || steps.length === 0}
         />
       </div>
+      <WatcherRepositoryFields
+        workspaceId={form.workspaceId}
+        repositoryId={form.repositoryId}
+        baseBranch={form.baseBranch}
+        onRepositoryChange={(repositoryId) =>
+          setForm((p) => ({ ...p, repositoryId, baseBranch: "" }))
+        }
+        onBaseBranchChange={(baseBranch) => setForm((p) => ({ ...p, baseBranch }))}
+      />
       <div className="grid grid-cols-2 gap-4">
         <SelectField
           label="Agent Profile"
           description="Optional — falls back to step default."
-          value={form.agentProfileId}
-          onChange={(v) => setForm((p) => ({ ...p, agentProfileId: v }))}
-          placeholder="(use step default)"
-          items={agentProfiles.map((p) => ({ id: p.id, label: p.label }))}
+          value={form.agentProfileId || STEP_DEFAULT}
+          onChange={(v) => setForm((p) => ({ ...p, agentProfileId: resolveProfileId(v) }))}
+          placeholder={STEP_DEFAULT_LABEL}
+          items={[
+            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            ...agentProfiles.map((p) => ({
+              id: p.id,
+              label: p.label,
+              icon: p.cli_passthrough ? <CliModeIcon /> : undefined,
+            })),
+          ]}
         />
         <SelectField
           label="Executor Profile"
           description="Optional — falls back to step default."
-          value={form.executorProfileId}
-          onChange={(v) => setForm((p) => ({ ...p, executorProfileId: v }))}
-          placeholder="(use step default)"
-          items={allExecutorProfiles.map((p) => ({ id: p.id, label: p.name }))}
-        />
-      </div>
-    </>
-  );
-}
-
-function SettingsFields({
-  form,
-  setForm,
-}: {
-  form: FormState;
-  setForm: React.Dispatch<React.SetStateAction<FormState>>;
-}) {
-  return (
-    <>
-      <div className="space-y-1.5">
-        <Label>Poll Interval (seconds)</Label>
-        <p className="text-xs text-muted-foreground">
-          How often to re-run the search. Minimum 60s, maximum 3600s.
-        </p>
-        <Input
-          type="number"
-          value={form.pollInterval}
-          onChange={(e) => setForm((p) => ({ ...p, pollInterval: Number(e.target.value) }))}
-          min={60}
-          max={3600}
-        />
-      </div>
-      <div className="flex items-center justify-between">
-        <div>
-          <Label>Enabled</Label>
-          <p className="text-xs text-muted-foreground">Pause or resume polling.</p>
-        </div>
-        <Switch
-          checked={form.enabled}
-          onCheckedChange={(v) => setForm((p) => ({ ...p, enabled: v }))}
-          className="cursor-pointer"
+          value={form.executorProfileId || STEP_DEFAULT}
+          onChange={(v) => setForm((p) => ({ ...p, executorProfileId: resolveProfileId(v) }))}
+          placeholder={STEP_DEFAULT_LABEL}
+          items={[
+            { id: STEP_DEFAULT, label: STEP_DEFAULT_LABEL },
+            ...allExecutorProfiles.map((p) => ({ id: p.id, label: p.name })),
+          ]}
         />
       </div>
     </>
@@ -479,15 +473,6 @@ function SettingsFields({
 function savingLabel(saving: boolean, isEdit: boolean): string {
   if (saving) return "Saving…";
   return isEdit ? "Update" : "Create";
-}
-
-function filterIsEmpty(form: FormState): boolean {
-  return (
-    form.query.trim() === "" &&
-    form.teamKey.trim() === "" &&
-    form.assigned.trim() === "" &&
-    form.stateIds.length === 0
-  );
 }
 
 export function LinearIssueWatchDialog({
@@ -511,33 +496,13 @@ export function LinearIssueWatchDialog({
   }, [watch, open, workspaceId, activeWorkspaceId]);
 
   const workspaceLocked = !!watch || !!workspaceId;
-
-  const canSave =
-    !!form.workspaceId &&
-    !filterIsEmpty(form) &&
-    !!form.workflowId &&
-    !!form.workflowStepId &&
-    !!form.prompt.trim();
+  const canSave = isWatchFormReady(form);
 
   const handleSave = useCallback(async () => {
+    const payload = buildWatchPayload(form);
+    if (!payload) return; // re-checks the cap input — see canSave gate
     setSaving(true);
     try {
-      const filter = {
-        query: form.query.trim() || undefined,
-        teamKey: form.teamKey.trim() || undefined,
-        stateIds: form.stateIds.length > 0 ? form.stateIds : undefined,
-        assigned: form.assigned.trim() || undefined,
-      };
-      const payload = {
-        filter,
-        workflowId: form.workflowId,
-        workflowStepId: form.workflowStepId,
-        agentProfileId: form.agentProfileId,
-        executorProfileId: form.executorProfileId,
-        prompt: form.prompt,
-        enabled: form.enabled,
-        pollIntervalSeconds: form.pollInterval,
-      };
       if (watch) {
         await onUpdate(watch.id, payload);
       } else {
@@ -558,24 +523,30 @@ export function LinearIssueWatchDialog({
           <DialogTitle>{watch ? "Edit Linear Watcher" : "Create Linear Watcher"}</DialogTitle>
           <DialogDescription>
             Poll Linear with a structured filter and auto-create a Kandev task for each
-            newly-matching issue. Issues are not bound to a repository — the workflow step&apos;s
-            defaults decide where the task runs.
+            newly-matching issue. Optionally bind a repository so each task runs against that
+            codebase, or leave it unset to run with no repository.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
           <WorkspacePicker
             value={form.workspaceId}
-            onChange={(v) =>
-              setForm((p) => ({ ...p, workspaceId: v, workflowId: "", workflowStepId: "" }))
-            }
+            onChange={(v) => setForm((p) => clearWorkspaceScopedForm(p, v))}
             disabled={workspaceLocked}
           />
+          {/* Hairlines separate the five conceptual blocks (Destination /
+              Filter / Automation / Prompt / Settings). Each block answers a
+              different question, so a consistent rhythm helps users navigate
+              the form visually instead of reading it as one long stack. */}
+          <Separator />
           <FilterFields form={form} setForm={setForm} />
+          <Separator />
           <AutomationFields form={form} setForm={setForm} />
+          <Separator />
           <PromptField
             value={form.prompt}
             onChange={(v) => setForm((p) => ({ ...p, prompt: v }))}
           />
+          <Separator />
           <SettingsFields form={form} setForm={setForm} />
         </div>
         <DialogFooter>

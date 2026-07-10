@@ -1,15 +1,10 @@
 "use client";
 
 import { useState, memo } from "react";
-import ReactMarkdown from "react-markdown";
 import { IconMinus, IconPlus, IconMaximize } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
-import {
-  markdownComponents,
-  normalizeMarkdown,
-  remarkPlugins,
-} from "@/components/shared/markdown-components";
+import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import type { Message } from "@/lib/types/http";
 
 function parsePlanContent(text: string): { title: string; body: string } {
@@ -23,19 +18,35 @@ function parsePlanContent(text: string): { title: string; body: string } {
   return { title: title || "Agent Plan", body };
 }
 
-function PlanMarkdownBody({ text, className }: { text: string; className?: string }) {
+function PlanMarkdownBody({
+  text,
+  className,
+  worktreePath,
+  onOpenFile,
+}: {
+  text: string;
+  className?: string;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}) {
   return (
     <div
       className={`markdown-body max-w-none text-sm [&>*]:my-2 [&>p]:my-2 [&>ul]:my-2 [&>ol]:my-2 ${className ?? ""}`}
     >
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-        {normalizeMarkdown(text)}
-      </ReactMarkdown>
+      <MemoizedMarkdown content={text} worktreePath={worktreePath} onOpenFile={onOpenFile} />
     </div>
   );
 }
 
-export const AgentPlanMessage = memo(function AgentPlanMessage({ comment }: { comment: Message }) {
+export const AgentPlanMessage = memo(function AgentPlanMessage({
+  comment,
+  worktreePath,
+  onOpenFile,
+}: {
+  comment: Message;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}) {
   const [collapsed, setCollapsed] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const text = comment.content;
@@ -76,6 +87,8 @@ export const AgentPlanMessage = memo(function AgentPlanMessage({ comment }: { co
               <PlanMarkdownBody
                 text={body}
                 className="text-foreground/80 [&_strong]:text-foreground"
+                worktreePath={worktreePath}
+                onOpenFile={onOpenFile}
               />
             </div>
           </div>
@@ -87,7 +100,7 @@ export const AgentPlanMessage = memo(function AgentPlanMessage({ comment }: { co
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
           </DialogHeader>
-          <PlanMarkdownBody text={body} />
+          <PlanMarkdownBody text={body} worktreePath={worktreePath} onOpenFile={onOpenFile} />
         </DialogContent>
       </Dialog>
     </>

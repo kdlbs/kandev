@@ -16,6 +16,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const clarificationInputPauseTimeout = 30 * time.Second
+
 // subscribeClarificationEvents subscribes to clarification-related events.
 func (s *Service) subscribeClarificationEvents() {
 	if s.eventBus == nil {
@@ -30,6 +32,58 @@ func (s *Service) subscribeClarificationEvents() {
 	if _, err := s.eventBus.Subscribe(events.ClarificationCancelled, s.handleClarificationAnswered); err != nil {
 		s.logger.Error("failed to subscribe to clarification.cancelled events", zap.Error(err))
 	}
+	if _, err := s.eventBus.Subscribe(events.ClarificationStaleDismissed, s.handleClarificationStaleDismissed); err != nil {
+		s.logger.Error("failed to subscribe to clarification.stale_dismissed events", zap.Error(err))
+	}
+}
+
+// handleClarificationStaleDismissed runs session cleanup when the user dismisses
+// a detached clarification overlay without starting a new agent turn.
+func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *bus.Event) error {
+	dataBytes, err := json.Marshal(event.Data)
+	if err != nil {
+		s.logger.Error("failed to marshal stale-dismissed clarification event data", zap.Error(err))
+		return nil
+	}
+	var data clarificationAnsweredData
+	if err := json.Unmarshal(dataBytes, &data); err != nil {
+		s.logger.Error("failed to parse stale-dismissed clarification event data", zap.Error(err))
+		return nil
+	}
+	if data.SessionID == "" || data.TaskID == "" {
+		s.logger.Warn("stale-dismissed clarification event missing session_id or task_id",
+			zap.String("session_id", data.SessionID),
+			zap.String("task_id", data.TaskID))
+		return nil
+	}
+
+	writeCtx := context.WithoutCancel(ctx)
+	if s.sessionHasPendingClarification(writeCtx, data.SessionID) {
+		return nil
+	}
+
+	session, err := s.repo.GetTaskSession(writeCtx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to load session for stale-dismissed clarification cleanup",
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return nil
+	}
+	if isTerminalSessionState(session.State) {
+		s.logger.Debug("ignoring stale-dismissed clarification for terminal session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("session_state", string(session.State)))
+		return nil
+	}
+
+	s.captureGitStatusSnapshot(writeCtx, data.SessionID)
+	s.finalizeAutomationRunIfEphemeral(writeCtx, data.TaskID, data.SessionID, true, "")
+	transitioned := s.processOnTurnCompleteViaEngine(writeCtx, data.TaskID, session)
+	if !transitioned {
+		s.writeTaskReviewState(writeCtx, data.TaskID, data.SessionID)
+	}
+	return nil
 }
 
 // clarificationAnsweredData is the event payload for ClarificationAnswered events.
@@ -231,6 +285,50 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 	return true
 }
 
+// PauseForClarificationInput converts a no-answer ask_user_question outcome
+// into a platform pause. It detaches the pending clarification so a late user
+// answer resumes through the event fallback path, then silently cancels the
+// active agent turn without evaluating workflow turn-complete actions. It
+// returns the number of clarification bundles detached.
+func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID string) (int, error) {
+	if sessionID == "" {
+		return 0, fmt.Errorf("session_id is required")
+	}
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), clarificationInputPauseTimeout)
+	defer cancel()
+	session, err := s.repo.GetTaskSession(writeCtx, sessionID)
+	if err != nil {
+		return 0, fmt.Errorf("load session for clarification pause: %w", err)
+	}
+	if session == nil {
+		return 0, nil
+	}
+
+	hasPendingClarification := s.sessionHasPendingClarification(writeCtx, sessionID)
+	detached := 0
+	if s.clarificationCanceller != nil {
+		detached = s.clarificationCanceller.DetachSessionAndNotify(writeCtx, sessionID)
+	}
+	if isTerminalSessionState(session.State) {
+		return detached, nil
+	}
+	if !hasPendingClarification && detached == 0 {
+		return detached, nil
+	}
+	if _, has := models.LoadPendingStepSignal(session.Metadata); has {
+		s.clearPendingStepSignal(writeCtx, session)
+	}
+
+	// The backend wait path and agentctl timeout notification can race for the
+	// same ask_user_question call. A duplicate cancel is safe: lifecycle returns
+	// ErrCancelEscalated/ErrNoExecutionForSession once the first pause wins, and
+	// completeTurnForSession is idempotent when there is no active turn left.
+	if err := s.cancelAgentSilent(writeCtx, session.TaskID, sessionID); err != nil {
+		return detached, err
+	}
+	return detached, nil
+}
+
 // cancelAgentSilent cancels the agent turn without creating a visible message
 // in the chat. Used by clarification recovery so the cancel-and-retry is seamless.
 //
@@ -238,22 +336,36 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 // (agent crashed mid-turn). In that case, skip the cancel signal but still reconcile the
 // session's state so clarification recovery can proceed with a fresh prompt.
 func (s *Service) cancelAgentSilent(ctx context.Context, taskID, sessionID string) error {
-	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
-		if !errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+	if s.agentManager == nil {
+		s.logger.Debug("skipping silent clarification cancel because agent manager is not configured",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+	} else if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
+		if !errors.Is(err, lifecycle.ErrNoExecutionForSession) && !errors.Is(err, lifecycle.ErrCancelEscalated) {
 			return fmt.Errorf("cancel agent: %w", err)
 		}
-		// Agent crashed or exited mid-turn — clarification recovery cannot signal a cancel,
-		// but we still reconcile state below so a fresh prompt can run. Error level so this
-		// surfaces for root-cause investigation of the crash.
-		s.logger.Error("agent process appears to have crashed during clarification recovery",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+		s.logSilentCancelReconciled(taskID, sessionID, err)
 	}
-
 	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, nil)
 	s.completeTurnForSession(ctx, sessionID)
 	return nil
+}
+
+func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error) {
+	if errors.Is(err, lifecycle.ErrCancelEscalated) {
+		s.logger.Warn("agent did not acknowledge silent clarification cancel; reconciling session state",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	// Agent crashed or exited mid-turn — clarification recovery cannot signal a cancel,
+	// but we still reconcile state below so a fresh prompt can run. Error level so this
+	// surfaces for root-cause investigation of the crash.
+	s.logger.Error("agent process appears to have crashed during clarification recovery",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID),
+		zap.Error(err))
 }
 
 func (s *Service) cancelClarificationWatchdogsForSession(sessionID, reason string) {

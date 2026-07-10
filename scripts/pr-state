@@ -1,0 +1,575 @@
+#!/usr/bin/env bash
+# pr-state — emit a raw JSON snapshot of PR CI and review state.
+#
+# Usage:
+#   scripts/pr-state [--summary] [--all] <PR>
+#   scripts/pr-state --comment <comment_id>
+#
+# Raw output:
+#   JSON object with:
+#   - pr: { number, branch }
+#   - since: { head_oid, committed_at } or null
+#   - checks: [{ type, name, workflow, status, conclusion, details_url, target_url, run_id, job_id }]
+#   - review_threads: [{ thread_id, is_resolved, path, comment_id, comment_created_at, author, body_preview }]
+#   - hidden_unresolved_threads: [{ thread_id, comment_id, author, path, body_preview }]
+#   - unresolved_review_thread_count: <N>
+#   - filtered_review_thread_count: <N>
+#   - reviews: [{ author, state, submitted_at, html_url }]
+#   - issue_comments: [{ author, body, created_at, url }]
+#   - errors: [{ source, message }]
+#
+# Summary output (--summary):
+#   JSON object with:
+#   - pr: { number, branch }
+#   - since: { head_oid, committed_at } or null
+#   - failed_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
+#   - pending_checks: [{ name, workflow, status, run_id, job_id, details_url, target_url }]
+#   - unresolved_review_thread_count: <N>
+#   - filtered_review_thread_count: <N>
+#   - unresolved_threads: [{ thread_id, comment_id, author, path, body_preview }]
+#   - hidden_unresolved_threads: [{ thread_id, comment_id, author, path, body_preview }]
+#   - summary_notes: [<short human-readable notes>]
+#   - errors: [{ source, message }]
+#
+# Comment output (--comment):
+#   JSON object for one PR review comment:
+#   - comment_id, author, body, path, line, original_line, commit_id, html_url, created_at, updated_at
+#
+# By default, comments/reviews/review threads are limited to items created after
+# the PR head commit. Checks are already scoped by GitHub to the current head.
+# Pass --all to include historical comments and reviews.
+#
+# Requires: gh (authenticated), jq.
+
+set -euo pipefail
+
+usage() {
+  sed -n '2,/^# Requires:/p' "$0" | sed 's|^# \{0,1\}||'
+  exit "${1:-1}"
+}
+
+INCLUDE_ALL=0
+SUMMARY=0
+COMMENT_ID=''
+PR=''
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --all)
+      INCLUDE_ALL=1
+      shift
+      ;;
+    --summary)
+      SUMMARY=1
+      shift
+      ;;
+    --comment)
+      shift
+      [[ $# -gt 0 && -z "${COMMENT_ID:-}" && -z "${PR:-}" ]] || usage 1
+      [[ "$1" =~ ^[0-9]+$ ]] || usage 1
+      COMMENT_ID=$1
+      shift
+      ;;
+    -h | --help)
+      usage 0
+      ;;
+    --)
+      shift
+      if [[ $# -gt 0 ]]; then
+        [[ -z "${PR:-}" && $# -eq 1 ]] || usage
+        PR=$1
+        shift
+      fi
+      break
+      ;;
+    -*)
+      usage 1
+      ;;
+    *)
+      [[ -z "${PR:-}" ]] || usage
+      PR=$1
+      shift
+      ;;
+  esac
+done
+
+[ $# -eq 0 ] || usage
+
+if [[ -n "${COMMENT_ID:-}" ]]; then
+  [[ -z "${PR:-}" && "$SUMMARY" == "0" && "$INCLUDE_ALL" == "0" ]] || usage
+else
+  [ -n "${PR:-}" ] || usage
+fi
+
+errors='[]'
+pr_json='{}'
+checks_json='[]'
+review_threads_json='[]'
+hidden_unresolved_threads_json='[]'
+reviews_json='[]'
+issue_comments_json='[]'
+since_json='null'
+unresolved_review_thread_count=null
+filtered_review_thread_count=null
+
+add_error() {
+  local source=$1
+  local message=$2
+  errors="$(jq -cn --argjson prev "$errors" --arg source "$source" --arg message "$message" \
+    '$prev + [{source: $source, message: $message}]')"
+}
+
+gh_json() {
+  env -u GH_DEBUG -u GITHUB_DEBUG -u GH_TRACE -u GITHUB_TRACE \
+    GH_PAGER=cat GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 \
+    gh "$@" 2>/dev/null
+}
+
+emit_comment_json() {
+  local comment_id=$1
+  local repo_json
+  local owner
+  local repo
+  local comment_json
+
+  repo_json="$(gh_json repo view --json owner,name)"
+  owner="$(jq -r '.owner.login // ""' <<<"$repo_json")"
+  repo="$(jq -r '.name // ""' <<<"$repo_json")"
+  if [[ -z "$owner" || -z "$repo" ]]; then
+    printf 'failed to resolve repository identity\n' >&2
+    return 1
+  fi
+
+  if ! comment_json="$(gh_json api "repos/$owner/$repo/pulls/comments/$comment_id")"; then
+    printf 'failed to fetch PR comment %s\n' "$comment_id" >&2
+    return 1
+  fi
+
+  jq -c '{
+    comment_id: (.id // null),
+    author: (.user.login // "unknown"),
+    body: (.body // ""),
+    path: (.path // null),
+    line: (.line // null),
+    original_line: (.original_line // null),
+    commit_id: (.commit_id // null),
+    html_url: (.html_url // null),
+    created_at: (.created_at // null),
+    updated_at: (.updated_at // null)
+  }' <<<"$comment_json"
+}
+
+if [[ -n "${COMMENT_ID:-}" ]]; then
+  emit_comment_json "$COMMENT_ID"
+  exit $?
+fi
+
+extract_checks_json() {
+  local status_json=$1
+  jq -cn --slurpfile checks_in <(printf '%s\n' "$status_json") '
+    def lower_or_null:
+      if . == null or . == "" then null else ascii_downcase end;
+    def extract($re; $field):
+      if . == null then null else ((capture($re)? | .[$field]) // null) end;
+    def normalized_conclusion:
+      if has("conclusion") then
+        (.conclusion | lower_or_null)
+      else
+        ((.state // "") | lower_or_null) as $state
+        | if $state == "pending" or $state == "expected" then null else $state end
+      end;
+    def preferred_check_order:
+      if .conclusion == "success" then 0
+      elif .status != "completed" then 1
+      elif (
+        .conclusion != null
+        and .conclusion != "neutral"
+        and .conclusion != "skipped"
+        and .conclusion != "cancelled"
+      ) then 2
+      elif .conclusion == "neutral" then 3
+      elif .conclusion == "skipped" then 4
+      elif .conclusion == "cancelled" then 5
+      else 6
+      end;
+    $checks_in[0]
+    | to_entries
+    | map(.value + {_index: .key} | {
+      type: (.["__typename"] // null),
+      name: (.name // .context // "unknown"),
+      workflow: (.workflowName // .workflow // .checkSuite.workflowRun.workflow.name // null),
+      status: ((.status // .state // "unknown") | ascii_downcase),
+      conclusion: normalized_conclusion,
+      details_url: (.detailsUrl // null),
+      target_url: (.targetUrl // null),
+      run_id: ((.detailsUrl // null) | extract("/actions/runs/(?<id>[0-9]+)"; "id")),
+      job_id: ((.detailsUrl // null) | extract("/job/(?<id>[0-9]+)"; "id")),
+      _index
+    })
+    | sort_by([(.workflow // ""), .name])
+    | group_by([(.workflow // ""), .name])
+    | map({
+      first_index: (map(._index) | min),
+      items: sort_by(preferred_check_order, ._index)
+    })
+    | sort_by(.first_index)
+    | map(.items[])
+    | map(del(._index))
+  '
+}
+
+extract_issue_comments_json() {
+  local comments_json=$1
+  local since=$2
+  jq -cn --slurpfile comments <(printf '%s\n' "$comments_json") --arg since "$since" '
+    $comments[0]
+    | map(select($since == "" or ((.createdAt // .created_at // "") > $since)))
+    | map({
+      author: (.author.login // "unknown"),
+      body: (.body // ""),
+      created_at: (.createdAt // .created_at // null),
+      url: (.url // null)
+    })
+  '
+}
+
+extract_reviews_json() {
+  local reviews_api_json=$1
+  local since=$2
+  jq -cn --slurpfile reviews <(printf '%s\n' "$reviews_api_json") --arg since "$since" '
+    $reviews[0]
+    | map(select($since == "" or ((.submitted_at // "") > $since)))
+    | map({
+      author: (.user.login // "unknown"),
+      state: ((.state // "unknown") | ascii_downcase),
+      submitted_at: (.submitted_at // null),
+      html_url: (.html_url // null)
+    })
+  '
+}
+
+extract_review_threads_json() {
+  local threads_nodes_json=$1
+  local since=$2
+  jq -cn --slurpfile threads <(printf '%s\n' "$threads_nodes_json") --arg since "$since" '
+    def relevant_comments:
+      if $since == "" then
+        (.comments.nodes // [])
+      else
+        [(.comments.nodes // [])[] | select((.createdAt // "") > $since)]
+      end;
+    $threads[0]
+    | map(. as $thread | (relevant_comments) as $comments | select($comments | length > 0) | {
+      thread_id: .id,
+      is_resolved: (.isResolved // false),
+      path: (.path // ""),
+      comment_id: ($comments[0].databaseId // null),
+      comment_created_at: ($comments[0].createdAt // null),
+      author: ($comments[0].author.login // "unknown"),
+      body_preview: (($comments[0].body // "") | gsub("\n"; " ") | .[0:120])
+    })
+  '
+}
+
+summarize_state_json() {
+  jq -c '
+    def effective_checks:
+      .checks
+      | to_entries
+      | map(.value + {_index: .key})
+      | sort_by([(.workflow // ""), .name])
+      | group_by([(.workflow // ""), .name])
+      | map(sort_by(._index) | .[0] | del(._index));
+
+    def bad_conclusion:
+      .conclusion != null
+      and .conclusion != "success"
+      and .conclusion != "skipped"
+      and .conclusion != "neutral";
+
+    def terminal_failure_status:
+      .status == "completed"
+      or .status == "failure"
+      or .status == "error";
+
+    def pending_status:
+      .status != "completed"
+      and .status != "success"
+      and .status != "failure"
+      and .status != "error";
+
+    {
+      pr,
+      since,
+      failed_checks: [
+        effective_checks[]
+        | select(terminal_failure_status and bad_conclusion)
+        | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
+      ],
+      pending_checks: [
+        effective_checks[]
+        | select(pending_status and .conclusion == null)
+        | {name, workflow, status, run_id, job_id, details_url, target_url}
+      ],
+      unresolved_review_thread_count,
+      filtered_review_thread_count,
+      unresolved_threads: [
+        .review_threads[]
+        | select(.is_resolved == false)
+        | {thread_id, comment_id, author, path, body_preview}
+      ],
+      hidden_unresolved_threads: (.hidden_unresolved_threads // []),
+      summary_notes: (
+        [
+          if (
+            (.unresolved_review_thread_count | type) == "number"
+            and .unresolved_review_thread_count > 0
+            and ([
+              .review_threads[]
+              | select(.is_resolved == false)
+            ] | length) == 0
+          ) then
+            "unresolved threads exist outside current-head filter; run `scripts/pr-resolve list <PR>` for full list"
+          else
+            empty
+          end
+        ]
+      ),
+      errors
+    }
+  '
+}
+
+fetch_head_commit_json() {
+  local owner=$1
+  local repo=$2
+  local pr_number=$3
+
+  gh_json api graphql \
+    -f query='
+      query($owner: String!, $repo: String!, $pr: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $pr) {
+            headRefOid
+            commits(last: 1) {
+              nodes {
+                commit {
+                  oid
+                  committedDate
+                }
+              }
+            }
+          }
+        }
+      }' \
+    -f owner="$owner" -f repo="$repo" -F pr="$pr_number" |
+    jq -c '{
+      head_oid: (.data.repository.pullRequest.headRefOid // .data.repository.pullRequest.commits.nodes[0].commit.oid // null),
+      committed_at: (.data.repository.pullRequest.commits.nodes[0].commit.committedDate // null)
+    }'
+}
+
+fetch_review_threads_nodes_json() {
+  local owner=$1
+  local repo=$2
+  local pr_number=$3
+  local cursor=''
+  local nodes_file
+  nodes_file="$(mktemp)"
+  printf '[]\n' >"$nodes_file"
+
+  while :; do
+    local cursor_args=()
+    if [[ -n "$cursor" ]]; then
+      cursor_args=(-f cursor="$cursor")
+    fi
+
+    local page_json
+    if ! page_json="$(gh_json api graphql \
+      -f query='
+        query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $pr) {
+              reviewThreads(first: 100, after: $cursor) {
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+                nodes {
+                  id
+                  isResolved
+                  path
+                  comments(last: 100) {
+                    nodes {
+                      databaseId
+                      createdAt
+                      author { login }
+                      body
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }' \
+      -f owner="$owner" -f repo="$repo" -F pr="$pr_number" "${cursor_args[@]}")"; then
+      rm -f "$nodes_file"
+      return 1
+    fi
+
+    local page_nodes
+    page_nodes="$(jq -c '.data.repository.pullRequest.reviewThreads.nodes // []' <<<"$page_json")"
+    local next_nodes_file
+    next_nodes_file="$(mktemp)"
+    if ! jq -cn \
+      --slurpfile prev "$nodes_file" \
+      --slurpfile page <(printf '%s\n' "$page_nodes") \
+      '$prev[0] + $page[0]' >"$next_nodes_file"; then
+      add_error "review_threads" "failed to merge paginated review threads"
+      rm -f "$next_nodes_file" "$nodes_file"
+      return 1
+    fi
+    mv "$next_nodes_file" "$nodes_file"
+
+    local has_next
+    has_next="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false' <<<"$page_json")"
+    if [[ "$has_next" != "true" ]]; then
+      break
+    fi
+
+    cursor="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor // ""' <<<"$page_json")"
+    if [[ -z "$cursor" ]]; then
+      add_error "review_threads" "pagination stopped: missing endCursor"
+      break
+    fi
+  done
+
+  cat "$nodes_file"
+  rm -f "$nodes_file"
+}
+
+repo_owner=''
+repo_name=''
+if repo_json="$(gh_json repo view --json owner,name)"; then
+  repo_owner="$(jq -r '.owner.login // ""' <<<"$repo_json")"
+  repo_name="$(jq -r '.name // ""' <<<"$repo_json")"
+else
+  add_error "repo" "gh repo view failed"
+fi
+
+comments_json='[]'
+status_json='[]'
+resolved_pr_number=''
+if pr_view_json="$(gh_json pr view "$PR" --json number,headRefName,statusCheckRollup,comments,url)"; then
+  resolved_pr_number="$(jq -r '.number // ""' <<<"$pr_view_json")"
+  if pr_url_owner="$(jq -r '.url | capture("github.com/(?<owner>[^/]+)/(?<repo>[^/]+)/pull/[0-9]+").owner // ""' <<<"$pr_view_json" 2>/dev/null)" && [[ -n "$pr_url_owner" ]]; then
+    repo_owner="$pr_url_owner"
+    repo_name="$(jq -r '.url | capture("github.com/(?<owner>[^/]+)/(?<repo>[^/]+)/pull/[0-9]+").repo // ""' <<<"$pr_view_json")"
+  fi
+  pr_json="$(jq -c '{number: .number, branch: (.headRefName // "unknown")}' <<<"$pr_view_json")"
+  comments_json="$(jq -c '.comments // []' <<<"$pr_view_json")"
+  status_json="$(jq -c '.statusCheckRollup // []' <<<"$pr_view_json")"
+  checks_json="$(extract_checks_json "$status_json")"
+else
+  if [[ "$PR" =~ ^[0-9]+$ ]]; then
+    pr_json="$(jq -cn --argjson number "$PR" '{number: $number, branch: "unknown"}')"
+  else
+    pr_json="$(jq -cn --arg branch "$PR" '{number: null, branch: $branch}')"
+  fi
+  add_error "pr_view" "gh pr view failed"
+fi
+
+since=''
+if [[ "$INCLUDE_ALL" != "1" && -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
+  if since_json="$(fetch_head_commit_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
+    since="$(jq -r '.committed_at // ""' <<<"$since_json")"
+    if [[ -z "$since" ]]; then
+      add_error "since" "head commit timestamp unavailable; including historical comments"
+      since_json='null'
+    fi
+  else
+    add_error "since" "gh api graphql head commit failed; including historical comments"
+    since_json='null'
+  fi
+fi
+
+issue_comments_json="$(extract_issue_comments_json "$comments_json" "$since")"
+
+if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
+  if reviews_pages_json="$(gh_json api --paginate -X GET "repos/$repo_owner/$repo_name/pulls/$resolved_pr_number/reviews")"; then
+    reviews_api_json="$(jq -cs 'add // []' <<<"$reviews_pages_json")"
+    reviews_json="$(extract_reviews_json "$reviews_api_json" "$since")"
+  else
+    add_error "reviews" "gh api pulls reviews failed"
+  fi
+else
+  add_error "reviews" "skipped: resolved PR identity unavailable"
+fi
+
+if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
+  if threads_nodes_json="$(fetch_review_threads_nodes_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
+    review_threads_json="$(extract_review_threads_json "$threads_nodes_json" "$since")"
+    all_review_threads_json="$(extract_review_threads_json "$threads_nodes_json" "")"
+    hidden_unresolved_threads_json="$(jq -cn \
+      --slurpfile all <(printf '%s\n' "$all_review_threads_json") \
+      --slurpfile filtered <(printf '%s\n' "$review_threads_json") \
+      '
+        ($filtered[0] | map(.thread_id)) as $filtered_ids
+        | $all[0]
+        | map(select(.is_resolved == false and (.thread_id as $id | $filtered_ids | index($id) | not)))
+        | map({thread_id, comment_id, author, path, body_preview})
+      ')"
+    unresolved_review_thread_count="$(jq -r '[.[] | select(.isResolved == false)] | length' <<<"$threads_nodes_json")"
+    filtered_review_thread_count="$(jq -r 'length' <<<"$review_threads_json")"
+  else
+    add_error "review_threads" "gh api graphql reviewThreads failed"
+  fi
+elif [[ -z "$repo_owner" || -z "$repo_name" ]]; then
+  add_error "review_threads" "skipped: repo lookup failed"
+elif [[ -z "$resolved_pr_number" ]]; then
+  add_error "review_threads" "skipped: resolved PR identity unavailable"
+fi
+
+state_tmp_dir="$(mktemp -d)"
+cleanup_state_tmp() {
+  rm -rf "$state_tmp_dir"
+}
+trap cleanup_state_tmp EXIT
+
+printf '%s\n' "$pr_json" >"$state_tmp_dir/pr.json"
+printf '%s\n' "$since_json" >"$state_tmp_dir/since.json"
+printf '%s\n' "$checks_json" >"$state_tmp_dir/checks.json"
+printf '%s\n' "$review_threads_json" >"$state_tmp_dir/review_threads.json"
+printf '%s\n' "$hidden_unresolved_threads_json" >"$state_tmp_dir/hidden_unresolved_threads.json"
+printf '%s\n' "$reviews_json" >"$state_tmp_dir/reviews.json"
+printf '%s\n' "$issue_comments_json" >"$state_tmp_dir/issue_comments.json"
+printf '%s\n' "$errors" >"$state_tmp_dir/errors.json"
+
+state_json="$(jq -cn \
+  --slurpfile pr "$state_tmp_dir/pr.json" \
+  --slurpfile since "$state_tmp_dir/since.json" \
+  --slurpfile checks "$state_tmp_dir/checks.json" \
+  --slurpfile review_threads "$state_tmp_dir/review_threads.json" \
+  --slurpfile hidden_unresolved_threads "$state_tmp_dir/hidden_unresolved_threads.json" \
+  --slurpfile reviews "$state_tmp_dir/reviews.json" \
+  --slurpfile issue_comments "$state_tmp_dir/issue_comments.json" \
+  --argjson unresolved_review_thread_count "$unresolved_review_thread_count" \
+  --argjson filtered_review_thread_count "$filtered_review_thread_count" \
+  --slurpfile errors "$state_tmp_dir/errors.json" \
+  '{
+    pr: $pr[0],
+    since: $since[0],
+    checks: $checks[0],
+    review_threads: $review_threads[0],
+    hidden_unresolved_threads: $hidden_unresolved_threads[0],
+    unresolved_review_thread_count: $unresolved_review_thread_count,
+    filtered_review_thread_count: $filtered_review_thread_count,
+    reviews: $reviews[0],
+    issue_comments: $issue_comments[0],
+    errors: $errors[0]
+  }')"
+
+if [[ "$SUMMARY" == "1" ]]; then
+  summarize_state_json <<<"$state_json"
+else
+  printf '%s\n' "$state_json"
+fi

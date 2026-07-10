@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { Task, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { JiraTicket } from "@/lib/types/jira";

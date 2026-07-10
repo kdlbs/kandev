@@ -1,7 +1,8 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { IconTrash } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -61,10 +62,12 @@ export function ProfileHeader({
   executor,
   profileName,
   description,
+  actions,
 }: {
   executor: Executor;
   profileName: string;
   description: string;
+  actions?: ReactNode;
 }) {
   const router = useRouter();
   return (
@@ -80,14 +83,17 @@ export function ProfileHeader({
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{description}</p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="cursor-pointer"
-        >
-          Back to Executors
-        </Button>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+          {actions}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push(EXECUTORS_ROUTE)}
+            className="w-full cursor-pointer sm:w-auto"
+          >
+            Back to Executors
+          </Button>
+        </div>
       </div>
       <Separator />
     </>

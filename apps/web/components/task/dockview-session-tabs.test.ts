@@ -1,15 +1,45 @@
 import { describe, it, expect, vi } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { reconcileRemovedSessionPanels } from "./dockview-session-tabs";
+import type { TaskSession } from "@/lib/types/http";
+import {
+  ensureSessionTabPrecedesNonSessionTabs,
+  findSessionAnchorGroupId,
+  reconcileRemovedSessionPanels,
+  resolveInitialPosition,
+  resolveSessionTabSyncTarget,
+  runAutoSessionTabEffect,
+  shouldActivateSessionPanel,
+  shouldRebuildDefaultForPendingSession,
+} from "./dockview-session-tabs";
+import { CENTER_GROUP, RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 
 type FakePanel = {
   id: string;
   api: { close: ReturnType<typeof vi.fn<[], void>> };
 };
 
+type MoveToOptions = {
+  group: unknown;
+  position: "center";
+  index: number;
+  skipSetActive: boolean;
+};
+
+type MoveToCall = {
+  panelId: string;
+  options: MoveToOptions;
+};
+
 const KEEP = "keep";
 const KEEP_PANEL = `session:${KEEP}`;
 const LEAKED_PANEL = "session:leaked";
+const PENDING_SESSION_ID = "session-new";
+const TEST_GROUP_CENTER = "group-center";
+const CENTER_POSITION = "center";
+const SIBLING_PANEL = "session:sibling";
+const AUTO_TASK_ID = "task-A";
+const PENDING_EFFECT_SESSION_ID = "session-pending";
 
 /**
  * Builds a fake DockviewApi where `panel.api.close()` mutates the underlying
@@ -38,8 +68,102 @@ function makeApi(panelIds: string[]): { api: DockviewApi; panels: FakePanel[] } 
   return { api, panels };
 }
 
+function makeAutoSessionAppStore(taskId: string | null, sessionIds: string[]) {
+  const itemsByTaskId = taskId ? { [taskId]: sessionIds.map((id) => ({ id })) } : {};
+  return {
+    getState: () => ({
+      tasks: { activeTaskId: taskId },
+      taskSessionsByTask: { itemsByTaskId },
+    }),
+  };
+}
+
+function makeAutoSessionRefs(
+  prevTaskId = "task-old",
+  prevSessionId: string | null = "session-old",
+) {
+  return {
+    sessionTabCreatedRef: { current: new Set<string>() },
+    prevTaskIdRef: { current: prevTaskId as string | null },
+    prevSessionIdRef: { current: prevSessionId },
+  };
+}
+
+function withDockviewState<T>(
+  updates: Partial<ReturnType<typeof useDockviewStore.getState>>,
+  callback: () => T,
+): T {
+  const previous = useDockviewStore.getState();
+  useDockviewStore.setState(updates);
+  try {
+    return callback();
+  } finally {
+    useDockviewStore.setState({
+      api: previous.api,
+      buildDefaultLayout: previous.buildDefaultLayout,
+      currentLayoutEnvId: previous.currentLayoutEnvId,
+      preMaximizeLayout: previous.preMaximizeLayout,
+      pinnedWidths: previous.pinnedWidths,
+      maximizedGroupId: previous.maximizedGroupId,
+      isRestoringLayout: previous.isRestoringLayout,
+    });
+  }
+}
+
+function makePositionApi(args: {
+  groups: string[];
+  panels?: Array<{ id: string; groupId: string }>;
+}): DockviewApi {
+  const panels =
+    args.panels?.map((p) => ({
+      id: p.id,
+      group: { id: p.groupId },
+    })) ?? [];
+  return {
+    groups: args.groups.map((id) => ({ id })),
+    panels,
+    getPanel: (id: string) => panels.find((p) => p.id === id) ?? null,
+  } as unknown as DockviewApi;
+}
+
 function panelById(panels: FakePanel[], id: string): FakePanel | undefined {
   return panels.find((p) => p.id === id);
+}
+
+function makeTabOrderApi(panelIds: string[]): {
+  api: DockviewApi;
+  moveToCalls: MoveToCall[];
+} {
+  const moveToCalls: MoveToCall[] = [];
+  const group = { id: TEST_GROUP_CENTER, panels: [] as Array<{ id: string }> };
+  const panels = panelIds.map((id) => ({
+    id,
+    group,
+    api: {
+      moveTo: vi.fn((options: MoveToOptions) => {
+        moveToCalls.push({ panelId: id, options });
+      }),
+    },
+  }));
+  group.panels = panels;
+  return {
+    api: {
+      getPanel: (id: string) => panels.find((p) => p.id === id) ?? null,
+    } as unknown as DockviewApi,
+    moveToCalls,
+  };
+}
+
+function expectedMove(panelId: string, index: number): MoveToCall {
+  return {
+    panelId,
+    options: {
+      group: expect.objectContaining({ id: TEST_GROUP_CENTER }),
+      position: CENTER_POSITION,
+      index,
+      skipSetActive: true,
+    },
+  };
 }
 
 describe("reconcileRemovedSessionPanels", () => {
@@ -148,5 +272,440 @@ describe("reconcileRemovedSessionPanels", () => {
 
     expect(createdSet.has("already-removed")).toBe(false);
     expect(createdSet.has(KEEP)).toBe(true);
+  });
+});
+
+describe("findSessionAnchorGroupId", () => {
+  function makeApiWithPanels(panels: Array<{ id: string; groupId: string }>): DockviewApi {
+    const enriched = panels.map((p) => ({ id: p.id, group: { id: p.groupId } }));
+    return {
+      panels: enriched,
+      getPanel: (id: string) => enriched.find((p) => p.id === id) ?? null,
+    } as unknown as DockviewApi;
+  }
+
+  it("returns the group id of a pr-detail anchor panel", () => {
+    // Regression: when a saved layout's session was sanitized away (page load)
+    // or replaced (env switch) but pr-detail remained, the new session would
+    // be added as a right-of-sidebar split instead of joining pr-detail's
+    // group — pulling pr-detail out of the user's grouping with the agent.
+    const api = makeApiWithPanels([{ id: "pr-detail", groupId: "saved-center-group" }]);
+
+    expect(findSessionAnchorGroupId(api)).toBe("saved-center-group");
+  });
+
+  it("matches keyed pr-detail panels used by multi-repo PR flows", () => {
+    // Multi-repo tasks open one PR tab per PR with id `pr-detail|owner/repo/N`
+    // (see addPRPanel in dockview-panel-actions.ts). Without prefix matching,
+    // findSessionAnchorGroupId would miss them and the new session would land
+    // as a right-of-sidebar split — losing the user's PR/session grouping.
+    const api = makeApiWithPanels([{ id: "pr-detail|owner/repo/123", groupId: "keyed-pr-group" }]);
+
+    expect(findSessionAnchorGroupId(api)).toBe("keyed-pr-group");
+  });
+
+  it("returns null when no anchor panel exists", () => {
+    const api = makeApiWithPanels([]);
+
+    expect(findSessionAnchorGroupId(api)).toBeNull();
+  });
+});
+
+describe("resolveInitialPosition", () => {
+  it("creates a center column left of the right sidebar when only the right group remains", () => {
+    useDockviewStore.setState({ centerGroupId: RIGHT_TOP_GROUP });
+    const api = makePositionApi({ groups: [RIGHT_TOP_GROUP] });
+
+    expect(resolveInitialPosition(api)).toEqual({
+      referenceGroup: RIGHT_TOP_GROUP,
+      direction: "left",
+    });
+  });
+});
+
+describe("ensureSessionTabPrecedesNonSessionTabs", () => {
+  it("moves a restored session tab before a PR tab that was saved first", () => {
+    const { api, moveToCalls } = makeTabOrderApi(["pr-detail", KEEP_PANEL, "preview:file-diff"]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveToCalls).toEqual([expectedMove(KEEP_PANEL, 0)]);
+  });
+
+  it("moves interleaved session tabs as a stable block before non-session tabs", () => {
+    const { api, moveToCalls } = makeTabOrderApi(["pr-detail", SIBLING_PANEL, KEEP_PANEL]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveToCalls).toEqual([expectedMove(KEEP_PANEL, 0), expectedMove(SIBLING_PANEL, 0)]);
+  });
+
+  it("does not move when session tabs already precede non-session tabs", () => {
+    const { api, moveToCalls } = makeTabOrderApi([KEEP_PANEL, SIBLING_PANEL, "pr-detail"]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveToCalls).toEqual([]);
+  });
+
+  it("does not move when the session tab already precedes non-session tabs", () => {
+    const { api, moveToCalls } = makeTabOrderApi([KEEP_PANEL, "pr-detail"]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveToCalls).toEqual([]);
+  });
+
+  it("keeps earlier session tabs ahead of the active session tab", () => {
+    const { api, moveToCalls } = makeTabOrderApi(["session:older", "pr-detail", KEEP_PANEL]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveToCalls).toEqual([expectedMove(KEEP_PANEL, 1)]);
+  });
+
+  it("does not move when the target session panel is absent", () => {
+    const { api, moveToCalls } = makeTabOrderApi(["pr-detail", SIBLING_PANEL]);
+
+    ensureSessionTabPrecedesNonSessionTabs(api, KEEP);
+
+    expect(moveToCalls).toEqual([]);
+  });
+});
+
+describe("shouldRebuildDefaultForPendingSession", () => {
+  it("does not rebuild when there is no effective session id", () => {
+    const api = makePositionApi({
+      groups: [RIGHT_TOP_GROUP],
+      panels: [
+        { id: "session:missing", groupId: RIGHT_TOP_GROUP },
+        { id: "files", groupId: RIGHT_TOP_GROUP },
+      ],
+    });
+
+    expect(shouldRebuildDefaultForPendingSession(api, null, [])).toBe(false);
+  });
+
+  it("rebuilds default when the active session is pending and no chat group remains", () => {
+    const api = makePositionApi({
+      groups: [RIGHT_TOP_GROUP],
+      panels: [
+        { id: "files", groupId: RIGHT_TOP_GROUP },
+        { id: "changes", groupId: RIGHT_TOP_GROUP },
+      ],
+    });
+
+    expect(shouldRebuildDefaultForPendingSession(api, PENDING_SESSION_ID, [])).toBe(true);
+  });
+
+  it("rebuilds before stale session panels are reconciled away", () => {
+    const api = makePositionApi({
+      groups: ["stale-center", RIGHT_TOP_GROUP],
+      panels: [
+        { id: "session:old", groupId: "stale-center" },
+        { id: "files", groupId: RIGHT_TOP_GROUP },
+        { id: "changes", groupId: RIGHT_TOP_GROUP },
+      ],
+    });
+
+    expect(shouldRebuildDefaultForPendingSession(api, PENDING_SESSION_ID, [])).toBe(true);
+  });
+
+  it("does not rebuild while the chat placeholder is still present", () => {
+    const api = makePositionApi({
+      groups: [CENTER_GROUP, RIGHT_TOP_GROUP],
+      panels: [
+        { id: "chat", groupId: CENTER_GROUP },
+        { id: "files", groupId: RIGHT_TOP_GROUP },
+      ],
+    });
+
+    expect(shouldRebuildDefaultForPendingSession(api, PENDING_SESSION_ID, [])).toBe(false);
+  });
+
+  it("does not rebuild once the active session is hydrated for the task", () => {
+    const api = makePositionApi({ groups: [RIGHT_TOP_GROUP] });
+
+    expect(
+      shouldRebuildDefaultForPendingSession(api, PENDING_SESSION_ID, [PENDING_SESSION_ID]),
+    ).toBe(false);
+  });
+});
+
+describe("resolveSessionTabSyncTarget", () => {
+  function makeSession(id: string, taskId: string): TaskSession {
+    return { id, task_id: taskId } as unknown as TaskSession;
+  }
+
+  it("returns the (activeTaskId, sid) pair for a session that belongs to the active task", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-new",
+      activeTaskId: "task-A",
+      activeSessionId: "s-old",
+      taskSessionsById: { "s-new": makeSession("s-new", "task-A") },
+      environmentIdBySessionId: { "s-new": "env-A" },
+    });
+
+    expect(target).toEqual({ taskId: "task-A", sessionId: "s-new" });
+  });
+
+  it("returns null for non-session panels (sidebar, files, terminal, ...)", () => {
+    for (const panelId of ["sidebar", "files", "changes", "terminal:default", "pr-detail"]) {
+      expect(
+        resolveSessionTabSyncTarget({
+          panelId,
+          activeTaskId: "task-A",
+          activeSessionId: null,
+          taskSessionsById: {},
+          environmentIdBySessionId: {},
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("returns null when the activated session matches activeSessionId (no-op)", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-current",
+      activeTaskId: "task-A",
+      activeSessionId: "s-current",
+      taskSessionsById: { "s-current": makeSession("s-current", "task-A") },
+      environmentIdBySessionId: { "s-current": "env-A" },
+    });
+
+    expect(target).toBeNull();
+  });
+
+  /**
+   * Regression for a layout-leak observed when creating a new task: during
+   * the task switch dockview can briefly fire `onDidActivePanelChange` for a
+   * stale `session:<oldSid>` panel that still belongs to the previous task.
+   * If we wrote `setActiveSession(newTaskId, oldSid)`, that would poison
+   * `lastSessionByTaskId[newTaskId]` and the next re-entry to the new task
+   * would resolve to the cross-task session, restoring the wrong layout
+   * (e.g. the previous task's files/changes panels).
+   */
+  it("returns null when the activated session belongs to a different task than activeTaskId", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-belongs-to-B",
+      activeTaskId: "task-A",
+      activeSessionId: null,
+      taskSessionsById: { "s-belongs-to-B": makeSession("s-belongs-to-B", "task-B") },
+      environmentIdBySessionId: { "s-belongs-to-B": "env-B" },
+    });
+
+    expect(target).toBeNull();
+  });
+
+  it("accepts a session that has an env mapping but isn't yet hydrated into taskSessions.items", () => {
+    // The listener can fire before `session.state_changed` lands the new
+    // session in the items map. The env mapping is what guarantees the session
+    // exists at all — once that's present we trust the active task.
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-pending-hydration",
+      activeTaskId: "task-A",
+      activeSessionId: null,
+      taskSessionsById: {},
+      environmentIdBySessionId: { "s-pending-hydration": "env-A" },
+    });
+
+    expect(target).toEqual({ taskId: "task-A", sessionId: "s-pending-hydration" });
+  });
+
+  /**
+   * Regression for a one-frame UI glitch: `removeTaskSession` clears
+   * `taskSessions.items[sid]` and `environmentIdBySessionId[sid]` atomically.
+   * A dying panel firing activation between the clear and unmount must not
+   * write `activeSessionId = <deletedSid>` — the env-mapping gate catches it.
+   */
+  it("returns null when the activated session has no env mapping (deleted or stale)", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s-deleted",
+      activeTaskId: "task-A",
+      activeSessionId: null,
+      taskSessionsById: {},
+      environmentIdBySessionId: {},
+    });
+
+    expect(target).toBeNull();
+  });
+
+  it("returns null when there is no active task", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:s",
+      activeTaskId: null,
+      activeSessionId: null,
+      taskSessionsById: {},
+      environmentIdBySessionId: { s: "env-A" },
+    });
+
+    expect(target).toBeNull();
+  });
+
+  it("returns null for a malformed session:<empty> panel id", () => {
+    const target = resolveSessionTabSyncTarget({
+      panelId: "session:",
+      activeTaskId: "task-A",
+      activeSessionId: null,
+      taskSessionsById: {},
+      environmentIdBySessionId: {},
+    });
+
+    expect(target).toBeNull();
+  });
+});
+
+describe("shouldActivateSessionPanel", () => {
+  const SID = "s-current";
+  const SESSION_PANEL_ID = `session:${SID}`;
+  const baseArgs = {
+    prevTaskId: null,
+    prevSessionId: null,
+    currentTaskId: "task-A",
+    currentSessionId: SID,
+    currentActivePanelId: null,
+  };
+
+  it("activates when the session panel did not exist before (fresh creation)", () => {
+    expect(shouldActivateSessionPanel({ ...baseArgs, sessionPanelExistedBefore: false })).toBe(
+      true,
+    );
+  });
+
+  it("activates on first mount when no panel is currently active", () => {
+    expect(
+      shouldActivateSessionPanel({
+        ...baseArgs,
+        sessionPanelExistedBefore: true,
+        currentActivePanelId: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("activates on first mount when the restored active panel is already the session", () => {
+    expect(
+      shouldActivateSessionPanel({
+        ...baseArgs,
+        sessionPanelExistedBefore: true,
+        currentActivePanelId: SESSION_PANEL_ID,
+      }),
+    ).toBe(true);
+  });
+
+  /**
+   * Regression: on page refresh, dockview's fromJSON restores the active
+   * panel from the saved layout (e.g. a file diff the user had focused).
+   * We must not force-activate the session panel on top of it.
+   */
+  it("does NOT override a restored non-session active panel on first mount", () => {
+    expect(
+      shouldActivateSessionPanel({
+        ...baseArgs,
+        sessionPanelExistedBefore: true,
+        currentActivePanelId: "preview:commit-detail",
+      }),
+    ).toBe(false);
+    expect(
+      shouldActivateSessionPanel({
+        ...baseArgs,
+        sessionPanelExistedBefore: true,
+        currentActivePanelId: "preview:file-editor",
+      }),
+    ).toBe(false);
+    expect(
+      shouldActivateSessionPanel({
+        ...baseArgs,
+        sessionPanelExistedBefore: true,
+        currentActivePanelId: "plan",
+      }),
+    ).toBe(false);
+  });
+
+  it("activates on intra-task session switch (same task, different session)", () => {
+    expect(
+      shouldActivateSessionPanel({
+        sessionPanelExistedBefore: true,
+        prevTaskId: "task-A",
+        prevSessionId: "s-old",
+        currentTaskId: "task-A",
+        currentSessionId: SID,
+        currentActivePanelId: "preview:commit-detail",
+      }),
+    ).toBe(true);
+  });
+
+  it("does NOT activate on task switch (preserves saved active panel for new task)", () => {
+    expect(
+      shouldActivateSessionPanel({
+        sessionPanelExistedBefore: true,
+        prevTaskId: "task-A",
+        prevSessionId: "s-old",
+        currentTaskId: "task-B",
+        currentSessionId: SID,
+        currentActivePanelId: "preview:commit-detail",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("runAutoSessionTabEffect", () => {
+  it("updates previous refs when panel ensure is skipped for an unhydrated session", () => {
+    const api = {
+      panels: [{ id: "chat" }],
+      getPanel: (id: string) => (id === "chat" ? { id: "chat" } : null),
+    } as unknown as DockviewApi;
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, []);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api }, () => {
+      runAutoSessionTabEffect(PENDING_EFFECT_SESSION_ID, appStore as never, refs as never);
+    });
+
+    expect(refs.prevTaskIdRef.current).toBe(AUTO_TASK_ID);
+    expect(refs.prevSessionIdRef.current).toBe(PENDING_EFFECT_SESSION_ID);
+  });
+
+  it("updates previous refs when releasing default layout for a pending session", () => {
+    const api = {
+      panels: [],
+      getPanel: () => null,
+    } as unknown as DockviewApi;
+    const buildDefaultLayout = vi.fn();
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, []);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState(
+      {
+        api,
+        buildDefaultLayout,
+        currentLayoutEnvId: null,
+        preMaximizeLayout: null,
+        pinnedWidths: new Map(),
+        maximizedGroupId: null,
+        isRestoringLayout: false,
+      },
+      () => {
+        runAutoSessionTabEffect(PENDING_EFFECT_SESSION_ID, appStore as never, refs as never);
+      },
+    );
+
+    expect(buildDefaultLayout).toHaveBeenCalledWith(api);
+    expect(refs.prevTaskIdRef.current).toBe(AUTO_TASK_ID);
+    expect(refs.prevSessionIdRef.current).toBe(PENDING_EFFECT_SESSION_ID);
+  });
+
+  it("updates previous refs when there is no effective session", () => {
+    const api = {
+      panels: [],
+      getPanel: () => null,
+    } as unknown as DockviewApi;
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, []);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api }, () => {
+      runAutoSessionTabEffect(null, appStore as never, refs as never);
+    });
+
+    expect(refs.prevTaskIdRef.current).toBe(AUTO_TASK_ID);
+    expect(refs.prevSessionIdRef.current).toBeNull();
   });
 });

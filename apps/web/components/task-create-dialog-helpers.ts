@@ -1,11 +1,18 @@
-import type { useRouter } from "next/navigation";
+import type { useRouter } from "@/lib/routing/client-router";
 import type { Task, Branch, LocalRepository, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
-import type { StepType, TaskRepoRow } from "@/components/task-create-dialog-types";
+import type {
+  StepType,
+  TaskRemoteRepoRow,
+  TaskRepoRow,
+} from "@/components/task-create-dialog-types";
+import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
+import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
 import { getLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
+import { createDebugLogger } from "@/lib/debug/log";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToTask } from "@/lib/links";
 import { INTENT_PLAN } from "@/lib/state/layout-manager";
@@ -14,6 +21,14 @@ import type { FileAttachment } from "@/components/task/chat/file-attachment";
 import type { MessageAttachment } from "@/lib/services/session-launch-service";
 
 type CreateTaskParams = Parameters<typeof createTask>[0];
+type CreateTaskRepositoryPayload = NonNullable<CreateTaskParams["repositories"]>[number];
+type RemoteRepoPRMetadata = {
+  headBranch?: string;
+  baseBranch?: string;
+  number?: number;
+};
+const selectionDebug = createDebugLogger("task-create:selection");
+const BRANCH_AUTOPICK_DEBUG = "branch-autopick";
 
 export type { CreateTaskParams };
 
@@ -24,30 +39,83 @@ export function toMessageAttachments(
   if (attachments.length === 0) return undefined;
   return attachments.map((att) =>
     att.isImage
-      ? { type: "image" as const, data: att.data, mime_type: att.mimeType }
+      ? {
+          type: "image" as const,
+          data: att.data,
+          mime_type: att.mimeType,
+          name: att.fileName,
+          ...(att.deliveryMode === "path" && { delivery_mode: "path" as const }),
+        }
       : {
           type: "resource" as const,
           data: att.data,
           mime_type: att.mimeType,
           name: att.fileName,
+          delivery_mode: "path" as const,
         },
   );
 }
 
-export function autoSelectBranch(branchList: Branch[], setBranch: (value: string) => void): void {
-  const lastUsedBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
-  if (
-    lastUsedBranch &&
-    branchList.some((b) => {
-      const displayName = b.type === "remote" && b.remote ? `${b.remote}/${b.name}` : b.name;
-      return displayName === lastUsedBranch;
-    })
-  ) {
-    setBranch(lastUsedBranch);
+export function autoSelectBranch(
+  branchList: Branch[],
+  setBranch: (value: string) => void,
+  options: { lastUsedBranch?: string | null; userSettingsLoaded?: boolean } = {},
+): void {
+  const localStorageBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
+  const settingsBranch = options.lastUsedBranch ?? null;
+  const localStorageValid = isBranchSelectable(branchList, localStorageBranch);
+  const settingsValid = isBranchSelectable(branchList, settingsBranch);
+  if (settingsBranch && settingsValid) {
+    selectionDebug(BRANCH_AUTOPICK_DEBUG, {
+      source: "settings:taskCreateLastUsed",
+      pick: settingsBranch,
+      local_storage_value: localStorageBranch ?? "-",
+      local_storage_valid: localStorageValid,
+      branch_count: branchList.length,
+    });
+    setBranch(settingsBranch);
+    return;
+  }
+  if (options.userSettingsLoaded === false) {
+    selectionDebug(BRANCH_AUTOPICK_DEBUG, {
+      source: "user-settings-loading",
+      pick: "-",
+      local_storage_value: localStorageBranch ?? "-",
+      local_storage_valid: localStorageValid,
+      branch_count: branchList.length,
+    });
+    return;
+  }
+  if (localStorageBranch && localStorageValid) {
+    selectionDebug(BRANCH_AUTOPICK_DEBUG, {
+      source: "localStorage:lastBranch",
+      pick: localStorageBranch,
+      local_storage_value: localStorageBranch,
+      local_storage_valid: true,
+      branch_count: branchList.length,
+    });
+    setBranch(localStorageBranch);
     return;
   }
   const preferredBranch = selectPreferredBranch(branchList);
+  selectionDebug(BRANCH_AUTOPICK_DEBUG, {
+    source: preferredBranch ? "preferred" : "none",
+    pick: preferredBranch ?? "-",
+    local_storage_value: localStorageBranch ?? "-",
+    local_storage_valid: localStorageValid,
+    branch_count: branchList.length,
+  });
   if (preferredBranch) setBranch(preferredBranch);
+}
+
+function isBranchSelectable(branchList: Branch[], value: string | null | undefined) {
+  return Boolean(value && branchList.some((branch) => branchDisplayName(branch) === value));
+}
+
+function branchDisplayName(branch: Branch) {
+  return branch.type === "remote" && branch.remote
+    ? `${branch.remote}/${branch.name}`
+    : branch.name;
 }
 
 export function computePassthroughProfile(
@@ -142,14 +210,16 @@ export function validateCreateInputs(inputs: {
   effectiveWorkflowId: string | null;
   /** Unified repos list. The form is valid if any row has a repo set OR URL mode is filled. */
   repositories: TaskRepoRow[];
-  githubUrl?: string;
+  /** Remote URL rows. The form is valid when at least one has a non-empty URL. */
+  remoteRepos?: TaskRemoteRepoRow[];
   agentProfileId: string;
   noRepository?: boolean;
 }): boolean {
+  const hasRemoteRepo = (inputs.remoteRepos ?? []).some((r) => r.url.trim() !== "");
   const hasRepo =
     inputs.noRepository ||
     inputs.repositories.some((r) => r.repositoryId || r.localPath) ||
-    Boolean(inputs.githubUrl?.trim());
+    hasRemoteRepo;
   return Boolean(
     inputs.trimmedTitle &&
     inputs.workspaceId &&
@@ -157,6 +227,36 @@ export function validateCreateInputs(inputs: {
     inputs.agentProfileId &&
     hasRepo,
   );
+}
+
+/**
+ * Detects two remote-repo rows that resolve to the same GitHub `owner/repo`.
+ *
+ * Both plain repo URLs and PR URLs are parsed via `parseGitHubAnyUrl`, so two
+ * different PRs of the same repo (`/pull/1116` and `/pull/1117`) or the same
+ * PR URL pasted twice are caught — they all collapse to the same backend
+ * repository, which would otherwise surface as an opaque UUID-laden error.
+ *
+ * Rows with an empty URL, or a URL that can't be parsed to `owner/repo`
+ * (garbage), are skipped — only parseable rows participate in the comparison,
+ * which is case-insensitive on `owner/repo`.
+ *
+ * Returns the human-readable label (`owner/repo`, preserving the first row's
+ * casing) of the first duplicate found, or `null` when every parseable row is
+ * a distinct repo.
+ */
+export function findDuplicateRemoteRepo(remoteRepos: TaskRemoteRepoRow[]): string | null {
+  const seen = new Map<string, string>();
+  for (const row of remoteRepos) {
+    const parsed = parseGitHubAnyUrl(row.url ?? "");
+    if (!parsed) continue;
+    const label = `${parsed.owner}/${parsed.repo}`;
+    const key = label.toLowerCase();
+    const existing = seen.get(key);
+    if (existing) return existing;
+    seen.set(key, label);
+  }
+  return null;
 }
 
 /**
@@ -169,10 +269,18 @@ export function validateCreateInputs(inputs: {
  *   detection happens on the backend.
  */
 export function buildRepositoriesPayload(opts: {
-  useGitHubUrl: boolean;
-  githubUrl: string;
-  githubBranch: string;
-  githubPrHeadBranch: string | null;
+  /** True when the form is in GitHub Remote (URL) mode. */
+  useRemote: boolean;
+  /** Remote-URL rows; non-empty `url` rows are mapped 1:1 to payload entries. */
+  remoteRepos: TaskRemoteRepoRow[];
+  /**
+   * Per-URL PR-info cache. Consulted for each remote row whose URL is a PR
+   * URL: if the row's branch equals the PR head (auto-fill or user-confirmed
+   * default), the payload anchors `base_branch` to the PR's actual target
+   * from the API so origin can resolve it even when the head only lives on
+   * a fork. Optional — non-Remote call sites can omit it.
+   */
+  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">;
   repositories: TaskRepoRow[];
   /** Used to look up `default_branch` for `localPath` rows. */
   discoveredRepositories: LocalRepository[];
@@ -194,15 +302,8 @@ export function buildRepositoriesPayload(opts: {
    */
   freshBranch?: { confirmDiscard: boolean; consentedDirtyFiles: string[] };
 }): NonNullable<CreateTaskParams["repositories"]> {
-  if (opts.useGitHubUrl && opts.githubUrl) {
-    return [
-      {
-        repository_id: "",
-        base_branch: opts.githubBranch || undefined,
-        checkout_branch: opts.githubPrHeadBranch || undefined,
-        github_url: opts.githubUrl.trim(),
-      },
-    ];
+  if (opts.useRemote) {
+    return buildRemoteRepoPayload(opts);
   }
   const fresh = opts.freshBranch
     ? {
@@ -244,6 +345,86 @@ export function buildRepositoriesPayload(opts: {
         ...fresh,
       };
     });
+}
+
+/**
+ * Builds the `repos: [{ github_url, branch }]` payload from the remote-URL
+ * rows. Rows with an empty URL are dropped silently — they're partially
+ * filled rows the user hasn't completed yet.
+ *
+ * Per-row PR-info inference: if a row's URL is a PR URL and the row's
+ * branch equals the PR's head branch (auto-selected by the chip or
+ * user-confirmed via "leave default"), the payload anchors `base_branch`
+ * to the PR's actual target from the GitHub API and surfaces the PR head
+ * as `checkout_branch`. This keeps fork PRs resolvable on `origin` (their
+ * head doesn't live there, but the base does). When the user overrides
+ * the branch to something other than the PR head, we treat their pick as
+ * the base and drop `checkout_branch`.
+ */
+function buildRemoteRepoPayload(opts: {
+  remoteRepos: TaskRemoteRepoRow[];
+  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">;
+}): NonNullable<CreateTaskParams["repositories"]> {
+  const nonEmpty = opts.remoteRepos.filter((r) => r.url.trim() !== "");
+  if (nonEmpty.length === 0) return [];
+  return nonEmpty.map((row) => buildRemoteRepoPayloadRow(row, opts.prInfoByUrl));
+}
+
+function buildRemoteRepoPayloadRow(
+  row: TaskRemoteRepoRow,
+  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">,
+): CreateTaskRepositoryPayload {
+  const url = row.url.trim();
+  const metadata = remoteRepoPRMetadata(row, url, prInfoByUrl);
+  if (metadata) return buildRemoteRepoPRPayload(row, url, metadata);
+  return buildPlainRemoteRepoPayload(row, url);
+}
+
+function remoteRepoPRMetadata(
+  row: TaskRemoteRepoRow,
+  url: string,
+  prInfoByUrl?: Pick<UsePRInfoByURLResult, "info">,
+): RemoteRepoPRMetadata | null {
+  // The cache is keyed on the trimmed URL (ensure() also trims), so we
+  // must look it up with the trimmed value too. Passing `row.url` directly
+  // would miss the cache when the user has stray whitespace around their
+  // URL and silently lose the PR base-branch anchoring.
+  const prInfo = prInfoByUrl?.info(url);
+  const number = prInfo?.prNumber ?? row.prNumber;
+  if (!prInfo && !number) return null;
+  return {
+    headBranch: prInfo?.prHeadBranch ?? row.prHeadBranch,
+    baseBranch: prInfo?.prBaseBranch ?? row.prBaseBranch,
+    number,
+  };
+}
+
+function buildRemoteRepoPRPayload(
+  row: TaskRemoteRepoRow,
+  url: string,
+  metadata: RemoteRepoPRMetadata,
+): CreateTaskRepositoryPayload {
+  const isPrAutoSelection = !!metadata.headBranch && row.branch === metadata.headBranch;
+  const baseBranch = isPrAutoSelection ? metadata.baseBranch || undefined : row.branch || undefined;
+  return {
+    repository_id: "",
+    base_branch: baseBranch,
+    checkout_branch: isPrAutoSelection ? metadata.headBranch || undefined : undefined,
+    pr_number: isPrAutoSelection ? metadata.number || undefined : undefined,
+    github_url: url,
+  };
+}
+
+function buildPlainRemoteRepoPayload(
+  row: TaskRemoteRepoRow,
+  url: string,
+): CreateTaskRepositoryPayload {
+  return {
+    repository_id: "",
+    base_branch: row.branch || undefined,
+    checkout_branch: undefined,
+    github_url: url,
+  };
 }
 
 function resolveRowDefaultBranch(

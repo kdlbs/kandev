@@ -118,6 +118,37 @@ func TestCreateAgentInstanceWithCaller_PersistsPendingAgentWhenApprovalRequired(
 	}
 }
 
+func TestCreateAgentInstanceWithCaller_InheritsCallerExecutorPreference(t *testing.T) {
+	svc, repo := newTestAgentService(t)
+	ctx := context.Background()
+
+	caller := &models.AgentInstance{
+		ID:                 "creator-1",
+		WorkspaceID:        "ws-1",
+		Name:               "CEO",
+		Role:               models.AgentRoleCEO,
+		ExecutorPreference: `{"type":"local_pc"}`,
+	}
+	agent := &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "Worker",
+		Role:        models.AgentRoleWorker,
+	}
+
+	if err := svc.CreateAgentInstanceWithCaller(ctx, agent, caller, "delegate"); err != nil {
+		t.Fatalf("CreateAgentInstanceWithCaller: %v", err)
+	}
+
+	stored, err := repo.GetAgentInstance(ctx, agent.ID)
+	if err != nil {
+		t.Fatalf("GetAgentInstance: %v", err)
+	}
+	if stored.ExecutorPreference != caller.ExecutorPreference {
+		t.Fatalf("executor_preference = %q, want inherited %q",
+			stored.ExecutorPreference, caller.ExecutorPreference)
+	}
+}
+
 func TestCreateAgentInstanceWithCaller_UICreateBypassesGovernance(t *testing.T) {
 	svc, _ := newTestAgentService(t)
 	ctx := context.Background()

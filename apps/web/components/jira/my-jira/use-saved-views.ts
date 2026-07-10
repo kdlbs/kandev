@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_FILTERS, type FilterState } from "./filter-model";
+import { fetchUserSettings } from "@/lib/api/domains/settings-api";
+import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
+import { hasUserSettingsSyncFailure } from "@/lib/user-settings-sync-failure";
 
 export type SavedView = {
   id: string;
@@ -15,6 +18,8 @@ export type SavedView = {
 };
 
 const STORAGE_KEY = "kandev:jira:saved-views:v1";
+const MIGRATED_KEY = "kandev:jira:saved-views:migrated-to-backend:v1";
+const SYNC_FAILED_KEY = "kandev:jira:saved-views:sync-failed:v1";
 
 const BUILTIN_VIEWS: SavedView[] = [
   {
@@ -23,12 +28,11 @@ const BUILTIN_VIEWS: SavedView[] = [
     builtin: true,
     filters: { ...DEFAULT_FILTERS, assignee: "me" },
   },
-  {
-    id: "builtin:in-progress",
-    name: "In progress",
-    builtin: true,
-    filters: { ...DEFAULT_FILTERS, assignee: "me", statusCategories: ["indeterminate"] },
-  },
+  // The former "In progress" builtin filtered by the "indeterminate" status
+  // category. Status names are now project-specific, so a global builtin can't
+  // hard-code an in-progress status without a selected project; dropping the
+  // status filter would have left it indistinguishable from "Assigned to me".
+  // Users get an in-progress view by selecting a project and its statuses.
   {
     id: "builtin:unassigned",
     name: "Unassigned",
@@ -44,32 +48,61 @@ function readStorage(): SavedView[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isSavedView);
+    return normalizeSavedViews(parsed);
   } catch {
     return [];
   }
 }
 
-function isFilterState(f: unknown): f is FilterState {
+// isFilterStateShape recognizes both the current `statuses: string[]` shape and
+// legacy views persisted with `statusCategories`. It only validates the fields
+// unrelated to statuses; status normalization happens in normalizeFilterState.
+function isFilterStateShape(f: unknown): f is Record<string, unknown> {
   if (!f || typeof f !== "object") return false;
   const rec = f as Record<string, unknown>;
   return (
     Array.isArray(rec.projectKeys) &&
     rec.projectKeys.every((k) => typeof k === "string") &&
-    Array.isArray(rec.statusCategories) &&
-    rec.statusCategories.every(
-      (c) => c === "" || c === "new" || c === "indeterminate" || c === "done",
-    ) &&
     (rec.assignee === "me" || rec.assignee === "unassigned" || rec.assignee === "anyone") &&
     typeof rec.searchText === "string" &&
     (rec.sort === "updated" || rec.sort === "created" || rec.sort === "priority")
   );
 }
 
-function isSavedView(v: unknown): v is SavedView {
-  if (!v || typeof v !== "object") return false;
+// normalizeFilterState coerces a persisted filter (current or legacy) into a
+// valid FilterState. Legacy views carrying `statusCategories` (and no
+// `statuses`) hydrate to `statuses: []` — the old category filter is dropped
+// rather than throwing, since categories no longer map to a specific status.
+function normalizeFilterState(rec: Record<string, unknown>): FilterState {
+  const statuses =
+    Array.isArray(rec.statuses) && rec.statuses.every((s) => typeof s === "string")
+      ? (rec.statuses as string[])
+      : [];
+  return {
+    projectKeys: rec.projectKeys as string[],
+    statuses,
+    assignee: rec.assignee as FilterState["assignee"],
+    searchText: rec.searchText as string,
+    sort: rec.sort as FilterState["sort"],
+  };
+}
+
+function normalizeSavedView(v: unknown): SavedView | null {
+  if (!v || typeof v !== "object") return null;
   const rec = v as Record<string, unknown>;
-  return typeof rec.id === "string" && typeof rec.name === "string" && isFilterState(rec.filters);
+  if (typeof rec.id !== "string" || typeof rec.name !== "string") return null;
+  if (!isFilterStateShape(rec.filters)) return null;
+  return {
+    id: rec.id,
+    name: rec.name,
+    filters: normalizeFilterState(rec.filters),
+    customJql: typeof rec.customJql === "string" ? rec.customJql : null,
+    builtin: rec.builtin === true,
+  };
+}
+
+function normalizeSavedViews(values: unknown[]): SavedView[] {
+  return values.map(normalizeSavedView).filter((v): v is SavedView => v !== null);
 }
 
 function writeStorage(views: SavedView[]): void {
@@ -81,6 +114,46 @@ function writeStorage(views: SavedView[]): void {
   }
 }
 
+function readServerViews(value: unknown): SavedView[] | null {
+  if (!Array.isArray(value)) return null;
+  return normalizeSavedViews(value);
+}
+
+const syncServer = createQueuedUserSettingsSync<SavedView[]>(SYNC_FAILED_KEY, (views) => ({
+  jira_saved_views: views,
+}));
+
+function snapshotKey(views: SavedView[]): string {
+  return JSON.stringify(views);
+}
+
+function hasMigratedToBackend(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(MIGRATED_KEY) === "1";
+}
+
+function markMigratedToBackend(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(MIGRATED_KEY, "1");
+  } catch {
+    // Ignore write failures.
+  }
+}
+
+function latestSavedViews(fallback: SavedView[]): SavedView[] {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw === null) return fallback;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return fallback;
+    return normalizeSavedViews(parsed);
+  } catch {
+    return fallback;
+  }
+}
+
 export function useSavedViews() {
   const [custom, setCustom] = useState<SavedView[]>([]);
 
@@ -88,7 +161,26 @@ export function useSavedViews() {
     let cancelled = false;
     async function init() {
       const loaded = readStorage();
+      const initialKey = snapshotKey(loaded);
       if (!cancelled) setCustom(loaded);
+      const response = await fetchUserSettings({ cache: "no-store" }).catch(() => null);
+      const serverViews = readServerViews(response?.settings.jira_saved_views);
+      if (!cancelled && serverViews) {
+        const local = readStorage();
+        if (snapshotKey(local) !== initialKey) return;
+        if (hasUserSettingsSyncFailure(SYNC_FAILED_KEY)) {
+          void syncServer(local);
+          return;
+        }
+        if (serverViews.length === 0 && local.length > 0 && !hasMigratedToBackend()) {
+          void syncServer(local);
+          markMigratedToBackend();
+          return;
+        }
+        writeStorage(serverViews);
+        setCustom(serverViews);
+        markMigratedToBackend();
+      }
     }
     void init();
     return () => {
@@ -105,8 +197,10 @@ export function useSavedViews() {
         customJql,
       };
       setCustom((prev) => {
-        const next = [...prev, view];
+        const next = [...latestSavedViews(prev), view];
         writeStorage(next);
+        void syncServer(next);
+        markMigratedToBackend();
         return next;
       });
       return view;
@@ -116,8 +210,10 @@ export function useSavedViews() {
 
   const remove = useCallback((id: string) => {
     setCustom((prev) => {
-      const next = prev.filter((v) => v.id !== id);
+      const next = latestSavedViews(prev).filter((v) => v.id !== id);
       writeStorage(next);
+      void syncServer(next);
+      markMigratedToBackend();
       return next;
     });
   }, []);

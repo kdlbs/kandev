@@ -3,6 +3,7 @@ import os from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildBackendEnv,
   buildWebEnv,
   listHostNetworkAddresses,
   logStartupInfo,
@@ -18,41 +19,41 @@ const ports: PortConfig = {
 };
 
 describe("buildWebEnv", () => {
-  const originalApiPort = process.env.NEXT_PUBLIC_KANDEV_API_PORT;
+  const originalViteApiPort = process.env.VITE_KANDEV_API_PORT;
   afterEach(() => {
-    if (originalApiPort === undefined) {
-      delete process.env.NEXT_PUBLIC_KANDEV_API_PORT;
+    if (originalViteApiPort === undefined) {
+      delete process.env.VITE_KANDEV_API_PORT;
     } else {
-      process.env.NEXT_PUBLIC_KANDEV_API_PORT = originalApiPort;
+      process.env.VITE_KANDEV_API_PORT = originalViteApiPort;
     }
   });
 
-  it("sets NEXT_PUBLIC_KANDEV_API_PORT in dev mode so the browser knows the backend port", () => {
+  it("does not set browser API port env vars in dev mode", () => {
     const env = buildWebEnv({ ports });
 
-    expect(env.NEXT_PUBLIC_KANDEV_API_PORT).toBe("38429");
+    expect(env.VITE_KANDEV_API_PORT).toBeUndefined();
     expect(env.NODE_ENV).not.toBe("production");
   });
 
-  it("does not set NEXT_PUBLIC_KANDEV_API_PORT in production single-port mode", () => {
-    // The Go backend reverse-proxies Next.js, so the client must use same-origin.
+  it("does not set browser API port env vars in production single-port mode", () => {
+    // The Go backend serves the SPA, so the client must use same-origin.
     // A non-empty value would cause the client to build cross-origin URLs like
     // `https://host:38429/...` that aren't reachable behind a reverse proxy.
     const env = buildWebEnv({ ports, production: true });
 
-    expect(env.NEXT_PUBLIC_KANDEV_API_PORT).toBeUndefined();
+    expect(env.VITE_KANDEV_API_PORT).toBeUndefined();
     expect(env.NODE_ENV).toBe("production");
   });
 
-  it("strips a host-level NEXT_PUBLIC_KANDEV_API_PORT in production", () => {
+  it("strips host-level browser API port env vars in production", () => {
     // If an operator has the var in their shell/Docker env, the process.env
-    // spread would otherwise leak it into the Next.js process and reintroduce
+    // spread would otherwise leak it into the web process and reintroduce
     // the cross-origin URL problem this fix addresses.
-    process.env.NEXT_PUBLIC_KANDEV_API_PORT = "99999";
+    process.env.VITE_KANDEV_API_PORT = "99999";
 
     const env = buildWebEnv({ ports, production: true });
 
-    expect(env.NEXT_PUBLIC_KANDEV_API_PORT).toBeUndefined();
+    expect(env.VITE_KANDEV_API_PORT).toBeUndefined();
   });
 
   it("always sets KANDEV_API_BASE_URL for SSR fetches", () => {
@@ -63,119 +64,24 @@ describe("buildWebEnv", () => {
   });
 
   it("enables debug flag when requested", () => {
-    expect(buildWebEnv({ ports, debug: true }).NEXT_PUBLIC_KANDEV_DEBUG).toBe("true");
-    expect(buildWebEnv({ ports }).NEXT_PUBLIC_KANDEV_DEBUG).toBeUndefined();
+    expect(buildWebEnv({ ports, debug: true }).VITE_KANDEV_DEBUG).toBe("true");
+    expect(buildWebEnv({ ports, debug: true }).KANDEV_DEBUG).toBe("true");
+    expect(buildWebEnv({ ports }).VITE_KANDEV_DEBUG).toBeUndefined();
+    expect(buildWebEnv({ ports }).KANDEV_DEBUG).toBeUndefined();
   });
 });
 
-describe("buildWebEnv allowedDevOrigins", () => {
-  const originalAllowed = process.env.NEXT_ALLOWED_DEV_ORIGINS;
+describe("buildBackendEnv", () => {
+  it("points backend non-API routes at the dev web server by default", () => {
+    const env = buildBackendEnv({ ports });
 
-  beforeEach(() => {
-    vi.spyOn(os, "networkInterfaces").mockReturnValue({
-      lo: [
-        {
-          address: "127.0.0.1",
-          netmask: "255.0.0.0",
-          family: "IPv4",
-          mac: "00:00:00:00:00:00",
-          internal: true,
-          cidr: "127.0.0.1/8",
-        },
-      ],
-      eth0: [
-        {
-          address: "192.168.1.34",
-          netmask: "255.255.252.0",
-          family: "IPv4",
-          mac: "aa:bb:cc:dd:ee:ff",
-          internal: false,
-          cidr: "192.168.1.34/22",
-        },
-        {
-          address: "fe80::1",
-          netmask: "ffff:ffff:ffff:ffff::",
-          family: "IPv6",
-          mac: "aa:bb:cc:dd:ee:ff",
-          internal: false,
-          cidr: "fe80::1/64",
-          scopeid: 2,
-        },
-      ],
-      tailscale0: [
-        {
-          address: "100.94.173.104",
-          netmask: "255.255.255.255",
-          family: "IPv4",
-          mac: "00:00:00:00:00:00",
-          internal: false,
-          cidr: "100.94.173.104/32",
-        },
-      ],
-    });
+    expect(env.KANDEV_WEB_INTERNAL_URL).toBe("http://localhost:37429");
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-    if (originalAllowed === undefined) {
-      delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
-    } else {
-      process.env.NEXT_ALLOWED_DEV_ORIGINS = originalAllowed;
-    }
-  });
+  it("omits the web proxy in production single-process mode", () => {
+    const env = buildBackendEnv({ ports, webProxy: false });
 
-  it("populates NEXT_ALLOWED_DEV_ORIGINS with LAN + Tailscale IPs in dev mode", () => {
-    delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
-    const env = buildWebEnv({ ports });
-    const origins = (env.NEXT_ALLOWED_DEV_ORIGINS ?? "").split(",");
-    expect(origins).toContain("192.168.1.34");
-    expect(origins).toContain("100.94.173.104");
-  });
-
-  it("excludes loopback and link-local IPv6 addresses", () => {
-    delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
-    const env = buildWebEnv({ ports });
-    const origins = (env.NEXT_ALLOWED_DEV_ORIGINS ?? "").split(",");
-    expect(origins).not.toContain("127.0.0.1");
-    expect(origins).not.toContain("fe80::1");
-  });
-
-  it("merges with a user-supplied NEXT_ALLOWED_DEV_ORIGINS, deduped", () => {
-    process.env.NEXT_ALLOWED_DEV_ORIGINS = "dev.example, 192.168.1.34";
-    const env = buildWebEnv({ ports });
-    const origins = (env.NEXT_ALLOWED_DEV_ORIGINS ?? "").split(",");
-    expect(origins).toContain("dev.example");
-    expect(origins).toContain("192.168.1.34");
-    expect(origins).toContain("100.94.173.104");
-    expect(origins.filter((s) => s === "192.168.1.34")).toHaveLength(1);
-  });
-
-  it("omits NEXT_ALLOWED_DEV_ORIGINS entirely when there's nothing to allow", () => {
-    delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
-    vi.restoreAllMocks();
-    vi.spyOn(os, "networkInterfaces").mockReturnValue({
-      lo: [
-        {
-          address: "127.0.0.1",
-          netmask: "255.0.0.0",
-          family: "IPv4",
-          mac: "00:00:00:00:00:00",
-          internal: true,
-          cidr: "127.0.0.1/8",
-        },
-      ],
-    });
-    const env = buildWebEnv({ ports });
-    // Better than setting NEXT_ALLOWED_DEV_ORIGINS="" — keeps the env clean for
-    // the loopback-only case so a downstream consumer that distinguishes
-    // "unset" from "empty" doesn't get confused.
-    expect(env.NEXT_ALLOWED_DEV_ORIGINS).toBeUndefined();
-  });
-
-  it("does not set NEXT_ALLOWED_DEV_ORIGINS in production", () => {
-    delete process.env.NEXT_ALLOWED_DEV_ORIGINS;
-    const env = buildWebEnv({ ports, production: true });
-    expect(env.NEXT_ALLOWED_DEV_ORIGINS).toBeUndefined();
+    expect(env.KANDEV_WEB_INTERNAL_URL).toBeUndefined();
   });
 });
 
@@ -385,16 +291,15 @@ describe("logStartupInfo", () => {
     expect(lines.some((l) => l.includes("agentctl"))).toBe(false);
   });
 
-  it('prints the web URL and network URLs when primary="web" (dev mode)', () => {
+  it('prints the web URL and network URLs when primary="web" is explicitly requested', () => {
     mockTwoInterfaces();
     logStartupInfo({ header: "test", ports, primary: "web" });
     const lines = log.mock.calls.map((c) => c.join(" "));
     expect(lines).toContain("[kandev] url: http://localhost:37429");
     expect(lines).toContain("[kandev]   network: http://192.168.1.34:37429");
     expect(lines).toContain("[kandev]   network: http://100.94.173.104:37429");
-    // The backend port is internal in dev mode (only the browser's API calls
-    // hit it, via NEXT_PUBLIC_KANDEV_API_PORT), so it doesn't show up as a URL
-    // for the user. The mcp endpoint still appears because MCP clients use it.
+    // Explicit web-primary mode is for diagnostics; normal dev/start modes
+    // use the backend URL as the browser entrypoint.
     expect(lines.some((l) => l === "[kandev] url: http://localhost:38429")).toBe(false);
     expect(lines.some((l) => l.includes("network:") && l.includes(":38429"))).toBe(false);
   });

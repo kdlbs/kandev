@@ -8,7 +8,9 @@ permissionMode: acceptEdits
 
 # Code Review
 
-Review the current changes in the codebase (Go + Next.js monorepo). Every finding needs a `file_path:line_number` reference, an explanation of *why* it matters, and a concrete fix.
+Review the current changes in the codebase (Go backend + Vite/React SPA monorepo). Every finding needs a `file_path:line_number` reference, an explanation of *why* it matters, and a concrete fix.
+
+Start from intent and evidence: read the spec/task first when available, then read tests before production code. Tests reveal the expected behavior and often expose whether the implementation is actually verified.
 
 ## Steps
 
@@ -22,7 +24,16 @@ Read each changed file in full — understand surrounding code, not just the dif
 
 For each file, identify which requirement or intent it serves. Flag any changes that don't map to the task — scope creep is a blocker.
 
-### 2. Review for issues
+### 2. Review tests and verification first
+
+Before reviewing implementation details:
+- Read changed tests and nearby existing tests.
+- Check whether tests assert behavior, not implementation details.
+- Check whether the selected test level is appropriate: unit for pure logic, integration for boundaries, E2E for critical browser flows.
+- Identify missing coverage for happy path, key error paths, edge cases, auth/workspace boundaries, and concurrency/order-sensitive behavior.
+- Treat missing tests for new or changed non-UI logic as a blocker unless the change is explicitly untestable and says why.
+
+### 3. Review for issues
 
 Check every changed file for the following layers. Skip layers that don't apply to the change.
 
@@ -32,6 +43,10 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - No SQL injection, XSS, command injection, or path traversal risks
 - Authentication and authorization checks in place for new endpoints
 - No insecure crypto (MD5/SHA1 for passwords, weak random)
+- Workspace and office boundaries are enforced; no cross-workspace data, credentials, logs, or agent context leakage
+- Agent/tool execution is constrained by code, not prompt text alone
+
+If the change is security-sensitive, recommend or run the `security-auditor` subagent for a focused pass rather than burying a broad audit inside general code review.
 
 **Architecture:**
 - Frontend: no direct data fetching in components (must go through store), shadcn imports from `@kandev/ui` not `@/components/ui/*`
@@ -71,17 +86,17 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - Defensive checks abnormal for the area of the codebase — compare with surrounding code patterns
 
 **Testing:**
-- Backend (Go): new or changed functions/methods should have corresponding tests
-- Frontend (JS/TS libs only): new utility functions, hooks, API clients, and store slices should have tests
+- Backend (Go): new or changed functions/methods must have corresponding tests
+- Frontend (JS/TS libs only): new utility functions, hooks, API clients, and store slices must have tests
 - We do NOT test React components — skip those
-- Flag untested logic but don't block on it; suggest what tests to add
+- Missing tests for changed logic are a blocker; suggest the exact behavior to cover and recommend the `test-engineer` subagent or `/tdd`
 
-### 3. Fix or report
+### 4. Fix or report
 
 - **Fix directly** any issues you can resolve confidently (dead code, unused imports, simple duplication, missing early returns)
 - **Report** issues that need the author's input — always explain *why* the issue matters and provide a concrete suggested fix
 
-### 4. Output
+### 5. Output
 
 Use this format:
 
@@ -90,7 +105,7 @@ Use this format:
 ### Findings
 
 #### Blocker (must fix before merge)
-*Security holes, data loss risk, broken logic, crashes*
+*Security holes, data loss risk, broken logic, crashes, missing tests for changed logic*
 
 1. **[Title]** — `file.go:42`
    - Issue: what's wrong
@@ -98,7 +113,7 @@ Use this format:
    - Fix: concrete suggestion or code snippet
 
 #### Suggestion (recommended, doesn't block)
-*Performance problems, poor error handling, architectural concerns, missing tests*
+*Performance problems, poor error handling, architectural concerns*
 
 ### Summary
 
@@ -115,6 +130,7 @@ Use this format:
 - Only report findings you're >=80% confident about — quality over quantity
 - Don't mark style preferences as blockers — linters cover formatting
 - Every criticism needs a suggested fix
+- Say when uncertain and recommend a specific investigation instead of guessing
 - Don't give feedback on code you didn't read
 - Omit empty severity sections
 

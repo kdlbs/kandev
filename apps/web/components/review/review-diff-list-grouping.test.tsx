@@ -9,6 +9,7 @@ vi.mock("@/components/diff", () => ({
   FileDiffViewer: ({ filePath }: { filePath: string }) => (
     <div data-testid="diff-stub">{filePath}</div>
   ),
+  DiffErrorBoundary: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("@/components/editors/file-actions-dropdown", () => ({

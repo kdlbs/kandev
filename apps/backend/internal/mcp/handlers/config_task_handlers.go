@@ -3,12 +3,14 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -49,13 +51,15 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 			"failed to look up task's primary session", nil)
 	}
 
-	// Active source session + prompt → deferred path. Running MoveTask now
-	// would race on_enter processing against the agent's still-active turn —
-	// corrupting session state and orphaning the queued prompt. Defer until
-	// handleAgentReady fires applyPendingMove on turn-end.
-	if req.Prompt != "" && session != nil &&
+	// Active source session → deferred path. Running MoveTask immediately would
+	// fail validateMoveSessions ("task has an active session (RUNNING)") and,
+	// if it somehow succeeded, would race on_enter processing against the
+	// agent's still-active turn. Defer until handleAgentReady fires
+	// applyPendingMove on turn-end. Prompt is optional: omit it for simple
+	// self-moves (e.g. Work → Done); include it for cross-agent hand-offs.
+	if session != nil &&
 		(session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting) {
-		return h.deferMoveTaskWithPrompt(ctx, msg, req, session)
+		return h.deferMoveTask(ctx, msg, req, session)
 	}
 
 	// Idle path — apply immediately. If a prompt was supplied, queue it on the
@@ -63,11 +67,11 @@ func (h *Handlers) handleMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 	return h.applyMoveTaskImmediate(ctx, msg, req, session)
 }
 
-// deferMoveTaskWithPrompt queues the hand-off prompt + records a PendingMove
-// for the agent's turn-end handler to apply. Used when the source session is
-// active and the caller supplied a prompt. Returns a synthetic moved-task DTO
-// so the agent's tool call resolves successfully and ends the turn cleanly.
-func (h *Handlers) deferMoveTaskWithPrompt(
+// deferMoveTask records a PendingMove for the agent's turn-end handler to
+// apply. Optionally queues a hand-off prompt when the caller supplied one.
+// Returns a synthetic moved-task DTO so the agent's tool call resolves
+// successfully and ends the turn cleanly.
+func (h *Handlers) deferMoveTask(
 	ctx context.Context,
 	msg *ws.Message,
 	req struct {
@@ -85,12 +89,14 @@ func (h *Handlers) deferMoveTaskWithPrompt(
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
 			"move_task requires message queue support while the source session is active", nil)
 	}
-	wrapped := "You were moved to this step with the following message: " + req.Prompt
-	if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {
-		h.logger.Error("move_task: failed to queue hand-off prompt",
-			zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-			"failed to queue move_task hand-off prompt", nil)
+	if req.Prompt != "" {
+		wrapped := "You were moved to this step with the following message: " + req.Prompt
+		if err := h.queueMoveTaskPrompt(ctx, req.TaskID, session.ID, wrapped); err != nil {
+			h.logger.Error("move_task: failed to queue hand-off prompt",
+				zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to queue move_task hand-off prompt", nil)
+		}
 	}
 	h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
 		TaskID:         req.TaskID,
@@ -176,20 +182,18 @@ func (h *Handlers) synthesizeMovedTaskDTO(ctx context.Context, taskID, workflowI
 //   - (session, nil) — task has a primary session.
 //   - (nil, nil)     — task has no primary session yet (legitimate "empty"
 //     state — task was created but no agent has been launched). The
-//     repository signals this with a "no primary session found for task:"
-//     error string; we treat it as a not-found rather than a failure so the
-//     caller can fall through to the idle-move path instead of rejecting the
-//     request.
+//     repository signals this with the taskrepo.ErrNoPrimarySession sentinel;
+//     we treat it as a not-found rather than a failure so the caller can fall
+//     through to the idle-move path instead of rejecting the request.
 //   - (nil, err)     — real backend lookup failure (DB error, etc.). The
 //     caller should map this to an internal error rather than collapsing it
 //     into "no session" downstream.
 func (h *Handlers) lookupSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
 	if err != nil {
-		// "no primary session found for task: <id>" is the repo's not-found
-		// signal — see scanTaskSession's noRowsErr formatting. Match by
-		// substring; there's no exported sentinel to errors.Is against.
-		if strings.Contains(err.Error(), "no primary session found for task") {
+		// Classify the repo's not-found signal via the typed sentinel rather
+		// than substring-matching the formatted message, which is brittle.
+		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
 			return nil, nil
 		}
 		return nil, err
@@ -261,14 +265,8 @@ func (h *Handlers) handleUpdateTaskState(ctx context.Context, msg *ws.Message) (
 	if req.State == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "state is required", nil)
 	}
-	state := v1.TaskState(req.State)
-	switch state {
-	case v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateScheduling,
-		v1.TaskStateInProgress, v1.TaskStateReview, v1.TaskStateBlocked,
-		v1.TaskStateWaitingForInput, v1.TaskStateCompleted,
-		v1.TaskStateFailed, v1.TaskStateCancelled:
-		// valid
-	default:
+	state := normalizeTaskState(req.State)
+	if !isValidTaskState(state) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "invalid task state: "+req.State, nil)
 	}
 
@@ -278,4 +276,51 @@ func (h *Handlers) handleUpdateTaskState(ctx context.Context, msg *ws.Message) (
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task state", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+func isValidTaskState(state v1.TaskState) bool {
+	switch state {
+	case v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateScheduling,
+		v1.TaskStateInProgress, v1.TaskStateReview, v1.TaskStateBlocked,
+		v1.TaskStateWaitingForInput, v1.TaskStateCompleted,
+		v1.TaskStateFailed, v1.TaskStateCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+// normalizeTaskState maps common agent-supplied aliases to canonical TaskState
+// values. Agents often send lowercase or shorthand strings (e.g. "complete",
+// "done") that are not valid v1.TaskState constants.
+func normalizeTaskState(raw string) v1.TaskState {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return v1.TaskState("")
+	}
+	upper := strings.ToUpper(trimmed)
+	switch upper {
+	case "OPEN", "TODO":
+		return v1.TaskStateTODO
+	case "IN_PROGRESS", "INPROGRESS", "ACTIVE":
+		return v1.TaskStateInProgress
+	case "COMPLETE", "COMPLETED", "DONE":
+		return v1.TaskStateCompleted
+	case "BLOCKED":
+		return v1.TaskStateBlocked
+	case "CANCELLED", "CANCELED":
+		return v1.TaskStateCancelled
+	case "REVIEW":
+		return v1.TaskStateReview
+	case "FAILED":
+		return v1.TaskStateFailed
+	case "CREATED":
+		return v1.TaskStateCreated
+	case "SCHEDULING":
+		return v1.TaskStateScheduling
+	case "WAITING_FOR_INPUT", "WAITING":
+		return v1.TaskStateWaitingForInput
+	default:
+		return v1.TaskState(trimmed)
+	}
 }

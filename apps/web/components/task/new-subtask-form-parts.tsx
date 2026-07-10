@@ -45,6 +45,12 @@ type SelectorsRowProps = {
   onAgentProfileChange: (value: string) => void;
   onExecutorProfileChange: (value: string) => void;
   disabled: boolean;
+  /**
+   * When true, hide the executor-profile selector. The subtask reuses the
+   * parent's materialized environment (inherit_parent), so choosing an
+   * executor would be meaningless — the parent's executor is always used.
+   */
+  hideExecutor: boolean;
 };
 
 export function SelectorsRow({
@@ -55,28 +61,33 @@ export function SelectorsRow({
   onAgentProfileChange,
   onExecutorProfileChange,
   disabled,
+  hideExecutor,
 }: SelectorsRowProps) {
   const noAgents = profileOptions.length === 0;
   return (
-    <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-      <div>
+    <div className={"grid min-w-0 grid-cols-1 gap-4" + (hideExecutor ? "" : " sm:grid-cols-2")}>
+      <div className="min-w-0">
         <AgentSelector
           options={profileOptions}
           value={agentProfileId}
           onValueChange={onAgentProfileChange}
           disabled={disabled || noAgents}
           placeholder={noAgents ? "No agents found" : "Select agent profile"}
+          popoverPortal
         />
       </div>
-      <div>
-        <ExecutorProfileSelector
-          options={executorProfileOptions}
-          value={executorProfileId}
-          onValueChange={onExecutorProfileChange}
-          disabled={disabled}
-          placeholder="Select executor profile"
-        />
-      </div>
+      {!hideExecutor && (
+        <div className="min-w-0">
+          <ExecutorProfileSelector
+            options={executorProfileOptions}
+            value={executorProfileId}
+            onValueChange={onExecutorProfileChange}
+            disabled={disabled}
+            placeholder="Select executor profile"
+            popoverPortal
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -119,17 +130,17 @@ export function PromptZone({
   const inputDisabled = isCreating || isSummarizing;
   return (
     <div
-      className="relative"
+      className="relative min-w-0 max-w-full"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="rounded-md border border-input bg-transparent">
+      <div className="min-w-0 max-w-full rounded-md border border-input bg-transparent focus-within:ring-2 focus-within:ring-ring/30">
         <ContextZone items={contextItems} />
         <Textarea
           ref={promptRef}
           placeholder="What should the agent work on?"
-          className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
+          className="min-w-0 max-w-full field-sizing-fixed wrap-anywhere border-0 focus-visible:ring-0 focus-visible:ring-offset-0 min-h-[120px] max-h-[240px] resize-none overflow-auto text-[13px]"
           autoFocus
           disabled={inputDisabled}
           data-testid="subtask-prompt-input"
@@ -213,8 +224,7 @@ function WorkspaceSection({
         workspaceId={workspaceId}
         onRowRepositoryChange={handlers.handleRowRepositoryChange}
         onRowBranchChange={handlers.handleRowBranchChange}
-        onToggleGitHubUrl={handlers.handleToggleGitHubUrl}
-        onGitHubUrlChange={handlers.handleGitHubUrlChange}
+        onToggleRemote={handlers.handleToggleRemote}
       />
       <WorktreeBadge show={showWorktreeBadge} branch={worktreeBranch} />
     </>
@@ -344,6 +354,21 @@ function WorkspaceModeOption({
   );
 }
 
+// Worktree badge shows only when the subtask still targets the parent's repo
+// (single chip, same id). Adding repos or pasting a URL makes it ambiguous.
+function shouldShowWorktreeBadge(
+  fs: ReturnType<typeof useSubtaskFormState>,
+  worktreeBranch: string | null,
+  parentRepositoryId: string | null,
+): boolean {
+  return (
+    !!worktreeBranch &&
+    fs.repositories.length === 1 &&
+    fs.repositories[0]?.repositoryId === parentRepositoryId &&
+    !fs.useRemote
+  );
+}
+
 /**
  * Renders the entire subtask form body (title input, repo chips, selectors,
  * context picker, prompt zone, footer). Extracted from `NewSubtaskForm` so
@@ -374,16 +399,10 @@ export function SubtaskFormBody({
   onClose,
   onSubmit,
 }: SubtaskFormBodyProps) {
-  // Worktree badge only when subtask still targets parent's repo (single chip,
-  // same id). Adding repos or pasting a URL makes it ambiguous, so hide.
-  const showWorktreeBadge =
-    !!worktreeBranch &&
-    fs.repositories.length === 1 &&
-    fs.repositories[0]?.repositoryId === parentRepositoryId &&
-    !fs.useGitHubUrl;
+  const showWorktreeBadge = shouldShowWorktreeBadge(fs, worktreeBranch, parentRepositoryId);
   const inheritParent = workspaceMode === "inherit_parent";
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form onSubmit={onSubmit} className="min-w-0 space-y-4">
       <div className="space-y-1.5">
         <label htmlFor="subtask-title-input" className="text-xs font-medium text-muted-foreground">
           Title
@@ -393,7 +412,7 @@ export function SubtaskFormBody({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Subtask title"
-          className="text-sm"
+          className="min-w-0 max-w-full text-sm"
           data-testid="subtask-title-input"
           disabled={isCreating}
         />
@@ -421,6 +440,7 @@ export function SubtaskFormBody({
         onAgentProfileChange={handlers.handleAgentProfileChange}
         onExecutorProfileChange={handlers.handleExecutorProfileChange}
         disabled={isCreating}
+        hideExecutor={inheritParent}
       />
       <ContextSelect
         value={contextValue}

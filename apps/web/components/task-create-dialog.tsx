@@ -1,10 +1,11 @@
 "use client";
 
-import { FormEvent, useCallback } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { Task, Repository } from "@/lib/types/http";
+import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
@@ -42,6 +43,9 @@ import {
   buildDialogFooterProps,
   buildDialogFormBodyProps,
 } from "@/components/task-create-dialog-prop-builders";
+import { resetTaskCreateLastUsedSync } from "@/components/task-create-dialog-handlers";
+import { useAppStore } from "@/components/state-provider";
+import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 
 export interface TaskCreateDialogProps {
   open: boolean;
@@ -69,7 +73,7 @@ export interface TaskCreateDialogProps {
   onSuccess?: (
     task: Task,
     mode: "create" | "edit",
-    meta?: { taskSessionId?: string | null },
+    meta?: { taskSessionId?: string | null; willNavigate?: boolean },
   ) => void;
   onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   initialValues?: TaskCreateDialogInitialValues;
@@ -121,8 +125,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     onRowBranchChange,
     onAgentProfileChange,
     onExecutorProfileChange,
-    onToggleGitHubUrl,
-    onGitHubUrlChange,
+    onToggleRemote,
     onToggleFreshBranch,
     workflowAgentLocked,
     repositories,
@@ -130,7 +133,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     isLocalExecutor,
   } = props;
   const showTaskName = (isCreateMode || isEditMode) && !isTaskStarted;
-  const taskNameAutoFocus = !isEditMode && !fs.useGitHubUrl;
+  const taskNameAutoFocus = !isEditMode && !fs.useRemote;
   return (
     <>
       <RepoChipsRow
@@ -140,12 +143,13 @@ function CreateModeBody(props: DialogFormBodyProps) {
         workspaceId={workspaceId}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
-        onToggleGitHubUrl={onToggleGitHubUrl}
-        onGitHubUrlChange={onGitHubUrlChange}
+        onToggleRemote={onToggleRemote}
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={fs.freshBranchEnabled}
         onToggleFreshBranch={onToggleFreshBranch}
         isLocalExecutor={isLocalExecutor}
+        lastUsedBranch={props.lastUsedBranch}
+        userSettingsLoaded={props.userSettingsLoaded}
         onToggleNoRepository={props.onToggleNoRepository}
         onWorkspacePathChange={props.onWorkspacePathChange}
       />
@@ -159,9 +163,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
       <DialogPromptSection
         isSessionMode={false}
         isTaskStarted={isTaskStarted}
-        isPassthroughProfile={props.isPassthroughProfile}
         initialDescription={props.initialDescription}
-        hasDescription={props.hasDescription}
         fs={fs}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
@@ -172,6 +174,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         aboveDescriptionSlot={props.aboveDescriptionSlot}
         extraFormSlot={props.extraFormSlot}
         autoFocusDescription={!isTaskStarted && !(showTaskName && taskNameAutoFocus)}
+        onVoiceAutoSend={props.onVoiceAutoSend}
       />
       <CreateModeSelectors
         isTaskStarted={isTaskStarted}
@@ -199,14 +202,13 @@ function SessionModeBody(props: DialogFormBodyProps) {
       <DialogPromptSection
         isSessionMode
         isTaskStarted={props.isTaskStarted}
-        isPassthroughProfile={props.isPassthroughProfile}
         initialDescription={props.initialDescription}
-        hasDescription={props.hasDescription}
         fs={props.fs}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
         workspaceId={props.workspaceId}
         onJiraImport={props.onJiraImport}
+        onVoiceAutoSend={props.onVoiceAutoSend}
       />
       <SessionSelectors
         agentProfileOptions={props.agentProfileOptions}
@@ -301,6 +303,7 @@ type SubmitWiringArgs = {
   repositoryLocalPath: string;
   isSessionMode: boolean;
   isEditMode: boolean;
+  preserveQueuedLastUsedOnClose: () => void;
 };
 
 function useSubmitHandlersWiring({
@@ -311,6 +314,7 @@ function useSubmitHandlersWiring({
   repositoryLocalPath,
   isSessionMode,
   isEditMode,
+  preserveQueuedLastUsedOnClose,
 }: SubmitWiringArgs) {
   const { workspaceId, workflowId, editingTask, onSuccess, onCreateSession, onOpenChange } = props;
   const { parentTaskId } = props;
@@ -327,10 +331,9 @@ function useSubmitHandlersWiring({
     repositories: fs.repositories,
     discoveredRepositories: fs.discoveredRepositories,
     workspaceRepositories,
-    useGitHubUrl: fs.useGitHubUrl,
-    githubUrl: fs.githubUrl,
-    githubPrHeadBranch: fs.githubPrHeadBranch,
-    githubBranch: fs.githubBranch,
+    useRemote: fs.useRemote,
+    remoteRepos: fs.remoteRepos,
+    prInfoByUrl: fs.prInfoByUrl,
     agentProfileId: computed.effectiveAgentProfileId,
     executorId: fs.executorId,
     executorProfileId: fs.executorProfileId,
@@ -338,6 +341,7 @@ function useSubmitHandlersWiring({
     onSuccess,
     onCreateSession,
     onOpenChange,
+    preserveTaskCreateLastUsedOnClose: preserveQueuedLastUsedOnClose,
     taskId,
     parentTaskId,
     descriptionInputRef: fs.descriptionInputRef,
@@ -347,7 +351,7 @@ function useSubmitHandlersWiring({
     setHasDescription: fs.setHasDescription,
     setTaskName: fs.setTaskName,
     setRepositories: fs.setRepositories,
-    setGitHubBranch: fs.setGitHubBranch,
+    setRemoteRepos: fs.setRemoteRepos,
     setAgentProfileId: fs.setAgentProfileId,
     setExecutorId: fs.setExecutorId,
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
@@ -376,7 +380,10 @@ function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository
   return "";
 }
 
-export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
+export function useTaskCreateDialogSetup(
+  props: TaskCreateDialogProps,
+  options: { preserveQueuedLastUsedOnClose?: () => void } = {},
+) {
   const { open, mode = "create", workspaceId, workflowId, defaultStepId } = props;
   const { editingTask, initialValues } = props;
   const isSessionMode = mode === "session";
@@ -393,6 +400,8 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     snapshots,
     repositories,
     repositoriesLoading,
+    taskCreateLastUsed,
+    userSettingsLoaded,
     computed,
   } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
   const repositoryLocalPath = resolveSingleRowLocalPath(fs, repositories);
@@ -403,11 +412,18 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     repositories,
     repositoriesLoading,
     agentProfiles,
+    compatibleAgentProfiles: computed.compatibleAgentProfiles,
+    authLoaded: computed.authLoaded,
     executors,
     workspaceDefaults: computed.workspaceDefaults,
     toast,
     workflows,
     isLocalExecutor: computed.isLocalExecutor,
+    lastUsedRepositoryId: taskCreateLastUsed.repositoryId,
+    userSettingsLoaded,
+    lastUsedAgentProfileId: taskCreateLastUsed.agentProfileId,
+    lastUsedExecutorProfileId: taskCreateLastUsed.executorProfileId,
+    lastUsedBranch: taskCreateLastUsed.branch,
     preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
   });
   useLockedFieldSync(open, workflowId, initialValues, fs);
@@ -420,6 +436,7 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     repositoryLocalPath,
     isSessionMode,
     isEditMode,
+    preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
   });
   const guardedHandleSubmit = useGuardedSubmit(
     submitHandlers.handleSubmit,
@@ -432,7 +449,7 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
   // can hold any number of repos; we hide the toggle whenever the question
   // ("which repo do we discard local changes in?") becomes ambiguous.
   const freshBranchAvailable =
-    !fs.useGitHubUrl && computed.isLocalExecutor && fs.repositories.length === 1;
+    !fs.useRemote && computed.isLocalExecutor && fs.repositories.length === 1;
   return {
     fs,
     isSessionMode,
@@ -450,6 +467,8 @@ export function useTaskCreateDialogSetup(props: TaskCreateDialogProps) {
     submitHandlers,
     handleKeyDown,
     freshBranchAvailable,
+    taskCreateLastUsed,
+    userSettingsLoaded,
     guardedHandleSubmit,
     enhance: useEnhanceForDialog(fs),
     handleJiraImport: useJiraImportHandler(fs),
@@ -474,29 +493,84 @@ function useGuardedSubmit(
   );
 }
 
+// Synthetic submit event used by the voice auto-send path. Calling the form
+// handler directly (instead of `form.requestSubmit()`) matches the chat
+// composer's pattern and avoids the Safari < 16 gap where `requestSubmit` is
+// missing on `HTMLFormElement`. `guardedHandleSubmit` only reads
+// `preventDefault` off the event, so a stubbed shape is sufficient.
+const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
+
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
-  const setup = useTaskCreateDialogSetup(props);
+  const syncedTaskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
+  const preserveQueuedLastUsedOnCloseRef = useRef<{
+    syncedSettings: TaskCreateLastUsedState | null | undefined;
+  } | null>(null);
+  const queuedLastUsedResetHandledRef = useRef(false);
+  const preserveQueuedLastUsedOnClose = useCallback(() => {
+    preserveQueuedLastUsedOnCloseRef.current = { syncedSettings: syncedTaskCreateLastUsed };
+  }, [syncedTaskCreateLastUsed]);
+  const resetQueuedLastUsedOnClose = useCallback(() => {
+    const preserveQueued = preserveQueuedLastUsedOnCloseRef.current;
+    resetTaskCreateLastUsedSync({
+      clearQueued: !preserveQueued,
+      syncedSettings: preserveQueued?.syncedSettings,
+    });
+    preserveQueuedLastUsedOnCloseRef.current = null;
+    queuedLastUsedResetHandledRef.current = true;
+  }, []);
+  const setup = useTaskCreateDialogSetup(props, { preserveQueuedLastUsedOnClose });
+  const { guardedHandleSubmit } = setup;
+  const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (props.open) {
+      preserveQueuedLastUsedOnCloseRef.current = null;
+      queuedLastUsedResetHandledRef.current = false;
+      return resetQueuedLastUsedOnClose;
+    }
+    if (queuedLastUsedResetHandledRef.current) {
+      queuedLastUsedResetHandledRef.current = false;
+      return;
+    }
+    resetQueuedLastUsedOnClose();
+  }, [props.open, resetQueuedLastUsedOnClose]);
+  // Voice auto-send invokes the same submit handler as the in-form Submit
+  // button. Every existing validation gate (missing title/repo/branch/agent,
+  // `submitBlockedReason`, in-flight create) still applies because they live
+  // inside `handleSubmit` itself, so a dictation with incomplete fields
+  // silently no-ops rather than creating a malformed task.
+  const handleVoiceAutoSend = useCallback(() => {
+    guardedHandleSubmit(VOICE_SUBMIT_EVENT);
+  }, [guardedHandleSubmit]);
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
+        ref={setPopoverContainer}
         data-testid="create-task-dialog"
-        className="w-full h-full max-w-full max-h-full rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
+        className="w-full h-full min-w-0 max-w-full max-h-full overflow-visible rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
-        <DialogHeader>
-          <DialogHeaderContent
-            isCreateMode={setup.isCreateMode}
-            isEditMode={setup.isEditMode}
-            sessionRepoName={setup.sessionRepoName}
-            initialTitle={props.initialValues?.title}
-          />
-        </DialogHeader>
-        <form onSubmit={setup.guardedHandleSubmit} className="flex flex-col gap-4 overflow-hidden">
-          <DialogFormBody {...buildDialogFormBodyProps(setup, props)} />
-          <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
-            <TaskCreateDialogFooter {...buildDialogFooterProps(setup, props)} />
-          </DialogFooter>
-        </form>
-        <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
+        <TaskCreateDialogPopoverContainerProvider container={popoverContainer}>
+          <DialogHeader>
+            <DialogHeaderContent
+              isCreateMode={setup.isCreateMode}
+              isEditMode={setup.isEditMode}
+              sessionRepoName={setup.sessionRepoName}
+              initialTitle={props.initialValues?.title}
+            />
+          </DialogHeader>
+          <form
+            onSubmit={guardedHandleSubmit}
+            className="flex min-w-0 flex-col gap-4 overflow-hidden"
+          >
+            <DialogFormBody
+              {...buildDialogFormBodyProps(setup, props)}
+              onVoiceAutoSend={handleVoiceAutoSend}
+            />
+            <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
+              <TaskCreateDialogFooter {...buildDialogFooterProps(setup, props)} />
+            </DialogFooter>
+          </form>
+          <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />
+        </TaskCreateDialogPopoverContainerProvider>
       </DialogContent>
     </Dialog>
   );

@@ -28,6 +28,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [inbox](office/inbox.md) | draft |
 | [assistant](office/assistant.md) | draft |
 | [plugins](office/plugins.md) | draft |
+| [automations-settings](office/automations-settings.md) | draft |
 | [testing](office/testing.md) | shipped |
 
 ## tasks/ — task & workflow model
@@ -42,8 +43,13 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [model-unification](tasks/model-unification.md) | draft |
 | [without-repositories](tasks/without-repositories.md) | draft |
 | [subtask-checklist](tasks/subtask-checklist.md) | shipped |
+| [subtask-completion-trigger](tasks/subtask-completion-trigger.md) | draft |
 | [subtree-controls](tasks/subtree-controls.md) | shipped |
 | [blocked-task-escalation](tasks/blocked-task-escalation.md) | draft |
+| [runtime-cleanup](tasks/runtime-cleanup.md) | draft |
+| [link-existing-task-github-issue](tasks/link-existing-task-github-issue.md) | building |
+| [multi-branch](tasks/multi-branch/spec.md) | shipped |
+| [quick-chat-expiration](tasks/quick-chat-expiration.md) | draft |
 
 ## agents/ — agent governance
 
@@ -63,6 +69,8 @@ Per-workspace credentials and triage triggers for external services.
 |---|---|
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
+| [gitlab-integration](gitlab-integration/spec.md) | shipped |
+| [jira-status-filter](jira-status-filter/spec.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
 
@@ -83,7 +91,19 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 
 | Spec | Status |
 |---|---|
+| [ci-pr-automation](ui/ci-pr-automation.md) | draft |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
+| [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
+| [slash-command-composer](ui/slash-command-composer.md) | shipped |
+
+## system-page/ — operational diagnostics & maintenance UI
+
+System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance, backups, logs, updates, OSS licenses, and about.
+
+| Spec | Status |
+|---|---|
+| [system-page](system-page/spec.md) | draft |
+| [feature-toggles](feature-toggles/spec.md) | draft |
 
 ---
 
@@ -93,13 +113,18 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 |---|---|
 | [improve-kandev](improve-kandev/spec.md) | draft |
 | [homebrew-core](homebrew-core/spec.md) | draft |
+| [native-kandev-cli](native-kandev-cli/spec.md) | draft |
+| [desktop-tauri-app](desktop-tauri-app/spec.md) | shipped |
+| [public-share-links](public-share-links/spec.md) | draft |
+| [ssh-executor](ssh-executor/spec.md) | draft |
+| [cli-mode-parity](cli-mode-parity/spec.md) | draft |
 
 ---
 
 ## Conventions
 
 - **Spec layout.** Umbrella specs live as flat `.md` files under the umbrella directory (`docs/specs/office/agents.md`). Standalone specs use a folder (`docs/specs/improve-kandev/spec.md`).
-- **Plans are not specs.** Implementation plans (`plan.md`) are working files, gitignored. Specs are the durable requirements.
+- **Plans are not specs.** Implementation plans are committed under `docs/plans/<feature>/` with individual sibling task files named `task-<NN>-<short-slug>.md`. Specs are the durable requirements; plans and task files are implementation records for the current buildout.
 - **Bug fixes are not specs.** Bugs produce a regression test plus an ADR if they encoded a new convention. See `/fix` skill.
 - **Architecture decisions are not specs.** ADRs live under `docs/decisions/`. See `/record decision`.
 

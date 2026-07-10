@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useRef, useState, type ComponentPropsWithoutRef } from "react";
 import { IconCheck, IconCircle, IconCircleFilled, IconListCheck, IconX } from "@tabler/icons-react";
-import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
+import { Popover, PopoverTrigger, PopoverContent } from "@kandev/ui/popover";
+import { useCompactTaskChrome } from "@/hooks/use-compact-task-chrome";
 import { cn } from "@/lib/utils";
 
 type TodoDisplayItem = {
@@ -60,48 +62,108 @@ function TodoList({ todos }: { todos: TodoDisplayItem[] }) {
   );
 }
 
+function TodoIndicatorContent({
+  todos,
+  completed,
+  progress,
+}: {
+  todos: TodoDisplayItem[];
+  completed: number;
+  progress: number;
+}) {
+  return (
+    <div data-testid="todo-indicator-popover">
+      <div className="flex items-center justify-between text-xs mb-2">
+        <span className="font-medium text-foreground">Todos</span>
+        <span className="text-muted-foreground">
+          {completed}/{todos.length} completed
+        </span>
+      </div>
+      <div className="h-1.5 rounded-full bg-muted/70 mb-3">
+        <div
+          className="h-full rounded-full bg-primary/80 transition-[width]"
+          style={{ width: `${progress}%` }}
+        />
+      </div>
+      <TodoList todos={todos} />
+    </div>
+  );
+}
+
+type TodoIndicatorButtonProps = {
+  allComplete: boolean;
+  completed: number;
+  total: number;
+  open?: boolean;
+} & ComponentPropsWithoutRef<"button">;
+
+const TodoIndicatorTrigger = forwardRef<HTMLButtonElement, TodoIndicatorButtonProps>(
+  function TodoIndicatorTrigger({ allComplete, completed, total, open, ...buttonProps }, ref) {
+    return (
+      <button
+        {...buttonProps}
+        ref={ref}
+        type="button"
+        data-testid="todo-indicator"
+        aria-expanded={open}
+        className={cn(
+          "flex items-center gap-1.5 px-2 py-0.5 text-xs transition-colors rounded cursor-pointer",
+          allComplete
+            ? "text-green-500 hover:text-green-400"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        {allComplete ? <IconCheck className="h-3 w-3" /> : <IconListCheck className="h-3 w-3" />}
+        <span>
+          {completed}/{total}
+        </span>
+      </button>
+    );
+  },
+);
+
 export function TodoIndicator({ todos }: TodoIndicatorProps) {
+  const usesCompactTaskChrome = useCompactTaskChrome();
+  const [open, setOpen] = useState(false);
+
   if (!todos.length) return null;
 
   const completed = todos.filter((t) => resolveStatus(t) === "completed").length;
   const allComplete = completed === todos.length;
   const progress = Math.round((completed / todos.length) * 100);
+  const content = <TodoIndicatorContent todos={todos} completed={completed} progress={progress} />;
+
+  if (!usesCompactTaskChrome) {
+    return (
+      <HoverCard openDelay={200} closeDelay={100}>
+        <HoverCardTrigger asChild>
+          <TodoIndicatorTrigger
+            allComplete={allComplete}
+            completed={completed}
+            total={todos.length}
+          />
+        </HoverCardTrigger>
+        <HoverCardContent side="top" align="start" className="w-72 p-3">
+          {content}
+        </HoverCardContent>
+      </HoverCard>
+    );
+  }
 
   return (
-    <HoverCard openDelay={200} closeDelay={100}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          data-testid="todo-indicator"
-          className={cn(
-            "flex items-center gap-1.5 px-2 py-0.5 text-xs transition-colors rounded cursor-pointer",
-            allComplete
-              ? "text-green-500 hover:text-green-400"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {allComplete ? <IconCheck className="h-3 w-3" /> : <IconListCheck className="h-3 w-3" />}
-          <span>
-            {completed}/{todos.length}
-          </span>
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent side="top" align="start" className="w-72 p-3">
-        <div className="flex items-center justify-between text-xs mb-2">
-          <span className="font-medium text-foreground">Todos</span>
-          <span className="text-muted-foreground">
-            {completed}/{todos.length} completed
-          </span>
-        </div>
-        <div className="h-1.5 rounded-full bg-muted/70 mb-3">
-          <div
-            className="h-full rounded-full bg-primary/80 transition-[width]"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
-        <TodoList todos={todos} />
-      </HoverCardContent>
-    </HoverCard>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <TodoIndicatorTrigger
+          allComplete={allComplete}
+          completed={completed}
+          total={todos.length}
+          open={open}
+        />
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" className="w-72 p-3">
+        {content}
+      </PopoverContent>
+    </Popover>
   );
 }
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,9 +13,21 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const (
+	messageCreateMaxRetries = 5
+	messageCreateRetryDelay = 50 * time.Millisecond
+)
+
 // CreateMessage creates a new message on an agent session
 func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) (*models.Message, error) {
-	session, err := s.sessions.GetTaskSession(ctx, req.TaskSessionID)
+	messageID := uuid.New().String()
+	session, err := s.getSessionWithRetry(
+		ctx,
+		req.TaskSessionID,
+		messageID,
+		messageCreateMaxRetries,
+		messageCreateRetryDelay,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -37,19 +50,25 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 	// Ensure we have a turn ID - get active turn or start a new one
 	turnID := req.TurnID
 	if turnID == "" {
-		turn, err := s.getOrStartTurn(ctx, req.TaskSessionID)
+		turn, err := s.getOrStartTurnWithRetry(
+			ctx,
+			req.TaskSessionID,
+			messageID,
+			messageCreateMaxRetries,
+			messageCreateRetryDelay,
+		)
 		if err != nil {
 			s.logger.Warn("failed to get or start turn for message",
 				zap.String("session_id", req.TaskSessionID),
 				zap.Error(err))
-			// Continue with empty turn ID - will fail on foreign key if turn is required
+			return nil, fmt.Errorf("failed to get or start turn: %w", err)
 		} else if turn != nil {
 			turnID = turn.ID
 		}
 	}
 
 	message := &models.Message{
-		ID:            uuid.New().String(),
+		ID:            messageID,
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
@@ -83,17 +102,17 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 // It includes retry logic to handle transient database errors and ensure
 // message chunks are not lost during streaming.
 func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *CreateMessageRequest) (*models.Message, error) {
-	const maxRetries = 5
-	const retryDelay = 50 * time.Millisecond
-
-	session, err := s.getSessionWithRetry(ctx, req.TaskSessionID, id, maxRetries, retryDelay)
+	session, err := s.getSessionWithRetry(ctx, req.TaskSessionID, id, messageCreateMaxRetries, messageCreateRetryDelay)
 	if err != nil {
 		return nil, err
 	}
 
-	message := s.buildMessage(ctx, id, req, session)
+	message, err := s.buildMessage(ctx, id, req, session)
+	if err != nil {
+		return nil, err
+	}
 
-	if err := s.createMessageWithRetry(ctx, message, maxRetries, retryDelay); err != nil {
+	if err := s.createMessageWithRetry(ctx, message, messageCreateMaxRetries, messageCreateRetryDelay); err != nil {
 		return nil, err
 	}
 
@@ -137,8 +156,33 @@ func (s *Service) getSessionWithRetry(ctx context.Context, sessionID, messageID 
 	return nil, err
 }
 
+// getOrStartTurnWithRetry fetches or starts a turn, retrying short-lived FK/session visibility races.
+func (s *Service) getOrStartTurnWithRetry(ctx context.Context, sessionID, messageID string, maxRetries int, retryDelay time.Duration) (*models.Turn, error) {
+	var turn *models.Turn
+	var err error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		turn, err = s.getOrStartTurn(ctx, sessionID)
+		if err == nil {
+			return turn, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if attempt < maxRetries-1 {
+			s.logger.Debug("failed to get or start turn for message, retrying",
+				zap.String("session_id", sessionID),
+				zap.String("message_id", messageID),
+				zap.Int("attempt", attempt+1),
+				zap.Int("max_retries", maxRetries),
+				zap.Error(err))
+			time.Sleep(retryDelay)
+		}
+	}
+	return nil, err
+}
+
 // buildMessage constructs a Message model from a CreateMessageRequest and resolved session.
-func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessageRequest, session *models.TaskSession) *models.Message {
+func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessageRequest, session *models.TaskSession) (*models.Message, error) {
 	authorType := models.MessageAuthorUser
 	if req.AuthorType == "agent" {
 		authorType = models.MessageAuthorAgent
@@ -156,10 +200,17 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 
 	turnID := req.TurnID
 	if turnID == "" {
-		if turn, err := s.getOrStartTurn(ctx, req.TaskSessionID); err != nil {
+		if turn, err := s.getOrStartTurnWithRetry(
+			ctx,
+			req.TaskSessionID,
+			id,
+			messageCreateMaxRetries,
+			messageCreateRetryDelay,
+		); err != nil {
 			s.logger.Warn("failed to get or start turn for streaming message",
 				zap.String("session_id", req.TaskSessionID),
 				zap.Error(err))
+			return nil, fmt.Errorf("failed to get or start turn: %w", err)
 		} else if turn != nil {
 			turnID = turn.ID
 		}
@@ -177,7 +228,7 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 		Metadata:      req.Metadata,
 		RequestsInput: req.RequestsInput,
 		CreatedAt:     time.Now().UTC(),
-	}
+	}, nil
 }
 
 // createMessageWithRetry persists a message with retry logic for transient DB errors.
@@ -244,11 +295,15 @@ func (s *Service) SearchMessages(ctx context.Context, sessionID, query string, l
 
 // DeleteMessage deletes a message
 func (s *Service) DeleteMessage(ctx context.Context, id string) error {
+	message, getErr := s.messages.GetMessage(ctx, id)
 	if err := s.messages.DeleteMessage(ctx, id); err != nil {
 		s.logger.Error("failed to delete message", zap.String("message_id", id), zap.Error(err))
 		return err
 	}
 
+	if getErr == nil && message != nil {
+		s.publishMessageEvent(ctx, events.MessageDeleted, message)
+	}
 	s.logger.Info("message deleted", zap.String("message_id", id))
 	return nil
 }
@@ -510,7 +565,7 @@ func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, re
 
 // UpdatePermissionMessage updates a permission request message's status.
 // It includes retry logic to handle race conditions.
-func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID, status string) error {
+func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendingID string, status models.PermissionStatus) error {
 	const maxRetries = 5
 	const retryDelay = 100 * time.Millisecond
 
@@ -550,7 +605,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	if message.Metadata == nil {
 		message.Metadata = make(map[string]interface{})
 	}
-	message.Metadata["status"] = status
+	message.Metadata["status"] = string(status)
 
 	if err := s.messages.UpdateMessage(ctx, message); err != nil {
 		s.logger.Error("failed to update permission message",
@@ -565,7 +620,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 
 	// When a permission expires, also mark the related tool call as cancelled
 	// so the UI no longer shows a loading spinner on the tool call.
-	if status == "expired" {
+	if status == models.PermissionStatusExpired {
 		if toolCallID, ok := message.Metadata["tool_call_id"].(string); ok && toolCallID != "" {
 			if err := s.UpdateToolCallMessage(ctx, sessionID, toolCallID, "error", "", "", nil); err != nil {
 				s.logger.Warn("failed to cancel related tool call message",
@@ -579,7 +634,7 @@ func (s *Service) UpdatePermissionMessage(ctx context.Context, sessionID, pendin
 	s.logger.Info("permission message updated",
 		zap.String("message_id", message.ID),
 		zap.String("pending_id", pendingID),
-		zap.String("status", status))
+		zap.String("status", string(status)))
 
 	return nil
 }

@@ -13,6 +13,7 @@ import { getShortcut, type StoredShortcutOverrides } from "@/lib/keyboard/shortc
 import { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Extension, isNodeEmpty } from "@tiptap/core";
+import { useHistoryKeymap } from "./tiptap-editor-history";
 import Code from "@tiptap/extension-code";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import { common, createLowlight } from "lowlight";
@@ -22,7 +23,10 @@ import { getChatDraftContent, setChatDraftContent } from "@/lib/local-storage";
 import { getMarkdownText, textToHtml, handleEditorPaste } from "./tiptap-helpers";
 import { CodeBlockView } from "./tiptap-code-block-view";
 import { ContextMention } from "./tiptap-mention-extension";
+import { SlashCommandNode } from "./tiptap-slash-command-extension";
 import type { ContextFile } from "@/lib/state/context-files-store";
+import type { TaskMentionData } from "@/hooks/use-inline-mention";
+import type { SlashCommand } from "./slash-command-types";
 
 export type TipTapInputHandle = {
   focus: () => void;
@@ -34,9 +38,11 @@ export type TipTapInputHandle = {
   getTextareaElement: () => HTMLElement | null;
   insertText: (text: string, from: number, to: number) => void;
   getMentions: () => ContextFile[];
+  getTaskMentions: () => TaskMentionData[];
 };
 
 const lowlightInstance = createLowlight(common);
+export const TIPTAP_EDITOR_TEXT_SIZE_CLASS = "text-base leading-relaxed lg:text-sm";
 
 /**
  * Custom Placeholder extension that reads the current placeholder from
@@ -115,10 +121,23 @@ type UseTipTapEditorOptions = {
   mentionSuggestion: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   slashSuggestion: any;
+  slashCommands: readonly SlashCommand[];
   /** True when a slash/@ suggestion menu is open with selectable items. Enter
    *  must defer to the suggestion plugin so the highlighted item is inserted
    *  instead of submitting the message. */
   isSuggestionMenuOpen: boolean;
+  /** Returns the user's previous messages for this session, newest-first. The
+   *  caller maintains the actual list; the editor reads it on each keypress so
+   *  ArrowUp/ArrowDown navigate the latest history without prop churn. */
+  getHistory: () => readonly string[];
+  /** Open the Ctrl+R fuzzy search overlay. The overlay lives in the parent
+   *  component (so it can position itself relative to the editor) — the editor
+   *  only knows when to open it. */
+  onOpenReverseSearch: () => void;
+  /** True while the reverse-search overlay owns focus. The editor must ignore
+   *  ArrowUp/ArrowDown in that state so the overlay's own list navigation
+   *  isn't shadowed. */
+  isReverseSearchOpen: boolean;
   ref: React.ForwardedRef<TipTapInputHandle>;
 };
 
@@ -132,6 +151,11 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
   const planModeEnabledRef = useRef(opts.planModeEnabled);
   const onPlanModeChangeRef = useRef(opts.onPlanModeChange);
   const isSuggestionMenuOpenRef = useRef(opts.isSuggestionMenuOpen);
+  const getHistoryRef = useRef(opts.getHistory);
+  const slashCommandsRef = useRef(opts.slashCommands);
+  const getSlashCommandsRef = useRef(() => slashCommandsRef.current);
+  const onOpenReverseSearchRef = useRef(opts.onOpenReverseSearch);
+  const isReverseSearchOpenRef = useRef(opts.isReverseSearchOpen);
   const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
   const keyboardShortcutsRef = useRef(keyboardShortcuts);
   useLayoutEffect(() => {
@@ -144,6 +168,10 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     planModeEnabledRef.current = opts.planModeEnabled;
     onPlanModeChangeRef.current = opts.onPlanModeChange;
     isSuggestionMenuOpenRef.current = opts.isSuggestionMenuOpen;
+    getHistoryRef.current = opts.getHistory;
+    slashCommandsRef.current = opts.slashCommands;
+    onOpenReverseSearchRef.current = opts.onOpenReverseSearch;
+    isReverseSearchOpenRef.current = opts.isReverseSearchOpen;
     keyboardShortcutsRef.current = keyboardShortcuts;
   });
   return {
@@ -156,25 +184,79 @@ function useTipTapRefs(opts: UseTipTapEditorOptions) {
     planModeEnabledRef,
     onPlanModeChangeRef,
     isSuggestionMenuOpenRef,
+    getHistoryRef,
+    getSlashCommandsRef,
+    onOpenReverseSearchRef,
+    isReverseSearchOpenRef,
     keyboardShortcutsRef,
   };
 }
 
+function buildEditorExtensions(args: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  mentionSuggestion: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  slashSuggestion: any;
+  submitKeymap: Extension;
+  historyKeymap: Extension;
+}) {
+  return [
+    Document,
+    Paragraph,
+    Text,
+    HardBreak,
+    History,
+    Code,
+    CodeBlockLowlight.extend({
+      addNodeView() {
+        return ReactNodeViewRenderer(CodeBlockView);
+      },
+    }).configure({ lowlight: lowlightInstance }),
+    DynamicPlaceholder,
+    SlashCommandNode,
+    ContextMention.configure({
+      suggestions: [args.mentionSuggestion, args.slashSuggestion],
+    }),
+    args.submitKeymap,
+    args.historyKeymap,
+  ];
+}
+
+function buildEditorProps(args: {
+  planModeEnabled: boolean;
+  className: string | undefined;
+  onFocus: (() => void) | undefined;
+  onBlur: (() => void) | undefined;
+  onImagePasteRef: React.RefObject<((files: File[]) => void) | undefined>;
+}) {
+  return {
+    attributes: {
+      class: cn(
+        "w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto",
+        TIPTAP_EDITOR_TEXT_SIZE_CLASS,
+        "placeholder:text-muted-foreground",
+        "focus:outline-none",
+        "disabled:cursor-not-allowed disabled:opacity-50",
+        args.planModeEnabled && "border-primary/40",
+        args.className,
+      ),
+    },
+    handlePaste: (view: import("@tiptap/pm/view").EditorView, event: ClipboardEvent) =>
+      handleEditorPaste(view, event, args.onImagePasteRef),
+    handleDOMEvents: {
+      focus: () => {
+        args.onFocus?.();
+        return false;
+      },
+      blur: () => {
+        args.onBlur?.();
+        return false;
+      },
+    },
+  };
+}
+
 export function useTipTapEditor(opts: UseTipTapEditorOptions) {
-  const {
-    value,
-    onChange,
-    placeholder,
-    disabled,
-    className,
-    planModeEnabled,
-    onFocus,
-    onBlur,
-    sessionId,
-    mentionSuggestion,
-    slashSuggestion,
-    ref,
-  } = opts;
   const refs = useTipTapRefs(opts);
   const SubmitKeymap = useSubmitKeymap({
     disabledRef: refs.disabledRef,
@@ -185,50 +267,33 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
     isSuggestionMenuOpenRef: refs.isSuggestionMenuOpenRef,
     keyboardShortcutsRef: refs.keyboardShortcutsRef,
   });
+  const historyController = useHistoryKeymap({
+    disabledRef: refs.disabledRef,
+    isSuggestionMenuOpenRef: refs.isSuggestionMenuOpenRef,
+    isReverseSearchOpenRef: refs.isReverseSearchOpenRef,
+    getHistoryRef: refs.getHistoryRef,
+    getSlashCommandsRef: refs.getSlashCommandsRef,
+    onOpenReverseSearchRef: refs.onOpenReverseSearchRef,
+    onChangeRef: refs.onChangeRef,
+    keyboardShortcutsRef: refs.keyboardShortcutsRef,
+  });
   const isSyncingRef = useRef(false);
   const initialSyncDoneRef = useRef(false);
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: [
-      Document,
-      Paragraph,
-      Text,
-      HardBreak,
-      History,
-      Code,
-      CodeBlockLowlight.extend({
-        addNodeView() {
-          return ReactNodeViewRenderer(CodeBlockView);
-        },
-      }).configure({ lowlight: lowlightInstance }),
-      DynamicPlaceholder,
-      ContextMention.configure({ suggestions: [mentionSuggestion, slashSuggestion] }),
-      SubmitKeymap,
-    ],
-    editorProps: {
-      attributes: {
-        class: cn(
-          "w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto",
-          "text-sm leading-relaxed",
-          "placeholder:text-muted-foreground",
-          "focus:outline-none",
-          "disabled:cursor-not-allowed disabled:opacity-50",
-          planModeEnabled && "border-primary/40",
-          className,
-        ),
-      },
-      handlePaste: (view, event) => handleEditorPaste(view, event, refs.onImagePasteRef),
-      handleDOMEvents: {
-        focus: () => {
-          onFocus?.();
-          return false;
-        },
-        blur: () => {
-          onBlur?.();
-          return false;
-        },
-      },
-    },
+    extensions: buildEditorExtensions({
+      mentionSuggestion: opts.mentionSuggestion,
+      slashSuggestion: opts.slashSuggestion,
+      submitKeymap: SubmitKeymap,
+      historyKeymap: historyController.extension,
+    }),
+    editorProps: buildEditorProps({
+      planModeEnabled: opts.planModeEnabled,
+      className: opts.className,
+      onFocus: opts.onFocus,
+      onBlur: opts.onBlur,
+      onImagePasteRef: refs.onImagePasteRef,
+    }),
     onUpdate: ({ editor: e }) => {
       if (isSyncingRef.current || !initialSyncDoneRef.current) return;
       const text = getMarkdownText(e);
@@ -236,20 +301,24 @@ export function useTipTapEditor(opts: UseTipTapEditorOptions) {
       const sid = refs.sessionIdRef.current;
       if (sid) setChatDraftContent(sid, e.getJSON());
     },
-    editable: !disabled,
+    editable: !opts.disabled,
   });
   useSyncEditor({
     editor,
-    disabled,
-    placeholder,
-    sessionId,
-    value,
+    disabled: opts.disabled,
+    placeholder: opts.placeholder,
+    sessionId: opts.sessionId,
+    value: opts.value,
     isSyncingRef,
     initialSyncDoneRef,
     onChangeRef: refs.onChangeRef,
   });
-  useEditorImperativeHandle(ref, editor, onChange, isSyncingRef);
-  return editor;
+  useEditorImperativeHandle(opts.ref, editor, opts.onChange, isSyncingRef);
+  const applyHistoryEntry = useMemo(
+    () => (index: number) => historyController.applyHistoryIndex(editor, index),
+    [editor, historyController],
+  );
+  return { editor, applyHistoryEntry };
 }
 
 // ── Sync hook ─────────────────────────────────────────────────────
@@ -492,7 +561,28 @@ function useEditorImperativeHandle(
             const { kind, path, label } = node.attrs;
             if (kind === "file") mentions.push({ path, name: label, pinned: false });
             else if (kind === "prompt") mentions.push({ path, name: label, pinned: false });
+            else if (kind === "plan") mentions.push({ path, name: label, pinned: false });
           }
+        });
+        return mentions;
+      },
+      getTaskMentions: () => {
+        if (!editor) return [];
+        const seen = new Set<string>();
+        const mentions: TaskMentionData[] = [];
+        editor.state.doc.descendants((node) => {
+          if (node.type.name !== "contextMention") return;
+          const { kind, label, taskId, workflowId, workflowStepId, taskState } = node.attrs;
+          if (kind !== "task" || !taskId || !workflowId || !workflowStepId || seen.has(taskId))
+            return;
+          seen.add(taskId);
+          mentions.push({
+            taskId,
+            title: label ?? taskId,
+            workflowId,
+            workflowStepId,
+            state: taskState ?? null,
+          });
         });
         return mentions;
       },

@@ -1,6 +1,7 @@
 import { classifyTask, type TaskBucket } from "@/components/task/task-classify";
 import type { TaskSwitcherItem } from "@/components/task/task-switcher";
 import { getExecutorLabel } from "@/lib/executor-icons";
+import { formatTaskStateLabel } from "@/lib/ui/state-labels";
 import type {
   FilterClause,
   FilterDimension,
@@ -26,6 +27,7 @@ export type GroupedSidebarList = {
 export type SidebarTaskPrefs = {
   pinnedTaskIds: string[];
   orderedTaskIds: string[];
+  subtaskOrderByParentId?: Record<string, string[]>;
 };
 
 type DimensionExtractor = (task: TaskSwitcherItem) => FilterValue | undefined;
@@ -42,6 +44,7 @@ function getStateBucket(task: TaskSwitcherItem): TaskBucket {
 
 const dimensionExtractors: Record<FilterDimension, DimensionExtractor> = {
   archived: (t) => t.isArchived === true,
+  // State filters intentionally use the action buckets exposed by the filter UI.
   state: (t) => getStateBucket(t),
   workflow: (t) => t.workflowId,
   workflowStep: (t) => t.workflowStepId,
@@ -130,9 +133,29 @@ export function applySort(
   tasks: TaskSwitcherItem[],
   spec: SortSpec,
   orderedTaskIds: string[] = [],
+  subTasksByParentId?: Map<string, TaskSwitcherItem[]>,
 ): TaskSwitcherItem[] {
-  const cmp: SortComparator =
-    spec.key === "custom" ? customComparator(orderedTaskIds) : SORT_COMPARATORS[spec.key];
+  let cmp: SortComparator;
+  if (spec.key === "state" && subTasksByParentId) {
+    const effectiveOrder = new Map<string, number>();
+    for (const t of tasks) {
+      let order = STATE_BUCKET_ORDER[getStateBucket(t)];
+      const subs = subTasksByParentId.get(t.id);
+      if (subs) {
+        for (const sub of subs) {
+          order = Math.min(order, STATE_BUCKET_ORDER[getStateBucket(sub)]);
+        }
+      }
+      effectiveOrder.set(t.id, order);
+    }
+    cmp = (a, b) => {
+      const bucket = effectiveOrder.get(a.id)! - effectiveOrder.get(b.id)!;
+      if (bucket !== 0) return bucket;
+      return (b.createdAt ?? "").localeCompare(a.createdAt ?? "");
+    };
+  } else {
+    cmp = spec.key === "custom" ? customComparator(orderedTaskIds) : SORT_COMPARATORS[spec.key];
+  }
   // "Custom" is a manual order — reversing it on direction=desc would flip
   // the user's drag, which has no intuitive meaning. The picker hides the
   // direction toggle for custom; this guard keeps the data layer consistent
@@ -149,8 +172,74 @@ export function applySort(
 
 const UNASSIGNED_LABEL = "Unassigned";
 const MULTI_REPO_LABEL = "Multi-repo";
+const NOT_STARTED_STATE_GROUP_KEY = "__not_started__";
+
+const STATE_GROUP_ORDER: Record<string, number> = {
+  [NOT_STARTED_STATE_GROUP_KEY]: 0,
+  CREATED: 1,
+  SCHEDULING: 2,
+  TODO: 3,
+  IN_PROGRESS: 4,
+  WAITING_FOR_INPUT: 5,
+  REVIEW: 6,
+  BLOCKED: 7,
+  FAILED: 8,
+  COMPLETED: 9,
+  CANCELLED: 10,
+};
 
 type GroupExtractor = (task: TaskSwitcherItem) => { key: string; label: string };
+
+function getTaskStateGroup(task: TaskSwitcherItem): { key: string; label: string } {
+  if (!task.state)
+    return { key: NOT_STARTED_STATE_GROUP_KEY, label: formatTaskStateLabel(undefined) };
+  return { key: task.state, label: formatTaskStateLabel(task.state) };
+}
+
+/**
+ * Computes the effective state group for a parent task, considering its direct
+ * subtasks. The task (or its "best" subtask) with the highest-priority bucket
+ * (lowest STATE_BUCKET_ORDER) determines the group. This makes a parent with an
+ * active subtask bubble up to the same section as genuinely-running top-level
+ * tasks.
+ *
+ * Tie-break: when multiple candidates share the same bucket, prefer the one
+ * with the lowest STATE_GROUP_ORDER (i.e. the earlier/more-active lifecycle
+ * state). This is consistent with the existing top-level sort where review
+ * (which includes COMPLETED/FAILED/CANCELLED) sorts above in_progress.
+ */
+function getEffectiveStateGroup(
+  task: TaskSwitcherItem,
+  subMap: Map<string, TaskSwitcherItem[]>,
+): { key: string; label: string } {
+  let bestTask = task;
+  let bestBucketOrder = STATE_BUCKET_ORDER[getStateBucket(task)];
+  let bestStateOrder = STATE_GROUP_ORDER[task.state ?? NOT_STARTED_STATE_GROUP_KEY] ?? 99;
+
+  const subs = subMap.get(task.id);
+  if (subs) {
+    for (const sub of subs) {
+      // Subtasks without an explicit persisted state can't provide a meaningful
+      // group heading (getTaskStateGroup would return "not started"), so skip
+      // them entirely. The parent still bubbles in applySort via bucket numbers.
+      if (!sub.state) continue;
+      const subBucketOrder = STATE_BUCKET_ORDER[getStateBucket(sub)];
+      if (subBucketOrder < bestBucketOrder) {
+        bestTask = sub;
+        bestBucketOrder = subBucketOrder;
+        bestStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
+      } else if (subBucketOrder === bestBucketOrder) {
+        const subStateOrder = STATE_GROUP_ORDER[sub.state] ?? 99;
+        if (subStateOrder < bestStateOrder) {
+          bestTask = sub;
+          bestStateOrder = subStateOrder;
+        }
+      }
+    }
+  }
+
+  return getTaskStateGroup(bestTask);
+}
 
 const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
   repository: (t) => {
@@ -176,10 +265,8 @@ const groupExtractors: Record<Exclude<GroupKey, "none">, GroupExtractor> = {
     }
     return { key: "__unassigned__", label: UNASSIGNED_LABEL };
   },
-  state: (t) => {
-    const bucket = getStateBucket(t);
-    return { key: bucket, label: bucket };
-  },
+  // State groups use persisted task states so headings match task status labels.
+  state: getTaskStateGroup,
 };
 
 function separateSubtasks(tasks: TaskSwitcherItem[]): {
@@ -201,7 +288,11 @@ function separateSubtasks(tasks: TaskSwitcherItem[]): {
   return { rootTasks, subTasksByParentId: subMap };
 }
 
-export function applyGroup(tasks: TaskSwitcherItem[], groupKey: GroupKey): GroupedSidebarList {
+export function applyGroup(
+  tasks: TaskSwitcherItem[],
+  groupKey: GroupKey,
+  effectiveStateSubMap?: Map<string, TaskSwitcherItem[]>,
+): GroupedSidebarList {
   const { rootTasks, subTasksByParentId } = separateSubtasks(tasks);
 
   if (groupKey === "none") {
@@ -214,7 +305,10 @@ export function applyGroup(tasks: TaskSwitcherItem[], groupKey: GroupKey): Group
   const extract = groupExtractors[groupKey];
   const buckets = new Map<string, SidebarGroup>();
   for (const task of rootTasks) {
-    const { key, label } = extract(task);
+    const { key, label } =
+      groupKey === "state" && effectiveStateSubMap
+        ? getEffectiveStateGroup(task, effectiveStateSubMap)
+        : extract(task);
     let group = buckets.get(key);
     if (!group) {
       group = { key, label, tasks: [] };
@@ -228,6 +322,7 @@ export function applyGroup(tasks: TaskSwitcherItem[], groupKey: GroupKey): Group
     mergeSingleRepoUnassigned(groups);
     sortRepoGroups(groups);
   }
+  if (groupKey === "state") sortStateGroups(groups);
   return { groups, subTasksByParentId };
 }
 
@@ -247,6 +342,14 @@ function sortRepoGroups(groups: SidebarGroup[]): void {
     if (b.key === "__multi__") return 1;
     if (a.key === "__unassigned__") return 1;
     if (b.key === "__unassigned__") return -1;
+    return a.label.localeCompare(b.label);
+  });
+}
+
+function sortStateGroups(groups: SidebarGroup[]): void {
+  groups.sort((a, b) => {
+    const order = (STATE_GROUP_ORDER[a.key] ?? 99) - (STATE_GROUP_ORDER[b.key] ?? 99);
+    if (order !== 0) return order;
     return a.label.localeCompare(b.label);
   });
 }
@@ -310,14 +413,136 @@ function buildIndex(ids: string[]): Map<string, number> {
   return m;
 }
 
+/**
+ * Sort subtasks of a single parent by the user's manual order. Listed
+ * subtasks come first in their stored order; unlisted ones keep their incoming
+ * order (which reflects the active sort) afterwards.
+ */
+function applySubtaskOrder(
+  subtasks: TaskSwitcherItem[],
+  orderedSubtaskIds: string[],
+): TaskSwitcherItem[] {
+  const orderIndex = buildIndex(orderedSubtaskIds);
+  const withSortIndex = subtasks.map((t, i) => ({ t, sortIdx: i }));
+  withSortIndex.sort((a, b) => {
+    const ai = orderIndex.get(a.t.id);
+    const bi = orderIndex.get(b.t.id);
+    if (ai !== undefined && bi !== undefined) return ai - bi;
+    if (ai !== undefined) return -1;
+    if (bi !== undefined) return 1;
+    return a.sortIdx - b.sortIdx;
+  });
+  return withSortIndex.map((x) => x.t);
+}
+
+/**
+ * Count a group's tasks including every nested descendant. The sidebar renders
+ * an arbitrarily deep tree, so the header count walks `subTasksByParentId`
+ * recursively rather than counting only root + direct children.
+ */
+export function countGroupTasks(
+  rootTasks: TaskSwitcherItem[],
+  subTasksByParentId: Map<string, TaskSwitcherItem[]>,
+): number {
+  let total = 0;
+  const visited = new Set<string>();
+  const stack = [...rootTasks];
+  while (stack.length > 0) {
+    const task = stack.pop()!;
+    if (visited.has(task.id)) continue;
+    visited.add(task.id);
+    total += 1;
+    const children = subTasksByParentId.get(task.id);
+    if (children) stack.push(...children);
+  }
+  return total;
+}
+
+/**
+ * Flatten the grouped sidebar tree into the exact top-to-bottom order of the
+ * task rows the user currently sees, honoring collapsed groups and collapsed
+ * subtask parents. This is the ordered list shift-click range selection walks.
+ */
+export function flattenVisibleTaskIds(
+  grouped: GroupedSidebarList,
+  collapsedGroupKeys: string[],
+  collapsedSubtaskParentIds: string[],
+): string[] {
+  const collapsedGroups = new Set(collapsedGroupKeys);
+  const collapsedSubs = new Set(collapsedSubtaskParentIds);
+  const out: string[] = [];
+  const visit = (task: TaskSwitcherItem) => {
+    out.push(task.id);
+    if (collapsedSubs.has(task.id)) return;
+    const subs = grouped.subTasksByParentId.get(task.id);
+    if (subs) for (const sub of subs) visit(sub);
+  };
+  for (const group of grouped.groups) {
+    if (collapsedGroups.has(group.key)) continue;
+    for (const task of group.tasks) visit(task);
+  }
+  return out;
+}
+
+/**
+ * Order `ids` by their position in the rendered `visibleTaskIds` list. Used
+ * before bulk moves so a backward range selection (anchor after target, which
+ * leaves the selection Set in insertion rather than visible order) still lands
+ * top-to-bottom at the destination. Ids absent from the visible list sort last
+ * so they never displace the visible-ordered ones.
+ */
+export function sortIdsByVisibleOrder(ids: string[], visibleTaskIds: string[]): string[] {
+  const order = new Map(visibleTaskIds.map((id, i) => [id, i]));
+  return [...ids].sort(
+    (a, b) =>
+      (order.get(a) ?? Number.POSITIVE_INFINITY) - (order.get(b) ?? Number.POSITIVE_INFINITY),
+  );
+}
+
+/**
+ * Decide whether a selection can be bulk-moved to a single step. A selected row
+ * with no workflow (e.g. the archived placeholder) can't move, so flag the
+ * selection as "mixed" (disables "Move to step") and report the movable subset.
+ */
+export function computeMixedWorkflowSelection(
+  displayTasks: Array<{ id: string; workflowId?: string }>,
+  selectedIds: Set<string>,
+): { isMixedWorkflowSelection: boolean; movableSelectedIds: Set<string> } {
+  const wfIds = new Set<string>();
+  const movable = new Set<string>();
+  let hasWorkflowless = false;
+  for (const t of displayTasks) {
+    if (!selectedIds.has(t.id)) continue;
+    if (t.workflowId) {
+      wfIds.add(t.workflowId);
+      movable.add(t.id);
+    } else {
+      hasWorkflowless = true;
+    }
+  }
+  return {
+    isMixedWorkflowSelection: hasWorkflowless || wfIds.size > 1,
+    movableSelectedIds: movable,
+  };
+}
+
 export function applyView(
   tasks: TaskSwitcherItem[],
   view: SidebarView,
   prefs?: SidebarTaskPrefs,
 ): GroupedSidebarList {
   const filtered = applyFilters(tasks, view.filters);
-  const sorted = applySort(filtered, view.sort, prefs?.orderedTaskIds);
-  const grouped = applyGroup(sorted, view.group);
+  const { subTasksByParentId } = separateSubtasks(filtered);
+  const sorted = applySort(filtered, view.sort, prefs?.orderedTaskIds, subTasksByParentId);
+  const grouped = applyGroup(sorted, view.group, subTasksByParentId);
+  const subOrderMap = prefs?.subtaskOrderByParentId;
+  if (subOrderMap) {
+    for (const [parentId, orderedIds] of Object.entries(subOrderMap)) {
+      const subs = grouped.subTasksByParentId.get(parentId);
+      if (!subs) continue;
+      grouped.subTasksByParentId.set(parentId, applySubtaskOrder(subs, orderedIds));
+    }
+  }
   if (!prefs || prefs.pinnedTaskIds.length === 0) return grouped;
   const pinnedSet = new Set(prefs.pinnedTaskIds);
   const pinIndex = buildIndex(prefs.pinnedTaskIds);

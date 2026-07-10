@@ -15,7 +15,15 @@ let mockLastSeen: string | undefined = undefined;
 let mockIsLoaded = true;
 let mockConnectionStatus = "connected";
 let mockIsRestoringLayout = false;
-let mockApi: { getPanel: typeof mockGetPanel } | null = { getPanel: mockGetPanel };
+let mockActivePanelId: string | null = "chat";
+let mockApi: { getPanel: typeof mockGetPanel; activePanel?: { id: string } | null } | null = null;
+
+function makeApi() {
+  return {
+    getPanel: mockGetPanel,
+    activePanel: mockActivePanelId ? { id: mockActivePanelId } : null,
+  };
+}
 
 function buildState() {
   return {
@@ -77,7 +85,8 @@ describe("usePlanPanelAutoOpen", () => {
     mockIsLoaded = true;
     mockConnectionStatus = "connected";
     mockIsRestoringLayout = false;
-    mockApi = { getPanel: mockGetPanel };
+    mockActivePanelId = "chat";
+    mockApi = makeApi();
     mockGetPanel.mockReturnValue(null);
     mockGetTaskPlan.mockResolvedValue(null);
   });
@@ -140,7 +149,8 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
     mockIsLoaded = true;
     mockConnectionStatus = "connected";
     mockIsRestoringLayout = false;
-    mockApi = { getPanel: mockGetPanel };
+    mockActivePanelId = "chat";
+    mockApi = makeApi();
     mockGetPanel.mockReturnValue(null);
     mockGetTaskPlan.mockResolvedValue(null);
   });
@@ -160,11 +170,23 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
     expect(mockGetTaskPlan).not.toHaveBeenCalled();
   });
 
-  it("acknowledges the plan on hydrate when the panel was restored", () => {
+  it("acknowledges the plan on hydrate when the restored panel is active", () => {
     mockGetPanel.mockReturnValue({ id: "plan" });
+    mockActivePanelId = "plan";
+    mockApi = makeApi();
     mockLastSeen = undefined;
     renderHook(() => usePlanPanelAutoOpen());
     expect(mockMarkTaskPlanSeen).toHaveBeenCalledWith("task-1");
+    expect(mockAddPlanPanel).not.toHaveBeenCalled();
+  });
+
+  it("does not acknowledge the plan on hydrate when the restored panel is inactive", () => {
+    mockGetPanel.mockReturnValue({ id: "plan" });
+    mockActivePanelId = "chat";
+    mockApi = makeApi();
+    mockLastSeen = undefined;
+    renderHook(() => usePlanPanelAutoOpen());
+    expect(mockMarkTaskPlanSeen).not.toHaveBeenCalled();
     expect(mockAddPlanPanel).not.toHaveBeenCalled();
   });
 
@@ -175,6 +197,24 @@ describe("usePlanPanelAutoOpen — eager fetch", () => {
     renderHook(() => usePlanPanelAutoOpen());
     expect(mockMarkTaskPlanSeen).not.toHaveBeenCalled();
     expect(mockAddPlanPanel).not.toHaveBeenCalled();
+  });
+
+  it("does not acknowledge a panel it just auto-opened when the eager fetch re-applies the plan", () => {
+    // First render: panel doesn't exist yet, so we auto-open it.
+    mockGetPanel.mockReturnValue(null);
+    const { rerender } = renderHook(() => usePlanPanelAutoOpen());
+    expect(mockAddPlanPanel).toHaveBeenCalledTimes(1);
+
+    // The eager getTaskPlan self-heal resolves after the WS push and
+    // re-applies an equivalent plan object (new reference, same updated_at),
+    // re-running the effect. By now the panel we added is registered, so
+    // getPanel returns it while lastSeen is still undefined. This must NOT
+    // mark the plan seen — that would suppress the indicator the user expects.
+    mockGetPanel.mockReturnValue({ id: "plan" });
+    mockPlan = agentPlan();
+    rerender();
+
+    expect(mockMarkTaskPlanSeen).not.toHaveBeenCalled();
   });
 
   it("does not retry the eager fetch after a failure", async () => {
@@ -206,7 +246,8 @@ describe("usePlanPanelAutoOpen — race guards", () => {
     mockIsLoaded = true;
     mockConnectionStatus = "connected";
     mockIsRestoringLayout = false;
-    mockApi = { getPanel: mockGetPanel };
+    mockActivePanelId = "chat";
+    mockApi = makeApi();
     mockGetPanel.mockReturnValue(null);
     mockGetTaskPlan.mockResolvedValue(null);
   });

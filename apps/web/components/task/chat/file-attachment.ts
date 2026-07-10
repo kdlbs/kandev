@@ -13,6 +13,7 @@ export type FileAttachment = {
   size: number; // File size in bytes
   preview?: string; // Data URL for image preview (only for images)
   isImage: boolean; // Whether this is a previewable image
+  deliveryMode: "prompt" | "path"; // Native prompt block or writable executor file path
 };
 
 export const PREVIEWABLE_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -27,22 +28,6 @@ export function formatBytes(bytes: number): string {
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
-
-/**
- * Open a base64-encoded image in a new browser window for full-size viewing.
- * MIME type is constrained to PREVIEWABLE_IMAGE_TYPES so a crafted value can't
- * break out of the `src` attribute in document.write. `noopener` keeps the
- * opened window from accessing window.opener.
- */
-export function openImageInWindow(mimeType: string, data: string): void {
-  const safeMime = PREVIEWABLE_IMAGE_TYPES.includes(mimeType) ? mimeType : "image/png";
-  const win = window.open("", "_blank", "noopener,noreferrer");
-  if (win) {
-    win.document.write(
-      `<img src="data:${safeMime};base64,${data}" style="max-width:100%;height:auto;" />`,
-    );
-  }
 }
 
 function isPreviewableImage(mimeType: string): boolean {
@@ -95,6 +80,7 @@ export function processFile(file: File): Promise<FileAttachment | null> {
             size: file.size,
             preview: dataUrl,
             isImage: true,
+            deliveryMode: "prompt",
           });
         };
         img.onerror = () => resolve(null);
@@ -107,6 +93,7 @@ export function processFile(file: File): Promise<FileAttachment | null> {
           fileName: file.name,
           size: file.size,
           isImage: false,
+          deliveryMode: "path",
         });
       }
     };

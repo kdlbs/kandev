@@ -17,6 +17,7 @@ export type {
 } from "./agent-profile";
 
 import type { AgentProfile } from "./agent-profile";
+import type { BackendMessage } from "./backend-message";
 
 export type TUIConfig = {
   command: string;
@@ -113,6 +114,15 @@ export type CommandEntry = {
   description?: string;
 };
 
+export type ConfigOptionEntry = {
+  type: string;
+  id: string;
+  name: string;
+  current_value: string;
+  category?: string;
+  options?: { value: string; name: string }[];
+};
+
 // CapabilityStatus mirrors the host utility probe status. "probing" is the
 // in-flight state; "ok" is populated; the remaining values signal errors the
 // UI can surface directly (auth, install, generic failure, not started yet).
@@ -131,6 +141,7 @@ export type ModelConfig = {
   available_modes?: ModeEntry[];
   current_mode_id?: string;
   available_commands?: CommandEntry[];
+  config_options?: ConfigOptionEntry[];
   supports_dynamic_models: boolean;
   status?: CapabilityStatus;
   error?: string;
@@ -161,6 +172,14 @@ export type PassthroughConfig = {
   supported: boolean;
   label: string;
   description: string;
+  auto_inject_prompt?: boolean;
+  submit_sequence?: string;
+  /**
+   * Short human-readable phrase describing how kandev injects MCP servers into
+   * this agent's CLI in passthrough mode (e.g. "an MCP config file passed via
+   * the --mcp-config flag"). Absent when the agent declares no MCP strategy.
+   */
+  mcp_injection?: string;
 };
 
 export type ToolStatus = {
@@ -272,6 +291,36 @@ export type TaskPlanResponse = {
   plan: TaskPlan | null;
 };
 
+/** A single anchored stop in a code walkthrough. */
+export type WalkthroughStep = {
+  title?: string;
+  repo?: string;
+  file: string;
+  line: number;
+  line_end?: number;
+  text: string;
+};
+
+/** An agent-authored guided code tour attached to a task. */
+export type TaskWalkthrough = {
+  id: string;
+  task_id: string;
+  title: string;
+  steps: WalkthroughStep[];
+  created_by: "agent";
+  created_at: string;
+  updated_at: string;
+};
+
+// Backend WS message map for walkthrough events, kept here (rather than in
+// backend.ts) so backend.ts stays under its line cap — mirrors the way office
+// events live in office-events.ts and fold into BackendMessageMap.
+export type WalkthroughBackendMessageMap = {
+  "task.walkthrough.created": BackendMessage<"task.walkthrough.created", TaskWalkthrough>;
+  "task.walkthrough.updated": BackendMessage<"task.walkthrough.updated", TaskWalkthrough>;
+  "task.walkthrough.deleted": BackendMessage<"task.walkthrough.deleted", TaskWalkthrough>;
+};
+
 // A single revision in the task plan history. `content` is optional because
 // list responses/WS broadcasts omit it for size; fetch detail separately.
 export type TaskPlanRevision = {
@@ -319,6 +368,8 @@ export type GlobalStatsDTO = {
   avg_turns_per_task: number;
   avg_messages_per_task: number;
   avg_duration_ms_per_task: number;
+  avg_turn_duration_ms: number;
+  avg_messages_per_turn: number;
 };
 
 export type DailyActivityDTO = {

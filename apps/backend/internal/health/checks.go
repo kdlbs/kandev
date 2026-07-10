@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"time"
 )
 
@@ -45,6 +46,12 @@ func (c *GitHubChecker) WithRateLimitProvider(p GitHubRateLimitProvider) *GitHub
 	c.rateProvider = p
 	return c
 }
+
+// Name returns the user-facing label for this check.
+func (c *GitHubChecker) Name() string { return "GitHub integration" }
+
+// Category returns the issue category this checker emits issues under.
+func (c *GitHubChecker) Category() string { return "github" }
 
 func (c *GitHubChecker) Check(_ context.Context) []Issue {
 	if c.provider == nil {
@@ -109,6 +116,37 @@ func rateLimitMessage(status GitHubRateLimitStatus) string {
 	return fmt.Sprintf("PR/issue checks are paused; resets in %s.", wait)
 }
 
+// GitExecutableChecker checks whether the host git executable is available.
+type GitExecutableChecker struct {
+	lookPath func(string) (string, error)
+}
+
+// NewGitExecutableChecker creates a checker for the required host git binary.
+func NewGitExecutableChecker() *GitExecutableChecker {
+	return &GitExecutableChecker{lookPath: exec.LookPath}
+}
+
+// Name returns the user-facing label for this check.
+func (c *GitExecutableChecker) Name() string { return "Git executable" }
+
+// Category returns the issue category this checker emits issues under.
+func (c *GitExecutableChecker) Category() string { return "system_requirements" }
+
+func (c *GitExecutableChecker) Check(_ context.Context) []Issue {
+	if _, err := c.lookPath("git"); err == nil {
+		return nil
+	}
+	return []Issue{{
+		ID:       "git_executable_missing",
+		Category: c.Category(),
+		Title:    "Git executable is required",
+		Message:  "Install Git and ensure the git executable is available on PATH.",
+		Severity: SeverityError,
+		FixURL:   "/settings/system/status",
+		FixLabel: "View system status",
+	}}
+}
+
 // AgentDiscoveryProvider abstracts the agent discovery check.
 type AgentDiscoveryProvider interface {
 	HasAvailableAgents(ctx context.Context) (bool, error)
@@ -125,6 +163,12 @@ func NewAgentChecker(provider AgentDiscoveryProvider) *AgentChecker {
 }
 
 const agentCheckTimeout = 10 * time.Second
+
+// Name returns the user-facing label for this check.
+func (c *AgentChecker) Name() string { return "AI agent availability" }
+
+// Category returns the issue category this checker emits issues under.
+func (c *AgentChecker) Category() string { return "agents" }
 
 func (c *AgentChecker) Check(ctx context.Context) []Issue {
 	if c.provider == nil {

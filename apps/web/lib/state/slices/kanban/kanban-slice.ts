@@ -60,7 +60,6 @@ export const createKanbanSlice: StateCreator<
     set((draft) => {
       draft.tasks.activeTaskId = taskId;
       draft.tasks.activeSessionId = sessionId;
-      // Auto-driven (WS) selection: don't touch pinnedSessionId.
       draft.tasks.lastSessionByTaskId[taskId] = sessionId;
     }),
   clearActiveSession: () =>

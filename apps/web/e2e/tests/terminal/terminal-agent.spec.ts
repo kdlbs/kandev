@@ -3,7 +3,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import type { Page } from "@playwright/test";
+import { TimeoutError, type Page } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
 // Helpers shared across TUI passthrough tests
@@ -108,8 +108,13 @@ test.describe("Terminal agent (TUI passthrough)", () => {
 
     const session = await openTaskSession(testPage, "TUI Test Task");
 
-    // Loading overlay is visible while the WebSocket connects
-    await session.waitForPassthroughLoading();
+    // The loading overlay is transient; on fast runs it may never be observable.
+    try {
+      await session.waitForPassthroughLoading();
+    } catch (error) {
+      // Keep tolerance for "didn't appear in time", but preserve real failures.
+      if (!(error instanceof TimeoutError)) throw error;
+    }
 
     // Once connected, loading overlay disappears and terminal content is visible
     await session.waitForPassthroughLoaded();

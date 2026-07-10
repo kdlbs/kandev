@@ -25,6 +25,8 @@ export type CommentAnnotation = DiffLineAnnotation<{
   isEditing: boolean;
 }>;
 
+export type DiffCommentUpdate = Partial<Pick<DiffComment, "text" | "status" | "codeContent">>;
+
 /**
  * Store state for diff comments — kept for backward compat type references.
  * @deprecated Use CommentsState from '@/lib/state/slices/comments' instead.
@@ -41,7 +43,7 @@ export interface DiffCommentsState {
  */
 export interface DiffCommentsActions {
   addComment: (comment: DiffComment) => void;
-  updateComment: (commentId: string, updates: Partial<DiffComment>) => void;
+  updateComment: (commentId: string, updates: DiffCommentUpdate) => void;
   removeComment: (sessionId: string, filePath: string, commentId: string) => void;
   addToPending: (commentId: string) => void;
   removeFromPending: (commentId: string) => void;
@@ -84,6 +86,8 @@ export interface DiffViewerProps {
   onCommentAdd?: (comment: DiffComment) => void;
   /** Callback when comment is deleted */
   onCommentDelete?: (commentId: string) => void;
+  /** Callback when comment is updated */
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   /** External comments (controlled mode) */
   comments?: DiffComment[];
   /** Additional class name */

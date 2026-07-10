@@ -319,6 +319,14 @@ func (c *Client) StreamUpdates(ctx context.Context, handler func(AgentEvent), mc
 	return nil
 }
 
+// HasAgentStream reports whether the agent updates WebSocket is currently
+// connected. Used to avoid opening a second stream on resume/restart.
+func (c *Client) HasAgentStream() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.agentStreamConn != nil
+}
+
 // readUpdatesStream is the read loop for the agent updates WebSocket stream.
 func (c *Client) readUpdatesStream(
 	ctx context.Context,
@@ -497,8 +505,9 @@ func (c *Client) CloseUpdatesStream() {
 
 // CancelResponse is the response from the agentctl cancel endpoint.
 type CancelResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
+	Success         bool   `json:"success"`
+	Error           string `json:"error,omitempty"`
+	NotAcknowledged bool   `json:"not_acknowledged,omitempty"`
 }
 
 // Cancel interrupts the current agent turn via the agent WebSocket stream.
@@ -521,6 +530,9 @@ func (c *Client) Cancel(ctx context.Context) error {
 		return fmt.Errorf("failed to parse cancel response: %w", err)
 	}
 	if !result.Success {
+		if result.NotAcknowledged {
+			return fmt.Errorf("%w: %s", ErrTurnCancelNotAcknowledged, result.Error)
+		}
 		return fmt.Errorf("cancel failed: %s", result.Error)
 	}
 	return nil

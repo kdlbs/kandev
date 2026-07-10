@@ -4,7 +4,7 @@
 package instance
 
 import (
-	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -38,7 +38,56 @@ type Instance struct {
 	manager *process.Manager
 
 	// server is the HTTP server for this instance's API (unexported)
-	server *http.Server
+	server instanceHTTPServer
+
+	// lastActivityNanos is the unix-nano timestamp of the most recently
+	// observed HTTP request on this instance's port. Used by the idle reaper
+	// to detect disconnected sessions. Bumped on request entry and exit by
+	// the activity middleware installed in instance.Manager.CreateInstance.
+	lastActivityNanos atomic.Int64
+
+	// inflightRequests counts HTTP requests currently being served on this
+	// instance's port. Long-lived requests (WebSocket upgrades for
+	// /agent/stream, /workspace/stream, etc.) keep this above zero for the
+	// full duration of the connection, so the idle reaper treats an
+	// instance with an open WS as active even when no new HTTP request
+	// arrives. Maintained by the activity middleware.
+	inflightRequests atomic.Int32
+}
+
+// MarkActivity stamps the current time as the most recent activity on this
+// instance. Called by the activity middleware on every request entry and exit.
+func (i *Instance) MarkActivity() {
+	i.lastActivityNanos.Store(time.Now().UnixNano())
+}
+
+// LastActivity returns the timestamp of the most recent observed activity on
+// this instance. Zero if no activity has been recorded yet.
+func (i *Instance) LastActivity() time.Time {
+	v := i.lastActivityNanos.Load()
+	if v == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, v)
+}
+
+// IsIdle reports whether the instance has been idle for at least `timeout`.
+// An instance with any in-flight HTTP request (notably an open WebSocket
+// stream) is never considered idle.
+func (i *Instance) IsIdle(now time.Time, timeout time.Duration) bool {
+	if i.inflightRequests.Load() > 0 {
+		return false
+	}
+	last := i.LastActivity()
+	if last.IsZero() {
+		// No activity observed since creation — fall back to CreatedAt so a
+		// never-touched instance still gets reaped after timeout.
+		last = i.CreatedAt
+	}
+	if last.IsZero() {
+		return false
+	}
+	return now.Sub(last) >= timeout
 }
 
 // McpServerConfig holds configuration for an MCP server.
@@ -80,6 +129,10 @@ type CreateRequest struct {
 	// AutoStart indicates whether to start the agent automatically after creation.
 	AutoStart bool `json:"auto_start,omitempty"`
 
+	// AutoApprovePermissions controls agentctl-side permission auto-approval
+	// for this instance. Nil uses the control server default.
+	AutoApprovePermissions *bool `json:"auto_approve_permissions,omitempty"`
+
 	// McpServers is a list of MCP servers to configure for the agent.
 	McpServers []McpServerConfig `json:"mcp_servers,omitempty"`
 
@@ -95,8 +148,28 @@ type CreateRequest struct {
 	// AssumeMcpSse overrides MCP capability filtering to assume SSE support.
 	AssumeMcpSse bool `json:"assume_mcp_sse,omitempty"`
 
-	// McpMode controls which MCP tools are registered: "task" (default) or "config".
+	// AssumeMcpHttp overrides MCP capability filtering to assume HTTP support.
+	AssumeMcpHttp bool `json:"assume_mcp_http,omitempty"`
+
+	// McpMode controls which MCP tools are registered: "task" (default), "config", or "office".
 	McpMode string `json:"mcp_mode,omitempty"`
+
+	// RequiresProcessKill forces the agent's process group to be killed on
+	// shutdown instead of relying on stdin close. Required for agents whose
+	// runtime keeps child processes alive when stdin closes (notably
+	// opencode acp, which spawns MCP server children that leak otherwise).
+	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
+
+	// StripEnv lists environment variables to strip from the agent's child
+	// process environment entirely (not just set to empty).
+	StripEnv []string `json:"strip_env,omitempty"`
+
+	// BaseBranches maps RepositoryName → base branch ref for per-repo diff
+	// stats. The empty key "" applies to the root / single-repo tracker.
+	// Each WorkspaceTracker reads its entry at startup and uses it as the
+	// first candidate when resolving BaseCommit / Ahead / Behind. Empty
+	// disables the override.
+	BaseBranches map[string]string `json:"base_branches,omitempty"`
 }
 
 // CreateResponse contains the result of creating a new agent instance.

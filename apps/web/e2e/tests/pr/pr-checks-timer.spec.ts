@@ -104,7 +104,7 @@ test.describe("PR checks running timer", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Open PR detail panel
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
@@ -119,10 +119,10 @@ test.describe("PR checks running timer", () => {
     const initialText = await durationEl.textContent();
     expect(initialText).toContain("running");
 
-    // Wait ~3 seconds and verify the time has changed (incremented)
-    await testPage.waitForTimeout(3_000);
-    const updatedText = await durationEl.textContent();
-    expect(updatedText).toContain("running");
-    expect(updatedText).not.toBe(initialText);
+    // Verify the live timer increments without paying a fixed sleep.
+    await expect
+      .poll(async () => durationEl.textContent(), { timeout: 3_000 })
+      .not.toBe(initialText);
+    await expect(durationEl).toContainText("running");
   });
 });

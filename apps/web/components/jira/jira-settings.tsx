@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { IconTicket, IconCode } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -19,6 +19,7 @@ import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getJiraConfig,
@@ -26,7 +27,12 @@ import {
   deleteJiraConfig,
   testJiraConnection,
 } from "@/lib/api/domains/jira-api";
-import type { JiraAuthMethod, JiraConfig, TestJiraConnectionResult } from "@/lib/types/jira";
+import type {
+  JiraAuthMethod,
+  JiraConfig,
+  JiraInstanceType,
+  TestJiraConnectionResult,
+} from "@/lib/types/jira";
 
 // Session cookies are HttpOnly so document.cookie can't read them, but
 // DevTools → Application → Cookies surfaces them in plain text. Users copy
@@ -43,6 +49,7 @@ type FormState = {
   siteUrl: string;
   email: string;
   authMethod: JiraAuthMethod;
+  instanceType: JiraInstanceType;
   defaultProjectKey: string;
   secret: string;
 };
@@ -51,6 +58,7 @@ const emptyForm: FormState = {
   siteUrl: "",
   email: "",
   authMethod: "api_token",
+  instanceType: "cloud",
   defaultProjectKey: "",
   secret: "",
 };
@@ -61,9 +69,32 @@ function configToForm(cfg: JiraConfig | null): FormState {
     siteUrl: cfg.siteUrl,
     email: cfg.email,
     authMethod: cfg.authMethod,
+    // Legacy rows written before Server/DC support carry an empty instanceType;
+    // default to cloud so the dropdown has a valid selection.
+    instanceType: cfg.instanceType || "cloud",
     defaultProjectKey: cfg.defaultProjectKey,
     secret: "",
   };
+}
+
+// defaultAuthForInstance returns the canonical auth method for an instance
+// type. Used when the user switches Instance type and the current auth method
+// is no longer valid for the new type (e.g. PAT picked for Cloud).
+function defaultAuthForInstance(instance: JiraInstanceType): JiraAuthMethod {
+  return instance === "server" ? "pat" : "api_token";
+}
+
+// authAllowedForInstance reports whether an auth method is allowed for a given
+// instance type. Mirrors the backend validation so the user can't submit an
+// invalid combination. session_cookie is Cloud-only today because the backend
+// wraps the secret under cloud.session.token / tenant.session.token cookie
+// names — Server/DC uses JSESSIONID, so the wrapping is a no-op there until we
+// add a Server-aware path.
+function authAllowedForInstance(auth: JiraAuthMethod, instance: JiraInstanceType): boolean {
+  if (auth === "api_token") return instance === "cloud";
+  if (auth === "pat") return instance === "server";
+  if (auth === "session_cookie") return instance === "cloud";
+  return false;
 }
 
 function saveLabel(saving: boolean, hasConfig: boolean): string {
@@ -77,19 +108,44 @@ type FieldsRowProps = {
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 };
 
-function SiteFields({ form, loading, update }: FieldsRowProps) {
+type InstanceFieldsProps = FieldsRowProps & {
+  setForm: Dispatch<SetStateAction<FormState>>;
+};
+
+function InstanceFields({ form, loading, setForm }: InstanceFieldsProps) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div className="space-y-1.5">
-        <Label htmlFor="jira-site">Site URL</Label>
-        <Input
-          id="jira-site"
-          data-testid="jira-site-input"
-          placeholder="https://acme.atlassian.net"
-          value={form.siteUrl}
-          onChange={(e) => update("siteUrl", e.target.value)}
+        <Label htmlFor="jira-instance">Instance type</Label>
+        <Select
+          value={form.instanceType}
+          onValueChange={(v) => {
+            const next = v as JiraInstanceType;
+            setForm((prev) => {
+              // Switching instance type changes which auth methods are valid;
+              // if the current one would become invalid, swap it for the
+              // canonical default for the new instance.
+              const auth = authAllowedForInstance(prev.authMethod, next)
+                ? prev.authMethod
+                : defaultAuthForInstance(next);
+              return { ...prev, instanceType: next, authMethod: auth };
+            });
+          }}
           disabled={loading}
-        />
+        >
+          <SelectTrigger id="jira-instance" className="w-full cursor-pointer">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="cloud">Atlassian Cloud</SelectItem>
+            <SelectItem value="server">Server / Data Center</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {form.instanceType === "cloud"
+            ? "Sites hosted at *.atlassian.net."
+            : "Self-hosted Jira (Server or Data Center)."}
+        </p>
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="jira-project">Default project key (optional)</Label>
@@ -98,7 +154,9 @@ function SiteFields({ form, loading, update }: FieldsRowProps) {
           data-testid="jira-project-input"
           placeholder="PROJ"
           value={form.defaultProjectKey}
-          onChange={(e) => update("defaultProjectKey", e.target.value.toUpperCase())}
+          onChange={(e) =>
+            setForm((prev) => ({ ...prev, defaultProjectKey: e.target.value.toUpperCase() }))
+          }
           disabled={loading}
         />
       </div>
@@ -106,7 +164,26 @@ function SiteFields({ form, loading, update }: FieldsRowProps) {
   );
 }
 
+function SiteFields({ form, loading, update }: FieldsRowProps) {
+  const placeholder =
+    form.instanceType === "server" ? "https://jira.your-company.com" : "https://acme.atlassian.net";
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="jira-site">Site URL</Label>
+      <Input
+        id="jira-site"
+        data-testid="jira-site-input"
+        placeholder={placeholder}
+        value={form.siteUrl}
+        onChange={(e) => update("siteUrl", e.target.value)}
+        disabled={loading}
+      />
+    </div>
+  );
+}
+
 function AuthFields({ form, loading, update }: FieldsRowProps) {
+  const showEmail = form.instanceType === "cloud" && form.authMethod === "api_token";
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div className="space-y-1.5">
@@ -116,29 +193,38 @@ function AuthFields({ form, loading, update }: FieldsRowProps) {
           onValueChange={(v) => update("authMethod", v as JiraAuthMethod)}
           disabled={loading}
         >
-          <SelectTrigger id="jira-auth" className="w-full">
+          <SelectTrigger id="jira-auth" className="w-full cursor-pointer">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="api_token">API token (recommended)</SelectItem>
-            <SelectItem value="session_cookie">Browser session cookie</SelectItem>
+            {form.instanceType === "cloud" ? (
+              <>
+                <SelectItem value="api_token">API token (recommended)</SelectItem>
+                <SelectItem value="session_cookie">Browser session cookie</SelectItem>
+              </>
+            ) : (
+              <SelectItem value="pat">Personal Access Token</SelectItem>
+            )}
           </SelectContent>
         </Select>
       </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="jira-email">
-          Email {form.authMethod === "session_cookie" && "(optional)"}
-        </Label>
-        <Input
-          id="jira-email"
-          data-testid="jira-email-input"
-          type="email"
-          placeholder="you@example.com"
-          value={form.email}
-          onChange={(e) => update("email", e.target.value)}
-          disabled={loading}
-        />
-      </div>
+      {showEmail ? (
+        <div className="space-y-1.5">
+          <Label htmlFor="jira-email">Email</Label>
+          <Input
+            id="jira-email"
+            data-testid="jira-email-input"
+            type="email"
+            placeholder="you@example.com"
+            value={form.email}
+            onChange={(e) => update("email", e.target.value)}
+            disabled={loading}
+          />
+        </div>
+      ) : (
+        // Keep the grid balanced so the auth select doesn't span both columns.
+        <div aria-hidden className="hidden sm:block" />
+      )}
     </div>
   );
 }
@@ -166,9 +252,17 @@ function SessionSnippet() {
 
 type SecretFieldProps = FieldsRowProps & { hasSavedSecret: boolean };
 
-function secretPlaceholder(isApiToken: boolean, hasSavedSecret: boolean): string {
-  if (hasSavedSecret) return "••••••••";
-  return isApiToken ? "paste token here" : "paste cloud.session.token value";
+// SECRET_COPY centralizes the field label and empty-state placeholder per
+// auth method. Keyed by JiraAuthMethod so adding a new method causes the
+// type system to flag the missing entry.
+const SECRET_COPY: Record<JiraAuthMethod, { label: string; placeholder: string }> = {
+  api_token: { label: "API token", placeholder: "paste API token here" },
+  pat: { label: "Personal Access Token", placeholder: "paste personal access token here" },
+  session_cookie: { label: "Session token value", placeholder: "paste cloud.session.token value" },
+};
+
+function secretPlaceholder(method: JiraAuthMethod, hasSavedSecret: boolean): string {
+  return hasSavedSecret ? "••••••••" : SECRET_COPY[method].placeholder;
 }
 
 function formatExpiry(expiresAt: string): { label: string; tone: "ok" | "warn" | "danger" } {
@@ -212,11 +306,13 @@ function SecretField({
   hasSavedSecret,
   secretExpiresAt,
 }: SecretFieldPropsWithExpiry) {
-  const isApiToken = form.authMethod === "api_token";
+  const method = form.authMethod;
+  const siteUrl = form.siteUrl.replace(/\/+$/, "");
+  const patHref = siteUrl ? `${siteUrl}/secure/ViewProfile.jspa` : undefined;
   return (
     <div className="space-y-1.5">
       <Label htmlFor="jira-secret">
-        {isApiToken ? "API token" : "Session token value"}
+        {SECRET_COPY[method].label}
         {hasSavedSecret && (
           <span className="text-xs text-muted-foreground ml-2">
             (saved — leave blank to keep the current value)
@@ -227,19 +323,19 @@ function SecretField({
         id="jira-secret"
         data-testid="jira-secret-input"
         type="password"
-        placeholder={secretPlaceholder(isApiToken, hasSavedSecret)}
+        placeholder={secretPlaceholder(method, hasSavedSecret)}
         value={form.secret}
         onChange={(e) => update("secret", e.target.value)}
         disabled={loading}
       />
-      {!isApiToken && hasSavedSecret && secretExpiresAt && (
+      {method === "session_cookie" && hasSavedSecret && secretExpiresAt && (
         <CookieExpiry expiresAt={secretExpiresAt} />
       )}
-      {isApiToken && (
+      {method === "api_token" && (
         <p className="text-xs text-muted-foreground">
           Create a token at{" "}
           <a
-            className="underline"
+            className="underline cursor-pointer"
             href="https://id.atlassian.com/manage-profile/security/api-tokens"
             target="_blank"
             rel="noreferrer"
@@ -248,7 +344,30 @@ function SecretField({
           </a>
         </p>
       )}
-      {!isApiToken && <SessionSnippet />}
+      {method === "pat" && (
+        <p className="text-xs text-muted-foreground">
+          Create a Personal Access Token from your Jira profile
+          {patHref ? (
+            <>
+              {" "}
+              (
+              <a
+                className="underline cursor-pointer"
+                href={patHref}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {patHref}
+              </a>
+              ){" "}
+            </>
+          ) : (
+            " "
+          )}
+          → Personal Access Tokens. Required scopes: read & write.
+        </p>
+      )}
+      {method === "session_cookie" && <SessionSnippet />}
     </div>
   );
 }
@@ -336,7 +455,23 @@ function ActionBar({
   );
 }
 
-function useJiraSettings() {
+function useJiraConfigRefresh(workspaceId: string, setConfig: (cfg: JiraConfig | null) => void) {
+  // Background refresh so the auth-health banner picks up new probe results
+  // from the backend poller without requiring a page reload. We re-fetch the
+  // config rather than the loud full `load()` to avoid flashing the form.
+  useEffect(() => {
+    const id = setInterval(() => {
+      getJiraConfig({ workspaceId })
+        .then((cfg) => setConfig(cfg))
+        .catch(() => {
+          /* transient failures are fine — next tick retries */
+        });
+    }, INTEGRATION_STATUS_REFRESH_MS);
+    return () => clearInterval(id);
+  }, [workspaceId, setConfig]);
+}
+
+function useJiraSettings(workspaceId: string) {
   const { toast } = useToast();
   const [config, setConfig] = useState<JiraConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -349,7 +484,7 @@ function useJiraSettings() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const cfg = await getJiraConfig();
+      const cfg = await getJiraConfig({ workspaceId });
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
@@ -357,25 +492,13 @@ function useJiraSettings() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [workspaceId, toast]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  // Background refresh so the auth-health banner picks up new probe results
-  // from the backend poller without requiring a page reload. We re-fetch the
-  // config rather than the loud full `load()` to avoid flashing the form.
-  useEffect(() => {
-    const id = setInterval(() => {
-      getJiraConfig()
-        .then((cfg) => setConfig(cfg))
-        .catch(() => {
-          /* transient failures are fine — next tick retries */
-        });
-    }, INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
-  }, []);
+  useJiraConfigRefresh(workspaceId, setConfig);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -387,25 +510,29 @@ function useJiraSettings() {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await testJiraConnection({ ...form });
+      const res = await testJiraConnection({ ...form }, { workspaceId });
       setTestResult(res);
     } catch (err) {
       setTestResult({ ok: false, error: String(err) });
     } finally {
       setTesting(false);
     }
-  }, [form]);
+  }, [workspaceId, form]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const saved = await setJiraConfig({
-        siteUrl: form.siteUrl,
-        email: form.email,
-        authMethod: form.authMethod,
-        defaultProjectKey: form.defaultProjectKey,
-        secret: form.secret || undefined,
-      });
+      const saved = await setJiraConfig(
+        {
+          siteUrl: form.siteUrl,
+          email: form.email,
+          authMethod: form.authMethod,
+          instanceType: form.instanceType,
+          defaultProjectKey: form.defaultProjectKey,
+          secret: form.secret || undefined,
+        },
+        { workspaceId },
+      );
       setConfig(saved);
       setForm(configToForm(saved));
       // Clear any inline test result from the previous credentials so the
@@ -417,12 +544,12 @@ function useJiraSettings() {
     } finally {
       setSaving(false);
     }
-  }, [form, toast]);
+  }, [workspaceId, form, toast]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Jira configuration?")) return;
     try {
-      await deleteJiraConfig();
+      await deleteJiraConfig({ workspaceId });
       setConfig(null);
       setForm(emptyForm);
       setTestResult(null);
@@ -430,11 +557,12 @@ function useJiraSettings() {
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [toast]);
+  }, [workspaceId, toast]);
 
   return {
     config,
     form,
+    setForm,
     loading,
     saving,
     testing,
@@ -464,35 +592,63 @@ function EnabledPill() {
   );
 }
 
-// JiraConnectionSection holds the install-wide credentials form. Watchers and
-// task presets live elsewhere because they scope per workspace.
-export function JiraConnectionSection() {
-  const s = useJiraSettings();
-  const missingSecret = !s.config?.hasSecret && !s.form.secret;
+// normalizeComparableSiteUrl mirrors the backend's normalizeSiteURL (strip
+// trailing slash, prepend https:// if no scheme) so that
+// "acme.atlassian.net" and "https://acme.atlassian.net" don't read as
+// different hosts in savedSecretMatches.
+function normalizeComparableSiteUrl(value: string): string {
+  const trimmed = value.trim().replace(/\/+$/, "");
+  if (!trimmed) return "";
+  return trimmed.includes("://") ? trimmed : `https://${trimmed}`;
+}
+
+// savedSecretMatches reports whether the saved secret can be reused against
+// the current form values. Reuse is only safe when every identity component
+// of the saved credential still matches: same auth method, same instance
+// type, same Jira host, and — for Cloud api_token where the basic pair is
+// email:token — the same email (case-insensitive). Otherwise the user could
+// change the site URL or Cloud account and silently submit the previous
+// token to a different host/account.
+function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean {
+  if (!config?.hasSecret) return false;
+  if (config.authMethod !== form.authMethod) return false;
+  if ((config.instanceType || "cloud") !== form.instanceType) return false;
+  if (normalizeComparableSiteUrl(config.siteUrl) !== normalizeComparableSiteUrl(form.siteUrl)) {
+    return false;
+  }
+  if (form.authMethod !== "api_token") return true;
+  return (config.email ?? "").toLowerCase() === form.email.toLowerCase();
+}
+
+export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const s = useJiraSettings(workspaceId);
+  const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
+  const missingSecret = !savedSecretMatchesMode && !s.form.secret;
+  // Email is only required for the Cloud + api_token combination. Server PAT
+  // and session cookies authenticate the user out of the token itself.
+  const emailRequired = s.form.instanceType === "cloud" && s.form.authMethod === "api_token";
   const disableSave =
-    s.saving ||
-    !s.form.siteUrl ||
-    (s.form.authMethod === "api_token" && !s.form.email) ||
-    missingSecret;
+    s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || missingSecret;
   const disableTest = missingSecret;
 
   return (
     <SettingsSection
       icon={<IconTicket className="h-5 w-5" />}
       title="Jira integration"
-      description="Connect Kandev to an Atlassian Cloud site. Credentials are stored encrypted server-side and shared across all workspaces."
+      description="Connect this workspace to Atlassian Cloud or a self-hosted Jira Server / Data Center instance. Credentials are stored encrypted server-side for the selected workspace."
       action={<EnabledPill />}
     >
       <Card>
         <CardContent className="space-y-4 pt-6">
           <IntegrationAuthStatusBanner health={s.health} />
+          <InstanceFields form={s.form} loading={s.loading} update={s.update} setForm={s.setForm} />
           <SiteFields form={s.form} loading={s.loading} update={s.update} />
           <AuthFields form={s.form} loading={s.loading} update={s.update} />
           <SecretField
             form={s.form}
             loading={s.loading}
             update={s.update}
-            hasSavedSecret={!!s.config?.hasSecret}
+            hasSavedSecret={savedSecretMatchesMode}
             secretExpiresAt={s.config?.secretExpiresAt ?? null}
           />
           <TestResultAlert result={s.testResult} />
@@ -514,15 +670,12 @@ export function JiraConnectionSection() {
   );
 }
 
-// JiraIntegrationPage is the install-wide settings surface mounted at
-// /settings/integrations/jira. The connection form and task-prompt presets
-// are global; the watchers section lists every watch across every workspace
-// in a single table, with workspace selection happening inside the create
-// dialog.
-export function JiraIntegrationPage() {
+export function JiraIntegrationPage({ workspaceId }: { workspaceId?: string } = {}) {
   return (
     <div className="space-y-8">
-      <JiraConnectionSection />
+      <WorkspaceScopedSection workspaceId={workspaceId}>
+        {(workspaceId) => <JiraConnectionSection key={workspaceId} workspaceId={workspaceId} />}
+      </WorkspaceScopedSection>
       <JiraIssueWatchersSection />
       <TaskPresetsSection />
     </div>

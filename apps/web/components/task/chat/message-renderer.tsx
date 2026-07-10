@@ -3,11 +3,12 @@
 import { memo, useState, useCallback, type ReactElement } from "react";
 import { IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import type { Message, TaskSessionState, TaskState } from "@/lib/types/http";
+import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartCreatedRequest } from "@/lib/services/session-launch-helpers";
 import { useAppStore } from "@/components/state-provider";
+import { useTask } from "@/hooks/use-task";
 import { ChatMessage } from "@/components/task/chat/messages/chat-message";
 import { PermissionRequestMessage } from "@/components/task/chat/messages/permission-request-message";
 import { StatusMessage } from "@/components/task/chat/messages/status-message";
@@ -24,18 +25,19 @@ import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subage
 import { MonitorMessage } from "@/components/task/chat/messages/monitor-message";
 import { AgentPlanMessage } from "@/components/task/chat/messages/agent-plan-message";
 import { ActionMessage } from "@/components/task/chat/messages/action-message";
+import {
+  KandevToolMessage,
+  hasKandevRenderer,
+} from "@/components/task/chat/messages/kandev-tool-message";
 
 type AdapterContext = {
   isTaskDescription: boolean;
-  sessionState?: TaskSessionState;
-  taskState?: TaskState;
   taskId?: string;
   permissionsByToolCallId?: Map<string, Message>;
   childrenByParentToolCallId?: Map<string, Message[]>;
   worktreePath?: string;
   sessionId?: string;
   onOpenFile?: (path: string) => void;
-  allMessages?: Message[];
   onScrollToMessage?: (messageId: string) => void;
 };
 
@@ -74,6 +76,68 @@ function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; ses
         {isStarting ? "Starting…" : "Start agent"}
       </Button>
     </div>
+  );
+}
+
+function useSessionStateValue(sessionId?: string): TaskSessionState | undefined {
+  return useAppStore((state) =>
+    sessionId ? (state.taskSessions.items[sessionId]?.state ?? undefined) : undefined,
+  );
+}
+
+/**
+ * The task-description message is the only row whose rendering depends on the
+ * live session/task state, so it reads them from the store directly. Keeping
+ * sessionState/taskState off the shared MessageRenderer props means a state
+ * transition no longer re-renders every message in the list.
+ */
+function TaskDescriptionMessage({
+  comment,
+  taskId,
+  sessionId,
+  worktreePath,
+  onOpenFile,
+  onScrollToMessage,
+}: {
+  comment: Message;
+  taskId?: string;
+  sessionId?: string;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+  onScrollToMessage?: (messageId: string) => void;
+}) {
+  const sessionState = useSessionStateValue(sessionId);
+  const task = useTask(taskId ?? null);
+  const renderAsUser = comment.author_type === "user" || sessionState !== "FAILED";
+  if (!renderAsUser) {
+    return (
+      <ChatMessage
+        comment={comment}
+        label="Agent"
+        className="bg-muted/40 text-foreground border-border/60"
+        showRichBlocks={comment.type === "message" || comment.type === "content" || !comment.type}
+        sessionId={sessionId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+        onScrollToMessage={onScrollToMessage}
+      />
+    );
+  }
+  const showStartButton =
+    sessionState === "CREATED" && task?.state !== "SCHEDULING" && !!taskId && !!sessionId;
+  return (
+    <>
+      <ChatMessage
+        comment={comment}
+        label="You"
+        className="bg-primary/10 text-foreground border-primary/30"
+        sessionId={sessionId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+        onScrollToMessage={onScrollToMessage}
+      />
+      {showStartButton && <TaskDescriptionStartButton taskId={taskId!} sessionId={sessionId!} />}
+    </>
   );
 }
 
@@ -182,6 +246,20 @@ const adapters: MessageAdapter[] = [
     },
   },
   {
+    // Kandev MCP tools — `mcp__kandev__list_tasks_kandev` etc. — get
+    // per-tool structured rendering. Must run BEFORE the generic tool_call
+    // adapter so the unwrapped + structured view wins. Unrecognised Kandev
+    // tools (no matching renderer) fall through to the generic adapter.
+    matches: (comment) => hasKandevRenderer(comment),
+    render: (comment, ctx) => {
+      const toolCallId = (comment.metadata as { tool_call_id?: string } | undefined)?.tool_call_id;
+      const permissionMessage = toolCallId
+        ? ctx.permissionsByToolCallId?.get(toolCallId)
+        : undefined;
+      return <KandevToolMessage comment={comment} permissionMessage={permissionMessage} />;
+    },
+  },
+  {
     matches: (comment) => comment.type === "tool_call",
     render: (comment, ctx) => {
       const toolCallId = (comment.metadata as { tool_call_id?: string } | undefined)?.tool_call_id;
@@ -202,7 +280,7 @@ const adapters: MessageAdapter[] = [
       const meta = comment.metadata as Record<string, unknown> | undefined;
       return Array.isArray(meta?.actions) && (meta.actions as unknown[]).length > 0;
     },
-    render: (comment, ctx) => <ActionMessage comment={comment} sessionState={ctx.sessionState} />,
+    render: (comment) => <ActionMessage comment={comment} />,
   },
   {
     matches: (comment) =>
@@ -220,7 +298,13 @@ const adapters: MessageAdapter[] = [
   },
   {
     matches: (comment) => comment.type === "agent_plan",
-    render: (comment) => <AgentPlanMessage comment={comment} />,
+    render: (comment, ctx) => (
+      <AgentPlanMessage
+        comment={comment}
+        worktreePath={ctx.worktreePath}
+        onOpenFile={ctx.onOpenFile}
+      />
+    ),
   },
   {
     matches: (comment) => comment.type === "script_execution",
@@ -229,29 +313,29 @@ const adapters: MessageAdapter[] = [
   {
     matches: () => true,
     render: (comment, ctx) => {
-      if (
-        comment.author_type === "user" ||
-        (ctx.isTaskDescription && ctx.sessionState !== "FAILED")
-      ) {
-        const showStartButton =
-          ctx.isTaskDescription &&
-          ctx.sessionState === "CREATED" &&
-          ctx.taskState !== "SCHEDULING" &&
-          ctx.taskId &&
-          ctx.sessionId;
+      if (ctx.isTaskDescription) {
         return (
-          <>
-            <ChatMessage
-              comment={comment}
-              label="You"
-              className="bg-primary/10 text-foreground border-primary/30"
-              allMessages={ctx.allMessages}
-              onScrollToMessage={ctx.onScrollToMessage}
-            />
-            {showStartButton && (
-              <TaskDescriptionStartButton taskId={ctx.taskId!} sessionId={ctx.sessionId!} />
-            )}
-          </>
+          <TaskDescriptionMessage
+            comment={comment}
+            taskId={ctx.taskId}
+            sessionId={ctx.sessionId}
+            worktreePath={ctx.worktreePath}
+            onOpenFile={ctx.onOpenFile}
+            onScrollToMessage={ctx.onScrollToMessage}
+          />
+        );
+      }
+      if (comment.author_type === "user") {
+        return (
+          <ChatMessage
+            comment={comment}
+            label="You"
+            className="bg-primary/10 text-foreground border-primary/30"
+            sessionId={ctx.sessionId}
+            worktreePath={ctx.worktreePath}
+            onOpenFile={ctx.onOpenFile}
+            onScrollToMessage={ctx.onScrollToMessage}
+          />
         );
       }
       return (
@@ -260,7 +344,9 @@ const adapters: MessageAdapter[] = [
           label="Agent"
           className="bg-muted/40 text-foreground border-border/60"
           showRichBlocks={comment.type === "message" || comment.type === "content" || !comment.type}
-          allMessages={ctx.allMessages}
+          sessionId={ctx.sessionId}
+          worktreePath={ctx.worktreePath}
+          onOpenFile={ctx.onOpenFile}
           onScrollToMessage={ctx.onScrollToMessage}
         />
       );
@@ -271,43 +357,34 @@ const adapters: MessageAdapter[] = [
 type MessageRendererProps = {
   comment: Message;
   isTaskDescription: boolean;
-  sessionState?: TaskSessionState;
-  taskState?: TaskState;
   taskId?: string;
   permissionsByToolCallId?: Map<string, Message>;
   childrenByParentToolCallId?: Map<string, Message[]>;
   worktreePath?: string;
   sessionId?: string;
   onOpenFile?: (path: string) => void;
-  allMessages?: Message[];
   onScrollToMessage?: (messageId: string) => void;
 };
 
 export const MessageRenderer = memo(function MessageRenderer({
   comment,
   isTaskDescription,
-  sessionState,
-  taskState,
   taskId,
   permissionsByToolCallId,
   childrenByParentToolCallId,
   worktreePath,
   sessionId,
   onOpenFile,
-  allMessages,
   onScrollToMessage,
 }: MessageRendererProps) {
   const ctx = {
     isTaskDescription,
-    sessionState,
-    taskState,
     taskId,
     permissionsByToolCallId,
     childrenByParentToolCallId,
     worktreePath,
     sessionId,
     onOpenFile,
-    allMessages,
     onScrollToMessage,
   };
   const adapter =

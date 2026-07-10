@@ -1,19 +1,23 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { IconArrowRight, IconGitMerge, IconX } from "@tabler/icons-react";
+import { useCallback, useState, type ReactNode } from "react";
+import { IconArrowRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TodoIndicator } from "./todo-indicator";
+import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
+import { ShareButton, shareableSessionStateClient } from "@/components/task/share/share-button";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
-import { useMessageHandler } from "@/hooks/use-message-handler";
-import { useAppStore } from "@/components/state-provider";
+import { useMessageHandler, buildTaskMentionsContext } from "@/hooks/use-message-handler";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { type ContextFile } from "@/lib/state/context-files-store";
+import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import {
   ChatInputContainer,
+  type ChatSubmitResult,
   type ChatInputContainerHandle,
   type MessageAttachment,
 } from "@/components/task/chat/chat-input-container";
@@ -22,25 +26,29 @@ import {
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
   formatPlanCommentsAsMarkdown,
+  formatWalkthroughCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import { usePlanActions } from "@/hooks/domains/kanban/use-plan-actions";
 import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-executor-environment-availability";
-import { useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
 import type { useChatPanelState } from "./use-chat-panel-state";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
-function buildSubmitMessage(
+export function buildSubmitMessage(
   message: string,
   reviewComments: DiffComment[] | undefined,
   pendingPRFeedback: import("@/lib/state/slices/comments").PRFeedbackComment[],
   planComments: import("@/lib/state/slices/comments").PlanComment[],
+  walkthroughComments: import("@/lib/state/slices/comments").WalkthroughComment[] = [],
 ): string {
   let finalMessage = message;
   if (reviewComments && reviewComments.length > 0) {
     finalMessage = formatReviewCommentsAsMarkdown(reviewComments) + (message || "");
+  }
+  if (walkthroughComments.length > 0) {
+    finalMessage = formatWalkthroughCommentsAsMarkdown(walkthroughComments) + finalMessage;
   }
   if (pendingPRFeedback.length > 0) {
     finalMessage = formatPRFeedbackAsMarkdown(pendingPRFeedback) + finalMessage;
@@ -91,11 +99,17 @@ function pickInputPlaceholder(a: PlaceholderArgs): string {
   );
 }
 
-export function useSubmitHandler(
-  panelState: ReturnType<typeof useChatPanelState>,
-  onSend?: (message: string) => void,
-) {
-  const [isSending, setIsSending] = useState(false);
+function showUnknownMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>["toast"]) {
+  console.error("Failed to send message:", error);
+  toast({
+    title: "Message send status unknown",
+    description:
+      "The connection dropped or timed out. Refresh the task to confirm whether it went through.",
+    variant: "error",
+  });
+}
+
+function usePanelMessageHandler(panelState: ReturnType<typeof useChatPanelState>) {
   const {
     resolvedSessionId,
     sessionModel,
@@ -103,17 +117,10 @@ export function useSubmitHandler(
     isAgentBusy,
     activeDocument,
     planComments,
-    pendingPRFeedback,
     contextFiles,
     prompts,
-    markCommentsSent,
-    clearSessionPlanComments,
-    handleClearPRFeedback,
-    clearEphemeral,
-    addContextFile,
-    planModeEnabled,
   } = panelState;
-  const { handleSendMessage } = useMessageHandler({
+  return useMessageHandler({
     resolvedSessionId,
     taskId: panelState.taskId,
     sessionModel,
@@ -125,6 +132,29 @@ export function useSubmitHandler(
     contextFiles,
     prompts,
   });
+}
+
+export function useSubmitHandler(
+  panelState: ReturnType<typeof useChatPanelState>,
+  onSend?: (message: string) => void,
+) {
+  const [isSending, setIsSending] = useState(false);
+  const storeApi = useAppStoreApi();
+  const { toast } = useToast();
+  const {
+    resolvedSessionId,
+    planComments,
+    pendingPRFeedback,
+    walkthroughComments,
+    markCommentsSent,
+    clearSessionPlanComments,
+    handleClearPRFeedback,
+    handleClearWalkthroughComments,
+    clearEphemeral,
+    addContextFile,
+    planModeEnabled,
+  } = panelState;
+  const { handleSendMessage } = usePanelMessageHandler(panelState);
 
   const handleSubmit = useCallback(
     async (
@@ -132,6 +162,7 @@ export function useSubmitHandler(
       reviewComments?: DiffComment[],
       attachments?: MessageAttachment[],
       inlineMentions?: ContextFile[],
+      inlineTaskMentions?: TaskMentionData[],
     ) => {
       if (isSending) return;
       setIsSending(true);
@@ -141,16 +172,28 @@ export function useSubmitHandler(
           reviewComments,
           pendingPRFeedback,
           planComments,
+          walkthroughComments,
         );
         const hasReviewComments = !!(reviewComments && reviewComments.length > 0);
         if (onSend) {
-          await onSend(finalMessage);
+          // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
+          const taskCtx = inlineTaskMentions?.length
+            ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
+            : "";
+          await onSend(finalMessage + taskCtx);
         } else {
-          await handleSendMessage(finalMessage, attachments, hasReviewComments, inlineMentions);
+          await handleSendMessage(
+            finalMessage,
+            attachments,
+            hasReviewComments,
+            inlineMentions,
+            inlineTaskMentions,
+          );
         }
         if (reviewComments && reviewComments.length > 0)
           markCommentsSent(reviewComments.map((c) => c.id));
         if (pendingPRFeedback.length > 0) handleClearPRFeedback();
+        if (walkthroughComments.length > 0) handleClearWalkthroughComments();
         if (planComments.length > 0) clearSessionPlanComments();
         if (resolvedSessionId) {
           clearEphemeral(resolvedSessionId);
@@ -159,6 +202,9 @@ export function useSubmitHandler(
             addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
           }
         }
+      } catch (error) {
+        showUnknownMessageSendToast(error, toast);
+        return false;
       } finally {
         setIsSending(false);
       }
@@ -166,16 +212,20 @@ export function useSubmitHandler(
     [
       isSending,
       onSend,
+      storeApi,
       handleSendMessage,
       markCommentsSent,
       planComments,
       clearSessionPlanComments,
+      walkthroughComments,
+      handleClearWalkthroughComments,
       pendingPRFeedback,
       handleClearPRFeedback,
       resolvedSessionId,
       clearEphemeral,
       planModeEnabled,
       addContextFile,
+      toast,
     ],
   );
 
@@ -222,58 +272,6 @@ export function useChatPanelHandlers(
   return { handleCancelTurn };
 }
 
-function PRMergedBanner({ taskId }: { taskId: string }) {
-  const taskPRs = useAppStore((state) => state.taskPRs.byTaskId[taskId]);
-  const [dismissed, setDismissed] = useState(false);
-  const archiveAndSwitch = useArchiveAndSwitchTask();
-  const { toast } = useToast();
-
-  const handleArchive = useCallback(async () => {
-    try {
-      await archiveAndSwitch(taskId);
-      toast({ description: "Task archived" });
-    } catch {
-      toast({ description: "Failed to archive task", variant: "error" });
-    }
-  }, [taskId, archiveAndSwitch, toast]);
-
-  // Multi-repo: only show "ready to archive" once every PR is merged. A
-  // single merged repo with others still open means the task isn't done yet.
-  const allMerged = !!taskPRs && taskPRs.length > 0 && taskPRs.every((pr) => pr.state === "merged");
-  if (!allMerged || dismissed) return null;
-
-  const bannerText =
-    taskPRs.length === 1
-      ? `PR #${taskPRs[0].pr_number} has been merged. You can archive this task.`
-      : `All ${taskPRs.length} PRs have been merged. You can archive this task.`;
-
-  return (
-    <div
-      data-testid="pr-merged-banner"
-      className="flex flex-1 items-center gap-2 rounded-md bg-purple-500/10 px-2 py-1 text-purple-600 dark:text-purple-400"
-    >
-      <IconGitMerge className="h-3.5 w-3.5 shrink-0" />
-      <span className="flex-1">{bannerText}</span>
-      <button
-        type="button"
-        data-testid="pr-merged-archive-button"
-        onClick={handleArchive}
-        className="underline underline-offset-2 hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer"
-      >
-        Archive
-      </button>
-      <button
-        type="button"
-        aria-label="Dismiss"
-        onClick={() => setDismissed(true)}
-        className="p-0.5 hover:bg-purple-500/10 rounded cursor-pointer"
-      >
-        <IconX className="h-3 w-3" />
-      </button>
-    </div>
-  );
-}
-
 type TodoDisplayItem = {
   text: string;
   done?: boolean;
@@ -283,20 +281,27 @@ type TodoDisplayItem = {
 function ChatStatusBar({
   todoItems,
   taskId,
+  sessionId,
+  sessionState,
   nextStepName,
   onProceed,
   isAgentBusy,
   isMoving,
+  queueChip,
 }: {
   todoItems: TodoDisplayItem[];
   taskId: string | null;
+  sessionId: string | null;
+  sessionState: string | null;
   nextStepName: string | null;
   onProceed: () => void;
   isAgentBusy: boolean;
   isMoving: boolean;
+  queueChip?: ReactNode;
 }) {
   const showTodos = todoItems.length > 0;
   const showProceed = !!nextStepName && !isAgentBusy;
+  const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
   // PRMergedBanner returns null internally when not applicable
   return (
     <div
@@ -305,7 +310,17 @@ function ChatStatusBar({
     >
       {showTodos && <TodoIndicator todos={todoItems} />}
       <PRStatusChip taskId={taskId} />
-      {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
+      {queueChip}
+      {/* Distinct per-banner keys: the key remounts the banner on task switch
+          so its dismissed state re-initialises, and keeping the two suffixes
+          different avoids a duplicate-sibling-key collision. */}
+      {taskId && <PRMergedBanner key={`${taskId}-merged`} taskId={taskId} />}
+      {taskId && <PRClosedBanner key={`${taskId}-closed`} taskId={taskId} />}
+      {canShare && taskId && sessionId && (
+        <div className="ml-auto shrink-0">
+          <ShareButton taskId={taskId} sessionId={sessionId} iconOnly />
+        </div>
+      )}
       {showProceed && (
         <Tooltip>
           <TooltipTrigger asChild>
@@ -313,7 +328,7 @@ function ChatStatusBar({
               type="button"
               variant="outline"
               size="sm"
-              className="ml-auto h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary"
+              className={`${canShare ? "" : "ml-auto "}h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary`}
               onClick={onProceed}
               disabled={isMoving}
               data-testid="proceed-next-step"
@@ -338,7 +353,8 @@ type ChatInputAreaProps = {
     reviewComments?: DiffComment[],
     attachments?: MessageAttachment[],
     inlineMentions?: ContextFile[],
-  ) => Promise<void>;
+    inlineTaskMentions?: TaskMentionData[],
+  ) => ChatSubmitResult;
   handleCancelTurn: () => Promise<void>;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;
@@ -404,6 +420,8 @@ export function ChatInputArea({
 }: ChatInputAreaProps) {
   const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled, todoItems } =
     panelState;
+  const sessionState = panelState.session?.state ?? null;
+  const canDrainQueue = sessionState === "WAITING_FOR_INPUT" || sessionState === "IDLE";
   const { planActions, executor, placeholder } = useChatInputDerived(
     panelState,
     chatInputRef,
@@ -412,15 +430,23 @@ export function ChatInputArea({
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   return (
     <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
-      <ChatStatusBar
-        todoItems={todoItems}
-        taskId={taskId}
-        nextStepName={proceedStepName}
-        onProceed={proceed}
-        isAgentBusy={isAgentBusy}
-        isMoving={isMoving}
-      />
-      <QueueAffordance sessionId={resolvedSessionId}>
+      <QueueAffordance
+        sessionId={resolvedSessionId}
+        canDrain={canDrainQueue}
+        renderStatusBar={(queueChip) => (
+          <ChatStatusBar
+            todoItems={todoItems}
+            taskId={taskId}
+            sessionId={resolvedSessionId}
+            sessionState={sessionState}
+            nextStepName={proceedStepName}
+            onProceed={proceed}
+            isAgentBusy={isAgentBusy}
+            isMoving={isMoving}
+            queueChip={queueChip}
+          />
+        )}
+      >
         <ChatInputContainer
           ref={chatInputRef}
           key={clarificationKey}
@@ -446,7 +472,9 @@ export function ChatInputArea({
           onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
           pendingCommentsByFile={panelState.pendingCommentsByFile}
           hasContextComments={
-            panelState.planComments.length > 0 || panelState.pendingPRFeedback.length > 0
+            panelState.planComments.length > 0 ||
+            panelState.pendingPRFeedback.length > 0 ||
+            panelState.walkthroughComments.length > 0
           }
           submitKey={panelState.chatSubmitKey}
           hasAgentCommands={!!(panelState.agentCommands && panelState.agentCommands.length > 0)}

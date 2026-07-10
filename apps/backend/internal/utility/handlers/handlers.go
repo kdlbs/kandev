@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -32,6 +33,7 @@ type InferenceExecutor interface {
 type HostUtilityExecutor interface {
 	ExecutePrompt(ctx context.Context, agentType, model, mode, prompt string) (*hostutility.PromptResult, error)
 	Get(agentType string) (hostutility.AgentCapabilities, bool)
+	Refresh(ctx context.Context, agentType string) (hostutility.AgentCapabilities, error)
 }
 
 // UserSettingsProvider provides user settings for default utility agent/model.
@@ -73,6 +75,7 @@ func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, executor In
 	api.POST("/execute", handlers.httpExecutePrompt)
 	api.GET("/agents/:id/calls", handlers.httpListCalls)
 	api.GET("/inference-agents", handlers.httpListInferenceAgents)
+	api.POST("/inference-agents/:id/refresh", handlers.httpRefreshInferenceAgent)
 }
 
 func (h *Handlers) httpListAgents(c *gin.Context) {
@@ -313,14 +316,15 @@ func (h *Handlers) httpListInferenceAgents(c *gin.Context) {
 	inferenceAgents := h.executor.ListInferenceAgentsWithContext(c.Request.Context())
 
 	// Build the response from the host utility capability cache (boot-time
-	// ACP probe). Only include agents whose probe reached StatusOK — an
-	// agent that isn't authenticated, not installed, or still probing
-	// can't actually run a utility prompt, so showing it in the picker
-	// just leads the user into a dead end.
+	// ACP probe). Every registered ACP-capable agent is included, even when
+	// its probe didn't reach StatusOK — the frontend uses the per-agent
+	// `status` field to render an inline note ("sign in to Claude",
+	// "setting up Claude…", "Claude CLI not installed") and a Refresh
+	// button instead of silently empty Model picker.
 	//
 	// hostExecutor is an optional dependency (see executeSessionless);
-	// without it we can't check health or surface models, so the list is
-	// empty by design rather than showing unusable options.
+	// without it we can't check probe state at all, so the list is empty
+	// by design rather than showing unusable options.
 	result := make([]dto.InferenceAgentDTO, 0, len(inferenceAgents))
 	if h.hostExecutor == nil {
 		c.JSON(http.StatusOK, dto.InferenceAgentsResponse{Agents: result})
@@ -331,25 +335,125 @@ func (h *Handlers) httpListInferenceAgents(c *gin.Context) {
 		// ag.Name() — built-in ACP agents return distinct strings for the
 		// two (e.g. "claude-acp" vs "Claude ACP Agent").
 		caps, ok := h.hostExecutor.Get(ia.ID)
-		if !ok || caps.Status != hostutility.StatusOK {
-			continue
-		}
-		models := make([]dto.InferenceModelDTO, 0, len(caps.Models))
-		for _, m := range caps.Models {
-			models = append(models, dto.InferenceModelDTO{
-				ID:          m.ID,
-				Name:        m.Name,
-				Description: m.Description,
-				IsDefault:   m.ID == caps.CurrentModelID,
-				Meta:        m.Meta,
-			})
-		}
-		result = append(result, dto.InferenceAgentDTO{
-			ID:          ia.ID,
-			Name:        ia.Name,
-			DisplayName: ia.DisplayName,
-			Models:      models,
-		})
+		result = append(result, inferenceAgentDTOFromCaps(ia, caps, ok))
 	}
 	c.JSON(http.StatusOK, dto.InferenceAgentsResponse{Agents: result})
+}
+
+// httpRefreshInferenceAgent re-probes an agent type and returns the updated
+// capabilities. Used by the settings page Refresh button so the user can
+// recover from a transient probe failure (sign-in race, agent not yet
+// installed at boot, network blip) without restarting kandev.
+func (h *Handlers) httpRefreshInferenceAgent(c *gin.Context) {
+	if h.hostExecutor == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "host utility not configured"})
+		return
+	}
+	agentID := c.Param("id")
+	ctx := c.Request.Context()
+
+	// Find the registered InferenceAgentInfo for this id so the DTO carries
+	// the same name/display_name as the list endpoint. Refusing unknown ids
+	// avoids spinning up probes for typos / arbitrary input.
+	var info *lifecycle.InferenceAgentInfo
+	for _, ia := range h.executor.ListInferenceAgentsWithContext(ctx) {
+		if ia.ID == agentID {
+			info = &ia
+			break
+		}
+	}
+	if info == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
+		return
+	}
+
+	caps, err := h.hostExecutor.Refresh(ctx, agentID)
+	if err != nil {
+		// Refresh already records the failure in the cache (status + error)
+		// via Manager.Refresh, so we surface the same shape as a GET would
+		// rather than a generic 500 — the UI can re-render the inline note
+		// with the latest probe error instead of going blank.
+		h.logger.Warn("failed to refresh inference agent",
+			zap.String("error", sanitizeStatusMessage(err.Error())),
+			zap.String("agent_id", agentID))
+		latest, ok := h.hostExecutor.Get(agentID)
+		c.JSON(http.StatusOK, inferenceAgentDTOFromCaps(*info, latest, ok))
+		return
+	}
+	c.JSON(http.StatusOK, inferenceAgentDTOFromCaps(*info, caps, true))
+}
+
+// inferenceAgentDTOFromCaps maps a (registry, cache) pair into the wire DTO.
+// hasCaps=false (cache miss) is reported as "probing" — the cache only misses
+// before the boot-time probe lands, which is the same state the UI surfaces
+// during a refresh.
+func inferenceAgentDTOFromCaps(ia lifecycle.InferenceAgentInfo, caps hostutility.AgentCapabilities, hasCaps bool) dto.InferenceAgentDTO {
+	models := make([]dto.InferenceModelDTO, 0, len(caps.Models))
+	for _, m := range caps.Models {
+		models = append(models, dto.InferenceModelDTO{
+			ID:          m.ID,
+			Name:        m.Name,
+			Description: m.Description,
+			IsDefault:   m.ID == caps.CurrentModelID,
+			Meta:        m.Meta,
+		})
+	}
+	configOptions := make([]dto.ConfigOptionDTO, 0, len(caps.ConfigOptions))
+	for _, opt := range caps.ConfigOptions {
+		choices := make([]dto.ConfigOptionChoiceDTO, 0, len(opt.Options))
+		for _, choice := range opt.Options {
+			choices = append(choices, dto.ConfigOptionChoiceDTO{
+				Value: choice.Value,
+				Name:  choice.Name,
+			})
+		}
+		configOptions = append(configOptions, dto.ConfigOptionDTO{
+			Type:         opt.Type,
+			ID:           opt.ID,
+			Name:         opt.Name,
+			CurrentValue: opt.CurrentValue,
+			Category:     opt.Category,
+			Options:      choices,
+		})
+	}
+	status := string(caps.Status)
+	if !hasCaps || status == "" {
+		status = string(hostutility.StatusProbing)
+	}
+	return dto.InferenceAgentDTO{
+		ID:            ia.ID,
+		Name:          ia.Name,
+		DisplayName:   ia.DisplayName,
+		Models:        models,
+		ConfigOptions: configOptions,
+		Status:        status,
+		StatusMessage: sanitizeStatusMessage(caps.Error),
+	}
+}
+
+// sanitizeStatusMessage strips obvious credential-looking substrings from a
+// probe error before exposing it on the wire. ACP probe errors usually carry
+// the upstream CLI's stderr verbatim; a misconfigured key can end up echoed
+// back ("...invalid api key=sk-..."). Belt-and-braces — the frontend never
+// shows the raw value, but the response is also reachable via /api/v1.
+//
+// Split into two patterns so prose like "access token was revoked" is left
+// alone: kw=val / kw:val requires a real separator (claude bot review), and
+// the separator is restricted to horizontal whitespace so a stderr line like
+// "invalid token\ncaused by network" does not eat words across lines
+// (greptile review). "api key" with a literal space is matched alongside
+// api_key / api-key (cubic review). The bare-space "bearer <tok>" form gets
+// its own anchored rule so the kv-only matcher can stay strict.
+var (
+	credentialKVPattern     = regexp.MustCompile(`(?i)((?:api[ _-]?key|token|secret|password))[^\S\n]*[:=][^\S\n]*\S+`)
+	credentialBearerPattern = regexp.MustCompile(`(?i)(bearer)[^\S\n]+\S+`)
+)
+
+func sanitizeStatusMessage(msg string) string {
+	if msg == "" {
+		return ""
+	}
+	msg = credentialKVPattern.ReplaceAllString(msg, "${1}=<redacted>")
+	msg = credentialBearerPattern.ReplaceAllString(msg, "${1}=<redacted>")
+	return msg
 }

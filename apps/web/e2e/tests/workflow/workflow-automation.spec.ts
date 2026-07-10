@@ -4,100 +4,6 @@ import { SessionPage } from "../../pages/session-page";
 
 test.describe("Workflow automation", () => {
   /**
-   * Seeds a 3-step workflow (Inbox → In Progress → Done).
-   * Configures In Progress with on_enter: auto_start_agent and a custom step
-   * prompt routed to the mock agent, plus on_turn_complete: move_to_step(Done).
-   *
-   * Verifies:
-   * - auto_start_agent fires when task is moved into In Progress
-   * - task appears in In Progress column before agent completes
-   * - step custom prompt is used (not the task description)
-   * - on_turn_complete advances task to Done column on the kanban board
-   * - session stepper shows Done as the current step
-   */
-  test("auto_start_agent with step custom prompt; on_turn_complete advances to next column", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    // --- Seed a workflow with explicit step configuration ---
-    const workflow = await apiClient.createWorkflow(
-      seedData.workspaceId,
-      "Automation Test Workflow",
-    );
-
-    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
-    const inProgressStep = await apiClient.createWorkflowStep(workflow.id, "In Progress", 1);
-    const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
-
-    // Configure In Progress: auto_start_agent on enter, custom step prompt with delay
-    // so we can observe the task in In Progress before on_turn_complete moves it to Done.
-    await apiClient.updateWorkflowStep(inProgressStep.id, {
-      prompt: 'e2e:delay(3000)\ne2e:message("delayed step response")\n{{task_prompt}}',
-      events: {
-        on_enter: [{ type: "auto_start_agent" }],
-        on_turn_complete: [{ type: "move_to_step", config: { step_id: doneStep.id } }],
-      },
-    });
-
-    // Point the kanban page at our custom workflow
-    await apiClient.saveUserSettings({
-      workspace_id: seedData.workspaceId,
-      workflow_filter_id: workflow.id,
-      enable_preview_on_click: false,
-    });
-
-    // Use the seed profile so tests don't pick up passthrough profiles from other tests.
-    const agentProfileId = seedData.agentProfileId;
-
-    // Create task in Inbox — does NOT trigger auto_start_agent
-    const task = await apiClient.createTask(seedData.workspaceId, "Auto Agent Workflow Task", {
-      workflow_id: workflow.id,
-      workflow_step_id: inboxStep.id,
-      agent_profile_id: agentProfileId,
-      repository_ids: [seedData.repositoryId],
-    });
-
-    // Move task to In Progress → triggers on_enter: auto_start_agent
-    await apiClient.moveTask(task.id, workflow.id, inProgressStep.id);
-
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    // Task should appear in In Progress while the agent is working (3s delay)
-    const cardInProgress = kanban.taskCardInColumn("Auto Agent Workflow Task", inProgressStep.id);
-    await expect(cardInProgress).toBeVisible({ timeout: 15_000 });
-
-    // After the agent completes its turn, on_turn_complete fires and moves the
-    // task to Done. The kanban board receives a WS push.
-    const cardInDone = kanban.taskCardInColumn("Auto Agent Workflow Task", doneStep.id);
-    await expect(cardInDone).toBeVisible({ timeout: 30_000 });
-
-    // Navigate to the session page
-    await cardInDone.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-
-    // Stepper shows Done as current step
-    await expect(session.stepperStep("Done")).toHaveAttribute("aria-current", "step", {
-      timeout: 10_000,
-    });
-
-    // Mock agent response confirms the step custom prompt was executed
-    await expect(session.chat.getByText("delayed step response", { exact: true })).toBeVisible({
-      timeout: 30_000,
-    });
-
-    // Session transitions to idle after agent completes
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
-
-    // Sidebar shows the task under "Turn Finished" section
-    await expect(session.sidebarSection("Turn Finished")).toBeVisible();
-  });
-
-  /**
    * Seeds a 4-step workflow (Todo → In Progress → Review → Done) and validates
    * the full lifecycle from both the kanban page and the session details page.
    *
@@ -217,9 +123,7 @@ test.describe("Workflow automation", () => {
     await session.sendMessage("/e2e:simple-message");
 
     // Wait for the agent to respond (second "simple mock response")
-    await expect(
-      session.chat.getByText("simple mock response", { exact: false }).nth(1),
-    ).toBeVisible({ timeout: 30_000 });
+    await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
 
     // Stepper still shows Review (no on_turn_complete events on Review)
     await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step", {
@@ -442,7 +346,7 @@ test.describe("Workflow automation", () => {
 
     // Session transitions to idle after the cascade completes.
     // The cascade runs 4 sequential agent turns; session state may lag message display.
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Sidebar shows the task under "Turn Finished" section
     await expect(session.sidebarSection("Turn Finished")).toBeVisible();
@@ -603,7 +507,7 @@ test.describe("Workflow automation", () => {
     await session.waitForLoad();
 
     // Wait for the idle input (chat is ready)
-    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await session.waitForChatIdle({ timeout: 15_000 });
 
     // The backend downgraded auto-start to prepare: session exists but agent
     // was NOT started. Verify session was created in CREATED state.

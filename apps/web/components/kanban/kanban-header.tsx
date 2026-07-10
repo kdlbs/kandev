@@ -1,46 +1,31 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import {
-  IconPlus,
-  IconSettings,
-  IconList,
-  IconLayoutKanban,
-  IconMenu2,
-  IconChartBar,
-  IconTimeline,
-  IconStethoscope,
-  IconBuildings,
-} from "@tabler/icons-react";
-import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
-import { useFeature } from "@/hooks/domains/features/use-feature";
-import { IntegrationsTopbarLinks } from "@/components/integrations/integrations-menu";
+import { IconList, IconLayoutKanban, IconMenu2, IconTimeline } from "@tabler/icons-react";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
-import { ReleaseNotesButton } from "../release-notes/release-notes-button";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
 import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/health-indicator";
 import { TaskSearchInput } from "./task-search-input";
-import { QuickChatButton } from "@/components/task/quick-chat-button";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
-import { linkToTask, linkToTasks } from "@/lib/links";
+import { linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
+import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import type { ComponentProps, RefObject } from "react";
 
 type KanbanHeaderProps = {
-  onCreateTask: () => void;
   workspaceId?: string;
   currentPage?: "kanban" | "tasks";
+  hideTitle?: boolean;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
@@ -59,7 +44,7 @@ const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
 ];
 
 const WORKBENCH_TOPBAR_CLASSNAME = "h-12 border-b-0 px-3 py-2";
-const DESKTOP_HEADER_NARROW_PX = 1100;
+const DESKTOP_HEADER_NARROW_PX = 800;
 
 function getWorkspaceLabel(
   workspaces: Array<{ id: string; name: string }>,
@@ -73,111 +58,9 @@ function getHeaderTitle(currentPage: string): string {
   return currentPage === "tasks" ? "Tasks" : "Home";
 }
 
-function SettingsTopbarButton({ size = "icon" }: { size?: ComponentProps<typeof Button>["size"] }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button asChild variant="outline" size={size} className="cursor-pointer">
-          <Link href="/settings" aria-label="Settings">
-            <IconSettings className="h-4 w-4" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Settings</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function ImproveKandevTopbarButton({
-  workspaceId,
-  buttonSize = "icon-lg",
-}: {
-  workspaceId: string | undefined;
-  buttonSize?: ComponentProps<typeof Button>["size"];
-}) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  return (
-    <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="outline"
-            size={buttonSize}
-            onClick={() => setOpen(true)}
-            className="cursor-pointer"
-            data-testid="improve-kandev-button"
-          >
-            <IconStethoscope className="h-4 w-4" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Improve Kandev</TooltipContent>
-      </Tooltip>
-      <ImproveKandevDialog
-        open={open}
-        onOpenChange={setOpen}
-        workspaceId={workspaceId ?? null}
-        onSuccess={(task) => router.push(linkToTask(task.id))}
-      />
-    </>
-  );
-}
-
-function StatsTopbarButton() {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button asChild variant="outline" size="icon-lg" className="cursor-pointer">
-          <Link href="/stats" aria-label="Stats">
-            <IconChartBar className="h-4 w-4" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Stats</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function OfficeTopbarButton() {
-  // Hidden in production where features.office=false. The hook reads SSR-
-  // hydrated state, so the button never appears for a single frame on
-  // first paint.
-  const officeEnabled = useFeature("office");
-  if (!officeEnabled) return null;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button asChild variant="outline" size="icon-lg" className="cursor-pointer">
-          <Link href="/office" aria-label="Office">
-            <IconBuildings className="h-4 w-4" />
-          </Link>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>Office</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function HomeLeftActions({ workspaceId }: { workspaceId?: string }) {
-  return (
-    <>
-      <IntegrationsTopbarLinks />
-      <StatsTopbarButton />
-      <OfficeTopbarButton />
-      <ImproveKandevTopbarButton workspaceId={workspaceId} />
-    </>
-  );
-}
-
-function WorkspaceLeftActions({ workspaceId }: { workspaceId?: string }) {
-  return (
-    <>
-      <IntegrationsTopbarLinks />
-      <OfficeTopbarButton />
-      <ImproveKandevTopbarButton workspaceId={workspaceId} />
-    </>
-  );
-}
+// Integrations / Stats / Office / Improve Kandev / Settings / Release notes
+// have all moved to the unified AppSidebar (Fix 6). The kanban top bar now
+// focuses on task-creation, view-toggle, kanban display, and search.
 
 function ViewToggleGroup({
   toggleValue,
@@ -245,8 +128,6 @@ function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
 }
 
 function TabletHeader({
-  onCreateTask,
-  workspaceId,
   title,
   workspaceLabel,
   searchQuery,
@@ -257,9 +138,8 @@ function TabletHeader({
   setMenuOpen,
   showHealthIndicator,
   onOpenHealthDialog,
+  hideTitle,
 }: {
-  onCreateTask: () => void;
-  workspaceId?: string;
   title: string;
   workspaceLabel: string;
   searchQuery: string;
@@ -270,22 +150,17 @@ function TabletHeader({
   setMenuOpen: (open: boolean) => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
+  hideTitle?: boolean;
 }) {
   const isHome = title === "Home";
 
   return (
     <PageTopbar
-      title={title}
-      subtitle={workspaceLabel}
+      title={hideTitle ? "" : title}
+      subtitle={hideTitle ? undefined : workspaceLabel}
+      backLabel={hideTitle || isHome ? "" : "Kandev"}
       className={WORKBENCH_TOPBAR_CLASSNAME}
-      variant={isHome ? "root" : "breadcrumb"}
-      leftActions={
-        isHome ? (
-          <HomeLeftActions workspaceId={workspaceId} />
-        ) : (
-          <WorkspaceLeftActions workspaceId={workspaceId} />
-        )
-      }
+      variant={hideTitle || isHome ? "root" : "breadcrumb"}
       actionsClassName="gap-2"
       actions={
         <>
@@ -298,16 +173,7 @@ function TabletHeader({
               className="hidden md:flex w-48 lg:w-56 [&_input]:h-8"
             />
           )}
-          <Button
-            onClick={onCreateTask}
-            size="lg"
-            className="cursor-pointer"
-            data-testid="create-task-button"
-          >
-            <IconPlus className="h-4 w-4" />
-            <span className="hidden sm:inline ml-1">Add task</span>
-          </Button>
-          <QuickChatButton workspaceId={workspaceId} size="lg" />
+          <TopbarMetrics />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
@@ -332,39 +198,7 @@ function TabletHeader({
   );
 }
 
-function CreateTaskTopbarButton({
-  onCreateTask,
-  compact,
-}: {
-  onCreateTask: () => void;
-  compact: boolean;
-}) {
-  const button = (
-    <Button
-      onClick={onCreateTask}
-      size={compact ? "icon-lg" : "lg"}
-      className="cursor-pointer"
-      data-testid="create-task-button"
-      aria-label={compact ? "Add task" : undefined}
-    >
-      <IconPlus className="h-4 w-4" />
-      {!compact && "Add task"}
-    </Button>
-  );
-
-  if (!compact) return button;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent>Add task</TooltipContent>
-    </Tooltip>
-  );
-}
-
 function DesktopHeader({
-  onCreateTask,
-  workspaceId,
   title,
   workspaceLabel,
   searchQuery,
@@ -372,14 +206,10 @@ function DesktopHeader({
   isSearchLoading,
   toggleValue,
   handleViewChange,
-  showReleaseNotesButton,
-  releaseNotesHasUnseen,
-  onOpenReleaseNotes,
   showHealthIndicator,
   onOpenHealthDialog,
+  hideTitle,
 }: {
-  onCreateTask: () => void;
-  workspaceId?: string;
   title: string;
   workspaceLabel: string;
   searchQuery: string;
@@ -387,11 +217,9 @@ function DesktopHeader({
   isSearchLoading: boolean;
   toggleValue: string;
   handleViewChange: (value: string) => void;
-  showReleaseNotesButton: boolean;
-  releaseNotesHasUnseen: boolean;
-  onOpenReleaseNotes: () => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
+  hideTitle?: boolean;
 }) {
   const headerRef = useRef<HTMLElement>(null);
   const isNarrow = useIsHeaderNarrow(headerRef);
@@ -406,30 +234,22 @@ function DesktopHeader({
   ) : null;
   const isHome = title === "Home";
   const centerSearch =
-    isHome && searchInput && !isNarrow ? (
-      <div data-testid="kanban-header-search">{searchInput}</div>
-    ) : null;
-  const actionsSearch = !isHome || isNarrow ? searchInput : null;
-  const leftActions = isHome ? (
-    <HomeLeftActions workspaceId={workspaceId} />
-  ) : (
-    <WorkspaceLeftActions workspaceId={workspaceId} />
-  );
+    searchInput && !isNarrow ? <div data-testid="kanban-header-search">{searchInput}</div> : null;
+  const actionsSearch = isNarrow ? searchInput : null;
 
   return (
     <PageTopbar
       ref={headerRef}
-      title={title}
-      subtitle={workspaceLabel}
+      title={hideTitle ? "" : title}
+      subtitle={hideTitle ? undefined : workspaceLabel}
+      backLabel={hideTitle || isHome ? "" : "Kandev"}
       center={centerSearch}
       className={WORKBENCH_TOPBAR_CLASSNAME}
-      variant={isHome ? "root" : "breadcrumb"}
-      leftActions={leftActions}
+      variant={hideTitle || isHome ? "root" : "breadcrumb"}
       actions={
         <>
           {actionsSearch}
-          <CreateTaskTopbarButton onCreateTask={onCreateTask} compact={isNarrow} />
-          <QuickChatButton workspaceId={workspaceId} size="lg" compact={isNarrow} />
+          <TopbarMetrics />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
@@ -439,14 +259,6 @@ function DesktopHeader({
             onClick={onOpenHealthDialog}
             size="icon-lg"
           />
-          {showReleaseNotesButton && (
-            <ReleaseNotesButton
-              hasUnseen={releaseNotesHasUnseen}
-              onClick={onOpenReleaseNotes}
-              size="icon-lg"
-            />
-          )}
-          <SettingsTopbarButton size="icon-lg" />
         </>
       }
     />
@@ -473,9 +285,9 @@ function useHeaderViewChange(
 }
 
 export function KanbanHeader({
-  onCreateTask,
   workspaceId,
   currentPage = "kanban",
+  hideTitle = false,
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
@@ -492,15 +304,11 @@ export function KanbanHeader({
   const title = getHeaderTitle(currentPage);
   const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId);
 
-  const indicatorProps = {
-    showReleaseNotesButton: releaseNotes.showTopbarButton,
-    releaseNotesHasUnseen: releaseNotes.hasUnseen,
-    onOpenReleaseNotes: releaseNotes.openDialog,
+  const healthProps = {
     showHealthIndicator: healthIndicator.hasIssues,
     onOpenHealthDialog: healthIndicator.openDialog,
   };
   const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };
-  const sharedActions = { onCreateTask, workspaceId };
 
   const renderHeader = () => {
     if (isMobile) {
@@ -510,8 +318,9 @@ export function KanbanHeader({
           currentPage={currentPage}
           title={title}
           workspaceLabel={workspaceLabel}
+          hideTitle={hideTitle}
           {...sharedSearch}
-          {...indicatorProps}
+          {...healthProps}
         />
       );
     }
@@ -519,14 +328,14 @@ export function KanbanHeader({
       return (
         <>
           <TabletHeader
-            {...sharedActions}
             title={title}
             workspaceLabel={workspaceLabel}
+            hideTitle={hideTitle}
             {...sharedSearch}
             toggleValue={toggleValue}
             handleViewChange={handleViewChange}
             setMenuOpen={setMenuOpen}
-            {...indicatorProps}
+            {...healthProps}
           />
           <MobileMenuSheet
             open={isMenuOpen}
@@ -534,20 +343,20 @@ export function KanbanHeader({
             workspaceId={workspaceId}
             currentPage={currentPage}
             {...sharedSearch}
-            {...indicatorProps}
+            {...healthProps}
           />
         </>
       );
     }
     return (
       <DesktopHeader
-        {...sharedActions}
         title={title}
         workspaceLabel={workspaceLabel}
+        hideTitle={hideTitle}
         {...sharedSearch}
         toggleValue={toggleValue}
         handleViewChange={handleViewChange}
-        {...indicatorProps}
+        {...healthProps}
       />
     );
   };

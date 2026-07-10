@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -23,14 +26,43 @@ import (
 // Used when a caller omits priority so the DB CHECK constraint is satisfied.
 const defaultPriority = "medium"
 
+const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
+
+// ErrSubtaskDepthExceeded is returned when a caller tries to create a
+// subtask of a kanban subtask (nesting depth > 1). Office task trees are
+// intentionally exempt.
+var ErrSubtaskDepthExceeded = fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+
+// ErrTaskAlreadyArchived is returned by ArchiveTask when the target task
+// already has archived_at set. Sentinel so cascade callers (e.g.
+// DeleteWorkflow) can treat a concurrent archive as a no-op instead of
+// aborting the whole operation.
+var ErrTaskAlreadyArchived = errors.New("task is already archived")
+
 type taskStopTarget struct {
 	sessionID   string
 	executionID string
+	// terminal indicates the session is already in a terminal state (CANCELLED,
+	// COMPLETED, FAILED, IDLE). Stop failures for terminal sessions are expected
+	// and must not block environment cleanup — the agent is already gone.
+	terminal bool
 }
 
 type taskEnvironmentCleanup struct {
 	env       *models.TaskEnvironment
 	deleteRow bool
+}
+
+type taskEnvironmentSessionUsageChecker interface {
+	HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (bool, error)
+}
+
+type taskEnvironmentSessionBorrowerFinder interface {
+	FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (string, error)
+}
+
+type taskEnvironmentOwnerTransferer interface {
+	TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error
 }
 
 // Task operations
@@ -50,6 +82,17 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
 	if err := s.validateCreateTaskRequest(req); err != nil {
+		return nil, err
+	}
+	if err := s.validateSubtaskDepth(ctx, req); err != nil {
+		return nil, err
+	}
+
+	// Subtasks created without explicit repositories inherit the parent's, so
+	// an inherit_parent subtask resolves a repo at launch and can reuse the
+	// parent's worktree (the UI omits repositories expecting this). Mirrors the
+	// MCP create_task path so UI- and agent-created subtasks behave identically.
+	if err := s.inheritParentRepositories(ctx, req); err != nil {
 		return nil, err
 	}
 
@@ -100,6 +143,44 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	return task, nil
 }
 
+// inheritParentRepositories fills req.Repositories from the parent task when a
+// subtask is created without explicit repositories. This applies to any
+// repo-less subtask (not only inherit_parent ones), matching the MCP
+// create_task path (mcp/handlers.inheritedRepoInputs) so UI- and agent-created
+// subtasks behave identically — the UI's new_workspace mode always sends repos,
+// so in practice only inherit_parent reaches here empty. RepositoryID and
+// BaseBranch carry over; CheckoutBranch is dropped on purpose because two
+// worktrees can't share a working branch, so the subtask branches off the same
+// base as the parent.
+//
+// A lookup failure is returned rather than swallowed: a subtask silently
+// created with no repositories can't establish a worktree, which would
+// reintroduce the exact fresh-worktree bug this inheritance is meant to fix —
+// failing fast surfaces the problem at creation time instead.
+func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTaskRequest) error {
+	if req.ParentID == "" || len(req.Repositories) > 0 {
+		return nil
+	}
+	parentRepos, err := s.taskRepos.ListTaskRepositories(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("list parent repositories for subtask inheritance: %w", err)
+	}
+	inherited := make([]TaskRepositoryInput, 0, len(parentRepos))
+	for _, r := range parentRepos {
+		if r == nil || r.RepositoryID == "" {
+			continue
+		}
+		inherited = append(inherited, TaskRepositoryInput{
+			RepositoryID: r.RepositoryID,
+			BaseBranch:   r.BaseBranch,
+		})
+	}
+	if len(inherited) > 0 {
+		req.Repositories = inherited
+	}
+	return nil
+}
+
 // validateCreateTaskRequest validates constraints for task creation.
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	isOffice := isOfficeRequest(req)
@@ -108,6 +189,22 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	}
 	if req.IsEphemeral && req.WorkflowID != "" {
 		return fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	}
+	return nil
+}
+
+// validateSubtaskDepth prevents nesting deeper than one level for kanban
+// (non-office) tasks. Office task trees intentionally allow arbitrary depth.
+func (s *Service) validateSubtaskDepth(ctx context.Context, req *CreateTaskRequest) error {
+	if req.ParentID == "" {
+		return nil
+	}
+	parent, err := s.tasks.GetTask(ctx, req.ParentID)
+	if err != nil {
+		return fmt.Errorf("invalid parent_id: %w", err)
+	}
+	if parent.ParentID != "" && !parent.IsFromOffice {
+		return ErrSubtaskDepthExceeded
 	}
 	return nil
 }
@@ -232,28 +329,45 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 
 	seen := make(map[string]bool, len(repositories))
 	for i, repoInput := range repositories {
-		repositoryID, baseBranch, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
+		repositoryID, baseBranch, _, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
 		if err != nil {
 			return err
 		}
 		if repositoryID == "" {
 			return fmt.Errorf("repository_id is required")
 		}
-		// Multi-repo validation: each repository may appear at most once per task.
-		// Without this guard the unique (task_id, repository_id) constraint on
-		// task_repositories would surface as an opaque DB error mid-loop, leaving
-		// some rows already inserted.
-		if seen[repositoryID] {
-			return fmt.Errorf("repository %q listed more than once for the task", repositoryID)
+		// Multi-branch validation: the same repository may appear multiple
+		// times in a task on different branches. Identity is
+		// (repository_id, base_branch, checkout_branch) — base_branch matters
+		// because the worktree executor anchors the branch there while
+		// checkout_branch stays empty, and the local-executor flow puts the
+		// branch in checkout_branch with base_branch anchored to default_branch.
+		// Both shapes must dedup; matching DB key is UNIQUE(task_id,
+		// repository_id, base_branch, checkout_branch).
+		dedupKey := repositoryID + "\x00" + baseBranch + "\x00" + repoInput.CheckoutBranch
+		if seen[dedupKey] {
+			label := s.repoDisplayLabel(ctx, repoInput, repositoryID)
+			branchLabel := repoInput.CheckoutBranch
+			if branchLabel == "" {
+				branchLabel = baseBranch
+			}
+			if branchLabel == "" {
+				return fmt.Errorf("repository %q is listed more than once for this task", label)
+			}
+			return fmt.Errorf("repository %q on branch %q is listed more than once for this task", label, branchLabel)
 		}
-		seen[repositoryID] = true
+		seen[dedupKey] = true
+		metadata := make(map[string]interface{})
+		if prNum := resolvePRNumber(repoInput); prNum > 0 {
+			metadata["pr_number"] = prNum
+		}
 		taskRepo := &models.TaskRepository{
 			TaskID:         taskID,
 			RepositoryID:   repositoryID,
 			BaseBranch:     baseBranch,
 			CheckoutBranch: repoInput.CheckoutBranch,
 			Position:       i,
-			Metadata:       make(map[string]interface{}),
+			Metadata:       metadata,
 		}
 		if err := s.taskRepos.CreateTaskRepository(ctx, taskRepo); err != nil {
 			s.logger.Error("failed to create task repository", zap.Error(err))
@@ -263,59 +377,244 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 	return nil
 }
 
+// repoDisplayLabel returns a human-readable label for a repository to surface
+// in the duplicate-repository error. It prefers owner/name parsed from the
+// input's GitHub URL, then the resolved repo entity's owner/name (or bare
+// name), and finally falls back to the repositoryID so the message is never
+// empty. Best-effort: lookup failures degrade to the next fallback.
+func (s *Service) repoDisplayLabel(ctx context.Context, repoInput TaskRepositoryInput, repositoryID string) string {
+	if repoInput.GitHubURL != "" {
+		if owner, name, err := parseGitHubRepoURL(repoInput.GitHubURL); err == nil {
+			return owner + "/" + name
+		}
+	}
+	if repo, err := s.repoEntities.GetRepository(ctx, repositoryID); err == nil && repo != nil {
+		if repo.ProviderOwner != "" && repo.ProviderName != "" {
+			return repo.ProviderOwner + "/" + repo.ProviderName
+		}
+		if repo.Name != "" {
+			return repo.Name
+		}
+	}
+	return repositoryID
+}
+
+// ResolveRepositoryRef resolves a single TaskRepositoryInput to a
+// (repositoryID, baseBranch) pair within the given workspace, creating the
+// repository if necessary. Mirrors the resolution used during task creation
+// (`createTaskRepositories`), but builds the local-path lookup map on demand
+// so callers that only resolve one input (e.g. add_branch) don't need to
+// thread the map themselves.
+//
+// Accepts inputs identified by RepositoryID, GitHubURL, or LocalPath. Returns
+// an empty repositoryID with no error when none of those are set, letting
+// callers decide whether to fall back to other defaults.
+func (s *Service) ResolveRepositoryRef(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput) (repositoryID, baseBranch string, created bool, err error) {
+	var repoByPath map[string]*models.Repository
+	if repoInput.RepositoryID == "" && repoInput.LocalPath != "" {
+		repos, listErr := s.repoEntities.ListRepositories(ctx, workspaceID)
+		if listErr != nil {
+			return "", "", false, listErr
+		}
+		repoByPath = make(map[string]*models.Repository, len(repos))
+		for _, repo := range repos {
+			if repo.LocalPath == "" {
+				continue
+			}
+			repoByPath[repo.LocalPath] = repo
+		}
+	}
+	return s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
+}
+
 // resolveRepoInput resolves a RepositoryInput to a repositoryID and baseBranch,
-// creating the repository if it doesn't exist yet.
-func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository) (repositoryID, baseBranch string, err error) {
+// creating the repository if it doesn't exist yet. Returns created=true only
+// when this call inserted a new Repository row (GitHub-URL miss → CreateRepository
+// or LocalPath miss → CreateRepository); callers that want to roll back a fresh
+// row on a later failure key off this flag.
+func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, repoByPath map[string]*models.Repository) (repositoryID, baseBranch string, created bool, err error) {
 	repositoryID = repoInput.RepositoryID
 	baseBranch = repoInput.BaseBranch
 	if repositoryID != "" {
-		// Verify the repository belongs to the target workspace. Without this
-		// check, an agent that knows a repository UUID from another workspace
-		// could associate it with a task in this workspace via the MCP tool's
-		// repository_id fast path (the github_url and local_path branches both
-		// scope through FindOrCreateRepository, which is workspace-bound).
-		repo, lookupErr := s.repoEntities.GetRepository(ctx, repositoryID)
-		if lookupErr != nil {
-			return "", "", fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
-		}
-		if repo == nil || repo.WorkspaceID != workspaceID {
-			return "", "", fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
-		}
-		return repositoryID, baseBranch, nil
+		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
 	// Handle GitHub URL: parse owner/name and use FindOrCreateRepository
 	if repoInput.GitHubURL != "" {
-		owner, name, parseErr := parseGitHubRepoURL(repoInput.GitHubURL)
-		if parseErr != nil {
-			return "", "", parseErr
-		}
-		defaultBranch := repoInput.DefaultBranch
-		if defaultBranch == "" {
-			defaultBranch = repoInput.BaseBranch
-		}
-		repo, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
-			WorkspaceID:   workspaceID,
-			Provider:      "github",
-			ProviderOwner: owner,
-			ProviderName:  name,
-			DefaultBranch: defaultBranch,
-		})
-		if createErr != nil {
-			return "", "", createErr
-		}
-		repositoryID = repo.ID
-		if baseBranch == "" {
-			baseBranch = repo.DefaultBranch
-		}
-		return repositoryID, baseBranch, nil
+		return s.resolveRepoInputGitHub(ctx, workspaceID, repoInput, baseBranch)
 	}
 
 	if repoInput.LocalPath == "" {
-		return repositoryID, baseBranch, nil
+		return repositoryID, baseBranch, false, nil
 	}
+	return s.resolveRepoInputLocal(ctx, workspaceID, repoInput, repoByPath, baseBranch)
+}
+
+func (s *Service) resolveRepoInputID(ctx context.Context, workspaceID, repositoryID, baseBranch string) (string, string, bool, error) {
+	// Verify the repository belongs to the target workspace. Without this
+	// check, an agent that knows a repository UUID from another workspace
+	// could associate it with a task in this workspace via the MCP tool's
+	// repository_id fast path (the github_url and local_path branches both
+	// scope through FindOrCreateRepository, which is workspace-bound).
+	repo, lookupErr := s.repoEntities.GetRepository(ctx, repositoryID)
+	if lookupErr != nil {
+		return "", "", false, fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
+	}
+	if repo == nil || repo.WorkspaceID != workspaceID {
+		return "", "", false, fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
+	}
+	replacementID, replacementCreated, replacementErr := s.safeRepositoryIDForTaskWorktree(ctx, workspaceID, repo)
+	if replacementErr != nil {
+		return "", "", false, replacementErr
+	}
+	if replacementID != "" {
+		return replacementID, baseBranch, replacementCreated, nil
+	}
+	return repositoryID, baseBranch, false, nil
+}
+
+func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspaceID string, repo *models.Repository) (string, bool, error) {
+	if !s.isKandevTaskWorktreeRepository(repo) {
+		return "", false, nil
+	}
+	if repo.Provider == "" || repo.ProviderOwner == "" || repo.ProviderName == "" {
+		return "", false, fmt.Errorf("repository %q points at a Kandev task worktree; use the source repository or GitHub URL", repo.ID)
+	}
+	existing, err := s.findSafeReplacementRepository(ctx, workspaceID, repo)
+	if err != nil {
+		return "", false, err
+	}
+	if existing != nil {
+		return existing.ID, false, nil
+	}
+	created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:    workspaceID,
+		Name:           repo.ProviderOwner + "/" + repo.ProviderName,
+		SourceType:     sourceTypeProvider,
+		Provider:       repo.Provider,
+		ProviderRepoID: repo.ProviderRepoID,
+		ProviderOwner:  repo.ProviderOwner,
+		ProviderName:   repo.ProviderName,
+		DefaultBranch:  repo.DefaultBranch,
+	})
+	if createErr != nil {
+		return "", false, fmt.Errorf("create provider repository for task worktree %q: %w", repo.ID, createErr)
+	}
+	return created.ID, true, nil
+}
+
+func (s *Service) replaceTaskWorktreeRepositoryMatch(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, bool, error) {
+	replacementID, replacementCreated, err := s.safeRepositoryIDForTaskWorktree(ctx, workspaceID, repo)
+	if err != nil {
+		return nil, false, err
+	}
+	if replacementID == "" {
+		return repo, false, nil
+	}
+	replacement, lookupErr := s.repoEntities.GetRepository(ctx, replacementID)
+	if lookupErr != nil {
+		return nil, false, fmt.Errorf("looking up repository %q: %w", replacementID, lookupErr)
+	}
+	if replacement == nil {
+		return nil, false, fmt.Errorf("replacement repository %q no longer exists", replacementID)
+	}
+	return replacement, replacementCreated, nil
+}
+
+// findSafeReplacementRepository prefers an existing safe local clone over a
+// provider row so private/offline repositories can reuse the user's checkout.
+func (s *Service) findSafeReplacementRepository(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, error) {
+	repos, err := s.repoEntities.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list repositories for task worktree replacement: %w", err)
+	}
+	var localClone *models.Repository
+	var providerRepo *models.Repository
+	for _, candidate := range repos {
+		if candidate == nil || candidate.ID == repo.ID {
+			continue
+		}
+		if !sameProviderIdentity(repo, candidate) {
+			continue
+		}
+		if s.isKandevTaskWorktreeRepository(candidate) {
+			continue
+		}
+		if candidate.SourceType == sourceTypeLocal && candidate.LocalPath != "" {
+			if localClone == nil {
+				localClone = candidate
+			}
+			continue
+		}
+		if candidate.SourceType == sourceTypeProvider && providerRepo == nil {
+			providerRepo = candidate
+		}
+	}
+	if localClone != nil {
+		return localClone, nil
+	}
+	if providerRepo != nil {
+		return providerRepo, nil
+	}
+	return nil, nil
+}
+
+func sameProviderIdentity(left, right *models.Repository) bool {
+	return left.Provider == right.Provider &&
+		left.ProviderOwner == right.ProviderOwner &&
+		left.ProviderName == right.ProviderName
+}
+
+func (s *Service) isKandevTaskWorktreeRepository(repo *models.Repository) bool {
+	return repo != nil && isKandevTaskWorktreePath(repo.LocalPath, s.discoveryConfig.TaskWorktreeRoots)
+}
+
+func isKandevTaskWorktreePath(path string, taskWorktreeRoots []string) bool {
+	normalized := normalizeTaskWorktreePath(path)
+	if normalized == "" {
+		return false
+	}
+	for _, root := range taskWorktreeRoots {
+		if pathAtOrInsideRoot(normalized, normalizeTaskWorktreePath(root)) {
+			return true
+		}
+	}
+	return strings.Contains(normalized, defaultKandevTaskWorktreePathSegment) ||
+		strings.HasSuffix(normalized, strings.TrimSuffix(defaultKandevTaskWorktreePathSegment, "/"))
+}
+
+func normalizeTaskWorktreePath(path string) string {
+	normalized := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	if normalized == "." || normalized == "" {
+		return ""
+	}
+	return normalized
+}
+
+func pathAtOrInsideRoot(path, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	if root != "/" {
+		root = strings.TrimRight(root, "/")
+	}
+	return path == root || strings.HasPrefix(path, root+"/")
+}
+
+// resolveRepoInputLocal handles the LocalPath branch of resolveRepoInput.
+// Looks the path up in the workspace snapshot; on miss, calls
+// CreateRepository (and reports created=true). Extracted to keep
+// resolveRepoInput inside the cyclomatic-complexity budget.
+func (s *Service) resolveRepoInputLocal(
+	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput,
+	repoByPath map[string]*models.Repository, baseBranch string,
+) (string, string, bool, error) {
 	repo := repoByPath[repoInput.LocalPath]
+	created := false
 	if repo == nil {
+		if isKandevTaskWorktreePath(repoInput.LocalPath, s.discoveryConfig.TaskWorktreeRoots) {
+			return "", "", false, fmt.Errorf("local path %q points at a Kandev task worktree; use the source repository or GitHub URL", repoInput.LocalPath)
+		}
 		name := strings.TrimSpace(repoInput.Name)
 		if name == "" {
 			name = filepath.Base(repoInput.LocalPath)
@@ -335,12 +634,12 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 			// and feeds into os.Stat/ReadFile inside gitref.DefaultBranch, so
 			// without this guard a caller could traverse the filesystem.
 			if safePath, pathErr := s.resolveAllowedLocalPath(repoInput.LocalPath); pathErr == nil {
-				if probed, err := gitref.DefaultBranch(safePath); err == nil && probed != "" && probed != "HEAD" {
+				if probed, err := gitref.DefaultBranchOrEmpty(safePath); err == nil && probed != "" {
 					defaultBranch = probed
 				}
 			}
 		}
-		created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
+		createdRepo, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
 			WorkspaceID:   workspaceID,
 			Name:          name,
 			SourceType:    "local",
@@ -348,18 +647,90 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 			DefaultBranch: defaultBranch,
 		})
 		if createErr != nil {
-			return "", "", createErr
+			return "", "", false, createErr
 		}
-		repo = created
+		repo = createdRepo
 		if repoByPath != nil {
 			repoByPath[repoInput.LocalPath] = repo
 		}
+		created = true
+	} else {
+		replacement, replacementCreated, replaceErr := s.replaceTaskWorktreeRepositoryMatch(ctx, workspaceID, repo)
+		if replaceErr != nil {
+			return "", "", false, replaceErr
+		}
+		repo = replacement
+		created = replacementCreated
 	}
-	repositoryID = repo.ID
 	if baseBranch == "" {
 		baseBranch = repo.DefaultBranch
 	}
-	return repositoryID, baseBranch, nil
+	return repo.ID, baseBranch, created, nil
+}
+
+// resolveRepoInputGitHub handles the GitHub-URL branch of resolveRepoInput:
+// parse owner/name, optionally probe the provider for default_branch, then
+// FindOrCreateRepository. Extracted so resolveRepoInput stays under the
+// cognitive-complexity budget after adding the probe-skip and probe-error
+// arms.
+func (s *Service) resolveRepoInputGitHub(
+	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput, baseBranch string,
+) (string, string, bool, error) {
+	owner, name, parseErr := parseGitHubRepoURL(repoInput.GitHubURL)
+	if parseErr != nil {
+		return "", "", false, parseErr
+	}
+	defaultBranch := repoInput.DefaultBranch
+	if defaultBranch == "" {
+		defaultBranch = repoInput.BaseBranch
+	}
+	if defaultBranch == "" && repoInput.ResolveProviderDefaults && s.providerProber != nil {
+		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, "github", owner, name)
+	}
+	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
+		WorkspaceID:   workspaceID,
+		Provider:      "github",
+		ProviderOwner: owner,
+		ProviderName:  name,
+		DefaultBranch: defaultBranch,
+	})
+	if createErr != nil {
+		return "", "", false, createErr
+	}
+	if baseBranch == "" {
+		baseBranch = repo.DefaultBranch
+	}
+	return repo.ID, baseBranch, repoCreated, nil
+}
+
+// probeProviderDefaultBranchIfMissing returns a default_branch resolved via
+// the provider prober, but only when the workspace doesn't already hold the
+// repo with a non-empty default_branch (the existing value wins downstream,
+// so the remote round-trip would be pure waste). A DB lookup error skips
+// the probe entirely — FindOrCreateRepository will hit the same DB and
+// surface the real cause; we log the lookup failure for observability.
+// Probe errors fall through to "" so the AddBranchToTask gate surfaces an
+// actionable validation rejection rather than a silent orphan.
+func (s *Service) probeProviderDefaultBranchIfMissing(
+	ctx context.Context, workspaceID, provider, owner, name string,
+) string {
+	existing, lookupErr := s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, provider, owner, name)
+	if lookupErr != nil {
+		s.logger.Warn("resolveRepoInput: failed to look up existing repo before probe",
+			zap.String("provider", provider),
+			zap.String("owner", owner),
+			zap.String("name", name),
+			zap.Error(lookupErr))
+		return ""
+	}
+	if existing != nil && existing.DefaultBranch != "" {
+		return ""
+	}
+	probed, probeErr := s.providerProber.ProbeDefaultBranch(ctx, provider, owner, name)
+	if probeErr != nil {
+		return ""
+	}
+	return probed
 }
 
 // parseGitHubRepoURL parses a GitHub repository URL into owner and name.
@@ -394,6 +765,34 @@ func parseGitHubRepoURL(rawURL string) (owner, name string, err error) {
 	}
 
 	return parts[0], parts[1], nil
+}
+
+// resolvePRNumber returns the GitHub PR number for a repository input. Prefers
+// the explicit PRNumber field; falls back to parsing a /pull/<N> path out of
+// GitHubURL when present. Returns 0 when no PR is identified.
+//
+// The PR number is needed at worktree-creation time so fork PRs (whose head
+// branch only exists on the contributor's fork) can be materialized via the
+// refs/pull/<N>/head refspec on the base repo instead of a branch-name fetch
+// that would 404 against origin.
+func resolvePRNumber(input TaskRepositoryInput) int {
+	if input.PRNumber > 0 {
+		return input.PRNumber
+	}
+	rawURL := strings.TrimSpace(input.GitHubURL)
+	idx := strings.Index(rawURL, "/pull/")
+	if idx < 0 {
+		return 0
+	}
+	numStr := rawURL[idx+len("/pull/"):]
+	if i := strings.IndexAny(numStr, "/?#"); i >= 0 {
+		numStr = numStr[:i]
+	}
+	n, err := strconv.Atoi(numStr)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // ReplaceTaskRepositories deletes all existing task-repository associations
@@ -455,6 +854,9 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.State = *req.State
 		stateChanged = true
 	}
+	if req.WorkflowStepID != nil {
+		task.WorkflowStepID = *req.WorkflowStepID
+	}
 	if req.Position != nil {
 		task.Position = *req.Position
 	}
@@ -505,7 +907,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	}
 
 	if task.ArchivedAt != nil {
-		return fmt.Errorf("task is already archived: %s", id)
+		return fmt.Errorf("%w: %s", ErrTaskAlreadyArchived, id)
 	}
 
 	// 2. Gather data needed for cleanup BEFORE archive
@@ -517,7 +919,10 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 			zap.Error(err))
 	}
 	if s.executionStopper != nil {
-		stopTargets = s.buildStopTargets(ctx, id, activeSessions)
+		stopTargets, err = s.buildStopTargets(ctx, id, activeSessions)
+		if err != nil {
+			return fmt.Errorf("list runtime cleanup inventory: %w", err)
+		}
 	}
 
 	// 2b. Capture git archive snapshot for active sessions BEFORE stopping agents
@@ -564,6 +969,19 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		return err
 	}
 
+	// 3b. Finalize active sessions in the DB. The async cleanup below tears down
+	// the agent processes; this records the terminal session state, which
+	// process teardown does not persist on its own.
+	if reaped, rerr := s.sessions.CancelActiveTaskSessionsByTaskID(ctx, id, "task archived"); rerr != nil {
+		s.logger.Warn("failed to reap active sessions on archive",
+			zap.String("task_id", id),
+			zap.Error(rerr))
+	} else if reaped > 0 {
+		s.logger.Info("reaped active sessions on archive",
+			zap.String("task_id", id),
+			zap.Int64("count", reaped))
+	}
+
 	// 4. Re-read task for updated archived_at field
 	task, err = s.tasks.GetTask(ctx, id)
 	if err != nil {
@@ -577,10 +995,9 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		zap.Duration("duration", time.Since(start)))
 
 	// 6. Background: Stop agents and cleanup worktrees
-	// Note: isEphemeral=false for archive to preserve quick-chat directories
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: true}
 	if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || taskEnv != nil {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, false,
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
@@ -591,12 +1008,48 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 // For fast UI response, the DB delete and event publish happen synchronously,
 // while agent stopping and worktree cleanup happen asynchronously.
 func (s *Service) DeleteTask(ctx context.Context, id string) error {
+	return s.deleteTaskWithReason(ctx, id, "")
+}
+
+// DeleteTaskWithReason behaves like DeleteTask but attaches a machine-readable
+// reason (e.g. "pr_approved_by_user") to the task.deleted event so the frontend
+// can explain why a focused task vanished.
+func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) error {
+	return s.deleteTaskWithReason(ctx, id, reason)
+}
+
+func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
+	_, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, reason, func(ctx context.Context, id string) (bool, error) {
+		if err := s.tasks.DeleteTask(ctx, id); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+	return err
+}
+
+func (s *Service) deleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	deleted, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, "", func(ctx context.Context, id string) (bool, error) {
+		return s.tasks.DeleteExpiredQuickChatTask(ctx, id, cutoff)
+	})
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return false, nil
+	}
+	return deleted, err
+}
+
+func (s *Service) deleteTaskWithReasonAndDBDelete(
+	ctx context.Context,
+	id string,
+	reason string,
+	deleteFromDB func(context.Context, string) (bool, error),
+) (bool, error) {
 	start := time.Now()
 
 	// 1. Get task (sync, fast)
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// 2. Gather data needed for cleanup BEFORE delete (sync, fast)
@@ -609,28 +1062,36 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 
 	worktrees := s.gatherWorktreesForDelete(ctx, id)
 	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, id)
+	if preserved, err := s.preserveTaskEnvironmentForActiveBorrower(ctx, id, taskEnv); err != nil {
+		return false, err
+	} else if preserved {
+		s.logger.Info("transferred borrowed task environment before task delete",
+			zap.String("task_id", id),
+			zap.String("env_id", taskEnvironmentID(taskEnv)),
+			zap.String("new_owner_task_id", taskEnv.TaskID))
+	}
 
-	// 3. Get active sessions for stopping agents (sync, fast)
-	// Must query before delete since DB records will be gone
-	var stopTargets []taskStopTarget
-	if s.executionStopper != nil {
-		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
-		if err != nil {
-			s.logger.Warn("failed to list active sessions for delete",
-				zap.String("task_id", id),
-				zap.Error(err))
-		}
-		stopTargets = s.buildStopTargets(ctx, id, activeSessions)
+	stopTargets, err := s.deleteTaskStopTargets(ctx, id)
+	if err != nil {
+		return false, err
 	}
 
 	// 4. Delete from DB (sync, fast)
-	if err := s.tasks.DeleteTask(ctx, id); err != nil {
+	deleted, err := deleteFromDB(ctx, id)
+	if err != nil {
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
-		return err
+		return false, err
+	}
+	if !deleted {
+		return false, nil
 	}
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
-	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
+	var extra map[string]interface{}
+	if reason != "" {
+		extra = map[string]interface{}{"reason": reason}
+	}
+	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
 	s.logger.Info("task deleted",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
@@ -642,11 +1103,29 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false}
 	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral || taskEnv != nil
 	if hasCleanup {
-		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, task.IsEphemeral,
+		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
 
-	return nil
+	return true, nil
+}
+
+func (s *Service) deleteTaskStopTargets(ctx context.Context, id string) ([]taskStopTarget, error) {
+	// Must query before delete since DB records will be gone.
+	if s.executionStopper == nil {
+		return nil, nil
+	}
+	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to list active sessions for delete",
+			zap.String("task_id", id),
+			zap.Error(err))
+	}
+	stopTargets, err := s.buildStopTargets(ctx, id, activeSessions)
+	if err != nil {
+		return nil, fmt.Errorf("list runtime cleanup inventory: %w", err)
+	}
+	return stopTargets, nil
 }
 
 // CleanupTaskResources tears down a task's runtime resources (container,
@@ -658,11 +1137,13 @@ func (s *Service) DeleteTask(ctx context.Context, id string) error {
 // teardown those wrappers run via runAsyncTaskCleanup. Without this call the
 // agent gets stopped but its container/sandbox leaks indefinitely.
 //
-// The caller is expected to have cancelled active runs separately (cascade
-// does this via runCanceller before invoking us), so stopTargets is empty.
+// The caller may already have cancelled active runs separately (cascade does
+// this via runCanceller before invoking us), but terminal sessions can still
+// have executors_running rows. We still derive runtime stop targets from
+// executors_running here so cascade cleanup does not drop durable handles.
 // deleteEnvRow controls whether the task_environment row is removed (true
-// for delete cascade, false for archive — archive preserves the row).
-// Best-effort and idempotent; failures are logged.
+// for delete cascade, false for archive — archive preserves the row). Runtime
+// inventory failures abort cleanup so durable stop handles remain retryable.
 func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, deleteEnvRow bool) {
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
@@ -670,17 +1151,44 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 			zap.String("task_id", taskID),
 			zap.Error(err))
 	}
+	var stopTargets []taskStopTarget
+	if s.executionStopper != nil {
+		stopTargets, err = s.buildStopTargets(ctx, taskID, sessions)
+		if err != nil {
+			s.logger.Warn("skipping cascade cleanup because runtime inventory failed",
+				zap.String("task_id", taskID),
+				zap.Error(err))
+			return
+		}
+	}
 	worktrees := s.gatherWorktreesForDelete(ctx, taskID)
 	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
+	if deleteEnvRow {
+		preserved, err := s.preserveTaskEnvironmentForActiveBorrower(ctx, taskID, taskEnv)
+		if err != nil {
+			s.logger.Warn("skipping cascade cleanup because task environment could not be preserved for borrower",
+				zap.String("task_id", taskID),
+				zap.String("env_id", taskEnvironmentID(taskEnv)),
+				zap.Error(err))
+			return
+		}
+		if preserved {
+			deleteEnvRow = false
+			s.logger.Info("transferred borrowed task environment before cascade delete",
+				zap.String("task_id", taskID),
+				zap.String("env_id", taskEnvironmentID(taskEnv)),
+				zap.String("new_owner_task_id", taskEnv.TaskID))
+		}
+	}
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvRow}
-	if len(sessions) == 0 && len(worktrees) == 0 && taskEnv == nil {
+	if len(sessions) == 0 && len(worktrees) == 0 && len(stopTargets) == 0 && taskEnv == nil {
 		return
 	}
 	reason := "cascade archive"
 	if deleteEnvRow {
 		reason = "cascade delete"
 	}
-	s.runAsyncTaskCleanup(taskID, sessions, worktrees, nil, envCleanup, false,
+	s.runAsyncTaskCleanup(taskID, sessions, worktrees, stopTargets, envCleanup,
 		reason, "failed to stop session on cascade cleanup", "cascade cleanup completed")
 }
 
@@ -730,61 +1238,102 @@ func (s *Service) runAsyncTaskCleanup(
 	worktrees []*worktree.Worktree,
 	stopTargets []taskStopTarget,
 	envCleanup taskEnvironmentCleanup,
-	isEphemeral bool,
 	stopReason, stopFailMsg, cleanupMsg string,
 ) {
-	go func() {
-		cleanupStart := time.Now()
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-
-		if s.executionStopper != nil && len(stopTargets) > 0 {
-			for _, target := range stopTargets {
-				if target.executionID != "" {
-					if err := s.executionStopper.StopExecution(cleanupCtx, target.executionID, stopReason, true); err != nil {
-						s.logger.Warn(stopFailMsg,
-							zap.String("task_id", id),
-							zap.String("session_id", target.sessionID),
-							zap.String("execution_id", target.executionID),
-							zap.Error(err))
-					}
-					continue
-				}
-				if err := s.executionStopper.StopSession(cleanupCtx, target.sessionID, stopReason, true); err != nil {
-					s.logger.Warn(stopFailMsg,
-						zap.String("task_id", id),
-						zap.String("session_id", target.sessionID),
-						zap.Error(err))
-				}
-			}
-		}
-
-		cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, envCleanup, isEphemeral)
-
-		if len(cleanupErrors) > 0 {
-			s.logger.Warn(cleanupMsg+" with errors",
-				zap.String("task_id", id),
-				zap.Int("error_count", len(cleanupErrors)),
-				zap.Duration("duration", time.Since(cleanupStart)))
-		} else {
-			s.logger.Info(cleanupMsg,
-				zap.String("task_id", id),
-				zap.Duration("duration", time.Since(cleanupStart)))
-		}
-	}()
+	go s.runTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup, stopReason, stopFailMsg, cleanupMsg)
 }
 
-func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSessions []*models.TaskSession) []taskStopTarget {
+func (s *Service) runTaskCleanup(
+	id string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget,
+	envCleanup taskEnvironmentCleanup,
+	stopReason, stopFailMsg, cleanupMsg string,
+) {
+	cleanupStart := time.Now()
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
+
+	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup, failedStops)
+
+	if len(cleanupErrors) > 0 {
+		s.logger.Warn(cleanupMsg+" with errors",
+			zap.String("task_id", id),
+			zap.Int("error_count", len(cleanupErrors)),
+			zap.Duration("duration", time.Since(cleanupStart)))
+	} else {
+		s.logger.Info(cleanupMsg,
+			zap.String("task_id", id),
+			zap.Duration("duration", time.Since(cleanupStart)))
+	}
+	s.signalCleanupDoneForTest()
+}
+
+// isCleanableSessionState reports whether a session has no running agent process
+// and stop failures are therefore expected. Unlike the orchestrator's
+// isTerminalSessionState (which excludes IDLE), this helper is used only during
+// task cleanup to decide whether a stop failure should block environment teardown.
+// IDLE is included because an idle session has already released its execution slot
+// and will return ErrExecutionNotFound just like CANCELLED/COMPLETED/FAILED.
+func isCleanableSessionState(state models.TaskSessionState) bool {
+	switch state {
+	case models.TaskSessionStateCancelled,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed,
+		models.TaskSessionStateIdle:
+		return true
+	}
+	return false
+}
+
+func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSessions []*models.TaskSession) ([]taskStopTarget, error) {
 	targets := make([]taskStopTarget, 0, len(activeSessions))
+	seen := make(map[string]struct{})
+	// Index session states so executor_running rows can be marked terminal.
+	sessionStates := make(map[string]models.TaskSessionState, len(activeSessions))
+	for _, sess := range activeSessions {
+		if sess != nil {
+			sessionStates[sess.ID] = sess.State
+		}
+	}
+	if s.executors != nil {
+		runningRows, err := s.executors.ListExecutorsRunningByTaskID(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		for _, running := range runningRows {
+			if running == nil || running.SessionID == "" {
+				continue
+			}
+			target := taskStopTarget{
+				sessionID:   running.SessionID,
+				executionID: strings.TrimSpace(running.AgentExecutionID),
+				terminal:    isCleanableSessionState(sessionStates[running.SessionID]),
+			}
+			targets = append(targets, target)
+			seen[target.sessionID] = struct{}{}
+		}
+	}
 	for _, sess := range activeSessions {
 		if sess == nil || sess.ID == "" {
+			continue
+		}
+		if _, ok := seen[sess.ID]; ok {
+			continue
+		}
+		// Sessions without an executor_running row that are already in a terminal
+		// state have no running process; skip creating a stop target.
+		if isCleanableSessionState(sess.State) {
 			continue
 		}
 		target := taskStopTarget{
 			sessionID:   sess.ID,
 			executionID: strings.TrimSpace(sess.AgentExecutionID),
 		}
-		if target.executionID == "" {
+		if target.executionID == "" && s.executors != nil {
 			running, err := s.executors.GetExecutorRunningBySessionID(ctx, sess.ID)
 			if err == nil && running != nil {
 				target.executionID = strings.TrimSpace(running.AgentExecutionID)
@@ -795,7 +1344,49 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 	s.logger.Debug("prepared task cleanup stop targets",
 		zap.String("task_id", taskID),
 		zap.Int("count", len(targets)))
-	return targets
+	return targets, nil
+}
+
+func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, stopTargets []taskStopTarget, stopReason, stopFailMsg string) map[string]struct{} {
+	failedStops := make(map[string]struct{})
+	if s.executionStopper == nil || len(stopTargets) == 0 {
+		return failedStops
+	}
+	for _, target := range stopTargets {
+		if target.executionID != "" {
+			if err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true); err != nil {
+				if target.terminal {
+					s.logger.Debug("stop failed for terminal session execution (expected), proceeding with cleanup",
+						zap.String("task_id", taskID),
+						zap.String("session_id", target.sessionID),
+						zap.Error(err))
+					continue
+				}
+				failedStops[target.sessionID] = struct{}{}
+				s.logger.Warn(stopFailMsg,
+					zap.String("task_id", taskID),
+					zap.String("session_id", target.sessionID),
+					zap.String("execution_id", target.executionID),
+					zap.Error(err))
+			}
+			continue
+		}
+		if err := s.executionStopper.StopSession(ctx, target.sessionID, stopReason, true); err != nil {
+			if target.terminal {
+				s.logger.Debug("stop failed for terminal session (expected), proceeding with cleanup",
+					zap.String("task_id", taskID),
+					zap.String("session_id", target.sessionID),
+					zap.Error(err))
+				continue
+			}
+			failedStops[target.sessionID] = struct{}{}
+			s.logger.Warn(stopFailMsg,
+				zap.String("task_id", taskID),
+				zap.String("session_id", target.sessionID),
+				zap.Error(err))
+		}
+	}
+	return failedStops
 }
 
 // performTaskCleanup handles post-deletion cleanup operations.
@@ -807,35 +1398,32 @@ func (s *Service) performTaskCleanup(
 	taskID string,
 	sessions []*models.TaskSession,
 	worktrees []*worktree.Worktree,
+	stopTargets []taskStopTarget,
 	envCleanup taskEnvironmentCleanup,
-	isEphemeral bool,
+	preserveExecutorRows map[string]struct{},
 ) []error {
 	var errs []error
+	hasPreservedRuntimes := len(preserveExecutorRows) > 0
 
-	errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
-	worktrees = excludeEnvironmentWorktree(worktrees, envCleanup.env)
-
-	// Cleanup worktrees
-	if len(worktrees) > 0 {
-		if cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner); ok {
-			if err := cleaner.CleanupWorktrees(ctx, worktrees); err != nil {
-				s.logger.Warn("failed to cleanup worktrees after delete",
-					zap.String("task_id", taskID),
-					zap.Error(err))
-				errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
-			}
-		}
+	if hasPreservedRuntimes {
+		s.logger.Warn("skipping shared environment cleanup after failed runtime stop",
+			zap.String("task_id", taskID),
+			zap.Int("preserved_runtime_count", len(preserveExecutorRows)))
 	}
+	errs = append(errs, s.cleanupDestructiveTaskResources(ctx, taskID, sessions, worktrees, envCleanup, preserveExecutorRows)...)
 
-	// Delete executor running records for sessions
-	for _, session := range sessions {
-		if session == nil || session.ID == "" {
+	sessionIDs := cleanupSessionIDs(sessions, stopTargets)
+	for _, sessionID := range sessionIDs {
+		if _, preserve := preserveExecutorRows[sessionID]; preserve {
+			s.logger.Warn("preserving executor runtime row after failed stop",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
 			continue
 		}
-		if err := s.executors.DeleteExecutorRunningBySessionID(ctx, session.ID); err != nil {
+		if err := s.executors.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
 			s.logger.Debug("failed to delete executor runtime for session",
 				zap.String("task_id", taskID),
-				zap.String("session_id", session.ID),
+				zap.String("session_id", sessionID),
 				zap.Error(err))
 			// Don't add to errs - this is a debug-level issue
 		}
@@ -844,33 +1432,278 @@ func (s *Service) performTaskCleanup(
 	// Cleanup quick-chat workspace directories for all tasks (not just ephemeral).
 	// Non-ephemeral office tasks also get quick-chat dirs allocated by manager_launch.go;
 	// both cases must be cleaned up to avoid a disk leak.
-	if s.quickChatDir != "" {
-		for _, session := range sessions {
-			if session == nil || session.ID == "" {
-				continue
-			}
-			sessionDir := filepath.Join(s.quickChatDir, session.ID)
-			if _, statErr := os.Stat(sessionDir); statErr != nil {
-				// Directory does not exist — nothing to remove.
-				continue
-			}
-			if err := os.RemoveAll(sessionDir); err != nil {
-				s.logger.Warn("failed to cleanup quick-chat workspace directory",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID),
-					zap.String("path", sessionDir),
-					zap.Error(err))
-				errs = append(errs, fmt.Errorf("cleanup quick-chat dir %s: %w", session.ID, err))
-			} else {
-				s.logger.Debug("cleaned up quick-chat workspace directory",
-					zap.String("task_id", taskID),
-					zap.String("session_id", session.ID),
-					zap.String("path", sessionDir))
-			}
-		}
-	}
+	errs = append(errs, s.cleanupQuickChatDirs(taskID, sessionIDs, preserveExecutorRows)...)
 
 	return errs
+}
+
+func (s *Service) signalCleanupDoneForTest() {
+	if s.cleanupDoneForTest == nil {
+		return
+	}
+	select {
+	case s.cleanupDoneForTest <- struct{}{}:
+	default:
+	}
+}
+
+func cleanupSessionIDs(sessions []*models.TaskSession, stopTargets []taskStopTarget) []string {
+	sessionIDs := make([]string, 0, len(sessions)+len(stopTargets))
+	seen := make(map[string]struct{})
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
+		sessionIDs = appendUniqueSessionID(sessionIDs, seen, session.ID)
+	}
+	for _, target := range stopTargets {
+		sessionIDs = appendUniqueSessionID(sessionIDs, seen, target.sessionID)
+	}
+	return sessionIDs
+}
+
+func appendUniqueSessionID(sessionIDs []string, seen map[string]struct{}, sessionID string) []string {
+	if sessionID == "" {
+		return sessionIDs
+	}
+	if _, ok := seen[sessionID]; ok {
+		return sessionIDs
+	}
+	seen[sessionID] = struct{}{}
+	return append(sessionIDs, sessionID)
+}
+
+func (s *Service) cleanupQuickChatDirs(
+	taskID string,
+	sessionIDs []string,
+	preserveExecutorRows map[string]struct{},
+) []error {
+	if s.quickChatDir == "" {
+		return nil
+	}
+	var errs []error
+	for _, sessionID := range sessionIDs {
+		if _, preserve := preserveExecutorRows[sessionID]; preserve {
+			continue
+		}
+		sessionDir := filepath.Join(s.quickChatDir, sessionID)
+		if _, statErr := os.Stat(sessionDir); statErr != nil {
+			// Directory does not exist — nothing to remove.
+			continue
+		}
+		if err := os.RemoveAll(sessionDir); err != nil {
+			s.logger.Warn("failed to cleanup quick-chat workspace directory",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("path", sessionDir),
+				zap.Error(err))
+			errs = append(errs, fmt.Errorf("cleanup quick-chat dir %s: %w", sessionID, err))
+			continue
+		}
+		s.logger.Debug("cleaned up quick-chat workspace directory",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("path", sessionDir))
+	}
+	return errs
+}
+
+func (s *Service) cleanupDestructiveTaskResources(
+	ctx context.Context,
+	taskID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	envCleanup taskEnvironmentCleanup,
+	preserveExecutorRows map[string]struct{},
+) []error {
+	var errs []error
+	skipOwnedEnvironment, err := s.hasActiveOtherTaskSessionsForEnvironment(ctx, taskID, envCleanup.env)
+	if err != nil {
+		s.logger.Warn("skipping task environment cleanup after shared-environment ownership check failed",
+			zap.String("task_id", taskID),
+			zap.String("env_id", taskEnvironmentID(envCleanup.env)),
+			zap.Error(err))
+		errs = append(errs, fmt.Errorf("check task environment ownership %s: %w", taskEnvironmentID(envCleanup.env), err))
+		skipOwnedEnvironment = true
+	}
+	if skipOwnedEnvironment {
+		s.logger.Info("skipping task environment cleanup while another task still uses it",
+			zap.String("task_id", taskID),
+			zap.String("env_id", taskEnvironmentID(envCleanup.env)))
+	}
+	if len(preserveExecutorRows) == 0 && !skipOwnedEnvironment {
+		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
+	}
+	originalWorktreeCount := len(worktrees)
+	worktrees = s.filterOwnedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees, envCleanup.env, skipOwnedEnvironment)
+	worktrees = cleanupEligibleWorktrees(worktrees, envCleanup.env, preserveExecutorRows)
+	if len(worktrees) == 0 {
+		if originalWorktreeCount > 0 {
+			s.logger.Debug("no task worktrees eligible for cleanup",
+				zap.String("task_id", taskID),
+				zap.Int("input_count", originalWorktreeCount),
+				zap.Int("preserved_runtime_count", len(preserveExecutorRows)))
+		}
+		return errs
+	}
+	cleaner, ok := s.worktreeCleanup.(WorktreeBatchCleaner)
+	if !ok {
+		return errs
+	}
+	if err := cleaner.CleanupWorktrees(ctx, worktrees); err != nil {
+		s.logger.Warn("failed to cleanup worktrees after delete",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
+	}
+	return errs
+}
+
+func taskEnvironmentID(env *models.TaskEnvironment) string {
+	if env == nil {
+		return ""
+	}
+	return env.ID
+}
+
+func (s *Service) hasActiveOtherTaskSessionsForEnvironment(ctx context.Context, taskID string, env *models.TaskEnvironment) (bool, error) {
+	if env == nil || env.ID == "" || s.sessions == nil {
+		return false, nil
+	}
+	checker, ok := s.sessions.(taskEnvironmentSessionUsageChecker)
+	if !ok {
+		return false, nil
+	}
+	return checker.HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx, env.ID, taskID)
+}
+
+func (s *Service) preserveTaskEnvironmentForActiveBorrower(ctx context.Context, taskID string, env *models.TaskEnvironment) (bool, error) {
+	if env == nil || env.ID == "" || s.sessions == nil {
+		return false, nil
+	}
+	finder, ok := s.sessions.(taskEnvironmentSessionBorrowerFinder)
+	if !ok {
+		return false, nil
+	}
+	borrowerTaskID, err := finder.FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx, env.ID, taskID)
+	if err != nil {
+		return false, fmt.Errorf("find task environment borrower %s: %w", env.ID, err)
+	}
+	if borrowerTaskID == "" {
+		return false, nil
+	}
+	ownerTransfer, ok := s.taskEnvironments.(taskEnvironmentOwnerTransferer)
+	if !ok {
+		return false, fmt.Errorf("task environment repository cannot transfer borrowed environment %s", env.ID)
+	}
+	if err := ownerTransfer.TransferTaskEnvironmentToTask(ctx, env.ID, borrowerTaskID); err != nil {
+		return false, fmt.Errorf("transfer task environment %s to %s: %w", env.ID, borrowerTaskID, err)
+	}
+	env.TaskID = borrowerTaskID
+	return true, nil
+}
+
+func (s *Service) filterOwnedWorktreesForTaskCleanup(
+	ctx context.Context,
+	taskID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	ownedEnv *models.TaskEnvironment,
+	skipOwnedEnvironment bool,
+) []*worktree.Worktree {
+	if len(worktrees) == 0 {
+		return worktrees
+	}
+	bySession := make(map[string]*models.TaskSession, len(sessions))
+	for _, sess := range sessions {
+		if sess != nil && sess.ID != "" {
+			bySession[sess.ID] = sess
+		}
+	}
+	envCache := map[string]*models.TaskEnvironment{}
+	filtered := worktrees[:0]
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		sess, sessionLoaded := bySession[wt.SessionID]
+		if s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
+			filtered = append(filtered, wt)
+		}
+	}
+	return filtered
+}
+
+func (s *Service) taskOwnsSessionWorktree(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	session *models.TaskSession,
+	sessionLoaded bool,
+	ownedEnv *models.TaskEnvironment,
+	skipOwnedEnvironment bool,
+	envCache map[string]*models.TaskEnvironment,
+) bool {
+	if session == nil {
+		if sessionID == "" {
+			return true
+		}
+		if !sessionLoaded {
+			s.logger.Warn("skipping task worktree cleanup because session ownership cannot be checked",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+		}
+		return false
+	}
+	if session.TaskEnvironmentID == "" {
+		return true
+	}
+	if ownedEnv != nil && session.TaskEnvironmentID == ownedEnv.ID {
+		return !skipOwnedEnvironment
+	}
+	if s.taskEnvironments == nil {
+		s.logger.Warn("skipping task worktree cleanup because task environment ownership cannot be checked",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("task_environment_id", session.TaskEnvironmentID))
+		return false
+	}
+	env, ok := envCache[session.TaskEnvironmentID]
+	if !ok {
+		var err error
+		env, err = s.taskEnvironments.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if err != nil {
+			s.logger.Warn("skipping task worktree cleanup because task environment lookup failed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("task_environment_id", session.TaskEnvironmentID),
+				zap.Error(err))
+			return false
+		}
+		envCache[session.TaskEnvironmentID] = env
+	}
+	if env == nil || env.TaskID != taskID {
+		return false
+	}
+	return true
+}
+
+func cleanupEligibleWorktrees(worktrees []*worktree.Worktree, env *models.TaskEnvironment, preserveExecutorRows map[string]struct{}) []*worktree.Worktree {
+	worktrees = excludeEnvironmentWorktree(worktrees, env)
+	if len(preserveExecutorRows) == 0 || len(worktrees) == 0 {
+		return worktrees
+	}
+	filtered := worktrees[:0]
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		if _, preserve := preserveExecutorRows[wt.SessionID]; preserve {
+			continue
+		}
+		filtered = append(filtered, wt)
+	}
+	return filtered
 }
 
 func (s *Service) cleanupTaskEnvironment(
@@ -931,17 +1764,169 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 // ListTasksByWorkspace returns paginated tasks for a workspace with task repositories loaded.
 // If query is non-empty, filters by task title, description, repository name, or repository path.
 // workflowID and repositoryID, when non-empty, further restrict results to that workflow/repository.
-func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
-	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
+func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
 	if err != nil {
 		return nil, 0, err
 	}
+
+	tasks, total = s.augmentWithPRMatches(ctx, tasks, total, prSearchOptions{
+		workspaceID:      workspaceID,
+		workflowID:       workflowID,
+		repositoryID:     repositoryID,
+		query:            query,
+		page:             page,
+		pageSize:         pageSize,
+		includeArchived:  includeArchived,
+		includeEphemeral: includeEphemeral,
+		onlyEphemeral:    onlyEphemeral,
+		excludeConfig:    excludeConfig,
+	})
 
 	if err := s.loadTaskRepositoriesBatch(ctx, tasks); err != nil {
 		s.logger.Error("failed to batch-load task repositories", zap.Error(err))
 	}
 
 	return tasks, total, nil
+}
+
+type prSearchOptions struct {
+	workspaceID      string
+	workflowID       string
+	repositoryID     string
+	query            string
+	page             int
+	pageSize         int
+	includeArchived  bool
+	includeEphemeral bool
+	onlyEphemeral    bool
+	excludeConfig    bool
+}
+
+// parsePRQuery extracts a positive PR number from a search query, accepting an
+// optional leading '#'. Returns (0, false) when the query is not a PR number.
+func parsePRQuery(query string) (int, bool) {
+	trimmed := strings.TrimPrefix(strings.TrimSpace(query), "#")
+	if trimmed == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(trimmed)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+// isConfigTask reports whether a task is a config-mode task (mirrors the SQL
+// `json_extract(metadata, '$.config_mode') IS NOT 1` filter). JSON-decoded
+// numbers arrive as float64, so accept both numeric 1 and bool true.
+func isConfigTask(task *models.Task) bool {
+	switch v := task.Metadata["config_mode"].(type) {
+	case float64:
+		return v == 1
+	case int:
+		return v == 1
+	case bool:
+		return v
+	default:
+		return false
+	}
+}
+
+// augmentWithPRMatches surfaces tasks associated with a PR number when the
+// search query looks like one. PR matches are prepended (most relevant) and
+// deduped against the existing results; `total` grows by the net-new count.
+// Best-effort: a missing resolver or a lookup error leaves results unchanged.
+//
+// Augmentation only applies to the first page of an unscoped search. It is
+// skipped for page > 1 (the prepend+truncate only makes sense against page 1,
+// otherwise a PR match would re-appear on every page and push out a real
+// result) and when a workflow or repository filter is set (a PR-matched task
+// isn't guaranteed to satisfy those filters, and the only caller that searches
+// by PR number — the Cmd+K command panel — sets neither).
+func (s *Service) augmentWithPRMatches(ctx context.Context, tasks []*models.Task, total int, opts prSearchOptions) ([]*models.Task, int) {
+	if opts.page > 1 || opts.workflowID != "" || opts.repositoryID != "" {
+		return tasks, total
+	}
+	prNum, ok := parsePRQuery(opts.query)
+	if !ok || s.prTaskResolver == nil {
+		return tasks, total
+	}
+	ids, err := s.prTaskResolver.FindTaskIDsByPRNumber(ctx, opts.workspaceID, prNum)
+	if err != nil {
+		s.logger.Warn("PR-number task lookup failed", zap.Int("pr_number", prNum), zap.Error(err))
+		return tasks, total
+	}
+
+	matched := s.fetchPRMatchedTasks(ctx, ids, tasks, opts)
+	if len(matched) == 0 {
+		return tasks, total
+	}
+
+	merged := make([]*models.Task, 0, len(matched)+len(tasks))
+	merged = append(merged, matched...)
+	merged = append(merged, tasks...)
+	total += len(matched)
+	if len(merged) > opts.pageSize {
+		merged = merged[:opts.pageSize]
+	}
+	return merged, total
+}
+
+// fetchPRMatchedTasks batch-loads the resolver's task IDs that aren't already in
+// `existing`, applies the same visibility filters as the repository search, and
+// returns the survivors in resolver order. The resolver returns distinct IDs,
+// so excluding the already-present ones is enough to keep the result deduped.
+func (s *Service) fetchPRMatchedTasks(ctx context.Context, ids []string, existing []*models.Task, opts prSearchOptions) []*models.Task {
+	seen := make(map[string]struct{}, len(existing))
+	for _, t := range existing {
+		seen[t.ID] = struct{}{}
+	}
+	var fetchIDs []string
+	for _, id := range ids {
+		if _, ok := seen[id]; !ok {
+			fetchIDs = append(fetchIDs, id)
+		}
+	}
+	if len(fetchIDs) == 0 {
+		return nil
+	}
+	fetched, err := s.tasks.GetTasksByIDs(ctx, fetchIDs)
+	if err != nil {
+		s.logger.Warn("PR-match task fetch failed", zap.Error(err))
+		return nil
+	}
+	byID := make(map[string]*models.Task, len(fetched))
+	for _, t := range fetched {
+		byID[t.ID] = t
+	}
+	var matched []*models.Task
+	for _, id := range fetchIDs {
+		task := byID[id]
+		if task == nil || s.prMatchFilteredOut(task, opts) {
+			continue
+		}
+		matched = append(matched, task)
+	}
+	return matched
+}
+
+// prMatchFilteredOut applies the same visibility filters the repository search
+// uses, so a PR-matched task respects includeArchived / ephemeral / config flags.
+func (s *Service) prMatchFilteredOut(task *models.Task, opts prSearchOptions) bool {
+	if !opts.includeArchived && task.ArchivedAt != nil {
+		return true
+	}
+	if opts.onlyEphemeral && !task.IsEphemeral {
+		return true
+	}
+	if !opts.includeEphemeral && !opts.onlyEphemeral && task.IsEphemeral {
+		return true
+	}
+	if opts.excludeConfig && isConfigTask(task) {
+		return true
+	}
+	return false
 }
 
 // loadTaskRepositoriesBatch loads repositories for multiple tasks in a single query.

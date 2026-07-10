@@ -1,35 +1,64 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import type { DockviewApi, DockviewReadyEvent, AddPanelOptions } from "dockview-react";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
-import { useDockviewStore } from "@/lib/state/dockview-store";
+import { releaseLayoutToDefault, useDockviewStore } from "@/lib/state/dockview-store";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
+import {
+  CENTER_GROUP,
+  isCenterCandidateGroupId,
+  RIGHT_TOP_GROUP,
+} from "@/lib/state/layout-manager";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import type { TaskSession } from "@/lib/types/http";
+import type { TaskPR } from "@/lib/types/github";
+import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { prTaskKey } from "@/components/github/pr-detail-panel";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
 /**
- * Sync `activeSessionId` in the store when the user clicks a session tab.
- * Layouts are env-keyed, so switching between sessions of the same task is
- * a no-op at the layout level — the env switch action short-circuits when
- * old==new env. No manual skip flag needed.
+ * Decide whether `onDidActivePanelChange` should write `setActiveSession`.
+ *
+ * The activated session must belong to the currently-active task. During a
+ * task switch dockview can briefly fire activation for a stale `session:<sid>`
+ * panel that still belongs to the previous task (panels are torn down async).
+ * Writing it would poison `lastSessionByTaskId[newTaskId]` with a session from
+ * a different task, which the next task-re-entry then prefers over the
+ * primary session, restoring the wrong layout.
+ *
+ * Two ownership gates:
+ * 1. Reject when the session is hydrated and known to belong to a different
+ *    task (the primary leak path).
+ * 2. Reject when the session has no `environmentIdBySessionId` entry. The
+ *    session slice clears `taskSessions.items[sid]` and
+ *    `environmentIdBySessionId[sid]` together on `removeTaskSession`, so a
+ *    missing env mapping means the session has been deleted or never existed.
+ *    Writing `activeSessionId = sid` in that window briefly points every
+ *    activeSessionId-consumer (chat / file editor / shell / pr-detail / ...)
+ *    at a dead session.
  */
-export function setupSessionTabSync(api: DockviewReadyEvent["api"], appStore: StoreApi<AppState>) {
-  return api.onDidActivePanelChange((panel) => {
-    if (!panel) return;
-    if (useDockviewStore.getState().isRestoringLayout) return;
-    if (!panel.id.startsWith("session:")) return;
-    const sid = panel.id.slice("session:".length);
-    if (sid && sid !== appStore.getState().tasks.activeSessionId) {
-      const taskId = appStore.getState().tasks.activeTaskId;
-      if (taskId) {
-        appStore.getState().setActiveSession(taskId, sid);
-      }
-    }
-  });
+export function resolveSessionTabSyncTarget(args: {
+  panelId: string;
+  activeTaskId: string | null;
+  activeSessionId: string | null;
+  taskSessionsById: Record<string, TaskSession>;
+  environmentIdBySessionId: Record<string, string>;
+}): { taskId: string; sessionId: string } | null {
+  const { panelId, activeTaskId, activeSessionId, taskSessionsById, environmentIdBySessionId } =
+    args;
+  if (!panelId.startsWith("session:")) return null;
+  const sid = panelId.slice("session:".length);
+  if (!sid) return null;
+  if (sid === activeSessionId) return null;
+  if (!activeTaskId) return null;
+  if (!environmentIdBySessionId[sid]) return null;
+  const sessionTaskId = taskSessionsById[sid]?.task_id;
+  if (sessionTaskId && sessionTaskId !== activeTaskId) return null;
+  return { taskId: activeTaskId, sessionId: sid };
 }
 
 /**
@@ -47,6 +76,12 @@ export function setupChatPanelSafetyNet(
     if (useDockviewStore.getState().isRestoringLayout) return;
     const isChatPanel = panel.id === "chat" || panel.id.startsWith("session:");
     if (!isChatPanel) return;
+    if (isDebug()) {
+      debug("setupChatPanelSafetyNet: chat panel removed", {
+        removedPanelId: panel.id,
+        livePanelIds: api.panels.map((p) => p.id),
+      });
+    }
     // Double rAF gives dockview time to finish internal operations like
     // drag-to-split moves (remove from old group → add to new group).
     requestAnimationFrame(() => {
@@ -55,21 +90,37 @@ export function setupChatPanelSafetyNet(
         const hasChatPanel = api.panels.some((p) => p.id === "chat" || p.id.startsWith("session:"));
         if (hasChatPanel) return;
         const activeSessionId = appStore.getState().tasks.activeSessionId;
-        const sb = api.getPanel("sidebar");
-        const position = sb
-          ? { direction: "right" as const, referencePanel: "sidebar" }
-          : undefined;
+        const position = undefined;
         // Only recreate a panel if there's still an active session.
         // If all sessions were deleted, leave the layout empty — the user
         // can create a new session via the "+" menu.
-        if (!activeSessionId) return;
+        if (!activeSessionId) {
+          if (isDebug()) debug("setupChatPanelSafetyNet: skip recreate (no active session)");
+          return;
+        }
         // Don't recreate a panel for a session that no longer exists in the
         // store — this guards against handleDelete racing with the safety net.
         const activeTaskId = appStore.getState().tasks.activeTaskId;
         const knownSessions = activeTaskId
           ? (appStore.getState().taskSessionsByTask.itemsByTaskId[activeTaskId] ?? [])
           : [];
-        if (!knownSessions.some((s) => s.id === activeSessionId)) return;
+        if (!knownSessions.some((s) => s.id === activeSessionId)) {
+          if (isDebug()) {
+            debug("setupChatPanelSafetyNet: skip recreate (session not in store)", {
+              activeSessionId,
+              activeTaskId,
+              knownSessionIds: knownSessions.map((s) => s.id),
+            });
+          }
+          return;
+        }
+        if (isDebug()) {
+          debug("setupChatPanelSafetyNet: recreating session panel", {
+            activeSessionId,
+            activeTaskId,
+            anchor: "auto",
+          });
+        }
         api.addPanel({
           id: `session:${activeSessionId}`,
           component: "chat",
@@ -79,7 +130,11 @@ export function setupChatPanelSafetyNet(
           position,
         });
         const nc = api.getPanel(`session:${activeSessionId}`);
-        if (nc) useDockviewStore.setState({ centerGroupId: nc.group.id });
+        if (nc) {
+          useDockviewStore.setState({
+            centerGroupId: isCenterCandidateGroupId(nc.group.id) ? nc.group.id : CENTER_GROUP,
+          });
+        }
       });
     });
   });
@@ -120,8 +175,108 @@ export function resolvePRPanelTargetGroup(
   centerGroupId: string,
 ): string {
   const sessionPanel = api.getPanel(`session:${sessionId}`);
-  const resolved = sessionPanel?.group?.id ?? centerGroupId;
-  return resolved;
+  const sessionGroupId = sessionPanel?.group?.id;
+  if (sessionGroupId && isCenterCandidateGroupId(sessionGroupId)) return sessionGroupId;
+  return isCenterCandidateGroupId(centerGroupId) ? centerGroupId : CENTER_GROUP;
+}
+
+/**
+ * Derive the auto-PR-panel decision inputs from one task's live PR list.
+ *
+ * @param taskPRs - The task's associated PRs, in creation order; `undefined`
+ *   when the task has none loaded.
+ * @returns `hasPR` — whether the task has any linked PR; `defaultPRKey` —
+ *   the key of the primary/first PR (matches `PRDetailPanelComponent`'s
+ *   fallback when no explicit `prKey` param is set), or `undefined` when
+ *   there's no PR.
+ */
+function resolveAutoPRPanelState(taskPRs: TaskPR[] | undefined): {
+  hasPR: boolean;
+  defaultPRKey: string | undefined;
+} {
+  const primary = getPrimaryTaskPR(taskPRs);
+  return {
+    hasPR: !!taskPRs && taskPRs.length > 0,
+    defaultPRKey: primary ? prTaskKey(primary) : undefined,
+  };
+}
+
+/**
+ * Pure effect logic for `useAutoPRPanel`: decides whether to add, remove,
+ * or leave alone the auto-shown PR detail panel, and mutates the given
+ * dockview `api` accordingly. Extracted for unit testing.
+ *
+ * @param api - The live dockview API to add/remove/update panels on.
+ * @param sessionId - The active session, used for the offered/dismissed
+ *   sessionStorage flag and to resolve the panel's target group.
+ * @param params.hasPR - Whether the active task has any linked PR.
+ * @param params.defaultPRKey - Key of the PR the legacy unkeyed
+ *   "pr-detail" panel should render (and stay resynced to).
+ * @param params.isRestoringLayout - Suppresses auto-add while a saved
+ *   layout is being restored.
+ * @param params.isMaximized - Suppresses auto-add while a group is
+ *   maximized.
+ * @param params.centerGroupId - Fallback group when no live session panel
+ *   can anchor the new PR panel.
+ */
+export function runAutoPRPanelEffect(
+  api: DockviewApi,
+  sessionId: string,
+  params: {
+    hasPR: boolean;
+    /** Key of the PR the legacy unkeyed "pr-detail" panel should render. */
+    defaultPRKey: string | undefined;
+    isRestoringLayout: boolean;
+    isMaximized: boolean;
+    centerGroupId: string;
+  },
+): void {
+  const decision = shouldAutoAddPRPanel({
+    hasPR: params.hasPR,
+    panelExists: !!api.getPanel("pr-detail"),
+    isRestoringLayout: params.isRestoringLayout,
+    isMaximized: params.isMaximized,
+    wasOffered: wasPRPanelOffered(sessionId),
+  });
+  if (decision === "remove") {
+    api.getPanel("pr-detail")?.api.close();
+    return;
+  }
+
+  if (decision === "add") {
+    const targetGroupId = resolvePRPanelTargetGroup(api, sessionId, params.centerGroupId);
+    focusOrAddPanel(api, {
+      id: "pr-detail",
+      component: "pr-detail",
+      title: "Pull Request",
+      position: { referenceGroup: targetGroupId },
+      inactive: true,
+      // Stamp the panel's params so addPRPanel can tell a matching menu
+      // click (reuse this tab) apart from a different PR's click (open a
+      // new tab) — see addPRPanel in dockview-panel-actions.ts.
+      params: params.defaultPRKey ? { prKey: params.defaultPRKey } : undefined,
+    });
+    markPRPanelOffered(sessionId);
+    return;
+  }
+
+  // "none" — panel already present or conditions not met.
+  // Mark as offered if the panel exists (e.g. restored from saved layout).
+  const legacy = api.getPanel("pr-detail");
+  if (params.hasPR && legacy) {
+    markPRPanelOffered(sessionId);
+    // Keep the legacy tab's stamped key in sync with the CURRENT default PR.
+    // Nothing else ever writes a different key onto this specific panel — a
+    // manual "+" menu pick of a different PR always creates its own keyed
+    // `pr-detail|<key>` tab instead (see addPRPanel in
+    // dockview-panel-actions.ts) — so unconditionally resyncing here is safe
+    // and fixes staleness both when the primary PR changes for this task and
+    // when this panel is reused across a task switch (see Greptile/cubic
+    // review on PR #1636).
+    if (params.defaultPRKey && legacy.params?.prKey !== params.defaultPRKey) {
+      legacy.api.updateParameters({ prKey: params.defaultPRKey });
+    }
+  }
 }
 
 /**
@@ -137,9 +292,16 @@ export function useAutoPRPanel() {
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const hasPR = useAppStore((s) => {
     const tid = s.tasks.activeTaskId;
-    return tid ? (s.taskPRs.byTaskId[tid]?.length ?? 0) > 0 : false;
+    return resolveAutoPRPanelState(tid ? s.taskPRs.byTaskId[tid] : undefined).hasPR;
+  });
+  // Key of the PR the legacy unkeyed "pr-detail" panel renders — mirrors
+  // PRDetailPanelComponent's fallback of the primary/first TaskPR.
+  const defaultPRKey = useAppStore((s) => {
+    const tid = s.tasks.activeTaskId;
+    return resolveAutoPRPanelState(tid ? s.taskPRs.byTaskId[tid] : undefined).defaultPRKey;
   });
   const hasApi = useDockviewStore((s) => !!s.api);
+  const appStore = useAppStoreApi();
 
   useEffect(() => {
     if (!taskId || !hasApi || !sessionId) return;
@@ -149,52 +311,79 @@ export function useAutoPRPanel() {
         const api = useDockviewStore.getState().api;
         if (!api) return;
 
-        const decisionParams = {
-          hasPR,
-          panelExists: !!api.getPanel("pr-detail"),
+        // Re-read live task/session/PR state before mutating dockview — a
+        // task or session switch during this two-frame delay must not stamp
+        // the panel with a stale task's PR key (cubic-dev-ai review on PR
+        // #1636). If the active task/session moved on, bail: the effect
+        // instance already scheduled for the new task/session (its deps
+        // changed) will handle it correctly.
+        const liveTasks = appStore.getState().tasks;
+        if (liveTasks.activeTaskId !== taskId || liveTasks.activeSessionId !== sessionId) return;
+        const live = resolveAutoPRPanelState(appStore.getState().taskPRs.byTaskId[taskId]);
+
+        runAutoPRPanelEffect(api, sessionId, {
+          hasPR: live.hasPR,
+          defaultPRKey: live.defaultPRKey,
           isRestoringLayout: useDockviewStore.getState().isRestoringLayout,
           isMaximized: useDockviewStore.getState().preMaximizeLayout !== null,
-          wasOffered: wasPRPanelOffered(sessionId),
-        };
-        const decision = shouldAutoAddPRPanel(decisionParams);
-        if (decision === "remove") {
-          api.getPanel("pr-detail")?.api.close();
-          return;
-        }
-
-        if (decision === "add") {
-          const targetGroupId = resolvePRPanelTargetGroup(
-            api,
-            sessionId,
-            useDockviewStore.getState().centerGroupId,
-          );
-          focusOrAddPanel(api, {
-            id: "pr-detail",
-            component: "pr-detail",
-            title: "Pull Request",
-            position: { referenceGroup: targetGroupId },
-            inactive: true,
-          });
-          markPRPanelOffered(sessionId);
-          return;
-        }
-
-        // "none" — panel already present or conditions not met.
-        // Mark as offered if the panel exists (e.g. restored from saved layout).
-        if (hasPR && api.getPanel("pr-detail")) {
-          markPRPanelOffered(sessionId);
-        }
+          centerGroupId: useDockviewStore.getState().centerGroupId,
+        });
       });
     });
-  }, [taskId, hasPR, hasApi, sessionId]);
+  }, [taskId, hasPR, hasApi, sessionId, defaultPRKey, appStore]);
 }
 
-function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
+/**
+ * Panels that are added co-tabbed with a session panel (see `useAutoPRPanel`).
+ * When a saved layout's session was stripped (phantom-session sanitize on
+ * page load, or stale removal during env switch), these siblings end up alone
+ * in a group with no session. Prefer joining that group when adding the new
+ * active session — without this fallback we'd add the session as a fresh
+ * split next to the sidebar, breaking the user's grouping.
+ *
+ * Each entry matches either the bare id (e.g. `pr-detail`) or a keyed
+ * variant `<id>|<key>` (multi-repo PR panels use `pr-detail|owner/repo/N`,
+ * see `addPRPanel` in dockview-panel-actions.ts).
+ */
+const SESSION_ANCHOR_PANEL_IDS = ["pr-detail"];
+
+export function findSessionAnchorGroupId(api: DockviewApi): string | null {
+  for (const id of SESSION_ANCHOR_PANEL_IDS) {
+    const exact = api.getPanel(id);
+    if (exact) return exact.group.id;
+    const keyedPrefix = `${id}|`;
+    const keyed = api.panels.find((p) => p.id.startsWith(keyedPrefix));
+    if (keyed) return keyed.group.id;
+  }
+  return null;
+}
+
+export function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
+  // Prefer the live "chat" placeholder's group. The session panel must be added
+  // INTO that group (so it's a tab beside chat) BEFORE chat is removed —
+  // otherwise removing chat empties and destroys the center group, the stored
+  // centerGroupId goes stale, and the session panel gets appended as a new row,
+  // collapsing the horizontal default layout into a vertical stack.
+  const chatGroupId = api.getPanel("chat")?.group?.id;
+  if (chatGroupId && isCenterCandidateGroupId(chatGroupId)) return { referenceGroup: chatGroupId };
   const { centerGroupId } = useDockviewStore.getState();
-  const centerGroupExists = centerGroupId && api.groups.some((g) => g.id === centerGroupId);
+  const centerGroupExists =
+    centerGroupId &&
+    isCenterCandidateGroupId(centerGroupId) &&
+    api.groups.some((g) => g.id === centerGroupId);
   if (centerGroupExists) return { referenceGroup: centerGroupId };
-  const sb = api.getPanel("sidebar");
-  if (sb) return { direction: "right" as const, referencePanel: "sidebar" };
+  const anchorGroupId = findSessionAnchorGroupId(api);
+  // index:0 matches the project's session-on-the-left convention (agent tab
+  // first, pr-detail/etc. to the right). Worth noting: if a user had
+  // rearranged a previous layout to put pr-detail first, that ordering is
+  // lost here — but the alternative (appending) would put the agent tab
+  // to the right of pr-detail, which contradicts the default placement
+  // every other code path produces. Pick the consistent default.
+  if (anchorGroupId && isCenterCandidateGroupId(anchorGroupId)) {
+    return { referenceGroup: anchorGroupId, index: 0 };
+  }
+  const rightTopExists = api.groups.some((g) => g.id === RIGHT_TOP_GROUP);
+  if (rightTopExists) return { referenceGroup: RIGHT_TOP_GROUP, direction: "left" };
   return undefined;
 }
 
@@ -254,7 +443,7 @@ export function reconcileRemovedSessionPanels(
     }
     createdSet.delete(sid);
   }
-  if (IS_DEBUG) {
+  if (isDebug()) {
     const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
     debug("reconcileRemovedSessionPanels", {
       keepSessionId,
@@ -276,20 +465,55 @@ export function reconcileRemovedSessionPanels(
 const EMPTY_SESSION_IDS_KEY = "";
 
 /**
- * Drop the generic "chat" placeholder once a real session is active.
- * Skips removal in maximized state to preserve the saved maximize layout.
- * Returns true when callers should continue ensuring session panels;
- * false when the maximized state intentionally suppresses them.
+ * Whether the layout is maximized — session panels are intentionally absent
+ * then (restored on exit-maximize). Returns true when callers should continue
+ * ensuring panels, false to skip.
  */
-function prepareLayoutForSessionPanels(api: DockviewApi): boolean {
-  const preMaximizeLayout = useDockviewStore.getState().preMaximizeLayout;
+function shouldEnsureSessionPanels(): boolean {
+  return useDockviewStore.getState().preMaximizeLayout === null;
+}
+
+/**
+ * Drop the generic "chat" placeholder once a real session panel exists.
+ *
+ * MUST run AFTER the session panel has been added to chat's group — removing
+ * chat while it's the only panel in the center group destroys that group and
+ * collapses the horizontal default layout into a vertical stack.
+ */
+function removeChatPlaceholder(api: DockviewApi): void {
+  if (useDockviewStore.getState().preMaximizeLayout) return;
   const chatPanel = api.getPanel("chat");
-  if (chatPanel && !preMaximizeLayout) {
-    api.removePanel(chatPanel);
+  if (chatPanel) api.removePanel(chatPanel);
+}
+
+/**
+ * Keep agent/session tabs before contextual siblings in their tab group.
+ *
+ * Dockview restores saved tab order verbatim. If a task previously saved
+ * `pr-detail` before `session:<id>`, the restored agent panel already exists,
+ * so `resolveInitialPosition(... index: 0)` never runs. Move session siblings
+ * as a stable block so multi-session ordering remains stable.
+ */
+export function ensureSessionTabPrecedesNonSessionTabs(api: DockviewApi, sessionId: string): void {
+  const panel = api.getPanel(`session:${sessionId}`);
+  const groupPanels = panel?.group?.panels;
+  if (!panel || !groupPanels) return;
+
+  const firstNonSessionIndex = groupPanels.findIndex((p) => !p.id.startsWith("session:"));
+  if (firstNonSessionIndex === -1) return;
+
+  const sessionPanelsToMove = groupPanels
+    .slice(firstNonSessionIndex + 1)
+    .filter((groupPanel) => groupPanel.id.startsWith("session:"));
+
+  for (const sessionPanel of sessionPanelsToMove.reverse()) {
+    sessionPanel.api.moveTo({
+      group: panel.group,
+      position: "center",
+      index: firstNonSessionIndex,
+      skipSetActive: true,
+    });
   }
-  // In maximized state, session panels are intentionally absent from the
-  // layout — they'll be restored when the user exits maximize.
-  return preMaximizeLayout === null;
 }
 
 /**
@@ -298,33 +522,310 @@ function prepareLayoutForSessionPanels(api: DockviewApi): boolean {
  *
  * - It was just created by `ensureSessionPanel` (no prior dockview state
  *   to honor), or
- * - The hook is mounting for the first time (initial page load) — preserve
- *   the long-standing behavior of focusing the agent tab so the chat is
- *   visible immediately, even when a saved layout had a different center
- *   tab active, or
+ * - The hook is mounting for the first time (initial page load) AND
+ *   dockview did not restore a different active panel from the saved
+ *   layout — fall back to focusing the agent tab so chat is visible, or
  * - The user switched sessions within the same task (intra-task switch
  *   where dockview hasn't re-activated the new session for us).
  *
  * After an env (task) switch the prev refs are populated and the task
- * changed — `restoreSavedActiveViews` has already applied the saved active
- * panel for the incoming task, so calling setActive here would override it
- * and force the agent tab on top of whatever the user had focused.
+ * changed — the saved layout's active panel has already been restored for
+ * the incoming task, so calling setActive here would override it and force
+ * the agent tab on top of whatever the user had focused.
+ *
+ * On first mount when the session panel was already in the restored layout,
+ * respect dockview's restored active panel (e.g. a file diff the user had
+ * focused before refresh) instead of forcing the agent tab on top.
  */
-function shouldActivateSessionPanel(args: {
+export function shouldActivateSessionPanel(args: {
   sessionPanelExistedBefore: boolean;
   prevTaskId: string | null;
   prevSessionId: string | null;
   currentTaskId: string | null;
   currentSessionId: string;
+  currentActivePanelId: string | null;
 }): boolean {
-  const { sessionPanelExistedBefore, prevTaskId, prevSessionId, currentTaskId, currentSessionId } =
-    args;
+  const {
+    sessionPanelExistedBefore,
+    prevTaskId,
+    prevSessionId,
+    currentTaskId,
+    currentSessionId,
+    currentActivePanelId,
+  } = args;
   if (!sessionPanelExistedBefore) return true;
   const isFirstMount = prevTaskId === null && prevSessionId === null;
-  if (isFirstMount) return true;
+  if (isFirstMount) {
+    const sessionPanelId = `session:${currentSessionId}`;
+    if (!currentActivePanelId || currentActivePanelId === sessionPanelId) return true;
+    return false;
+  }
   const taskChanged = prevTaskId !== currentTaskId;
   const sessionChanged = prevSessionId !== currentSessionId;
   return sessionChanged && !taskChanged;
+}
+
+type AutoSessionTabRefs = {
+  sessionTabCreatedRef: MutableRefObject<Set<string>>;
+  prevTaskIdRef: MutableRefObject<string | null>;
+  prevSessionIdRef: MutableRefObject<string | null>;
+};
+
+/**
+ * Activate the newly-ensured session panel and update the center-group store
+ * entry. Returns the resolved active panel for sibling anchoring.
+ */
+function activateSessionPanel(
+  api: DockviewApi,
+  effectiveSessionId: string,
+  sessionPanelExistedBefore: boolean,
+  refs: AutoSessionTabRefs,
+  tid: string | null,
+): ReturnType<DockviewApi["getPanel"]> {
+  const activePanel = api.getPanel(`session:${effectiveSessionId}`);
+  if (!activePanel) return activePanel;
+
+  const currentActivePanelId = api.activePanel?.id ?? null;
+  const shouldActivate = shouldActivateSessionPanel({
+    sessionPanelExistedBefore,
+    prevTaskId: refs.prevTaskIdRef.current,
+    prevSessionId: refs.prevSessionIdRef.current,
+    currentTaskId: tid,
+    currentSessionId: effectiveSessionId,
+    currentActivePanelId,
+  });
+  if (isDebug()) {
+    debug("useAutoSessionTab: activation decision", {
+      effectiveSessionId,
+      shouldActivate,
+      sessionPanelExistedBefore,
+      prevTaskId: refs.prevTaskIdRef.current,
+      prevSessionId: refs.prevSessionIdRef.current,
+      currentTaskId: tid,
+      currentActivePanelId,
+      activeGroupId: activePanel.group.id,
+    });
+  }
+  if (shouldActivate) activePanel.api.setActive();
+  useDockviewStore.setState({
+    centerGroupId: isCenterCandidateGroupId(activePanel.group.id)
+      ? activePanel.group.id
+      : CENTER_GROUP,
+  });
+  return activePanel;
+}
+
+/**
+ * Add sibling session panels (inactive) into the same group as the active
+ * panel so they appear as tabs. Returns the list of newly-created sibling IDs
+ * for debug logging.
+ */
+function ensureSiblingPanels(
+  api: DockviewApi,
+  currentSessionIds: string[],
+  effectiveSessionId: string,
+  siblingAnchor: AddPanelOptions["position"],
+  createdSet: Set<string>,
+): string[] {
+  const created: string[] = [];
+  for (const sid of currentSessionIds) {
+    if (sid === effectiveSessionId) continue;
+    if (isDebug() && !api.getPanel(`session:${sid}`)) created.push(sid);
+    ensureSessionPanel(api, sid, siblingAnchor, true, createdSet);
+  }
+  return created;
+}
+
+/** Resolve the current session ID list from the store for the active task. */
+function resolveCurrentSessionIds(appStore: ReturnType<typeof useAppStoreApi>): {
+  tid: string | null;
+  currentSessionIds: string[];
+} {
+  const tid = appStore.getState().tasks.activeTaskId;
+  const currentSessions = tid
+    ? (appStore.getState().taskSessionsByTask.itemsByTaskId[tid] ?? [])
+    : [];
+  return { tid: tid ?? null, currentSessionIds: currentSessions.map((s) => s.id) };
+}
+
+/**
+ * Check early-exit conditions after reconciliation. Returns true when the
+ * caller should bail out before ensuring panels.
+ */
+function shouldSkipPanelEnsure(
+  api: DockviewApi,
+  effectiveSessionId: string,
+  currentSessionIds: string[],
+  createdSet: Set<string>,
+): boolean {
+  if (!currentSessionIds.includes(toSessionId(effectiveSessionId))) {
+    if (isDebug()) {
+      debug("useAutoSessionTab: skip (session not in store yet)", {
+        effectiveSessionId,
+        currentSessionIds,
+      });
+    }
+    return true;
+  }
+  if (!shouldEnsureSessionPanels()) {
+    if (isDebug())
+      debug("useAutoSessionTab: skip body (maximized - panels suppressed)", { effectiveSessionId });
+    createdSet.add(effectiveSessionId);
+    return true;
+  }
+  return false;
+}
+
+export function shouldRebuildDefaultForPendingSession(
+  api: DockviewApi,
+  effectiveSessionId: string | null,
+  currentSessionIds: string[],
+): boolean {
+  if (!effectiveSessionId) return false;
+  if (currentSessionIds.includes(toSessionId(effectiveSessionId))) return false;
+  if (api.getPanel("chat")) return false;
+  return true;
+}
+
+function logAutoSessionTabEffectEntry(
+  api: DockviewApi,
+  effectiveSessionId: string | null,
+  tid: string | null,
+  currentSessionIds: string[],
+  refs: AutoSessionTabRefs,
+): void {
+  if (!isDebug()) return;
+  debug("useAutoSessionTab: effect entry", {
+    effectiveSessionId,
+    activeTaskId: tid,
+    prevTaskId: refs.prevTaskIdRef.current,
+    prevSessionId: refs.prevSessionIdRef.current,
+    currentSessionIds,
+    livePanelIdsBefore: api.panels.map((p) => p.id),
+    createdSet: Array.from(refs.sessionTabCreatedRef.current),
+  });
+}
+
+function updateAutoSessionTabRefs(
+  refs: AutoSessionTabRefs,
+  tid: string | null,
+  effectiveSessionId: string | null,
+): void {
+  refs.prevTaskIdRef.current = tid;
+  refs.prevSessionIdRef.current = effectiveSessionId;
+}
+
+/**
+ * Core effect body for useAutoSessionTab — extracted to reduce complexity of
+ * the hook itself.
+ */
+export function runAutoSessionTabEffect(
+  effectiveSessionId: string | null,
+  appStore: ReturnType<typeof useAppStoreApi>,
+  refs: AutoSessionTabRefs,
+): void {
+  const api = useDockviewStore.getState().api;
+  if (!api) return;
+
+  const { tid, currentSessionIds } = resolveCurrentSessionIds(appStore);
+
+  logAutoSessionTabEffectEntry(api, effectiveSessionId, tid, currentSessionIds, refs);
+
+  if (shouldRebuildDefaultForPendingSession(api, effectiveSessionId, currentSessionIds)) {
+    if (isDebug()) {
+      debug("useAutoSessionTab: release default for pending session", {
+        effectiveSessionId,
+        currentSessionIds,
+        currentLayoutEnvId: useDockviewStore.getState().currentLayoutEnvId,
+        livePanelIds: api.panels.map((p) => p.id),
+      });
+    }
+    releaseLayoutToDefault(useDockviewStore.getState().currentLayoutEnvId);
+    updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
+    return;
+  }
+
+  reconcileRemovedSessionPanels(
+    api,
+    refs.sessionTabCreatedRef.current,
+    currentSessionIds,
+    effectiveSessionId ?? "",
+  );
+
+  if (!effectiveSessionId) {
+    if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");
+    updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
+    return;
+  }
+
+  if (
+    shouldSkipPanelEnsure(
+      api,
+      effectiveSessionId,
+      currentSessionIds,
+      refs.sessionTabCreatedRef.current,
+    )
+  ) {
+    updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
+    return;
+  }
+
+  const initialPosition = resolveInitialPosition(api);
+  const sessionPanelExistedBefore = !!api.getPanel(`session:${effectiveSessionId}`);
+
+  if (isDebug()) {
+    debug("useAutoSessionTab: ensuring active session panel", {
+      effectiveSessionId,
+      sessionPanelExistedBefore,
+      initialPosition: JSON.stringify(initialPosition),
+    });
+  }
+
+  ensureSessionPanel(
+    api,
+    effectiveSessionId,
+    initialPosition,
+    false,
+    refs.sessionTabCreatedRef.current,
+  );
+
+  // Now that the session panel occupies the center group, drop the generic
+  // "chat" placeholder. Order matters: removing chat first would empty and
+  // destroy the center group, collapsing the horizontal layout.
+  removeChatPlaceholder(api);
+  ensureSessionTabPrecedesNonSessionTabs(api, effectiveSessionId);
+
+  const activePanel = activateSessionPanel(
+    api,
+    effectiveSessionId,
+    sessionPanelExistedBefore,
+    refs,
+    tid,
+  );
+
+  const siblingAnchor: AddPanelOptions["position"] = activePanel
+    ? { referenceGroup: activePanel.group.id }
+    : initialPosition;
+
+  const siblingsCreated = ensureSiblingPanels(
+    api,
+    currentSessionIds,
+    effectiveSessionId,
+    siblingAnchor,
+    refs.sessionTabCreatedRef.current,
+  );
+
+  if (isDebug()) {
+    debug("useAutoSessionTab: effect exit", {
+      effectiveSessionId,
+      siblingsCreated,
+      livePanelIdsAfter: api.panels.map((p) => p.id),
+      activeGroupId: activePanel?.group.id ?? null,
+      liveActivePanelId: api.activePanel?.id ?? null,
+    });
+  }
+
+  updateAutoSessionTabRefs(refs, tid, effectiveSessionId);
 }
 
 /**
@@ -357,74 +858,10 @@ export function useAutoSessionTab(effectiveSessionId: string | null) {
   });
 
   useEffect(() => {
-    const api = useDockviewStore.getState().api;
-    if (!api) return;
-
-    // Re-read the current session list straight from the store so we iterate
-    // the live array (sessionIdsKey change is what gets us here).
-    const tid = appStore.getState().tasks.activeTaskId;
-    const currentSessions = tid
-      ? (appStore.getState().taskSessionsByTask.itemsByTaskId[tid] ?? [])
-      : [];
-    const currentSessionIds = currentSessions.map((s) => s.id);
-
-    // Always reconcile removed panels — even when effectiveSessionId is null
-    // (e.g. all sessions deleted) so orphaned tabs are closed.
-    reconcileRemovedSessionPanels(
-      api,
-      sessionTabCreatedRef.current,
-      currentSessionIds,
-      effectiveSessionId ?? "",
-    );
-
-    if (!effectiveSessionId) return;
-
-    // Don't create a panel for a session that no longer exists in the store —
-    // guards against a race where removeTaskSession fires before the active
-    // session is switched, which would cause the deleted session's panel to
-    // be re-created by ensureSessionPanel.
-    if (!currentSessionIds.includes(toSessionId(effectiveSessionId))) return;
-
-    if (!prepareLayoutForSessionPanels(api)) {
-      sessionTabCreatedRef.current.add(effectiveSessionId);
-      return;
-    }
-
-    const initialPosition = resolveInitialPosition(api);
-
-    // Active panel first so its group becomes the anchor for siblings.
-    const sessionPanelExistedBefore = !!api.getPanel(`session:${effectiveSessionId}`);
-    ensureSessionPanel(
-      api,
-      effectiveSessionId,
-      initialPosition,
-      false,
-      sessionTabCreatedRef.current,
-    );
-    const activePanel = api.getPanel(`session:${effectiveSessionId}`);
-    if (activePanel) {
-      const shouldActivate = shouldActivateSessionPanel({
-        sessionPanelExistedBefore,
-        prevTaskId: prevTaskIdRef.current,
-        prevSessionId: prevSessionIdRef.current,
-        currentTaskId: tid ?? null,
-        currentSessionId: effectiveSessionId,
-      });
-      if (shouldActivate) {
-        activePanel.api.setActive();
-      }
-      useDockviewStore.setState({ centerGroupId: activePanel.group.id });
-    }
-
-    const siblingAnchor: AddPanelOptions["position"] = activePanel
-      ? { referenceGroup: activePanel.group.id }
-      : initialPosition;
-
-    for (const sid of currentSessionIds) {
-      if (sid === effectiveSessionId) continue;
-      ensureSessionPanel(api, sid, siblingAnchor, true, sessionTabCreatedRef.current);
-    }
-    prevTaskIdRef.current = tid ?? null;
-    prevSessionIdRef.current = effectiveSessionId;
+    runAutoSessionTabEffect(effectiveSessionId, appStore, {
+      sessionTabCreatedRef,
+      prevTaskIdRef,
+      prevSessionIdRef,
+    });
   }, [effectiveSessionId, sessionIdsKey, appStore]);
 }

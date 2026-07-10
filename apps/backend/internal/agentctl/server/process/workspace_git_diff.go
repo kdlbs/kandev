@@ -7,12 +7,23 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
+
+// sha1HexPattern matches a full-length git SHA-1 (40 lowercase or
+// uppercase hex characters). Used inline at the few sinks that consume
+// `update.BaseCommit` so CodeQL's `go/command-injection` taint tracker
+// sees the allowlist barrier co-located with the subprocess call — the
+// taint flowed in through the merge-base/rev-parse call upstream whose
+// argument list contained a (sanitised) user-controlled branch ref, and
+// the analyser otherwise treats that command's output as still tainted.
+var sha1HexPattern = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 
 const (
 	// maxDiffFileSize is the maximum file size for which we generate diffs.
@@ -36,31 +47,54 @@ const (
 	diffSkipReasonBudgetExceeded = "budget_exceeded"
 )
 
-// enrichWithDiffData adds diff information (additions, deletions, diff content) to file info
-func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *types.GitStatusUpdate) {
+// enrichWithDiffData adds diff information (additions, deletions, diff content)
+// to file info. The prior status is threaded through so per-file diff data can
+// be carried forward when a git command times out — without it a single bad
+// poll would wipe the diffs panel for files that genuinely still have changes.
+//
+// Carry-forward runs once at the end, after every enrichment phase has had a
+// chance to populate fresh data. Running it inside enrichWithUnstagedDiff would
+// pre-fill fi.Diff for staged-only files, and enrichWithStagedDiff's
+// `if fileInfo.Diff == ""` guard would then skip the fresh staged diff fetch.
+func (wt *WorkspaceTracker) enrichWithDiffData(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
 	// Always diff against HEAD for unstaged/staged content so that files committed
 	// locally (but not yet pushed) show only their uncommitted changes rather than
 	// the entire file as new. The remote branch is only relevant for ahead/behind counts.
-	wt.enrichWithUnstagedDiff(ctx, update, "HEAD")
-	wt.enrichWithStagedDiff(ctx, update, "HEAD")
+	wt.enrichWithUnstagedDiff(ctx, update, "HEAD", prior)
+	wt.enrichWithStagedDiff(ctx, update, "HEAD", prior)
 	wt.enrichUntrackedFileDiffs(ctx, update)
+	carryForwardFileDiffs(update, prior)
 }
 
 // enrichWithBranchDiff computes the total additions/deletions for the entire branch
 // vs the merge-base, covering committed + staged + unstaged changes in one pass.
 // Untracked file line counts (already computed) are added on top.
 // The result is stored in BranchAdditions/BranchDeletions for the sidebar display.
-func (wt *WorkspaceTracker) enrichWithBranchDiff(ctx context.Context, update *types.GitStatusUpdate) {
+//
+// On numstat failure the totals are carried forward from prior when HEAD
+// hasn't moved, mirroring the per-command carry-forward used elsewhere in
+// getGitStatus to avoid a transient git timeout clearing the sidebar count.
+func (wt *WorkspaceTracker) enrichWithBranchDiff(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
 	if update.BaseCommit == "" {
 		return
 	}
 
+	// BaseCommit was produced by an earlier `git merge-base / rev-parse`
+	// call whose argument list contained a user-controlled branch ref —
+	// CodeQL's `go/command-injection` taint tracker treats the output of
+	// such a command as still tainted. Inline a SHA-shape allowlist check
+	// here so the sanitiser barrier sits in the same function as the
+	// downstream `wt.runGitOutput` call and the value flowing into the
+	// next `git` invocation is provably a hex SHA, not user input.
+	if !sha1HexPattern.MatchString(update.BaseCommit) {
+		return
+	}
+
 	// git diff --numstat <merge-base> covers committed + staged + unstaged changes.
-	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", update.BaseCommit)
-	numstatCmd.Dir = wt.workDir
-	numstatOut, err := numstatCmd.Output()
+	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", update.BaseCommit)
 	if err != nil {
-		wt.logger.Debug("enrichWithBranchDiff: numstat failed", zap.Error(err))
+		wt.logger.Debug("enrichWithBranchDiff: numstat failed, carrying forward", zap.Error(err))
+		carryBranchDiff(update, prior)
 		return
 	}
 
@@ -100,16 +134,110 @@ func totalDiffBytes(update *types.GitStatusUpdate) int64 {
 	return total
 }
 
+// carryBranchDiff copies prior.BranchAdditions/BranchDeletions onto update when
+// neither HEAD nor BaseCommit has moved. A new HEAD or a re-pointed merge-base
+// invalidates the cached totals — both are inputs to `git diff --numstat
+// <merge-base>`, so a change in either makes the prior count stale.
+func carryBranchDiff(update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
+		return
+	}
+	if prior.BaseCommit != update.BaseCommit {
+		return
+	}
+	update.BranchAdditions = prior.BranchAdditions
+	update.BranchDeletions = prior.BranchDeletions
+}
+
+// carryForwardFileDiffs copies per-file diff content, additions, deletions, and
+// skip reason from prior.Files into update.Files for files still present in
+// update.Files. Used when a `git diff --numstat` call (the gate that drives
+// per-file diff enrichment) fails: the porcelain status already reported which
+// files changed; we just can't compute fresh diffs this poll, so we keep the
+// last known diff data visible until the next successful poll. HEAD is
+// required to be unchanged so we don't show stale diffs after a reset/commit.
+func carryForwardFileDiffs(update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
+		return
+	}
+	for path, fi := range update.Files {
+		// A non-empty Diff means an earlier enrichment pass already populated
+		// this entry (e.g. unstaged numstat succeeded, then staged numstat
+		// failed). Leave the freshly-computed entry alone — only fill in
+		// completely-missing diff data.
+		if fi.Diff != "" {
+			continue
+		}
+		// A skip reason set this poll (budget_exceeded, too_large, binary)
+		// is an intentional decision to not surface diff content; restoring
+		// a prior diff would defeat that skip and could show stale content
+		// for a file that has since grown past the size or budget cap.
+		if fi.DiffSkipReason != "" {
+			continue
+		}
+		priorFi, ok := prior.Files[path]
+		if !ok || priorFi.Diff == "" {
+			continue
+		}
+		fi.Diff = priorFi.Diff
+		fi.DiffSkipReason = priorFi.DiffSkipReason
+		if fi.Additions == 0 {
+			fi.Additions = priorFi.Additions
+		}
+		if fi.Deletions == 0 {
+			fi.Deletions = priorFi.Deletions
+		}
+		update.Files[path] = fi
+	}
+}
+
+// carryForwardFileDiff fills fi.Diff/DiffSkipReason from prior for a single
+// file when HEAD matches and prior had diff content. Used when numstat
+// succeeded (so Additions/Deletions are fresh) but the per-file capDiffOutput
+// call returned empty — typically a 10s gitCommandTimeout on a large diff,
+// throttle starvation, or a broken pipe. Without this, a single slow file
+// would blank the diff content in the UI even though we have a usable cached
+// copy. Returns the (possibly updated) FileInfo so callers can re-store it.
+func carryForwardFileDiff(fi types.FileInfo, filePath string, update *types.GitStatusUpdate, prior types.GitStatusUpdate) types.FileInfo {
+	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
+		return fi
+	}
+	priorFi, ok := prior.Files[filePath]
+	if !ok || priorFi.Diff == "" {
+		return fi
+	}
+	fi.Diff = priorFi.Diff
+	fi.DiffSkipReason = priorFi.DiffSkipReason
+	return fi
+}
+
 // capDiffOutput runs a git diff command and returns at most maxDiffOutputSize bytes.
 // Returns the output string and whether it was truncated.
+//
+// Holds a git throttle slot for the full Start → Wait lifetime so streaming
+// diffs count against the same global cap as Output/CombinedOutput callers
+// — otherwise the throttle could be silently bypassed by switching to
+// pipe-based reads. Slot is acquired before Start; if Start fails we
+// release immediately, else release runs after Wait.
 func capDiffOutput(ctx context.Context, workDir string, args ...string) (string, bool) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(cctx, "git", args...)
 	cmd.Dir = workDir
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", false
 	}
+	release, err := subproc.Git().Acquire(cctx)
+	if err != nil {
+		_ = stdout.Close()
+		return "", false
+	}
+	// release() is idempotent (sync.Once inside the throttle), so a defer
+	// covers every return path — including ones added later between Start
+	// and the explicit end-of-function release.
+	defer release()
 	if err := cmd.Start(); err != nil {
 		_ = stdout.Close()
 		return "", false
@@ -153,13 +281,17 @@ func resolveNumstatPath(numstatPath string) string {
 }
 
 // enrichWithUnstagedDiff populates additions/deletions and diff content for files
-// with unstaged changes by comparing the worktree against baseRef.
-func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *types.GitStatusUpdate, baseRef string) {
-	numstatCmd := exec.CommandContext(ctx, "git", "diff", "--numstat", baseRef)
-	numstatCmd.Dir = wt.workDir
-	numstatOut, err := numstatCmd.Output()
+// with unstaged changes by comparing the worktree against baseRef. On numstat
+// failure the function returns early and leaves the carry-forward to
+// enrichWithDiffData — preventing a single git timeout from blanking the diffs
+// panel for files whose porcelain status still shows them as changed, while
+// keeping the staged phase free to populate fresh data for staged-only files.
+func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *types.GitStatusUpdate, baseRef string, prior types.GitStatusUpdate) {
+	numstatOut, err := wt.runGitOutput(ctx, "diff", "--numstat", baseRef)
 	if err != nil {
-		wt.logger.Debug("failed to get numstat", zap.Error(err))
+		// Carry-forward happens once at the end of enrichWithDiffData so the
+		// staged phase can still populate fresh diffs for staged-only files.
+		wt.logger.Debug("enrichWithUnstagedDiff: numstat failed", zap.Error(err))
 		return
 	}
 
@@ -205,6 +337,8 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *
 			if truncated {
 				fileInfo.DiffSkipReason = diffSkipReasonTruncated
 			}
+		} else {
+			fileInfo = carryForwardFileDiff(fileInfo, filePath, update, prior)
 		}
 
 		update.Files[filePath] = fileInfo
@@ -212,15 +346,18 @@ func (wt *WorkspaceTracker) enrichWithUnstagedDiff(ctx context.Context, update *
 }
 
 // enrichWithStagedDiff populates additions/deletions and diff content for staged files
-// that have no additional unstaged changes, using git diff --cached.
-func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *types.GitStatusUpdate, baseRef string) {
+// that have no additional unstaged changes, using git diff --cached. On --cached
+// numstat failure the function returns early; carry-forward happens once at the
+// end of enrichWithDiffData (same rationale as enrichWithUnstagedDiff).
+func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *types.GitStatusUpdate, baseRef string, prior types.GitStatusUpdate) {
 	// For staged files that don't have unstaged changes, we need to get the diff from the index.
 	// The first diff (git diff baseRef) shows worktree vs baseRef, but if a file is staged
 	// and has no additional unstaged changes, its diff won't appear there.
-	stagedCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--numstat", baseRef)
-	stagedCmd.Dir = wt.workDir
-	stagedOut, err := stagedCmd.Output()
+	stagedOut, err := wt.runGitOutput(ctx, "diff", "--cached", "--numstat", baseRef)
 	if err != nil {
+		// Carry-forward happens at the end of enrichWithDiffData; running it
+		// here would mask the unstaged phase's fresh data.
+		wt.logger.Debug("enrichWithStagedDiff: --cached numstat failed", zap.Error(err))
 		return
 	}
 
@@ -267,6 +404,8 @@ func (wt *WorkspaceTracker) enrichWithStagedDiff(ctx context.Context, update *ty
 				if truncated {
 					fileInfo.DiffSkipReason = diffSkipReasonTruncated
 				}
+			} else {
+				fileInfo = carryForwardFileDiff(fileInfo, filePath, update, prior)
 			}
 		}
 		update.Files[filePath] = fileInfo

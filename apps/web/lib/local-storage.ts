@@ -1,3 +1,5 @@
+import { setWalkthroughLastSeen } from "@/lib/walkthrough-notification-storage";
+
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 // Session Storage helpers (cleared when browser tab closes)
@@ -107,28 +109,14 @@ export function setKanbanPreviewState(state: Partial<KanbanPreviewState>): void 
   }
 }
 
-// Internal storage key for plan notifications (not exported - encapsulated)
 const PLAN_NOTIFICATION_KEY = "kandev.plan.lastSeenByTask";
 
-/**
- * Plan notification state - tracks when user last viewed each task's plan
- * Key is taskId, value is the plan's updated_at timestamp when last viewed
- */
 export type PlanNotificationState = Record<string, string | null>;
 
-/**
- * Get the plan notification state from localStorage
- * @returns Record of taskId -> last seen plan update timestamp
- */
 export function getPlanNotificationState(): PlanNotificationState {
   return getLocalStorage(PLAN_NOTIFICATION_KEY, {} as PlanNotificationState);
 }
 
-/**
- * Set the last seen timestamp for a specific task's plan
- * @param taskId - The task ID
- * @param timestamp - The plan's updated_at timestamp when viewed (or null to clear)
- */
 export function setPlanLastSeen(taskId: string, timestamp: string | null): void {
   const state = getPlanNotificationState();
   if (timestamp === null) {
@@ -139,11 +127,6 @@ export function setPlanLastSeen(taskId: string, timestamp: string | null): void 
   setLocalStorage(PLAN_NOTIFICATION_KEY, state);
 }
 
-/**
- * Get the last seen timestamp for a specific task's plan
- * @param taskId - The task ID
- * @returns The last seen timestamp, or null if never viewed
- */
 export function getPlanLastSeen(taskId: string): string | null {
   const state = getPlanNotificationState();
   return state[taskId] ?? null;
@@ -254,7 +237,15 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 // --- Dockview per-session layout (sessionStorage) ---
 // Dockview layout is keyed by `taskEnvironmentId` so sessions sharing a task
 // env reuse one layout (the env owns the workspace, terminals, files, etc.).
-const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout.";
+//
+// v2: bumped when the sidebar/right viewport-proportional caps shipped.
+// Layouts saved by older builds capture column widths that may exceed the
+// new initial-default caps; loading them would resurface the very behaviour
+// users complained about (sidebar "maxed out" by default after upgrade).
+// Bumping the prefix invalidates legacy saves so every env opens at the
+// preset defaults once, then resumes per-env persistence. Bumped to v3 to
+// discard layouts captured with the now-removed dockview sidebar column.
+const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout-v3.";
 
 /**
  * Get the saved dockview layout for a task environment.
@@ -281,8 +272,33 @@ export function setEnvLayout(envId: string, layout: object): void {
   }
 }
 
+// --- Dockview global left-sidebar width (localStorage) ---
+// The LEFT sidebar width is a single GLOBAL preference shared across every
+// task env (unlike the per-env layout above, which keys widths by envId).
+// Stores the user's raw, unclamped width — clamping to the current screen
+// happens at apply time. Written only by a genuine sash drag; read by every
+// layout build/restore/switch via getPinnedWidth.
+const DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY = "kandev.dockview.sidebar-width";
+
+export function getGlobalSidebarWidth(): number | null {
+  const v = getLocalStorage<number | null>(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY, null);
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
+}
+
+export function setGlobalSidebarWidth(width: number): void {
+  if (!Number.isFinite(width) || width <= 0) return;
+  setLocalStorage(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY, Math.round(width));
+}
+
+export function clearGlobalSidebarWidth(): void {
+  removeLocalStorage(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY);
+}
+
 // --- Dockview per-env maximize state (sessionStorage) ---
-const DOCKVIEW_ENV_MAXIMIZE_PREFIX = "kandev.dockview.env-maximize.";
+// v3: bumped in lockstep with DOCKVIEW_ENV_LAYOUT_PREFIX. The maximize blob
+// references the pre-maximize layout, which can carry the same oversized
+// widths as the env layout.
+const DOCKVIEW_ENV_MAXIMIZE_PREFIX = "kandev.dockview.env-maximize-v3.";
 
 export type EnvMaximizeState = {
   /** The pre-maximize (normal) layout to restore on exit-maximize. */
@@ -354,6 +370,50 @@ export function markPRPanelOffered(sessionId: string): void {
   }
 }
 
+// PR merged banner dismissal — per-task, survives reload + task switch within
+// the tab session, resets on tab close.
+const PR_MERGED_BANNER_DISMISSED_PREFIX = "kandev.pr-merged-banner-dismissed.";
+
+export function wasPRMergedBannerDismissed(taskId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markPRMergedBannerDismissed(taskId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`, "1");
+  } catch {
+    // Ignore write failures
+  }
+}
+
+// PR closed banner dismissal — same lifetime as the merged banner: per-task,
+// survives reload + task switch within the tab session, resets on tab close.
+const PR_CLOSED_BANNER_DISMISSED_PREFIX = "kandev.pr-closed-banner-dismissed.";
+
+export function wasPRClosedBannerDismissed(taskId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markPRClosedBannerDismissed(taskId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`, "1");
+  } catch {
+    // Ignore write failures
+  }
+}
+
 // Internal storage keys for open file tabs
 const OPEN_FILES_KEY = "kandev.openFiles";
 const ACTIVE_TAB_KEY = "kandev.activeTab";
@@ -366,6 +426,9 @@ const ACTIVE_TAB_KEY = "kandev.activeTab";
 export interface StoredFileTab {
   path: string;
   name: string;
+  /** Multi-repo subpath (repository_name) so a restored tab re-fetches its
+   *  content under the right repository after a refresh. */
+  repo?: string;
   markdownPreview?: boolean;
   pinned?: boolean;
 }
@@ -465,6 +528,7 @@ type StoredFileAttachment = {
   fileName: string;
   size: number;
   isImage: boolean;
+  deliveryMode?: "prompt" | "path";
 };
 
 export function getChatDraftText(sessionId: string): string {
@@ -499,6 +563,13 @@ export function getChatDraftAttachments(sessionId: string): StoredFileAttachment
   );
 }
 
+function normalizeAttachmentDeliveryMode(
+  value: unknown,
+  fallback: "prompt" | "path",
+): "prompt" | "path" {
+  return value === "prompt" || value === "path" ? value : fallback;
+}
+
 export function setChatDraftAttachments(
   sessionId: string,
   attachments: Array<{
@@ -508,6 +579,7 @@ export function setChatDraftAttachments(
     fileName: string;
     size: number;
     isImage: boolean;
+    deliveryMode?: "prompt" | "path";
     preview?: string;
   }>,
 ): void {
@@ -516,13 +588,14 @@ export function setChatDraftAttachments(
   } else {
     // Strip `preview` to halve storage cost — reconstructed on load for images
     const stored: StoredFileAttachment[] = attachments.map(
-      ({ id, data, mimeType, fileName, size, isImage }) => ({
+      ({ id, data, mimeType, fileName, size, isImage, deliveryMode }) => ({
         id,
         data,
         mimeType,
         fileName,
         size,
         isImage,
+        deliveryMode,
       }),
     );
     setSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`, stored);
@@ -534,11 +607,15 @@ export function setChatDraftAttachments(
  */
 export function restoreAttachmentPreview(
   att: StoredFileAttachment,
-): StoredFileAttachment & { preview?: string } {
+): StoredFileAttachment & { deliveryMode: "prompt" | "path"; preview?: string } {
   if (att.isImage) {
-    return { ...att, preview: `data:${att.mimeType};base64,${att.data}` };
+    return {
+      ...att,
+      deliveryMode: normalizeAttachmentDeliveryMode(att.deliveryMode, "prompt"),
+      preview: `data:${att.mimeType};base64,${att.data}`,
+    };
   }
-  return att;
+  return { ...att, deliveryMode: normalizeAttachmentDeliveryMode(att.deliveryMode, "path") };
 }
 
 export function getChatInputHeight(sessionId: string): number | null {
@@ -562,6 +639,11 @@ export function cleanupTaskStorage(
 ): void {
   // Plan notification (localStorage, keyed per task inside a Record)
   setPlanLastSeen(taskId, null);
+  setWalkthroughLastSeen(taskId, null);
+
+  // PR merged / closed banner dismissal (sessionStorage, keyed per task)
+  removeSessionStorage(`${PR_MERGED_BANNER_DISMISSED_PREFIX}${taskId}`);
+  removeSessionStorage(`${PR_CLOSED_BANNER_DISMISSED_PREFIX}${taskId}`);
 
   // Sidebar collapsed-subtask set (sessionStorage, array keyed by parent taskId)
   const collapsed = getStoredCollapsedSubtaskParents();
@@ -579,6 +661,11 @@ export function cleanupTaskStorage(
   if (ordered.includes(taskId)) {
     setStoredOrderedTaskIds(ordered.filter((id) => id !== taskId));
   }
+
+  // Per-parent subtask order: drop the deleted task as a parent key, and strip
+  // it from any other parent's subtask-order list (in case it was a subtask).
+  const subOrder = getStoredSubtaskOrderByParentId();
+  if (pruneSubtaskOrder(subOrder, taskId)) setStoredSubtaskOrderByParentId(subOrder);
 
   // Env-keyed storage — dockview layout + maximize live under task envs.
   for (const envId of envIds) {
@@ -696,6 +783,51 @@ export function getStoredOrderedTaskIds(): string[] {
 export function setStoredOrderedTaskIds(ids: string[]): void {
   setLocalStorage(SIDEBAR_TASK_ORDER_KEY, ids);
 }
+
+const SIDEBAR_SUBTASK_ORDER_KEY = "kandev.sidebar.subtaskOrderByParentId";
+
+export function getStoredSubtaskOrderByParentId(): Record<string, string[]> {
+  const raw = getLocalStorage<Record<string, string[]>>(SIDEBAR_SUBTASK_ORDER_KEY, {}) as unknown;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [parentId, ids] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof parentId !== "string" || !Array.isArray(ids)) continue;
+    const filtered = ids.filter((id): id is string => typeof id === "string");
+    if (filtered.length > 0) out[parentId] = filtered;
+  }
+  return out;
+}
+
+export function setStoredSubtaskOrderByParentId(map: Record<string, string[]>): void {
+  setLocalStorage(SIDEBAR_SUBTASK_ORDER_KEY, map);
+}
+
+/**
+ * Strip a task id from a subtask-order map: drop it as a parent key, and
+ * remove it from every other parent's subtask list (cleaning up the parent
+ * entry if its list becomes empty). Mutates `map` in place and returns
+ * `true` if anything changed. Used by both `cleanupTaskStorage` (plain
+ * object) and `removeTaskFromSidebarPrefs` (Immer draft) to keep the two
+ * cleanup paths in lockstep.
+ */
+export function pruneSubtaskOrder(map: Record<string, string[]>, taskId: string): boolean {
+  let changed = false;
+  if (taskId in map) {
+    delete map[taskId];
+    changed = true;
+  }
+  for (const [parentId, ids] of Object.entries(map)) {
+    if (!ids.includes(taskId)) continue;
+    const next = ids.filter((id) => id !== taskId);
+    if (next.length === 0) delete map[parentId];
+    else map[parentId] = next;
+    changed = true;
+  }
+  return changed;
+}
+
+// AppSidebar collapse/section/width storage helpers live in
+// `./local-storage-app-sidebar` to keep this module under the line cap.
 
 // --- Sidebar collapsed subtask parents (sessionStorage, tab-scoped) ---
 

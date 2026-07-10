@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -147,12 +148,40 @@ func (h *WorkspaceHandlers) httpUpdateWorkspace(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.FromWorkspace(workspace))
 }
 
+type httpDeleteWorkspaceRequest struct {
+	ConfirmName string `json:"confirm_name"`
+}
+
 func (h *WorkspaceHandlers) httpDeleteWorkspace(c *gin.Context) {
-	if err := h.service.DeleteWorkspace(c.Request.Context(), c.Param("id")); err != nil {
-		handleNotFound(c, h.logger, err, "workspace not deleted")
+	var body httpDeleteWorkspaceRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if body.ConfirmName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "confirm_name is required"})
+		return
+	}
+	if err := h.service.DeleteWorkspaceWithConfirmName(
+		c.Request.Context(),
+		c.Param("id"),
+		body.ConfirmName,
+	); err != nil {
+		h.handleHTTPDeleteWorkspaceError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
+}
+
+func (h *WorkspaceHandlers) handleHTTPDeleteWorkspaceError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, service.ErrWorkspaceConfirmNameMismatch):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case isNotFound(err):
+		c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "workspace not deleted"})
+	}
 }
 
 // WS handlers
@@ -254,12 +283,35 @@ func (h *WorkspaceHandlers) wsUpdateWorkspace(ctx context.Context, msg *ws.Messa
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromWorkspace(workspace))
 }
 
+type wsDeleteWorkspaceRequest struct {
+	ID          string `json:"id"`
+	ConfirmName string `json:"confirm_name"`
+}
+
 func (h *WorkspaceHandlers) wsDeleteWorkspace(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete workspace",
-		func(ctx context.Context, id string) (any, error) {
-			if err := h.service.DeleteWorkspace(ctx, id); err != nil {
-				return nil, err
-			}
-			return dto.SuccessResponse{Success: true}, nil
-		})
+	var req wsDeleteWorkspaceRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.ID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
+	}
+	if req.ConfirmName == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "confirm_name is required", nil)
+	}
+	if err := h.service.DeleteWorkspaceWithConfirmName(ctx, req.ID, req.ConfirmName); err != nil {
+		return h.wsDeleteWorkspaceError(msg, err)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+}
+
+func (h *WorkspaceHandlers) wsDeleteWorkspaceError(msg *ws.Message, err error) (*ws.Message, error) {
+	switch {
+	case errors.Is(err, service.ErrWorkspaceConfirmNameMismatch):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	case isNotFound(err):
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Workspace not found", nil)
+	default:
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to delete workspace", nil)
+	}
 }

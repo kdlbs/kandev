@@ -29,7 +29,8 @@ import {
   isSessionDeletable,
   isSessionResumable,
 } from "@/hooks/domains/session/use-session-actions";
-import { NewSessionDialog } from "../new-session-dialog";
+import { HandoffDropdownMenuSub } from "../handoff-profile-menu-items";
+import { NewSessionDialog, type HandoffPreset } from "../new-session-dialog";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
@@ -87,20 +88,28 @@ function StateBadge({ state }: { state: TaskSessionState | null }) {
 }
 
 function SessionActionsMenu({
+  taskId,
   state,
   isPrimary,
   onSetPrimary,
   onStop,
   onResume,
   onAskDelete,
+  onHandoffProfile,
 }: {
+  taskId: string;
   state: TaskSessionState | null;
   isPrimary: boolean;
   onSetPrimary: () => void;
   onStop: () => void;
   onResume: () => void;
   onAskDelete: () => void;
+  onHandoffProfile: (profileId: string) => void;
 }) {
+  const hasLifecycleAction =
+    !!state &&
+    (isSessionStoppable(state) || isSessionResumable(state) || isSessionDeletable(state));
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -141,6 +150,8 @@ function SessionActionsMenu({
             Delete
           </DropdownMenuItem>
         )}
+        {hasLifecycleAction && <DropdownMenuSeparator />}
+        <HandoffDropdownMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -209,9 +220,18 @@ function SessionRowItem({
   onSelect: (sessionId: string) => void;
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffPreset, setHandoffPreset] = useState<HandoffPreset | null>(null);
   const actions = useSessionActions({ sessionId: row.id, taskId });
   const isOnly = totalSessions === 1;
   const showBadges = totalSessions > 1;
+  const handleHandoffProfile = useCallback(
+    (profileId: string) => {
+      setHandoffPreset({ sourceSessionId: row.id, targetProfileId: profileId });
+      setHandoffOpen(true);
+    },
+    [row.id],
+  );
 
   return (
     <>
@@ -242,14 +262,27 @@ function SessionRowItem({
         <span className="text-sm truncate flex-1">{row.agentLabel}</span>
         <StateBadge state={row.state} />
         <SessionActionsMenu
+          taskId={taskId}
           state={row.state}
           isPrimary={row.isPrimary}
           onSetPrimary={() => void actions.setPrimary()}
           onStop={() => void actions.stop()}
           onResume={() => void actions.resume()}
           onAskDelete={() => setConfirmDelete(true)}
+          onHandoffProfile={handleHandoffProfile}
         />
       </div>
+      {handoffPreset && (
+        <NewSessionDialog
+          open={handoffOpen}
+          onOpenChange={(open) => {
+            setHandoffOpen(open);
+            if (!open) setHandoffPreset(null);
+          }}
+          taskId={taskId}
+          handoff={handoffPreset}
+        />
+      )}
       <DeleteSessionConfirmDialog
         open={confirmDelete}
         onOpenChange={setConfirmDelete}

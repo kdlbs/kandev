@@ -95,7 +95,7 @@ test.describe("PR detail panel", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Verify PR topbar button appears with PR number
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
@@ -195,7 +195,7 @@ test.describe("PR detail panel", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Wait for PR data to arrive (topbar button confirms PR is loaded)
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
@@ -212,7 +212,7 @@ test.describe("PR detail panel", () => {
     // 3. Reload page — panel should stay dismissed
     await testPage.reload();
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
 
     // Give the auto-show hook time to fire (double rAF) — panel should NOT reappear
     await testPage.waitForTimeout(1_000);
@@ -324,13 +324,13 @@ test.describe("PR detail panel", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
 
     // Switch to Task B (no PR) — PR panel should be removed
     await session.clickTaskInSidebar("Plain Task");
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).not.toBeVisible({ timeout: 10_000 });
 
     // Switch back to Task A — PR panel should re-appear
@@ -464,7 +464,7 @@ test.describe("PR detail panel", () => {
 
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
 
     // Invariant: PR panel shares the session's dockview group (is a tab, not a split).
@@ -475,7 +475,7 @@ test.describe("PR detail panel", () => {
     // against the new session. Assert the invariant still holds.
     await session.clickTaskInSidebar("Second PR Task");
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
     await session.expectPrPanelAndSessionShareGroup();
 
@@ -486,8 +486,148 @@ test.describe("PR detail panel", () => {
     // tab in a new group while the PR panel stayed in the old center group.
     await session.clickTaskInSidebar("First PR Task");
     await session.waitForLoad();
-    await session.idleInput().waitFor({ state: "visible", timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
     await session.expectPrPanelAndSessionShareGroup();
+  });
+
+  /**
+   * General correctness coverage for the auto-shown PR panel across task
+   * switches (each task keeps its own dockview layout in this environment,
+   * so this does not reproduce the exact stale-panel-reuse window flagged
+   * by Greptile/cubic-dev-ai on PR #1636 — that fix is unit-tested directly
+   * against `runAutoPRPanelEffect`'s resync logic in
+   * use-auto-pr-panel.test.ts). This still guards the user-visible
+   * contract: the panel must show the CURRENTLY active task's PR.
+   *
+   * Setup:
+   *   Inbox → Working (auto_start, on_turn_complete → Done) → Done
+   *   Task A (with PR #401), Task B (with PR #402)
+   */
+  test("shows the correct task's PR after switching between two PR-linked tasks", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "PR Refresh Workflow");
+
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const workingStep = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
+    const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+
+    await apiClient.updateWorkflowStep(workingStep.id, {
+      prompt: 'e2e:message("done")\n{{task_prompt}}',
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+        on_turn_complete: [{ type: "move_to_step", config: { step_id: doneStep.id } }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 401,
+        title: "First task PR",
+        state: "open",
+        head_branch: "feat/first",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        additions: 5,
+        deletions: 1,
+      },
+      {
+        number: 402,
+        title: "Second task PR",
+        state: "open",
+        head_branch: "feat/second",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        additions: 8,
+        deletions: 2,
+      },
+    ]);
+
+    const taskA = await apiClient.createTask(seedData.workspaceId, "Refresh Task A", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const taskB = await apiClient.createTask(seedData.workspaceId, "Refresh Task B", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await apiClient.moveTask(taskA.id, workflow.id, workingStep.id);
+    await apiClient.moveTask(taskB.id, workflow.id, workingStep.id);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskA.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 401,
+      pr_url: "https://github.com/testorg/testrepo/pull/401",
+      pr_title: "First task PR",
+      head_branch: "feat/first",
+      base_branch: "main",
+      author_login: "test-user",
+      additions: 5,
+      deletions: 1,
+    });
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskB.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 402,
+      pr_url: "https://github.com/testorg/testrepo/pull/402",
+      pr_title: "Second task PR",
+      head_branch: "feat/second",
+      base_branch: "main",
+      author_login: "test-user",
+      additions: 8,
+      deletions: 2,
+    });
+
+    await expect(kanban.taskCardInColumn("Refresh Task A", doneStep.id)).toBeVisible({
+      timeout: 45_000,
+    });
+    await expect(kanban.taskCardInColumn("Refresh Task B", doneStep.id)).toBeVisible({
+      timeout: 45_000,
+    });
+
+    await kanban.taskCardInColumn("Refresh Task A", doneStep.id).click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await expect(session.prDetailTab()).toHaveText("PR #401", { timeout: 15_000 });
+
+    await session.clickTaskInSidebar("Refresh Task B");
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await expect(session.prDetailTab()).toHaveText("PR #402", { timeout: 15_000 });
+
+    await session.clickTaskInSidebar("Refresh Task A");
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await expect(session.prDetailTab()).toHaveText("PR #401", { timeout: 15_000 });
   });
 });

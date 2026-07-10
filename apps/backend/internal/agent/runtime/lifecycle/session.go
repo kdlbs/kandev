@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/appctx"
@@ -26,6 +27,7 @@ type SessionManager struct {
 	eventPublisher *EventPublisher
 	streamManager  *StreamManager
 	executionStore *ExecutionStore
+	statusUpdater  func(executionID string, status v1.AgentStatus) error
 	historyManager *SessionHistoryManager
 	stopCh         <-chan struct{} // For graceful shutdown coordination
 }
@@ -45,6 +47,10 @@ func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManage
 	sm.streamManager = strm
 	sm.executionStore = store
 	sm.historyManager = history
+}
+
+func (sm *SessionManager) SetStatusUpdater(updater func(executionID string, status v1.AgentStatus) error) {
+	sm.statusUpdater = updater
 }
 
 // InitializeResult contains the result of session initialization
@@ -131,6 +137,19 @@ func (sm *SessionManager) createOrLoadSession(
 		sessionID, err := sm.loadSession(ctx, client, agentConfig, existingSessionID, mcpServers)
 		if err == nil {
 			return sessionID, nil
+		}
+		// If the underlying ACP connection is dead (peer disconnected, context
+		// cancelled), session/new on the same client will return the same
+		// transport error — falling back just emits a noisy duplicate failure
+		// and delays the FAILED transition. Short-circuit so the caller can
+		// rebuild the connection (next resume cycle gets a fresh agentctl
+		// instance and a fresh ACP connection).
+		if isTransportDeadErr(err) {
+			sm.logger.Warn("session/load failed at transport layer, not retrying with session/new",
+				zap.String("agent_type", agentConfig.ID()),
+				zap.String("existing_session_id", existingSessionID),
+				zap.String("reason", err.Error()))
+			return "", err
 		}
 		// session/load can fail for reasons that don't justify aborting the
 		// session: agent doesn't support the method (capability mismatch /
@@ -264,6 +283,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 	markReady func(executionID string) error,
 	profileModel string,
 	profileMode string,
+	profileConfigOptions map[string]string,
 ) error {
 	// Create session-level trace span to group all operations under one trace
 	_, sessionSpan := tracing.TraceSessionStart(
@@ -327,8 +347,9 @@ func (sm *SessionManager) InitializeAndPrompt(
 	execution.ACPSessionID = result.SessionID
 	execution.sessionInitialized = true
 
-	// Apply profile model via ACP session/set_model (best-effort).
-	// ACP is the only surface for model selection now; no --model CLI flag.
+	// Apply profile model through the ACP session's advertised model-selection
+	// mechanism (best-effort). ACP is the only surface for model selection now;
+	// no --model CLI flag.
 	if profileModel != "" && execution.agentctl != nil {
 		if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
 			sm.logger.Warn("failed to set profile model via ACP",
@@ -356,6 +377,26 @@ func (sm *SessionManager) InitializeAndPrompt(
 		}
 	}
 
+	// Apply any dynamic ACP config options saved on the profile. Model and
+	// mode are handled above so their existing semantics stay unchanged.
+	for configID, value := range profileconfig.SanitizeConfigOptions(profileConfigOptions) {
+		if execution.agentctl == nil {
+			break
+		}
+		if err := execution.agentctl.SetConfigOption(ctx, configID, value); err != nil {
+			sm.logger.Warn("failed to set profile config option via ACP",
+				zap.String("execution_id", execution.ID),
+				zap.String("config_id", configID),
+				zap.String("value", value),
+				zap.Error(err))
+		} else {
+			sm.logger.Info("set profile config option on ACP session",
+				zap.String("execution_id", execution.ID),
+				zap.String("config_id", configID),
+				zap.String("value", value))
+		}
+	}
+
 	// Publish session created event
 	if sm.eventPublisher != nil {
 		sm.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
@@ -375,10 +416,11 @@ func convertAttachments(attachments []MessageAttachment) []v1.MessageAttachment 
 	result := make([]v1.MessageAttachment, 0, len(attachments))
 	for _, att := range attachments {
 		result = append(result, v1.MessageAttachment{
-			Type:     att.Type,
-			Data:     att.Data,
-			MimeType: att.MimeType,
-			Name:     att.Name,
+			Type:         att.Type,
+			Data:         att.Data,
+			MimeType:     att.MimeType,
+			Name:         att.Name,
+			DeliveryMode: att.DeliveryMode,
 		})
 	}
 	return result
@@ -481,9 +523,9 @@ func (sm *SessionManager) waitForPromptDone(ctx context.Context, execution *Agen
 				// skip the REVIEW task-state transition — the user is cancelling, not
 				// hitting a real agent failure.
 				if strings.HasPrefix(signal.Error, "cancel escalated") {
-					return nil, fmt.Errorf("agent error: %s: %w", signal.Error, ErrCancelEscalated)
+					return nil, fmt.Errorf("%w: %s: %w", ErrAgentReported, signal.Error, ErrCancelEscalated)
 				}
-				return nil, fmt.Errorf("agent error: %s", signal.Error)
+				return nil, fmt.Errorf("%w: %s", ErrAgentReported, signal.Error)
 			}
 
 			// Peek at buffer for return value
@@ -568,7 +610,11 @@ func (sm *SessionManager) SendPrompt(
 		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
 			return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 		}
-		if sm.executionStore != nil {
+		if sm.statusUpdater != nil {
+			if err := sm.statusUpdater(execution.ID, v1.AgentStatusRunning); err != nil {
+				return nil, err
+			}
+		} else if sm.executionStore != nil {
 			sm.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
 		}
 	}
@@ -649,18 +695,46 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 	prompt string,
 	attachments []v1.MessageAttachment,
 ) error {
-	ready := make(chan struct{})
-	go sm.streamManager.connectUpdatesStream(execution, ready)
+	reconnectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
-	select {
-	case <-ready:
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("timed out waiting for updates stream reconnect")
+	var lastErr error
+	for {
+		if !execution.agentctl.HasAgentStream() {
+			ready := make(chan struct{})
+			sm.streamManager.connectUpdatesStreamAsync(execution, ready)
+
+			select {
+			case <-ready:
+			case <-reconnectCtx.Done():
+				if lastErr != nil {
+					return fmt.Errorf("timed out waiting for updates stream reconnect: %w", lastErr)
+				}
+				return reconnectCtx.Err()
+			}
+		}
+
+		if execution.agentctl.HasAgentStream() {
+			if err := execution.agentctl.Prompt(reconnectCtx, prompt, attachments); err == nil {
+				return nil
+			} else if !isAgentStreamNotConnectedErr(err) {
+				return err
+			} else {
+				lastErr = err
+			}
+		} else {
+			lastErr = fmt.Errorf("agent stream not connected")
+		}
+
+		select {
+		case <-reconnectCtx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("timed out waiting for updates stream reconnect: %w", lastErr)
+			}
+			return reconnectCtx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
-
-	return execution.agentctl.Prompt(ctx, prompt, attachments)
 }
 
 // jsonRPCMethodNotFound is the JSON-RPC 2.0 error code for "Method not found".
@@ -702,4 +776,28 @@ func isAgentStreamNotConnectedErr(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "agent stream not connected")
+}
+
+// isTransportDeadErr reports whether a session/load failure is caused by the
+// underlying ACP connection being gone rather than an agent-side error. The
+// coder/acp-go-sdk surfaces this as a JSON-RPC internal-error whose data map
+// carries the canonical phrase "peer disconnected before response" (also
+// emitted while waiting for pre-response notifications). The error reaches us
+// as a string through the agentctl WS layer, so we match the phrase.
+// "connection closed" is the SDK's own cause string emitted from
+// shutdownReceive — pulling double duty as a fallback for paths where the
+// peer-disconnected wrapping isn't applied. Canonical context cancellation
+// errors short-circuit too: the caller's ctx going down means session/new
+// retry will fail for the same reason, so treat it as transport-dead.
+func isTransportDeadErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "peer disconnected") ||
+		strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "notification queue overflow")
 }

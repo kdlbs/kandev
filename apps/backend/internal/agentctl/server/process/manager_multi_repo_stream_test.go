@@ -108,6 +108,43 @@ func TestManager_RepoSubpaths(t *testing.T) {
 	}
 }
 
+// Regression for #982: passthrough mode must start per-repo trackers so file-change events reach the Files panel.
+func TestManager_StartAllWorkspaceTrackers_StartsRootAndRepoTrackers(t *testing.T) {
+	taskRoot := t.TempDir()
+	for _, name := range []string{"frontend", "backend"} {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+		if err := os.Rename(repoDir, filepath.Join(taskRoot, name)); err != nil {
+			t.Fatalf("place %s: %v", name, err)
+		}
+	}
+
+	mgr := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, newTestLogger(t))
+	if len(mgr.repoTrackers) != 2 {
+		t.Fatalf("expected 2 per-repo trackers, got %d", len(mgr.repoTrackers))
+	}
+
+	mgr.StartAllWorkspaceTrackers(context.Background())
+	t.Cleanup(func() {
+		mgr.workspaceTracker.Stop()
+		for _, tr := range mgr.repoTrackers {
+			tr.Stop()
+		}
+	})
+
+	// initialScanDone closes once the monitor goroutine ran — confirms Start() actually fired.
+	for i, tr := range append([]*WorkspaceTracker{mgr.workspaceTracker}, mgr.repoTrackers...) {
+		select {
+		case <-tr.initialScanDone:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("tracker %d (workDir=%q) never completed initial scan — Start did not run", i, tr.workDir)
+		}
+	}
+
+	// Idempotency: a second call must not panic or double-start.
+	mgr.StartAllWorkspaceTrackers(context.Background())
+}
+
 // Verifies that SetWorkspacePollMode propagates to every per-repo tracker.
 // Without the fan-out, per-repo trackers stay at their construction-time
 // default and never receive the focus-triggered refresh that delivers a

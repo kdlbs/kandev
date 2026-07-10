@@ -31,7 +31,6 @@ type Poller struct {
 	logger        *logger.Logger
 	auth          *healthpoll.Poller
 	issueInterval time.Duration
-	issueTickHook func() // tests use this to observe each issue-watch tick.
 
 	mu              sync.Mutex
 	cancelIssueLoop context.CancelFunc
@@ -51,15 +50,6 @@ func NewPoller(svc *Service, log *logger.Logger) *Poller {
 		auth:          healthpoll.New("linear", svcProber{svc}, log),
 		issueInterval: defaultIssuePollTickInterval,
 	}
-}
-
-// SetIssueTickHook installs a callback fired at the end of each issue-watch
-// tick. Production code never sets this; tests use it to wait for a tick
-// without sleep-polling.
-func (p *Poller) SetIssueTickHook(fn func()) {
-	p.mu.Lock()
-	p.issueTickHook = fn
-	p.mu.Unlock()
 }
 
 // Start launches both background loops. Calling Start more than once without
@@ -113,7 +103,6 @@ func (p *Poller) issueWatchLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			p.checkIssueWatches(ctx)
-			p.fireIssueTickHook()
 		}
 	}
 }
@@ -161,15 +150,6 @@ func isIssueWatchDue(w *IssueWatch, now time.Time) bool {
 		interval = DefaultIssueWatchPollInterval
 	}
 	return now.Sub(*w.LastPolledAt) >= time.Duration(interval)*time.Second
-}
-
-func (p *Poller) fireIssueTickHook() {
-	p.mu.Lock()
-	hook := p.issueTickHook
-	p.mu.Unlock()
-	if hook != nil {
-		hook()
-	}
 }
 
 // svcProber adapts *Service to healthpoll.Prober without leaking the shared

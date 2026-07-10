@@ -47,6 +47,18 @@ describe("fallbackGroupPosition", () => {
     expect(fallbackGroupPosition(api)).toEqual({ referenceGroup: sessionGroupId });
   });
 
+  it("does not use a right-column session panel as a center fallback", () => {
+    // Regression: after restoring a bad task layout, the session tab could be
+    // added into group-right-top with Files/Changes. A stale centerGroupId then
+    // made center-targeted panels keep landing in that right tools group.
+    const api = makeApi(
+      [SIDEBAR_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP],
+      [{ id: "session:abc", group: { id: RIGHT_TOP_GROUP } }],
+    );
+
+    expect(fallbackGroupPosition(api)).toBeUndefined();
+  });
+
   it("does not return a right-column group when no center-like group exists", () => {
     // Right-column groups (Changes/Files/Terminal) are tool columns — placing
     // a diff or PR panel there is the same UX bug as placing it in the sidebar.

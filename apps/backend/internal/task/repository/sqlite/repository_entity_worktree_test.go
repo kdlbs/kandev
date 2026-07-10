@@ -2,44 +2,13 @@ package sqlite
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
-	"github.com/jmoiron/sqlx"
-
-	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func newRepoForRepositoryTests(t *testing.T) *Repository {
-	t.Helper()
-	dbPath := filepath.Join(t.TempDir(), "repo-test.db")
-	dbConn, err := db.OpenSQLite(dbPath)
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
-	repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
-	if err != nil {
-		t.Fatalf("new repo: %v", err)
-	}
-	t.Cleanup(func() { _ = sqlxDB.Close() })
-	return repo
-}
-
-func seedWorkspace(t *testing.T, repo *Repository, id string) {
-	t.Helper()
-	_, err := repo.db.Exec(repo.db.Rebind(`
-		INSERT OR IGNORE INTO workspaces (id, name, created_at, updated_at)
-		VALUES (?, 'ws', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`), id)
-	if err != nil {
-		t.Fatalf("seed workspace: %v", err)
-	}
-}
-
 func TestRepositoryEntity_WorktreeFilesRoundtrip(t *testing.T) {
-	repo := newRepoForRepositoryTests(t)
+	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
 	seedWorkspace(t, repo, "ws-1")
 
@@ -88,7 +57,7 @@ func TestRepositoryEntity_WorktreeFilesRoundtrip(t *testing.T) {
 // file config) can be resolved by local_path — the lookup used during worktree
 // creation, where the RepositoryID isn't available.
 func TestRepositoryEntity_GetByLocalPath(t *testing.T) {
-	repo := newRepoForRepositoryTests(t)
+	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
 	seedWorkspace(t, repo, "ws-1")
 
@@ -125,7 +94,7 @@ func TestRepositoryEntity_GetByLocalPath(t *testing.T) {
 // without any worktree-file config loads with an empty list, mirroring rows
 // written before the feature existed.
 func TestRepositoryEntity_DefaultsBackwardCompat(t *testing.T) {
-	repo := newRepoForRepositoryTests(t)
+	repo := newRepoForEntityTests(t)
 	ctx := context.Background()
 	seedWorkspace(t, repo, "ws-1")
 

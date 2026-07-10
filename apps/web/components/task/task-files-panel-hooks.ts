@@ -11,6 +11,7 @@ export function useFilesPanelData(onOpenFile: (file: OpenFileTab) => void) {
     createFile: baseCreateFile,
     deleteFile: hookDeleteFile,
     renameFile: hookRenameFile,
+    downloadFile: hookDownloadFile,
   } = useFileOperations(activeSessionId ?? null);
 
   const handleCreateFile = useCallback(
@@ -38,6 +39,7 @@ export function useFilesPanelData(onOpenFile: (file: OpenFileTab) => void) {
     activeSessionId,
     hookDeleteFile,
     hookRenameFile,
+    hookDownloadFile,
     handleCreateFile,
   };
 }

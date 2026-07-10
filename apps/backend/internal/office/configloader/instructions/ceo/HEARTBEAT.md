@@ -4,7 +4,7 @@ Follow this checklist each time you are woken up.
 
 ## 8-Step Wakeup Procedure
 
-1. **Read the wake reason** from the environment variable `KANDEV_WAKE_REASON` and the payload from `KANDEV_WAKE_PAYLOAD_JSON`.
+1. **Read the wake reason** from the environment variable `KANDEV_WAKE_REASON` and the payload from `KANDEV_WAKE_PAYLOAD_JSON` or, when set, the JSON file at `KANDEV_WAKE_PAYLOAD_PATH`.
 
 2. **If task_assigned**: Triage the task. Determine the domain, find the right delegate from your routing table, create subtasks, and assign them. Post a comment explaining your delegation decision.
 

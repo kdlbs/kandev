@@ -1,8 +1,20 @@
 import type { StateCreator } from "zustand";
-import type { TaskSession } from "@/lib/types/http";
+import { original } from "immer";
+import type { Message, TaskSession } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
-import { migrateEnvKeyedData } from "@/lib/state/slices/session-runtime/session-runtime-slice";
-import { createDebugLogger, IS_DEBUG } from "@/lib/debug/log";
+import { reconcileMessages } from "./message-signature";
+import {
+  migrateEnvKeyedData,
+  purgeSessionRuntimeState,
+} from "@/lib/state/slices/session-runtime/session-runtime-slice";
+import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtime/types";
+import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
+import {
+  getWalkthroughLastSeen,
+  setWalkthroughLastSeen,
+} from "@/lib/walkthrough-notification-storage";
 
 const debugEnv = createDebugLogger("session:env-mapping");
 
@@ -41,13 +53,17 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
   }
 }
 
+function removeMessageByID(messages: Message[], messageId: string) {
+  return messages.filter((message) => message.id !== messageId);
+}
+
 /** Eagerly populate session→environment mapping and migrate any data stored under the fallback key.
  *  `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function syncEnvironmentMapping(draft: any, sessionId: string, environmentId: string | undefined) {
   if (!environmentId) return;
   const previous = draft.environmentIdBySessionId[sessionId];
-  if (IS_DEBUG) {
+  if (isDebug()) {
     debugEnv("syncEnvironmentMapping", {
       sessionId,
       environmentId,
@@ -63,6 +79,25 @@ function syncEnvironmentMapping(draft: any, sessionId: string, environmentId: st
   }
   draft.environmentIdBySessionId[sessionId] = environmentId;
   migrateEnvKeyedData(draft, sessionId, environmentId);
+}
+
+/**
+ * Backfill the prepare-progress slice from a session's `metadata.prepare_result`
+ * when sessions are loaded from the API (e.g. switching tasks client-side).
+ *
+ * Without this, prepare progress only ever arrives via SSR hydration or live WS
+ * events, so switching to a task whose prepare already completed (common for
+ * remote executors) showed an empty "Environment prepared" row until a full
+ * page reload re-ran SSR. Only populates when no entry exists yet so we never
+ * clobber live WS progress for an in-flight prepare.
+ *
+ * `draft` must be the combined store state (SessionSlice + SessionRuntimeSlice).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function syncPrepareProgress(draft: any, session: TaskSession) {
+  if (draft.prepareProgress.bySessionId[session.id]) return;
+  const prepareState = prepareResultToSessionState(session.id, session.metadata);
+  if (prepareState) draft.prepareProgress.bySessionId[session.id] = prepareState;
 }
 
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
@@ -106,10 +141,16 @@ export const defaultSessionState: SessionSliceState = {
     comparePairByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
   },
+  walkthroughs: {
+    byTaskId: {},
+    activeStepByTaskId: {},
+    lastSeenUpdatedAtByTaskId: {},
+  },
   queue: { bySessionId: {}, metaBySessionId: {}, isLoading: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionSlice>[0];
+type ImmerGet = () => SessionSlice;
 
 function buildMessageActions(set: ImmerSet) {
   return {
@@ -155,6 +196,34 @@ function buildMessageActions(set: ImmerSet) {
         );
         messages[index] = merged;
       }),
+    removeMessage: (
+      sessionId: Parameters<SessionSlice["removeMessage"]>[0],
+      messageId: Parameters<SessionSlice["removeMessage"]>[1],
+    ) =>
+      set((draft) => {
+        const messages = draft.messages.bySession[sessionId];
+        if (!messages) return;
+        draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
+      }),
+    mergeMessages: (
+      sessionId: string,
+      messages: Parameters<SessionSlice["mergeMessages"]>[1],
+      meta?: Parameters<SessionSlice["mergeMessages"]>[2],
+    ) =>
+      set((draft) => {
+        const prevDraft = draft.messages.bySession[sessionId];
+        const prev = (prevDraft ? (original(prevDraft) ?? prevDraft) : undefined) as
+          | Message[]
+          | undefined;
+        const reconciled = reconcileMessages(prev, messages);
+        // Only replace the array when identity actually changed, so a no-op
+        // refetch preserves the array reference and triggers no re-render.
+        if (reconciled !== prev) {
+          draft.messages.bySession[sessionId] = reconciled;
+        }
+        ensureMessageMeta(draft.messages.metaBySession, sessionId);
+        if (meta) applyMessageMeta(draft.messages.metaBySession, sessionId, meta);
+      }),
     prependMessages: (
       sessionId: string,
       messages: Parameters<SessionSlice["prependMessages"]>[1],
@@ -185,14 +254,20 @@ function buildMessageActions(set: ImmerSet) {
   };
 }
 
-function buildTaskPlanActions(set: ImmerSet) {
+function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
   return {
-    setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) =>
+    setTaskPlan: (taskId: string, plan: Parameters<SessionSlice["setTaskPlan"]>[1]) => {
+      const shouldHydrateLastSeen = get().taskPlans.lastSeenUpdatedAtByTaskId[taskId] === undefined;
+      const storedLastSeen = shouldHydrateLastSeen ? getPlanLastSeen(taskId) : null;
       set((draft) => {
         draft.taskPlans.byTaskId[taskId] = plan;
         draft.taskPlans.loadingByTaskId[taskId] = false;
         draft.taskPlans.loadedByTaskId[taskId] = true;
-      }),
+        if (shouldHydrateLastSeen && storedLastSeen !== null) {
+          draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = storedLastSeen;
+        }
+      });
+    },
     setTaskPlanLoading: (taskId: string, loading: boolean) =>
       set((draft) => {
         draft.taskPlans.loadingByTaskId[taskId] = loading;
@@ -201,7 +276,8 @@ function buildTaskPlanActions(set: ImmerSet) {
       set((draft) => {
         draft.taskPlans.savingByTaskId[taskId] = saving;
       }),
-    clearTaskPlan: (taskId: string) =>
+    clearTaskPlan: (taskId: string) => {
+      setPlanLastSeen(taskId, null);
       set((draft) => {
         // revisionContentCache is keyed by revisionId, so pick the IDs for this
         // task before deleting the revisions list and drop their cache entries.
@@ -221,12 +297,16 @@ function buildTaskPlanActions(set: ImmerSet) {
         delete draft.taskPlans.previewRevisionIdByTaskId[taskId];
         delete draft.taskPlans.comparePairByTaskId[taskId];
         delete draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId];
-      }),
-    markTaskPlanSeen: (taskId: string) =>
+      });
+    },
+    markTaskPlanSeen: (taskId: string) => {
+      const plan = get().taskPlans.byTaskId[taskId];
+      const lastSeen = plan?.updated_at ?? "";
+      setPlanLastSeen(taskId, lastSeen);
       set((draft) => {
-        const plan = draft.taskPlans.byTaskId[taskId];
-        draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = plan?.updated_at ?? "";
-      }),
+        draft.taskPlans.lastSeenUpdatedAtByTaskId[taskId] = lastSeen;
+      });
+    },
     setPlanRevisions: (
       taskId: string,
       revisions: Parameters<SessionSlice["setPlanRevisions"]>[1],
@@ -266,6 +346,47 @@ function buildTaskPlanActions(set: ImmerSet) {
         draft.taskPlans.revisionContentCache[revisionId] = content;
       }),
     ...buildPreviewCompareActions(set),
+  };
+}
+
+function buildWalkthroughActions(set: ImmerSet, get: ImmerGet) {
+  return {
+    setWalkthrough: (
+      taskId: string,
+      walkthrough: Parameters<SessionSlice["setWalkthrough"]>[1],
+    ) => {
+      const shouldHydrateLastSeen =
+        get().walkthroughs.lastSeenUpdatedAtByTaskId[taskId] === undefined;
+      const storedLastSeen = shouldHydrateLastSeen ? getWalkthroughLastSeen(taskId) : null;
+      set((draft) => {
+        const previous = draft.walkthroughs.byTaskId[taskId];
+        draft.walkthroughs.byTaskId[taskId] = walkthrough;
+        // Clamp the active step into the new step range (defaults to 0). A
+        // replaced/shorter tour must not leave the pointer past the last step.
+        const steps = walkthrough?.steps.length ?? 0;
+        const isReplacement = previous?.id !== walkthrough?.id;
+        const current = isReplacement ? 0 : (draft.walkthroughs.activeStepByTaskId[taskId] ?? 0);
+        draft.walkthroughs.activeStepByTaskId[taskId] =
+          steps === 0 ? 0 : Math.min(current, steps - 1);
+        if (shouldHydrateLastSeen && storedLastSeen !== null) {
+          draft.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] = storedLastSeen;
+        }
+      });
+    },
+    setWalkthroughActiveStep: (taskId: string, stepIndex: number) =>
+      set((draft) => {
+        const steps = draft.walkthroughs.byTaskId[taskId]?.steps.length ?? 0;
+        const clamped = steps === 0 ? 0 : Math.max(0, Math.min(stepIndex, steps - 1));
+        draft.walkthroughs.activeStepByTaskId[taskId] = clamped;
+      }),
+    markWalkthroughSeen: (taskId: string) => {
+      const wt = get().walkthroughs.byTaskId[taskId];
+      const lastSeen = wt?.updated_at ?? "";
+      setWalkthroughLastSeen(taskId, lastSeen);
+      set((draft) => {
+        draft.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] = lastSeen;
+      });
+    },
   };
 }
 
@@ -332,8 +453,14 @@ function buildTaskSessionActions(set: ImmerSet) {
             (s) => s.id !== sessionId,
           );
         }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        delete (draft as any).environmentIdBySessionId[sessionId];
+        // Drop the conversation history owned by this session.
+        delete draft.messages.bySession[sessionId];
+        delete draft.messages.metaBySession[sessionId];
+        delete draft.turns.bySession[sessionId];
+        delete draft.turns.activeBySession[sessionId];
+        // Cascade into the runtime slice (shell/process/git buffers + per-session
+        // maps); this also removes the environmentIdBySessionId mapping.
+        purgeSessionRuntimeState(draft as unknown as SessionRuntimeSliceState, sessionId);
       }),
     setTaskSessionsForTask: (
       taskId: string,
@@ -350,6 +477,7 @@ function buildTaskSessionActions(set: ImmerSet) {
         for (const session of merged) {
           draft.taskSessions.items[session.id] = session;
           syncEnvironmentMapping(draft, session.id, session.task_environment_id);
+          syncPrepareProgress(draft, session);
         }
       }),
     // Upsert a session from a WS event without flipping the per-task `loadedByTaskId`
@@ -385,7 +513,7 @@ export const createSessionSlice: StateCreator<
   [["zustand/immer", never]],
   [],
   SessionSlice
-> = (set) => ({
+> = (set, get) => ({
   ...defaultSessionState,
   ...buildMessageActions(set),
   addTurn: (turn) =>
@@ -396,10 +524,13 @@ export const createSessionSlice: StateCreator<
         draft.turns.bySession[sessionId].push(turn);
       }
     }),
-  completeTurn: (sessionId, turnId, completedAt) =>
+  completeTurn: (sessionId, turnId, completedAt, metadata) =>
     set((draft) => {
       const turn = draft.turns.bySession[sessionId]?.find((t) => t.id === turnId);
-      if (turn) turn.completed_at = completedAt;
+      if (turn) {
+        turn.completed_at = completedAt;
+        if (metadata) turn.metadata = metadata;
+      }
     }),
   setActiveTurn: (sessionId, turnId) =>
     set((draft) => {
@@ -430,7 +561,8 @@ export const createSessionSlice: StateCreator<
     set((draft) => {
       draft.activeModel.bySessionId[sessionId] = modelId;
     }),
-  ...buildTaskPlanActions(set),
+  ...buildTaskPlanActions(set, get),
+  ...buildWalkthroughActions(set, get),
   setQueueEntries: (sessionId, entries, meta) =>
     set((draft) => {
       draft.queue.bySessionId[sessionId] = entries;

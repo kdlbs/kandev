@@ -15,9 +15,14 @@ const DefaultMaxPerSession = 10
 // dispatch hardcodes QueuedByAgent so user clients can never overwrite an
 // agent-authored entry.
 const (
-	QueuedByUser  = "user"
-	QueuedByAgent = "agent"
+	QueuedByUser     = "user"
+	QueuedByAgent    = "agent"
+	QueuedByWorkflow = "workflow"
 )
+
+// MetadataCoalesceKey identifies queued entries that should be replaced rather
+// than appended when a newer pending message supersedes an older one.
+const MetadataCoalesceKey = "coalesce_key"
 
 // QueueFullErrorCode is the well-known WS / MCP error code surfaced when an
 // insert would exceed the per-session cap. Shared between the user-side WS
@@ -50,9 +55,11 @@ type QueuedMessage struct {
 
 // MessageAttachment represents an attachment (image) in a queued message.
 type MessageAttachment struct {
-	Type     string `json:"type"`
-	Data     string `json:"data"`
-	MimeType string `json:"mime_type"`
+	Type         string `json:"type"`
+	Data         string `json:"data"`
+	MimeType     string `json:"mime_type"`
+	Name         string `json:"name,omitempty"`
+	DeliveryMode string `json:"delivery_mode,omitempty"`
 }
 
 // QueueStatus is the per-session view returned to clients: full ordered list of

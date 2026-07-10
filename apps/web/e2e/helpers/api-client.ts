@@ -7,6 +7,15 @@ import type {
   TaskSessionState,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
+import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
+import type { VoiceModeSettings } from "../../lib/types/http-voice";
+import type {
+  SSHAgentReadinessResponse,
+  SSHProbeShellsResponse,
+  SSHSession,
+  SSHTestRequest,
+  SSHTestResult,
+} from "../../lib/types/http-ssh";
 
 // --- GitHub Mock Types ---
 
@@ -30,6 +39,23 @@ export type MockPR = {
   deletions?: number;
   merged_at?: string;
   requested_reviewers?: Array<{ login: string; type: string }>;
+};
+
+export type MockIssue = {
+  number: number;
+  title: string;
+  body?: string;
+  url?: string;
+  html_url?: string;
+  state?: string;
+  author_login?: string;
+  repo_owner: string;
+  repo_name: string;
+  labels?: string[];
+  assignees?: string[];
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string | null;
 };
 
 export type MockOrg = {
@@ -76,6 +102,8 @@ type CreateTaskOpts = {
   repositories?: Array<{ repository_id: string; base_branch?: string; checkout_branch?: string }>;
   plan_mode?: boolean;
   metadata?: Record<string, unknown>;
+  parent_id?: string;
+  attachments?: MessageAttachmentInput[];
 };
 
 function buildTaskMetadata(opts: CreateTaskOpts): Record<string, unknown> | undefined {
@@ -104,10 +132,19 @@ function buildCreateTaskBody(
     "repositories",
     opts?.repositories ?? opts?.repository_ids?.map((id) => ({ repository_id: id })),
   );
+  setIf(body, "attachments", opts?.attachments);
   if (opts?.plan_mode) body.plan_mode = true;
   setIf(body, "parent_id", opts?.parent_id);
   return body;
 }
+
+type MessageAttachmentInput = {
+  type: string;
+  data: string;
+  mime_type: string;
+  name?: string;
+  delivery_mode?: "prompt" | "path";
+};
 
 type OptionalAgentTaskOpts = {
   workflow_id?: string;
@@ -118,6 +155,7 @@ type OptionalAgentTaskOpts = {
   executor_profile_id?: string;
   metadata?: Record<string, unknown>;
   parent_id?: string;
+  attachments?: MessageAttachmentInput[];
 };
 
 /** `repositories` (with per-entry branches) takes precedence over the shorthand
@@ -139,6 +177,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   setIf(fields, "executor_profile_id", opts.executor_profile_id);
   setIf(fields, "metadata", opts.metadata);
   setIf(fields, "parent_id", opts.parent_id);
+  setIf(fields, "attachments", opts.attachments);
   return fields;
 }
 
@@ -170,6 +209,21 @@ export class ApiClient {
     return res.json() as Promise<T>;
   }
 
+  private async activeWorkspaceId(): Promise<string | undefined> {
+    const { settings } = await this.getUserSettings();
+    const workspaceId = settings.workspace_id;
+    return typeof workspaceId === "string" && workspaceId.trim() !== ""
+      ? workspaceId.trim()
+      : undefined;
+  }
+
+  private async withActiveWorkspace(path: string, workspaceId?: string): Promise<string> {
+    const resolved = workspaceId?.trim() || (await this.activeWorkspaceId());
+    if (!resolved) return path;
+    const separator = path.includes("?") ? "&" : "?";
+    return `${path}${separator}workspace_id=${encodeURIComponent(resolved)}`;
+  }
+
   async healthCheck(): Promise<void> {
     await this.request("GET", "/health");
   }
@@ -187,6 +241,50 @@ export class ApiClient {
       workspace_id: workspaceId,
       name,
       ...(templateId ? { workflow_template_id: templateId } : {}),
+    });
+  }
+
+  /**
+   * Seed a workflow with an explicit style (kanban / office / custom) via the
+   * KANDEV_E2E_MOCK test harness. Production has no HTTP path that creates an
+   * office-style workflow (the normal create endpoint always normalises to
+   * kanban), so this is the only way to stand up an office workflow for the
+   * "exclude office from settings export" coverage (issue #1109).
+   */
+  async seedWorkflow(
+    workspaceId: string,
+    name: string,
+    style: "kanban" | "office" | "custom",
+  ): Promise<{ workflow_id: string }> {
+    return this.request("POST", "/api/v1/_test/workflows", {
+      workspace_id: workspaceId,
+      name,
+      style,
+    });
+  }
+
+  /**
+   * Seed a task row directly via the test harness, bypassing the service-layer
+   * subtask-depth guard. Use this (not `createTask`) to build nested chains
+   * deeper than one level — `createTask` rejects depth > 1 for kanban tasks.
+   */
+  async seedTask(
+    workspaceId: string,
+    title: string,
+    opts?: {
+      workflow_id?: string;
+      workflow_step_id?: string;
+      parent_id?: string;
+      state?: string;
+    },
+  ): Promise<{ task_id: string }> {
+    return this.request("POST", "/api/v1/_test/tasks", {
+      workspace_id: workspaceId,
+      title,
+      workflow_id: opts?.workflow_id ?? "",
+      workflow_step_id: opts?.workflow_step_id ?? "",
+      parent_id: opts?.parent_id ?? "",
+      state: opts?.state ?? "",
     });
   }
 
@@ -222,6 +320,7 @@ export class ApiClient {
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
       parent_id?: string;
+      attachments?: MessageAttachmentInput[];
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", buildCreateTaskBody(workspaceId, title, opts));
@@ -229,7 +328,7 @@ export class ApiClient {
 
   async updateTaskState(
     taskId: string,
-    state: "BACKLOG" | "IN_PROGRESS" | "REVIEW" | "COMPLETED",
+    state: "BACKLOG" | "IN_PROGRESS" | "REVIEW" | "COMPLETED" | "FAILED" | "CANCELLED",
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/tasks/${taskId}`, { state });
   }
@@ -277,8 +376,10 @@ export class ApiClient {
     opts: {
       model: string;
       mode?: string;
+      config_options?: Record<string, string>;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
+      env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
     },
   ): Promise<{
     id: string;
@@ -288,8 +389,10 @@ export class ApiClient {
       name,
       model: opts.model,
       mode: opts.mode,
+      config_options: opts.config_options,
       cli_passthrough: opts.cli_passthrough ?? false,
       cli_flags: opts.cli_flags,
+      env_vars: opts.env_vars,
     });
   }
 
@@ -313,8 +416,10 @@ export class ApiClient {
       name?: string;
       model?: string;
       mode?: string;
+      config_options?: Record<string, string>;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
+      env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
     },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/agent-profiles/${profileId}`, patch);
@@ -331,6 +436,13 @@ export class ApiClient {
     content: string,
   ): Promise<{ id: string; name: string; content: string; builtin: boolean }> {
     return this.request("POST", "/api/v1/prompts", { name, content });
+  }
+
+  async updatePrompt(
+    promptId: string,
+    patch: { name?: string; content?: string },
+  ): Promise<{ id: string; name: string; content: string; builtin: boolean }> {
+    return this.request("PATCH", `/api/v1/prompts/${promptId}`, patch);
   }
 
   async deletePrompt(promptId: string): Promise<void> {
@@ -357,6 +469,7 @@ export class ApiClient {
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
       parent_id?: string;
+      attachments?: MessageAttachmentInput[];
     },
   ): Promise<CreateTaskResponse> {
     return this.request("POST", "/api/v1/tasks", {
@@ -427,7 +540,12 @@ export class ApiClient {
 
   async updateRepository(
     repositoryId: string,
-    updates: { dev_script?: string; setup_script?: string; cleanup_script?: string },
+    updates: {
+      dev_script?: string;
+      setup_script?: string;
+      cleanup_script?: string;
+      copy_files?: string;
+    },
   ): Promise<void> {
     await this.request("PATCH", `/api/v1/repositories/${repositoryId}`, updates);
   }
@@ -550,6 +668,9 @@ export class ApiClient {
     default_utility_model?: string;
     sidebar_views?: unknown[];
     kanban_view_mode?: string;
+    tasks_list_sort?: string;
+    tasks_list_group?: string;
+    voice_mode?: VoiceModeSettings;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
@@ -578,6 +699,13 @@ export class ApiClient {
         on_turn_start?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
         on_exit?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_comment?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_blocker_resolved?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_children_completed?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_approval_resolved?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_heartbeat?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_budget_alert?: Array<{ type: string; config?: Record<string, unknown> }>;
+        on_agent_error?: Array<{ type: string; config?: Record<string, unknown> }>;
       };
     },
   ): Promise<void> {
@@ -670,20 +798,24 @@ export class ApiClient {
     taskId: string,
     opts: {
       state: TaskSessionState;
+      sessionId?: string;
       agentProfileId?: string;
       startedAt?: string;
       completedAt?: string;
       commandCount?: number;
+      metadata?: Record<string, unknown>;
     },
   ): Promise<{ session_id: string }> {
     const body: Record<string, unknown> = {
       task_id: taskId,
       state: opts.state,
     };
+    if (opts.sessionId !== undefined) body.session_id = opts.sessionId;
     if (opts.agentProfileId !== undefined) body.agent_profile_id = opts.agentProfileId;
     if (opts.startedAt !== undefined) body.started_at = opts.startedAt;
     if (opts.completedAt !== undefined) body.completed_at = opts.completedAt;
     if (opts.commandCount !== undefined) body.command_count = opts.commandCount;
+    if (opts.metadata !== undefined) body.metadata = opts.metadata;
     return this.request("POST", "/api/v1/_test/task-sessions", body);
   }
 
@@ -706,6 +838,25 @@ export class ApiClient {
       await this.seedSessionMessage(sessionId, {
         type: "tool_call",
         content: `synthetic tool call ${i + 1}`,
+      });
+    }
+  }
+
+  /**
+   * Seed `count` agent text messages (type "message"), oldest-to-newest.
+   * Unlike `seedToolCallMessages`, these are `message`-type rows so the chat's
+   * newest-window fetch contains a user/agent message and does not trigger the
+   * auto-backfill that would otherwise pull older pages on its own.
+   */
+  async seedAgentMessages(
+    sessionId: string,
+    count: number,
+    prefix = "filler message",
+  ): Promise<void> {
+    for (let i = 0; i < count; i++) {
+      await this.seedSessionMessage(sessionId, {
+        type: "message",
+        content: `${prefix} ${i + 1}`,
       });
     }
   }
@@ -797,6 +948,10 @@ export class ApiClient {
 
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/prs", { prs });
+  }
+
+  async mockGitHubAddIssues(issues: MockIssue[]): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/issues", { issues });
   }
 
   async mockGitHubAddOrgs(orgs: MockOrg[]): Promise<void> {
@@ -912,6 +1067,40 @@ export class ApiClient {
     await this.request("POST", "/api/v1/github/mock/task-prs", data);
   }
 
+  async getTaskCIAutomationOptions(taskId: string): Promise<TaskCIAutomationOptions> {
+    return this.request("GET", `/api/v1/github/tasks/${encodeURIComponent(taskId)}/ci-options`);
+  }
+
+  async updateTaskCIAutomationOptions(
+    taskId: string,
+    patch: TaskCIAutomationPatch,
+  ): Promise<TaskCIAutomationOptions> {
+    return this.request(
+      "PATCH",
+      `/api/v1/github/tasks/${encodeURIComponent(taskId)}/ci-options`,
+      patch,
+    );
+  }
+
+  async getTaskPR(taskId: string): Promise<{
+    task_id: string;
+    pr_number: number;
+    state: string;
+    review_state: string;
+    checks_state: string;
+    mergeable_state: string;
+    review_count: number;
+    pending_review_count: number;
+    required_reviews?: number | null;
+  } | null> {
+    const res = await this.rawRequest("GET", `/api/v1/github/task-prs/${taskId}`);
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      throw new Error(`getTaskPR failed (${res.status}): ${await res.text()}`);
+    }
+    return res.json();
+  }
+
   async mockGitHubSeedPRFeedback(data: {
     owner: string;
     repo: string;
@@ -954,6 +1143,16 @@ export class ApiClient {
     await this.request("PUT", "/api/v1/github/mock/auth-health", data);
   }
 
+  /**
+   * Toggles the mock client's "list accessible repos unavailable" branch.
+   * When set to true, GET /api/v1/github/repos responds with 503
+   * `github_not_configured` — used by Remote-tab e2e specs that need to
+   * verify the "Connect GitHub" banner in the chip popover.
+   */
+  async mockGitHubSetReposUnavailable(unavailable: boolean): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/repos-unavailable", { unavailable });
+  }
+
   async mockGitHubGetStatus(): Promise<{
     authenticated: boolean;
     username: string;
@@ -992,6 +1191,8 @@ export class ApiClient {
       task_environment_id?: string;
       worktree_path?: string;
       worktree_branch?: string;
+      error_message?: string;
+      metadata?: Record<string, unknown>;
     }>;
     total: number;
   }> {
@@ -1022,6 +1223,23 @@ export class ApiClient {
     }>;
   }> {
     return this.request("GET", `/api/v1/tasks/${taskId}`);
+  }
+
+  async getTaskPlan(taskId: string): Promise<{
+    task_id: string;
+    content: string;
+    title?: string;
+    created_by: string;
+    updated_at: string;
+  } | null> {
+    try {
+      return await this.wsRequest("task.plan.get", { task_id: taskId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Backend returns "plan not found" when no plan exists for the task.
+      if (message.includes("plan not found")) return null;
+      throw error;
+    }
   }
 
   /**
@@ -1072,17 +1290,20 @@ export class ApiClient {
    * Used by tests that need a second session on a task with an existing
    * environment (multi-session reuse, recovery scenarios).
    */
-  async launchSession(payload: {
-    task_id: string;
-    agent_profile_id: string;
-    executor_id?: string;
-    executor_profile_id?: string;
-    prompt: string;
-    intent?: string;
-    workflow_step_id?: string;
-    auto_start?: boolean;
-  }): Promise<{ session_id: string; agent_execution_id: string; state: string }> {
-    return this.wsRequest("session.launch", payload);
+  async launchSession(
+    payload: {
+      task_id: string;
+      agent_profile_id: string;
+      executor_id?: string;
+      executor_profile_id?: string;
+      prompt: string;
+      intent?: string;
+      workflow_step_id?: string;
+      auto_start?: boolean;
+    },
+    timeoutMs = 30_000,
+  ): Promise<{ session_id: string; agent_execution_id: string; state: string }> {
+    return this.wsRequest("session.launch", payload, timeoutMs);
   }
 
   /** Stop a running session via WS `session.stop` — same path the UI uses. */
@@ -1126,6 +1347,7 @@ export class ApiClient {
       prompt?: string;
       review_scope?: string;
       poll_interval_seconds?: number;
+      cleanup_policy?: "auto" | "always" | "never";
     },
   ): Promise<{ id: string }> {
     return this.request("POST", "/api/v1/github/watches/review", {
@@ -1137,11 +1359,91 @@ export class ApiClient {
       prompt: opts?.prompt ?? "",
       review_scope: opts?.review_scope ?? "user_and_teams",
       poll_interval_seconds: opts?.poll_interval_seconds ?? 300,
+      cleanup_policy: opts?.cleanup_policy ?? "auto",
     });
   }
 
-  async triggerReviewWatch(watchId: string): Promise<{ new_prs: number; cleaned?: number }> {
-    return this.request("POST", `/api/v1/github/watches/review/${watchId}/trigger`, undefined);
+  async updateReviewWatch(
+    watchId: string,
+    workspaceId: string,
+    patch: {
+      enabled?: boolean;
+      cleanup_policy?: "auto" | "always" | "never";
+      prompt?: string;
+      repos?: Array<{ owner: string; name: string }>;
+    },
+  ): Promise<void> {
+    await this.request(
+      "PUT",
+      `/api/v1/github/watches/review/${watchId}?workspace_id=${encodeURIComponent(workspaceId)}`,
+      patch,
+    );
+  }
+
+  async deleteReviewWatch(watchId: string, workspaceId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/github/watches/review/${watchId}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async triggerReviewWatch(
+    watchId: string,
+    workspaceId: string,
+  ): Promise<{ new_prs: number; new_prs_found: number; cleaned?: number }> {
+    const params = new URLSearchParams({ workspace_id: workspaceId });
+    return this.request(
+      "POST",
+      `/api/v1/github/watches/review/${watchId}/trigger?${params}`,
+      undefined,
+    );
+  }
+
+  /**
+   * Invokes the manual cleanup sweep — same code path the settings-page
+   * "Clean up merged" button uses. Returns the number of tasks deleted.
+   */
+  async cleanupMergedReviewTasks(): Promise<{ deleted: number }> {
+    return this.request("POST", "/api/v1/github/cleanup/review-tasks", undefined);
+  }
+
+  async cleanupClosedIssueTasks(): Promise<{ deleted: number }> {
+    return this.request("POST", "/api/v1/github/cleanup/issue-tasks", undefined);
+  }
+
+  /**
+   * Posts a user-authored message on an existing task session via the same WS
+   * action the chat UI uses. The resulting message lacks the auto_start
+   * metadata flag, so the cleanup loop counts it as real user engagement.
+   * Use after the auto-started agent finishes so the session is in a state
+   * that accepts new prompts.
+   */
+  async addUserMessage(
+    taskId: string,
+    sessionId: string,
+    content: string,
+    attachments?: MessageAttachmentInput[],
+  ): Promise<void> {
+    await this.wsRequest("message.add", {
+      task_id: taskId,
+      session_id: sessionId,
+      content,
+      attachments,
+    });
+  }
+
+  async queueMessage(
+    taskId: string,
+    sessionId: string,
+    content: string,
+    attachments?: MessageAttachmentInput[],
+  ): Promise<void> {
+    await this.wsRequest("message.queue.add", {
+      task_id: taskId,
+      session_id: sessionId,
+      content,
+      attachments,
+    });
   }
 
   // --- Integration config seeding (real API, not mock) ---
@@ -1149,21 +1451,46 @@ export class ApiClient {
   async setJiraConfig(payload: {
     siteUrl: string;
     email: string;
-    authMethod?: "api_token" | "session_cookie";
+    authMethod?: "api_token" | "pat" | "session_cookie";
+    instanceType?: "cloud" | "server";
     defaultProjectKey?: string;
     secret: string;
+    workspaceId?: string;
   }): Promise<unknown> {
-    return this.request("POST", "/api/v1/jira/config", {
-      ...payload,
+    const { workspaceId, ...config } = payload;
+    const path = await this.withActiveWorkspace("/api/v1/jira/config", workspaceId);
+    return this.request("POST", path, {
+      ...config,
       authMethod: payload.authMethod ?? "api_token",
+      instanceType: payload.instanceType ?? "cloud",
     });
   }
 
-  async setLinearConfig(payload: { secret: string; defaultTeamKey?: string }): Promise<unknown> {
-    return this.request("POST", "/api/v1/linear/config", {
+  async setLinearConfig(payload: {
+    secret: string;
+    defaultTeamKey?: string;
+    workspaceId?: string;
+  }): Promise<unknown> {
+    const { workspaceId, ...config } = payload;
+    const path = await this.withActiveWorkspace("/api/v1/linear/config", workspaceId);
+    return this.request("POST", path, {
       defaultTeamKey: "",
-      ...payload,
+      ...config,
       authMethod: "api_key",
+    });
+  }
+
+  async setSentryConfig(payload: {
+    secret: string;
+    url?: string;
+    workspaceId?: string;
+  }): Promise<unknown> {
+    const { workspaceId, ...config } = payload;
+    const path = await this.withActiveWorkspace("/api/v1/sentry/config", workspaceId);
+    return this.request("PUT", path, {
+      authMethod: "auth_token",
+      url: "https://sentry.io",
+      ...config,
     });
   }
 
@@ -1175,12 +1502,15 @@ export class ApiClient {
    * navigating, otherwise the import bar can race the first render.
    */
   async waitForIntegrationAuthHealthy(
-    integration: "jira" | "linear",
-    timeoutMs = 5_000,
+    integration: "jira" | "linear" | "sentry",
+    options: number | { timeoutMs?: number; workspaceId?: string } = 5_000,
   ): Promise<void> {
+    const timeoutMs = typeof options === "number" ? options : (options.timeoutMs ?? 5_000);
+    const workspaceId = typeof options === "number" ? undefined : options.workspaceId;
+    const path = await this.withActiveWorkspace(`/api/v1/${integration}/config`, workspaceId);
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const res = await this.rawRequest("GET", `/api/v1/${integration}/config`);
+      const res = await this.rawRequest("GET", path);
       if (res.ok && res.status === 200) {
         const cfg = (await res.json()) as { hasSecret?: boolean; lastOk?: boolean };
         if (cfg.hasSecret && cfg.lastOk) return;
@@ -1206,12 +1536,25 @@ export class ApiClient {
     await this.request("PUT", "/api/v1/jira/mock/auth-result", result);
   }
 
-  async mockJiraSetAuthHealth(args: { ok: boolean; error?: string }): Promise<void> {
-    await this.request("PUT", "/api/v1/jira/mock/auth-health", args);
+  async mockJiraSetAuthHealth(args: {
+    ok: boolean;
+    error?: string;
+    workspaceId?: string;
+  }): Promise<void> {
+    const { workspaceId, ...payload } = args;
+    const path = await this.withActiveWorkspace("/api/v1/jira/mock/auth-health", workspaceId);
+    await this.request("PUT", path, payload);
   }
 
   async mockJiraSetProjects(projects: MockJiraProject[]): Promise<void> {
     await this.request("POST", "/api/v1/jira/mock/projects", { projects });
+  }
+
+  async mockJiraSetProjectStatuses(projectKey: string, statuses: MockJiraStatus[]): Promise<void> {
+    await this.request("POST", "/api/v1/jira/mock/project-statuses", {
+      projectKey,
+      statuses,
+    });
   }
 
   async mockJiraAddTickets(tickets: MockJiraTicket[]): Promise<void> {
@@ -1258,8 +1601,11 @@ export class ApiClient {
     ok: boolean;
     error?: string;
     orgSlug?: string;
+    workspaceId?: string;
   }): Promise<void> {
-    await this.request("PUT", "/api/v1/linear/mock/auth-health", args);
+    const { workspaceId, ...payload } = args;
+    const path = await this.withActiveWorkspace("/api/v1/linear/mock/auth-health", workspaceId);
+    await this.request("PUT", path, payload);
   }
 
   async mockLinearSetTeams(teams: MockLinearTeam[]): Promise<void> {
@@ -1276,6 +1622,88 @@ export class ApiClient {
 
   async mockLinearSetGetIssueError(args: { statusCode: number; message: string }): Promise<void> {
     await this.request("PUT", "/api/v1/linear/mock/get-issue-error", args);
+  }
+
+  // --- Sentry Mock Control ---
+
+  async mockSentryReset(): Promise<void> {
+    await this.request("DELETE", "/api/v1/sentry/mock/reset");
+  }
+
+  async mockSentrySetAuthResult(result: {
+    ok: boolean;
+    userId?: string;
+    displayName?: string;
+    email?: string;
+    error?: string;
+  }): Promise<void> {
+    await this.request("PUT", "/api/v1/sentry/mock/auth-result", result);
+  }
+
+  async mockSentrySetAuthHealth(args: {
+    ok: boolean;
+    error?: string;
+    workspaceId?: string;
+  }): Promise<void> {
+    const { workspaceId, ...payload } = args;
+    const path = await this.withActiveWorkspace("/api/v1/sentry/mock/auth-health", workspaceId);
+    await this.request("PUT", path, payload);
+  }
+
+  async mockSentrySetOrganizations(organizations: MockSentryOrganization[]): Promise<void> {
+    await this.request("POST", "/api/v1/sentry/mock/organizations", { organizations });
+  }
+
+  async mockSentrySetProjects(projects: MockSentryProject[]): Promise<void> {
+    await this.request("POST", "/api/v1/sentry/mock/projects", { projects });
+  }
+
+  // --- Linear issue watch CRUD ---
+  // Used by the agent-profile-delete spec to exercise the watcher dependency
+  // surface added in the watcher self-heal PR. Filter shape matches
+  // linear.CreateIssueWatchRequest (Go side).
+
+  async createLinearIssueWatch(opts: {
+    workspaceId: string;
+    workflowId: string;
+    workflowStepId: string;
+    agentProfileId: string;
+    executorProfileId?: string;
+    filter?: { teamKey?: string };
+    prompt?: string;
+    enabled?: boolean;
+    pollIntervalSeconds?: number;
+  }): Promise<{ id: string; enabled: boolean; lastError?: string }> {
+    return this.request("POST", "/api/v1/linear/watches/issue", {
+      workspaceId: opts.workspaceId,
+      workflowId: opts.workflowId,
+      workflowStepId: opts.workflowStepId,
+      agentProfileId: opts.agentProfileId,
+      executorProfileId: opts.executorProfileId ?? "",
+      filter: { teamKey: "ENG", ...(opts.filter ?? {}) },
+      prompt: opts.prompt ?? "",
+      enabled: opts.enabled ?? true,
+      pollIntervalSeconds: opts.pollIntervalSeconds ?? 300,
+    });
+  }
+
+  async getLinearIssueWatch(
+    workspaceId: string,
+    watchId: string,
+  ): Promise<{
+    id: string;
+    enabled: boolean;
+    lastError?: string;
+    lastErrorAt?: string;
+  } | null> {
+    // No single-watch GET on the route table (only POST/PATCH/DELETE/trigger);
+    // walk the workspace list and find by id. Scoped by workspace_id so the
+    // result set stays small even if the install accumulates watchers. The
+    // list endpoint wraps the rows in a { watches: [...] } envelope.
+    const { watches } = await this.request<{
+      watches: Array<{ id: string; enabled: boolean; lastError?: string; lastErrorAt?: string }>;
+    }>("GET", `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(workspaceId)}`);
+    return watches.find((w) => w.id === watchId) ?? null;
   }
 
   // --- Agent dashboard E2E seed helpers (KANDEV_E2E_MOCK=true) ---
@@ -1477,11 +1905,98 @@ export class ApiClient {
       headers: { Authorization: `Bearer ${token}` },
     });
   }
+
+  // --- SSH executor helpers ---
+
+  /**
+   * Create an SSH executor. The `config` map carries the fields the SSH
+   * runtime reads at launch time: ssh_host / ssh_port / ssh_user /
+   * ssh_host_fingerprint / ssh_identity_source / ssh_identity_file /
+   * ssh_proxy_jump. Pre-trusting a fingerprint here lets tests skip the UI
+   * test-then-trust flow.
+   */
+  async createSSHExecutor(
+    name: string,
+    config: Record<string, string>,
+  ): Promise<{ id: string; name: string; type: string; config: Record<string, string> }> {
+    return this.request("POST", "/api/v1/executors", { name, type: "ssh", config });
+  }
+
+  async updateExecutor(
+    executorId: string,
+    patch: { name?: string; config?: Record<string, string> },
+  ): Promise<void> {
+    await this.request("PATCH", `/api/v1/executors/${executorId}`, patch);
+  }
+
+  async getExecutor(executorId: string): Promise<{
+    id: string;
+    name: string;
+    type: string;
+    config?: Record<string, string>;
+  }> {
+    return this.request("GET", `/api/v1/executors/${executorId}`);
+  }
+
+  async testSSHConnection(req: SSHTestRequest): Promise<SSHTestResult> {
+    return this.request("POST", "/api/v1/ssh/test", req);
+  }
+
+  async listSSHSessions(executorId: string): Promise<SSHSession[]> {
+    return this.request("GET", `/api/v1/ssh/executors/${executorId}/sessions`);
+  }
+
+  async probeSSHAgents(
+    executorId: string,
+    body?: { shell?: string },
+  ): Promise<SSHAgentReadinessResponse> {
+    return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-agents`, body ?? {});
+  }
+
+  async probeSSHShells(executorId: string): Promise<SSHProbeShellsResponse> {
+    return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-shells`);
+  }
+
+  /**
+   * Seed an automation via the E2E HTTP endpoint (avoids WS / Node 24 requirement).
+   * Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async seedAutomation(opts: {
+    workspaceId: string;
+    name: string;
+    workflowId?: string;
+    workflowStepId?: string;
+  }): Promise<{ id: string; workspace_id: string; name: string }> {
+    return this.request("POST", "/api/v1/e2e/automations", {
+      workspace_id: opts.workspaceId,
+      name: opts.name,
+      workflow_id: opts.workflowId ?? "",
+      workflow_step_id: opts.workflowStepId ?? "",
+    });
+  }
+
+  /**
+   * Seed an automation run row via the E2E HTTP endpoint.
+   * Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async seedAutomationRun(
+    automationId: string,
+    status = "skipped",
+    taskId?: string,
+  ): Promise<{ id: string; automation_id: string; status: string; task_id: string }> {
+    return this.request("POST", "/api/v1/e2e/automation-runs", {
+      automation_id: automationId,
+      status,
+      task_id: taskId ?? "",
+    });
+  }
 }
 
 // --- Jira / Linear mock payload types ---
 
 export type MockJiraProject = { id: string; key: string; name: string };
+
+export type MockJiraStatus = { id: string; name: string; statusCategory?: string };
 
 export type MockJiraTransition = {
   id: string;
@@ -1527,3 +2042,9 @@ export type MockLinearIssue = {
   priority?: number;
   url?: string;
 };
+
+// --- Sentry mock payload types ---
+
+export type MockSentryOrganization = { id: string; slug: string; name: string };
+
+export type MockSentryProject = { id: string; slug: string; name: string; orgSlug: string };

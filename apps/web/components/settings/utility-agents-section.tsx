@@ -17,6 +17,7 @@ import {
   CustomAgentsSection,
   USE_DEFAULT,
 } from "@/components/settings/utility-sections";
+import { useInferenceAgents } from "@/components/settings/use-inference-agents";
 
 function buildAllModels(inferenceAgents: InferenceAgent[]) {
   return inferenceAgents.flatMap((ia) =>
@@ -44,7 +45,7 @@ async function handleBuiltinChange(
 
 export function UtilityAgentsSection() {
   const [agents, setAgents] = useState<UtilityAgent[]>([]);
-  const [inferenceAgents, setInferenceAgents] = useState<InferenceAgent[]>([]);
+  const { inferenceAgents, setInferenceAgents, refreshAgent } = useInferenceAgents();
   const [defaultAgentId, setDefaultAgentId] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
   const [loading, setLoading] = useState(true);
@@ -72,7 +73,7 @@ export function UtilityAgentsSection() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setInferenceAgents]);
 
   const handleDefaultChange = async (agentId: string, model: string) => {
     const prevAgentId = defaultAgentId;
@@ -118,6 +119,7 @@ export function UtilityAgentsSection() {
           defaultAgentId={defaultAgentId}
           defaultModel={defaultModel}
           onDefaultChange={handleDefaultChange}
+          onRefreshAgent={refreshAgent}
         />
         <PerActionOverridesSection
           builtins={builtins}

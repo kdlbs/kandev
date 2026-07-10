@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# pr-resolve — list and resolve PR review threads in batch.
+#
+# Usage:
+#   scripts/pr-resolve list <PR>
+#       List unresolved review threads, one per line, TAB-separated:
+#         <thread_id>\t<comment_id>\t<author>\t<path>\t<body_first_120_chars>
+#
+#   scripts/pr-resolve show <PR> <thread_id|comment_id>
+#       Print the full thread/comment body plus path, line, author, commit id,
+#       and URL. Use before deciding how to answer a preview from list.
+#
+#   scripts/pr-resolve reply <PR> <comment_id> <thread_id> <body>
+#   scripts/pr-resolve reply <PR> <comment_id> <thread_id> --body-file <path>
+#       Reply to the thread starter, resolve the thread, and add a +1
+#       reaction in one call. Use this for both "fixed" replies and
+#       pushback replies — the reply body conveys whether you agreed
+#       or not.
+#
+# Owner/repo are derived from `gh repo view` in the current repo.
+#
+# Requires: gh (authenticated) and jq.
+
+set -euo pipefail
+
+usage() {
+  sed -n '2,20p' "$0" | sed 's|^# \{0,1\}||'
+  exit "${1:-1}"
+}
+
+[ $# -ge 1 ] || usage
+
+cmd=$1; shift
+
+case "$cmd" in
+  -h | --help | help)
+    usage 0
+    ;;
+esac
+
+if [[ "$cmd" == "reply" && ( $# -eq 4 || $# -eq 5 ) ]]; then
+  if [[ "$2" == PRRT_* ]]; then
+    echo "reply expects comment_id before thread_id; got a review thread ID in the comment_id position" >&2
+    exit 1
+  fi
+  if [[ "$3" != PRRT_* ]]; then
+    echo "reply expects thread_id after comment_id; got a non-review-thread ID in the thread_id position" >&2
+    exit 1
+  fi
+  if [[ $# -eq 4 && "$4" == "--body-file" ]]; then
+    echo "reply --body-file requires a path" >&2
+    exit 1
+  fi
+  if [[ $# -eq 5 ]]; then
+    [[ "$4" == "--body-file" ]] || usage
+    [[ -f "$5" ]] || { echo "body file not found: $5" >&2; exit 1; }
+    [[ -s "$5" ]] || { echo "body file is empty: $5" >&2; exit 1; }
+  fi
+fi
+
+read -r OWNER REPO < <(gh repo view --json owner,name --jq '"\(.owner.login) \(.name)"')
+
+case "$cmd" in
+  list)
+    [ $# -eq 1 ] || usage
+    PR=$1
+    gh api graphql -f query='
+      query($owner: String!, $repo: String!, $pr: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $pr) {
+            reviewThreads(first: 100) {
+              nodes {
+                id
+                isResolved
+                path
+                comments(first: 1) {
+                  nodes { databaseId author { login } body }
+                }
+              }
+            }
+          }
+        }
+      }' -f owner="$OWNER" -f repo="$REPO" -F pr="$PR" \
+    | jq -r '.data.repository.pullRequest.reviewThreads.nodes
+             | map(select(.isResolved == false))
+             | .[]
+             | "\(.id)\t\(.comments.nodes[0].databaseId)\t\(.comments.nodes[0].author.login)\t\(.path)\t\(.comments.nodes[0].body | gsub("\n"; " ") | .[0:120])"'
+    ;;
+
+  show)
+    [ $# -eq 2 ] || usage
+    PR=$1; TARGET=$2
+    case "$TARGET" in
+      PRRT_*)
+        gh api graphql -f query='
+          query($id: ID!) {
+            node(id: $id) {
+              ... on PullRequestReviewThread {
+                id
+                isResolved
+                path
+                line
+                pullRequest { number }
+                comments(first: 100) {
+                  nodes {
+                    databaseId
+                    author { login }
+                    body
+                    path
+                    line
+                    commit { oid }
+                    url
+                    createdAt
+                  }
+                }
+              }
+            }
+          }' -f id="$TARGET" \
+        | jq -r --argjson pr "$PR" '
+            .data.node as $thread
+            | if $thread == null then error("thread not found")
+              elif $thread.pullRequest.number != $pr then error("thread belongs to PR #\($thread.pullRequest.number), not #\($pr)")
+              else
+                "thread_id: \($thread.id)",
+                "resolved: \($thread.isResolved)",
+                "path: \($thread.path // "-")",
+                "line: \($thread.line // "-")",
+                "comments:",
+                ($thread.comments.nodes[] | [
+                  "  comment_id: \(.databaseId)",
+                  "  author: \(.author.login // "-")",
+                  "  path: \(.path // $thread.path // "-")",
+                  "  line: \(.line // "-")",
+                  "  commit_id: \(.commit.oid // "-")",
+                  "  html_url: \(.url // "-")",
+                  "  created_at: \(.createdAt // "-")",
+                  "  body:",
+                  (.body | split("\n") | map("    " + .) | join("\n"))
+                ] | join("\n"))
+              end'
+        ;;
+      *)
+        gh api "repos/$OWNER/$REPO/pulls/comments/$TARGET" \
+        | jq -r --argjson pr "$PR" '
+            (.pull_request_url | capture("/pulls/(?<number>[0-9]+)$").number | tonumber) as $comment_pr
+            | if $comment_pr != $pr then error("comment belongs to PR #\($comment_pr), not #\($pr)")
+              else
+                "comment_id: \(.id)",
+                "author: \(.user.login // "-")",
+                "path: \(.path // "-")",
+                "line: \(.line // "-")",
+                "commit_id: \(.commit_id // "-")",
+                "html_url: \(.html_url // "-")",
+                "created_at: \(.created_at // "-")",
+                "body:",
+                (.body | split("\n") | map("  " + .) | join("\n"))
+              end'
+        ;;
+    esac
+    ;;
+
+  reply)
+    [[ $# -eq 4 || $# -eq 5 ]] || usage
+    PR=$1; COMMENT_ID=$2; THREAD_ID=$3
+    if [[ $# -eq 5 ]]; then
+      BODY=$(<"$5")
+    else
+      BODY=$4
+    fi
+    gh api -X POST "repos/$OWNER/$REPO/pulls/$PR/comments/$COMMENT_ID/replies" \
+      -f body="$BODY" --silent
+    gh api graphql -f query='mutation($t: ID!) { resolveReviewThread(input: {threadId: $t}) { thread { isResolved } } }' \
+      -f t="$THREAD_ID" --silent
+    gh api -X POST "repos/$OWNER/$REPO/pulls/comments/$COMMENT_ID/reactions" \
+      -f content="+1" --silent
+    echo "ok $THREAD_ID"
+    ;;
+
+  *)
+    usage
+    ;;
+esac

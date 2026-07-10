@@ -2,9 +2,11 @@ package utility
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -14,7 +16,17 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
+	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"go.uber.org/zap"
+)
+
+const (
+	openCodeCommand       = "opencode"
+	openCodeACPSubcommand = "acp"
+
+	acpCommandTerminateGrace = 250 * time.Millisecond
+	acpCommandForceKillGrace = 500 * time.Millisecond
+	acpCommandPollInterval   = 25 * time.Millisecond
 )
 
 // ACPInferenceExecutor executes one-shot prompts using the ACP protocol.
@@ -64,6 +76,8 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
 	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
+	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
+	configureACPCommand(cmd, e.logger)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -78,12 +92,13 @@ func (e *ACPInferenceExecutor) Execute(ctx context.Context, req *PromptRequest) 
 	if err := cmd.Start(); err != nil {
 		return &PromptResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
 	}
+	lifecycle, err := installACPCommandLifecycle(cmd)
+	if err != nil {
+		e.logger.Warn("failed to install ACP command lifecycle; falling back to process-tree cleanup",
+			zap.Error(err))
+	}
 
-	// Ensure process cleanup
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
+	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 
 	// Execute ACP protocol
 	mcpServers, dropped := toACPMcpServers(req.MCPServers)
@@ -178,14 +193,12 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	sessionID := sessionResp.SessionId
 
 	// Optionally set the session model before prompting. ACP-first agents
-	// declare no CLI ModelFlag, so `--model` is not appended at spawn time;
-	// the model has to be applied over the ACP protocol here.
+	// declare no CLI ModelFlag, so `--model` is not appended at spawn time.
+	// Model selection may be a model-shaped config option (Codex/Cursor) or
+	// the older unstable session/set_model method, depending on the agent.
 	if model != "" {
-		if _, err := conn.UnstableSetSessionModel(ctx, acp.UnstableSetSessionModelRequest{
-			SessionId: sessionID,
-			ModelId:   acp.UnstableModelId(model),
-		}); err != nil {
-			return "", fmt.Errorf("ACP session/set_model failed: %w", err)
+		if _, err := applySessionModel(ctx, conn, sessionID, model, sessionResp.ConfigOptions); err != nil {
+			return "", fmt.Errorf("ACP model selection failed: %w", err)
 		}
 	}
 
@@ -213,6 +226,16 @@ func (e *ACPInferenceExecutor) executeACPSession(
 	mu.Unlock()
 
 	return result, nil
+}
+
+func applySessionModel(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID acp.SessionId,
+	model string,
+	configOptions []acp.SessionConfigOption,
+) (sessionmodel.Method, error) {
+	return sessionmodel.ApplySDKFromACP(ctx, conn, string(sessionID), model, configOptions)
 }
 
 // toACPMcpServers converts the cross-process DTO list into the ACP SDK shape.
@@ -300,6 +323,8 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	//nolint:gosec // resolvedCmd is from a hard-coded allow-list; args[1:] are CLI flags
 	cmd := exec.CommandContext(ctx, resolvedCmd, args[1:]...)
 	cmd.Dir = workDir
+	cmd.Env = sanitizeEnvForAgent(req.InferenceConfig)
+	configureACPCommand(cmd, e.logger)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -312,10 +337,12 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 	if err := cmd.Start(); err != nil {
 		return &ProbeResponse{Success: false, Error: fmt.Sprintf("start: %v", err)}, nil
 	}
-	defer func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	}()
+	lifecycle, err := installACPCommandLifecycle(cmd)
+	if err != nil {
+		e.logger.Warn("failed to install ACP command lifecycle; falling back to process-tree cleanup",
+			zap.Error(err))
+	}
+	defer cleanupACPCommand(ctx, cmd, lifecycle, e.logger)
 
 	resp, err := e.probeACPSession(ctx, stdin, stdout, workDir)
 	if err != nil {
@@ -325,10 +352,103 @@ func (e *ACPInferenceExecutor) Probe(ctx context.Context, req *ProbeRequest) (*P
 			DurationMs: int(time.Since(startTime).Milliseconds()),
 		}, nil
 	}
+	if len(resp.Models) == 0 && isOpenCodeACPCommand(cfg.Command) {
+		e.applyOpenCodeModelsFallback(ctx, resp, resolvedCmd, workDir)
+	}
 
 	resp.Success = true
 	resp.DurationMs = int(time.Since(startTime).Milliseconds())
 	return resp, nil
+}
+
+// isOpenCodeACPCommand reports whether the configured ACP probe command is
+// OpenCode's ACP transport.
+func isOpenCodeACPCommand(command []string) bool {
+	return len(command) >= 2 &&
+		filepath.Base(command[0]) == openCodeCommand &&
+		command[1] == openCodeACPSubcommand
+}
+
+// applyOpenCodeModelsFallback fills an otherwise empty probe model list from
+// OpenCode's CLI model listing.
+func (e *ACPInferenceExecutor) applyOpenCodeModelsFallback(ctx context.Context, resp *ProbeResponse, resolvedCmd, workDir string) {
+	models, err := probeOpenCodeModels(ctx, resolvedCmd, workDir)
+	if err != nil {
+		e.logger.Warn("ACP probe: failed to list opencode models",
+			zap.String("command", resolvedCmd),
+			zap.Error(err))
+		return
+	}
+	if len(models) == 0 {
+		e.logger.Warn("ACP probe: opencode models returned no valid model entries",
+			zap.String("command", resolvedCmd))
+		return
+	}
+	resp.Models = models
+}
+
+// probeOpenCodeModels runs the OpenCode model-listing command and converts its
+// output into probe model entries.
+func probeOpenCodeModels(ctx context.Context, resolvedCmd, workDir string) ([]ProbeModel, error) {
+	//nolint:gosec // resolvedCmd is from the same hard-coded allow-list used to launch the ACP probe.
+	cmd := exec.CommandContext(ctx, resolvedCmd, "models")
+	cmd.Dir = workDir
+	cmd.Env = environWithNoColor(os.Environ())
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, commandErrorWithStderr(err)
+	}
+	return parseOpenCodeModelsOutput(string(out)), nil
+}
+
+// environWithNoColor returns an environment that forces NO_COLOR=1, replacing
+// any caller-provided value.
+func environWithNoColor(environ []string) []string {
+	env := make([]string, 0, len(environ)+1)
+	for _, item := range environ {
+		if !strings.HasPrefix(item, "NO_COLOR=") {
+			env = append(env, item)
+		}
+	}
+	return append(env, "NO_COLOR=1")
+}
+
+// commandErrorWithStderr preserves stderr from failed commands when Go exposes
+// it through exec.ExitError.
+func commandErrorWithStderr(err error) error {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		stderr := strings.TrimSpace(string(exitErr.Stderr))
+		if stderr != "" {
+			return fmt.Errorf("%w: %s", err, stderr)
+		}
+	}
+	return err
+}
+
+// parseOpenCodeModelsOutput converts newline-delimited OpenCode model IDs into
+// deduplicated probe model entries.
+func parseOpenCodeModelsOutput(output string) []ProbeModel {
+	seen := make(map[string]struct{})
+	var models []ProbeModel
+	for _, line := range strings.Split(output, "\n") {
+		id := strings.TrimSpace(line)
+		if !isOpenCodeModelID(id) {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		models = append(models, ProbeModel{ID: id, Name: id})
+	}
+	return models
+}
+
+// isOpenCodeModelID accepts model-like OpenCode IDs and rejects decoration or
+// progress lines from CLI output.
+func isOpenCodeModelID(id string) bool {
+	return strings.Contains(id, "/") && !strings.ContainsAny(id, " \t\r")
 }
 
 // probeACPSession performs initialize + session/new and returns the parsed
@@ -437,18 +557,16 @@ func buildInitProbeFields(initResp acp.InitializeResponse) *ProbeResponse {
 }
 
 // applySessionProbeFields populates models and modes from an ACP session/new response.
+//
+// As of acp-go-sdk v0.13.5 the legacy unstable `models` field on
+// NewSessionResponse was removed upstream; model and mode selection are
+// surfaced through the typed `configOptions[]` carrier with
+// `category: model | mode`. The kdlbs fork restores read-only parsing of the
+// top-level `models` field via acp.LegacyModels for agents that haven't
+// migrated yet (auggie 0.29.x). The legacy `modes` field is still present on
+// the SDK type and we keep populating from it for older agents.
 func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionResponse) {
-	if sessionResp.Models != nil {
-		out.CurrentModelID = string(sessionResp.Models.CurrentModelId)
-		for _, m := range sessionResp.Models.AvailableModels {
-			out.Models = append(out.Models, ProbeModel{
-				ID:          string(m.ModelId),
-				Name:        m.Name,
-				Description: derefString(m.Description),
-				Meta:        m.Meta,
-			})
-		}
-	}
+	out.ConfigOptions = probeConfigOptions(sessionResp.ConfigOptions)
 	if sessionResp.Modes != nil {
 		out.CurrentModeID = string(sessionResp.Modes.CurrentModeId)
 		for _, m := range sessionResp.Modes.AvailableModes {
@@ -460,6 +578,127 @@ func applySessionProbeFields(out *ProbeResponse, sessionResp acp.NewSessionRespo
 			})
 		}
 	}
+	applyConfigOptionsAsModels(out, sessionResp.ConfigOptions)
+	if len(out.Models) == 0 {
+		applyLegacyModelsFallback(out, sessionResp.LegacyModels)
+	}
+	if sessionResp.Modes == nil {
+		applyConfigOptionsAsModes(out, sessionResp.ConfigOptions)
+	}
+}
+
+// applyLegacyModelsFallback fills out.Models / out.CurrentModelID from the
+// pre-v0.13.5 top-level `models` field still emitted by agents like
+// auggie 0.29.x. Only invoked when typed configOptions[category=model] did
+// not produce a model list, so the new surface always wins when present.
+func applyLegacyModelsFallback(out *ProbeResponse, legacy *acp.LegacyModels) {
+	if legacy == nil || len(legacy.AvailableModels) == 0 {
+		return
+	}
+	out.CurrentModelID = legacy.CurrentModelId
+	for _, m := range legacy.AvailableModels {
+		out.Models = append(out.Models, ProbeModel{
+			ID:          m.ModelId,
+			Name:        m.Name,
+			Description: derefString(m.Description),
+			Meta:        m.Meta,
+		})
+	}
+}
+
+func probeConfigOptions(opts []acp.SessionConfigOption) []ProbeConfigOption {
+	out := make([]ProbeConfigOption, 0, len(opts))
+	for _, opt := range opts {
+		sel := opt.Select
+		if sel == nil {
+			continue
+		}
+		config := ProbeConfigOption{
+			Type:         sel.Type,
+			ID:           string(sel.Id),
+			Name:         sel.Name,
+			CurrentValue: string(sel.CurrentValue),
+		}
+		if sel.Category != nil {
+			config.Category = string(*sel.Category)
+		}
+		for _, item := range selectOptionsUngrouped(sel.Options) {
+			config.Options = append(config.Options, ProbeConfigOptionChoice{
+				Value: string(item.Value),
+				Name:  item.Name,
+			})
+		}
+		out = append(out, config)
+	}
+	return out
+}
+
+// applyConfigOptionsAsModels extracts a ProbeModel list from any
+// configOptions[] entry tagged with category=model. Used as a fallback when
+// the legacy `models` field is omitted by the agent.
+func applyConfigOptionsAsModels(out *ProbeResponse, opts []acp.SessionConfigOption) {
+	sel := findSelectConfigOption(opts, acp.SessionConfigOptionCategoryModel)
+	if sel == nil {
+		return
+	}
+	out.CurrentModelID = string(sel.CurrentValue)
+	for _, opt := range selectOptionsUngrouped(sel.Options) {
+		out.Models = append(out.Models, ProbeModel{
+			ID:          string(opt.Value),
+			Name:        opt.Name,
+			Description: derefString(opt.Description),
+			Meta:        opt.Meta,
+		})
+	}
+}
+
+// applyConfigOptionsAsModes mirrors applyConfigOptionsAsModels for modes.
+func applyConfigOptionsAsModes(out *ProbeResponse, opts []acp.SessionConfigOption) {
+	sel := findSelectConfigOption(opts, acp.SessionConfigOptionCategoryMode)
+	if sel == nil {
+		return
+	}
+	out.CurrentModeID = string(sel.CurrentValue)
+	for _, opt := range selectOptionsUngrouped(sel.Options) {
+		out.Modes = append(out.Modes, ProbeMode{
+			ID:          string(opt.Value),
+			Name:        opt.Name,
+			Description: derefString(opt.Description),
+			Meta:        opt.Meta,
+		})
+	}
+}
+
+// findSelectConfigOption returns the first Select-typed configOption whose
+// category matches. Boolean toggles and other categories are skipped.
+func findSelectConfigOption(opts []acp.SessionConfigOption, want acp.SessionConfigOptionCategory) *acp.SessionConfigOptionSelect {
+	for i := range opts {
+		sel := opts[i].Select
+		if sel == nil || sel.Category == nil {
+			continue
+		}
+		if *sel.Category == want {
+			return sel
+		}
+	}
+	return nil
+}
+
+// selectOptionsUngrouped flattens a SessionConfigSelectOptions union to a
+// plain slice. Grouped options are flattened group-by-group so callers do not
+// need to care about the nesting.
+func selectOptionsUngrouped(opts acp.SessionConfigSelectOptions) []acp.SessionConfigSelectOption {
+	if opts.Ungrouped != nil {
+		return []acp.SessionConfigSelectOption(*opts.Ungrouped)
+	}
+	if opts.Grouped == nil {
+		return nil
+	}
+	var out []acp.SessionConfigSelectOption
+	for _, g := range *opts.Grouped {
+		out = append(out, g.Options...)
+	}
+	return out
 }
 
 func derefString(p *string) string {
@@ -475,10 +714,17 @@ func derefString(p *string) string {
 // is not derived from untrusted input — even though the value is
 // semantically the same as the base name taken from InferenceConfig.Command.
 var allowedProbeCommands = map[string]string{
-	"npx":        "npx",
-	"auggie":     "auggie",
-	"opencode":   "opencode",
-	"mock-agent": "mock-agent",
+	"auggie":        "auggie",
+	"cursor-agent":  "cursor-agent",
+	"devin":         "devin",
+	"kimi":          "kimi",
+	"kiro-cli-chat": "kiro-cli-chat",
+	"mock-agent":    "mock-agent",
+	"npx":           "npx",
+	"omp":           "omp",
+	openCodeCommand: openCodeCommand,
+	"qodercli":      "qodercli",
+	"traecli":       "traecli",
 }
 
 // resolveProbeCommand validates and returns a hard-coded executable name for
@@ -487,9 +733,37 @@ func resolveProbeCommand(name string) string {
 	return allowedProbeCommands[filepath.Base(name)]
 }
 
+// sanitizeEnvForAgent returns a child-process environment with agent-declared
+// variables (InferenceConfigDTO.StripEnv) removed. Applied to one-shot
+// probe/inference subprocesses; the persistent session path strips in
+// process.Manager.buildAdapterConfig instead.
+func sanitizeEnvForAgent(cfg *InferenceConfigDTO) []string {
+	env := os.Environ()
+	if cfg != nil {
+		for _, key := range cfg.StripEnv {
+			env = RemoveEnvEntry(env, key)
+		}
+	}
+	return env
+}
+
+// RemoveEnvEntry removes all entries for the given key from the env slice.
+// Used to ensure a variable is truly absent (not just empty) in the child
+// process environment — some programs distinguish unset from empty string.
+func RemoveEnvEntry(env []string, key string) []string {
+	prefix := key + "="
+	next := make([]string, 0, len(env))
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			next = append(next, e)
+		}
+	}
+	return next
+}
+
 // buildACPCommand builds the command arguments for ACP inference. The model
 // parameter is a no-op for ACP-first agents (they have no ModelFlag); model
-// selection is applied via the ACP session/set_model protocol call instead.
+// selection is applied through the ACP session after session/new instead.
 func buildACPCommand(cfg *InferenceConfigDTO, model string) []string {
 	args := make([]string, len(cfg.Command))
 	copy(args, cfg.Command)

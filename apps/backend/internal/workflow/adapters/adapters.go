@@ -24,7 +24,8 @@ type WorkflowRepo interface {
 	ListStepDecisions(ctx context.Context, taskID, stepID string) ([]*models.WorkflowStepDecision, error)
 	RecordStepDecision(ctx context.Context, d *models.WorkflowStepDecision) error
 	ClearStepDecisions(ctx context.Context, taskID, stepID string) (int64, error)
-	GetStep(ctx context.Context, id string) (*models.WorkflowStep, error)
+	ResolveCurrentRunner(ctx context.Context, stepID, taskID string) (string, error)
+	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
 }
 
 // Compile-time check that *repository.Repository satisfies WorkflowRepo.
@@ -63,6 +64,11 @@ func (a *ParticipantAdapter) ListStepParticipants(
 		})
 	}
 	return out, nil
+}
+
+// WorkflowStepIDForTask satisfies engine.TargetTaskStepResolver.
+func (a *ParticipantAdapter) WorkflowStepIDForTask(ctx context.Context, taskID string) (string, error) {
+	return a.Repo.GetTaskWorkflowStepID(ctx, taskID)
 }
 
 // DecisionAdapter implements engine.DecisionStore.
@@ -120,7 +126,8 @@ func (a *DecisionAdapter) ClearStepDecisions(
 }
 
 // PrimaryAgentAdapter implements engine.PrimaryAgentResolver. The "primary"
-// agent for a workflow step is the one stored on workflow_steps.agent_profile_id.
+// agent for a task is its current runner participant, falling back to the
+// workflow step's agent_profile_id when no task-specific runner exists.
 type PrimaryAgentAdapter struct {
 	Repo WorkflowRepo
 }
@@ -132,18 +139,25 @@ func NewPrimaryAgentAdapter(repo WorkflowRepo) *PrimaryAgentAdapter {
 
 // PrimaryAgentProfileID satisfies engine.PrimaryAgentResolver.
 func (a *PrimaryAgentAdapter) PrimaryAgentProfileID(
-	ctx context.Context, stepID string,
+	ctx context.Context, stepID, taskID string,
 ) (string, error) {
-	step, err := a.Repo.GetStep(ctx, stepID)
+	agentID, err := a.Repo.ResolveCurrentRunner(ctx, stepID, taskID)
 	if err != nil {
-		return "", fmt.Errorf("get step %s: %w", stepID, err)
+		return "", fmt.Errorf("resolve current runner for step %s task %s: %w", stepID, taskID, err)
 	}
-	return step.AgentProfileID, nil
+	return agentID, nil
+}
+
+// WorkflowStepIDForTask satisfies engine.TargetTaskStepResolver.
+func (a *PrimaryAgentAdapter) WorkflowStepIDForTask(ctx context.Context, taskID string) (string, error) {
+	return a.Repo.GetTaskWorkflowStepID(ctx, taskID)
 }
 
 // Compile-time interface assertions.
 var (
-	_ engine.ParticipantStore     = (*ParticipantAdapter)(nil)
-	_ engine.DecisionStore        = (*DecisionAdapter)(nil)
-	_ engine.PrimaryAgentResolver = (*PrimaryAgentAdapter)(nil)
+	_ engine.ParticipantStore       = (*ParticipantAdapter)(nil)
+	_ engine.TargetTaskStepResolver = (*ParticipantAdapter)(nil)
+	_ engine.DecisionStore          = (*DecisionAdapter)(nil)
+	_ engine.PrimaryAgentResolver   = (*PrimaryAgentAdapter)(nil)
+	_ engine.TargetTaskStepResolver = (*PrimaryAgentAdapter)(nil)
 )

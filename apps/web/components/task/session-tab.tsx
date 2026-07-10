@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { DockviewDefaultTab, type IDockviewPanelHeaderProps } from "dockview-react";
 import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
@@ -29,8 +36,18 @@ import {
   isSessionDeletable as isDeletable,
   isSessionResumable as isResumable,
 } from "@/hooks/domains/session/use-session-actions";
+import { shareableSessionStateClient } from "@/components/task/share/share-button";
+import { ShareDialog } from "@/components/task/share/share-dialog";
+import { HandoffContextMenuSub } from "@/components/task/handoff-profile-menu-items";
+import { NewSessionDialog, type HandoffPreset } from "@/components/task/new-session-dialog";
+import { usableConfigOptions } from "@/components/model-config-selector";
 import type { TaskSessionState } from "@/lib/types/http";
+import {
+  markSessionTabUserActivationIntent,
+  shouldMarkSessionTabUserActivationIntent,
+} from "./session-tab-activation-intent";
 import { isSessionActive } from "./session-sort";
+import { resolveSessionTabTitle } from "./session-tab-title";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 
 function useSessionTabState(sessionId: string | undefined) {
@@ -46,16 +63,38 @@ function useSessionTabState(sessionId: string | undefined) {
     return state.taskSessions.items[sessionId]?.state ?? null;
   }) as TaskSessionState | null;
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
-  const agentLabel = useAppStore((state) => {
+  const tabTitle = useAppStore((state) => {
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
-    if (!session?.agent_profile_id) return null;
-    const profile = state.agentProfiles.items.find(
-      (p: { id: string }) => p.id === session.agent_profile_id,
-    );
-    if (!profile) return null;
-    const parts = profile.label.split(" \u2022 ");
-    return parts[1] || parts[0] || profile.label;
+    const sessionModels = state.sessionModels.bySessionId[sessionId];
+    const activeModelId = state.activeModel.bySessionId[sessionId] || null;
+    const agentLabel = (() => {
+      if (!session?.agent_profile_id) return null;
+      const profile = state.agentProfiles.items.find(
+        (p: { id: string }) => p.id === session.agent_profile_id,
+      );
+      if (!profile) return null;
+      const parts = profile.label.split(" \u2022 ");
+      return parts[1] || parts[0] || profile.label;
+    })();
+    const snapshotModel =
+      typeof session?.agent_profile_snapshot?.model === "string"
+        ? session.agent_profile_snapshot.model
+        : null;
+    return resolveSessionTabTitle({
+      agentLabel,
+      activeModelId,
+      currentModelId: sessionModels?.currentModelId || null,
+      snapshotModel,
+      modelOptions:
+        sessionModels?.models.map((model) => ({
+          id: model.modelId,
+          name: model.name,
+          description: model.description,
+          usageMultiplier: model.usageMultiplier,
+        })) ?? [],
+      configOptions: usableConfigOptions(sessionModels?.configOptions),
+    });
   });
   const agentName = useAppStore((state) => {
     if (!sessionId) return null;
@@ -85,7 +124,7 @@ function useSessionTabState(sessionId: string | undefined) {
     if (!activeTaskId) return 0;
     return state.taskSessionsByTask.itemsByTaskId[activeTaskId]?.length ?? 0;
   });
-  return { isPrimary, sessionState, taskId, agentLabel, agentName, sessionNumber, sessionCount };
+  return { isPrimary, sessionState, taskId, tabTitle, agentName, sessionNumber, sessionCount };
 }
 
 function useSessionTabActions(
@@ -109,6 +148,45 @@ function useSessionTabActions(
     for (const panel of toClose) containerApi.removePanel(panel);
   }, [api, containerApi]);
   return { handleSetPrimary, handleStop, handleResume, handleDelete, handleCloseOthers };
+}
+
+function useSessionTabUserActivationIntent(
+  sessionId: string | undefined,
+  activeSessionId: string | null,
+  isActive: boolean,
+) {
+  const markUserActivationIntent = useCallback(
+    (target: EventTarget | null) => {
+      if (
+        !shouldMarkSessionTabUserActivationIntent({ sessionId, activeSessionId, isActive, target })
+      )
+        return;
+      markSessionTabUserActivationIntent(sessionId);
+    },
+    [activeSessionId, isActive, sessionId],
+  );
+  const handlePointerDownCapture = useCallback(
+    (event: ReactPointerEvent) => {
+      if (event.button === 0) markUserActivationIntent(event.target);
+    },
+    [markUserActivationIntent],
+  );
+  const handleKeyDownCapture = useCallback(
+    (event: ReactKeyboardEvent) => {
+      if (event.key === "Enter" || event.key === " ") markUserActivationIntent(event.target);
+    },
+    [markUserActivationIntent],
+  );
+  return { handlePointerDownCapture, handleKeyDownCapture };
+}
+
+function useDockviewTabActiveState(api: IDockviewPanelHeaderProps["api"]) {
+  const [isActive, setIsActive] = useState(api.isActive);
+  useEffect(() => {
+    const disposable = api.onDidActiveChange((e) => setIsActive(e.isActive));
+    return () => disposable.dispose();
+  }, [api]);
+  return isActive;
 }
 
 function DeleteSessionDialog({
@@ -163,13 +241,23 @@ function DeleteSessionDialog({
 function SessionContextMenuItems({
   sessionState,
   isPrimary,
+  canShare,
+  taskId,
+  sessionId,
   actions,
   onDelete,
+  onShare,
+  onHandoffProfile,
 }: {
   sessionState: TaskSessionState | null;
   isPrimary: boolean;
+  canShare: boolean;
+  taskId: string | null;
+  sessionId: string | undefined;
   actions: ReturnType<typeof useSessionTabActions>;
   onDelete: () => void;
+  onShare: () => void;
+  onHandoffProfile: (profileId: string) => void;
 }) {
   return (
     <ContextMenuContent>
@@ -196,11 +284,89 @@ function SessionContextMenuItems({
           Delete
         </ContextMenuItem>
       )}
+      {canShare && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem className="cursor-pointer" onSelect={onShare}>
+            Share
+          </ContextMenuItem>
+        </>
+      )}
+      {taskId && sessionId && (
+        <>
+          <ContextMenuSeparator />
+          <HandoffContextMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
+        </>
+      )}
       <ContextMenuSeparator />
       <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
         Close Others
       </ContextMenuItem>
     </ContextMenuContent>
+  );
+}
+
+function SessionTabTriggerContent({
+  props,
+  sessionId,
+  isPrimary,
+  showMultiSessionBadges,
+  sessionNumber,
+  agentName,
+  sessionState,
+  isActive,
+  showDeleteOnClose,
+  onCloseTab,
+}: {
+  props: IDockviewPanelHeaderProps;
+  sessionId: string | undefined;
+  isPrimary: boolean;
+  showMultiSessionBadges: boolean;
+  sessionNumber: number | null;
+  agentName: string | null;
+  sessionState: TaskSessionState | null;
+  isActive: boolean;
+  showDeleteOnClose: boolean;
+  onCloseTab: () => void;
+}) {
+  const tabContentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showDeleteOnClose || !sessionId) return;
+    const closeAction = tabContentRef.current?.querySelector(".dv-default-tab-action");
+    if (!closeAction) return;
+    closeAction.setAttribute("data-testid", `session-tab-close-${sessionId}`);
+    return () => closeAction.removeAttribute("data-testid");
+  }, [showDeleteOnClose, sessionId, isActive]); // isActive: re-run when tab activates so Dockview renders .dv-default-tab-action
+
+  return (
+    <div ref={tabContentRef} className="flex items-center">
+      {isPrimary && showMultiSessionBadges && (
+        <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
+      )}
+      {sessionNumber != null && showMultiSessionBadges && (
+        <span className="ml-1.5 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5">
+          {sessionNumber}
+        </span>
+      )}
+      {agentName &&
+        (isSessionActive(sessionState) ? (
+          <GridSpinner
+            className={`ml-1.5 shrink-0 text-[14px] text-muted-foreground${isActive ? "" : " opacity-50"}`}
+          />
+        ) : (
+          <AgentLogo
+            agentName={agentName}
+            size={14}
+            className={`ml-1.5 shrink-0${isActive ? "" : " opacity-50"}`}
+          />
+        ))}
+      <DockviewDefaultTab
+        {...props}
+        hideClose={!showDeleteOnClose}
+        closeActionOverride={showDeleteOnClose ? onCloseTab : undefined}
+      />
+    </div>
   );
 }
 
@@ -211,23 +377,42 @@ function SessionContextMenuItems({
 export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const sessionId = api.id.startsWith("session:") ? api.id.slice("session:".length) : undefined;
-  const { isPrimary, sessionState, taskId, agentLabel, agentName, sessionNumber, sessionCount } =
+  const { isPrimary, sessionState, taskId, tabTitle, agentName, sessionNumber, sessionCount } =
     useSessionTabState(sessionId);
   const actions = useSessionTabActions(sessionId, taskId, api, containerApi);
   const onDoubleClick = useTabMaximizeOnDoubleClick(api);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [isActive, setIsActive] = useState(api.isActive);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [handoffOpen, setHandoffOpen] = useState(false);
+  const [handoffPreset, setHandoffPreset] = useState<HandoffPreset | null>(null);
+  const isActive = useDockviewTabActiveState(api);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
+  const handleHandoffProfile = useCallback(
+    (profileId: string) => {
+      if (!sessionId) return;
+      setHandoffPreset({ sourceSessionId: sessionId, targetProfileId: profileId });
+      setHandoffOpen(true);
+    },
+    [sessionId],
+  );
 
   useEffect(() => {
-    const disposable = api.onDidActiveChange((e) => setIsActive(e.isActive));
-    return () => disposable.dispose();
-  }, [api]);
-
-  useEffect(() => {
-    if (agentLabel && api.title !== agentLabel) api.setTitle(agentLabel);
-  }, [agentLabel, api]);
+    if (tabTitle && api.title !== tabTitle) api.setTitle(tabTitle);
+  }, [tabTitle, api]);
 
   const showMultiSessionBadges = sessionCount > 1;
+  // Multi-session tab close means delete, not hide-only. Running/starting sessions are
+  // not deletable, so we omit the X rather than reviving hide-only close behavior.
+  const showDeleteOnClose = showMultiSessionBadges && !!sessionState && isDeletable(sessionState);
+  const handleCloseTab = useCallback(() => {
+    setConfirmDelete(true);
+  }, []);
+  const { handlePointerDownCapture, handleKeyDownCapture } = useSessionTabUserActivationIntent(
+    sessionId,
+    activeSessionId,
+    isActive,
+  );
 
   return (
     <>
@@ -235,37 +420,33 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
         <ContextMenuTrigger
           className="flex h-full items-center cursor-pointer select-none"
           data-testid={sessionId ? `session-tab-${sessionId}` : undefined}
+          onPointerDownCapture={handlePointerDownCapture}
+          onKeyDownCapture={handleKeyDownCapture}
           onDoubleClick={onDoubleClick}
         >
-          <div className="flex items-center">
-            {isPrimary && showMultiSessionBadges && (
-              <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
-            )}
-            {sessionNumber != null && showMultiSessionBadges && (
-              <span className="ml-1.5 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5">
-                {sessionNumber}
-              </span>
-            )}
-            {agentName &&
-              (isSessionActive(sessionState) ? (
-                <GridSpinner
-                  className={`ml-1.5 shrink-0 text-[14px] text-muted-foreground${isActive ? "" : " opacity-50"}`}
-                />
-              ) : (
-                <AgentLogo
-                  agentName={agentName}
-                  size={14}
-                  className={`ml-1.5 shrink-0${isActive ? "" : " opacity-50"}`}
-                />
-              ))}
-            <DockviewDefaultTab {...props} hideClose={sessionCount <= 1} />
-          </div>
+          <SessionTabTriggerContent
+            props={props}
+            sessionId={sessionId}
+            isPrimary={isPrimary}
+            showMultiSessionBadges={showMultiSessionBadges}
+            sessionNumber={sessionNumber}
+            agentName={agentName}
+            sessionState={sessionState}
+            isActive={isActive}
+            showDeleteOnClose={showDeleteOnClose}
+            onCloseTab={handleCloseTab}
+          />
         </ContextMenuTrigger>
         <SessionContextMenuItems
           sessionState={sessionState}
           isPrimary={isPrimary}
+          canShare={canShare}
+          taskId={taskId}
+          sessionId={sessionId}
           actions={actions}
           onDelete={() => setConfirmDelete(true)}
+          onShare={() => setShareOpen(true)}
+          onHandoffProfile={handleHandoffProfile}
         />
       </ContextMenu>
       <DeleteSessionDialog
@@ -275,6 +456,26 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
         sessionCount={sessionCount}
         onConfirm={actions.handleDelete}
       />
+      {taskId && sessionId && (
+        <ShareDialog
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          taskId={taskId}
+          sessionId={sessionId}
+        />
+      )}
+      {taskId && handoffPreset && (
+        <NewSessionDialog
+          open={handoffOpen}
+          onOpenChange={(open) => {
+            setHandoffOpen(open);
+            if (!open) setHandoffPreset(null);
+          }}
+          taskId={taskId}
+          groupId={api.group?.id}
+          handoff={handoffPreset}
+        />
+      )}
     </>
   );
 }

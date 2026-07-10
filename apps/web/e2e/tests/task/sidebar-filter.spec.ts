@@ -1,6 +1,14 @@
 /**
  * E2E tests for the composable sidebar filter / sort / group system + saved views.
  *
+ * After the unified AppSidebar overhaul, the filter UI lives in the AppSidebar
+ * Tasks-section header as the `TasksViewPicker` (a view-picker dropdown +
+ * filter gear) rather than the legacy `sidebar-filter-bar`. The picker is
+ * visible whenever the Tasks section is expanded, which it is by default and on
+ * `/t/` routes. The `SidebarFilterPopoverPage` page object encapsulates the new
+ * surface (see its docstring). Saved-view chips now live inside the picker's
+ * dropdown menu instead of an always-visible chip row.
+ *
  * Coverage:
  *   - Gear popover open/close
  *   - Default "All tasks" view is seeded for new users
@@ -11,8 +19,17 @@
  *   - Persistence across reload
  *   - Draft semantics + discard
  *   - Last-view deletion guard
+ *
+ * NOTE: Drag-to-reorder of saved views was removed by the overhaul — the views
+ * are now dropdown-menu items, not a sortable chip row. The "view ordering"
+ * tests that depended on dragging are dropped / adapted accordingly (see the
+ * "view ordering" describe block).
  */
+import path from "node:path";
+import fs from "node:fs";
+import { execSync } from "node:child_process";
 import { test, expect } from "../../fixtures/test-base";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 
@@ -58,19 +75,6 @@ async function saveTitleView(
   await filters.close();
 }
 
-async function expectStoredSidebarViewOrder(
-  apiClient: import("../../helpers/api-client").ApiClient,
-  names: string[],
-): Promise<void> {
-  await expect
-    .poll(async () => {
-      const response = await apiClient.getUserSettings();
-      const views = (response.settings.sidebar_views ?? []) as Array<{ name: string }>;
-      return views.map((view) => view.name);
-    })
-    .toEqual(names);
-}
-
 test.describe("Sidebar filter bar — popover basics", () => {
   test("gear opens popover; ESC closes it", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Basics Task"]);
@@ -86,7 +90,8 @@ test.describe("Sidebar filter bar — popover basics", () => {
     seedData,
   }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Chip Task"]);
-    const chips = filters.chipRow.getByTestId("sidebar-view-chip");
+    await filters.openViewPicker();
+    const chips = filters.chipMenu.getByTestId("sidebar-view-chip");
     await expect(chips).toHaveCount(1);
     await expect(chips.filter({ hasText: "All tasks" })).toBeVisible();
   });
@@ -112,36 +117,16 @@ test.describe("Sidebar filter bar — popover basics", () => {
 });
 
 test.describe("Sidebar filter — view ordering", () => {
-  test("dragged view order persists to settings and survives reload", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const { filters } = await openWithSeed(testPage, apiClient, seedData, [
-      "Order alpha task",
-      "Order beta task",
-      "Order gamma task",
-    ]);
-    await saveTitleView(filters, "Alpha View", "alpha");
-    await saveTitleView(filters, "Beta View", "beta");
-    await saveTitleView(filters, "Gamma View", "gamma");
-    await filters.expectChipOrder(["All tasks", "Alpha View", "Beta View", "Gamma View"]);
+  // The "dragged view order persists to settings and survives reload" test was
+  // DELETED in the AppSidebar overhaul: saved views moved from a horizontal,
+  // drag-sortable `sidebar-view-chip-row` into the `TasksViewPicker` dropdown
+  // menu. Dropdown menu items are not sortable, so there is no longer a
+  // drag-to-reorder affordance to exercise. The underlying store action
+  // (reorderSidebarViews) still exists but has no UI entry point, so an E2E
+  // test would have nothing to drive. Re-add coverage if a reorder affordance
+  // returns to the picker.
 
-    await filters.dragViewBefore("Gamma View", "All tasks");
-
-    const reorderedNames = ["Gamma View", "All tasks", "Alpha View", "Beta View"];
-    await filters.expectChipOrder(reorderedNames);
-    await expectStoredSidebarViewOrder(apiClient, reorderedNames);
-
-    await testPage.reload();
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
-    const filters2 = new SidebarFilterPopoverPage(testPage);
-    await filters2.expectChipOrder(reorderedNames);
-    await filters2.expectActiveViewChip("Gamma View");
-  });
-
-  test("reordered views still select, delete, and append normally", async ({
+  test("appended views select, delete, and append normally", async ({
     testPage,
     apiClient,
     seedData,
@@ -154,8 +139,8 @@ test.describe("Sidebar filter — view ordering", () => {
     await saveTitleView(filters, "Alpha View", "alpha");
     await saveTitleView(filters, "Beta View", "beta");
     await saveTitleView(filters, "Gamma View", "gamma");
-    await filters.dragViewBefore("Gamma View", "All tasks");
-    await filters.expectChipOrder(["Gamma View", "All tasks", "Alpha View", "Beta View"]);
+    // Views append in creation order after the default "All tasks".
+    await filters.expectChipOrder(["All tasks", "Alpha View", "Beta View", "Gamma View"]);
 
     await filters.selectViewByName("Alpha View");
     await filters.expectActiveViewChip("Alpha View");
@@ -165,11 +150,12 @@ test.describe("Sidebar filter — view ordering", () => {
     await filters.selectViewByName("Beta View");
     await filters.open();
     await filters.deleteActiveView();
-    await filters.expectChipOrder(["Gamma View", "All tasks", "Alpha View"]);
-    await filters.expectActiveViewChip("Gamma View");
+    await filters.expectChipOrder(["All tasks", "Alpha View", "Gamma View"]);
+    // Deleting the active view falls back to the first remaining view.
+    await filters.expectActiveViewChip("All tasks");
 
     await saveTitleView(filters, "Delta View", "delta");
-    await filters.expectChipOrder(["Gamma View", "All tasks", "Alpha View", "Delta View"]);
+    await filters.expectChipOrder(["All tasks", "Alpha View", "Gamma View", "Delta View"]);
     await filters.expectActiveViewChip("Delta View");
   });
 });
@@ -267,9 +253,12 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     await filters.expectActiveViewChip("My View");
 
     await testPage.reload();
+    const session2 = new SessionPage(testPage);
+    await session2.waitForLoad();
     const f2 = new SidebarFilterPopoverPage(testPage);
+    await f2.openViewPicker();
     await expect(
-      f2.chipRow.getByTestId("sidebar-view-chip").filter({ hasText: "My View" }),
+      f2.chipMenu.getByTestId("sidebar-view-chip").filter({ hasText: "My View" }),
     ).toBeVisible();
   });
 
@@ -287,9 +276,12 @@ test.describe("Sidebar filter — saved views CRUD", () => {
 
     await filters.open();
     await filters.deleteActiveView();
+    await filters.close();
+    await filters.openViewPicker();
     await expect(
-      filters.chipRow.getByTestId("sidebar-view-chip").filter({ hasText: "Ephemeral" }),
+      filters.chipMenu.getByTestId("sidebar-view-chip").filter({ hasText: "Ephemeral" }),
     ).toHaveCount(0);
+    await filters.closeViewPicker();
     await filters.expectActiveViewChip("All tasks");
   });
 
@@ -301,6 +293,67 @@ test.describe("Sidebar filter — saved views CRUD", () => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Last View Task"]);
     await filters.open();
     await expect(filters.popover.getByTestId("view-delete-button")).toHaveCount(0);
+  });
+});
+
+test.describe("Sidebar filter — repository dimension (#1213)", () => {
+  test("filtering by a repository keeps only that repo's tasks (not an empty board)", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    // The default seeded repo is a LOCAL repo (no GitHub provider), named
+    // "E2E Repo". Regression for #1213: a local repo's filter option value used
+    // to be its full local_path while each task carried the repo *name*, so a
+    // saved repository clause matched nothing and the board went empty.
+
+    // A second, distinct local repo so we can prove the clause keeps matches and
+    // drops non-matches.
+    const repoBName = "Second E2E Repo";
+    const repoBDir = path.join(backend.tmpDir, "repos", "e2e-repo-filter-b");
+    fs.mkdirSync(repoBDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: repoBDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: repoBDir, env: gitEnv });
+    const repoB = await apiClient.createRepository(seedData.workspaceId, repoBDir, "main", {
+      name: repoBName,
+    });
+
+    await apiClient.createTask(seedData.workspaceId, "Task in repo A", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+    await apiClient.createTask(seedData.workspaceId, "Task in repo B", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [repoB.id],
+    });
+
+    const navTask = await apiClient.createTask(seedData.workspaceId, "Repo Filter Nav", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await testPage.goto(`/t/${navTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.sidebar).toBeVisible({ timeout: 10_000 });
+    const filters = new SidebarFilterPopoverPage(testPage);
+    await expect(filters.bar).toBeVisible();
+
+    // Both tasks visible before filtering.
+    await expect(session.sidebar.getByText("Task in repo A")).toBeVisible();
+    await expect(session.sidebar.getByText("Task in repo B")).toBeVisible();
+
+    await filters.addFilterRow();
+    await filters.setClauseDimension(0, "Repository");
+    await filters.setClauseEnumValue(0, "E2E Repo");
+    await filters.close();
+
+    // Repo A's task survives (this was empty before the fix); repo B's is hidden.
+    await expect(session.sidebar.getByText("Task in repo A")).toBeVisible();
+    await expect(session.sidebar.getByText("Task in repo B")).toHaveCount(0);
   });
 });
 

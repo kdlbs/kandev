@@ -57,3 +57,33 @@ func TestCopilotACP_BuildCommand_NoCLIFlagSpecialCasing(t *testing.T) {
 		}
 	}
 }
+
+// TestCopilotACP_BuildCommand_PreferNativeBinary verifies that when the
+// lifecycle has found the standalone `copilot` CLI in the execution
+// environment, BuildCommand emits it directly instead of `npx -y <pkg>` —
+// skipping the npm registry round-trip that makes launches slow behind a
+// private registry.
+func TestCopilotACP_BuildCommand_PreferNativeBinary(t *testing.T) {
+	ag := NewCopilotACP()
+
+	if name := ag.NativeBinaryName(); name != "copilot" {
+		t.Fatalf("NativeBinaryName() = %q, want %q", name, "copilot")
+	}
+
+	native := ag.BuildCommand(CommandOptions{PreferNativeBinary: true}).Args()
+	wantNative := []string{"copilot", "--acp"}
+	if len(native) != len(wantNative) {
+		t.Fatalf("native argv mismatch\n  got:  %#v\n  want: %#v", native, wantNative)
+	}
+	for i := range native {
+		if native[i] != wantNative[i] {
+			t.Errorf("native argv[%d] = %q, want %q", i, native[i], wantNative[i])
+		}
+	}
+
+	// Default (binary absent) still uses npx.
+	npx := ag.BuildCommand(CommandOptions{}).Args()
+	if len(npx) == 0 || npx[0] != "npx" {
+		t.Errorf("default command should start with npx, got %#v", npx)
+	}
+}

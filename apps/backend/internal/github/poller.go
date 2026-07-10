@@ -187,89 +187,50 @@ func (p *Poller) checkPRWatches(ctx context.Context) {
 }
 
 // tryBatchedPRWatchCheck runs the batched GraphQL flow for the supplied
-// watches. Returns true when the path succeeded so the caller can skip the
-// per-watch fallback.
+// watches via the shared Service.SyncWatchesBatched seam. Returns true
+// when the path succeeded so the caller can skip the per-watch fallback.
+// The poller's only extra responsibility on top of the service apply is
+// publishing PRFeedback events for status changes and merge/close events
+// (the on-demand sync path intentionally doesn't publish these).
 func (p *Poller) tryBatchedPRWatchCheck(ctx context.Context, watches []*PRWatch) bool {
-	exec, err := graphQLExecutorFor(p.service.client)
+	results, err := p.service.SyncWatchesBatched(ctx, watches)
 	if err != nil {
+		p.logger.Debug("batched PR watch check failed", zap.Error(err))
 		return false
 	}
-	numbered, searching := splitPRWatches(watches)
-	statusByKey, ok := p.fetchBatchedStatuses(ctx, exec, numbered, searching)
-	if !ok {
-		return false
-	}
-	for _, w := range numbered {
-		key := prStatusCacheKey(w.Owner, w.Repo, w.PRNumber)
-		status, ok := statusByKey[key]
-		if !ok {
-			// Alias missing — PR may have been deleted; fall through to the
-			// per-watch path which already handles the not-found case.
-			p.checkSinglePRWatch(ctx, w)
+	for _, r := range results {
+		if !r.Found || r.Status == nil {
 			continue
 		}
-		p.applyPRStatus(ctx, w, status)
-	}
-	for _, w := range searching {
-		key := graphqlBranchKey(w.Owner, w.Repo, w.Branch)
-		status, ok := statusByKey[key]
-		if !ok || status == nil || status.PR == nil {
-			// No PR yet for this branch — record the timestamp like the
-			// per-watch path so liveness updates.
-			now := time.Now().UTC()
-			_ = p.service.store.UpdatePRWatchTimestamps(ctx, w.ID, now, nil, "", "")
+		// Skip publish when the underlying SyncTaskPR failed — the task_pr
+		// row is still stale, so emitting a "PR merged" / "checks changed"
+		// event would put the frontend ahead of the DB until the next poll.
+		if r.SyncFailed {
 			continue
 		}
-		p.applyDetectedPR(ctx, w, status.PR)
+		// Publish PRFeedback event when the watch was previously numbered and
+		// either the PR transitioned to merged/closed or check/review state
+		// changed. Searching watches (PRNumber==0) that just got promoted
+		// don't fire a feedback event — they get an associate-event via
+		// SyncTaskPR / AssociatePRWithTask inside the service apply.
+		if r.Watch.PRNumber == 0 {
+			continue
+		}
+		pr := r.Status.PR
+		if pr != nil && (pr.State == prStateMerged || pr.State == prStateClosed) {
+			p.publishPRStatusEvent(ctx, r.Watch, r.Status)
+			continue
+		}
+		if r.Changed {
+			p.publishPRStatusEvent(ctx, r.Watch, r.Status)
+		}
 	}
 	return true
 }
 
-// fetchBatchedStatuses runs both the numbered-PR query and the branch query
-// against GraphQL. The combined map keys numbered watches by
-// prStatusCacheKey and searching watches by graphqlBranchKey, so callers can
-// look up either kind in one place. Returns (nil, false) when any required
-// query failed so the caller falls back to per-watch checks rather than
-// silently absorbing the failure as "no result".
-func (p *Poller) fetchBatchedStatuses(
-	ctx context.Context, exec GraphQLExecutor, numbered, searching []*PRWatch,
-) (map[string]*PRStatus, bool) {
-	combined := make(map[string]*PRStatus)
-
-	if len(numbered) > 0 {
-		refs := make([]graphQLPRRef, 0, len(numbered))
-		for _, w := range numbered {
-			refs = append(refs, graphQLPRRef{Owner: w.Owner, Repo: w.Repo, Number: w.PRNumber})
-		}
-		out, err := runBatchedPRQuery(ctx, exec, refs)
-		if err != nil {
-			p.logger.Debug("batched PR status query failed", zap.Error(err))
-			return nil, false
-		}
-		for k, v := range out {
-			combined[k] = v
-		}
-	}
-	if len(searching) > 0 {
-		refs := make([]graphQLBranchRef, 0, len(searching))
-		for _, w := range searching {
-			refs = append(refs, graphQLBranchRef{Owner: w.Owner, Repo: w.Repo, Branch: w.Branch})
-		}
-		out, err := runBatchedBranchQuery(ctx, exec, refs)
-		if err != nil {
-			p.logger.Debug("batched branch query failed", zap.Error(err))
-			return nil, false
-		}
-		for k, v := range out {
-			combined[k] = v
-		}
-	}
-	return combined, true
-}
-
 // splitPRWatches partitions watches into "we know the PR number" and "still
 // searching for one on this branch" buckets so each gets its own batched
-// query shape.
+// query shape. Used by Service.SyncWatchesBatched.
 func splitPRWatches(watches []*PRWatch) (numbered, searching []*PRWatch) {
 	for _, w := range watches {
 		if w.PRNumber == 0 {
@@ -279,57 +240,6 @@ func splitPRWatches(watches []*PRWatch) (numbered, searching []*PRWatch) {
 		}
 	}
 	return numbered, searching
-}
-
-// applyPRStatus is the post-fetch processing extracted from
-// checkSinglePRWatch so the batched path can reuse it.
-func (p *Poller) applyPRStatus(ctx context.Context, watch *PRWatch, status *PRStatus) {
-	if status == nil {
-		return
-	}
-	hasNew := status.ChecksState != watch.LastCheckStatus || status.ReviewState != watch.LastReviewState
-	now := time.Now().UTC()
-	if err := p.service.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, status.ChecksState, status.ReviewState); err != nil {
-		p.logger.Error("failed to update PR watch timestamps", zap.String("id", watch.ID), zap.Error(err))
-	}
-	if syncErr := p.service.SyncTaskPR(ctx, watch.TaskID, status); syncErr != nil {
-		p.logger.Error("failed to sync task PR",
-			zap.String("task_id", watch.TaskID), zap.Error(syncErr))
-		return
-	}
-	if status.PR != nil && (status.PR.State == prStateMerged || status.PR.State == prStateClosed) {
-		p.publishPRStatusEvent(ctx, watch, status)
-		if resetErr := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, 0); resetErr != nil {
-			p.logger.Error("failed to reset completed PR watch",
-				zap.String("id", watch.ID), zap.Error(resetErr))
-		}
-		return
-	}
-	if hasNew {
-		p.publishPRStatusEvent(ctx, watch, status)
-	}
-}
-
-// applyDetectedPR is the searching-watch counterpart to applyPRStatus —
-// promotes a PRWatch from "searching" to a known PR number and records the
-// task association.
-func (p *Poller) applyDetectedPR(ctx context.Context, watch *PRWatch, pr *PR) {
-	now := time.Now().UTC()
-	_ = p.service.store.UpdatePRWatchTimestamps(ctx, watch.ID, now, nil, "", "")
-	if err := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, pr.Number); err != nil {
-		p.logger.Error("failed to update PR watch with detected PR",
-			zap.String("watch_id", watch.ID), zap.Int("pr_number", pr.Number), zap.Error(err))
-		return
-	}
-	if _, err := p.service.AssociatePRWithTask(ctx, watch.TaskID, watch.RepositoryID, pr); err != nil {
-		p.logger.Error("failed to associate detected PR with task",
-			zap.String("task_id", watch.TaskID), zap.Int("pr_number", pr.Number), zap.Error(err))
-		return
-	}
-	p.logger.Info("detected PR for session branch (batched)",
-		zap.String("watch_id", watch.ID),
-		zap.String("branch", watch.Branch),
-		zap.Int("pr_number", pr.Number))
 }
 
 func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
@@ -538,16 +448,17 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 		p.logger.Error("failed to list review watches", zap.Error(err))
 		return
 	}
-	if len(watches) == 0 {
-		return
-	}
+	// Note: do NOT early-return on len(watches) == 0 — the global orphan
+	// sweep below is precisely what handles the "user disabled / deleted
+	// every watch" case. Fall through to the no-op loop and run the sweep.
 	p.logger.Debug("checking review watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
 		// A previous iteration in this same cycle may have exhausted the
-		// search bucket. Stop early instead of issuing another doomed search
-		// that would only deepen the secondary-limit penalty.
+		// search bucket. Skip remaining per-watch checks instead of issuing
+		// another doomed search, but fall through to the orphan sweep below
+		// since it doesn't touch the search API.
 		if p.searchBucketExhausted("review_watch") {
-			return
+			break
 		}
 		p.logger.Debug("polling review watch",
 			zap.String("watch_id", watch.ID),
@@ -582,6 +493,15 @@ func (p *Poller) checkReviewWatches(ctx context.Context) {
 				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
 		}
 	}
+	// Global orphan sweep: catches dedup rows whose watch was deleted or
+	// disabled. Without this pass those rows (and the tasks they reference)
+	// would never be re-examined, since the per-watch loop only iterates
+	// enabled watches.
+	if cleaned, err := p.service.CleanupAllOrphanedReviewTasks(ctx); err != nil {
+		p.logger.Warn("failed to sweep orphaned review tasks", zap.Error(err))
+	} else if cleaned > 0 {
+		p.logger.Info("swept orphaned review tasks", zap.Int("deleted", cleaned))
+	}
 }
 
 // issueWatchLoop polls issue watches for new GitHub issues.
@@ -614,13 +534,12 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 		p.logger.Error("failed to list issue watches", zap.Error(err))
 		return
 	}
-	if len(watches) == 0 {
-		return
-	}
+	// Note: do NOT early-return on len(watches) == 0 — the orphan sweep
+	// below is what reaps tasks for disabled/deleted watches. Fall through.
 	p.logger.Debug("checking issue watches", zap.Int("count", len(watches)))
 	for _, watch := range watches {
 		if p.searchBucketExhausted("issue_watch") {
-			return
+			break
 		}
 		p.logger.Debug("polling issue watch",
 			zap.String("watch_id", watch.ID),
@@ -653,5 +572,10 @@ func (p *Poller) checkIssueWatches(ctx context.Context) {
 			p.logger.Info("cleaned up closed issue tasks",
 				zap.String("watch_id", watch.ID), zap.Int("deleted", cleaned))
 		}
+	}
+	if cleaned, err := p.service.CleanupAllOrphanedIssueTasks(ctx); err != nil {
+		p.logger.Warn("failed to sweep orphaned issue tasks", zap.Error(err))
+	} else if cleaned > 0 {
+		p.logger.Info("swept orphaned issue tasks", zap.Int("deleted", cleaned))
 	}
 }

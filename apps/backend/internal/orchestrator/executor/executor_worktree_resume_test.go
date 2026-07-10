@@ -83,4 +83,3 @@ func TestLaunchPreparedSession_SingleRepoWorktree_PersistsSubdirAsWorkspacePath(
 			env.WorkspacePath, subdir)
 	}
 }
-

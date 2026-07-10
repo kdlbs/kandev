@@ -51,6 +51,7 @@ type Session struct {
 
 // Maximum size of output buffer (16KB should be enough for recent history)
 const maxOutputBufferSize = 16 * 1024
+const shellStopGrace = 250 * time.Millisecond
 
 // Config holds shell session configuration
 type Config struct {
@@ -166,6 +167,7 @@ func (s *Session) start(cfg Config) error {
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = cfg.WorkDir
 	s.cmd.Env = buildShellEnv(cfg.WorkDir)
+	configureShellProcess(s.cmd)
 
 	// Start with PTY
 	var err error
@@ -206,13 +208,26 @@ func (s *Session) Stop() error {
 	s.stopping = true // Mark as stopping to prevent respawn
 	s.mu.Unlock()
 
-	s.logger.Info("stopping shell session")
+	pid := 0
+	if s.cmd != nil && s.cmd.Process != nil {
+		pid = s.cmd.Process.Pid
+	}
+	s.logger.Info("stopping shell session",
+		zap.String("shell", s.shell),
+		zap.String("cwd", s.workDir),
+		zap.Int("pid", pid),
+		zap.Duration("grace", shellStopGrace))
+	s.logger.Debug("shell session stop requested",
+		zap.Int("pid", pid),
+		zap.String("shell", s.shell),
+		zap.String("cwd", s.workDir))
 
 	// Signal stop
 	close(s.stopCh)
 
 	// Close PTY (sends SIGHUP to process on Unix)
 	if s.pty != nil {
+		s.logger.Debug("shell session PTY close requested", zap.Int("pid", pid))
 		_ = s.pty.Close()
 	}
 
@@ -220,14 +235,30 @@ func (s *Session) Stop() error {
 	select {
 	case <-s.doneCh:
 		s.logger.Info("shell session stopped gracefully")
-	case <-time.After(5 * time.Second):
-		s.logger.Warn("shell session stop timeout, force killing")
-		if s.cmd != nil && s.cmd.Process != nil {
-			_ = s.cmd.Process.Kill()
-		}
+		s.cleanupShellProcessGroup(pid, "leader_exited")
+	case <-time.After(shellStopGrace):
+		s.logger.Warn("shell session stop timeout, force killing",
+			zap.Int("pid", pid),
+			zap.Duration("grace", shellStopGrace))
+		s.cleanupShellProcessGroup(pid, "stop_timeout")
 	}
 
 	return nil
+}
+
+func (s *Session) cleanupShellProcessGroup(pid int, reason string) {
+	if s.cmd == nil || s.cmd.Process == nil {
+		return
+	}
+	s.logger.Debug("shell session process group cleanup requested",
+		zap.Int("pid", pid),
+		zap.String("reason", reason))
+	if err := killShellProcessGroup(s.cmd.Process); err != nil {
+		s.logger.Debug("shell session process group cleanup failed",
+			zap.Int("pid", pid),
+			zap.String("reason", reason),
+			zap.Error(err))
+	}
 }
 
 // Write sends input to the shell

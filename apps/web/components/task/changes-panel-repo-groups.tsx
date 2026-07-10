@@ -11,16 +11,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CommitRow, type CommitItem } from "./commit-row";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
-
-type ChangedFile = {
-  path: string;
-  status: import("@/lib/state/store").FileInfo["status"];
-  staged: boolean;
-  plus: number | undefined;
-  minus: number | undefined;
-  oldPath: string | undefined;
-  repositoryName?: string;
-};
+import type { ChangedFile } from "./changes-panel-helpers";
 
 export type RepoGroup = ReturnType<typeof groupByRepositoryName<ChangedFile>>[number];
 
@@ -152,7 +143,6 @@ export function FileSectionActions({
 
 export function CommitsGroupActions({
   repositoryName,
-  unpushedCount,
   aheadCount,
   prExists,
   canCreatePR,
@@ -161,7 +151,6 @@ export function CommitsGroupActions({
   stop,
 }: {
   repositoryName: string;
-  unpushedCount: number;
   aheadCount: number;
   prExists: boolean;
   canCreatePR: boolean;
@@ -171,7 +160,7 @@ export function CommitsGroupActions({
 }) {
   return (
     <div className="flex items-center gap-1" onClick={stop}>
-      {onRepoPush && (unpushedCount > 0 || aheadCount > 0) && (
+      {onRepoPush && aheadCount > 0 && (
         <Button
           size="sm"
           variant="ghost"
@@ -181,7 +170,7 @@ export function CommitsGroupActions({
         >
           <IconCloudUpload className="h-3 w-3" />
           Push
-          <span className="text-muted-foreground">{unpushedCount || aheadCount}</span>
+          <span className="text-muted-foreground">{aheadCount}</span>
         </Button>
       )}
       {onRepoCreatePR && (
@@ -208,7 +197,7 @@ export function CommitsGroupActions({
 
 /**
  * Per-repo group inside the Commits section. Like {@link RepoGroupItem} but
- * for commit rows; surfaces a Push button when the repo has unpushed commits.
+ * for commit rows; surfaces a Push button when the repo is ahead of its remote.
  */
 export function CommitsRepoGroup({
   repositoryName,
@@ -246,7 +235,6 @@ export function CommitsRepoGroup({
   // Each repo has its own "latest unpushed commit" — revert/amend in this
   // group must target THIS repo's newest, not the merged-list newest.
   const firstUnpushedInGroup = groupCommits.findIndex((c) => c.pushed !== true);
-  const unpushedCount = groupCommits.filter((c) => !c.pushed).length;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   const label = displayName || repositoryName || "Repository";
   // Bug 10 acknowledged trade-off: `existingPrUrl` is sourced from a
@@ -297,7 +285,6 @@ export function CommitsRepoGroup({
         </button>
         <CommitsGroupActions
           repositoryName={repositoryName}
-          unpushedCount={unpushedCount}
           aheadCount={aheadCount}
           prExists={prExists}
           canCreatePR={canCreatePR}

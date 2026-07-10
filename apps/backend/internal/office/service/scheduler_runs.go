@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 )
 
 // ClaimNextRun atomically claims the next eligible run from the queue.
@@ -77,11 +78,11 @@ func (s *Service) publishRunProcessed(
 		"status": status,
 	}
 	if run != nil {
-		parsed := ParseRunPayload(run.Payload)
+		taskID, commentID := commentkeys.IdentityFromPayload(run.Payload)
 		data["agent_profile_id"] = run.AgentProfileID
 		data["reason"] = run.Reason
-		data["task_id"] = parsed["task_id"]
-		data["comment_id"] = parsed["comment_id"]
+		data["task_id"] = taskID
+		data["comment_id"] = commentID
 		if run.ErrorMessage != "" {
 			data["error_message"] = run.ErrorMessage
 		}

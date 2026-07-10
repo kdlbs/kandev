@@ -56,9 +56,11 @@ interface DiffHeaderToolbarOptions {
   onToggleWordWrap: () => void;
   viewMode: ViewMode;
   onToggleViewMode: () => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
+  /** Multi-repo subpath (repository_name) so Edit opens under the right repo. */
+  repo?: string;
   expandUnchanged?: boolean;
   onToggleExpandUnchanged?: () => void;
 }
@@ -81,6 +83,7 @@ function DiffHeaderToolbarButtons({
   onToggleViewMode,
   onOpenFile,
   onPreviewMarkdown,
+  repo,
   isMarkdownFile,
 }: ToolbarButtonsProps) {
   return (
@@ -139,7 +142,7 @@ function DiffHeaderToolbarButtons({
       )}
 
       {onOpenFile && (
-        <ToolbarBtn onClick={() => onOpenFile(resolvedPath)} tooltip="Edit">
+        <ToolbarBtn onClick={() => onOpenFile(resolvedPath, repo)} tooltip="Edit">
           <IconPencil className="h-3.5 w-3.5" />
         </ToolbarBtn>
       )}
@@ -163,6 +166,7 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
     onOpenFile,
     onPreviewMarkdown,
     onRevert,
+    repo,
     expandUnchanged,
     onToggleExpandUnchanged,
   } = opts;
@@ -182,6 +186,7 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
           onOpenFile={onOpenFile}
           onPreviewMarkdown={onPreviewMarkdown}
           onRevert={onRevert}
+          repo={repo}
           expandUnchanged={expandUnchanged}
           onToggleExpandUnchanged={onToggleExpandUnchanged}
         />
@@ -197,6 +202,7 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
       onOpenFile,
       onPreviewMarkdown,
       onRevert,
+      repo,
       expandUnchanged,
       onToggleExpandUnchanged,
     ],

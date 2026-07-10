@@ -12,8 +12,23 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
-	"github.com/kandev/kandev/internal/worktree"
 )
+
+// worktree file materialization modes. Kept as local constants so the
+// persistence layer doesn't import the worktree package (which would create an
+// import cycle via worktree's test dependencies).
+const (
+	worktreeFileModeCopy    = "copy"
+	worktreeFileModeSymlink = "symlink"
+)
+
+// normalizeWorktreeFileMode defaults empty/unknown values to copy.
+func normalizeWorktreeFileMode(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), worktreeFileModeSymlink) {
+		return worktreeFileModeSymlink
+	}
+	return worktreeFileModeCopy
+}
 
 // marshalWorktreeFiles serializes a repository's worktree file list to the JSON
 // text stored in the repositories.worktree_files column. A nil/empty list is
@@ -49,7 +64,7 @@ func unmarshalWorktreeFiles(raw string) []models.WorktreeFile {
 		}
 		out = append(out, models.WorktreeFile{
 			Path: f.Path,
-			Mode: string(worktree.NormalizeFileMaterializeMode(f.Mode)),
+			Mode: normalizeWorktreeFileMode(f.Mode),
 		})
 	}
 	return out
@@ -67,13 +82,13 @@ func (r *Repository) CreateRepository(ctx context.Context, repository *models.Re
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO repositories (
 			id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-			provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script,
-			worktree_files, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			provider_name, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script,
+			copy_files, worktree_files, created_at, updated_at, deleted_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), repository.ID, repository.WorkspaceID, repository.Name, repository.SourceType, repository.LocalPath, repository.Provider,
 		repository.ProviderRepoID, repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix,
-		dialect.BoolToInt(repository.PullBeforeWorktree), repository.SetupScript, repository.CleanupScript, repository.DevScript,
-		marshalWorktreeFiles(repository.WorktreeFiles),
+		repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree), repository.SetupScript, repository.CleanupScript, repository.DevScript,
+		repository.CopyFiles, marshalWorktreeFiles(repository.WorktreeFiles),
 		repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
 
 	return err
@@ -82,8 +97,8 @@ func (r *Repository) CreateRepository(ctx context.Context, repository *models.Re
 // repositoryColumns is the shared SELECT column list for repository rows, in the
 // order expected by scanRepository.
 const repositoryColumns = `id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
-	provider_name, default_branch, worktree_branch_prefix, pull_before_worktree, setup_script, cleanup_script, dev_script,
-	worktree_files, created_at, updated_at, deleted_at`
+	provider_name, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script,
+	copy_files, worktree_files, created_at, updated_at, deleted_at`
 
 // rowScanner abstracts *sql.Row and *sql.Rows so a single scan routine serves
 // both single-row and iterating queries.
@@ -99,8 +114,8 @@ func scanRepository(s rowScanner) (*models.Repository, error) {
 	err := s.Scan(
 		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
 		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderOwner, &repository.ProviderName,
-		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.PullBeforeWorktree, &repository.SetupScript,
-		&repository.CleanupScript, &repository.DevScript, &worktreeFiles,
+		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.WorktreeBranchTemplate, &repository.PullBeforeWorktree, &repository.SetupScript,
+		&repository.CleanupScript, &repository.DevScript, &repository.CopyFiles, &worktreeFiles,
 		&repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 	)
 	if err != nil {
@@ -128,13 +143,13 @@ func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Re
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE repositories SET
 			name = ?, source_type = ?, local_path = ?, provider = ?, provider_repo_id = ?, provider_owner = ?,
-			provider_name = ?, default_branch = ?, worktree_branch_prefix = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?,
-			worktree_files = ?, updated_at = ?
+			provider_name = ?, default_branch = ?, worktree_branch_prefix = ?, worktree_branch_template = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?,
+			copy_files = ?, worktree_files = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), repository.Name, repository.SourceType, repository.LocalPath, repository.Provider, repository.ProviderRepoID,
-		repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix, dialect.BoolToInt(repository.PullBeforeWorktree),
+		repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix, repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree),
 		repository.SetupScript, repository.CleanupScript, repository.DevScript,
-		marshalWorktreeFiles(repository.WorktreeFiles),
+		repository.CopyFiles, marshalWorktreeFiles(repository.WorktreeFiles),
 		repository.UpdatedAt, repository.ID)
 	if err != nil {
 		return err

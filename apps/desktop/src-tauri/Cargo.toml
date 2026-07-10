@@ -1,0 +1,38 @@
+[package]
+name = "kandev-desktop"
+version = "0.76.0"
+description = "Kandev desktop shell"
+authors = ["Kandev"]
+license = "AGPL-3.0-only"
+repository = "https://github.com/kdlbs/kandev"
+edition = "2021"
+rust-version = "1.88"
+
+[[bin]]
+name = "kandev-desktop"
+path = "src/main.rs"
+required-features = ["desktop-runtime"]
+test = false
+
+[features]
+default = []
+desktop-runtime = [
+  "dep:tauri",
+  "dep:tauri-plugin-single-instance",
+  "dep:tauri-runtime",
+]
+
+[build-dependencies]
+tauri-build = { version = "=2.4.1", features = [] }
+
+[dependencies]
+darling = "=0.21.3"
+getrandom = "0.3"
+idna_adapter = "=1.0.0"
+libc = "0.2"
+plist = "=1.10.0"
+serde_json = "1"
+serde_with = "=3.15.0"
+tauri = { version = "=2.8.4", features = [], optional = true }
+tauri-runtime = { version = "=2.9.0", optional = true }
+tauri-plugin-single-instance = { version = "=2.2.1", optional = true }

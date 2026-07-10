@@ -24,6 +24,7 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 		engine.ActionResetAgentContext: &resetAgentContextCallback{svc: svc},
 		engine.ActionAutoStartAgent:    &autoStartAgentCallback{svc: svc},
 		engine.ActionSetWorkflowData:   &setWorkflowDataCallback{},
+		engine.ActionSetSessionMode:    &setSessionModeCallback{svc: svc},
 	}
 	if svc.engineRunQueue != nil {
 		r[engine.ActionQueueRun] = engine.QueueRunCallback{
@@ -31,6 +32,7 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 			Participants: svc.engineParticipants,
 			CEOResolver:  svc.engineCEOResolver,
 			Primary:      svc.enginePrimary,
+			TaskSteps:    workflowTargetStepResolver(svc.enginePrimary, svc.engineParticipants),
 		}
 		if svc.engineParticipants != nil {
 			r[engine.ActionQueueRunForEachParticipant] = engine.QueueRunForEachParticipantCallback{
@@ -52,6 +54,22 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 		}
 	}
 	return r
+}
+
+// workflowTargetStepResolver picks the primary adapter first because it is the
+// queue_run primary resolver, then falls back to participants. Nil means
+// cross-task queue_run targets will surface ErrActionNotYetWired.
+func workflowTargetStepResolver(
+	primary engine.PrimaryAgentResolver,
+	participants engine.ParticipantStore,
+) engine.TargetTaskStepResolver {
+	if resolver, ok := primary.(engine.TargetTaskStepResolver); ok {
+		return resolver
+	}
+	if resolver, ok := participants.(engine.TargetTaskStepResolver); ok {
+		return resolver
+	}
+	return nil
 }
 
 // switchWorkflowDispatcher returns the closure SwitchWorkflowCallback uses
@@ -106,6 +124,30 @@ func (c *disablePlanModeCallback) Execute(ctx context.Context, in engine.ActionI
 		return engine.ActionResult{}, fmt.Errorf("load session for disable plan mode: %w", err)
 	}
 	c.svc.clearSessionPlanMode(ctx, session)
+	return engine.ActionResult{}, nil
+}
+
+// setSessionModeCallback applies a workflow-declared session permission mode
+// (e.g. "acceptEdits") when entering a step. See issue #1183.
+type setSessionModeCallback struct {
+	svc *Service
+}
+
+func (c *setSessionModeCallback) Execute(ctx context.Context, in engine.ActionInput) (engine.ActionResult, error) {
+	// Skip before any DB lookup: passthrough sessions manage their own mode in
+	// the CLI, and an action with no mode is a no-op. Guarding here keeps a
+	// skipped action from failing on a session-load error, and mirrors the
+	// enable/disable plan-mode callbacks.
+	if in.Action.SetSessionMode == nil || in.State.IsPassthrough {
+		return engine.ActionResult{}, nil
+	}
+	session, err := c.svc.repo.GetTaskSession(ctx, in.State.SessionID)
+	if err != nil {
+		return engine.ActionResult{}, fmt.Errorf("load session for set session mode: %w", err)
+	}
+	// Passthrough is already excluded above, so pass false explicitly; the
+	// isPassthrough parameter exists for the legacy processOnEnter call site.
+	c.svc.applyStepSessionMode(ctx, session, in.Action.SetSessionMode.Mode, false)
 	return engine.ActionResult{}, nil
 }
 

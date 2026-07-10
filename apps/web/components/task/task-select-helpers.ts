@@ -16,6 +16,10 @@ import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
 import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
+
+const debug = createDebugLogger("dockview:task-select");
+let taskSelectionSequence = 0;
 
 export type SwitchToSessionFn = (
   taskId: string,
@@ -42,19 +46,30 @@ export function resolveLoadedSessionId(
  * `lastSessionByTaskId`) over `primarySessionId`, so opening a non-primary
  * tab then bouncing through another task does not silently snap the user
  * back to primary. Falls back to `primarySessionId` when the remembered
- * session is unknown / missing an env mapping (e.g. it was deleted).
+ * session is unknown / missing an env mapping (e.g. it was deleted), OR
+ * when it belongs to a different task — the latter guards against a poisoned
+ * `lastSessionByTaskId` entry written by a stale dockview panel-activation
+ * during a task switch (see `setupSessionTabSync`).
  */
-export function resolvePreferredSessionId(
-  taskId: string,
-  primarySessionId: string,
-  lastSessionByTaskId: Record<string, string>,
-  environmentIdBySessionId: Record<string, string>,
-): string {
+export function resolvePreferredSessionId(args: {
+  taskId: string;
+  primarySessionId: string;
+  lastSessionByTaskId: Record<string, string>;
+  environmentIdBySessionId: Record<string, string>;
+  taskSessionsById: Record<string, TaskSession>;
+}): string {
+  const {
+    taskId,
+    primarySessionId,
+    lastSessionByTaskId,
+    environmentIdBySessionId,
+    taskSessionsById,
+  } = args;
   const last = lastSessionByTaskId[taskId];
-  if (last && environmentIdBySessionId[last]) {
-    return last;
-  }
-  return primarySessionId;
+  if (!last || !environmentIdBySessionId[last]) return primarySessionId;
+  const lastTaskId = taskSessionsById[last]?.task_id;
+  if (lastTaskId && lastTaskId !== taskId) return primarySessionId;
+  return last;
 }
 
 export function buildSwitchToSession(
@@ -65,6 +80,16 @@ export function buildSwitchToSession(
     const state = store.getState();
     const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
     const newEnvId = state.environmentIdBySessionId[sessionId] ?? null;
+    if (isDebug()) {
+      debug("switchToSession: entry", {
+        taskId,
+        sessionId,
+        oldSessionId: oldSessionId ?? null,
+        oldEnvId,
+        newEnvId,
+        path: newEnvId ? "performLayoutSwitch" : "releaseToDefault",
+      });
+    }
     setActiveSession(taskId, sessionId);
     if (newEnvId) {
       performLayoutSwitch(oldEnvId, newEnvId, sessionId);
@@ -77,9 +102,21 @@ export function buildSwitchToSession(
     // layout to default so the new task starts from a clean slate; when the
     // new env id arrives, useEnvSwitchCleanup will adopt it without rebuild.
     if (oldEnvId || oldSessionId !== sessionId) {
+      if (isDebug()) {
+        debug("switchToSession: releasing outgoing env (no newEnvId yet)", { oldEnvId });
+      }
       releaseLayoutToDefault(oldEnvId);
     }
   };
+}
+
+function nextTaskSelectionToken(): number {
+  taskSelectionSequence += 1;
+  return taskSelectionSequence;
+}
+
+function taskSelectionWasSuperseded(selectionToken: number): boolean {
+  return selectionToken !== taskSelectionSequence;
 }
 
 export async function prepareAndSwitchTask(
@@ -87,6 +124,7 @@ export async function prepareAndSwitchTask(
   store: StoreApi<AppState>,
   switchToSession: SwitchToSessionFn,
   setPreparingTaskId: (id: string | null) => void,
+  shouldContinue: () => boolean = () => true,
 ): Promise<boolean> {
   setPreparingTaskId(taskId);
   // Capture before the async launch; WS events may update activeSessionId
@@ -104,6 +142,7 @@ export async function prepareAndSwitchTask(
   try {
     const { request } = buildPrepareRequest(taskId);
     const resp = await launchSession(request);
+    if (!shouldContinue()) return false;
     if (resp.session_id) {
       // Pass `null` instead of the original oldSessionId — releaseLayoutToDefault
       // already saved + released the outgoing env, and the dockview now holds the
@@ -136,55 +175,94 @@ export function selectTaskWithLayout(params: {
 }): void {
   const { taskId, task, store, switchToSession, loadTaskSessionsForTask } = params;
   const state = store.getState();
+  const selectionToken = nextTaskSelectionToken();
+  const startActiveTaskId = state.tasks.activeTaskId ?? null;
   const oldSessionId = state.tasks.activeSessionId;
-  if (task?.primarySessionId) {
-    const targetSessionId = resolvePreferredSessionId(
+  let activeTaskChangedExternally = false;
+  const unsubscribeSelectionGuard = store.subscribe((current, previous) => {
+    const currentTaskId = current.tasks.activeTaskId ?? null;
+    const previousTaskId = previous.tasks.activeTaskId ?? null;
+    if (currentTaskId !== previousTaskId && currentTaskId !== taskId) {
+      activeTaskChangedExternally = true;
+    }
+  });
+  const disposeSelectionGuard = () => {
+    if (typeof unsubscribeSelectionGuard === "function") unsubscribeSelectionGuard();
+  };
+  const selectionWasSuperseded = () => {
+    if (taskSelectionWasSuperseded(selectionToken)) return true;
+    if (activeTaskChangedExternally) return true;
+    const activeTaskId = store.getState().tasks.activeTaskId ?? null;
+    return activeTaskId !== startActiveTaskId && activeTaskId !== taskId;
+  };
+  if (isDebug()) {
+    debug("selectTaskWithLayout: entry", {
       taskId,
-      task.primarySessionId,
-      state.tasks.lastSessionByTaskId,
-      state.environmentIdBySessionId,
-    );
+      primarySessionId: task?.primarySessionId ?? null,
+      oldSessionId: oldSessionId ?? null,
+      prevActiveTaskId: state.tasks.activeTaskId ?? null,
+    });
+  }
+  if (task?.primarySessionId) {
+    const targetSessionId = resolvePreferredSessionId({
+      taskId,
+      primarySessionId: task.primarySessionId,
+      lastSessionByTaskId: state.tasks.lastSessionByTaskId,
+      environmentIdBySessionId: state.environmentIdBySessionId,
+      taskSessionsById: state.taskSessions.items,
+    });
     const hasEnvId = !!state.environmentIdBySessionId[targetSessionId];
     if (hasEnvId) {
+      disposeSelectionGuard();
       switchToSession(taskId, targetSessionId, oldSessionId);
       loadTaskSessionsForTask(taskId);
       replaceTaskUrl(taskId);
       return;
     }
-    loadTaskSessionsForTask(taskId).then((sessions) => {
-      switchToSession(taskId, resolveLoadedSessionId(sessions, targetSessionId), oldSessionId);
-      replaceTaskUrl(taskId);
-    });
+    void loadTaskSessionsForTask(taskId)
+      .then((sessions) => {
+        if (selectionWasSuperseded()) return;
+        switchToSession(taskId, resolveLoadedSessionId(sessions, targetSessionId), oldSessionId);
+        replaceTaskUrl(taskId);
+      })
+      .finally(disposeSelectionGuard)
+      .catch(() => undefined);
     return;
   }
 
-  loadTaskSessionsForTask(taskId).then(async (sessions) => {
-    const currentOldSessionId = store.getState().tasks.activeSessionId;
-    const primary = sessions.find((s) => s.is_primary);
-    const sessionId = primary?.id ?? sessions[0]?.id ?? null;
-    if (sessionId) {
-      switchToSession(taskId, sessionId, currentOldSessionId);
-      replaceTaskUrl(taskId);
-      return;
-    }
+  void loadTaskSessionsForTask(taskId)
+    .then(async (sessions) => {
+      if (selectionWasSuperseded()) return;
+      const currentOldSessionId = store.getState().tasks.activeSessionId;
+      const primary = sessions.find((s) => s.is_primary);
+      const sessionId = primary?.id ?? sessions[0]?.id ?? null;
+      if (sessionId) {
+        switchToSession(taskId, sessionId, currentOldSessionId);
+        replaceTaskUrl(taskId);
+        return;
+      }
 
-    const switched = await prepareAndSwitchTask(
-      taskId,
-      store,
-      switchToSession,
-      params.setPreparingTaskId,
-    );
-    if (switched) {
-      replaceTaskUrl(taskId);
-      return;
-    }
+      const switched = await prepareAndSwitchTask(
+        taskId,
+        store,
+        switchToSession,
+        params.setPreparingTaskId,
+        () => !selectionWasSuperseded(),
+      );
+      if (switched) {
+        replaceTaskUrl(taskId);
+        return;
+      }
+      if (selectionWasSuperseded()) return;
 
-    // Failure path: prepareAndSwitchTask already called releaseLayoutToDefault
-    // before awaiting, so the outgoing env's layout is already saved and the
-    // dockview is showing the default layout. A second release here would
-    // overwrite the just-saved env layout with `api.toJSON()` (the default),
-    // losing the user's real layout for the originating task.
-    params.setActiveTask(taskId);
-    replaceTaskUrl(taskId);
-  });
+      // Failure path: prepareAndSwitchTask already called releaseLayoutToDefault
+      // before awaiting, so the outgoing env's layout is already saved and the
+      // dockview is showing the default layout. A second release here would
+      // overwrite the just-saved env layout with `api.toJSON()` (the default),
+      // losing the user's real layout for the originating task.
+      params.setActiveTask(taskId);
+      replaceTaskUrl(taskId);
+    })
+    .finally(disposeSelectionGuard)
+    .catch(() => undefined);
 }

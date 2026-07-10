@@ -32,6 +32,25 @@ func IsValidBranchName(branch string) bool {
 	return validBranchNameRegex.MatchString(branch)
 }
 
+// IsValidBaseBranchRef validates a base-branch ref using the IsValidBranchName
+// allowlist, transparently stripping an "origin/" prefix (the regex disallows
+// "/" as the first character). Shared so service-tier base-branch rejection
+// uses the same allowlist as task base-branch overrides and the agentctl-side
+// sanitiser.
+func IsValidBaseBranchRef(ref string) bool {
+	rest := ref
+	if stripped, ok := strings.CutPrefix(ref, "origin/"); ok {
+		rest = stripped
+	}
+	// git check-ref-format also rejects a trailing "/" and consecutive "//",
+	// which the IsValidBranchName regex (its char class includes "/") permits.
+	// Reject them here so "main/" / "origin/main/" / "a//b" don't pass.
+	if strings.HasSuffix(rest, "/") || strings.Contains(rest, "//") {
+		return false
+	}
+	return IsValidBranchName(rest)
+}
+
 // IsKnownSafeGitFlag returns true if the argument is a known safe git flag used by this codebase.
 // This prevents argument injection where user input could introduce malicious flags.
 // Only flags actually used by the Kandev codebase are whitelisted.

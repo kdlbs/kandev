@@ -1,6 +1,6 @@
 "use client";
 
-import dynamic from "next/dynamic";
+import dynamic from "@/lib/routing/client-dynamic";
 import { useEffect, useState, type ReactNode } from "react";
 import { IconLoader2, IconRestore } from "@tabler/icons-react";
 import {

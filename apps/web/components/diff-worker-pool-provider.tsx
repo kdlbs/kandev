@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useEffect } from "react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme/app-theme";
 import { WorkerPoolContextProvider, useWorkerPool } from "@pierre/diffs/react";
 import { PIERRE_THEME } from "@/lib/theme/colors";
 

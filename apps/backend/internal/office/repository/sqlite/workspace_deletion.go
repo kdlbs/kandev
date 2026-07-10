@@ -51,15 +51,37 @@ func (r *Repository) deleteWorkspaceDataTx(ctx context.Context, tx *sqlx.Tx, wor
 	// We delete them via the merged table; shallow kanban profiles
 	// (workspace_id = '') are unaffected.
 	statements := []string{
+		`DELETE FROM run_events WHERE run_id IN (
+			SELECT id FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)
+		)`,
+		`DELETE FROM office_run_route_attempts WHERE run_id IN (
+			SELECT id FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)
+		)`,
+		`DELETE FROM office_run_skills WHERE run_id IN (
+			SELECT id FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)
+		)`,
 		`DELETE FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
+		`DELETE FROM agent_wakeup_requests WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
+		`DELETE FROM agent_continuation_summaries WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM office_agent_memory WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM office_agent_instructions WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM office_agent_runtime WHERE agent_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM office_cost_events WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 		`DELETE FROM office_cost_events WHERE project_id IN (SELECT id FROM office_projects WHERE workspace_id = ?)`,
+		`DELETE FROM office_provider_health WHERE workspace_id = ?`,
+		`DELETE FROM office_workspace_routing WHERE workspace_id = ?`,
+		`DELETE FROM office_workspace_settings WHERE workspace_id = ?`,
 		`DELETE FROM office_budget_policies WHERE workspace_id = ?`,
 		`DELETE FROM office_routine_runs WHERE routine_id IN (SELECT id FROM office_routines WHERE workspace_id = ?)`,
 		`DELETE FROM office_routine_triggers WHERE routine_id IN (SELECT id FROM office_routines WHERE workspace_id = ?)`,
+		`DELETE FROM task_workspace_group_members WHERE workspace_group_id IN (
+			SELECT id FROM task_workspace_groups WHERE workspace_id = ?
+		)`,
+		`DELETE FROM task_workspace_groups WHERE workspace_id = ?`,
+		`DELETE FROM office_task_tree_hold_members WHERE hold_id IN (
+			SELECT id FROM office_task_tree_holds WHERE workspace_id = ?
+		)`,
+		`DELETE FROM office_task_tree_holds WHERE workspace_id = ?`,
 		`DELETE FROM office_task_labels WHERE label_id IN (SELECT id FROM office_labels WHERE workspace_id = ?)`,
 		`DELETE FROM office_labels WHERE workspace_id = ?`,
 		`DELETE FROM office_channels WHERE workspace_id = ?`,

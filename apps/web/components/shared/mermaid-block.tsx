@@ -1,17 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useTheme } from "next-themes";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
+import { useTheme } from "@/components/theme/app-theme";
 import { IconZoomIn, IconZoomOut, IconCode } from "@tabler/icons-react";
-import {
-  DEFAULT_SCALE,
-  SCALE_STEP,
-  MIN_SCALE,
-  MAX_SCALE,
-  getSvgDimensions,
-  sanitizeMermaidCode,
-  cleanupMermaidOrphans,
-} from "./mermaid-utils";
+import { getSvgDimensions, sanitizeMermaidCode, cleanupMermaidOrphans } from "./mermaid-utils";
+import { useMermaidScale, useMermaidViewportWidth } from "./mermaid-block-hooks";
 import { useToast } from "@/components/toast-provider";
 
 type MermaidAPI = typeof import("mermaid").default;
@@ -26,60 +19,139 @@ function getMermaid(): Promise<MermaidAPI> {
   return mermaidPromise;
 }
 
+/**
+ * Streaming-aware debounce window. Chat messages stream in chunk by chunk and
+ * each intermediate prefix of a mermaid block is almost always invalid
+ * (`subgraph` without `end`, `loop` without `end`, etc). Waiting until the
+ * code prop has been stable for this long collapses the streaming chunks into
+ * a single render attempt so we don't toast on every partial parse error.
+ */
+const RENDER_DEBOUNCE_MS = 300;
+
 type MermaidBlockProps = {
   code: string;
 };
 
-export function MermaidBlock({ code }: MermaidBlockProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+type ToastFn = ReturnType<typeof useToast>["toast"];
+
+function sameSvgSize(
+  a: { w: number; h: number } | null,
+  b: { w: number; h: number } | null,
+): boolean {
+  return a?.w === b?.w && a?.h === b?.h;
+}
+
+/**
+ * Debounced mermaid render. Owns the timer, the in-flight cancellation flag,
+ * and the toast-suppression rule (no toast while a previously-rendered svg is
+ * still visible). Returns the rendered svg and the last error so the caller
+ * can decide what to show.
+ */
+function useMermaidRender(code: string, resolvedTheme: string | undefined, toast: ToastFn) {
+  const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [scale, setScale] = useState(DEFAULT_SCALE);
-  const [svgSize, setSvgSize] = useState<{ w: number; h: number } | null>(null);
-  const [showCode, setShowCode] = useState(false);
-  const { resolvedTheme } = useTheme();
-  const { toast } = useToast();
+  // Synchronous mirror of `svg` so the render closure can decide whether to
+  // toast without re-running the debounce effect on every successful render.
+  const svgRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!code.trim()) return;
+    if (!code.trim()) {
+      // Source went blank (e.g. a streaming chunk emptied this block) — drop
+      // the previous diagram so we don't keep the stale SVG on screen.
+      svgRef.current = null;
+      setSvg(null);
+      setError(null);
+      return;
+    }
 
     let cancelled = false;
     const theme = resolvedTheme === "dark" ? "dark" : "default";
-    const id = `mermaid-md-${++mermaidIdCounter}`;
-
     const sanitizedCode = sanitizeMermaidCode(code);
 
-    getMermaid()
-      .then((mermaid) => {
-        mermaid.initialize({ startOnLoad: false, theme, securityLevel: "loose" });
-        return mermaid.render(id, sanitizedCode);
-      })
-      .then(({ svg }) => {
-        cleanupMermaidOrphans(id);
-        if (!cancelled && containerRef.current) {
-          containerRef.current.innerHTML = svg;
-          setSvgSize(getSvgDimensions(containerRef.current));
+    const timer = setTimeout(() => {
+      const id = `mermaid-md-${++mermaidIdCounter}`;
+      getMermaid()
+        .then((mermaid) => {
+          mermaid.initialize({ startOnLoad: false, theme, securityLevel: "loose" });
+          return mermaid.render(id, sanitizedCode);
+        })
+        .then(({ svg: rendered }) => {
+          cleanupMermaidOrphans(id);
+          if (cancelled) return;
+          svgRef.current = rendered;
+          setSvg(rendered);
           setError(null);
-        }
-      })
-      .catch((err: Error) => {
-        cleanupMermaidOrphans(id);
-        if (!cancelled) {
+        })
+        .catch((err: Error) => {
+          cleanupMermaidOrphans(id);
+          if (cancelled) return;
           setError(err.message);
-          toast({ title: "Failed to render diagram", description: err.message, variant: "error" });
-        }
-      });
+          // Suppress the toast when a previously-rendered SVG is still on
+          // screen — the error banner is also suppressed in that case, so a
+          // toast here would surface a failure the user never sees in the UI.
+          if (svgRef.current === null) {
+            toast({
+              title: "Failed to render diagram",
+              description: err.message,
+              variant: "error",
+            });
+          }
+        });
+    }, RENDER_DEBOUNCE_MS);
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [code, resolvedTheme, toast]);
 
-  const zoomIn = useCallback(() => setScale((s) => Math.min(s + SCALE_STEP, MAX_SCALE)), []);
-  const zoomOut = useCallback(() => setScale((s) => Math.max(s - SCALE_STEP, MIN_SCALE)), []);
-  const zoomReset = useCallback(() => setScale(DEFAULT_SCALE), []);
+  return { svg, error };
+}
+
+export function MermaidBlock({ code }: MermaidBlockProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const svgSizeRef = useRef<{ w: number; h: number } | null>(null);
+  const [svgSize, setSvgSize] = useState<{ w: number; h: number } | null>(null);
+  const [scrollRegionElement, setScrollRegionElement] = useState<HTMLDivElement | null>(null);
+  const [showCode, setShowCode] = useState(false);
+  const { resolvedTheme } = useTheme();
+  const { toast } = useToast();
+  const { svg, error } = useMermaidRender(code, resolvedTheme, toast);
+  const viewportWidth = useMermaidViewportWidth(scrollRegionElement);
+  const { scale, zoomIn, zoomOut, zoomReset, resetAutoScale } = useMermaidScale(
+    svgSize,
+    viewportWidth,
+  );
+
+  // Read intrinsic SVG dimensions once the rendered markup is in the DOM so
+  // the zoom transform scales the correct box. Runs after every successful
+  // render (svg state change).
+  useLayoutEffect(() => {
+    if (svg && containerRef.current) {
+      const nextSize = getSvgDimensions(containerRef.current);
+      if (!sameSvgSize(svgSizeRef.current, nextSize)) {
+        svgSizeRef.current = nextSize;
+        setSvgSize(nextSize);
+        resetAutoScale();
+      }
+      return;
+    }
+    // svg reset back to null — drop the stale footprint so the wrapper
+    // doesn't reserve space for a diagram that's no longer rendered.
+    if (svgSizeRef.current !== null) {
+      svgSizeRef.current = null;
+      setSvgSize(null);
+      resetAutoScale();
+    }
+  }, [svg, resetAutoScale]);
+
   const toggleCode = useCallback(() => setShowCode((v) => !v), []);
 
-  if (error) {
+  // Surface the error only when we have no previously-rendered svg to fall
+  // back to. Once a successful render lands, that svg stays visible even if a
+  // later code change fails to parse — better than flashing a red banner over
+  // a diagram that was working a moment ago.
+  if (error !== null && svg === null) {
     return (
       <div className="my-3 rounded-md border border-destructive/30 bg-destructive/5 p-3">
         <p className="text-xs text-destructive mb-2">Failed to render diagram</p>
@@ -101,11 +173,16 @@ export function MermaidBlock({ code }: MermaidBlockProps) {
   return (
     <div className="mermaid-block group/mermaid relative my-3 block w-full max-w-full min-w-0 rounded-md border border-border/50 bg-muted/20">
       <div
+        ref={setScrollRegionElement}
         className="mermaid-scroll-region w-full overflow-x-auto overflow-y-hidden p-3"
         style={{ display: showCode ? "none" : undefined }}
       >
         <div style={wrapperStyle}>
-          <div ref={containerRef} style={containerStyle} />
+          <div
+            ref={containerRef}
+            style={containerStyle}
+            dangerouslySetInnerHTML={{ __html: svg ?? "" }}
+          />
         </div>
       </div>
       {showCode && (

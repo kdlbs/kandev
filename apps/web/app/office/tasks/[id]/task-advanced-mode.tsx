@@ -1,7 +1,7 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import Link from "next/link";
+import dynamic from "@/lib/routing/client-dynamic";
+import Link from "@/components/routing/app-link";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";

@@ -80,8 +80,13 @@ test.describe("Setup script no duplicate execution", () => {
 
       expect(task.session_id).toBeTruthy();
       const { messages } = await apiClient.listSessionMessages(task.session_id!);
+      // Filter by metadata.script_type === "setup" — the chat surfaces other
+      // `script_execution` rows too (e.g. agent_boot), and counting all of
+      // them masked the bug where the setup script never ran.
       const scriptMsgs = messages.filter(
-        (m) => (m as { type?: string }).type === "script_execution",
+        (m) =>
+          (m as { type?: string }).type === "script_execution" &&
+          ((m as { metadata?: { script_type?: string } }).metadata?.script_type ?? "") === "setup",
       );
       expect(scriptMsgs).toHaveLength(1);
     } finally {

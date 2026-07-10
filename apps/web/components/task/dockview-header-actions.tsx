@@ -28,6 +28,8 @@ import { replaceTaskUrl } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
 import { AddPanelMenuItems, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
+import { useUserShells } from "@/hooks/domains/session/use-user-shells";
+import { useEnsureDefaultTerminalOrdinary } from "@/hooks/domains/session/use-ensure-default-terminal-ordinary";
 import { NewSessionDialog } from "./new-session-dialog";
 import { NewTaskDropdown } from "./new-task-dropdown";
 import { useActiveSessionDevScript } from "./repository-scripts-menu";
@@ -88,26 +90,65 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
   const { group, containerApi } = props;
   const state = useLeftHeaderState(group.id, containerApi);
   const environmentId = useEnvironmentId();
+  const taskID = useAppStore((s) => s.tasks?.activeTaskId ?? null);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
+  const addUserShell = useAppStore((s) => s.addUserShell);
   const devScript = useActiveSessionDevScript();
   const [showNewSessionDialog, setShowNewSessionDialog] = useState(false);
+  // Eagerly populate the user-shell store for this env+task so the
+  // dockview "+" menu's Terminals submenu and the per-tab badge logic
+  // both have the data ready on first open. Without this call, the
+  // store stays empty on desktop (the mobile right-panel hook is the
+  // only other call site) and the menu would render an empty section.
+  useUserShells(environmentId, taskID);
+  // Migrate the static `terminal-default` panel into a DB-backed
+  // ordinary terminal so its tab gets a real seq badge alongside any
+  // user-created terminals.
+  useEnsureDefaultTerminalOrdinary();
 
   const handleAddTerminal = useCallback(async () => {
     if (!environmentId) return;
     try {
-      const result = await createUserShell(environmentId);
-      addTerminalPanel(result.terminalId, group.id, environmentId);
+      // Pass taskId so the backend creates a DB-backed ordinary terminal
+      // (with seq/kind) instead of a legacy passthrough shell. Also stamp
+      // taskID into the dockview panel params so the destroy cleanup
+      // passes ownership verification.
+      const result = await createUserShell(environmentId, { taskId: taskID ?? undefined });
+      // Push the new ordinary terminal into the user-shell store
+      // synchronously so TerminalTab's store lookup finds it on first
+      // render. Without this, the tab would briefly show the panel's
+      // initial title ("Terminal {seq}") before the next WS list
+      // catches up and rewrites it to the normalized "Terminal".
+      addUserShell(environmentId, {
+        terminalId: result.terminalId,
+        kind: result.kind,
+        seq: result.seq,
+        displayName: result.displayName,
+        customName: null,
+        state: result.state ?? "open",
+        ptyStatus: result.ptyStatus ?? "stopped",
+        running: result.ptyStatus === "running",
+        label: result.label,
+        closable: result.closable ?? true,
+        initialCommand: result.initialCommand,
+      });
+      // Panel title is always set to "Terminal" — TerminalTab pushes the
+      // custom name (or "Terminal") onto api.title via setTitle once it
+      // mounts; passing "Terminal" here avoids a "Terminal 1" → "Terminal"
+      // flash on first paint.
+      addTerminalPanel(result.terminalId, group.id, environmentId, taskID ?? undefined, "Terminal");
     } catch (error) {
       console.error("Failed to create terminal:", error);
     }
-  }, [environmentId, addTerminalPanel, group.id]);
+  }, [environmentId, taskID, addTerminalPanel, addUserShell, group.id]);
 
   const handleRunScript = useCallback(
     async (scriptId: string) => {
       if (!environmentId) return;
       try {
         const result = await createUserShell(environmentId, { scriptId });
-        addTerminalPanel(result.terminalId, group.id, environmentId);
+        const title = result.label ?? "Script";
+        addTerminalPanel(result.terminalId, group.id, environmentId, undefined, title);
       } catch (error) {
         console.error("Failed to run script:", error);
       }
@@ -122,7 +163,7 @@ export function LeftHeaderActions(props: IDockviewHeaderActionsProps) {
         command: devScript,
         label: "Dev Server",
       });
-      addTerminalPanel(result.terminalId, group.id, environmentId);
+      addTerminalPanel(result.terminalId, group.id, environmentId, undefined, "Dev Server");
     } catch (error) {
       console.error("Failed to start dev script:", error);
     }
@@ -427,7 +468,13 @@ function TerminalScriptsDropdown({
       if (!environmentId) return;
       try {
         const result = await createUserShell(environmentId, { scriptId });
-        addTerminalPanel(result.terminalId, rightBottomGroupId ?? undefined, environmentId);
+        addTerminalPanel(
+          result.terminalId,
+          rightBottomGroupId ?? undefined,
+          environmentId,
+          undefined,
+          result.label ?? "Script",
+        );
       } catch (error) {
         console.error("Failed to run script:", error);
       }
@@ -488,6 +535,7 @@ function TerminalDevPreviewButton({
   visible,
 }: TerminalDevPreviewButtonProps) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const taskID = useAppStore((state) => state.tasks?.activeTaskId ?? null);
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
   const addTerminalPanel = useDockviewStore((s) => s.addTerminalPanel);
   const upsertProcessStatus = useAppStore((state) => state.upsertProcessStatus);
@@ -506,14 +554,22 @@ function TerminalDevPreviewButton({
       // Process may already be running
     }
     try {
-      const shell = await createUserShell(environmentId);
-      addTerminalPanel(shell.terminalId, rightBottomGroupId ?? undefined, environmentId);
+      const shell = await createUserShell(environmentId, { taskId: taskID ?? undefined });
+      const title = shell.displayName ?? shell.label ?? "Terminal";
+      addTerminalPanel(
+        shell.terminalId,
+        rightBottomGroupId ?? undefined,
+        environmentId,
+        taskID ?? undefined,
+        title,
+      );
     } catch {
       // Terminal creation is best-effort
     }
   }, [
     activeSessionId,
     environmentId,
+    taskID,
     addBrowserPanel,
     upsertProcessStatus,
     setActiveProcess,

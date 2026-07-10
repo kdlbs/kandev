@@ -1,8 +1,8 @@
-import { cookies } from "next/headers";
+import { readCookies } from "@/lib/server/cookies";
 import type { Layout } from "react-resizable-panels";
 
 export const readLayoutDefaults = async () => {
-  const cookieStore = await cookies();
+  const cookieStore = await readCookies();
   const defaults: Record<string, Layout> = {};
   const cookieList =
     typeof (cookieStore as { getAll?: () => { name: string; value: string }[] }).getAll ===

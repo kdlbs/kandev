@@ -1,33 +1,17 @@
 "use client";
 
-import { useCallback, useState } from "react";
 import { IconAlertTriangle, IconCheck, IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import type { Message } from "@/lib/types/http";
-import type { PermissionActionType, PermissionOptionKind } from "@/lib/types/permission";
 import { PermissionActionRow } from "./permission-action-row";
+import { summarizePermissionAction } from "./permission-action-summary";
+import {
+  parsePermission,
+  usePermissionResponseHandlers,
+  type PermissionRequestMetadata,
+} from "./use-permission-handlers";
 
-type PermissionOption = {
-  option_id: string;
-  name: string;
-  kind: PermissionOptionKind;
-};
-
-type PermissionRequestMetadata = {
-  pending_id: string;
-  tool_call_id?: string;
-  options: PermissionOption[];
-  action_type: PermissionActionType;
-  action_details?: {
-    command?: string;
-    path?: string;
-    cwd?: string;
-  };
-  status?: "pending" | "approved" | "rejected" | "expired";
-};
-
-function getPermissionStatusBadge(status?: "pending" | "approved" | "rejected" | "expired") {
+function getPermissionStatusBadge(status: PermissionRequestMetadata["status"]) {
   switch (status) {
     case "approved":
       return (
@@ -61,98 +45,59 @@ type PermissionRequestMessageProps = {
 };
 
 export function PermissionRequestMessage({ comment }: PermissionRequestMessageProps) {
-  const [isResponding, setIsResponding] = useState(false);
-  const metadata = comment.metadata as PermissionRequestMetadata | undefined;
+  const { permissionMetadata, permissionStatus, isPermissionPending } = parsePermission(comment);
+  const { isResponding, handleApprove, handleAllowAlways, hasAllowAlways, handleReject } =
+    usePermissionResponseHandlers({
+      permissionMetadata,
+      permissionMessage: comment,
+    });
 
-  const isResolved =
-    metadata?.status === "approved" ||
-    metadata?.status === "rejected" ||
-    metadata?.status === "expired";
-  const isPending = !isResolved;
-
-  const handleRespond = useCallback(
-    async (optionId: string, cancelled: boolean = false) => {
-      if (!metadata) return;
-
-      const client = getWebSocketClient();
-      if (!client) {
-        console.error("WebSocket client not available");
-        return;
-      }
-
-      setIsResponding(true);
-      try {
-        await client.request("permission.respond", {
-          session_id: comment.session_id,
-          pending_id: metadata.pending_id,
-          option_id: cancelled ? undefined : optionId,
-          cancelled,
-        });
-      } catch (error) {
-        console.error("Failed to respond to permission request:", error);
-      } finally {
-        setIsResponding(false);
-      }
-    },
-    [comment.session_id, metadata],
-  );
-
-  const handleApprove = useCallback(() => {
-    const allowOption = metadata?.options.find(
-      (opt) => opt.kind === "allow_once" || opt.kind === "allow_always",
-    );
-    if (allowOption) {
-      handleRespond(allowOption.option_id);
-    }
-  }, [metadata, handleRespond]);
-
-  const handleReject = useCallback(() => {
-    const rejectOption = metadata?.options.find(
-      (opt) => opt.kind === "reject_once" || opt.kind === "reject_always",
-    );
-    if (rejectOption) {
-      handleRespond(rejectOption.option_id);
-    } else {
-      handleRespond("", true);
-    }
-  }, [metadata, handleRespond]);
-
-  const statusBadge = getPermissionStatusBadge(metadata?.status);
+  const statusBadge = getPermissionStatusBadge(permissionStatus);
+  const titleText = comment.content || "Permission Required";
+  const detailSummary = summarizePermissionAction(permissionMetadata?.action_details, titleText);
 
   return (
     <div className="w-full">
-      {/* Icon + Content Row */}
       <div className="flex items-start gap-3 w-full">
-        {/* Icon */}
         <div className="flex-shrink-0 mt-0.5">
           <IconAlertTriangle
             className={cn(
               "h-4 w-4",
-              isPending ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+              isPermissionPending ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
             )}
           />
         </div>
 
-        {/* Content */}
         <div className="flex-1 min-w-0 pt-0.5">
           <div className="flex items-center gap-2 text-xs">
             <span
               className={cn(
                 "font-mono text-xs",
-                isPending ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground",
+                isPermissionPending
+                  ? "text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground",
               )}
             >
-              {comment.content || "Permission Required"}
+              {titleText}
             </span>
             {statusBadge}
           </div>
 
-          {/* Approval buttons - only show when pending */}
-          {isPending && (
+          {detailSummary && (
+            <div
+              className="mt-1 font-mono text-xs text-muted-foreground break-all"
+              data-testid="permission-action-detail"
+            >
+              {detailSummary}
+            </div>
+          )}
+
+          {isPermissionPending && (
             <div className="mt-2">
               <PermissionActionRow
                 onApprove={handleApprove}
                 onReject={handleReject}
+                onAllowAlways={hasAllowAlways ? handleAllowAlways : undefined}
                 isResponding={isResponding}
               />
             </div>

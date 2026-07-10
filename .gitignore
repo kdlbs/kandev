@@ -19,6 +19,10 @@ go.work
 # Dependency directories
 vendor/
 
+# Python helper caches
+__pycache__/
+*.py[cod]
+
 # IDE and editor files
 .idea/
 *.swp
@@ -40,6 +44,9 @@ Thumbs.db
 # Log files
 *.log
 logs/
+!apps/backend/internal/system/logs/
+!apps/web/app/settings/system/logs/
+!apps/web/e2e/tests/system/logs-page.spec.ts
 
 # Temporary files
 tmp/
@@ -105,15 +112,19 @@ normalized-*.jsonl
 # Serena MCP
 .serena/*
 .gitnexus
-.codex
+.codex/*
+!.codex/agents/
+!.codex/agents/*.toml
+!.codex/config.toml
 
 # playwright-cli snapshots/console logs
 .playwright-cli/
 /.claude/scheduled_tasks.lock
 
-# implementation plans (reviewed locally, not committed)
-docs/specs/*/plan.md
-docs/plans/
-
 # Local worktrees (not the backend-managed tree under ~/.kandev)
 /.worktrees/
+
+# PR screenshot/asset scratch dirs — never committed; drag-and-drop into the
+# GitHub PR description instead (see apps/web/e2e/scripts/upload-pr-assets.ts).
+/.pr-screenshots/
+/apps/web/.pr-assets/

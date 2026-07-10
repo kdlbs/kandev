@@ -76,7 +76,7 @@ type LaunchSpec struct {
 	// PriorACPSession is the ACP session id to resume, if any.
 	PriorACPSession string
 
-	// McpMode selects the MCP tool surface (e.g. "config" for config-mode tools).
+	// McpMode selects the MCP tool surface ("task", "config", or "office").
 	McpMode string
 
 	// Metadata carries integration-specific fields. Phase 1 supports

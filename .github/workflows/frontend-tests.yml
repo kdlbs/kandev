@@ -11,6 +11,8 @@ on:
       - "apps/web/**"
       - "apps/packages/**"
       - "apps/pnpm-lock.yaml"
+      - "apps/backend/go.mod"
+      - "apps/backend/go.sum"
       - ".github/workflows/frontend-tests.yml"
       - "!**/*.md"
       - "!**/*.mdx"
@@ -25,6 +27,8 @@ on:
       - "apps/web/**"
       - "apps/packages/**"
       - "apps/pnpm-lock.yaml"
+      - "apps/backend/go.mod"
+      - "apps/backend/go.sum"
       - ".github/workflows/frontend-tests.yml"
       - "!**/*.md"
       - "!**/*.mdx"
@@ -34,32 +38,66 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege: the `frontend` job only reads source and runs tests.
+# `packages: read` lets the container job pull the kandev-ci image from GHCR.
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   frontend:
     name: Run Frontend Lint, Tests, and Build
     runs-on: ubuntu-latest
+    # Pre-baked image bundles Node 24, pnpm 9.15.9, Go, and go-licenses —
+    # see .github/docker/ci-base/Dockerfile.
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
     defaults:
       run:
+        # Container jobs default to `sh` (dash); pin to bash for `set -euo
+        # pipefail` and other bash-isms used by the formatting / licenses steps.
+        shell: bash
         working-directory: apps
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
 
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v5
-        with:
-          version: "9.15.9"
+      - name: Mark workspace safe for git
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Cache pnpm store
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          node-version: "24"
+          path: ~/.local/share/pnpm/store
+          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Regenerate OSS licenses manifest
+        run: pnpm --filter @kandev/web licenses:gen
+
+      - name: Verify licenses manifest is fresh
+        shell: bash
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          # `defaults.run.working-directory` is `apps`, so the path is relative.
+          # The diff is reported as a warning, not a hard failure: `go-licenses`
+          # resolves slightly different license metadata across platforms (macOS
+          # dev vs. ubuntu CI) for the same Go modules, and we have not yet
+          # eliminated that drift. The committed file is still the source of
+          # truth for what the page renders.
+          if ! git diff --quiet --exit-code web/generated/licenses.json; then
+            echo "::warning::apps/web/generated/licenses.json differs from a fresh re-run."
+            echo "::warning::Run 'pnpm --filter @kandev/web licenses:gen' and commit if the drift is real."
+            git --no-pager diff --stat web/generated/licenses.json || true
+          fi
 
       - name: Check formatting
         shell: bash
@@ -87,11 +125,23 @@ jobs:
             exit 0
           fi
 
+          # Skip symlinks — prettier errors with exit 123 when an explicit
+          # pattern is a symbolic link. CLAUDE.md files in the tree are symlinks
+          # to sibling AGENTS.md files (Codex / Claude Code convention).
+          FILES_TO_CHECK="$(
+            echo "${CHANGED_FILES}" \
+              | sed 's#^apps/##' \
+              | while IFS= read -r f; do [ -L "$f" ] || echo "$f"; done
+          )"
+
+          if [[ -z "${FILES_TO_CHECK}" ]]; then
+            echo "No non-symlink Prettier-scoped files changed."
+            exit 0
+          fi
+
           echo "Checking Prettier on changed files:"
-          echo "${CHANGED_FILES}"
-          echo "${CHANGED_FILES}" \
-            | sed 's#^apps/##' \
-            | xargs pnpm exec prettier --check --ignore-unknown
+          echo "${FILES_TO_CHECK}"
+          echo "${FILES_TO_CHECK}" | xargs pnpm exec prettier --check --ignore-unknown
 
       - name: Run lint
         run: pnpm --filter @kandev/web lint

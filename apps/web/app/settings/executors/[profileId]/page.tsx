@@ -1,9 +1,10 @@
 "use client";
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
+import { IconShieldLock } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
@@ -25,6 +26,7 @@ import {
   rowsToEnvVars,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ScriptCard } from "@/components/settings/profile-edit/script-card";
+import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
 import {
   type GitIdentityMode,
   type GitIdentityState,
@@ -84,10 +86,15 @@ function parseRemoteCredentials(config?: Record<string, string>): string[] {
 }
 
 function useRemoteExecutorFlags(executorType: ExecutorType) {
+  // SSH joins the "remote" set because it runs the agent on a host whose
+  // filesystem doesn't share paths with the kandev backend — so the same
+  // remote-credentials + auth-secrets surface applies (the SSH executor
+  // SFTPs files into the remote user's $HOME).
   const isRemote =
     executorType === "local_docker" ||
     executorType === "remote_docker" ||
-    executorType === "sprites";
+    executorType === "sprites" ||
+    executorType === "ssh";
   return {
     isRemote,
     isDocker: executorType === "local_docker" || executorType === "remote_docker",
@@ -405,15 +412,29 @@ function ProfileEditSections({
   profile,
   form,
   secrets,
+  onShellChange,
 }: {
   executor: Executor;
   profile: ExecutorProfile;
   form: ReturnType<typeof useProfileFormState>;
   secrets: ReturnType<typeof useSecrets>["items"];
+  onShellChange?: (shell: string) => Promise<void>;
 }) {
+  const isSSH = executor.type === "ssh";
   return (
     <>
       <ProfileDetailsCard name={form.name} onNameChange={form.setName} />
+      {isSSH && (
+        // SSH-specific: lives right after profile details (top of the page)
+        // because the very next question after "name this profile" on an
+        // SSH host is "which agents are installed here". Drives the shell
+        // selector that governs every subsequent SSH command run by kandev.
+        <SSHAgentReadinessCard
+          executorId={executor.id}
+          shell={profile.config?.ssh_shell}
+          onShellChange={onShellChange}
+        />
+      )}
       {form.isSprites && (
         <SpritesApiKeyCard
           secretId={form.spritesSecretId}
@@ -488,11 +509,25 @@ function ProfileEditSections({
 }
 
 function ProfileEditForm({ executor, profile }: { executor: Executor; profile: ExecutorProfile }) {
+  const router = useRouter();
   const { items: secrets } = useSecrets();
   const persistence = useProfilePersistence(executor, profile);
   const form = useProfileFormState(executor, profile);
   const relatedContainers = useDockerProfileContainers(profile.id, form.isDocker);
   const spritesTokenMissing = form.isSprites && !form.spritesSecretId;
+  const headerActions =
+    executor.type === "ssh" ? (
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => router.push(`/settings/executors/ssh/${executor.id}`)}
+        className="w-full cursor-pointer sm:w-auto"
+        data-testid="ssh-connection-settings-link"
+      >
+        <IconShieldLock className="mr-1.5 h-4 w-4" />
+        Connection Settings
+      </Button>
+    ) : undefined;
 
   const handleSave = () => {
     if (!form.name.trim() || form.mcpPolicyError || spritesTokenMissing) return;
@@ -505,6 +540,28 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       env_vars: form.buildEnvVars(),
     });
   };
+
+  // Shell selector lives on the SSH readiness card and persists out-of-band
+  // from the main Save button — users twiddling the dropdown shouldn't have
+  // to remember to press Save afterwards. The PATCH carries the full
+  // (merged) config so the backend's config-replace semantics don't wipe
+  // adjacent keys (workdir_root, prepare_script env, etc.). Key name is
+  // ssh_shell to match MetadataKeySSHShell — buildLaunchMetadata copies
+  // profile.config keys verbatim into req.Metadata, so the same string
+  // has to identify the shell on both sides.
+  const handleShellChange = useCallback(
+    async (next: string) => {
+      const mergedConfig = { ...(profile.config ?? {}), ssh_shell: next };
+      await persistence.save({
+        name: profile.name,
+        config: mergedConfig,
+        prepare_script: profile.prepare_script ?? "",
+        cleanup_script: profile.cleanup_script ?? "",
+        env_vars: profile.env_vars ?? [],
+      });
+    },
+    [persistence, profile],
+  );
 
   const handleDelete = (options?: { removeRelatedDockerContainers?: boolean }) => {
     const beforeDelete = options?.removeRelatedDockerContainers
@@ -524,8 +581,15 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         executor={executor}
         profileName={profile.name}
         description={getExecutorDescription(executor.type)}
+        actions={headerActions}
       />
-      <ProfileEditSections executor={executor} profile={profile} form={form} secrets={secrets} />
+      <ProfileEditSections
+        executor={executor}
+        profile={profile}
+        form={form}
+        secrets={secrets}
+        onShellChange={handleShellChange}
+      />
       {spritesTokenMissing && (
         <p className="text-sm text-destructive">Sprites API key is required.</p>
       )}
@@ -558,5 +622,6 @@ function getExecutorDescription(type: ExecutorType): string {
   if (type === "local_docker") return "Runs Docker containers on this machine.";
   if (type === "remote_docker") return "Connects to a remote Docker host.";
   if (type === "sprites") return "Runs agents in Sprites.dev cloud sandboxes.";
+  if (type === "ssh") return "Runs agents on a trusted Linux amd64 or macOS host over SSH.";
   return "Custom executor.";
 }

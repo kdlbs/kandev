@@ -39,20 +39,38 @@ type McpServerConfig struct {
 
 // CreateInstanceRequest contains the parameters for creating a new agent instance.
 type CreateInstanceRequest struct {
-	ID                 string            `json:"id,omitempty"`
-	WorkspacePath      string            `json:"workspace_path"`
-	AgentCommand       string            `json:"agent_command,omitempty"`
-	Protocol           string            `json:"protocol,omitempty"`       // Protocol adapter to use (acp, rest, mcp, codex)
-	AgentType          string            `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
-	WorkspaceFlag      string            `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
-	Env                map[string]string `json:"env,omitempty"`
-	AutoStart          bool              `json:"auto_start,omitempty"`
-	McpServers         []McpServerConfig `json:"mcp_servers,omitempty"`
-	SessionID          string            `json:"session_id,omitempty"`           // Task session ID for MCP tool calls
-	TaskID             string            `json:"task_id,omitempty"`              // Task ID for MCP plan tool calls (server-side injection)
-	DisableAskQuestion bool              `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
-	AssumeMcpSse       bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
-	McpMode            string            `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default) or "config"
+	ID                     string            `json:"id,omitempty"`
+	WorkspacePath          string            `json:"workspace_path"`
+	AgentCommand           string            `json:"agent_command,omitempty"`
+	Protocol               string            `json:"protocol,omitempty"`       // Protocol adapter to use (acp, rest, mcp, codex)
+	AgentType              string            `json:"agent_type,omitempty"`     // Agent type ID for debug file naming (e.g., "codex", "auggie")
+	WorkspaceFlag          string            `json:"workspace_flag,omitempty"` // CLI flag for workspace path (e.g., "--workspace-root")
+	Env                    map[string]string `json:"env,omitempty"`
+	AutoStart              bool              `json:"auto_start,omitempty"`
+	AutoApprovePermissions *bool             `json:"auto_approve_permissions,omitempty"`
+	McpServers             []McpServerConfig `json:"mcp_servers,omitempty"`
+	SessionID              string            `json:"session_id,omitempty"`           // Task session ID for MCP tool calls
+	TaskID                 string            `json:"task_id,omitempty"`              // Task ID for MCP plan tool calls (server-side injection)
+	DisableAskQuestion     bool              `json:"disable_ask_question,omitempty"` // Disable ask_user_question MCP tool (TUI agents)
+	AssumeMcpSse           bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
+	AssumeMcpHttp          bool              `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
+	McpMode                string            `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "config", or "office"
+	// RequiresProcessKill tells agentctl to skip the graceful stdin-close wait
+	// and reap the agent process group immediately. Required for agents whose
+	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes
+	// — notably opencode acp.
+	RequiresProcessKill bool `json:"requires_process_kill,omitempty"`
+
+	// StripEnv lists environment variables to strip from the agent's child
+	// process environment entirely (not just set to empty). Propagated from
+	// RuntimeConfig.StripEnv by the lifecycle executors.
+	StripEnv []string `json:"strip_env,omitempty"`
+
+	// BaseBranches maps RepositoryName → base branch ref for the task's
+	// per-repo diff stats. The empty key "" applies to the root /
+	// single-repo tracker. Empty map disables the override and falls back
+	// to the hardcoded origin/main → master priority list inside agentctl.
+	BaseBranches map[string]string `json:"base_branches,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

@@ -172,7 +172,7 @@ type DefaultUtilitySettings struct {
 }
 
 // PreparePromptRequest prepares a prompt request by resolving the template.
-// If the utility agent has empty AgentID/Model, the defaults are used.
+// If the utility agent has no Model, the default AgentID/Model pair is used.
 // When sessionless is true, missing template variables are substituted with
 // empty strings instead of being left as {{Var}}.
 func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tmplCtx *template.Context, defaults *DefaultUtilitySettings, sessionless bool) (*PromptRequest, error) {
@@ -189,14 +189,18 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 		return nil, err
 	}
 
-	// Use agent's configured values, fall back to defaults if empty
+	// Use agent-specific values when fully configured. If the model is empty,
+	// treat the default agent/model as an inseparable pair so a default model
+	// from one provider is never sent to another provider's ACP config.
 	agentCLI := agent.AgentID
 	model := agent.Model
-	if agentCLI == "" && defaults != nil {
-		agentCLI = defaults.AgentID
-	}
-	if model == "" && defaults != nil {
-		model = defaults.Model
+	if defaults != nil {
+		if model == "" {
+			agentCLI = defaults.AgentID
+			model = defaults.Model
+		} else if agentCLI == "" {
+			agentCLI = defaults.AgentID
+		}
 	}
 
 	return &PromptRequest{
@@ -211,7 +215,7 @@ func (s *Service) PreparePromptRequest(ctx context.Context, utilityID string, tm
 type PromptRequest struct {
 	UtilityID      string
 	ResolvedPrompt string
-	AgentCLI       string // The inference agent ID (e.g., "claude-code", "amp")
+	AgentCLI       string // The inference agent ID (e.g., "claude-acp", "amp")
 	Model          string // The model to use
 }
 

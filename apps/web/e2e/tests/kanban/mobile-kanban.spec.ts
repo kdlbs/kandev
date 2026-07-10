@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { missingGitHealth } from "./health-fixtures";
 
 test.describe("Mobile kanban view", () => {
   test("renders mobile layout with column tabs and swipeable columns", async ({
@@ -19,10 +20,60 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.mobileKanbanLayout()).toBeVisible();
     // FAB should be visible for creating tasks
     await expect(mobile.mobileFab).toBeVisible();
-    // Search bar should be visible on mobile
-    await expect(mobile.mobileSearchBar).toBeVisible();
+    // Search is collapsed behind a topbar icon by default
+    await expect(mobile.mobileSearchToggle).toBeVisible();
+    await expect(mobile.mobileSearchBar).not.toBeVisible();
     // Task card should be visible
     await expect(mobile.taskCardByTitle("Mobile Layout Task")).toBeVisible();
+  });
+
+  test("search toggle reveals and hides the search input", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.createTask(seedData.workspaceId, "Toggle Visible Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    // Hidden by default, revealed when the topbar search icon is tapped
+    await expect(mobile.mobileSearchBar).not.toBeVisible();
+    await mobile.openSearch();
+    await expect(mobile.mobileSearchBar).toBeVisible();
+    // Input is focused on reveal so the keyboard opens immediately
+    await expect(mobile.searchInput()).toBeFocused();
+
+    // Tapping the icon again collapses the search bar
+    await mobile.mobileSearchToggle.click();
+    await expect(mobile.mobileSearchBar).not.toBeVisible();
+  });
+
+  test("collapsing search clears an active query", async ({ testPage, apiClient, seedData }) => {
+    await apiClient.createTask(seedData.workspaceId, "Clearable Alpha", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.createTask(seedData.workspaceId, "Other Beta", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await mobile.openSearch();
+    await mobile.searchInput().fill("Alpha");
+    await expect(mobile.taskCardByTitle("Other Beta")).not.toBeVisible({ timeout: 5000 });
+
+    // Collapsing clears the query so the full list is shown again
+    await mobile.mobileSearchToggle.click();
+    await expect(mobile.mobileSearchBar).not.toBeVisible();
+    await expect(mobile.taskCardByTitle("Clearable Alpha")).toBeVisible({ timeout: 5000 });
+    await expect(mobile.taskCardByTitle("Other Beta")).toBeVisible({ timeout: 5000 });
   });
 
   test("shows mobile menu via hamburger button", async ({ testPage }) => {
@@ -35,6 +86,75 @@ test.describe("Mobile kanban view", () => {
     // Menu sheet should open with display options
     await expect(testPage.getByRole("heading", { name: "Menu" })).toBeVisible();
     await expect(testPage.getByText("Display Options")).toBeVisible();
+  });
+
+  test("switches workspaces from the mobile menu", async ({ testPage, apiClient }) => {
+    const otherWorkspace = await apiClient.createWorkspace("Mobile Alternate Workspace");
+    await apiClient.createWorkflow(otherWorkspace.id, "Mobile Alternate Workflow", "simple");
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await mobile.mobileMenuButton.click();
+    const dialog = testPage.getByRole("dialog", { name: "Menu" });
+    await expect(dialog.getByText("Workspace", { exact: true })).toBeVisible();
+    await expect(testPage.getByTestId("mobile-workspace-trigger")).toContainText("E2E Workspace");
+
+    await testPage.getByTestId("mobile-workspace-trigger").click();
+    await testPage.getByTestId(`mobile-workspace-item-${otherWorkspace.id}`).click();
+
+    await expect(dialog).not.toBeVisible();
+
+    await mobile.mobileMenuButton.click();
+    await expect(testPage.getByTestId("mobile-workspace-trigger")).toContainText(
+      "Mobile Alternate Workspace",
+    );
+  });
+
+  test("mobile menu exposes settings navigation", async ({ testPage }) => {
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await mobile.mobileMenuButton.click();
+    await testPage.getByRole("link", { name: "Settings" }).click();
+
+    await expect(testPage).toHaveURL(/\/settings(?:\/general)?$/);
+    await expect(testPage.getByRole("link", { name: /Appearance/ })).toBeVisible();
+  });
+
+  test("opening mobile menu does not focus task search", async ({ testPage }) => {
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await mobile.mobileMenuButton.click();
+    const dialog = testPage.getByRole("dialog", { name: "Menu" });
+    const searchInput = dialog.getByPlaceholder("Search tasks...");
+
+    await expect(searchInput).toBeVisible();
+    await expect(searchInput).not.toBeFocused();
+  });
+
+  test("opens missing git health issue from mobile menu", async ({ testPage, backend }) => {
+    await testPage.route(`${backend.baseUrl}/api/v1/system/health`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(missingGitHealth),
+      }),
+    );
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await mobile.mobileMenuButton.click();
+    await testPage.getByRole("button", { name: "Health issues" }).click();
+
+    const dialog = testPage.getByRole("dialog", { name: "Setup Issues" });
+    await expect(dialog.getByText("Git executable is required")).toBeVisible();
+    await expect(
+      dialog.getByText("Install Git and ensure the git executable is available on PATH."),
+    ).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "View system status" })).toBeVisible();
   });
 
   test("column tabs allow switching between workflow steps", async ({
@@ -100,7 +220,8 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.taskCardByTitle("Searchable Alpha")).toBeVisible();
     await expect(mobile.taskCardByTitle("Hidden Beta")).toBeVisible();
 
-    // Type in search
+    // Reveal the search input from the topbar, then type in it
+    await mobile.openSearch();
     await mobile.searchInput().fill("Alpha");
 
     // Only matching task should remain visible

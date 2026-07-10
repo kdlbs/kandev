@@ -17,6 +17,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -590,6 +591,44 @@ func TestEnsureWorkspaceExecutionForSession_ReusesExistingTaskEnvironmentExecuti
 	}
 }
 
+func TestCreateExecutionResolvesProfileOnceForEnvAndAutoApprove(t *testing.T) {
+	profileResolver := &countingProfileResolver{
+		info: &AgentProfileInfo{
+			ProfileID:   "profile-1",
+			AgentID:     "auggie",
+			AutoApprove: true,
+			EnvVars:     []settingsmodels.ProfileEnvVar{{Key: "CLAUDE_CONFIG_DIR", Value: "/tmp/claude"}},
+		},
+	}
+	mgr, backend := newEnvironmentExecutionTestManagerWithProfileResolver(t, &mockWorkspaceInfoProvider{}, profileResolver)
+
+	_, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
+		SessionID:      "session-1",
+		AgentID:        "auggie",
+		AgentProfileID: "profile-1",
+		WorkspacePath:  "/workspace/task-1",
+	})
+	if err != nil {
+		t.Fatalf("createExecution returned error: %v", err)
+	}
+
+	if got := profileResolver.calls.Load(); got != 1 {
+		t.Fatalf("ResolveProfile calls = %d, want 1", got)
+	}
+	if backend.lastRequest == nil {
+		t.Fatal("CreateInstance was not called")
+	}
+	if !backend.lastRequest.AutoApprovePermissions {
+		t.Fatal("AutoApprovePermissions = false, want true")
+	}
+	if backend.lastRequest.AutoApprovePermissionsOverride == nil || !*backend.lastRequest.AutoApprovePermissionsOverride {
+		t.Fatalf("AutoApprovePermissionsOverride = %v, want true", backend.lastRequest.AutoApprovePermissionsOverride)
+	}
+	if got := backend.lastRequest.Env["CLAUDE_CONFIG_DIR"]; got != "/tmp/claude" {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q", got, "/tmp/claude")
+	}
+}
+
 // --- test helpers ---
 
 type createInstanceExecutor struct {
@@ -597,6 +636,7 @@ type createInstanceExecutor struct {
 	client       *agentctl.Client
 	createCount  atomic.Int32
 	stopCount    atomic.Int32
+	lastRequest  *ExecutorCreateRequest
 	authToken    string
 	nonce        string
 	delay        time.Duration
@@ -634,6 +674,7 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 		case <-time.After(e.delay):
 		}
 	}
+	e.lastRequest = req
 	e.createCount.Add(1)
 	if progress != nil {
 		completeStepSuccess(progress)
@@ -657,6 +698,14 @@ func (e *createInstanceExecutor) StopInstance(ctx context.Context, instance *Exe
 }
 
 func newEnvironmentExecutionTestManager(t *testing.T, provider WorkspaceInfoProvider) (*Manager, *createInstanceExecutor) {
+	return newEnvironmentExecutionTestManagerWithProfileResolver(t, provider, &MockProfileResolver{})
+}
+
+func newEnvironmentExecutionTestManagerWithProfileResolver(
+	t *testing.T,
+	provider WorkspaceInfoProvider,
+	profileResolver ProfileResolver,
+) (*Manager, *createInstanceExecutor) {
 	t.Helper()
 	log := newTestLogger()
 	execRegistry := NewExecutorRegistry(log)
@@ -667,12 +716,23 @@ func newEnvironmentExecutionTestManager(t *testing.T, provider WorkspaceInfoProv
 	execRegistry.Register(backend)
 
 	mgr := NewManager(
-		newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, profileResolver, nil,
 		ExecutorFallbackWarn, "", log,
 	)
 	mgr.workspaceInfoProvider = provider
-	t.Cleanup(func() { close(mgr.stopCh) })
+	cleanupManagerStopCh(t, mgr)
 	return mgr, backend
+}
+
+type countingProfileResolver struct {
+	info  *AgentProfileInfo
+	err   error
+	calls atomic.Int32
+}
+
+func (r *countingProfileResolver) ResolveProfile(_ context.Context, _ string) (*AgentProfileInfo, error) {
+	r.calls.Add(1)
+	return r.info, r.err
 }
 
 func newReadyAgentctlClient(t *testing.T, log *logger.Logger) *agentctl.Client {

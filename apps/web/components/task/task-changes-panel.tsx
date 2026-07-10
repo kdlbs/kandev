@@ -2,6 +2,7 @@
 
 import { memo, useMemo, useCallback, createRef, useState, useEffect, useRef } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
+import { TruncatedFilesBanner, useSelectedFileKey } from "./changes-panel-banner";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { useReviewSources, type ReviewSource } from "@/hooks/domains/session/use-review-sources";
@@ -13,9 +14,11 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateUserSettings } from "@/lib/api";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { ReviewDiffList } from "@/components/review/review-diff-list";
+import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import type { ReviewFile } from "@/components/review/types";
 import { hashDiff, reviewFileKey, splitReviewFileKey } from "@/components/review/types";
 import { usePanelActions } from "@/hooks/use-panel-actions";
+import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import { ChangesTopBar } from "./changes-top-bar";
 import type { SelectedDiff } from "./task-layout";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
@@ -28,13 +31,13 @@ type TaskChangesPanelProps = {
   onClearSelected: () => void;
   onBecameEmpty?: () => void;
   /** Callback to open file in editor */
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   /**
    * Restrict the diff list to a single source. Defaults to `"all"` (no
    * filter). Mobile uses this for source tabs; desktop omits it.
    */
   sourceFilter?: "all" | ReviewSource;
-  /** Force word-wrap on diffs. Defaults to false (user-controlled). */
+  /** Force word-wrap on diffs. Defaults to the app diff preference. */
   wordWrap?: boolean;
 };
 
@@ -76,7 +79,7 @@ function scrollToFileAndClear(
 
 function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () => void) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
-  const { allFiles, cumulativeLoading, prDiffLoading, gitStatus, rawPRFiles } =
+  const { allFiles, cumulativeLoading, prDiffLoading, gitStatus, rawPRFiles, truncatedFilesCount } =
     useReviewSources(activeSessionId);
   const pr = useActiveTaskPR();
   const { reviews } = useSessionFileReviews(activeSessionId);
@@ -150,6 +153,7 @@ function useChangesView(selectedDiff: SelectedDiff | null, onClearSelected: () =
     cumulativeLoading,
     prDiffLoading,
     gitStatus,
+    truncatedFilesCount,
   };
 }
 
@@ -165,10 +169,22 @@ function persistAutoMarkSetting(checked: boolean) {
   updateUserSettings(payload, { cache: "no-store" }).catch(() => {});
 }
 
+function useReviewWalkthroughRequest(
+  activeSessionId: string | null | undefined,
+  allFiles: ReviewFile[],
+) {
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  return useRequestChangesWalkthrough({
+    taskId: activeTaskId,
+    sessionId: activeSessionId,
+    files: allFiles,
+  });
+}
+
 function useChangesActions(
   activeSessionId: string | null | undefined,
   allFiles: ReviewFile[],
-  defaultWordWrap = false,
+  defaultWordWrap = DEFAULT_DIFF_WORD_WRAP,
 ) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
@@ -439,7 +455,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   onBecameEmpty,
   onOpenFile: onOpenFileProp,
   sourceFilter = "all",
-  wordWrap: wordWrapProp = false,
+  wordWrap: wordWrapProp = DEFAULT_DIFF_WORD_WRAP,
 }: TaskChangesPanelProps) {
   const isArchived = useIsTaskArchived();
   const { openFile: panelOpenFile, openFileInMarkdownPreview } = usePanelActions();
@@ -456,6 +472,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     cumulativeLoading,
     prDiffLoading,
     gitStatus,
+    truncatedFilesCount,
   } = useChangesView(selectedDiff, onClearSelected);
   const {
     splitView,
@@ -468,6 +485,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     handleToggleAutoMark,
     handleFixComments,
   } = useChangesActions(activeSessionId, allFiles, wordWrapProp);
+  const handleRequestWalkthrough = useReviewWalkthroughRequest(activeSessionId, allFiles);
   const { visibleFiles, visibleFileRefs, reviewedCount, totalCount, progressPercent } =
     useVisibleDiffState({
       allFiles,
@@ -480,13 +498,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
       reviewedFiles,
       staleFiles,
     });
-  const selectedFileKey = useMemo(
-    () =>
-      mode === "file" && filePath
-        ? reviewFileKey({ path: filePath, repository_name: fileRepositoryName })
-        : undefined,
-    [mode, filePath, fileRepositoryName],
-  );
+  const selectedFileKey = useSelectedFileKey(mode, filePath, fileRepositoryName);
   useAutoCloseWhenEmpty({
     mode,
     filePath,
@@ -512,8 +524,11 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
         handleToggleSplitView={handleToggleSplitView}
         handleToggleAutoMark={handleToggleAutoMark}
         handleFixComments={handleFixComments}
+        handleRequestWalkthrough={handleRequestWalkthrough}
+        requestWalkthroughDisabled={allFiles.length === 0}
       />
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
+        <TruncatedFilesBanner count={truncatedFilesCount} />
         <ChangesPanelContent
           isLoading={cumulativeLoading || prDiffLoading}
           files={visibleFiles}
@@ -559,7 +574,7 @@ function ChangesPanelContent({
   selectedFile?: string | null;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => Promise<void>;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, repo?: string) => void;
   onPreviewMarkdown?: (path: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 }) {

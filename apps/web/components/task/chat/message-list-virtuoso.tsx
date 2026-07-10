@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { RenderItem } from "@/hooks/use-processed-messages";
+import type { Message, TaskSessionState } from "@/lib/types/http";
 import { AgentStatus } from "@/components/task/chat/messages/agent-status";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
@@ -13,11 +14,17 @@ import {
   MessageListStatus,
   MessageItem,
   getItemKey,
+  getConversationLoadingState,
   getSessionRunningState,
   getLastTurnGroupId,
 } from "./message-list-shared";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const FIRST_INDEX_BASE = 100_000;
+
+const debugVirtuoso = createDebugLogger("chat:virtuoso");
+const debugScrollParent = createDebugLogger("chat:virtuoso:scrollParent");
+const debugFirstIndex = createDebugLogger("chat:virtuoso:firstIndex");
 
 type VirtuosoBodyProps = MessageListProps & {
   scrollParent: HTMLDivElement;
@@ -54,13 +61,34 @@ type IndexState = { keys: string[]; firstItemIndex: number };
 function useStableFirstItemIndex(items: RenderItem[]) {
   const keys = useMemo(() => items.map(getItemKey), [items]);
 
-  const [state, setState] = useState<IndexState>(() => ({
-    keys,
-    firstItemIndex: FIRST_INDEX_BASE - keys.length + 1,
-  }));
+  const [state, setState] = useState<IndexState>(() => {
+    const firstItemIndex = FIRST_INDEX_BASE - keys.length + 1;
+    if (isDebug()) {
+      debugFirstIndex("init", {
+        keyCount: keys.length,
+        firstItemIndex,
+        firstKey: keys[0] ?? "-",
+        lastKey: keys[keys.length - 1] ?? "-",
+      });
+    }
+    return { keys, firstItemIndex };
+  });
 
   if (keys !== state.keys) {
     const nextIndex = computeFirstItemIndex(state.keys, state.firstItemIndex, keys);
+    if (isDebug()) {
+      debugFirstIndex("transition", {
+        prevKeyCount: state.keys.length,
+        nextKeyCount: keys.length,
+        prevIndex: state.firstItemIndex,
+        nextIndex,
+        delta: nextIndex - state.firstItemIndex,
+        prevFirstKey: state.keys[0] ?? "-",
+        nextFirstKey: keys[0] ?? "-",
+        prevLastKey: state.keys[state.keys.length - 1] ?? "-",
+        nextLastKey: keys[keys.length - 1] ?? "-",
+      });
+    }
     setState({ keys, firstItemIndex: nextIndex });
     return nextIndex;
   }
@@ -70,15 +98,7 @@ function useStableFirstItemIndex(items: RenderItem[]) {
 
 function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   const { items, sessionId, permissionsByToolCallId, childrenByParentToolCallId, taskId } = props;
-  const {
-    worktreePath,
-    onOpenFile,
-    lastTurnGroupId,
-    isRunning,
-    messages,
-    sessionState,
-    taskState,
-  } = props;
+  const { worktreePath, onOpenFile, lastTurnGroupId, isRunning } = props;
   const { hasMore, isLoadingMore, loadMore } = props;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const itemCount = items.length;
@@ -135,9 +155,6 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
             onOpenFile={onOpenFile}
             isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
             isTurnActive={isRunning}
-            messages={messages}
-            sessionState={sessionState}
-            taskState={taskState}
             onScrollToMessage={handleScrollToMessage}
           />
         </div>
@@ -154,9 +171,6 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
       onOpenFile,
       lastTurnGroupId,
       isRunning,
-      messages,
-      sessionState,
-      taskState,
       handleScrollToMessage,
     ],
   );
@@ -171,6 +185,24 @@ function VirtuosoBody(props: VirtuosoBodyProps) {
   const { scrollParent, Header, Footer } = props;
   const { virtuosoRef, itemCount, firstItemIndex, handleStartReached, computeItemKey, renderItem } =
     useVirtuosoCallbacks(props);
+
+  // Captured once on mount — `initialTopMostItemIndex` only takes effect on
+  // Virtuoso's first render, so logging it here tells us which item Virtuoso
+  // anchored on for that lifecycle.
+  const mountSnapshotRef = useRef<{ itemCount: number; firstItemIndex: number } | null>(null);
+  useEffect(() => {
+    if (!isDebug()) return;
+    if (mountSnapshotRef.current) return;
+    mountSnapshotRef.current = { itemCount, firstItemIndex };
+    debugVirtuoso("mount", {
+      itemCount,
+      firstItemIndex,
+      initialTopMostItemIndex: itemCount - 1,
+      hasMore: props.hasMore,
+      isRunning: props.isRunning,
+      lastTurnGroupId: props.lastTurnGroupId ?? "-",
+    });
+  }, [itemCount, firstItemIndex, props.hasMore, props.isRunning, props.lastTurnGroupId]);
 
   return (
     <Virtuoso
@@ -192,20 +224,146 @@ function VirtuosoBody(props: VirtuosoBodyProps) {
   );
 }
 
+type VirtuosoSnapshot = {
+  branch: string;
+  itemCount: number;
+  messageCount: number;
+  scrollParentReady: boolean;
+};
+
+function virtuosoSnapshotChanged(prev: VirtuosoSnapshot | null, next: VirtuosoSnapshot): boolean {
+  if (!prev) return true;
+  return (
+    prev.branch !== next.branch ||
+    prev.itemCount !== next.itemCount ||
+    prev.messageCount !== next.messageCount ||
+    prev.scrollParentReady !== next.scrollParentReady
+  );
+}
+
+type VirtuosoDebugExtras = {
+  sessionId: string | null | undefined;
+  messagesLoading: boolean;
+  isInitialLoading: boolean;
+  showLoadingState: boolean;
+  sessionState: string | null | undefined;
+  lastItemKey: string;
+};
+
+function logVirtuosoSnapshotChange(
+  prev: VirtuosoSnapshot | null,
+  next: VirtuosoSnapshot,
+  extras: VirtuosoDebugExtras,
+) {
+  debugVirtuoso(prev ? "snapshot-change" : "snapshot-init", {
+    sessionId: extras.sessionId ?? "-",
+    ...next,
+    prevBranch: prev?.branch ?? "-",
+    prevItemCount: prev?.itemCount ?? -1,
+    prevMessageCount: prev?.messageCount ?? -1,
+    prevScrollParentReady: prev?.scrollParentReady ?? false,
+    messagesLoading: extras.messagesLoading,
+    isInitialLoading: extras.isInitialLoading,
+    showLoadingState: extras.showLoadingState,
+    sessionState: extras.sessionState ?? "-",
+    lastItemKey: extras.lastItemKey,
+    initialTopMostItemIndex: next.itemCount - 1,
+  });
+}
+
+type UseVirtuosoDebugSnapshotArgs = {
+  items: RenderItem[];
+  messages: { length: number };
+  scrollParent: HTMLDivElement | null;
+  sessionId: string | null | undefined;
+  messagesLoading: boolean;
+  isInitialLoading: boolean;
+  showLoadingState: boolean;
+  sessionState: string | null | undefined;
+};
+
+/** Track which render branch fires and how itemCount/messageCount transition. */
+function useVirtuosoDebugSnapshot({
+  items,
+  messages,
+  scrollParent,
+  sessionId,
+  messagesLoading,
+  isInitialLoading,
+  showLoadingState,
+  sessionState,
+}: UseVirtuosoDebugSnapshotArgs) {
+  const prevSnapshotRef = useRef<VirtuosoSnapshot | null>(null);
+  useEffect(() => {
+    if (!isDebug()) return;
+    const snapshot: VirtuosoSnapshot = {
+      branch: isInitialLoading || items.length === 0 ? "fallback" : "virtuoso",
+      itemCount: items.length,
+      messageCount: messages.length,
+      scrollParentReady: Boolean(scrollParent),
+    };
+    const prev = prevSnapshotRef.current;
+    if (!virtuosoSnapshotChanged(prev, snapshot)) return;
+    const lastItem = items[items.length - 1];
+    logVirtuosoSnapshotChange(prev, snapshot, {
+      sessionId,
+      messagesLoading,
+      isInitialLoading,
+      showLoadingState,
+      sessionState,
+      lastItemKey: lastItem ? getItemKey(lastItem) : "-",
+    });
+    prevSnapshotRef.current = snapshot;
+  }, [
+    items,
+    messages.length,
+    scrollParent,
+    sessionId,
+    messagesLoading,
+    isInitialLoading,
+    showLoadingState,
+    sessionState,
+  ]);
+}
+
 /** Defer providing scroll parent to Virtuoso until the element has non-zero size. */
 function useVisibleScrollParent() {
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const nodeRef = useRef<HTMLDivElement | null>(null);
   const setScrollRef = useCallback((node: HTMLDivElement | null) => {
     nodeRef.current = node;
-    if (node && node.offsetHeight > 0) setScrollParent(node);
+    if (node && node.offsetHeight > 0) {
+      if (isDebug()) {
+        debugScrollParent("ref-callback-ready", {
+          offsetHeight: node.offsetHeight,
+          path: "synchronous",
+        });
+      }
+      setScrollParent(node);
+    } else if (isDebug()) {
+      debugScrollParent("ref-callback-defer", {
+        hasNode: Boolean(node),
+        offsetHeight: node?.offsetHeight ?? null,
+        reason: !node ? "no-node" : "zero-height",
+      });
+    }
   }, []);
   useEffect(() => {
     const node = nodeRef.current;
     if (!node || scrollParent) return;
+    if (isDebug()) {
+      debugScrollParent("ro-attach", {
+        initialHeight: node.offsetHeight,
+      });
+    }
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (entry.contentRect.height > 0) {
+          if (isDebug()) {
+            debugScrollParent("ro-ready", {
+              height: entry.contentRect.height,
+            });
+          }
           setScrollParent(node);
           ro.disconnect();
           return;
@@ -216,6 +374,63 @@ function useVisibleScrollParent() {
     return () => ro.disconnect();
   }, [scrollParent]);
   return { scrollParent, setScrollRef };
+}
+
+type HeaderFooterArgs = {
+  isLoadingMore: boolean;
+  hasMore: boolean;
+  showLoadingState: boolean;
+  messagesLoading: boolean;
+  isInitialLoading: boolean;
+  messages: Message[];
+  loadMore: () => Promise<number>;
+  sessionState?: TaskSessionState;
+  sessionId: string | null;
+  footerActionMessages?: Message[];
+};
+
+/** Memoized Virtuoso Header (load-more status) and Footer (agent status + actions). */
+function useVirtuosoHeaderFooter(args: HeaderFooterArgs) {
+  const { isLoadingMore, hasMore, showLoadingState, messagesLoading, isInitialLoading } = args;
+  const { messages, loadMore, sessionState, sessionId, footerActionMessages } = args;
+  const footerActions = useMemo(() => footerActionMessages ?? [], [footerActionMessages]);
+
+  const Header = useCallback(
+    () => (
+      <MessageListStatus
+        isLoadingMore={isLoadingMore}
+        hasMore={hasMore}
+        showLoadingState={showLoadingState}
+        messagesLoading={messagesLoading}
+        isInitialLoading={isInitialLoading}
+        messagesCount={messages.length}
+        onLoadMore={loadMore}
+      />
+    ),
+    [
+      isLoadingMore,
+      hasMore,
+      showLoadingState,
+      messagesLoading,
+      isInitialLoading,
+      messages.length,
+      loadMore,
+    ],
+  );
+
+  const Footer = useCallback(
+    () => (
+      <>
+        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+        {footerActions.map((msg) => (
+          <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
+        ))}
+      </>
+    ),
+    [sessionId, sessionState, messages, footerActions],
+  );
+
+  return { Header, Footer, footerActions };
 }
 
 export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: MessageListProps) {
@@ -229,47 +444,41 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
     sessionState,
   } = props;
   const { scrollParent, setScrollRef } = useVisibleScrollParent();
-  const isInitialLoading = messagesLoading && messages.length === 0;
-  const isNonLoadableSession =
-    !sessionState || ["CREATED", "FAILED", "COMPLETED", "CANCELLED"].includes(sessionState);
-  const showLoadingState =
-    (messagesLoading || isInitialLoading) && !isWorking && !isNonLoadableSession;
+  const { isInitialLoading, showLoadingState } = getConversationLoadingState({
+    messagesLoading,
+    messagesCount: messages.length,
+    isWorking,
+    sessionState,
+  });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
   const isRunning = getSessionRunningState(sessionState);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
 
-  const Header = useCallback(
-    () => (
-      <MessageListStatus
-        isLoadingMore={isLoadingMore}
-        hasMore={hasMore}
-        showLoadingState={showLoadingState}
-        messagesLoading={messagesLoading}
-        isInitialLoading={isInitialLoading}
-        messagesCount={messages.length}
-      />
-    ),
-    [isLoadingMore, hasMore, showLoadingState, messagesLoading, isInitialLoading, messages.length],
-  );
+  // Track which render branch fires and how itemCount/messageCount transition.
+  // See useVirtuosoDebugSnapshot for details on the remote-executor scroll bug.
+  useVirtuosoDebugSnapshot({
+    items,
+    messages,
+    scrollParent,
+    sessionId,
+    messagesLoading,
+    isInitialLoading,
+    showLoadingState,
+    sessionState,
+  });
 
-  const footerActions = useMemo(() => footerActionMessages ?? [], [footerActionMessages]);
-
-  const Footer = useCallback(
-    () => (
-      <>
-        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
-        {footerActions.map((msg) => (
-          <MessageRenderer
-            key={msg.id}
-            comment={msg}
-            isTaskDescription={false}
-            sessionState={sessionState}
-          />
-        ))}
-      </>
-    ),
-    [sessionId, sessionState, messages, footerActions],
-  );
+  const { Header, Footer, footerActions } = useVirtuosoHeaderFooter({
+    isLoadingMore,
+    hasMore,
+    showLoadingState,
+    messagesLoading,
+    isInitialLoading,
+    messages,
+    loadMore,
+    sessionState,
+    sessionId,
+    footerActionMessages,
+  });
 
   if (isInitialLoading || items.length === 0) {
     return (
@@ -281,15 +490,11 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
           messagesLoading={messagesLoading}
           isInitialLoading={isInitialLoading}
           messagesCount={messages.length}
+          onLoadMore={loadMore}
         />
         <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
         {footerActions.map((msg) => (
-          <MessageRenderer
-            key={msg.id}
-            comment={msg}
-            isTaskDescription={false}
-            sessionState={sessionState}
-          />
+          <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
         ))}
       </SessionPanelContent>
     );

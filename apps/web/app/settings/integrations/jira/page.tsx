@@ -1,5 +1,9 @@
 import { JiraIntegrationPage } from "@/components/jira/jira-settings";
 
-export default function IntegrationsJiraPage() {
-  return <JiraIntegrationPage />;
+type IntegrationsJiraPageProps = {
+  workspaceId?: string;
+};
+
+export default function IntegrationsJiraPage({ workspaceId }: IntegrationsJiraPageProps = {}) {
+  return <JiraIntegrationPage workspaceId={workspaceId} />;
 }

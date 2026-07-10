@@ -23,6 +23,15 @@ func snapshotPath(backupDir, fromVersion string) string {
 	return filepath.Join(backupDir, name)
 }
 
+// SnapshotSQLite copies the live database to path using VACUUM INTO,
+// which produces a clean, defragmented snapshot including all WAL frames.
+// Returns the size of the created file in bytes. Exported for use by
+// internal/system/backups; the lowercase alias preserves call sites in
+// this package.
+func SnapshotSQLite(writer *sqlx.DB, path string) (int64, error) {
+	return snapshotSQLite(writer, path)
+}
+
 // snapshotSQLite copies the live database to path using VACUUM INTO,
 // which produces a clean, defragmented snapshot including all WAL frames.
 // Returns the size of the created file in bytes.
@@ -35,6 +44,14 @@ func snapshotSQLite(writer *sqlx.DB, path string) (int64, error) {
 		return 0, fmt.Errorf("stat snapshot %s: %w", path, err)
 	}
 	return info.Size(), nil
+}
+
+// PruneBackups is the exported alias of pruneBackups, intended for callers
+// outside this package (e.g. internal/system/backups retention tests) that
+// need to verify the auto-snapshot retention policy without copy-pasting
+// the implementation.
+func PruneBackups(dir string, keep int) error {
+	return pruneBackups(dir, keep)
 }
 
 // pruneBackups retains only the keep newest backup files (sorted by mtime)

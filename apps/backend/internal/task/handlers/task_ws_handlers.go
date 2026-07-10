@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrator"
@@ -122,6 +123,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
 			DefaultBranch:  r.DefaultBranch,
@@ -130,9 +132,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	// Always persist profile IDs in task metadata so they can be used as the
-	// task's "default" agent profile. This is needed both for deferred agent start
-	// (handleTaskMovedNoSession) and for reverting to the default agent when a
-	// workflow step has no agent_profile override.
+	// task's "default" agent profile. This is needed for deferred agent start
+	// (handleTaskMovedNoSession) and workflow steps that explicitly use the
+	// workflow/task default profile.
 	if req.AgentProfileID != "" {
 		if req.Metadata == nil {
 			req.Metadata = make(map[string]interface{})
@@ -176,6 +178,11 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		response.TaskSessionID = launchResp.SessionID
 		response.AgentExecutionID = launchResp.AgentExecutionID
 	}
+	h.recordTaskCreateLastUsed(ctx, httpCreateTaskRequest{
+		AgentProfileID:    req.AgentProfileID,
+		ExecutorProfileID: req.ExecutorProfileID,
+		Repositories:      req.Repositories,
+	}, repos)
 	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
@@ -252,6 +259,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 				RepositoryID:   r.RepositoryID,
 				BaseBranch:     r.BaseBranch,
 				CheckoutBranch: r.CheckoutBranch,
+				PRNumber:       r.PRNumber,
 				LocalPath:      r.LocalPath,
 				Name:           r.Name,
 				DefaultBranch:  r.DefaultBranch,
@@ -330,7 +338,14 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workflow_step_id is required", nil)
 	}
 
-	result, err := h.service.MoveTask(ctx, req.ID, req.WorkflowID, req.WorkflowStepID, req.Position)
+	result, err := h.service.MoveTaskWithOptions(
+		ctx,
+		req.ID,
+		req.WorkflowID,
+		req.WorkflowStepID,
+		req.Position,
+		service.MoveTaskOptions{AllowActivePrimarySession: true},
+	)
 	if err != nil {
 		h.logger.Error("failed to move task", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)
@@ -348,6 +363,50 @@ func (h *TaskHandlers) wsMoveTask(ctx context.Context, msg *ws.Message) (*ws.Mes
 type wsUpdateTaskStateRequest struct {
 	ID    string `json:"id"`
 	State string `json:"state"`
+}
+
+// wsUpdateTaskRepositoryRequest is the body of task.repository.update. Today
+// it only mutates base_branch; future per-row fields can be added under
+// optional pointer types without breaking older clients.
+type wsUpdateTaskRepositoryRequest struct {
+	TaskID           string `json:"task_id"`
+	TaskRepositoryID string `json:"task_repository_id"`
+	BaseBranch       string `json:"base_branch"`
+}
+
+// wsUpdateTaskRepository handles task.repository.update. Mirrors the MCP
+// path through the same service method so both surfaces stay in sync.
+func (h *TaskHandlers) wsUpdateTaskRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsUpdateTaskRepositoryRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if req.TaskRepositoryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_repository_id is required", nil)
+	}
+	taskRepo, err := h.service.UpdateRepositoryBaseBranch(ctx, service.UpdateRepositoryBaseBranchRequest{
+		TaskID:           req.TaskID,
+		TaskRepositoryID: req.TaskRepositoryID,
+		BaseBranch:       req.BaseBranch,
+	})
+	if err != nil {
+		h.logger.Error("failed to update task repository", zap.Error(err))
+		if errors.Is(err, service.ErrTaskRepositoryNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+		}
+		// Validation errors (required-field, invalid ref name) surface to
+		// the caller verbatim; opaque internal errors are reported as a
+		// generic 500-style message so DB or downstream-fault details
+		// don't leak across the WS boundary.
+		if isValidationError(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task repository", nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, taskRepo)
 }
 
 func (h *TaskHandlers) wsUpdateTaskState(ctx context.Context, msg *ws.Message) (*ws.Message, error) {

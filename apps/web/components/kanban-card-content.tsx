@@ -1,9 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CSS, type Transform } from "@dnd-kit/utilities";
 import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
-import { IconAlertCircle, IconArrowsMaximize, IconDots, IconSubtask } from "@tabler/icons-react";
+import {
+  IconAlertCircle,
+  IconArrowsMaximize,
+  IconDots,
+  IconLoader2,
+  IconSubtask,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Checkbox } from "@kandev/ui/checkbox";
@@ -14,13 +20,20 @@ import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
-import { getTaskStateIcon, shouldUseQuestionTaskIcon } from "@/lib/ui/state-icons";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import {
+  getTaskStateIcon,
+  shouldShowTaskRunningSpinner,
+  shouldUseQuestionTaskIcon,
+} from "@/lib/ui/state-icons";
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
-import type { Task } from "@/components/kanban-card";
+import type { RepositoryChip, Task } from "@/components/kanban-card";
+
+const kanbanStatusDebug = createDebugLogger("kanban:task-status");
 
 type KanbanCardActionProps = {
   task: Task;
@@ -41,66 +54,88 @@ type DraggableCardState = {
 
 export type KanbanCardShellProps = KanbanCardActionProps &
   DraggableCardState & {
-    repositoryNames?: string[];
+    repositoryChips?: RepositoryChip[];
     isSelected?: boolean;
     isMultiSelectMode?: boolean;
     isPreviewed: boolean;
-    onClick: () => void;
+    onClick: (e: React.MouseEvent) => void;
     onCheckboxClick: (e: React.MouseEvent) => void;
   };
 
 const REPO_CHIPS_VISIBLE = 2;
 
-function RepoChipRow({ repoNames }: { repoNames: string[] }) {
-  if (repoNames.length === 0) return null;
-  const visible = repoNames.slice(0, REPO_CHIPS_VISIBLE);
-  const overflow = repoNames.slice(REPO_CHIPS_VISIBLE);
-  const row = (
-    <div className="mb-1 flex items-center gap-1 min-w-0 overflow-hidden">
-      {visible.map((name) => (
-        <span
-          key={name}
-          className="shrink-0 rounded-sm bg-muted/60 px-1 py-px text-[9px] font-medium text-muted-foreground leading-tight max-w-[8rem] truncate"
-        >
-          {name}
-        </span>
-      ))}
-      {overflow.length > 0 && (
-        <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-medium text-muted-foreground/80">
-          +{overflow.length}
-        </span>
-      )}
-    </div>
+function RepoChip({ chip }: { chip: RepositoryChip }) {
+  const badge = (
+    <span
+      title={chip.path}
+      className="shrink-0 rounded-sm bg-muted/60 px-1 py-px text-[9px] font-medium text-muted-foreground leading-tight max-w-[8rem] truncate"
+    >
+      {chip.label}
+    </span>
   );
-  if (repoNames.length <= 1) return row;
+  if (!chip.path) return badge;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{row}</TooltipTrigger>
+      <TooltipTrigger asChild>{badge}</TooltipTrigger>
       <TooltipContent side="top" align="start">
-        <div className="flex flex-col gap-0.5 text-xs">
-          {repoNames.map((name) => (
-            <span key={name}>{name}</span>
-          ))}
-        </div>
+        <span className="max-w-[22rem] break-all text-xs">{chip.path}</span>
       </TooltipContent>
     </Tooltip>
   );
 }
 
+function OverflowRepoTooltip({ chips }: { chips: RepositoryChip[] }) {
+  return (
+    <div className="flex max-w-[24rem] flex-col gap-1 text-xs">
+      {chips.map((chip) => (
+        <div key={`${chip.label}:${chip.path ?? ""}`} className="min-w-0">
+          <div className="font-medium">{chip.label}</div>
+          {chip.path && <div className="break-all text-muted-foreground">{chip.path}</div>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RepoChipRow({ chips }: { chips: RepositoryChip[] }) {
+  if (chips.length === 0) return null;
+  const visible = chips.slice(0, REPO_CHIPS_VISIBLE);
+  const overflow = chips.slice(REPO_CHIPS_VISIBLE);
+  return (
+    <div className="mb-1 flex items-center gap-1 min-w-0 overflow-hidden">
+      {visible.map((chip) => (
+        <RepoChip key={`${chip.label}:${chip.path ?? ""}`} chip={chip} />
+      ))}
+      {overflow.length > 0 && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[9px] font-medium text-muted-foreground/80">
+              +{overflow.length}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" align="start">
+            <OverflowRepoTooltip chips={overflow} />
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </div>
+  );
+}
+
 export function KanbanCardBody({
   task,
-  repoNames,
+  repositoryChips,
   actions,
 }: {
   task: Task;
-  repoNames: string[];
+  repositoryChips: RepositoryChip[];
   actions?: React.ReactNode;
 }) {
   return (
     <>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <RepoChipRow repoNames={repoNames} />
+          <RepoChipRow chips={repositoryChips} />
           <div className="flex items-center gap-1 min-w-0">
             <p
               data-testid="task-card-title"
@@ -185,17 +220,71 @@ function KanbanCardActions({
   isArchiving,
 }: KanbanCardActionProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [storePrimarySessionState, setStorePrimarySessionState] = useState<string | null>(null);
+  const storeApi = useAppStoreApi();
+  const debugEnabled = isDebug();
   const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
   const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
   const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarificationRequest);
-  const statusIcon = getTaskStateIcon(task.state, "h-4 w-4", hasPendingClarificationRequest);
+  const showRunningSpinner = shouldShowTaskRunningSpinner(task.state, task.primarySessionState);
+  const storeWouldShowRunningSpinner =
+    storePrimarySessionState === null
+      ? null
+      : shouldShowTaskRunningSpinner(task.state, storePrimarySessionState);
+  const hasSpinnerMismatch =
+    showRunningSpinner &&
+    storeWouldShowRunningSpinner === false &&
+    task.primarySessionState !== storePrimarySessionState;
+  const statusIcon = showRunningSpinner ? (
+    <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />
+  ) : (
+    getTaskStateIcon(task.state, "h-4 w-4", hasPendingClarificationRequest)
+  );
   const hasKnownSession =
     Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
 
+  useEffect(() => {
+    if (!debugEnabled || !task.primarySessionId) {
+      setStorePrimarySessionState(null);
+      return;
+    }
+
+    const primarySessionId = task.primarySessionId;
+    const readPrimarySessionState = () =>
+      storeApi.getState().taskSessions.items[primarySessionId]?.state ?? null;
+    const syncPrimarySessionState = () => {
+      const nextState = readPrimarySessionState();
+      setStorePrimarySessionState((current) => (current === nextState ? current : nextState));
+    };
+
+    syncPrimarySessionState();
+    return storeApi.subscribe(syncPrimarySessionState);
+  }, [debugEnabled, storeApi, task.primarySessionId]);
+
+  useEffect(() => {
+    if (!hasSpinnerMismatch || !debugEnabled) return;
+    kanbanStatusDebug("spinner mismatch", {
+      task_id: task.id,
+      taskState: task.state ?? "-",
+      primarySessionId: task.primarySessionId ?? "-",
+      taskPrimarySessionState: task.primarySessionState ?? "-",
+      storePrimarySessionState: storePrimarySessionState ?? "-",
+      showSpinner: showRunningSpinner,
+    });
+  }, [
+    debugEnabled,
+    hasSpinnerMismatch,
+    showRunningSpinner,
+    storePrimarySessionState,
+    task.id,
+    task.primarySessionId,
+    task.primarySessionState,
+    task.state,
+  ]);
+
   return (
     <div className="flex items-center gap-2">
-      {(task.state === "IN_PROGRESS" || task.state === "SCHEDULING" || showQuestionIcon) &&
-        statusIcon}
+      {(showRunningSpinner || showQuestionIcon) && statusIcon}
       {showMaximizeButton && onOpenFullPage && hasKnownSession && (
         <button
           type="button"
@@ -310,7 +399,7 @@ function KanbanCardActionSlot({
 
 export function KanbanCardShell({
   task,
-  repositoryNames,
+  repositoryChips,
   attributes,
   listeners,
   setNodeRef,
@@ -364,7 +453,7 @@ export function KanbanCardShell({
           <div className="min-w-0 flex-1">
             <KanbanCardBody
               task={task}
-              repoNames={repositoryNames ?? []}
+              repositoryChips={repositoryChips ?? []}
               actions={
                 <KanbanCardActionSlot
                   isMultiSelectMode={isMultiSelectMode}

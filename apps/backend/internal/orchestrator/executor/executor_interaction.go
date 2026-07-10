@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	agentctlshared "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -117,6 +121,12 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 	return nil
 }
 
+// stopReasonPassthrough is the StopReason returned by Executor.Prompt when a
+// passthrough session's prompt is dispatched to PTY stdin (no ACP turn to
+// observe). The submit sequence is resolved per-agent via ResolvePassthroughConfig
+// — see promptPassthrough below.
+const stopReasonPassthrough = "passthrough_dispatched"
+
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
 // Attachments (images) are passed to the agent if provided
@@ -147,6 +157,16 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 		zap.Int("attachments_count", len(attachments)),
 		zap.Bool("dispatch_only", dispatchOnly))
 
+	// Passthrough sessions don't speak ACP — route the prompt through PTY stdin
+	// so the CLI agent actually receives it. The Preview-screen chat input (and
+	// any other surface that calls message.add against a passthrough session)
+	// reaches this branch via Service.PromptTask → Executor.Prompt.
+	// dispatchOnly is intentionally not forwarded: PTY writes are inherently
+	// fire-and-forget, so the flag has no analogue in passthrough mode.
+	if e.agentManager.IsPassthroughSession(ctx, sessionID) {
+		return e.promptPassthrough(ctx, taskID, session, prompt, attachments)
+	}
+
 	result, err := e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
@@ -157,18 +177,145 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 	return result, nil
 }
 
-// SwitchModel switches the model for a running session. It first attempts an in-place switch
-// via ACP session/set_model (instant, no process restart). If the agent doesn't support
-// in-place switching, it falls back to stopping and restarting the agent with the new model.
+// promptPassthrough delivers a user prompt to a passthrough (PTY) agent session.
+// Passthrough mode has no structured protocol channel for attachments, so we
+// save them into the session workspace and append path instructions to the
+// stdin prompt.
+//
+// The submit sequence is resolved per-agent via ResolvePassthroughConfig — most
+// TUI CLIs use "\r" but the config field lets a future agent override it
+// without touching this code path.
+//
+// A WritePassthroughStdin failure (no live PTY, runner unavailable) is returned
+// as an error so Service.handlePromptError can revert session state and surface
+// the failure to the user. A MarkPassthroughRunning failure is non-fatal — the
+// data is already in the PTY; only the AgentRunning event is missed.
+func (e *Executor) promptPassthrough(ctx context.Context, taskID string, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment) (*PromptResult, error) {
+	sessionID := session.ID
+	promptWithAttachments, err := e.buildPassthroughPromptWithAttachments(ctx, session, prompt, attachments)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(promptWithAttachments) == "" {
+		return nil, fmt.Errorf("passthrough prompt cannot be empty")
+	}
+	pt, err := e.agentManager.ResolvePassthroughConfig(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve passthrough config: %w", err)
+	}
+	// Mark RUNNING before the chunk loop so concurrent PromptTask calls are
+	// blocked by checkSessionPromptable during the inter-chunk SubmitDelay
+	// window (150ms for Claude). Otherwise a rapid double-send or workflow
+	// event firing in parallel passes the WAITING_FOR_INPUT guard and writes
+	// a second prompt onto the same PTY stdin mid-submit. Mark-error stays
+	// non-fatal — at worst we miss the AgentRunning event but the prompt
+	// still gets through.
+	if err := e.agentManager.MarkPassthroughRunning(sessionID); err != nil {
+		e.logger.Warn("failed to mark passthrough as running before prompt; concurrent send window is open",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+	for _, chunk := range agents.PlanPassthroughStdinChunks(promptWithAttachments, pt) {
+		if chunk.DelayBefore > 0 {
+			time.Sleep(chunk.DelayBefore)
+		}
+		if err := e.agentManager.WritePassthroughStdin(ctx, sessionID, chunk.Data); err != nil {
+			return nil, fmt.Errorf("failed to write to passthrough stdin: %w", err)
+		}
+	}
+	return &PromptResult{StopReason: stopReasonPassthrough}, nil
+}
+
+func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, session *models.TaskSession, prompt string, attachments []v1.MessageAttachment) (string, error) {
+	if len(attachments) == 0 {
+		return prompt, nil
+	}
+	workDir := e.passthroughAttachmentWorkspace(ctx, session)
+	if workDir == "" {
+		return "", fmt.Errorf("passthrough attachments require a session workspace path")
+	}
+	attachMgr := agentctlshared.NewAttachmentManager(workDir, e.logger.Zap())
+	attachMgr.SetSessionID(session.ID)
+	saved, err := attachMgr.SaveAttachments(attachments)
+	if err != nil {
+		return "", fmt.Errorf("save passthrough attachments: %w", err)
+	}
+	if len(saved) == 0 {
+		if strings.TrimSpace(prompt) != "" {
+			e.logger.Warn("no attachments were saved for passthrough prompt; delivering text-only",
+				zap.String("session_id", session.ID),
+				zap.Int("attachments_submitted", len(attachments)))
+			return prompt, nil
+		}
+		return "", fmt.Errorf("passthrough prompt has no usable attachments")
+	}
+	attachmentPrompt := strings.TrimSpace(agentctlshared.BuildAttachmentPrompt(saved, true))
+	if strings.TrimSpace(prompt) == "" {
+		return attachmentPrompt, nil
+	}
+	return prompt + "\n\n" + attachmentPrompt, nil
+}
+
+func (e *Executor) passthroughAttachmentWorkspace(ctx context.Context, session *models.TaskSession) string {
+	if workDir := strings.TrimSpace(session.WorkspacePath); workDir != "" {
+		return workDir
+	}
+	if workDir := workspaceFromSessionWorktrees(session); workDir != "" {
+		return workDir
+	}
+	if session.TaskEnvironmentID != "" {
+		if env, err := e.repo.GetTaskEnvironment(ctx, session.TaskEnvironmentID); err == nil {
+			if workDir := workspaceFromTaskEnvironment(env); workDir != "" {
+				return workDir
+			}
+		}
+	}
+	if env, err := e.repo.GetTaskEnvironmentByTaskID(ctx, session.TaskID); err == nil {
+		if workDir := workspaceFromTaskEnvironment(env); workDir != "" {
+			return workDir
+		}
+	}
+	return ""
+}
+
+func workspaceFromSessionWorktrees(session *models.TaskSession) string {
+	if len(session.Worktrees) == 0 {
+		return ""
+	}
+	first := strings.TrimSpace(session.Worktrees[0].WorktreePath)
+	if first == "" {
+		return ""
+	}
+	if len(session.Worktrees) == 1 {
+		return first
+	}
+	return filepath.Dir(first)
+}
+
+func workspaceFromTaskEnvironment(env *models.TaskEnvironment) string {
+	if env == nil {
+		return ""
+	}
+	if workDir := strings.TrimSpace(env.WorkspacePath); workDir != "" {
+		return workDir
+	}
+	return strings.TrimSpace(env.WorktreePath)
+}
+
+// SwitchModel switches the model for a running session. It first attempts an
+// in-place switch via ACP model selection (instant, no process restart). If
+// the agent doesn't support in-place switching, it falls back to stopping and
+// restarting the agent with the new model.
 func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel, prompt string) (*PromptResult, error) {
 	e.logger.Info("switching model for session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
 		zap.String("new_model", newModel))
 
-	// Try in-place model switch first (ACP agents support session/set_model)
+	// Try in-place model switch first.
 	if err := e.agentManager.SetSessionModelBySessionID(ctx, sessionID, newModel); err == nil {
-		e.logger.Info("model switched in-place via ACP session/set_model",
+		e.logger.Info("model switched in-place via ACP model selection",
 			zap.String("session_id", sessionID),
 			zap.String("new_model", newModel))
 		e.persistInPlaceModelSwitch(ctx, sessionID, newModel)
@@ -262,7 +409,10 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 		return fmt.Errorf("failed to launch agent with new model: %w", err)
 	}
 
-	e.persistModelSwitchState(ctx, taskID, sessionID, session, newModel)
+	if err := e.persistModelSwitchState(ctx, taskID, sessionID, session, newModel); err != nil {
+		e.stopUnstartedExecution(ctx, sessionID, resp.AgentExecutionID)
+		return err
+	}
 
 	if err := e.agentManager.StartAgentProcess(ctx, resp.AgentExecutionID); err != nil {
 		e.logger.Error("failed to start agent process after model switch",
@@ -295,6 +445,7 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		ExecutorType:      execConfig.ExecutorType,
 		Metadata:          execConfig.Metadata,
 		IsEphemeral:       task.IsEphemeral,
+		IsPassthrough:     session.IsPassthrough,
 		TaskEnvironmentID: session.TaskEnvironmentID,
 	}
 
@@ -368,7 +519,7 @@ func (e *Executor) applyWorktreeToSwitchRequest(req *LaunchAgentRequest, session
 // after a model switch launch. The executors_running row's agent_execution_id /
 // container_id / status are written by the lifecycle manager during the launch
 // itself (lifecycle.persistExecutorRunning) and not touched here.
-func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, newModel string) {
+func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, newModel string) error {
 	session.State = models.TaskSessionStateStarting
 	session.UpdatedAt = time.Now().UTC()
 
@@ -377,12 +528,15 @@ func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionI
 	}
 	session.AgentProfileSnapshot["model"] = newModel
 
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	if err := e.updateSessionStarting(ctx, taskID, session, true); err != nil {
 		e.logger.Error("failed to update session after model switch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return err
 	}
+	e.persistRuntimeModelMetadata(ctx, sessionID, session, newModel)
+	return nil
 }
 
 // persistInPlaceModelSwitch updates the session snapshot model after a successful
@@ -402,6 +556,27 @@ func (e *Executor) persistInPlaceModelSwitch(ctx context.Context, sessionID, new
 	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
 		e.logger.Warn("failed to persist in-place model switch",
 			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	e.persistRuntimeModelMetadata(ctx, sessionID, session, newModel)
+}
+
+func (e *Executor) persistRuntimeModelMetadata(ctx context.Context, sessionID string, session *models.TaskSession, modelID string) {
+	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
+	cfg.Model = modelID
+	writeCtx := context.WithoutCancel(ctx)
+	if err := e.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg); err != nil {
+		e.logger.Warn("failed to persist runtime model after model switch",
+			zap.String("session_id", sessionID),
+			zap.String("model", modelID),
+			zap.Error(err))
+		return
+	}
+	if err := e.repo.SetSessionMetadataKey(writeCtx, sessionID, "context_window", nil); err != nil {
+		e.logger.Warn("failed to clear context window after model switch",
+			zap.String("session_id", sessionID),
+			zap.String("model", modelID),
 			zap.Error(err))
 	}
 }

@@ -9,6 +9,43 @@ import (
 // expressed via ACP session modes and per-tool-call permission prompts.
 var emptyPermSettings = map[string]PermissionSetting{}
 
+// agentctlAutoApproveSetting is the universal profile toggle for Kandev-side
+// ACP permission auto-approval (not a subprocess CLI flag).
+var agentctlAutoApproveSetting = PermissionSetting{
+	Supported:   true,
+	Default:     false,
+	Label:       "Auto-approve all permissions",
+	Description: "Kandev allows every agent permission request without prompting you. Dangerous — use only in trusted workspaces.",
+	ApplyMethod: PermissionApplyMethodAgentctlAutoApprove,
+}
+
+// CatalogPermissionSettings returns the agent's curated permission catalogue
+// plus the shared agentctl auto-approve entry advertised on every agent profile.
+func CatalogPermissionSettings(ag Agent) map[string]PermissionSetting {
+	return mergeAgentctlAutoApprove(ag.PermissionSettings())
+}
+
+// StripEnvFor returns the runtime-declared environment keys that should be
+// removed before spawning an agent subprocess. Inference-only paths derive
+// this from RuntimeConfig instead of carrying a second declaration.
+func StripEnvFor(ia InferenceAgent) []string {
+	if a, ok := ia.(Agent); ok {
+		if rt := a.Runtime(); rt != nil {
+			return rt.StripEnv
+		}
+	}
+	return nil
+}
+
+func mergeAgentctlAutoApprove(settings map[string]PermissionSetting) map[string]PermissionSetting {
+	merged := make(map[string]PermissionSetting, len(settings)+1)
+	for k, v := range settings {
+		merged[k] = v
+	}
+	merged[PermissionKeyAutoApprove] = agentctlAutoApproveSetting
+	return merged
+}
+
 // CmdBuilder constructs CLI command slices using a fluent API.
 type CmdBuilder struct {
 	args []string

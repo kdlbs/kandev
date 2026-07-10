@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
@@ -17,6 +18,22 @@ var cursorACPLogoLight []byte
 var cursorACPLogoDark []byte
 
 const cursorACPBin = "cursor-agent"
+
+// cursorPermSettings maps a curated CLI flag to cursor-agent's --force switch.
+// In ACP mode Cursor emits session/request_permission for commands off its
+// allowlist; --force ("Run Everything") suppresses those prompts. Default off
+// because --force runs everything unsandboxed. Universal agentctl auto-approve
+// (PermissionKeyAutoApprove) is added by CatalogPermissionSettings, not here.
+var cursorPermSettings = map[string]PermissionSetting{
+	PermissionKeyCursorForce: {
+		Supported:   true,
+		Default:     false,
+		Label:       "Cursor run everything (--force)",
+		Description: "Append cursor-agent --force so the CLI stops prompting for non-allowlisted commands (unsandboxed).",
+		ApplyMethod: PermissionApplyMethodCLIFlag,
+		CLIFlag:     "--force",
+	},
+}
 
 var (
 	_ Agent            = (*CursorACP)(nil)
@@ -34,7 +51,7 @@ type CursorACP struct {
 func NewCursorACP() *CursorACP {
 	return &CursorACP{
 		StandardPassthrough: StandardPassthrough{
-			PermSettings: emptyPermSettings,
+			PermSettings: cursorPermSettings,
 			Cfg: PassthroughConfig{
 				Supported:      true,
 				Label:          "CLI Passthrough",
@@ -43,6 +60,9 @@ func NewCursorACP() *CursorACP {
 				ModelFlag:      NewParam("--model", "{model}"),
 				IdleTimeout:    3 * time.Second,
 				BufferMaxBytes: DefaultBufferMaxBytes,
+				// cursor-agent has no MCP flag/env; write or merge a
+				// project-local .cursor/mcp.json into the worktree.
+				MCPStrategy: mcpconfig.CursorStrategy{},
 			},
 		},
 	}
@@ -77,18 +97,21 @@ func (a *CursorACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *CursorACP) BuildCommand(opts CommandOptions) Command {
+	// --force is applied via profile cli_flags (seeded from cursor_force), not
+	// PermissionValues, so auto_approve stays agentctl-only.
 	return Cmd(cursorACPBin, "acp").Build()
 }
 
 func (a *CursorACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:            Cmd(cursorACPBin, "acp").Build(),
-		WorkingDir:     "{workspace}",
-		Env:            map[string]string{},
-		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
-		Protocol:       agent.ProtocolACP,
-		UserSkillDir:   ".cursor/skills",
+		Cmd:                Cmd(cursorACPBin, "acp").Build(),
+		WorkingDir:         "{workspace}",
+		Env:                map[string]string{},
+		ResourceLimits:     ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
+		Protocol:           agent.ProtocolACP,
+		UserSkillDir:       ".cursor/skills",
+		ProjectMCPStrategy: mcpconfig.CursorStrategy{},
 		SessionConfig: SessionConfig{
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
@@ -97,14 +120,33 @@ func (a *CursorACP) Runtime() *RuntimeConfig {
 	}
 }
 
-func (a *CursorACP) RemoteAuth() *RemoteAuth { return nil }
+func (a *CursorACP) RemoteAuth() *RemoteAuth {
+	return &RemoteAuth{
+		Methods: []RemoteAuthMethod{
+			{
+				Type:      "env",
+				EnvVar:    "CURSOR_API_KEY",
+				SetupHint: "Create an API key at https://cursor.com/dashboard/integrations (Cursor Pro).",
+			},
+		},
+	}
+}
 
+// cursor-agent isn't on npm. The official installer drops the binary into
+// ~/.local/bin; make sure that dir is on PATH for the rest of the prepare
+// script and for future shells on the sprite.
 func (a *CursorACP) InstallScript() string {
-	return "Install Cursor CLI from https://cursor.com/cli"
+	return `set -e
+tmp="$(mktemp)"
+curl -fsS https://cursor.com/install -o "$tmp"
+bash "$tmp"
+rm -f "$tmp"
+export PATH="$HOME/.local/bin:$PATH"
+grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"`
 }
 
 func (a *CursorACP) PermissionSettings() map[string]PermissionSetting {
-	return emptyPermSettings
+	return cursorPermSettings
 }
 
 func (a *CursorACP) InferenceConfig() *InferenceConfig {

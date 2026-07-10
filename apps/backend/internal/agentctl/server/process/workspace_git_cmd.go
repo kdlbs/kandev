@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"os/exec"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // gitOptionalLocksOff is the env var git reads to skip "optional" locks, i.e.
@@ -25,4 +27,45 @@ func (wt *WorkspaceTracker) pollingGitCommand(ctx context.Context, args ...strin
 	cmd.Dir = wt.workDir
 	cmd.Env = append(os.Environ(), gitOptionalLocksOff)
 	return cmd
+}
+
+// gitCmdContext builds a per-command timeout-bounded ctx and an exec.Cmd
+// for a git invocation. When polling is true, the cmd is built via
+// pollingGitCommand (which sets GIT_OPTIONAL_LOCKS=0) so the background
+// poll loop doesn't contend with user-initiated git operations on the
+// index lock. The returned cancel must be deferred by the caller to
+// release the timer once the subprocess exits.
+func (wt *WorkspaceTracker) gitCmdContext(ctx context.Context, polling bool, args ...string) (context.Context, context.CancelFunc, *exec.Cmd) {
+	cctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	if polling {
+		return cctx, cancel, wt.pollingGitCommand(cctx, args...)
+	}
+	cmd := exec.CommandContext(cctx, "git", args...)
+	cmd.Dir = wt.workDir
+	return cctx, cancel, cmd
+}
+
+// runGitOutput runs a git command with a per-command timeout and returns its
+// stdout. The derived ctx ensures cancellation SIGKILLs the subprocess and
+// releases its throttle slot even when the outer poll ctx is long-lived.
+func (wt *WorkspaceTracker) runGitOutput(ctx context.Context, args ...string) ([]byte, error) {
+	cctx, cancel, cmd := wt.gitCmdContext(ctx, false, args...)
+	defer cancel()
+	return subproc.RunGitOutput(cctx, cmd)
+}
+
+// runGit is runGitOutput's no-stdout sibling for verify-style probes where
+// only the exit code matters.
+func (wt *WorkspaceTracker) runGit(ctx context.Context, args ...string) error {
+	cctx, cancel, cmd := wt.gitCmdContext(ctx, false, args...)
+	defer cancel()
+	return subproc.RunGit(cctx, cmd)
+}
+
+// runPollingGitOutput is runGitOutput's polling sibling — see
+// gitCmdContext for the GIT_OPTIONAL_LOCKS rationale.
+func (wt *WorkspaceTracker) runPollingGitOutput(ctx context.Context, args ...string) ([]byte, error) {
+	cctx, cancel, cmd := wt.gitCmdContext(ctx, true, args...)
+	defer cancel()
+	return subproc.RunGitOutput(cctx, cmd)
 }

@@ -1,7 +1,9 @@
 import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { useRegularMode } from "../../helpers/regular-mode";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { seedClarificationSession } from "../../helpers/clarification";
 import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
 
@@ -9,34 +11,18 @@ import { KanbanPage } from "../../pages/kanban-page";
  * Seed a task + session with a clarification scenario and navigate to the session page.
  * Does NOT wait for idle input — the agent will be blocked on the clarification MCP call.
  */
-async function seedClarificationTask(
+function seedClarificationTask(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
   scenario: string,
 ): Promise<SessionPage> {
-  const task = await apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    title,
-    seedData.agentProfileId,
-    {
-      description: `/e2e:${scenario}`,
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-
-  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
-
-  await testPage.goto(`/t/${task.id}`);
-
-  const session = new SessionPage(testPage);
-  await session.waitForLoad();
-
-  return session;
+  return seedClarificationSession(testPage, apiClient, seedData, title, { scenario });
 }
+
+// Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
+useRegularMode();
 
 test.describe("Clarification flow", () => {
   test.describe.configure({ retries: 1 });
@@ -60,6 +46,40 @@ test.describe("Clarification flow", () => {
     await expect(session.chat).toContainText(/You answered|selected_option/);
   });
 
+  test("custom answer accepts multiple lines via Shift+Enter", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Multiline",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // The custom answer is a textarea: Shift+Enter inserts a newline, plain
+    // Enter submits the whole multi-line draft.
+    const input = session.clarificationInput();
+    await input.click();
+    await input.pressSequentially("first line");
+    await input.press("Shift+Enter");
+    await input.pressSequentially("second line");
+    await expect(input).toHaveValue("first line\nsecond line");
+
+    await input.press("Enter");
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("first line");
+    await expect(session.chat).toContainText("second line");
+    // The two lines must stay separated: if the newline were dropped the reply
+    // would render as the fused "first linesecond line".
+    await expect(session.chat).not.toContainText("linesecond line");
+  });
+
   test("skip clarification", async ({ testPage, apiClient, seedData }) => {
     const session = await seedClarificationTask(
       testPage,
@@ -74,25 +94,63 @@ test.describe("Clarification flow", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
-  test("timeout closes overlay and renders expired entry in history", async ({
+  test("timeout detaches clarification but keeps overlay for deferred answer", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const session = await seedClarificationTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Clarification Timeout",
-      "clarification-timeout",
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Clarification Timeout Workflow",
     );
+    const timeoutStep = await apiClient.createWorkflowStep(workflow.id, "Timeout Step", 0);
+    await apiClient.createWorkflowStep(workflow.id, "Should Not Advance", 1);
+
+    await apiClient.updateWorkflowStep(timeoutStep.id, {
+      events: {
+        on_turn_complete: [{ type: "move_to_next" }],
+      },
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Clarification Timeout",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:clarification-timeout",
+        workflow_id: workflow.id,
+        workflow_step_id: timeoutStep.id,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    await testPage.goto(`/t/${task.id}`);
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
 
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
-    await expect(session.chat).toContainText("timed out", { timeout: 30_000 });
-    await expect(session.clarificationOverlay()).not.toBeVisible({ timeout: 10_000 });
-    await expect(session.clarificationDeferredNotice()).not.toBeVisible();
-    await expect(session.clarificationExpiredNotice()).toBeVisible();
-    await expect(session.idleInput()).toBeVisible({ timeout: 10_000 });
+    await expect(session.chat).toContainText("Question timed out", { timeout: 30_000 });
+    await expect(session.clarificationDeferredNotice()).toBeVisible({ timeout: 10_000 });
+    await expect(session.clarificationExpiredNotice()).not.toBeVisible();
+
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {
+        timeout: 10_000,
+        message: "clarification timeout must not run on_turn_complete auto-advance",
+      })
+      .toBe(timeoutStep.id);
+
+    const sessionsAfterTimeout = await apiClient.listTaskSessions(task.id);
+    const primarySession = sessionsAfterTimeout.sessions.find(
+      (candidate) => candidate.id === task.session_id,
+    );
+    expect(primarySession?.state).toBe("WAITING_FOR_INPUT");
+
+    // Agent moved on; a late answer goes through the event fallback as a new prompt.
+    await session.clarificationOption("PostgreSQL").click();
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
   test("options render label and description on separate rows", async ({

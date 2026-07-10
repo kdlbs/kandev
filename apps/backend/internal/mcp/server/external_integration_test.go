@@ -23,7 +23,7 @@ func TestExternalMCP_ToolsListOverHTTP(t *testing.T) {
 
 	dispatcher := ws.NewDispatcher()
 	backendClient := NewDispatcherBackendClient(dispatcher, log)
-	srv := NewExternal(backendClient, "http://localhost:38429", log, "")
+	srv := NewExternal(backendClient, log, "")
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -82,7 +82,7 @@ func TestExternalMCP_ToolsCallDispatchesToBackend(t *testing.T) {
 	})
 
 	backendClient := NewDispatcherBackendClient(dispatcher, log)
-	srv := NewExternal(backendClient, "http://localhost:38429", log, "")
+	srv := NewExternal(backendClient, log, "")
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

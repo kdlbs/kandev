@@ -5,11 +5,16 @@ import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import type { DiffComment } from "@/lib/diff/types";
 import type { FileInfo, CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 import type { PRDiffFile } from "@/lib/types/github";
+import type { Comment } from "@/lib/state/slices/comments";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
+import { walkthroughStepMatchesFile } from "@/lib/diff/walkthrough-match";
+import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
+import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import { ReviewTopBar } from "./review-top-bar";
 import { ReviewFileTree } from "./review-file-tree";
 import { ReviewDiffList } from "./review-diff-list";
@@ -39,24 +44,16 @@ function addCumulativeDiffFiles(
   files: CumulativeDiff["files"],
   gitStatusFiles: Record<string, FileInfo> | null,
 ) {
-  // Multi-repo: backend always stamps each per-file payload with
-  // `repository_name` + the repo-relative `path`. Single-repo (or legacy)
-  // payloads keep the bare path on the map key. We trust `file.path` to be
-  // set in the multi-repo shape — a missing `path` would be a backend
-  // contract violation and indicates the caller is on an outdated agentctl;
-  // surface it loudly via a console warning rather than silently injecting
-  // the composite map key into the displayed path (which used to corrupt
-  // the file tree node names).
+  // Multi-repo: backend stamps each per-file payload with `repository_name`
+  // + the repo-relative `path`, and uses a NUL-composite `<repo>\x00<path>`
+  // map key. Single-repo payloads from `parseCommitDiff` carry the bare path
+  // only on the map key (no `path` field on the value). Prefer the stamped
+  // value so the composite key doesn't bleed into the displayed path, and
+  // fall back to the map key so single-repo files aren't silently dropped.
   for (const [mapKey, file] of Object.entries(files)) {
     const repoName = file.repository_name;
-    const path = file.path;
-    if (!path) {
-      console.warn("[review] cumulative diff entry missing `path` field; skipping", {
-        mapKey,
-        repoName,
-      });
-      continue;
-    }
+    const path = file.path ?? mapKey;
+    if (!path) continue;
     const key = fileMapKey(path, repoName);
     if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
@@ -138,16 +135,32 @@ function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[]) {
   }
 }
 
-function buildAllFiles(
+export function buildAllFiles(
   gitStatusFiles: Record<string, FileInfo> | null,
   cumulativeDiff: CumulativeDiff | null,
   prDiffFiles?: PRDiffFile[],
 ): ReviewFile[] {
   const fileMap = new Map<string, ReviewFile>();
-  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
-  if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files, gitStatusFiles);
+  // Order matters and must match `buildReviewSources` (the Changes panel
+  // builder): uncommitted FIRST so its always-fresh WS-pushed diff content
+  // wins over the polled cumulative diff for files that exist in both. Before
+  // this, the dialog and the panel disagreed on `datasource.ts`-style files
+  // (panel: fresh worktree content from `git-status`, dialog: stale cumulative
+  // diff snapshot from the last fetch) — the dialog appeared to show outdated
+  // content even though the cumulative-diff hook was successfully refetching.
   if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
+  if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files, gitStatusFiles);
+  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
   return Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+export function filterPendingDiffCommentsForSession(
+  comments: Comment[],
+  sessionId: string,
+): DiffComment[] {
+  return comments.filter(
+    (comment): comment is DiffComment => comment.sessionId === sessionId && isDiffComment(comment),
+  );
 }
 
 type ReviewDialogProps = {
@@ -302,6 +315,25 @@ function useReviewDialogHandlers(opts: ReviewDialogHandlerOptions) {
   };
 }
 
+function useRepositoryNameToId() {
+  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
+  return useMemo(() => {
+    const m = new Map<string, string>();
+    for (const list of Object.values(reposByWorkspace)) {
+      for (const r of list) m.set(r.name, r.id);
+    }
+    return m;
+  }, [reposByWorkspace]);
+}
+
+function useFilteredReviewFiles(allFiles: ReviewFile[], filter: string) {
+  return useMemo(() => {
+    if (!filter.trim()) return allFiles;
+    const q = filter.toLowerCase();
+    return allFiles.filter((f) => f.path.toLowerCase().includes(q));
+  }, [allFiles, filter]);
+}
+
 function useReviewDialogState(props: ReviewDialogProps) {
   const {
     open,
@@ -316,15 +348,15 @@ function useReviewDialogState(props: ReviewDialogProps) {
   const [splitView, setSplitView] = useState(() =>
     typeof window === "undefined" ? false : localStorage.getItem("diff-view-mode") === "split",
   );
-  const [wordWrap, setWordWrap] = useState(false);
+  const [wordWrap, setWordWrap] = useState(DEFAULT_DIFF_WORD_WRAP);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
   const { reviews, markReviewed, markUnreviewed } = useSessionFileReviews(sessionId);
   const byId = useCommentsStore((s) => s.byId);
   const sessionCommentIds = useCommentsStore((s) => s.bySession[sessionId]);
   const getStorePendingComments = useCommentsStore((s) => s.getPendingComments);
   const getPendingComments = useCallback((): DiffComment[] => {
-    return getStorePendingComments().filter(isDiffComment);
-  }, [getStorePendingComments]);
+    return filterPendingDiffCommentsForSession(getStorePendingComments(), sessionId);
+  }, [getStorePendingComments, sessionId]);
   const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
 
   const [filter, setFilter] = useState("");
@@ -332,28 +364,12 @@ function useReviewDialogState(props: ReviewDialogProps) {
     () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles),
     [gitStatusFiles, cumulativeDiff, prDiffFiles],
   );
-  const filteredFiles = useMemo(() => {
-    if (!filter.trim()) return allFiles;
-    const q = filter.toLowerCase();
-    return allFiles.filter((f) => f.path.toLowerCase().includes(q));
-  }, [allFiles, filter]);
+  const filteredFiles = useFilteredReviewFiles(allFiles, filter);
   const { reviewedFiles, staleFiles } = useMemo(
     () => computeReviewSets(allFiles, reviews),
     [allFiles, reviews],
   );
-  // Build a `repository_name` → `repositoryId` map from the workspace repos
-  // slice. Comments store `repositoryId` (UUID) but ReviewFiles carry
-  // `repository_name` (e.g. "kandev"); the dialog needs both to scope the
-  // per-repo comment counts. Falls back to an empty map (legacy single-repo
-  // counts by path only).
-  const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
-  const repositoryNameToId = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const list of Object.values(reposByWorkspace)) {
-      for (const r of list) m.set(r.name, r.id);
-    }
-    return m;
-  }, [reposByWorkspace]);
+  const repositoryNameToId = useRepositoryNameToId();
   const commentCountByFile = useMemo(
     () => computeCommentCounts(byId, sessionCommentIds, allFiles, repositoryNameToId),
     [byId, sessionCommentIds, allFiles, repositoryNameToId],
@@ -386,6 +402,17 @@ function useReviewDialogState(props: ReviewDialogProps) {
     onOpenChange,
     sessionId,
   });
+  const handleToggleSplitView = useCallback(
+    (split: boolean) => {
+      setSplitView(split);
+      handlers.handleToggleSplitView(split);
+    },
+    [handlers.handleToggleSplitView],
+  );
+  const handleSelectFile = useCallback(
+    (path: string) => handlers.handleSelectFile(path, setSelectedFile),
+    [handlers.handleSelectFile],
+  );
 
   return {
     selectedFile,
@@ -404,27 +431,65 @@ function useReviewDialogState(props: ReviewDialogProps) {
     fileRefs,
     getPendingComments,
     markCommentsSent,
-    handleToggleSplitView: (split: boolean) => {
-      setSplitView(split);
-      handlers.handleToggleSplitView(split);
-    },
-    handleSelectFile: (path: string) => handlers.handleSelectFile(path, setSelectedFile),
+    handleToggleSplitView,
+    handleSelectFile,
     handleToggleReviewed: handlers.handleToggleReviewed,
     handleSendComments: handlers.handleSendComments,
     handleDiscard: handlers.handleDiscard,
   };
 }
 
+/**
+ * Drives review file-selection from the active walkthrough step: when the tour
+ * advances (or the dialog opens on a tour), select+scroll to the step's file so
+ * its diff expands and the inline WalkthroughStepCard renders at the line.
+ */
+function useWalkthroughFileSelection(
+  open: boolean,
+  allFiles: ReviewFile[],
+  filter: string,
+  setFilter: (value: string) => void,
+  handleSelectFile: (key: string) => void,
+) {
+  const step = useAppStore((state) => {
+    const taskId = state.tasks.activeTaskId;
+    if (!taskId) return null;
+    const wt = state.walkthroughs.byTaskId[taskId];
+    const idx = state.walkthroughs.activeStepByTaskId[taskId] ?? 0;
+    return wt?.steps[idx] ?? null;
+  });
+  useEffect(() => {
+    if (!open || !step) return;
+    const file = allFiles.find((f) => walkthroughStepMatchesFile(f, step, allFiles));
+    if (!file) return;
+    const q = filter.trim().toLowerCase();
+    if (q && !file.path.toLowerCase().includes(q)) setFilter("");
+    handleSelectFile(reviewFileKey(file));
+  }, [open, step, allFiles, filter, setFilter, handleSelectFile]);
+}
+
 export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps) {
   const { open, onOpenChange, sessionId, baseBranch, onOpenFile } = props;
   const s = useReviewDialogState(props);
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const handleRequestWalkthrough = useRequestChangesWalkthrough({
+    taskId: activeTaskId,
+    sessionId,
+    files: s.allFiles,
+  });
+  const splitRowRef = useRef<HTMLDivElement>(null);
+  const sidebar = useReviewSidebarResize(splitRowRef, open);
+  useWalkthroughFileSelection(open, s.allFiles, s.filter, s.setFilter, s.handleSelectFile);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="!max-w-[100vw] !w-[100vw] sm:!max-w-[80vw] sm:!w-[80vw] max-h-[85vh] h-[85vh] p-0 gap-0 flex flex-col shadow-2xl"
         showCloseButton={false}
-        overlayClassName="bg-transparent"
+        // Use a fixed black tint (not a theme token) so the backdrop reads
+        // as "a little dark" in both light and dark mode — `foreground/N`
+        // would invert to a light overlay in dark mode.
+        overlayClassName="bg-black/40"
       >
         <DialogTitle className="sr-only">Review Changes</DialogTitle>
         <ReviewTopBar
@@ -439,11 +504,17 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
           onToggleWordWrap={s.setWordWrap}
           onSendComments={s.handleSendComments}
           onClose={() => onOpenChange(false)}
+          onRequestWalkthrough={handleRequestWalkthrough}
+          requestWalkthroughDisabled={s.allFiles.length === 0}
           getPendingComments={s.getPendingComments}
           markCommentsSent={s.markCommentsSent}
         />
-        <div className="flex flex-1 min-h-0">
-          <div className="w-[280px] sm:w-[220px] min-w-[100px] border-r border-border flex-shrink-0 overflow-hidden hidden sm:flex flex-col">
+        <div ref={splitRowRef} className="flex flex-1 min-h-0">
+          <div
+            data-testid="review-dialog-sidebar"
+            className="border-r border-border flex-shrink-0 overflow-hidden hidden sm:flex flex-col"
+            style={{ width: `${sidebar.width}px` }}
+          >
             <ReviewFileTree
               files={s.filteredFiles}
               reviewedFiles={s.reviewedFiles}
@@ -456,6 +527,16 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
               onToggleReviewed={s.handleToggleReviewed}
             />
           </div>
+          <button
+            data-testid="review-dialog-sidebar-resize"
+            type="button"
+            tabIndex={-1}
+            aria-label="Resize file list"
+            className="hidden sm:block w-1 bg-border hover:bg-primary cursor-col-resize flex-shrink-0 relative group transition-colors p-0"
+            {...sidebar.resizeHandleProps}
+          >
+            <span className="absolute inset-y-0 -left-1 -right-1" />
+          </button>
           <div className="flex-1 min-w-0 overflow-hidden">
             {s.filteredFiles.length > 0 ? (
               <ReviewDiffList

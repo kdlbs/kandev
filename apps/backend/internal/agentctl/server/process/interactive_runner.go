@@ -7,6 +7,8 @@
 package process
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -20,8 +22,13 @@ import (
 type InteractiveStartRequest struct {
 	SessionID            string            `json:"session_id"`                       // Required: Agent session owning this process
 	Command              []string          `json:"command"`                          // Required: Command and args to execute
+	LogCommand           []string          `json:"log_command,omitempty"`            // Optional: redacted copy of Command for logging (e.g. MCP `-c` overrides with tokens); falls back to Command when unset
 	WorkingDir           string            `json:"working_dir"`                      // Working directory
+	ScopeID              string            `json:"scope_id,omitempty"`               // User-shell scope (task environment ID) when applicable
+	TerminalID           string            `json:"terminal_id,omitempty"`            // User-shell terminal ID when applicable
+	Label                string            `json:"label,omitempty"`                  // User-facing terminal label when applicable
 	Env                  map[string]string `json:"env,omitempty"`                    // Additional environment variables
+	StripEnv             []string          `json:"strip_env,omitempty"`              // Environment variable keys to remove from the inherited environment
 	PromptPattern        string            `json:"prompt_pattern,omitempty"`         // Regex pattern to detect agent prompt for turn completion
 	IdleTimeout          time.Duration     `json:"idle_timeout,omitempty"`           // Idle timeout for turn detection
 	BufferMaxBytes       int64             `json:"buffer_max_bytes,omitempty"`       // Max output buffer size
@@ -36,12 +43,22 @@ type InteractiveStartRequest struct {
 	IsUserShell          bool              `json:"is_user_shell,omitempty"`          // Mark as user shell process (excluded from session-level lookups)
 }
 
+// commandForLog returns the command to log: the redacted LogCommand when the
+// caller supplied one, otherwise the raw Command.
+func (r InteractiveStartRequest) commandForLog() []string {
+	if len(r.LogCommand) > 0 {
+		return r.LogCommand
+	}
+	return r.Command
+}
+
 // InteractiveProcessInfo represents the state of an interactive process.
 type InteractiveProcessInfo struct {
 	ID         string               `json:"id"`
 	SessionID  string               `json:"session_id"`
 	Command    []string             `json:"command"`
 	WorkingDir string               `json:"working_dir"`
+	OSPID      int                  `json:"os_pid,omitempty"`
 	Status     types.ProcessStatus  `json:"status"`
 	ExitCode   *int                 `json:"exit_code,omitempty"`
 	StartedAt  time.Time            `json:"started_at"`
@@ -148,4 +165,22 @@ func (r *InteractiveRunner) SetStateCallback(cb AgentStateCallback) {
 // Currently always returns an idle detector that relies on the idle timer mechanism.
 func createStatusDetector() StatusDetector {
 	return NewIdleDetector()
+}
+
+// WaitForFirstIdle blocks until the idle detector for processID fires for
+// the first time, or ctx is canceled. Returns nil on first-idle, error otherwise.
+// Returns an error immediately if processID is unknown.
+func (r *InteractiveRunner) WaitForFirstIdle(ctx context.Context, processID string) error {
+	r.mu.RLock()
+	proc, ok := r.processes[processID]
+	r.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("process %q not found", processID)
+	}
+	select {
+	case <-proc.firstIdleCh:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

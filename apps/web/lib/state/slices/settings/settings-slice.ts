@@ -1,5 +1,6 @@
 import type { StateCreator } from "zustand";
-import type { SettingsSlice, SettingsSliceState } from "./types";
+import { DEFAULT_TASKS_LIST_GROUP, DEFAULT_TASKS_LIST_SORT } from "@/lib/tasks/tasks-list-options";
+import { DEFAULT_VOICE_MODE_STATE, type SettingsSlice, type SettingsSliceState } from "./types";
 
 export const defaultSettingsState: SettingsSliceState = {
   executors: { items: [] },
@@ -25,6 +26,8 @@ export const defaultSettingsState: SettingsSliceState = {
     kanbanViewMode: null,
     workflowId: null,
     repositoryIds: [],
+    tasksListSort: DEFAULT_TASKS_LIST_SORT,
+    tasksListGroup: DEFAULT_TASKS_LIST_GROUP,
     preferredShell: null,
     shellOptions: [],
     defaultEditorId: null,
@@ -39,10 +42,28 @@ export const defaultSettingsState: SettingsSliceState = {
     lspServerConfigs: {},
     savedLayouts: [],
     sidebarViews: [],
+    sidebarActiveViewId: null,
+    sidebarDraft: null,
+    sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
+    taskCreateLastUsed: {
+      repositoryId: null,
+      branch: null,
+      agentProfileId: null,
+      executorProfileId: null,
+      synced: false,
+    },
+    jiraSavedViews: undefined,
+    jiraTaskPresets: undefined,
+    githubSavedPresets: undefined,
+    githubDefaultQueryPresets: undefined,
+    gitlabSavedPresets: undefined,
     defaultUtilityAgentId: null,
     keyboardShortcuts: {},
     terminalFontFamily: null,
     terminalFontSize: null,
+    changesPanelLayout: "tree",
+    systemMetricsDisplay: { showInTopbar: false },
+    voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
     loaded: false,
   },
 };

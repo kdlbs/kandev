@@ -17,10 +17,12 @@ export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: 
   // Hidden workflows (e.g. the system "Improve Kandev" template) are loaded
   // into the global store with `includeHidden: true` so the kanban can resolve
   // them when a task references one, but they must never surface in the
-  // settings management UI. Filter them out at the store boundary so all
-  // downstream merging logic remains hidden-agnostic.
+  // settings management UI. Office-style workflows are managed from the Office
+  // surface (ADR-0004) and must be excluded the same way — the SSR-side filter
+  // in `workspace-workflows-client.tsx` already drops them; the store-boundary
+  // filter must match so live WS/fetch updates cannot merge them back in.
   const scopedStoreWorkflows = useMemo(() => {
-    const visible = storeWorkflows.filter((w) => !w.hidden);
+    const visible = storeWorkflows.filter((w) => !w.hidden && w.style !== "office");
     return workspaceId ? visible.filter((w) => w.workspaceId === workspaceId) : visible;
   }, [storeWorkflows, workspaceId]);
   const [workflowItems, setWorkflowItems] = useState<Workflow[]>(initialWorkflows);

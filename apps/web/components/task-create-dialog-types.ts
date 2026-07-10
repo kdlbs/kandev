@@ -1,5 +1,7 @@
 import type React from "react";
-import type { LocalRepository, Repository, Executor, Branch, Task } from "@/lib/types/http";
+import type { LocalRepository, Repository, Executor, Task } from "@/lib/types/http";
+import type { UseBranchesByURLResult } from "@/hooks/domains/github/use-branches-by-url";
+import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { AgentProfileOption, WorkspaceState } from "@/lib/state/slices";
 import type {
   KanbanMultiState,
@@ -36,6 +38,24 @@ export type TaskRepoRow = {
   branch: string;
 };
 
+/**
+ * One remote-repo row in the task-create form. Each row is either a
+ * picker-selected repo or a manually-pasted URL/PR — both collapse to a
+ * single `url` field, with `source` only used for UI affordance.
+ */
+export type TaskRemoteRepoRow = {
+  key: string; // stable client-side React key
+  url: string; // canonical https://… or paste-as-typed
+  branch: string;
+  source: "picker" | "paste";
+  prNumber?: number;
+  prBaseBranch?: string;
+  prHeadBranch?: string;
+  // Optional metadata when source === "picker":
+  provider?: "github" | "gitlab";
+  fullName?: string; // "owner/name"
+};
+
 export type StepType = {
   id: string;
   title: string;
@@ -57,12 +77,37 @@ export type TaskCreateDialogInitialValues = {
   /** When set, opens the dialog in GitHub URL mode pre-filled with this value
    * (e.g. "github.com/owner/repo"). Used when no matching workspace repo exists. */
   githubUrl?: string;
+  prNumber?: number;
+  prBaseBranch?: string;
 };
 
 export type StoreSelections = {
   agentProfiles: AgentProfileOption[];
+  /**
+   * Subset of `agentProfiles` that can run on the currently-selected executor
+   * profile (`useExecutorProfileCompat`). Drives auto-selection in
+   * `useDefaultSelectionsEffect` so a previously-used profile that's
+   * incompatible with the current executor (e.g. Claude profile + Sprites)
+   * doesn't get silently restored and trip the "No compatible" empty state.
+   *
+   * Equal to `agentProfiles` until the executor profile + auth-spec catalog
+   * have loaded — read together with `authLoaded` to know which case applies.
+   */
+  compatibleAgentProfiles: AgentProfileOption[];
+  /**
+   * True once the remote-auth catalog has been fetched. Until then,
+   * `compatibleAgentProfiles` is just `agentProfiles` (no filter applied), so
+   * auto-pick must wait — otherwise the first render restores a lastId that
+   * looks valid against the unfiltered list, the specs land milliseconds
+   * later, and `noCompatibleAgent` flips true via the
+   * "selected-not-in-compatible" branch.
+   */
+  authLoaded: boolean;
   executors: Executor[];
   workspaceDefaults: Workspace | null | undefined;
+  userSettingsLoaded?: boolean;
+  lastUsedAgentProfileId?: string | null;
+  lastUsedExecutorProfileId?: string | null;
 };
 
 export type DialogComputedValues = {
@@ -89,6 +134,10 @@ export type DialogComputedValues = {
   selectedExecutorProfileName: string | null;
   /** True when an executor profile is selected and no agent profile is compatible with it. */
   noCompatibleAgent: boolean;
+  /** Subset of agent profiles that pass the executor's auth-credential check. See `StoreSelections.compatibleAgentProfiles`. */
+  compatibleAgentProfiles: AgentProfileOption[];
+  /** True once the remote-auth catalog has been fetched. See `StoreSelections.authLoaded`. */
+  authLoaded: boolean;
 };
 
 export type DialogComputedArgs = {
@@ -117,10 +166,22 @@ export type TaskCreateEffectsArgs = {
   repositories: Repository[];
   repositoriesLoading: boolean;
   agentProfiles: AgentProfileOption[];
+  compatibleAgentProfiles: AgentProfileOption[];
+  authLoaded: boolean;
   executors: Executor[];
   workspaceDefaults: Workspace | null | undefined;
   toast: ReturnType<typeof useToast>["toast"];
   workflows: Array<{ id: string; agent_profile_id?: string }>;
+  /** Store-backed last-used repository. Used when the localStorage mirror has not been primed yet. */
+  lastUsedRepositoryId?: string | null;
+  /** Whether DB-backed user settings are loaded, or a best-effort fetch has settled. */
+  userSettingsLoaded?: boolean;
+  /** Store-backed last-used agent profile. Used when the localStorage mirror has not been primed yet. */
+  lastUsedAgentProfileId?: string | null;
+  /** Store-backed last-used executor profile. Used when the localStorage mirror has not been primed yet. */
+  lastUsedExecutorProfileId?: string | null;
+  /** Store-backed last-used branch. Used when the localStorage mirror has not been primed yet. */
+  lastUsedBranch?: string | null;
   /**
    * True when the currently-selected executor is the local-host one (no
    * worktree, no container). Drives the "reset row.branch on local switch"
@@ -170,9 +231,28 @@ export type DialogFormState = {
   addRepository: () => void;
   removeRepository: (key: string) => void;
   updateRepository: (key: string, patch: Partial<TaskRepoRow>) => void;
-  /** GitHub URL mode: a separate flow that replaces the chip row with a URL input. */
-  githubBranch: string;
-  setGitHubBranch: (v: string) => void;
+  /**
+   * Remote URL list driving the new "GitHub Remote" mode. Each row carries a
+   * URL + branch; legacy singleton URL flow reads `remoteRepos[0]` during the
+   * transitional period until the multi-row UI lands.
+   */
+  remoteRepos: TaskRemoteRepoRow[];
+  setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>;
+  addRemoteRepo: () => void;
+  removeRemoteRepo: (key: string) => void;
+  updateRemoteRepo: (key: string, patch: Partial<TaskRemoteRepoRow>) => void;
+  /**
+   * Per-URL branches cache. Each chip reads its own row's branches by URL;
+   * no dialog-level singleton branch field remains.
+   */
+  branchesByUrl: UseBranchesByURLResult;
+  /**
+   * Per-URL PR-info cache. Each chip calls `ensure(row.url)` when its URL
+   * changes; the chip auto-selects the PR head branch when the URL is a PR
+   * URL and the row's branch is still empty. The dialog also reads the
+   * first row's `info(url).suggestedTitle` to autofill the task title.
+   */
+  prInfoByUrl: UsePRInfoByURLResult;
   agentProfileId: string;
   setAgentProfileId: (v: string) => void;
   executorId: string;
@@ -193,18 +273,11 @@ export type DialogFormState = {
   setIsCreatingSession: (v: boolean) => void;
   isCreatingTask: boolean;
   setIsCreatingTask: (v: boolean) => void;
-  useGitHubUrl: boolean;
-  setUseGitHubUrl: (v: boolean) => void;
-  githubUrl: string;
-  setGitHubUrl: (v: string) => void;
-  githubBranches: Branch[];
-  setGitHubBranches: (v: Branch[]) => void;
-  githubBranchesLoading: boolean;
-  setGitHubBranchesLoading: (v: boolean) => void;
+  /** True when the form is in the GitHub Remote (URL) mode. */
+  useRemote: boolean;
+  setUseRemote: (v: boolean) => void;
   githubUrlError: string | null;
   setGitHubUrlError: (v: string | null) => void;
-  githubPrHeadBranch: string | null;
-  setGitHubPrHeadBranch: (v: string | null) => void;
   /** When non-empty, the selected workflow overrides the agent profile */
   workflowAgentProfileId: string;
   setWorkflowAgentProfileId: (v: string) => void;
@@ -242,11 +315,16 @@ export type SubmitHandlersDeps = {
   discoveredRepositories: LocalRepository[];
   /** Workspace repositories — used to look up `default_branch` for `repositoryId` rows. */
   workspaceRepositories: Repository[];
-  useGitHubUrl: boolean;
-  githubUrl: string;
-  githubPrHeadBranch: string | null;
-  /** Branch for the GitHub URL flow. Per-row branches live on `repositories[i].branch`. */
-  githubBranch: string;
+  /** True when the GitHub Remote (URL) mode is active. */
+  useRemote: boolean;
+  /** Remote-repo rows (multi-row). The submit path collapses non-empty rows into `repos[]`. */
+  remoteRepos: TaskRemoteRepoRow[];
+  /**
+   * Per-URL PR-info cache. The submit path consults this so a PR row whose
+   * head lives on a fork can still anchor `base_branch` to the PR's actual
+   * target (from the GitHub API).
+   */
+  prInfoByUrl: UsePRInfoByURLResult;
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
@@ -261,10 +339,11 @@ export type SubmitHandlersDeps = {
   onSuccess?: (
     task: Task,
     mode: "create" | "edit",
-    meta?: { taskSessionId?: string | null },
+    meta?: { taskSessionId?: string | null; willNavigate?: boolean },
   ) => void;
   onCreateSession?: (data: { prompt: string; agentProfileId: string; executorId: string }) => void;
   onOpenChange: (open: boolean) => void;
+  preserveTaskCreateLastUsedOnClose?: () => void;
   taskId: string | null;
   parentTaskId?: string;
   descriptionInputRef: React.RefObject<TaskFormInputsHandle | null>;
@@ -274,7 +353,7 @@ export type SubmitHandlersDeps = {
   setHasDescription: (v: boolean) => void;
   setTaskName: (v: string) => void;
   setRepositories: React.Dispatch<React.SetStateAction<TaskRepoRow[]>>;
-  setGitHubBranch: (v: string) => void;
+  setRemoteRepos: React.Dispatch<React.SetStateAction<TaskRemoteRepoRow[]>>;
   setAgentProfileId: (v: string) => void;
   setExecutorId: (v: string) => void;
   setSelectedWorkflowId: (v: string | null) => void;
@@ -312,9 +391,7 @@ export type DialogFormBodyProps = {
   isCreateMode: boolean;
   isEditMode: boolean;
   isTaskStarted: boolean;
-  isPassthroughProfile: boolean;
   initialDescription: string;
-  hasDescription: boolean;
   workspaceId: string | null;
   onJiraImport?: (ticket: JiraTicket) => void;
   onLinearImport?: (issue: LinearIssue) => void;
@@ -339,8 +416,7 @@ export type DialogFormBodyProps = {
   onAgentProfileChange: (v: string) => void;
   onExecutorProfileChange: (v: string) => void;
   onWorkflowChange: (v: string) => void;
-  onToggleGitHubUrl?: () => void;
-  onGitHubUrlChange: (v: string) => void;
+  onToggleRemote?: () => void;
   onToggleFreshBranch: (enabled: boolean) => void;
   onToggleNoRepository?: () => void;
   onWorkspacePathChange: (value: string) => void;
@@ -348,6 +424,8 @@ export type DialogFormBodyProps = {
   workflowAgentLocked: boolean;
   /** Workspace repositories — driven into the chip row for repo + branch picks. */
   repositories: Repository[];
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
   /** Computed in the parent: single-row + local executor + not URL mode. */
   freshBranchAvailable: boolean;
   /**
@@ -368,4 +446,11 @@ export type DialogFormBodyProps = {
   descriptionPlaceholder?: string;
   /** When true, hides the workflow picker so the enforced workflow can't be swapped. */
   workflowLocked?: boolean;
+  /**
+   * Called by the voice-input button after a non-empty transcript is inserted
+   * into the description when the user has voice auto-send enabled. The dialog
+   * routes this to a programmatic form submit so dictation can create the task
+   * hands-free.
+   */
+  onVoiceAutoSend?: () => void;
 };

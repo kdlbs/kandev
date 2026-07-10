@@ -6,11 +6,15 @@ import {
   defaultSessionRuntimeState,
   defaultUIState,
   defaultGitHubState,
+  defaultGitLabState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultAutomationsState,
+  defaultSystemState,
 } from "./slices";
+import { getStoredQuickChatNames } from "@/lib/local-storage";
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
@@ -42,6 +46,7 @@ export const defaultState = {
   pendingModel: defaultSessionState.pendingModel,
   activeModel: defaultSessionState.activeModel,
   taskPlans: defaultSessionState.taskPlans,
+  walkthroughs: defaultSessionState.walkthroughs,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -62,14 +67,27 @@ export const defaultState = {
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   githubStatus: defaultGitHubState.githubStatus,
   taskPRs: defaultGitHubState.taskPRs,
+  pendingPrUrlByTaskId: defaultGitHubState.pendingPrUrlByTaskId,
   prWatches: defaultGitHubState.prWatches,
   reviewWatches: defaultGitHubState.reviewWatches,
   issueWatches: defaultGitHubState.issueWatches,
   actionPresets: defaultGitHubState.actionPresets,
+  prFeedbackCache: defaultGitHubState.prFeedbackCache,
+  taskCIAutomation: defaultGitHubState.taskCIAutomation,
+  taskMRs: defaultGitLabState.taskMRs,
+  gitlabReviewWatches: defaultGitLabState.gitlabReviewWatches,
+  gitlabIssueWatches: defaultGitLabState.gitlabIssueWatches,
+  gitlabMRWatches: defaultGitLabState.gitlabMRWatches,
+  gitlabActionPresets: defaultGitLabState.gitlabActionPresets,
+  gitlabStats: defaultGitLabState.gitlabStats,
+  gitlabStatus: defaultGitLabState.gitlabStatus,
   jiraIssueWatches: defaultJiraState.jiraIssueWatches,
   linearIssueWatches: defaultLinearState.linearIssueWatches,
   office: defaultOfficeState.office,
   features: defaultFeaturesState.features,
+  automations: defaultAutomationsState.automations,
+  automationRuns: defaultAutomationsState.automationRuns,
+  system: defaultSystemState.system,
   previewPanel: defaultUIState.previewPanel,
   rightPanel: defaultUIState.rightPanel,
   diffs: defaultUIState.diffs,
@@ -89,6 +107,44 @@ export const defaultState = {
 };
 
 export type DefaultState = typeof defaultState;
+
+function mergeGitLabFields(
+  d: DefaultState,
+  s: Partial<DefaultState>,
+): Pick<
+  DefaultState,
+  | "taskMRs"
+  | "gitlabReviewWatches"
+  | "gitlabIssueWatches"
+  | "gitlabMRWatches"
+  | "gitlabActionPresets"
+  | "gitlabStats"
+  | "gitlabStatus"
+> {
+  return {
+    taskMRs: { ...d.taskMRs, ...s.taskMRs },
+    gitlabReviewWatches: { ...d.gitlabReviewWatches, ...s.gitlabReviewWatches },
+    gitlabIssueWatches: { ...d.gitlabIssueWatches, ...s.gitlabIssueWatches },
+    gitlabMRWatches: { ...d.gitlabMRWatches, ...s.gitlabMRWatches },
+    gitlabActionPresets: { ...d.gitlabActionPresets, ...s.gitlabActionPresets },
+    gitlabStats: { ...d.gitlabStats, ...s.gitlabStats },
+    gitlabStatus: { ...d.gitlabStatus, ...s.gitlabStatus },
+  };
+}
+
+function mergeQuickChatState(initialState: Partial<DefaultState>): DefaultState["quickChat"] {
+  const quickChat = { ...defaultState.quickChat, ...initialState.quickChat };
+  if (!initialState.quickChat?.sessions) return quickChat;
+
+  const storedNames = getStoredQuickChatNames();
+  return {
+    ...quickChat,
+    sessions: initialState.quickChat.sessions.map((session) => {
+      const localName = storedNames[session.sessionId];
+      return localName ? { ...session, name: localName } : session;
+    }),
+  };
+}
 
 export function mergeInitialState(initialState?: Partial<DefaultState>): DefaultState {
   if (!initialState) return defaultState;
@@ -132,6 +188,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     pendingModel: { ...defaultState.pendingModel, ...initialState.pendingModel },
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
+    walkthroughs: { ...defaultState.walkthroughs, ...initialState.walkthroughs },
     queue: { ...defaultState.queue, ...initialState.queue },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },
@@ -150,10 +207,17 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     sessionPollMode: { ...defaultState.sessionPollMode, ...initialState.sessionPollMode },
     githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
     taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
+    pendingPrUrlByTaskId: {
+      ...defaultState.pendingPrUrlByTaskId,
+      ...initialState.pendingPrUrlByTaskId,
+    },
     prWatches: { ...defaultState.prWatches, ...initialState.prWatches },
     reviewWatches: { ...defaultState.reviewWatches, ...initialState.reviewWatches },
     issueWatches: { ...defaultState.issueWatches, ...initialState.issueWatches },
     actionPresets: { ...defaultState.actionPresets, ...initialState.actionPresets },
+    prFeedbackCache: { ...defaultState.prFeedbackCache, ...initialState.prFeedbackCache },
+    taskCIAutomation: { ...defaultState.taskCIAutomation, ...initialState.taskCIAutomation },
+    ...mergeGitLabFields(defaultState, initialState),
     jiraIssueWatches: { ...defaultState.jiraIssueWatches, ...initialState.jiraIssueWatches },
     linearIssueWatches: {
       ...defaultState.linearIssueWatches,
@@ -161,6 +225,9 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     },
     office: { ...defaultState.office, ...initialState.office },
     features: { ...defaultState.features, ...initialState.features },
+    automations: { ...defaultState.automations, ...initialState.automations },
+    automationRuns: { ...defaultState.automationRuns, ...initialState.automationRuns },
+    system: { ...defaultState.system, ...initialState.system },
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },
@@ -170,7 +237,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     chatInput: { ...defaultState.chatInput, ...initialState.chatInput },
     documentPanel: { ...defaultState.documentPanel, ...initialState.documentPanel },
     systemHealth: { ...defaultState.systemHealth, ...initialState.systemHealth },
-    quickChat: { ...defaultState.quickChat, ...initialState.quickChat },
+    quickChat: mergeQuickChatState(initialState),
     sessionFailureNotification:
       initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },

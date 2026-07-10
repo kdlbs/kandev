@@ -13,14 +13,17 @@ import (
 // mockJiraService records dedup calls so tests can assert on the
 // reserve→assign→release contract used by handleNewJiraIssue.
 type mockJiraService struct {
-	reserveReturn  bool
-	reserveErr     error
-	reserveCalls   int
-	assignCalls    int
-	releaseCalls   int
-	lastWatchID    string
-	lastIssueKey   string
-	assignedTaskID string
+	reserveReturn      bool
+	reserveErr         error
+	reserveCalls       int
+	assignCalls        int
+	releaseCalls       int
+	lastWatchID        string
+	lastIssueKey       string
+	assignedTaskID     string
+	disableCalls       int
+	lastDisableWatchID string
+	lastDisableCause   string
 }
 
 func (m *mockJiraService) ReserveIssueWatchTask(_ context.Context, watchID, issueKey, _ string) (bool, error) {
@@ -38,6 +41,13 @@ func (m *mockJiraService) AssignIssueWatchTaskID(_ context.Context, _, _ string,
 
 func (m *mockJiraService) ReleaseIssueWatchTask(_ context.Context, _, _ string) error {
 	m.releaseCalls++
+	return nil
+}
+
+func (m *mockJiraService) DisableIssueWatchWithError(_ context.Context, watchID, cause string) error {
+	m.disableCalls++
+	m.lastDisableWatchID = watchID
+	m.lastDisableCause = cause
 	return nil
 }
 
@@ -66,6 +76,15 @@ func setupJiraTaskTest(t *testing.T) *Service {
 	return createTestService(repo, stepGetter, newMockTaskRepo())
 }
 
+// dispatchJiraEvent drives an event through the watcher coordinator
+// synchronously using a JiraWatcherSource — mirrors what handleNewJiraIssue
+// does, but without the goroutine, so tests can assert on observable side
+// effects deterministically.
+func dispatchJiraEvent(svc *Service, evt *jira.NewJiraIssueEvent) {
+	src := NewJiraWatcherSource(svc.jiraService, svc.logger)
+	svc.watcherCoordinator.Dispatch(context.Background(), src, evt)
+}
+
 func TestCreateJiraIssueTask_HappyPath(t *testing.T) {
 	svc := setupJiraTaskTest(t)
 	jiraSvc := &mockJiraService{reserveReturn: true}
@@ -73,7 +92,7 @@ func TestCreateJiraIssueTask_HappyPath(t *testing.T) {
 	creator := &countingIssueTaskCreator{taskID: "task-jira-1"}
 	svc.SetIssueTaskCreator(creator)
 
-	svc.createJiraIssueTask(context.Background(), newJiraIssueEvent())
+	dispatchJiraEvent(svc, newJiraIssueEvent())
 
 	if jiraSvc.reserveCalls != 1 {
 		t.Errorf("expected 1 Reserve call, got %d", jiraSvc.reserveCalls)
@@ -102,7 +121,7 @@ func TestCreateJiraIssueTask_SkipsWhenAlreadyReserved(t *testing.T) {
 	creator := &countingIssueTaskCreator{}
 	svc.SetIssueTaskCreator(creator)
 
-	svc.createJiraIssueTask(context.Background(), newJiraIssueEvent())
+	dispatchJiraEvent(svc, newJiraIssueEvent())
 
 	if creator.calls != 0 {
 		t.Errorf("expected CreateIssueTask NOT to be called when reservation is lost, got %d", creator.calls)
@@ -119,13 +138,38 @@ func TestCreateJiraIssueTask_ReleasesWhenCreateFails(t *testing.T) {
 	creator := &countingIssueTaskCreator{err: errors.New("task creation failed")}
 	svc.SetIssueTaskCreator(creator)
 
-	svc.createJiraIssueTask(context.Background(), newJiraIssueEvent())
+	dispatchJiraEvent(svc, newJiraIssueEvent())
 
 	if jiraSvc.assignCalls != 0 {
 		t.Errorf("expected no Assign when task creation failed, got %d", jiraSvc.assignCalls)
 	}
 	if jiraSvc.releaseCalls != 1 {
 		t.Errorf("expected Release after task creation failure, got %d", jiraSvc.releaseCalls)
+	}
+}
+
+// TestSetIssueTaskCreator_RefreshesCoordinatorTaskCreator pins the wiring
+// contract that calling SetIssueTaskCreator again must update the coordinator.
+// Regression guard: an earlier version of initWatcherCoordinator returned
+// early on the second call and silently kept the original creator.
+func TestSetIssueTaskCreator_RefreshesCoordinatorTaskCreator(t *testing.T) {
+	svc := setupJiraTaskTest(t)
+	jiraSvc := &mockJiraService{reserveReturn: true}
+	svc.SetJiraService(jiraSvc)
+
+	first := &countingIssueTaskCreator{taskID: "task-first"}
+	svc.SetIssueTaskCreator(first)
+
+	second := &countingIssueTaskCreator{taskID: "task-second"}
+	svc.SetIssueTaskCreator(second)
+
+	dispatchJiraEvent(svc, newJiraIssueEvent())
+
+	if first.calls != 0 {
+		t.Errorf("first creator must not be invoked after being replaced, got %d calls", first.calls)
+	}
+	if second.calls != 1 {
+		t.Errorf("expected the latest creator to be used, got %d calls", second.calls)
 	}
 }
 

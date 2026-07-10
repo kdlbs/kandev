@@ -15,8 +15,6 @@ export type CliOptions = {
 export type ParseResult = {
   options: CliOptions;
   showHelp: boolean;
-  /** Deprecated flags seen on the command line. cli.ts emits warnings after parsing. */
-  deprecatedFlags: string[];
 };
 
 export class ParseError extends Error {}
@@ -24,10 +22,6 @@ export class ParseError extends Error {}
 export function parseArgs(argv: string[]): ParseResult {
   const opts: CliOptions = { command: "run" };
   let showHelp = false;
-  const deprecatedFlags: string[] = [];
-  const noteDeprecated = (flag: string) => {
-    if (!deprecatedFlags.includes(flag)) deprecatedFlags.push(flag);
-  };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--help" || arg === "-h") {
@@ -77,16 +71,8 @@ export function parseArgs(argv: string[]): ParseResult {
       opts.webPort = parsePort(arg.slice("--web-internal-port=".length), "--web-internal-port");
       continue;
     }
-    if (arg === "--web-port") {
-      opts.webPort = parsePort(takeValue(argv, i, "--web-port"), "--web-port");
-      noteDeprecated("--web-port");
-      i += 1;
-      continue;
-    }
-    if (arg.startsWith("--web-port=")) {
-      opts.webPort = parsePort(arg.slice("--web-port=".length), "--web-port");
-      noteDeprecated("--web-port");
-      continue;
+    if (arg === "--web-port" || arg.startsWith("--web-port=")) {
+      throw new ParseError("--web-port has been removed; use --web-internal-port for dev mode");
     }
     if (arg === "--verbose" || arg === "-v") {
       opts.verbose = true;
@@ -101,7 +87,10 @@ export function parseArgs(argv: string[]): ParseResult {
       continue;
     }
   }
-  return { options: opts, showHelp, deprecatedFlags };
+  if (opts.webPort !== undefined && opts.command !== "dev") {
+    throw new ParseError("--web-internal-port only applies to dev mode");
+  }
+  return { options: opts, showHelp };
 }
 
 function takeValue(argv: string[], i: number, flag: string): string {
@@ -127,10 +116,14 @@ export type ResolvedPorts = {
 
 // CLI flags beat env vars; KANDEV_PORT is an alias for KANDEV_BACKEND_PORT.
 export function resolvePorts(options: CliOptions, env: NodeJS.ProcessEnv): ResolvedPorts {
+  if (options.webPort !== undefined && options.command !== "dev") {
+    throw new ParseError("--web-internal-port only applies to dev mode");
+  }
   return {
     backendPort:
       options.backendPort ?? envPort(env, "KANDEV_BACKEND_PORT") ?? envPort(env, "KANDEV_PORT"),
-    webPort: options.webPort ?? envPort(env, "KANDEV_WEB_PORT"),
+    webPort:
+      options.command === "dev" ? (options.webPort ?? envPort(env, "KANDEV_WEB_PORT")) : undefined,
   };
 }
 

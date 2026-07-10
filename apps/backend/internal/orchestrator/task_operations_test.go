@@ -15,10 +15,12 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
 	"github.com/kandev/kandev/internal/orchestrator/scheduler"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -79,6 +81,162 @@ func TestPromptTask_SessionAlreadyRunning(t *testing.T) {
 	_, err := svc.PromptTask(context.Background(), "task1", "session1", "hello", "", false, nil, false)
 	if err == nil {
 		t.Fatal("expected error when session is already RUNNING")
+	}
+}
+
+func TestPromptTask_WaitsForStartingSessionBeforePrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentExecutionID = "exec-resumed-1"
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-resumed-1")
+
+	promptReady := make(chan struct{})
+	readinessChecked := make(chan struct{}, 1)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptResult: &executor.PromptResult{
+			StopReason:   "end_turn",
+			AgentMessage: "simple mock response",
+		},
+		isAgentReadyFn: func(_ context.Context, _ string) bool {
+			select {
+			case readinessChecked <- struct{}{}:
+			default:
+			}
+			select {
+			case <-promptReady:
+				return true
+			default:
+				return false
+			}
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	done := make(chan struct {
+		result *PromptResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := svc.PromptTask(ctx, "task1", "session1", "/e2e:simple-message", "", false, nil, false)
+		done <- struct {
+			result *PromptResult
+			err    error
+		}{result: result, err: err}
+	}()
+
+	go func() {
+		time.Sleep(25 * time.Millisecond)
+		readySession, err := repo.GetTaskSession(context.Background(), "session1")
+		if err != nil || readySession == nil {
+			return
+		}
+		readySession.State = models.TaskSessionStateWaitingForInput
+		readySession.UpdatedAt = time.Now().UTC()
+		_ = repo.UpdateTaskSession(context.Background(), readySession)
+	}()
+
+	select {
+	case <-readinessChecked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected PromptTask to wait for agent prompt readiness")
+	}
+
+	select {
+	case result := <-done:
+		t.Fatalf("PromptTask returned before prompt readiness: result=%#v err=%v", result.result, result.err)
+	default:
+	}
+
+	close(promptReady)
+
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("PromptTask failed after prompt readiness: %v", result.err)
+		}
+		if result.result == nil {
+			t.Fatal("PromptTask returned nil result")
+		}
+		if result.result.AgentMessage != "simple mock response" {
+			t.Fatalf("unexpected agent message: %q", result.result.AgentMessage)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("PromptTask did not return after prompt readiness")
+	}
+
+	agentMgr.mu.Lock()
+	prompts := append([]string(nil), agentMgr.capturedPrompts...)
+	calls := append([]promptCall(nil), agentMgr.capturedPromptCalls...)
+	agentMgr.mu.Unlock()
+	if len(prompts) != 1 {
+		t.Fatalf("expected one prompt after readiness, got %d", len(prompts))
+	}
+	if prompts[0] != "/e2e:simple-message" {
+		t.Fatalf("unexpected prompt: %q", prompts[0])
+	}
+	if len(calls) != 1 || calls[0].ExecutionID != "exec-resumed-1" {
+		t.Fatalf("unexpected prompt calls: %#v", calls)
+	}
+}
+
+func TestTrySwitchModelUpdatesRuntimeModelCache(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:           true,
+		setSessionModelSupported: true,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileSnapshot = map[string]interface{}{"model": "gpt-5.5"}
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	svc.runtimeModelBySession.Store("session1", "gpt-5.5")
+
+	result, switched, err := svc.trySwitchModel(context.Background(), "task1", "session1", "gpt-5.3-codex-spark", "continue", session)
+	if err != nil {
+		t.Fatalf("trySwitchModel returned error: %v", err)
+	}
+	if switched {
+		t.Fatal("in-place model switch should let prompt dispatch continue")
+	}
+	if result != nil {
+		t.Fatalf("expected nil prompt result for in-place switch, got %#v", result)
+	}
+	if len(agentMgr.setSessionModelCalls) != 1 {
+		t.Fatalf("expected one model switch call, got %d", len(agentMgr.setSessionModelCalls))
+	}
+	if agentMgr.setSessionModelCalls[0] != (sessionModelCall{SessionID: "session1", ModelID: "gpt-5.3-codex-spark"}) {
+		t.Fatalf("unexpected model switch call: %#v", agentMgr.setSessionModelCalls[0])
+	}
+	cached, ok := svc.runtimeModelBySession.Load("session1")
+	if !ok {
+		t.Fatal("expected runtime model cache entry")
+	}
+	if cached != "gpt-5.3-codex-spark" {
+		t.Fatalf("expected runtime model cache to update, got %#v", cached)
 	}
 }
 
@@ -371,6 +529,131 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	}
 }
 
+// TestCancelAgent_TaskStateReconcile ensures cancel lands actively-working
+// kanban tasks in REVIEW (treated as finished work the user may want to
+// review). Office tasks and tasks already out of IN_PROGRESS / SCHEDULING
+// must be left untouched.
+func TestCancelAgent_TaskStateReconcile(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name            string
+		taskState       v1.TaskState
+		office          bool
+		wantStateUpdate bool
+	}{
+		{name: "in_progress", taskState: v1.TaskStateInProgress, wantStateUpdate: true},
+		{name: "scheduling", taskState: v1.TaskStateScheduling, wantStateUpdate: true},
+		{name: "review", taskState: v1.TaskStateReview},
+		{name: "office", taskState: v1.TaskStateInProgress, office: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			taskRepo := newMockTaskRepo()
+			agentMgr := &mockAgentManager{isAgentRunning: true}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+
+			taskID := "task-" + tc.name
+			sessionID := "session-" + tc.name
+
+			if tc.office {
+				seedOfficeSession(t, repo, taskID, sessionID, "")
+				// Seed the mock so a missing office guard would fail the test: without
+				// AssigneeAgentProfileID early-return, UpdateTaskStateIfCurrentIn would
+				// run against this IN_PROGRESS row and write updatedStates.
+				taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: tc.taskState}
+			} else {
+				seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+				task, err := repo.GetTask(ctx, taskID)
+				if err != nil {
+					t.Fatalf("get task: %v", err)
+				}
+				task.State = tc.taskState
+				if err := repo.UpdateTask(ctx, task); err != nil {
+					t.Fatalf("update task state: %v", err)
+				}
+				taskRepo.tasks[taskID] = &v1.Task{ID: taskID, State: tc.taskState}
+			}
+
+			if err := svc.CancelAgent(ctx, sessionID); err != nil {
+				t.Fatalf("cancel agent: %v", err)
+			}
+
+			got, ok := taskRepo.updatedStates[taskID]
+			if tc.wantStateUpdate {
+				if !ok {
+					t.Fatal("expected tasks.state to be updated on cancel")
+				}
+				if got != v1.TaskStateReview {
+					t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, got)
+				}
+				return
+			}
+			if ok {
+				t.Fatalf("expected tasks.state to remain unchanged, got %q", got)
+			}
+		})
+	}
+}
+
+// TestCancelAgent_DeliversQueuedMessageOnResume pins the corrected pause→resume
+// contract (#1597 pause→resume recovery): a message queued while the agent was
+// running is DELIVERED once cancel settles the session to WAITING_FOR_INPUT, not
+// stranded on the queue for indefinite manual drain.
+//
+// This replaces the former TestCancelAgent_LeavesQueuedMessageForManualDrain,
+// which codified the wedge as expected. On a normal cancel the agent's
+// complete(cancelled) event fires handleAgentReady → on_turn_complete → drain,
+// but on an escalated / dead-process cancel no agent.ready event ever fires, so
+// nothing drained the queue and the operator's queued message was lost until a
+// second manual send. Cancel now drains directly after reconciling the session.
+//
+// Proof of delivery is the queue emptying: drainQueuedMessageForPromptableSession
+// pops the message synchronously (TakeQueued) before dispatching it, so a
+// Count==0 immediately after CancelAgent returns is deterministic. The actual
+// PromptTask dispatch runs in a goroutine (state may already be RUNNING by the
+// time we re-read), mirroring TestHandleAgentBootReady_DrainsOrphanedQueuedMessage.
+func TestCancelAgent_DeliversQueuedMessageOnResume(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	// repoForExecutionLookup + isAgentRunning let the executeQueuedMessage
+	// goroutine's PromptTask → ensureSessionRunning → GetExecutionBySession land
+	// on a working path instead of nil-derefing s.executor under -race.
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "queued after cancel", "", messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+
+	if err := svc.CancelAgent(ctx, "session1"); err != nil {
+		t.Fatalf("cancel agent: %v", err)
+	}
+
+	// Cancel settles the session so a new prompt can land. The drain goroutine
+	// may already have moved it back to RUNNING; either state proves the wedge
+	// (stuck RUNNING with a full queue) is gone.
+	updated, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get updated session: %v", err)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput &&
+		updated.State != models.TaskSessionStateRunning {
+		t.Fatalf("expected session state WAITING_FOR_INPUT or RUNNING after cancel, got %q", updated.State)
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	if status.Count != 0 {
+		t.Fatalf("expected cancel to deliver the queued message on resume, count=%d entries=%+v", status.Count, status.Entries)
+	}
+}
+
 // --- StartCreatedSession ---
 
 func TestStartCreatedSession_WrongTask(t *testing.T) {
@@ -380,7 +663,7 @@ func TestStartCreatedSession_WrongTask(t *testing.T) {
 	// Session belongs to "task-other", not "task1"
 	seedTaskAndSession(t, repo, "task-other", "session1", models.TaskSessionStateCreated)
 
-	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, nil)
+	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error when session does not belong to task")
 	}
@@ -392,9 +675,191 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 
-	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, nil)
+	_, err := svc.StartCreatedSession(context.Background(), "task1", "session1", "profile1", "prompt", false, false, false, nil)
 	if err == nil {
 		t.Fatal("expected error when session is not in CREATED state")
+	}
+}
+
+func TestStartCreatedSession_WorkflowOverridePromotesPreparedWhenTaskHasNoPrimary(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "Workflow", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task1",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step1",
+		Title:          "Task",
+		Description:    "desc",
+		State:          v1.TaskStateInProgress,
+		Metadata:       map[string]interface{}{models.MetaKeyAgentProfileID: "profile-a"},
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID:             "step1",
+		WorkflowID:     "wf1",
+		Name:           "Step 1",
+		AgentProfileID: "profile-b",
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		WorkspaceID: "ws1",
+		WorkflowID:  "wf1",
+		Title:       "Task",
+		Description: "desc",
+		State:       v1.TaskStateInProgress,
+		Metadata:    map[string]interface{}{models.MetaKeyAgentProfileID: "profile-a"},
+	}
+
+	var launchedProfile string
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchedProfile = req.AgentProfileID
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	sessionID, err := svc.PrepareTaskSession(ctx, "task1", "profile-a", "", "", "step1", false)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+	prepared, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after prepare: %v", err)
+	}
+	if !prepared.IsPrimary {
+		t.Fatal("prepared first session should start as primary")
+	}
+	prepared.IsPrimary = false
+	if err := repo.UpdateTaskSession(ctx, prepared); err != nil {
+		t.Fatalf("clear prepared primary flag: %v", err)
+	}
+
+	if _, err := svc.StartCreatedSession(ctx, "task1", sessionID, "profile-a", "desc", true, false, true, nil); err != nil {
+		t.Fatalf("StartCreatedSession: %v", err)
+	}
+
+	updated, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after start: %v", err)
+	}
+	if updated.AgentProfileID != "profile-b" {
+		t.Fatalf("agent profile = %q, want profile-b", updated.AgentProfileID)
+	}
+	if !updated.IsPrimary {
+		t.Fatal("workflow profile override must promote prepared session when task has no primary")
+	}
+	if got := updated.Metadata[models.SessionMetaKeyCreatedBy]; got != models.SessionCreatedByWorkflowSwitch {
+		t.Fatalf("created_by metadata = %v, want %q", got, models.SessionCreatedByWorkflowSwitch)
+	}
+	if launchedProfile != "profile-b" {
+		t.Fatalf("launched profile = %q, want profile-b", launchedProfile)
+	}
+}
+
+// TestStartCreatedSession_EmptyProfileFallsBackToWorkflowDefault pins the bug
+// where an auto-started session prepared without an agent_profile_id (e.g. a
+// task imported from Linear whose metadata agent_profile_id is empty) recorded
+// the auto-start step prompt but never launched the agent. StartCreatedSession
+// aborted with "agent_profile_id is required" because the required-profile
+// guard ran before the workflow-default resolution. The launch must instead
+// inherit the workflow's default agent profile and persist it on the session.
+func TestStartCreatedSession_EmptyProfileFallsBackToWorkflowDefault(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	// executors_running lets LaunchPreparedSession take the existing-workspace
+	// fast path instead of launching a real agent.
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	// Bind the task to a workflow step whose workflow defines a default agent
+	// profile, with no step-level override — the Auto Dispatch Workflow shape.
+	dbTask, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	dbTask.WorkflowStepID = "step1"
+	if err := repo.UpdateTask(ctx, dbTask); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{ID: "step1", WorkflowID: "wf1"}
+	stepGetter.workflowAgentProfileID = "wf-default-profile"
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Test Task", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+
+	// The auto-start path passes the session's stored profile, which is empty
+	// here. The previous code aborted with "agent_profile_id is required".
+	_, err = svc.StartCreatedSession(ctx, "task1", "session1", "", "Do the work", true, false, true, nil)
+	if err != nil {
+		t.Fatalf("StartCreatedSession must resolve the workflow default for an empty profile, got error: %v", err)
+	}
+
+	// The resolved workflow default must be persisted on the session so the
+	// agent actually launches under it (and the UI shows the right agent).
+	got, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	if got.AgentProfileID != "wf-default-profile" {
+		t.Errorf("expected session to inherit workflow default %q, got %q", "wf-default-profile", got.AgentProfileID)
+	}
+}
+
+func TestStartCreatedSession_OfficeTaskSkipsSchedulingState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	dbTask, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	dbTask.State = v1.TaskStateReview
+	dbTask.WorkflowStepID = "step-office"
+	dbTask.AssigneeAgentProfileID = "office-agent"
+	if err := repo.UpdateTask(ctx, dbTask); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Office Task", State: v1.TaskStateReview}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-office"] = &wfmodels.WorkflowStep{ID: "step-office", WorkflowID: "wf1"}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+
+	if _, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Do the work", true, false, true, nil); err != nil {
+		t.Fatalf("StartCreatedSession: %v", err)
+	}
+
+	if writes := taskRepo.stateWrites["task1"]; writes != 0 {
+		t.Fatalf("office task should not write SCHEDULING, got %d state writes", writes)
+	}
+	if got := taskRepo.tasks["task1"].State; got != v1.TaskStateReview {
+		t.Fatalf("office task state = %s, want REVIEW", got)
 	}
 }
 
@@ -403,8 +868,15 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 // mockMessageCreator implements MessageCreator for testing.
 // Only CreateUserMessage is tracked; all other methods are no-op stubs.
 type mockMessageCreator struct {
-	userMessages    []mockUserMessage
-	sessionMessages []mockSessionMessage
+	userMessages       []mockUserMessage
+	sessionMessages    []mockSessionMessage
+	agentMessages      []mockAgentMessage
+	agentMessageWrites int
+	agentStreamWrites  int
+	thinkingWrites     int
+	toolCallWrites     int
+	toolUpdateWrites   int
+	userMessageErr     error
 }
 
 type mockUserMessage struct {
@@ -418,20 +890,31 @@ type mockSessionMessage struct {
 	requestsInput                                   bool
 }
 
+type mockAgentMessage struct {
+	taskID, content, sessionID, turnID string
+}
+
 func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, content, sessionID, turnID string, metadata map[string]interface{}) error {
+	if m.userMessageErr != nil {
+		return m.userMessageErr
+	}
 	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, turnID, metadata})
 	return nil
 }
 
-func (m *mockMessageCreator) CreateAgentMessage(context.Context, string, string, string, string) error {
+func (m *mockMessageCreator) CreateAgentMessage(_ context.Context, taskID, content, sessionID, turnID string) error {
+	m.agentMessages = append(m.agentMessages, mockAgentMessage{taskID, content, sessionID, turnID})
+	m.agentMessageWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) CreateToolCallMessage(context.Context, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+	m.toolCallWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, string, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+	m.toolUpdateWrites++
 	return nil
 }
 
@@ -452,26 +935,137 @@ func (m *mockMessageCreator) CreatePermissionRequestMessage(context.Context, str
 	return "", nil
 }
 
-func (m *mockMessageCreator) UpdatePermissionMessage(context.Context, string, string, string) error {
+func (m *mockMessageCreator) UpdatePermissionMessage(context.Context, string, string, models.PermissionStatus) error {
 	return nil
 }
 
 func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {
+	m.agentStreamWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) AppendAgentMessage(context.Context, string, string) error {
+	m.agentStreamWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) CreateThinkingMessageStreaming(context.Context, string, string, string, string, string) error {
+	m.thinkingWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) AppendThinkingMessage(context.Context, string, string) error {
+	m.thinkingWrites++
 	return nil
 }
 func (m *mockMessageCreator) InvalidateModelCache(string) {}
+
+// --- backfillInitialUserMessageIfMissing ---
+
+func TestBackfillInitialUserMessageIfMissing_RecordsWhenSessionEmpty(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	// Session has zero messages — backfill should record the prompt.
+	svc.backfillInitialUserMessageIfMissing(ctx, "task1", "session1", "original prompt")
+
+	if len(mc.userMessages) != 1 {
+		t.Fatalf("expected 1 user message recorded, got %d", len(mc.userMessages))
+	}
+	if mc.userMessages[0].content != "original prompt" {
+		t.Errorf("content = %q, want %q", mc.userMessages[0].content, "original prompt")
+	}
+}
+
+func TestBackfillInitialUserMessageIfMissing_SkipsWhenUserMessageExists(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	// Seed an existing user message — the backfill must be a no-op so a
+	// successful prior launch isn't duplicated on a subsequent resume.
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn1", TaskSessionID: "session1", TaskID: "task1", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create turn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            "msg1",
+		TaskSessionID: "session1",
+		TaskID:        "task1",
+		TurnID:        "turn1",
+		AuthorType:    models.MessageAuthorUser,
+		Content:       "user already sent this",
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	svc.backfillInitialUserMessageIfMissing(ctx, "task1", "session1", "would be a duplicate")
+
+	if len(mc.userMessages) != 0 {
+		t.Fatalf("expected no user message recorded (one already exists), got %d", len(mc.userMessages))
+	}
+}
+
+// TestBackfillInitialUserMessageIfMissing_SkipsWhenAgentMessageExists covers
+// the regression where a partial prior run produced agent output but never
+// recorded the initial user message. Recording the user message now with
+// CreatedAt=time.Now() would place it at the bottom of the chat (after the
+// agent messages), which is worse than leaving the chat alone.
+func TestBackfillInitialUserMessageIfMissing_SkipsWhenAgentMessageExists(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	if err := repo.CreateTurn(ctx, &models.Turn{ID: "turn1", TaskSessionID: "session1", TaskID: "task1", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("create turn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            "agent-msg-1",
+		TaskSessionID: "session1",
+		TaskID:        "task1",
+		TurnID:        "turn1",
+		AuthorType:    models.MessageAuthorAgent,
+		Content:       "agent partial output from a prior run",
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create agent message: %v", err)
+	}
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	svc.backfillInitialUserMessageIfMissing(ctx, "task1", "session1", "the original prompt")
+
+	if len(mc.userMessages) != 0 {
+		t.Fatalf("expected no backfill when agent messages exist, got %d", len(mc.userMessages))
+	}
+}
+
+func TestBackfillInitialUserMessageIfMissing_SkipsEmptyPrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	svc.backfillInitialUserMessageIfMissing(ctx, "task1", "session1", "")
+
+	if len(mc.userMessages) != 0 {
+		t.Fatalf("expected no user message for empty prompt, got %d", len(mc.userMessages))
+	}
+}
 
 func TestRecordInitialMessage_DoesNotChangeSessionState(t *testing.T) {
 	ctx := context.Background()
@@ -482,7 +1076,7 @@ func TestRecordInitialMessage_DoesNotChangeSessionState(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.messageCreator = mc
 
-	svc.recordInitialMessage(ctx, "task1", "session1", "hello world", false, nil)
+	svc.recordInitialMessage(ctx, "task1", "session1", "hello world", false, false, nil)
 
 	// Session state must remain STARTING — recordInitialMessage should not modify state.
 	session, err := repo.GetTaskSession(ctx, "session1")
@@ -509,7 +1103,7 @@ func TestPostLaunchCreated_SkipMessage_DoesNotChangeSessionState(t *testing.T) {
 
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
-	svc.postLaunchCreated(ctx, "task1", "session1", "prompt", true, false, nil)
+	svc.postLaunchCreated(ctx, "task1", "session1", "prompt", true, false, false, nil)
 
 	// Session state must remain STARTING when skipMessage=true.
 	session, err := repo.GetTaskSession(ctx, "session1")
@@ -530,7 +1124,7 @@ func TestPostLaunchCreated_WithMessage_DoesNotChangeSessionState(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.messageCreator = mc
 
-	svc.postLaunchCreated(ctx, "task1", "session1", "hello", false, false, nil)
+	svc.postLaunchCreated(ctx, "task1", "session1", "hello", false, false, false, nil)
 
 	// Session state must remain STARTING — postLaunchCreated delegates to
 	// recordInitialMessage which only creates the message.
@@ -547,6 +1141,29 @@ func TestPostLaunchCreated_WithMessage_DoesNotChangeSessionState(t *testing.T) {
 	}
 }
 
+func TestPostLaunchCreated_AutoStart_SetsMetadata(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	// autoStart=true should land an `auto_start: true` tag on the
+	// recorded user message so HasUserAuthoredMessage skips it. This
+	// asserts the metadata wiring in recordInitialMessage directly —
+	// the broader behavior is tested in cmd/kandev TestHasUserAuthoredMessage.
+	svc.postLaunchCreated(ctx, "task1", "session1", "auto-started by workflow", false, false, true, nil)
+
+	if len(mc.userMessages) != 1 {
+		t.Fatalf("expected 1 user message, got %d", len(mc.userMessages))
+	}
+	if mc.userMessages[0].metadata["auto_start"] != true {
+		t.Fatalf("expected auto_start=true in metadata, got %v", mc.userMessages[0].metadata)
+	}
+}
+
 func TestPostLaunchCreated_PlanMode_SetsMetadata(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -556,7 +1173,7 @@ func TestPostLaunchCreated_PlanMode_SetsMetadata(t *testing.T) {
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	svc.messageCreator = mc
 
-	svc.postLaunchCreated(ctx, "task1", "session1", "plan this", false, true, nil)
+	svc.postLaunchCreated(ctx, "task1", "session1", "plan this", false, true, false, nil)
 
 	// User message should have plan_mode metadata.
 	if len(mc.userMessages) != 1 {
@@ -608,7 +1225,7 @@ func TestStartCreatedSession_WrapsFirstPromptWithKandevSystemBlock(t *testing.T)
 	mc := &mockMessageCreator{}
 	svc.messageCreator = mc
 
-	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Build me a feature", false, false, nil)
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Build me a feature", false, false, false, nil)
 	if err != nil {
 		t.Fatalf("StartCreatedSession failed: %v", err)
 	}
@@ -667,9 +1284,9 @@ func TestStartCreatedSession_DoesNotDoubleWrapPreWrappedPrompt(t *testing.T) {
 	svc.messageCreator = mc
 
 	// Simulate an upstream caller (e.g. wsAddMessage) that has already wrapped.
-	preWrapped := sysprompt.InjectKandevContext("task1", "session1", "Build me a feature")
+	preWrapped := sysprompt.InjectKandevContext("task1", "session1", "Build me a feature", false)
 
-	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", preWrapped, false, false, nil)
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", preWrapped, false, false, false, nil)
 	if err != nil {
 		t.Fatalf("StartCreatedSession failed: %v", err)
 	}
@@ -713,7 +1330,7 @@ func TestStartCreatedSession_EmptyPromptSkipsWrap(t *testing.T) {
 	mc := &mockMessageCreator{}
 	svc.messageCreator = mc
 
-	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "", false, false, nil)
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "", false, false, false, nil)
 	if err != nil {
 		t.Fatalf("StartCreatedSession failed: %v", err)
 	}
@@ -841,13 +1458,20 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 
 	// Agent launch succeeds so the resume path does not unwind and mark the task
 	// FAILED, which would exercise a separate state-mutation code path.
-	agentMgr := &mockAgentManager{
-		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-			return &executor.LaunchAgentResponse{
-				AgentExecutionID: "exec-new",
-				Status:           v1.AgentStatusStarting,
-			}, nil
+	startAgentProcessCalled := false
+	agentMgr := &sessionUpdatingAgentManager{
+		mockAgentManager: &mockAgentManager{
+			launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				return &executor.LaunchAgentResponse{
+					AgentExecutionID: "exec-new",
+					Status:           v1.AgentStatusStarting,
+				}, nil
+			},
 		},
+		repo:          repo,
+		sessionID:     "session1",
+		taskID:        "task1",
+		onStartCalled: &startAgentProcessCalled,
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
@@ -897,6 +1521,15 @@ func (c *ctxAwareTaskRepo) UpdateTaskState(ctx context.Context, taskID string, s
 		return err
 	}
 	return c.inner.UpdateTaskState(ctx, taskID, state)
+}
+
+func (c *ctxAwareTaskRepo) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return c.inner.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
 }
 
 // TestResumeTaskSession_FailedStateWriteSurvivesCancelledCallerCtx verifies the
@@ -998,7 +1631,7 @@ func TestErrorClassificationFunctions(t *testing.T) {
 			{"unrelated error", errors.New("something else"), false},
 			{"exact match", ErrAgentPromptInProgress, true},
 			{"wrapped error", fmt.Errorf("outer: %w", ErrAgentPromptInProgress), true},
-			{"string contains match", errors.New("prefix: agent is currently processing a prompt, try later"), true},
+			{"untyped string match no longer accepted", errors.New("prefix: agent is currently processing a prompt, try later"), false},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1019,7 +1652,7 @@ func TestErrorClassificationFunctions(t *testing.T) {
 			{"unrelated error", errors.New("something else"), false},
 			{"exact match", ErrSessionResetInProgress, true},
 			{"wrapped error", fmt.Errorf("outer: %w", ErrSessionResetInProgress), true},
-			{"string contains match", errors.New("prefix: session reset in progress, please wait"), true},
+			{"untyped string match no longer accepted", errors.New("prefix: session reset in progress, please wait"), false},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1038,8 +1671,8 @@ func TestErrorClassificationFunctions(t *testing.T) {
 		}{
 			{"nil error", nil, false},
 			{"unrelated error", errors.New("something else"), false},
-			{"lifecycle manager error", fmt.Errorf("session %q already has an agent running (execution: %s)", "s1", "exec-1"), true},
-			{"wrapped error", fmt.Errorf("failed to resume session: %w", fmt.Errorf("session %q already has an agent running (execution: %s)", "s1", "exec-1")), true},
+			{"lifecycle manager error", fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, "s1", "exec-1"), true},
+			{"wrapped error", fmt.Errorf("failed to resume session: %w", fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, "s1", "exec-1")), true},
 		}
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
@@ -1125,6 +1758,9 @@ func TestGetTaskSessionStatus_HealsStuckStartingSession(t *testing.T) {
 	if updated.State != models.TaskSessionStateWaitingForInput {
 		t.Fatalf("expected persisted session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
 	}
+	if resp.UpdatedAt != updated.UpdatedAt.UTC().Format(time.RFC3339Nano) {
+		t.Fatalf("expected response updated_at %q, got %q", updated.UpdatedAt.UTC().Format(time.RFC3339Nano), resp.UpdatedAt)
+	}
 	if state, ok := taskRepo.updatedStates["task1"]; !ok || state != v1.TaskStateReview {
 		t.Fatalf("expected task state %q, got %q (ok=%v)", v1.TaskStateReview, state, ok)
 	}
@@ -1193,22 +1829,165 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
 
 		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
-			ID:        "er1",
-			SessionID: "session1",
-			TaskID:    "task1",
-			CreatedAt: now,
-			UpdatedAt: now,
+			ID:               "er1",
+			SessionID:        "session1",
+			TaskID:           "task1",
+			AgentExecutionID: "exec-terminal",
+			CreatedAt:        now,
+			UpdatedAt:        now,
 		})
 		if err != nil {
 			t.Fatalf("failed to upsert executor running: %v", err)
 		}
 
-		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		agentMgr := &mockAgentManager{}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 		svc.reconcileSessionsOnStartup(ctx)
 
 		_, err = repo.GetExecutorRunningBySessionID(ctx, "session1")
 		if err == nil {
 			t.Fatal("expected ExecutorRunning record to be deleted for terminal session")
+		}
+		agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 {
+			t.Fatalf("expected one StopAgentWithReason call, got %d", len(stopCalls))
+		}
+		if stopCalls[0] != (stopAgentCall{
+			ExecutionID: "exec-terminal",
+			Reason:      "startup terminal session cleanup",
+			Force:       true,
+		}) {
+			t.Fatalf("unexpected StopAgentWithReason call: %#v", stopCalls[0])
+		}
+	})
+
+	t.Run("terminal_session_stop_failure_preserves_executor_row", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "er1",
+			SessionID:        "session1",
+			TaskID:           "task1",
+			AgentExecutionID: "exec-terminal",
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		agentMgr := &mockAgentManager{stopAgentWithReasonErr: errors.New("runtime still running")}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.reconcileSessionsOnStartup(ctx)
+
+		running, err := repo.GetExecutorRunningBySessionID(ctx, "session1")
+		if err != nil {
+			t.Fatalf("expected ExecutorRunning record to be preserved after stop failure: %v", err)
+		}
+		if running.AgentExecutionID != "exec-terminal" {
+			t.Fatalf("expected execution ID to be preserved, got %q", running.AgentExecutionID)
+		}
+		agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 {
+			t.Fatalf("expected one StopAgentWithReason call, got %d", len(stopCalls))
+		}
+		if stopCalls[0] != (stopAgentCall{
+			ExecutionID: "exec-terminal",
+			Reason:      "startup terminal session cleanup",
+			Force:       true,
+		}) {
+			t.Fatalf("unexpected StopAgentWithReason call: %#v", stopCalls[0])
+		}
+	})
+
+	t.Run("missing_session_runtime_cleaned_up", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "er1",
+			SessionID:        "session-deleted",
+			TaskID:           "task-deleted",
+			AgentExecutionID: "exec-deleted",
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		agentMgr := &mockAgentManager{}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.reconcileSessionsOnStartup(ctx)
+
+		_, err = repo.GetExecutorRunningBySessionID(ctx, "session-deleted")
+		if err == nil {
+			t.Fatal("expected ExecutorRunning record to be deleted for missing session after stop")
+		}
+		agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 {
+			t.Fatalf("expected one StopAgentWithReason call, got %d", len(stopCalls))
+		}
+		if stopCalls[0] != (stopAgentCall{
+			ExecutionID: "exec-deleted",
+			Reason:      "startup missing session cleanup",
+			Force:       true,
+		}) {
+			t.Fatalf("unexpected StopAgentWithReason call: %#v", stopCalls[0])
+		}
+	})
+
+	t.Run("missing_session_stop_failure_preserves_executor_row", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "er1",
+			SessionID:        "session-deleted",
+			TaskID:           "task-deleted",
+			AgentExecutionID: "exec-deleted",
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		agentMgr := &mockAgentManager{stopAgentWithReasonErr: errors.New("runtime still running")}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.reconcileSessionsOnStartup(ctx)
+
+		running, err := repo.GetExecutorRunningBySessionID(ctx, "session-deleted")
+		if err != nil {
+			t.Fatalf("expected ExecutorRunning record to be preserved after stop failure: %v", err)
+		}
+		if running.AgentExecutionID != "exec-deleted" {
+			t.Fatalf("expected execution ID to be preserved, got %q", running.AgentExecutionID)
+		}
+		agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 {
+			t.Fatalf("expected one StopAgentWithReason call, got %d", len(stopCalls))
+		}
+		if stopCalls[0] != (stopAgentCall{
+			ExecutionID: "exec-deleted",
+			Reason:      "startup missing session cleanup",
+			Force:       true,
+		}) {
+			t.Fatalf("unexpected StopAgentWithReason call: %#v", stopCalls[0])
 		}
 	})
 
@@ -1283,6 +2062,93 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 		}
 		if er.ResumeToken != "acp-session-abc" {
 			t.Fatalf("expected resume token to be preserved, got %q", er.ResumeToken)
+		}
+	})
+
+	t.Run("failed_session_without_resume_token_stops_runtime_before_cleanup", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "er1",
+			SessionID:        "session1",
+			TaskID:           "task1",
+			AgentExecutionID: "exec-failed",
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		agentMgr := &mockAgentManager{}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.reconcileSessionsOnStartup(ctx)
+
+		_, err = repo.GetExecutorRunningBySessionID(ctx, "session1")
+		if err == nil {
+			t.Fatal("expected ExecutorRunning record to be deleted for failed session after stop")
+		}
+		agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 {
+			t.Fatalf("expected one StopAgentWithReason call, got %d", len(stopCalls))
+		}
+		if stopCalls[0] != (stopAgentCall{
+			ExecutionID: "exec-failed",
+			Reason:      "startup failed session cleanup",
+			Force:       true,
+		}) {
+			t.Fatalf("unexpected StopAgentWithReason call: %#v", stopCalls[0])
+		}
+	})
+
+	t.Run("failed_session_stop_failure_preserves_executor_row", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:               "er1",
+			SessionID:        "session1",
+			TaskID:           "task1",
+			AgentExecutionID: "exec-failed",
+			CreatedAt:        now,
+			UpdatedAt:        now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		agentMgr := &mockAgentManager{stopAgentWithReasonErr: errors.New("runtime still running")}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.reconcileSessionsOnStartup(ctx)
+
+		running, err := repo.GetExecutorRunningBySessionID(ctx, "session1")
+		if err != nil {
+			t.Fatalf("expected ExecutorRunning record to be preserved after stop failure: %v", err)
+		}
+		if running.AgentExecutionID != "exec-failed" {
+			t.Fatalf("expected execution ID to be preserved, got %q", running.AgentExecutionID)
+		}
+		agentMgr.mu.Lock()
+		stopCalls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		if len(stopCalls) != 1 {
+			t.Fatalf("expected one StopAgentWithReason call, got %d", len(stopCalls))
+		}
+		if stopCalls[0] != (stopAgentCall{
+			ExecutionID: "exec-failed",
+			Reason:      "startup failed session cleanup",
+			Force:       true,
+		}) {
+			t.Fatalf("unexpected StopAgentWithReason call: %#v", stopCalls[0])
 		}
 	})
 

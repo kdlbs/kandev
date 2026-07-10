@@ -4,11 +4,13 @@ import type { GitHubSlice, GitHubSliceState } from "./types";
 export const defaultGitHubState: GitHubSliceState = {
   githubStatus: { status: null, loaded: false, loading: false },
   taskPRs: { byTaskId: {} },
+  pendingPrUrlByTaskId: { byTaskId: {} },
   prWatches: { items: [], loaded: false, loading: false },
   reviewWatches: { items: [], loaded: false, loading: false },
   issueWatches: { items: [], loaded: false, loading: false },
   actionPresets: { byWorkspaceId: {}, loading: {} },
   prFeedbackCache: { byKey: {} },
+  taskCIAutomation: { byTaskId: {}, loading: {}, saving: {}, errors: {} },
 };
 
 const PR_FEEDBACK_CACHE_LIMIT = 20;
@@ -33,7 +35,33 @@ function createGitHubStatusActions(
   };
 }
 
-function createTaskPRActions(set: ImmerSet): Pick<GitHubSlice, "setTaskPRs" | "setTaskPR"> {
+function clearPendingPrUrlForRepo(draft: GitHubSlice, taskId: string, repoKey: string) {
+  const pending = draft.pendingPrUrlByTaskId.byTaskId[taskId];
+  if (!pending) return;
+  delete pending[repoKey];
+  if (Object.keys(pending).length === 0) {
+    delete draft.pendingPrUrlByTaskId.byTaskId[taskId];
+  }
+}
+
+/** Clear client-only pending URLs for the repo that just synced (not sibling repos). */
+function clearPendingForTaskPR(
+  draft: GitHubSlice,
+  taskId: string,
+  pr: { repository_id?: string; pr_url?: string },
+) {
+  clearPendingPrUrlForRepo(draft, taskId, pr.repository_id ?? "");
+  clearPendingPrUrlForRepo(draft, taskId, "");
+  const pending = draft.pendingPrUrlByTaskId.byTaskId[taskId];
+  if (!pending || !pr.pr_url) return;
+  for (const key of Object.keys(pending)) {
+    if (pending[key] === pr.pr_url) clearPendingPrUrlForRepo(draft, taskId, key);
+  }
+}
+
+function createTaskPRActions(
+  set: ImmerSet,
+): Pick<GitHubSlice, "setTaskPRs" | "setTaskPR" | "setPendingPrUrlForTask"> {
   return {
     setTaskPRs: (prs) =>
       set((draft) => {
@@ -41,16 +69,35 @@ function createTaskPRActions(set: ImmerSet): Pick<GitHubSlice, "setTaskPRs" | "s
       }),
     setTaskPR: (taskId, pr) =>
       set((draft) => {
-        // Upsert by repository_id so multi-repo PRs coexist for the same task.
-        // For legacy rows without a repository_id, match on the empty key (one
-        // such row per task max), preserving prior single-PR semantics.
+        // Upsert by (repository_id, pr_number) so multi-branch tasks can
+        // hold N PRs on the same repo as siblings. Keying on
+        // repository_id alone collapses every PR for that repo onto one
+        // slot — the second WS event silently overwrites the first and
+        // the UI shows only the most-recent PR. Legacy rows without a
+        // repository_id match on the empty key + pr_number, preserving
+        // prior single-PR semantics for single-repo tasks.
         const current = draft.taskPRs.byTaskId[taskId];
         const existing = Array.isArray(current) ? current : [];
         const repoKey = pr.repository_id ?? "";
-        const idx = existing.findIndex((p) => (p.repository_id ?? "") === repoKey);
+        const idx = existing.findIndex(
+          (p) => (p.repository_id ?? "") === repoKey && p.pr_number === pr.pr_number,
+        );
         if (idx >= 0) existing[idx] = pr;
         else existing.push(pr);
         draft.taskPRs.byTaskId[taskId] = existing;
+        clearPendingForTaskPR(draft, taskId, pr);
+      }),
+    setPendingPrUrlForTask: (taskId, repoKey, prUrl) =>
+      set((draft) => {
+        const trimmed = prUrl.trim();
+        if (!trimmed) {
+          clearPendingPrUrlForRepo(draft, taskId, repoKey);
+          return;
+        }
+        if (!draft.pendingPrUrlByTaskId.byTaskId[taskId]) {
+          draft.pendingPrUrlByTaskId.byTaskId[taskId] = {};
+        }
+        draft.pendingPrUrlByTaskId.byTaskId[taskId][repoKey] = trimmed;
       }),
   };
 }
@@ -186,6 +233,35 @@ function createPRFeedbackCacheActions(
   };
 }
 
+function createTaskCIAutomationActions(
+  set: ImmerSet,
+): Pick<
+  GitHubSlice,
+  | "setTaskCIAutomationOptions"
+  | "setTaskCIAutomationLoading"
+  | "setTaskCIAutomationSaving"
+  | "setTaskCIAutomationError"
+> {
+  return {
+    setTaskCIAutomationOptions: (taskId, options) =>
+      set((draft) => {
+        draft.taskCIAutomation.byTaskId[taskId] = options;
+      }),
+    setTaskCIAutomationLoading: (taskId, loading) =>
+      set((draft) => {
+        draft.taskCIAutomation.loading[taskId] = loading;
+      }),
+    setTaskCIAutomationSaving: (taskId, saving) =>
+      set((draft) => {
+        draft.taskCIAutomation.saving[taskId] = saving;
+      }),
+    setTaskCIAutomationError: (taskId, error) =>
+      set((draft) => {
+        draft.taskCIAutomation.errors[taskId] = error;
+      }),
+  };
+}
+
 function createRateLimitActions(set: ImmerSet): Pick<GitHubSlice, "applyGitHubRateLimitUpdate"> {
   return {
     applyGitHubRateLimitUpdate: (update) =>
@@ -217,4 +293,5 @@ export const createGitHubSlice: StateCreator<
   ...createActionPresetActions(set),
   ...createRateLimitActions(set),
   ...createPRFeedbackCacheActions(set),
+  ...createTaskCIAutomationActions(set),
 });

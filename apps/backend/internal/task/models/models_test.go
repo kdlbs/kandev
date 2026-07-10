@@ -8,6 +8,34 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func TestLoadSessionRuntimeConfigMapStringExtractsReservedKeys(t *testing.T) {
+	cfg, ok := LoadSessionRuntimeConfig(map[string]interface{}{
+		SessionMetaKeyRuntimeConfig: map[string]string{
+			"model":            "gpt-5.3-codex-spark",
+			"mode":             "acceptEdits",
+			"reasoning_effort": "low",
+		},
+	})
+	if !ok {
+		t.Fatal("expected runtime config")
+	}
+	if cfg.Model != "gpt-5.3-codex-spark" {
+		t.Fatalf("Model = %q", cfg.Model)
+	}
+	if cfg.Mode != "acceptEdits" {
+		t.Fatalf("Mode = %q", cfg.Mode)
+	}
+	if got := cfg.ConfigOptions["reasoning_effort"]; got != "low" {
+		t.Fatalf("reasoning_effort = %q", got)
+	}
+	if _, ok := cfg.ConfigOptions["model"]; ok {
+		t.Fatal("model key should not remain in ConfigOptions")
+	}
+	if _, ok := cfg.ConfigOptions["mode"]; ok {
+		t.Fatal("mode key should not remain in ConfigOptions")
+	}
+}
+
 func TestTaskStateConstants(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -32,6 +60,29 @@ func TestTaskStateConstants(t *testing.T) {
 				t.Errorf("expected %s, got %s", tt.expected, string(tt.state))
 			}
 		})
+	}
+}
+
+func TestIsTerminalTaskState(t *testing.T) {
+	tests := []struct {
+		state v1.TaskState
+		want  bool
+	}{
+		{v1.TaskStateCompleted, true},
+		{v1.TaskStateFailed, true},
+		{v1.TaskStateCancelled, true},
+		{v1.TaskStateTODO, false},
+		{v1.TaskStateCreated, false},
+		{v1.TaskStateScheduling, false},
+		{v1.TaskStateInProgress, false},
+		{v1.TaskStateReview, false},
+		{v1.TaskStateBlocked, false},
+		{v1.TaskStateWaitingForInput, false},
+	}
+	for _, tt := range tests {
+		if got := IsTerminalTaskState(tt.state); got != tt.want {
+			t.Errorf("IsTerminalTaskState(%s) = %v, want %v", tt.state, got, tt.want)
+		}
 	}
 }
 
@@ -218,6 +269,26 @@ func TestTaskToAPIWithEmptyOptionalFields(t *testing.T) {
 
 	if len(apiTask.Repositories) != 0 {
 		t.Errorf("expected no repositories, got %d", len(apiTask.Repositories))
+	}
+}
+
+func TestTaskEnvironmentRepoToAPIIncludesBranchSlug(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &TaskEnvironmentRepo{
+		ID:                "ter-1",
+		TaskEnvironmentID: "env-1",
+		RepositoryID:      "repo-1",
+		BranchSlug:        "branch-5hn",
+		WorktreeID:        "wt-1",
+		Position:          1,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+
+	api := repo.ToAPI()
+
+	if api["branch_slug"] != "branch-5hn" {
+		t.Fatalf("branch_slug = %v, want branch-5hn", api["branch_slug"])
 	}
 }
 

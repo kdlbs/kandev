@@ -17,10 +17,24 @@ func (h *Handlers) handleListExecutors(ctx context.Context, msg *ws.Message) (*w
 		h.logger.Error("failed to list executors", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list executors", nil)
 	}
-	dtos := make([]dto.ExecutorDTO, 0, len(executors))
-	for _, e := range executors {
-		dtos = append(dtos, dto.FromExecutor(e))
+
+	profiles, err := h.taskSvc.ListAllExecutorProfiles(ctx)
+	if err != nil {
+		h.logger.Error("failed to list executor profiles for executor listing", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list executor profiles", nil)
 	}
+	profilesByExecutor := make(map[string][]dto.ExecutorProfileDTO, len(executors))
+	for _, profile := range profiles {
+		profilesByExecutor[profile.ExecutorID] = append(profilesByExecutor[profile.ExecutorID], dto.FromExecutorProfile(profile))
+	}
+
+	dtos := make([]dto.ExecutorDTO, 0, len(executors))
+	for _, executor := range executors {
+		executorDTO := dto.FromExecutor(executor)
+		executorDTO.Profiles = profilesByExecutor[executor.ID]
+		dtos = append(dtos, executorDTO)
+	}
+
 	return ws.NewResponse(msg.ID, msg.Action, dto.ListExecutorsResponse{Executors: dtos, Total: len(dtos)})
 }
 

@@ -21,9 +21,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"unsafe"
 
-	"golang.org/x/sys/windows"
+	"github.com/kandev/kandev/internal/agentctl/server/winproc"
 )
 
 func main() {
@@ -47,77 +46,33 @@ func main() {
 		}
 	}()
 
-	job, err := createKillOnCloseJob()
-	if err != nil {
-		die("create job: %v", err)
-	}
-	// Don't `defer CloseHandle(job)` — we want the OS to close it as part of
-	// process teardown so KILL_ON_JOB_CLOSE fires correctly on any exit path
-	// including os.Exit and panics. Manual close on success is also fine
-	// because the child has already exited by then.
-
 	cmd := exec.Command(os.Args[1], os.Args[2:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
 	if err := cmd.Start(); err != nil {
-		_ = windows.CloseHandle(job)
 		die("start child: %v", err)
 	}
 
-	if err := assignProcessToJob(job, cmd.Process.Pid); err != nil {
+	job, err := winproc.InstallKillOnCloseJobForCommand(cmd)
+	if err != nil {
 		_ = cmd.Process.Kill()
-		_ = windows.CloseHandle(job)
 		die("assign job: %v", err)
 	}
+	// Don't `defer job.Close()` — we want the OS to close it as part of
+	// process teardown so KILL_ON_JOB_CLOSE fires correctly on any exit path
+	// including os.Exit and panics. Manual close on success is also fine
+	// because the child has already exited by then.
 
 	waitErr := cmd.Wait()
-	_ = windows.CloseHandle(job)
+	_ = job.Close()
 	if waitErr != nil {
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			os.Exit(exitErr.ExitCode())
 		}
 		die("wait: %v", waitErr)
 	}
-}
-
-func createKillOnCloseJob() (windows.Handle, error) {
-	job, err := windows.CreateJobObject(nil, nil)
-	if err != nil {
-		return 0, fmt.Errorf("CreateJobObject: %w", err)
-	}
-	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
-		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
-			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-		},
-	}
-	if _, err := windows.SetInformationJobObject(
-		job,
-		windows.JobObjectExtendedLimitInformation,
-		uintptr(unsafe.Pointer(&info)),
-		uint32(unsafe.Sizeof(info)),
-	); err != nil {
-		_ = windows.CloseHandle(job)
-		return 0, fmt.Errorf("SetInformationJobObject: %w", err)
-	}
-	return job, nil
-}
-
-func assignProcessToJob(job windows.Handle, pid int) error {
-	procHandle, err := windows.OpenProcess(
-		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE,
-		false,
-		uint32(pid),
-	)
-	if err != nil {
-		return fmt.Errorf("OpenProcess(%d): %w", pid, err)
-	}
-	defer windows.CloseHandle(procHandle)
-	if err := windows.AssignProcessToJobObject(job, procHandle); err != nil {
-		return fmt.Errorf("AssignProcessToJobObject: %w", err)
-	}
-	return nil
 }
 
 func die(format string, args ...any) {

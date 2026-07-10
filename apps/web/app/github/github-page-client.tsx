@@ -1,19 +1,23 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { IconBrandGithub } from "@tabler/icons-react";
+import Link from "@/components/routing/app-link";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { IconBrandGithub, IconMenu2 } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
+import { Button } from "@kandev/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { PageTopbar } from "@/components/page-topbar";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { usePRKeyToTasks } from "@/hooks/domains/github/use-pr-key-to-tasks";
 import type { Repository, Workflow, WorkflowStep } from "@/lib/types/http";
-import type { GitHubIssue, GitHubPR } from "@/lib/types/github";
+import type { GitHubIssue, GitHubPR, TaskPR } from "@/lib/types/github";
 import { PRList } from "@/components/github/my-github/pr-list";
 import { IssueList } from "@/components/github/my-github/issue-list";
 import {
   PresetsSidebar,
   type SidebarSelection,
 } from "@/components/github/my-github/presets-sidebar";
+import { PresetsScopeBar } from "@/components/github/my-github/presets-scope-bar";
 import {
   PR_PRESETS,
   ISSUE_PRESETS,
@@ -40,6 +44,7 @@ import {
   resolveIssuePresets,
 } from "@/components/github/my-github/action-presets";
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
+import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 
 type GitHubPageClientProps = {
   workspaceId?: string;
@@ -48,12 +53,26 @@ type GitHubPageClientProps = {
   repositories: Repository[];
 };
 
-function PageHeader() {
+function PageHeader({ onOpenMobileSidebar }: { onOpenMobileSidebar?: () => void }) {
   return (
     <PageTopbar
       title="GitHub"
       subtitle="Pull requests and issues across your repos."
       icon={<IconBrandGithub className="h-4 w-4" />}
+      actions={
+        onOpenMobileSidebar && (
+          <Button
+            variant="outline"
+            size="icon-lg"
+            onClick={onOpenMobileSidebar}
+            className="md:hidden cursor-pointer"
+            data-testid="github-mobile-menu-button"
+            aria-label="Open GitHub filters"
+          >
+            <IconMenu2 className="h-4 w-4" />
+          </Button>
+        )
+      }
     />
   );
 }
@@ -109,6 +128,7 @@ function ResultsList({
   prPresets,
   issuePresets,
   onStartTask,
+  prKeyToTasks,
 }: {
   selection: SidebarSelection;
   items: Array<GitHubPR | GitHubIssue>;
@@ -117,6 +137,7 @@ function ResultsList({
   prPresets: TaskPreset[];
   issuePresets: TaskPreset[];
   onStartTask: (payload: LaunchPayload) => void;
+  prKeyToTasks: Map<string, TaskPR[]>;
 }) {
   if (selection.kind === "pr") {
     return (
@@ -126,6 +147,7 @@ function ResultsList({
         error={error}
         presets={prPresets}
         onStartTask={onStartTask}
+        prKeyToTasks={prKeyToTasks}
       />
     );
   }
@@ -143,6 +165,7 @@ function ResultsList({
 type GitHubPageState = ReturnType<typeof useGitHubPageState>;
 
 function useRepoOptions(
+  workspaceId: string | null,
   selection: SidebarSelection,
   committedQuery: string,
   items: Array<GitHubPR | GitHubIssue>,
@@ -158,7 +181,7 @@ function useRepoOptions(
   // Reset the accumulator whenever the query context changes (preset, saved,
   // custom query). Repo filter is deliberately excluded so narrowing doesn't
   // reset — that's the whole point of the accumulator.
-  const reposResetKey = `${selection.kind}:${selection.source}:${selection.id}:${committedQuery.trim()}`;
+  const reposResetKey = `${workspaceId ?? "global"}:${selection.kind}:${selection.source}:${selection.id}:${committedQuery.trim()}`;
   const knownRepos = useKnownRepos(reposResetKey, pageRepos);
   return useMemo(() => {
     const set = new Set(knownRepos);
@@ -167,83 +190,206 @@ function useRepoOptions(
   }, [knownRepos, repoFilter]);
 }
 
-function useResolvedQueryPresets() {
-  const { prPresets: storedPr, issuePresets: storedIssue } = useDefaultQueryPresets();
+function useResolvedQueryPresets(workspaceId: string | null = null) {
+  const { prPresets: storedPr, issuePresets: storedIssue } = useDefaultQueryPresets(workspaceId);
   const pr = useMemo(() => resolvePresetOptions(storedPr, PR_PRESETS), [storedPr]);
   const issue = useMemo(() => resolvePresetOptions(storedIssue, ISSUE_PRESETS), [storedIssue]);
   return { pr, issue };
 }
 
-function useGitHubPageState() {
-  const { pr: resolvedPrPresets, issue: resolvedIssuePresets } = useResolvedQueryPresets();
-
+function useInitialSidebarSelection(
+  workspaceId: string | null,
+  resolvedPrPresets: PresetOption[],
+  autoResetSearchRef: MutableRefObject<boolean>,
+  setQueryImmediate: (query: string) => void,
+  setRepoFilter: (repo: string) => void,
+) {
+  const userSelectedRef = useRef(false);
   const [selection, setSelection] = useState<SidebarSelection>(() => ({
     kind: "pr",
     source: "preset",
     id: resolvedPrPresets[0]?.value ?? "",
   }));
-  const {
-    draft: customQuery,
-    committed: committedQuery,
-    setDraft: setCustomQuery,
-    setImmediate: setQueryImmediate,
-    commit: commitCustomQuery,
-  } = useCommittedQuery(resolvedPrPresets[0]?.filter ?? "");
-  const [repoFilter, setRepoFilter] = useState("");
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
-  const {
-    presets: savedPresets,
-    save: saveSavedPreset,
-    remove: removeSavedPreset,
-  } = useSavedPresets();
 
-  const presets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
-  const search = useGitHubSearch<GitHubPR | GitHubIssue>(
-    selection.kind,
-    presets,
-    selection.source === "preset" ? selection.id : "",
-    committedQuery,
-    repoFilter,
-  );
-  const repoOptions = useRepoOptions(selection, committedQuery, search.items, repoFilter);
-  const title = useMemo(
-    () => resolveTitle(selection, savedPresets, resolvedPrPresets, resolvedIssuePresets),
-    [selection, savedPresets, resolvedPrPresets, resolvedIssuePresets],
-  );
+  useEffect(() => {
+    userSelectedRef.current = false;
+    autoResetSearchRef.current = true;
+  }, [workspaceId]);
 
-  const onSelect = useCallback(
+  useEffect(() => {
+    if (userSelectedRef.current || !autoResetSearchRef.current) return;
+    const first = resolvedPrPresets[0];
+    setSelection({ kind: "pr", source: "preset", id: first?.value ?? "" });
+    setQueryImmediate(first?.filter ?? "");
+    setRepoFilter("");
+  }, [workspaceId, resolvedPrPresets, autoResetSearchRef, setQueryImmediate, setRepoFilter]);
+
+  const setUserSelection = useCallback((next: SidebarSelection) => {
+    userSelectedRef.current = true;
+    setSelection(next);
+  }, []);
+
+  return { selection, setProgrammaticSelection: setSelection, setUserSelection };
+}
+
+function firstPresetSelection(
+  kind: SidebarSelection["kind"],
+  pr: PresetOption[],
+  issue: PresetOption[],
+) {
+  const preset = (kind === "pr" ? pr : issue)[0];
+  return {
+    selection: { kind, source: "preset", id: preset?.value ?? "" } as SidebarSelection,
+    filter: preset?.filter ?? "",
+  };
+}
+
+function useSidebarSelectionHandler({
+  savedPresets,
+  resolvedPrPresets,
+  resolvedIssuePresets,
+  setQueryImmediate,
+  setRepoFilter,
+  setUserSelection,
+  markSearchInteracted,
+}: {
+  savedPresets: SavedPreset[];
+  resolvedPrPresets: PresetOption[];
+  resolvedIssuePresets: PresetOption[];
+  setQueryImmediate: (query: string) => void;
+  setRepoFilter: (repo: string) => void;
+  setUserSelection: (next: SidebarSelection) => void;
+  markSearchInteracted: () => void;
+}) {
+  return useCallback(
     (s: SidebarSelection) => {
-      setSelection(s);
+      markSearchInteracted();
+      setUserSelection(s);
       if (s.source === "saved") {
         const found = savedPresets.find((p) => p.id === s.id);
         setQueryImmediate(found?.customQuery ?? "");
         setRepoFilter(found?.repoFilter ?? "");
         return;
       }
-      const presetList = s.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
-      const preset = presetList.find((p) => p.value === s.id);
+      const preset = (s.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets).find(
+        (p) => p.value === s.id,
+      );
       setQueryImmediate(preset?.filter ?? "");
       setRepoFilter("");
     },
-    [savedPresets, setQueryImmediate, resolvedPrPresets, resolvedIssuePresets],
+    [
+      savedPresets,
+      setQueryImmediate,
+      resolvedPrPresets,
+      resolvedIssuePresets,
+      setUserSelection,
+      markSearchInteracted,
+    ],
   );
+}
+
+function useSearchInteractionControls(
+  setCustomQueryRaw: (query: string) => void,
+  setRepoFilterRaw: (repo: string) => void,
+) {
+  const autoResetSearchRef = useRef(true);
+  const markSearchInteracted = useCallback(() => {
+    autoResetSearchRef.current = false;
+  }, []);
+  const setCustomQuery = useCallback(
+    (query: string) => {
+      markSearchInteracted();
+      setCustomQueryRaw(query);
+    },
+    [markSearchInteracted, setCustomQueryRaw],
+  );
+  const setRepoFilter = useCallback(
+    (repo: string) => {
+      markSearchInteracted();
+      setRepoFilterRaw(repo);
+    },
+    [markSearchInteracted, setRepoFilterRaw],
+  );
+  return { autoResetSearchRef, markSearchInteracted, setCustomQuery, setRepoFilter };
+}
+
+function useGitHubPageState(workspaceId: string | null) {
+  const { pr: resolvedPrPresets, issue: resolvedIssuePresets } =
+    useResolvedQueryPresets(workspaceId);
+  const {
+    draft: customQuery,
+    committed: committedQuery,
+    setDraft: setCustomQueryRaw,
+    setImmediate: setQueryImmediate,
+    commit: commitCustomQuery,
+  } = useCommittedQuery(resolvedPrPresets[0]?.filter ?? "");
+  const [repoFilter, setRepoFilterRaw] = useState("");
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const { autoResetSearchRef, markSearchInteracted, setCustomQuery, setRepoFilter } =
+    useSearchInteractionControls(setCustomQueryRaw, setRepoFilterRaw);
+  const {
+    presets: savedPresets,
+    save: saveSavedPreset,
+    remove: removeSavedPreset,
+  } = useSavedPresets(workspaceId);
+  const { selection, setProgrammaticSelection, setUserSelection } = useInitialSidebarSelection(
+    workspaceId,
+    resolvedPrPresets,
+    autoResetSearchRef,
+    setQueryImmediate,
+    setRepoFilterRaw,
+  );
+
+  const presets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
+  const search = useGitHubSearch<GitHubPR | GitHubIssue>({
+    kind: selection.kind,
+    presets,
+    preset: selection.source === "preset" ? selection.id : "",
+    customQuery: committedQuery,
+    repoFilter,
+    workspaceId,
+  });
+  const repoOptions = useRepoOptions(
+    workspaceId,
+    selection,
+    committedQuery,
+    search.items,
+    repoFilter,
+  );
+  const title = useMemo(
+    () => resolveTitle(selection, savedPresets, resolvedPrPresets, resolvedIssuePresets),
+    [selection, savedPresets, resolvedPrPresets, resolvedIssuePresets],
+  );
+
+  const onSelect = useSidebarSelectionHandler({
+    savedPresets,
+    resolvedPrPresets,
+    resolvedIssuePresets,
+    setQueryImmediate,
+    setRepoFilter: setRepoFilterRaw,
+    setUserSelection,
+    markSearchInteracted,
+  });
 
   const canSaveCurrent = customQuery.trim().length > 0 || repoFilter.length > 0;
   const suggestedLabel = customQuery.trim() || (repoFilter ? `In ${repoFilter}` : "Saved query");
-  const onOpenSaveDialog = () => {
-    if (canSaveCurrent) setSaveDialogOpen(true);
-  };
+  const onOpenSaveDialog = () => canSaveCurrent && setSaveDialogOpen(true);
   const onConfirmSave = (label: string) => {
     const created = saveSavedPreset({ kind: selection.kind, label, customQuery, repoFilter });
-    setSelection({ kind: selection.kind, source: "saved", id: created.id });
+    if (!created) return;
+    setProgrammaticSelection({ kind: selection.kind, source: "saved", id: created.id });
   };
   const onDeleteSaved = (id: string) => {
     removeSavedPreset(id);
     if (selection.source === "saved" && selection.id === id) {
-      const fallbackPresets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
-      setSelection({ kind: selection.kind, source: "preset", id: fallbackPresets[0]?.value ?? "" });
-      setQueryImmediate(fallbackPresets[0]?.filter ?? "");
-      setRepoFilter("");
+      const fallback = firstPresetSelection(
+        selection.kind,
+        resolvedPrPresets,
+        resolvedIssuePresets,
+      );
+      setProgrammaticSelection(fallback.selection);
+      setQueryImmediate(fallback.filter);
+      setRepoFilterRaw("");
     }
   };
 
@@ -286,55 +432,55 @@ function AuthenticatedLayout({
   onStartTask: (payload: LaunchPayload) => void;
 }) {
   const { selection, search, repoOptions, title } = state;
+  const prKeyToTasks = usePRKeyToTasks(workspaceId ?? null);
+  useAllWorkflowSnapshots(workspaceId ?? null);
   return (
-    <div className="flex-1 flex min-h-0">
-      <aside className="w-60 border-r overflow-y-auto shrink-0">
-        <PresetsSidebar
-          selected={selection}
-          onSelect={state.onSelect}
-          savedPresets={state.savedPresets}
-          onDeleteSaved={state.onDeleteSaved}
-          canSaveCurrent={state.canSaveCurrent}
-          onSaveCurrent={state.onOpenSaveDialog}
-          prPresets={state.resolvedPrPresets}
-          issuePresets={state.resolvedIssuePresets}
-        />
-      </aside>
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <ListToolbar
-          title={title}
-          count={search.total}
+    <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <PresetsScopeBar
+        className="hidden md:flex"
+        selected={selection}
+        onSelect={state.onSelect}
+        savedPresets={state.savedPresets}
+        onDeleteSaved={state.onDeleteSaved}
+        canSaveCurrent={state.canSaveCurrent}
+        onSaveCurrent={state.onOpenSaveDialog}
+        prPresets={state.resolvedPrPresets}
+        issuePresets={state.resolvedIssuePresets}
+      />
+      <ListToolbar
+        title={title}
+        count={search.total}
+        loading={search.loading}
+        lastFetchedAt={search.lastFetchedAt}
+        customQuery={state.customQuery}
+        committedQuery={state.committedQuery}
+        onCustomQueryChange={state.setCustomQuery}
+        onCommitCustomQuery={state.commitCustomQuery}
+        repoFilter={state.repoFilter}
+        onRepoFilterChange={state.setRepoFilter}
+        repoOptions={repoOptions}
+        onRefresh={search.refresh}
+      />
+      {!workspaceId && <NoWorkspaceNotice />}
+      <div className="flex-1 overflow-auto px-6 py-4">
+        <ResultsList
+          selection={selection}
+          items={search.items}
           loading={search.loading}
-          lastFetchedAt={search.lastFetchedAt}
-          customQuery={state.customQuery}
-          committedQuery={state.committedQuery}
-          onCustomQueryChange={state.setCustomQuery}
-          onCommitCustomQuery={state.commitCustomQuery}
-          repoFilter={state.repoFilter}
-          onRepoFilterChange={state.setRepoFilter}
-          repoOptions={repoOptions}
-          onRefresh={search.refresh}
+          error={search.error}
+          prPresets={prPresets}
+          issuePresets={issuePresets}
+          onStartTask={onStartTask}
+          prKeyToTasks={prKeyToTasks}
         />
-        {!workspaceId && <NoWorkspaceNotice />}
-        <div className="flex-1 overflow-auto px-6 py-4">
-          <ResultsList
-            selection={selection}
-            items={search.items}
-            loading={search.loading}
-            error={search.error}
-            prPresets={prPresets}
-            issuePresets={issuePresets}
-            onStartTask={onStartTask}
-          />
-        </div>
-        <ResultsPagination
-          page={search.page}
-          pageSize={search.pageSize}
-          total={search.total}
-          onPageChange={search.setPage}
-        />
-      </main>
-    </div>
+      </div>
+      <ResultsPagination
+        page={search.page}
+        pageSize={search.pageSize}
+        total={search.total}
+        onPageChange={search.setPage}
+      />
+    </main>
   );
 }
 
@@ -346,7 +492,8 @@ export function GitHubPageClient({
 }: GitHubPageClientProps) {
   const { status, loaded } = useGitHubStatus();
   const [launchPayload, setLaunchPayload] = useState<LaunchPayload | null>(null);
-  const state = useGitHubPageState();
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const state = useGitHubPageState(workspaceId ?? null);
   const { presets: storedPresets } = useGitHubActionPresets(workspaceId ?? null);
   const prPresets = useMemo(() => resolvePRPresets(storedPresets), [storedPresets]);
   const issuePresets = useMemo(() => resolveIssuePresets(storedPresets), [storedPresets]);
@@ -358,10 +505,24 @@ export function GitHubPageClient({
   const onStartTask = useCallback((payload: LaunchPayload) => setLaunchPayload(payload), []);
   const onCloseLaunch = useCallback(() => setLaunchPayload(null), []);
   const authed = !!status?.authenticated;
+  const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
+  // Close the mobile sheet after any sidebar selection. KindToggle clicks also
+  // route through onSelect — closing on every selection is acceptable UX since
+  // the user always wants to see the list after picking a kind or preset.
+  // No useCallback: `state` is a fresh object every render, so memoizing
+  // these handlers would be deceptive — they'd still be new refs each pass.
+  const onMobileSidebarSelect = (s: Parameters<typeof state.onSelect>[0]) => {
+    state.onSelect(s);
+    setMobileSidebarOpen(false);
+  };
+  const onMobileSaveCurrent = () => {
+    setMobileSidebarOpen(false);
+    state.onOpenSaveDialog();
+  };
 
   return (
     <div className="h-screen w-full flex flex-col bg-background">
-      <PageHeader />
+      <PageHeader onOpenMobileSidebar={loaded && authed ? onOpenMobileSidebar : undefined} />
       {!loaded && <div className="p-6 text-sm text-muted-foreground">Checking GitHub status…</div>}
       {loaded && !authed && (
         <div className="p-6 max-w-2xl">
@@ -377,6 +538,27 @@ export function GitHubPageClient({
           onStartTask={onStartTask}
         />
       )}
+      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-sm overflow-y-auto p-0"
+          data-testid="github-mobile-sidebar"
+        >
+          <SheetHeader className="px-4 pt-4 pb-2">
+            <SheetTitle>Filters</SheetTitle>
+          </SheetHeader>
+          <PresetsSidebar
+            selected={state.selection}
+            onSelect={onMobileSidebarSelect}
+            savedPresets={state.savedPresets}
+            onDeleteSaved={state.onDeleteSaved}
+            canSaveCurrent={state.canSaveCurrent}
+            onSaveCurrent={onMobileSaveCurrent}
+            prPresets={state.resolvedPrPresets}
+            issuePresets={state.resolvedIssuePresets}
+          />
+        </SheetContent>
+      </Sheet>
       <QuickTaskLauncher
         workspaceId={workspaceId ?? null}
         workflows={workflows}

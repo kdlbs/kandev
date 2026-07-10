@@ -17,7 +17,9 @@ function createFakeBundle(dir: string) {
   fs.writeFileSync(path.join(dir, "bin", "kandev"), "fake");
   fs.writeFileSync(path.join(dir, "bin", "agentctl"), "fake");
   fs.mkdirSync(path.join(dir, "web"), { recursive: true });
-  fs.writeFileSync(path.join(dir, "web", "server.js"), "fake");
+  fs.writeFileSync(path.join(dir, "web", "index.html"), '<div id="root"></div>');
+  fs.mkdirSync(path.join(dir, "web", "assets"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "web", "assets", "index.js"), "fake");
 }
 
 describe("validateBundle", () => {
@@ -40,7 +42,7 @@ describe("validateBundle", () => {
     fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "bin", "agentctl"), "fake");
     fs.mkdirSync(path.join(tmpDir, "web"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "web", "server.js"), "fake");
+    fs.writeFileSync(path.join(tmpDir, "web", "index.html"), "");
     expect(() => validateBundle(tmpDir)).toThrow(/Backend binary not found/);
   });
 
@@ -48,15 +50,20 @@ describe("validateBundle", () => {
     fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "bin", "kandev"), "fake");
     fs.mkdirSync(path.join(tmpDir, "web"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "web", "server.js"), "fake");
+    fs.writeFileSync(path.join(tmpDir, "web", "index.html"), "");
     expect(() => validateBundle(tmpDir)).toThrow(/agentctl binary not found/);
   });
 
-  it("throws when web server.js is missing", () => {
+  it("does not require external web assets", () => {
     fs.mkdirSync(path.join(tmpDir, "bin"), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, "bin", "kandev"), "fake");
     fs.writeFileSync(path.join(tmpDir, "bin", "agentctl"), "fake");
-    expect(() => validateBundle(tmpDir)).toThrow(/Web server.*not found/);
+    expect(() => validateBundle(tmpDir)).not.toThrow();
+  });
+
+  it("does not require a Node web server in the runtime bundle", () => {
+    createFakeBundle(tmpDir);
+    expect(() => validateBundle(tmpDir)).not.toThrow();
   });
 });
 
@@ -137,6 +144,15 @@ describe("resolveRuntime", () => {
 
   describe("no runtime found", () => {
     it("throws an actionable error message mentioning install paths", () => {
+      // Ensure require.resolve fails so we reach the "no runtime found" path.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ModuleAny = Module as unknown as { _resolveFilename: any };
+      vi.spyOn(ModuleAny, "_resolveFilename").mockImplementationOnce(() => {
+        const err = new Error("Cannot find module") as Error & { code: string };
+        err.code = "MODULE_NOT_FOUND";
+        throw err;
+      });
+
       let error: Error | null = null;
       try {
         resolveRuntime();

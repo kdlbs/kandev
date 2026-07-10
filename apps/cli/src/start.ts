@@ -2,86 +2,41 @@
  * Production start command for running local builds.
  *
  * This module implements the `kandev start` command, which runs the locally
- * built backend binary and web app in production mode. Unlike `kandev dev`
+ * built backend binary in production mode. Unlike `kandev dev`
  * which uses hot-reloading, this runs the optimized production builds.
  *
  * Prerequisites:
  * - Backend must be built: `make build-backend`
- * - Web app must be built: `make build-web`
- * - Or simply: `make build` (builds both)
+ * - Or simply: `make build`
  */
 
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-import { DATA_DIR, HEALTH_TIMEOUT_MS_RELEASE } from "./constants";
-import { resolveHealthTimeoutMs, waitForHealth, waitForUrlReady } from "./health";
+import {
+  HEALTH_TIMEOUT_MS_RELEASE,
+  resolveDataDir,
+  resolveDatabasePath,
+  resolveKandevHomeDir,
+} from "./constants";
+import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName } from "./platform";
 import { createProcessSupervisor } from "./process";
-import {
-  attachBackendExitHandler,
-  buildBackendEnv,
-  buildWebEnv,
-  logStartupInfo,
-  pickPorts,
-} from "./shared";
-import { launchWebApp, openBrowser } from "./web";
-
-/**
- * Locates the standalone Next.js `server.js` inside `apps/web/.next/standalone/`.
- *
- * Normally this sits at `.next/standalone/web/server.js`, but Turbopack may
- * place it under a deeper path (e.g. `.next/standalone/Users/.../web/server.js`)
- * when it detects the wrong project root (typically caused by a stray
- * `package-lock.json` in a parent directory). We look for any `web/server.js`
- * below the standalone directory so `kandev start` keeps working.
- *
- * @returns absolute path to `server.js`, or null if it cannot be found.
- */
-export function resolveStandaloneServerPath(repoRoot: string): string | null {
-  const standaloneDir = path.join(repoRoot, "apps", "web", ".next", "standalone");
-  const expected = path.join(standaloneDir, "web", "server.js");
-  if (fs.existsSync(expected)) return expected;
-  if (!fs.existsSync(standaloneDir)) return null;
-
-  return findWebServerJs(standaloneDir);
-}
-
-// Walks `dir` manually instead of relying on `Dirent.parentPath` (Node 20.12+),
-// so the CLI keeps working on older Node 20.x runtimes installed via npx.
-function findWebServerJs(dir: string): string | null {
-  const stack: string[] = [dir];
-  while (stack.length > 0) {
-    const current = stack.pop() as string;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(current, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (entry.isDirectory() && entry.name !== "node_modules") {
-        stack.push(path.join(current, entry.name));
-      } else if (entry.isFile() && entry.name === "server.js" && path.basename(current) === "web") {
-        return path.join(current, entry.name);
-      }
-    }
-  }
-  return null;
-}
+import { buildBackendEnv, logStartupInfo, pickBackendPorts } from "./shared";
+import { launchRestartableBackend } from "./supervisor/backend";
+import { openBrowser } from "./web";
 
 export type StartOptions = {
   /** Path to the repository root directory */
   repoRoot: string;
   /** Optional preferred backend port (finds available port if not specified) */
   backendPort?: number;
-  /** Optional preferred web port (finds available port if not specified) */
-  webPort?: number;
   /** Show info logs from backend + web */
   verbose?: boolean;
   /** Show debug logs + agent message dumps */
   debug?: boolean;
+  /** Skip browser open. Set by service units and preview environments. */
+  headless?: boolean;
 };
 
 /**
@@ -91,81 +46,43 @@ export type StartOptions = {
  * 1. Validates that build artifacts exist
  * 2. Picks available ports for all services
  * 3. Starts the backend binary (with warn log level for clean output)
- * 4. Starts the web app via `pnpm start`
- * 5. Waits for the backend to be healthy before announcing readiness
+ * 4. Waits for the backend to be healthy before announcing readiness
  *
  * @param options - Configuration for the start command
- * @throws Error if backend binary or web build is not found
+ * @throws Error if backend binary is not found
  */
 export async function runStart({
   repoRoot,
   backendPort,
-  webPort,
   verbose = false,
   debug = false,
+  headless = false,
 }: StartOptions): Promise<void> {
-  const ports = await pickPorts(backendPort, webPort);
+  const ports = await pickBackendPorts(backendPort);
 
   const backendBin = path.join(repoRoot, "apps", "backend", "bin", getBinaryName("kandev"));
   if (!fs.existsSync(backendBin)) {
     throw new Error("Backend binary not found. Run `make build` first.");
   }
 
-  // Check for standalone build (Next.js standalone output)
-  const webServerPath = resolveStandaloneServerPath(repoRoot);
-  if (!webServerPath) {
-    const standaloneDir = path.join(repoRoot, "apps", "web", ".next", "standalone");
-    if (!fs.existsSync(standaloneDir)) {
-      throw new Error("Web standalone build not found. Run `make build` first.");
-    }
-    throw new Error(
-      `Web standalone build is missing server.js under ${standaloneDir}. ` +
-        "This can happen when Next.js/Turbopack detects a different project root " +
-        "(e.g. a stray package-lock.json in a parent directory). " +
-        "Remove the stray lockfile and re-run `make build`.",
-    );
-  }
-  const webStandaloneDir = path.dirname(webServerPath);
-  const webStaticDir = path.join(repoRoot, "apps", "web", ".next", "static");
-  const standaloneStaticDir = path.join(webStandaloneDir, ".next", "static");
-  if (fs.existsSync(webStaticDir) && !fs.existsSync(standaloneStaticDir)) {
-    fs.mkdirSync(path.dirname(standaloneStaticDir), { recursive: true });
-    try {
-      fs.symlinkSync(webStaticDir, standaloneStaticDir, "junction");
-    } catch (err) {
-      console.warn(
-        `[kandev] failed to link Next.js static assets: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
-  // Link public directory (fonts, images, etc.) into standalone output
-  const webPublicDir = path.join(repoRoot, "apps", "web", "public");
-  const standalonePublicDir = path.join(webStandaloneDir, "public");
-  if (fs.existsSync(webPublicDir) && !fs.existsSync(standalonePublicDir)) {
-    try {
-      fs.symlinkSync(webPublicDir, standalonePublicDir, "junction");
-    } catch (err) {
-      console.warn(
-        `[kandev] failed to link public assets: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
   // Production mode: use warn log level for clean output unless verbose/debug
   const showOutput = verbose || debug;
-  const dbPath = process.env.KANDEV_DATABASE_PATH || path.join(DATA_DIR, "kandev.db");
+  fs.mkdirSync(resolveDataDir(), { recursive: true });
+  // The data dir holds the SQLite DB; keep it owner-only even if it pre-existed
+  // with a looser umask-derived mode.
+  fs.chmodSync(resolveDataDir(), 0o700);
+  const dbPath = resolveDatabasePath();
   const logLevel =
     process.env.KANDEV_LOG_LEVEL?.trim() || (debug ? "debug" : verbose ? "info" : "warn");
   const backendEnv = buildBackendEnv({
     ports,
     logLevel,
+    webProxy: false,
     extra: {
       KANDEV_DATABASE_PATH: dbPath,
       ...(debug ? { KANDEV_DEBUG_AGENT_MESSAGES: "true", KANDEV_DEBUG_PPROF_ENABLED: "true" } : {}),
     },
   });
-  const webEnv = buildWebEnv({ ports, production: true, debug });
 
   logStartupInfo({
     header: "start mode: using local build",
@@ -179,34 +96,27 @@ export async function runStart({
 
   // Start backend: ignore stdin, show stdout only in verbose/debug mode, always show stderr
   // Stderr is always inherited to ensure error messages are visible immediately (no pipe buffering)
-  const backendProc = spawn(backendBin, [], {
+  const backend = await launchRestartableBackend({
+    command: backendBin,
+    args: [],
     cwd: path.dirname(backendBin),
     env: backendEnv,
+    homeDir: resolveKandevHomeDir(),
+    ports,
+    mode: "start",
     stdio: showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "ignore", "inherit"],
+    supervisor,
   });
-  supervisor.children.push(backendProc);
-
-  attachBackendExitHandler(backendProc, supervisor);
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");
-  await waitForHealth(ports.backendUrl, backendProc, healthTimeoutMs);
+  await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs);
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
-  // Use standalone server.js directly (not pnpm start)
-  const webUrl = `http://localhost:${ports.webPort}`;
-  console.log("[kandev] starting web...");
-  const webProc = launchWebApp({
-    command: "node",
-    args: [webServerPath],
-    cwd: webStandaloneDir,
-    env: webEnv,
-    supervisor,
-    label: "web",
-    quiet: !showOutput,
-  });
-
-  await waitForUrlReady(webUrl, webProc, healthTimeoutMs);
   console.log("[kandev] open: " + ports.backendUrl);
+  if (headless) {
+    console.log(`[kandev] ready (headless) at ${ports.backendUrl}`);
+    return;
+  }
   openBrowser(ports.backendUrl);
 }

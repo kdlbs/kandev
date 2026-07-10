@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
+	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/constants"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -106,8 +108,9 @@ type AgentStderrResponse struct {
 
 // CancelResponse is the response from a cancel request.
 type CancelResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
+	Success         bool   `json:"success"`
+	Error           string `json:"error,omitempty"`
+	NotAcknowledged bool   `json:"not_acknowledged,omitempty"`
 }
 
 // handleAgentStreamWS streams agent session notifications via WebSocket.
@@ -313,8 +316,10 @@ func (s *Server) handleWSInitialize(ctx context.Context, msg *ws.Message) *ws.Me
 }
 
 // injectKandevMcpServers prepends the local kandev MCP server to the list of MCP servers.
-// Both SSE and HTTP variants are injected - the agent's capability filtering will select
-// the appropriate one based on what the agent supports (SSE for Claude Code, HTTP for Codex ACP).
+// Both HTTP and SSE variants are injected - the agent's capability filtering will select
+// the appropriate one based on what the agent supports. HTTP is listed first so that
+// when an agent advertises both transports the "first surviving entry wins" dedup keeps
+// the HTTP entry (modern streamable MCP); SSE remains as a fallback for SSE-only agents.
 // Any existing kandev server in the list is filtered out to avoid duplicates.
 func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.McpServer {
 	kandevMcpSse := types.McpServer{
@@ -328,15 +333,15 @@ func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.Mc
 		URL:  fmt.Sprintf("http://localhost:%d%s", s.cfg.Port, mcpPathHTTP),
 	}
 	filtered := make([]types.McpServer, 0, len(mcpServers)+2)
-	filtered = append(filtered, kandevMcpSse, kandevMcpHttp)
+	filtered = append(filtered, kandevMcpHttp, kandevMcpSse)
 	for _, srv := range mcpServers {
 		if srv.Name != kandevMcpServerName {
 			filtered = append(filtered, srv)
 		}
 	}
-	s.logger.Debug("injected local kandev MCP servers (sse+http)",
-		zap.String("sse_url", kandevMcpSse.URL),
+	s.logger.Debug("injected local kandev MCP servers (http+sse)",
 		zap.String("http_url", kandevMcpHttp.URL),
+		zap.String("sse_url", kandevMcpSse.URL),
 		zap.Int("total_servers", len(filtered)))
 	return filtered
 }
@@ -485,12 +490,21 @@ func (s *Server) handleWSCancel(ctx context.Context, msg *ws.Message) *ws.Messag
 	}
 
 	if err := adapter.Cancel(ctx); err != nil {
-		s.logger.Error("cancel failed", zap.Error(err))
-		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		notAck := errors.Is(err, acptransport.ErrTurnCancelNotAcknowledged)
+		if notAck {
+			s.logger.Warn("cancel not acknowledged by in-flight prompt", zap.Error(err))
+		} else {
+			s.logger.Error("cancel failed", zap.Error(err))
+		}
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, CancelResponse{
+			Success:         false,
+			Error:           err.Error(),
+			NotAcknowledged: notAck,
+		})
 		return resp
 	}
 
-	s.logger.Info("cancel completed")
+	s.logger.Info("cancel acknowledged")
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, CancelResponse{Success: true})
 	return resp
 }
