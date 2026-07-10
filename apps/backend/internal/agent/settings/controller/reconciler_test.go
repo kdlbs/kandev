@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"testing"
 
 	"go.uber.org/zap"
@@ -55,7 +56,7 @@ func newFakeStore() *fakeStore {
 
 func (f *fakeStore) CreateAgent(_ context.Context, a *models.Agent) error {
 	f.nextAgentID++
-	a.ID = "agent-" + itoa(f.nextAgentID)
+	a.ID = "agent-" + strconv.Itoa(f.nextAgentID)
 	f.agents[a.ID] = a
 	f.byName[a.Name] = a
 	return nil
@@ -99,7 +100,7 @@ func (f *fakeStore) UpsertAgentProfileMcpConfig(context.Context, *models.AgentPr
 
 func (f *fakeStore) CreateAgentProfile(_ context.Context, p *models.AgentProfile) error {
 	f.nextProfID++
-	p.ID = "profile-" + itoa(f.nextProfID)
+	p.ID = "profile-" + strconv.Itoa(f.nextProfID)
 	f.profiles[p.AgentID] = append(f.profiles[p.AgentID], p)
 	f.created = append(f.created, p)
 	return nil
@@ -170,18 +171,6 @@ func (f *fakeStore) ListAgentProfiles(_ context.Context, agentID string) ([]*mod
 }
 
 func (f *fakeStore) Close() error { return nil }
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	out := ""
-	for n > 0 {
-		out = string(rune('0'+n%10)) + out
-		n /= 10
-	}
-	return out
-}
 
 // mockInferenceAgent is a minimal fake agent for the registry.
 type mockInferenceAgent struct {
@@ -438,7 +427,7 @@ func TestProfileReconciler_SkipsOrphanCleanupWhenEnabledRegistryEmpty(t *testing
 func TestProfileReconciler_SkipsOrphanCleanupWhenBatchExceedsSafetyLimit(t *testing.T) {
 	st := newFakeStore()
 	for i := 1; i <= 21; i++ {
-		orphanAgent := &models.Agent{Name: "removed-old-agent-" + itoa(i)}
+		orphanAgent := &models.Agent{Name: "removed-old-agent-" + strconv.Itoa(i)}
 		_ = st.CreateAgent(context.Background(), orphanAgent)
 		orphanProfile := &models.AgentProfile{
 			AgentID: orphanAgent.ID,
@@ -467,10 +456,10 @@ func TestProfileReconciler_SkipsOrphanCleanupWhenProfileCountExceedsSafetyLimit(
 	st := newFakeStore()
 	orphanAgent := &models.Agent{Name: "removed-old-agent"}
 	_ = st.CreateAgent(context.Background(), orphanAgent)
-	for i := 1; i <= 11; i++ {
+	for i := 1; i <= 51; i++ {
 		orphanProfile := &models.AgentProfile{
 			AgentID: orphanAgent.ID,
-			Name:    "legacy-" + itoa(i),
+			Name:    "legacy-" + strconv.Itoa(i),
 			Model:   "x",
 		}
 		_ = st.CreateAgentProfile(context.Background(), orphanProfile)
@@ -524,6 +513,9 @@ func TestProfileReconciler_SkipsOrphanCleanupWhenCandidateProfileListFails(t *te
 	fields := entries[0].ContextMap()
 	if fields["profiles_candidate_partial"] != true {
 		t.Errorf("profiles_candidate_partial = %v, want true", fields["profiles_candidate_partial"])
+	}
+	if fields["profiles_candidate_count"] != int64(0) {
+		t.Errorf("profiles_candidate_count = %v, want 0 for partial collection", fields["profiles_candidate_count"])
 	}
 }
 

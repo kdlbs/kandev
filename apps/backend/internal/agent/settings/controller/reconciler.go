@@ -20,7 +20,7 @@ const (
 	// Orphan cleanup is startup hygiene, not a user-confirmed bulk action.
 	// Keep automatic batches small so registry bugs fail closed.
 	maxOrphanCleanupAgentTypesPerRun = 20
-	maxOrphanCleanupProfilesPerRun   = 10
+	maxOrphanCleanupProfilesPerRun   = 50
 )
 
 // CapabilityReader is the minimum surface of the host utility manager that
@@ -201,7 +201,9 @@ func (r *ProfileReconciler) collectOrphanCleanupCandidates(
 			})
 		}
 	}
-	summary.profilesCandidateCount = len(candidates)
+	if summary.profileListFailureCount == 0 {
+		summary.profilesCandidateCount = len(candidates)
+	}
 	return candidates
 }
 
