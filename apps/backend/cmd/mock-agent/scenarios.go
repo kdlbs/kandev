@@ -817,7 +817,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 		return
 	}
 	runGitCmd := makeGitRunner(wd)
-	if !writeWalkthroughFile(e, runGitCmd, "reemit.txt", "line 1\nline 2\n", "line 1\nREEMIT_CHANGE\n") {
+	if !writeWalkthroughFile(e, runGitCmd, "walkthrough-reemit", "reemit.txt", "line 1\nline 2\n", "line 1\nREEMIT_CHANGE\n") {
 		return
 	}
 
@@ -867,33 +867,33 @@ func walkthroughDemoArgs() map[string]interface{} {
 
 // writeWalkthroughFile writes content and commits it, then (when changed is
 // non-empty) leaves an uncommitted modification so the file appears in review.
-func writeWalkthroughFile(e *emitter, runGitCmd func(args ...string) error, path, base, changed string) bool {
+func writeWalkthroughFile(e *emitter, runGitCmd func(args ...string) error, prefix, path, base, changed string) bool {
 	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
-		e.text("walkthrough-basic: write base failed: " + err.Error())
+		e.text(prefix + ": write base failed: " + err.Error())
 		return false
 	}
 	if err := runGitCmd("add", path); err != nil {
-		e.text("walkthrough-basic: git add failed: " + err.Error())
+		e.text(prefix + ": git add failed: " + err.Error())
 		return false
 	}
 	if err := runGitCmd("commit", "-m", "add "+path); err != nil {
-		e.text("walkthrough-basic: git commit failed: " + err.Error())
+		e.text(prefix + ": git commit failed: " + err.Error())
 		return false
 	}
 	if changed == "" {
 		return true
 	}
 	if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
-		e.text("walkthrough-basic: write change failed: " + err.Error())
+		e.text(prefix + ": write change failed: " + err.Error())
 		return false
 	}
 	return true
 }
 
-func setupWalkthroughFiles(e *emitter) bool {
+func setupWalkthroughFiles(e *emitter, prefix string) bool {
 	wd, err := os.Getwd()
 	if err != nil {
-		e.text("walkthrough-basic: getwd failed: " + err.Error())
+		e.text(prefix + ": getwd failed: " + err.Error())
 		return false
 	}
 	runGitCmd := makeGitRunner(wd)
@@ -903,14 +903,14 @@ func setupWalkthroughFiles(e *emitter) bool {
 	_ = runGitCmd("commit", "-m", "cleanup walkthrough fixtures")
 
 	// Three changed files (diff-anchored steps) + one clean committed file (editor-mode step).
-	ok := writeWalkthroughFile(e, runGitCmd, "walkthrough_a.txt",
+	ok := writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_a.txt",
 		"line 1: ENTRY\nline 2: BASE\nline 3: BASE\n",
 		"line 1: ENTRY\nline 2: WALKTHROUGH_CHANGE_A\nline 3: WALKTHROUGH_CHANGE_A\n")
-	ok = ok && writeWalkthroughFile(e, runGitCmd, "walkthrough_b.txt",
+	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_b.txt",
 		"line 1: B\nline 2: BASE\n", "line 1: B\nline 2: WALKTHROUGH_CHANGE_B\n")
-	ok = ok && writeWalkthroughFile(e, runGitCmd, "walkthrough_c.txt",
+	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_c.txt",
 		"line 1: C\nline 2: BASE\n", "line 1: C\nline 2: WALKTHROUGH_CHANGE_C\n")
-	ok = ok && writeWalkthroughFile(e, runGitCmd, "walkthrough_base.txt",
+	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_base.txt",
 		"line 1: WALKTHROUGH_UNCHANGED\nline 2: supporting context\n", "")
 	return ok
 }
@@ -937,7 +937,7 @@ func emitWalkthroughTour(e *emitter, doneText string) {
 // It lets E2E tests click the actual Changes-panel Walkthrough request button.
 func scenarioWalkthroughSetup(e *emitter) {
 	fixedDelay(50)
-	if !setupWalkthroughFiles(e) {
+	if !setupWalkthroughFiles(e, "walkthrough-setup") {
 		return
 	}
 	e.text("walkthrough-setup complete: changes ready")
@@ -953,7 +953,7 @@ func scenarioWalkthroughRequested(e *emitter) {
 // walkthrough over them via the show_walkthrough_kandev MCP tool.
 func scenarioWalkthroughBasic(e *emitter) {
 	fixedDelay(50)
-	if !setupWalkthroughFiles(e) {
+	if !setupWalkthroughFiles(e, "walkthrough-basic") {
 		return
 	}
 	emitWalkthroughTour(e, "walkthrough-basic complete: 5-step tour emitted")

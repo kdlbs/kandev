@@ -78,10 +78,7 @@ func (s *WalkthroughService) ShowWalkthrough(ctx context.Context, req ShowWalkth
 		s.logger.Error("get existing walkthrough", zap.String("task_id", req.TaskID), zap.Error(err))
 		return nil, err
 	}
-	eventType := events.TaskWalkthroughCreated
-	if existing != nil {
-		eventType = events.TaskWalkthroughUpdated
-	}
+	created := existing == nil
 
 	wt := &models.TaskWalkthrough{
 		TaskID:    req.TaskID,
@@ -99,6 +96,13 @@ func (s *WalkthroughService) ShowWalkthrough(ctx context.Context, req ShowWalkth
 		return nil, err
 	}
 
+	if existing == nil && !wt.CreatedAt.Equal(wt.UpdatedAt) {
+		created = false
+	}
+	eventType := events.TaskWalkthroughUpdated
+	if created {
+		eventType = events.TaskWalkthroughCreated
+	}
 	s.publishEvent(ctx, eventType, wt)
 	return wt, nil
 }
@@ -166,6 +170,9 @@ func (s *WalkthroughService) DeleteWalkthrough(ctx context.Context, taskID strin
 		return ErrTaskWalkthroughNotFound
 	}
 	if err := s.repo.DeleteTaskWalkthrough(ctx, taskID); err != nil {
+		if errors.Is(err, ErrTaskWalkthroughNotFound) {
+			return ErrTaskWalkthroughNotFound
+		}
 		return err
 	}
 	s.publishEvent(ctx, events.TaskWalkthroughDeleted, existing)

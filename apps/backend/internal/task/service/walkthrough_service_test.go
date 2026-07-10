@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -80,6 +81,24 @@ func TestWalkthroughService_ShowWalkthrough_Replace(t *testing.T) {
 	got, err := svc.GetWalkthrough(ctx, "task-1")
 	if err != nil || got == nil || len(got.Steps) != 1 {
 		t.Fatalf("GetWalkthrough after replace = %+v, err %v", got, err)
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughUpdated)
+}
+
+func TestWalkthroughService_ShowWalkthrough_ConcurrentInsertPublishesUpdated(t *testing.T) {
+	eventBus := NewMockEventBus()
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := NewWalkthroughService(&concurrentCreateWalkthroughRepo{}, eventBus, log)
+
+	wt, err := svc.ShowWalkthrough(context.Background(), ShowWalkthroughRequest{
+		TaskID: "task-1",
+		Steps:  sampleSteps(),
+	})
+	if err != nil {
+		t.Fatalf("ShowWalkthrough failed: %v", err)
+	}
+	if !wt.CreatedAt.Before(wt.UpdatedAt) {
+		t.Fatalf("expected repository to return an updated existing row, got created_at=%v updated_at=%v", wt.CreatedAt, wt.UpdatedAt)
 	}
 	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskWalkthroughUpdated)
 }
@@ -197,4 +216,49 @@ func TestWalkthroughService_Delete(t *testing.T) {
 	if err := svc.DeleteWalkthrough(ctx, "task-1"); err != ErrTaskWalkthroughNotFound {
 		t.Fatalf("expected ErrTaskWalkthroughNotFound, got %v", err)
 	}
+}
+
+func TestWalkthroughService_Delete_ConcurrentDeleteReturnsNotFound(t *testing.T) {
+	eventBus := NewMockEventBus()
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	svc := NewWalkthroughService(&concurrentDeleteWalkthroughRepo{}, eventBus, log)
+
+	if err := svc.DeleteWalkthrough(context.Background(), "task-1"); err != ErrTaskWalkthroughNotFound {
+		t.Fatalf("expected ErrTaskWalkthroughNotFound, got %v", err)
+	}
+	if got := len(eventBus.GetPublishedEvents()); got != 0 {
+		t.Fatalf("expected no delete event after concurrent delete, got %d", got)
+	}
+}
+
+type concurrentCreateWalkthroughRepo struct{}
+
+func (r *concurrentCreateWalkthroughRepo) GetTaskWalkthrough(ctx context.Context, taskID string) (*models.TaskWalkthrough, error) {
+	return nil, nil
+}
+
+func (r *concurrentCreateWalkthroughRepo) CreateTaskWalkthrough(ctx context.Context, wt *models.TaskWalkthrough) error {
+	now := time.Now().UTC()
+	wt.ID = "existing-walkthrough"
+	wt.CreatedAt = now.Add(-time.Minute)
+	wt.UpdatedAt = now
+	return nil
+}
+
+func (r *concurrentCreateWalkthroughRepo) DeleteTaskWalkthrough(ctx context.Context, taskID string) error {
+	return nil
+}
+
+type concurrentDeleteWalkthroughRepo struct{}
+
+func (r *concurrentDeleteWalkthroughRepo) GetTaskWalkthrough(ctx context.Context, taskID string) (*models.TaskWalkthrough, error) {
+	return &models.TaskWalkthrough{ID: "gone", TaskID: taskID, Steps: sampleSteps()}, nil
+}
+
+func (r *concurrentDeleteWalkthroughRepo) CreateTaskWalkthrough(ctx context.Context, wt *models.TaskWalkthrough) error {
+	return nil
+}
+
+func (r *concurrentDeleteWalkthroughRepo) DeleteTaskWalkthrough(ctx context.Context, taskID string) error {
+	return ErrTaskWalkthroughNotFound
 }
