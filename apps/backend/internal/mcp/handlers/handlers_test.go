@@ -241,13 +241,15 @@ func TestHandleCreateTask_SubtaskUsesStartupPromptWhenDescriptionEmpty(t *testin
 	})
 	require.NoError(t, err)
 
+	// start_agent defaults to true so the sub-task description guard actually
+	// fires; nil sessionLauncher means the auto-start step no-ops, so the test
+	// exercises the guard-after-resolution path without launching an agent.
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"title":               "Fix bug",
 		"parent_id":           parent.ID,
 		"agent_profile_id":    "test-agent-profile",
 		"executor_profile_id": "test-executor-profile",
-		"start_agent":         false,
 	})
 	resp, err := h.handleCreateTask(ctx, msg)
 	require.NoError(t, err)
