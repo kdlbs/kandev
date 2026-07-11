@@ -304,12 +304,56 @@ func TestService_ListRepositoriesPreservesRepositoryWhenPruningFails(t *testing.
 	}
 }
 
+func TestService_ListRepositoriesPreservesRepositoryWhenRetainedRowReadFails(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	taskRoot := filepath.Join(t.TempDir(), "tasks")
+	svc.discoveryConfig.TaskWorktreeRoots = []string{taskRoot}
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID:          "repo-read-error",
+		WorkspaceID: "ws-1",
+		Name:        "read-error",
+		SourceType:  sourceTypeLocal,
+		LocalPath:   filepath.Join(taskRoot, "active-task", "repo"),
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	svc.repoEntities = retainedRepositoryReadError{RepositoryEntityRepository: repo}
+
+	repositories, err := svc.ListRepositories(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repositories) != 1 || repositories[0].ID != "repo-read-error" {
+		t.Fatalf("ListRepositories = %#v, want repository preserved", repositories)
+	}
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("published events = %#v, want none", events)
+	}
+}
+
 type failingPruneRepository struct {
 	repository.RepositoryEntityRepository
 }
 
 func (failingPruneRepository) DeleteRepositoryIfNoActiveTaskSessions(context.Context, string) (bool, error) {
 	return false, errors.New("database unavailable")
+}
+
+type retainedRepositoryReadError struct {
+	repository.RepositoryEntityRepository
+}
+
+func (retainedRepositoryReadError) DeleteRepositoryIfNoActiveTaskSessions(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (retainedRepositoryReadError) GetRepository(context.Context, string) (*models.Repository, error) {
+	return nil, errors.New("database unavailable")
 }
 
 // Task tests

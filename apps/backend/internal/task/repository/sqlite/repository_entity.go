@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // CreateRepository creates a new repository
@@ -49,7 +50,7 @@ func (r *Repository) GetRepository(ctx context.Context, id string) (*models.Repo
 	)
 
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("repository not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", repoerrors.ErrRepositoryNotFound, id)
 	}
 	return repository, err
 }

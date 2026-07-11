@@ -782,8 +782,16 @@ func (s *Service) ListRepositories(ctx context.Context, workspaceID string) ([]*
 			s.publishRepositoryEvent(ctx, events.RepositoryDeleted, repository)
 			continue
 		}
-		if current, getErr := s.repoEntities.GetRepository(ctx, repository.ID); getErr == nil {
+		current, getErr := s.repoEntities.GetRepository(ctx, repository.ID)
+		if getErr == nil {
 			live = append(live, current)
+			continue
+		}
+		if !errors.Is(getErr, taskrepo.ErrRepositoryNotFound) {
+			s.logger.Warn("failed to re-read retained task worktree repository, using cached value",
+				zap.String("repository_id", repository.ID),
+				zap.Error(getErr))
+			live = append(live, repository)
 		}
 	}
 	return live, nil

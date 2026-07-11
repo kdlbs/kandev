@@ -940,7 +940,7 @@ func (r *Repository) FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(c
 func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	var exists int
 	// Only sessions of live (non-archived) tasks count; archived tasks never
-	// block repository deletion. IDLE office sessions are resumable and must
+	// block repository deletion. IDLE sessions are resumable and must
 	// preserve their repository rows.
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT 1

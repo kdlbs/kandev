@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 func newRepoForEntityTests(t *testing.T) *Repository {
@@ -67,6 +69,14 @@ func TestRepositoryCopyFiles_RoundTrip(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].CopyFiles != ".env, *.local" {
 		t.Errorf("ListRepositories CopyFiles = %v, want one repo with %q", list, ".env, *.local")
+	}
+}
+
+func TestGetRepositoryReturnsNotFoundError(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	_, err := repo.GetRepository(context.Background(), "missing")
+	if !errors.Is(err, repoerrors.ErrRepositoryNotFound) {
+		t.Fatalf("GetRepository error = %v, want ErrRepositoryNotFound", err)
 	}
 }
 
