@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -744,7 +745,32 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
-	return s.repoEntities.ListRepositories(ctx, workspaceID)
+	repositories, err := s.repoEntities.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	live := repositories[:0]
+	for _, repository := range repositories {
+		if repository == nil || repository.SourceType != sourceTypeLocal || !s.isKandevTaskWorktreeRepository(repository) {
+			live = append(live, repository)
+			continue
+		}
+		if _, statErr := os.Stat(repository.LocalPath); !errors.Is(statErr, os.ErrNotExist) {
+			live = append(live, repository)
+			continue
+		}
+		if err := s.DeleteRepository(ctx, repository.ID); err != nil {
+			if !errors.Is(err, ErrActiveTaskSessions) {
+				s.logger.Warn("failed to prune missing task worktree repository",
+					zap.String("repository_id", repository.ID),
+					zap.String("local_path", repository.LocalPath),
+					zap.Error(err))
+			}
+			live = append(live, repository)
+		}
+	}
+	return live, nil
 }
 
 // CountActiveSessionsByRepository returns the number of agent sessions in an
