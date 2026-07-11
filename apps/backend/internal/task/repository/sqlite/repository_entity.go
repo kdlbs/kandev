@@ -93,6 +93,37 @@ func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteRepositoryIfNoActiveTaskSessions soft-deletes a repository only when
+// no live task linked to it has a session that blocks deletion. Keeping the
+// predicate in the UPDATE prevents a session from becoming active between a
+// separate check and the delete.
+func (r *Repository) DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context, id string) (bool, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE repositories
+		SET deleted_at = ?, updated_at = ?
+		WHERE id = ?
+			AND deleted_at IS NULL
+			AND NOT EXISTS (
+				SELECT 1
+				FROM task_sessions s
+				INNER JOIN task_repositories tr ON tr.task_id = s.task_id
+				INNER JOIN tasks t ON t.id = s.task_id
+				WHERE tr.repository_id = repositories.id
+					AND t.archived_at IS NULL
+					AND s.state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')
+			)
+	`), now, now, id)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 // ListRepositories returns all repositories for a workspace
 func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
