@@ -230,6 +230,14 @@ type TaskSessionDTO struct {
 	IsPassthrough     bool                `json:"is_passthrough"`
 	ReviewStatus      models.ReviewStatus `json:"review_status,omitempty"`
 	TaskEnvironmentID string              `json:"task_environment_id,omitempty"`
+	// ForegroundActivity mirrors the in-memory fine-grained busy substate onto a
+	// RUNNING session so a fresh page-load / second tab sees the accept-input +
+	// working-in-background affordance without waiting for a WS flip
+	// (ADR-0035). Absent for every non-RUNNING session and
+	// whenever no provider is wired; a client treats absent as "generating".
+	// Not persisted — populated at the serialization boundary by
+	// EnrichForegroundActivity, never by FromTaskSession.
+	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
@@ -266,6 +274,10 @@ type TaskSessionSummaryDTO struct {
 	IsPassthrough     bool                          `json:"is_passthrough"`
 	ReviewStatus      models.ReviewStatus           `json:"review_status,omitempty"`
 	TaskEnvironmentID string                        `json:"task_environment_id,omitempty"`
+	// ForegroundActivity mirrors the in-memory fine-grained busy substate onto a
+	// RUNNING session (ADR-0035); see TaskSessionDTO. Absent
+	// for non-RUNNING sessions; populated by EnrichForegroundActivitySummary.
+	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
@@ -716,6 +728,34 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		result.Worktrees = session.Worktrees
 	}
 	return result
+}
+
+// ForegroundActivityProvider surfaces the in-memory fine-grained busy substate
+// for a session (ADR-0035). It is satisfied by the
+// orchestrator; the serialization layer depends only on this narrow seam so it
+// takes no hard orchestrator dependency and can be faked in tests.
+type ForegroundActivityProvider interface {
+	ForegroundActivity(sessionID string) v1.ForegroundActivity
+}
+
+// EnrichForegroundActivity stamps the live fine-grained busy substate onto a full
+// session DTO. It is a no-op for a non-RUNNING session or a nil provider, so the
+// field is emitted (via omitempty) only where it is meaningful and never fabricated
+// for a session whose coarse state already tells the whole story.
+func EnrichForegroundActivity(dto *TaskSessionDTO, provider ForegroundActivityProvider) {
+	if dto == nil || provider == nil || dto.State != models.TaskSessionStateRunning {
+		return
+	}
+	dto.ForegroundActivity = provider.ForegroundActivity(dto.ID)
+}
+
+// EnrichForegroundActivitySummary is EnrichForegroundActivity for the lightweight
+// summary DTO used by the list endpoints.
+func EnrichForegroundActivitySummary(dto *TaskSessionSummaryDTO, provider ForegroundActivityProvider) {
+	if dto == nil || provider == nil || dto.State != models.TaskSessionStateRunning {
+		return
+	}
+	dto.ForegroundActivity = provider.ForegroundActivity(dto.ID)
 }
 
 // WorkflowStepDTO represents a workflow step for API responses

@@ -432,7 +432,9 @@ function SessionRow({
       <div className="w-5 shrink-0 flex items-center justify-center">
         <Tooltip>
           <TooltipTrigger asChild>
-            <div>{getSessionStateIcon(session.state, "h-3.5 w-3.5")}</div>
+            <div>
+              {getSessionStateIcon(session.state, "h-3.5 w-3.5", session.foreground_activity)}
+            </div>
           </TooltipTrigger>
           <TooltipContent side="left">{STATUS_LABELS[status]}</TooltipContent>
         </Tooltip>

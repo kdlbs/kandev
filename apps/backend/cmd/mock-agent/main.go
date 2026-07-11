@@ -379,6 +379,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 	}
 	return []acp.AvailableCommand{
 		{Name: "slow", Description: "Run a slow response (default 5s)", Input: hint("duration (e.g. 10s)")},
+		{Name: "background", Description: "Spawn a subagent and stay foreground-idle (default 8s)", Input: hint("duration (e.g. 8s)")},
 		{Name: "error", Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},

@@ -208,6 +208,10 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.name !== undefined) update.name = payload.name;
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
+  // Reset the fine-grained busy substate on every coarse transition so a stale
+  // "background" value can't survive into the next turn (ADR-0035).
+  if (payload.foreground_activity !== undefined)
+    update.foreground_activity = payload.foreground_activity;
   return update;
 }
 
@@ -482,6 +486,31 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
   });
 }
 
+/** Apply an intra-RUNNING flip of the fine-grained busy substate: the
+ *  foreground turn moved between generating and idle-on-background-work without
+ *  any coarse state change (ADR-0035). Annotates the
+ *  existing session row so the composer gate and status indicator update; does
+ *  nothing until the row exists (state_changed seeds it first). */
+function applyForegroundActivity(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+): void {
+  if (!payload?.task_id || !payload?.session_id) return;
+  const taskId = toTaskId(payload.task_id);
+  const sessionId = toSessionId(payload.session_id);
+  const existing = store.getState().taskSessions.items[sessionId];
+  if (!existing) return;
+  store.getState().upsertTaskSessionFromEvent(taskId, {
+    id: sessionId,
+    task_id: taskId,
+    state: existing.state,
+    started_at: existing.started_at ?? "",
+    updated_at: existing.updated_at ?? "",
+    foreground_activity: payload.foreground_activity ?? null,
+  });
+}
+
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "message.queue.status_changed": (message) => {
@@ -554,6 +583,9 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       });
 
       maybeFanOutOfficeRefetch(store, newState, existingSession?.state);
+    },
+    "session.activity_changed": (message) => {
+      applyForegroundActivity(store, message.payload);
     },
     "session.agentctl_starting": (message) => {
       const payload = message.payload;

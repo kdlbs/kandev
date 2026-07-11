@@ -2215,6 +2215,11 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	// Same reasoning for the push-detection tracker. Multi-repo sessions
 	// accumulate one entry per repo; pushTrackerForget walks them all.
 	s.pushTrackerForget(sessionID)
+	// And the foreground/background turn-activity signal. It is normally cleared
+	// at turn close, but a trailing stream event can re-create the entry after
+	// the last turn completed; forget it here so a deleted session leaves no
+	// orphaned map slot.
+	s.clearTurnActivity(sessionID)
 
 	// Auto-promote another session if we deleted the primary
 	if wasPrimary {
@@ -2695,6 +2700,11 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	}
 	session = claimedSession
 	s.startTurnForSession(ctx, sessionID)
+	// A fresh foreground prompt is, by definition, foreground generation — clear
+	// any lingering "waiting on background" state so this turn gates input while
+	// it runs (e.g. when the operator sent this message into a background-idle
+	// session that was just accepted by checkSessionPromptable).
+	s.markForegroundGenerating(sessionID)
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
 	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
@@ -2829,6 +2839,15 @@ func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.
 		models.TaskSessionStateIdle:
 		return nil
 	case models.TaskSessionStateRunning:
+		// Narrow the busy signal: a session that kicked off background work and
+		// is otherwise idle in the foreground should still accept a new message
+		// rather than reporting "running" and dropping it.
+		if !s.isForegroundTurnGenerating(sessionID) {
+			s.logger.Debug("accepting prompt: foreground turn idle, only background work outstanding",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return nil
+		}
 		s.logger.Warn("rejected prompt while agent is already running",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
