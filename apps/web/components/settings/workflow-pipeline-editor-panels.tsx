@@ -407,7 +407,7 @@ function StepTransitionsSection({
             <Label htmlFor={`${step.id}-exit-disable-plan`} className="text-sm">
               Disable plan mode
             </Label>
-            <HelpTip text="Turn off plan mode when leaving this step." />
+            <HelpTip text="Keep plan mode on for every turn in this step, then turn it off only when the task moves to another step." />
           </div>
         </div>
       )}

@@ -34,7 +34,9 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
 ## Steps
 
-**Create a task for each step below and mark them as completed as you go.**
+Track these steps with an internal todo/checklist and mark them complete as you go.
+Do not create, update, or delete Kandev subtasks for this workflow unless the user
+explicitly requests task tracking.
 
 1. **Uncommitted changes:** If there are dirty or staged changes, run `/commit` first (it runs `/verify` internally).
 

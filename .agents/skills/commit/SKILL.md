@@ -51,7 +51,9 @@ ci: add PR title linting workflow
 
 ## Steps
 
-**Create a task for each step below and mark them as completed as you go.**
+Track these steps with an internal todo/checklist and mark them complete as you go.
+Do not create, update, or delete Kandev subtasks for this workflow unless the user
+explicitly requests task tracking.
 
 1. **Understand changes:** Run `git status` and `git diff` to understand all changes. Review recent commits with `git log --oneline -10` to match project style.
 
