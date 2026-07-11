@@ -429,6 +429,13 @@ type Service struct {
 	// in-flight dispatch at all is reason enough to defer.
 	dispatchingQueued sync.Map
 
+	// foregroundActivity tracks, per session, whether the open turn is actively
+	// generating in the foreground or only waiting on a spawned background task
+	// (subagent / run-in-background shell). Keyed sessionID -> *turnActivity;
+	// see turn_activity.go. Consulted by checkSessionPromptable so a session
+	// that kicked off background work still accepts operator input.
+	foregroundActivity sync.Map
+
 	// taskRuntimeStateMu serializes task-state flips derived from session
 	// runtime state. Without it, a completion/cancel path can check for active
 	// sibling sessions just before another handler marks one RUNNING, then
@@ -954,6 +961,12 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 // query the DB for any open turn and close it. Loops to mop up multiple
 // zombies (e.g. left over from before this fix) with a small sanity bound.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
+	// The foreground/background activity signal is turn-scoped: once the turn is
+	// closed the next foreground prompt starts from the "generating" default.
+	// Clear it before the turnService guard so the reset happens even when no
+	// turn service is wired (tests, minimal configs).
+	s.clearTurnActivity(sessionID)
+
 	if s.turnService == nil {
 		return
 	}

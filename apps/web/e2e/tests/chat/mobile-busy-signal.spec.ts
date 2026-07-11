@@ -1,0 +1,95 @@
+import { test, expect } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
+
+// Mobile (Pixel 5) coverage for ADR-0035. Filename matches
+// /mobile-.*\.spec\.ts/ so the `mobile-chrome` project picks it up. The composer
+// gating and the working affordance derive from the same shared hooks the
+// desktop path uses, so this asserts the operator-visible outcome holds at
+// mobile width: a background-idle session shows "working" while the composer
+// accepts input, then flips to done once the background task finishes.
+
+test.describe("Mobile fine-grained busy signal", () => {
+  test.describe.configure({ retries: 1 });
+
+  test("background-idle session shows working AND accepts input at mobile width", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    // Drive the background window via the auto-started first turn (the task
+    // description) rather than a sendMessage follow-up: the live turn reliably
+    // reaches the mobile client while it is still running (same approach as
+    // mobile-empty-turn.spec.ts).
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile busy signal",
+      seedData.agentProfileId,
+      {
+        description: "/background 12s",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // The auto-started turn is working…
+    await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
+
+    // …and once it yields to background work the composer flips to accept-input
+    // (idle placeholder) while the status still reads "working" — both facts
+    // visible at once at mobile width.
+    await expect(session.idleInput()).toBeVisible({ timeout: 25_000 });
+    await expect(session.agentStatus()).toBeVisible();
+    await expect(session.turnComplete()).toHaveCount(0);
+
+    // After the background task completes, the turn ends → done/idle.
+    await expect(session.agentStatus()).not.toBeVisible({ timeout: 40_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("background-idle substate survives a reload at mobile width", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    // Long background window so it is still held after the reload lands.
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile busy signal reload",
+      seedData.agentProfileId,
+      {
+        description: "/background 20s",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    // Reach the background-idle window.
+    await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 25_000 });
+    await expect(session.agentStatus()).toBeVisible();
+
+    // Reload mid-window: a fresh mobile client. The accept-input + working
+    // affordance must come straight from the boot payload (no persisted value,
+    // no activity_changed WS flip due) — ADR-0035.
+    await testPage.reload();
+    await session.waitForLoad();
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
+    await expect(session.agentStatus()).toBeVisible();
+    await expect(session.turnComplete()).toHaveCount(0);
+  });
+});

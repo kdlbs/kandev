@@ -37,7 +37,9 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	for _, session := range sessions {
-		sessionDTOs = append(sessionDTOs, dto.FromTaskSessionSummary(session))
+		summary := dto.FromTaskSessionSummary(session)
+		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
+		sessionDTOs = append(sessionDTOs, summary)
 	}
 	resp := dto.ListTaskSessionSummariesResponse{
 		Sessions: sessionDTOs,

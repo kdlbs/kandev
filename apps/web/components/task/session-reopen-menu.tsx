@@ -128,7 +128,9 @@ export function SessionReopenMenuItems({
             {session.state !== "RUNNING" &&
               session.state !== "STARTING" &&
               session.state !== "WAITING_FOR_INPUT" && (
-                <span className="shrink-0">{getSessionStateIcon(session.state, "h-3 w-3")}</span>
+                <span className="shrink-0">
+                  {getSessionStateIcon(session.state, "h-3 w-3", session.foreground_activity)}
+                </span>
               )}
           </DropdownMenuItem>
         );

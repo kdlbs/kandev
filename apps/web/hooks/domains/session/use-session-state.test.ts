@@ -185,3 +185,57 @@ describe("useSessionState", () => {
     });
   });
 });
+
+describe("useSessionState — fine-grained busy signal (foreground_activity)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockActiveTaskId = null;
+    mockActiveSessionId = null;
+    mockSessionItems = {};
+    mockSession = null;
+    mockTask = null;
+    mockPrepareProgress = {};
+  });
+
+  // ADR-0035. (a) generating gates the composer;
+  // (b) background-idle accepts input but stays working; (c) fully idle.
+  it("(a) RUNNING+generating gates the composer", () => {
+    mockSession = {
+      ...createMockSession("session-1", "task-1", "RUNNING"),
+      foreground_activity: "generating",
+    };
+
+    const { result } = renderHook(() => useSessionState("session-1"));
+
+    // Gated (busy) AND working.
+    expect(result.current.isAgentBusy).toBe(true);
+    expect(result.current.isWorking).toBe(true);
+  });
+
+  it("(b) RUNNING+background accepts input while the working affordance stays up", () => {
+    mockSession = {
+      ...createMockSession("session-1", "task-1", "RUNNING"),
+      foreground_activity: "background",
+    };
+
+    const { result } = renderHook(() => useSessionState("session-1"));
+
+    // Composer enabled (not busy) — the message sends instead of queueing —
+    // yet still working, never "done".
+    expect(result.current.isAgentBusy).toBe(false);
+    expect(result.current.isWorking).toBe(true);
+  });
+
+  it("a stale background substate is ignored once the session leaves RUNNING", () => {
+    mockSession = {
+      ...createMockSession("session-1", "task-1", "COMPLETED"),
+      foreground_activity: "background",
+    };
+
+    const { result } = renderHook(() => useSessionState("session-1"));
+
+    // Fully idle (c): neither working nor busy.
+    expect(result.current.isWorking).toBe(false);
+    expect(result.current.isAgentBusy).toBe(false);
+  });
+});

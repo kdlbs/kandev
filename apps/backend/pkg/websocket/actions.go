@@ -190,6 +190,8 @@ const (
 	ActionSessionMessageUpdated    = "session.message.updated"
 	ActionSessionMessageDeleted    = "session.message.deleted"
 	ActionSessionStateChanged      = "session.state_changed"
+	ActionSessionActivityChanged   = "session.activity_changed"
+	ActionSessionWaitingForInput   = "session.waiting_for_input"
 	ActionSessionAgentctlStarting  = "session.agentctl_starting"
 	ActionSessionAgentctlReady     = "session.agentctl_ready"
 	ActionSessionAgentctlError     = "session.agentctl_error"

@@ -9,8 +9,11 @@ import (
 )
 
 // monitorToolName is the literal toolName Claude-acp tags Monitor tool calls with
-// in `_meta.claudeCode.toolName`. Used to recognize Monitor across the lifecycle.
-const monitorToolName = "Monitor"
+// in `_meta.claudeCode.toolName`. Used to recognize Monitor across the lifecycle
+// and, via streams.MonitorSubkind, as the `kind` stamped on the structured
+// Monitor view — so the adapter (producer) and the orchestrator's background-work
+// classifier (consumer, streams.IsActiveMonitor) share one source of truth.
+const monitorToolName = streams.MonitorSubkind
 
 // monitorRegistrationOutputPrefix identifies the rawOutput banner Claude-acp
 // emits when a Monitor registers (~1s after start). The wrapper sets status to

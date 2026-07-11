@@ -840,3 +840,102 @@ describe("session.state_changed → agentctl ready fallback", () => {
     expect(setSessionAgentctlStatus).not.toHaveBeenCalled();
   });
 });
+
+describe("session.activity_changed handler — fine-grained busy signal", () => {
+  const ACTIVITY_EVENT = "session.activity_changed";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function makeActivityMessage(payload: {
+    task_id?: string;
+    session_id?: string;
+    foreground_activity?: string;
+  }) {
+    return { id: "m", type: "notification" as const, action: ACTIVITY_EVENT, payload };
+  }
+
+  it("annotates an existing RUNNING session with the background substate", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING" } } },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+    );
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      id: "s-1",
+      state: "RUNNING",
+      foreground_activity: "background",
+    });
+  });
+
+  it("flips back to generating on the next activity event", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING" } } },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "generating" }),
+    );
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({ foreground_activity: "generating" });
+  });
+
+  it("does nothing until the session row exists (state_changed seeds it first)", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: {} },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+    );
+
+    expect(upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("session.state_changed carries and resets the busy substate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("merges foreground_activity from the state_changed payload", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } } },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "RUNNING",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        foreground_activity: "generating" as any,
+      }),
+    );
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      state: "RUNNING",
+      foreground_activity: "generating",
+    });
+  });
+});

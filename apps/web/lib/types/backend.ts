@@ -9,6 +9,7 @@ export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 
 import type {
   AvailableAgent,
+  ForegroundActivity,
   SavedLayout,
   SidebarViewApi,
   SidebarViewDraftApi,
@@ -247,6 +248,28 @@ export type TaskSessionStateChangedPayload = {
   review_status?: string;
   // Task environment (for session→environment mapping)
   task_environment_id?: string;
+  // Fine-grained busy substate (see ADR-0035), carried on every transition so
+  // the client resets stale values; intra-RUNNING flips arrive on
+  // session.activity_changed instead.
+  foreground_activity?: ForegroundActivity;
+};
+
+/**
+ * Payload for `session.activity_changed` — the fine-grained busy signal
+ * (see ADR-0035). Fires when a RUNNING session's foreground turn flips between
+ * generating and idle-on-background-work, with no coarse state change.
+ */
+export type TaskSessionActivityChangedPayload = {
+  task_id: string;
+  session_id: string;
+  foreground_activity: ForegroundActivity;
+};
+
+export type TaskSessionWaitingForInputPayload = {
+  task_id: string;
+  session_id: string;
+  title: string;
+  body: string;
 };
 
 export type TaskSessionNotificationPayload = {
@@ -509,6 +532,14 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "session.turn_finished": BackendMessage<
       "session.turn_finished",
       TaskSessionNotificationPayload
+    >;
+    "session.activity_changed": BackendMessage<
+      "session.activity_changed",
+      TaskSessionActivityChangedPayload
+    >;
+    "session.waiting_for_input": BackendMessage<
+      "session.waiting_for_input",
+      TaskSessionWaitingForInputPayload
     >;
     "session.clarification_requested": BackendMessage<
       "session.clarification_requested",

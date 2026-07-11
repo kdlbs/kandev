@@ -56,6 +56,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted   | frontend                    | 2026-07-14 |
 | 0047 | [Plugins read conversation content via a capability-gated Host RPC](0047-plugin-host-conversation-reads.md)                          | accepted   | backend, protocol           | 2026-07-21 |
 | 0048 | [Plugins invoke a settings-selectable utility agent](0048-plugin-host-utility-agent-invoke.md)                                       | accepted   | backend, frontend, protocol | 2026-07-21 |
+| 0049 | [Fine-grained foreground-idle busy signal](0049-fine-grained-foreground-idle-busy-signal.md)                                      | accepted   | backend, frontend, protocol | 2026-07-11 |
 | 2026-07-23-opencode-review-evidence-trust | [Trusted OpenCode Review Evidence](2026-07-23-opencode-review-evidence-trust.md) | accepted | workflow, infra | 2026-07-23 |
 | 2026-07-23-planner-direct-small-work | [Planner Direct Small Work](2026-07-23-planner-direct-small-work.md) | accepted | workflow | 2026-07-23 |
 | 2026-07-23-post-commit-hook-aware-verification | [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md) | accepted | workflow | 2026-07-23 |
