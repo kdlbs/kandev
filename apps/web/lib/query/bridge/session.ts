@@ -42,11 +42,11 @@ export function registerSessionBridge(
   return registerBridgeHandlers(ws, queryClient, {
     "session.message.added": (message) => {
       const row = messageFromPayload(message.payload);
-      if (row) upsertMessageCaches(queryClient, row);
+      if (row) upsertSessionMessageCaches(queryClient, row);
     },
     "session.message.updated": (message) => {
       const row = messageFromPayload(message.payload);
-      if (row) upsertMessageCaches(queryClient, row);
+      if (row) upsertSessionMessageCaches(queryClient, row);
     },
     "session.message.deleted": (message) => {
       removeMessageCaches(queryClient, message);
@@ -181,7 +181,7 @@ function turnFromPayload(payload: TurnEvent["payload"]): Turn | null {
   };
 }
 
-function upsertMessageCaches(queryClient: QueryClient, row: Message): void {
+export function upsertSessionMessageCaches(queryClient: QueryClient, row: Message): void {
   const sid = row.session_id;
   const latestMessagesKey = qk.session.messages(sid);
   if (queryClient.getQueryData(latestMessagesKey) === undefined) {
@@ -460,6 +460,9 @@ function upsertTaskPlan(queryClient: QueryClient, message: PlanEvent): void {
     created_by: payload.created_by,
     created_at: payload.created_at,
     updated_at: payload.updated_at,
+    implementation_started_at: payload.implementation_started_at,
+    implementation_started_session_id: payload.implementation_started_session_id,
+    implementation_started_by: payload.implementation_started_by,
   };
   queryClient.setQueryData(qk.taskPlan.detail(payload.task_id), plan);
 }

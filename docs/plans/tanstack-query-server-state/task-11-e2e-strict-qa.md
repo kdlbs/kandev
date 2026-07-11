@@ -59,6 +59,16 @@ Residual risks:
 - No unresolved Task 11 blockers. The containers project keeps one destructive
   Docker recovery test skipped by design.
 
+Post-rebase CI follow-up (2026-07-11):
+
+- Reproduced the desktop plan-toolbar failure in the CI Docker runtime.
+- Added failing unit regressions for dropped plan implementation markers and
+  accepted walkthrough prompts missing from the latest-message Query cache.
+- Fixed both cache paths; 2 focused unit files / 10 tests passed.
+- Rebuilt Docker E2E passed the desktop plan-toolbar spec and 4 mobile
+  plan-toolbar/walkthrough tests with strict WS accounting.
+- The lifecycle rebase resolution passed all 765 package tests.
+
 ## Files Likely Touched
 
 - `apps/web/e2e/tests/**`

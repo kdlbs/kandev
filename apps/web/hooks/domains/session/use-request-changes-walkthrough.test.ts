@@ -1,5 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
+import type { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 
 const mockRequest = vi.fn();
 const mockQueueMessage = vi.fn();
@@ -9,6 +12,12 @@ const mockListPrompts = vi.fn();
 const mockGetWebSocketClient = vi.fn(() => ({ request: mockRequest }));
 type MockStoreState = ReturnType<typeof storeState>;
 let mockStoreState: MockStoreState;
+let queryClient: QueryClient;
+
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-query")>();
+  return { ...actual, useQueryClient: () => queryClient };
+});
 
 vi.mock("@/components/state-provider", () => ({
   useAppStoreApi: () => ({ getState: () => mockStoreState }),
@@ -53,6 +62,7 @@ function renderRequestHook(ready = true) {
 describe("useRequestChangesWalkthrough", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    queryClient = makeQueryClient();
     mockStoreState = storeState("WAITING_FOR_INPUT");
     mockListPrompts.mockResolvedValue({
       prompts: [
@@ -67,6 +77,11 @@ describe("useRequestChangesWalkthrough", () => {
   });
 
   it("sends a walkthrough request directly when the agent is waiting", async () => {
+    queryClient.setQueryData(qk.session.messages("session-1"), {
+      messages: [],
+      hasMore: false,
+      oldestCursor: null,
+    });
     mockRequest.mockResolvedValueOnce({
       id: "msg-1",
       session_id: "session-1",
@@ -99,6 +114,11 @@ describe("useRequestChangesWalkthrough", () => {
     expect(sentContent).not.toContain("Base commit:");
     expect(mockListPrompts).toHaveBeenCalledWith({ cache: "no-store" });
     expect(mockAddMessage).toHaveBeenCalledWith(expect.objectContaining({ id: "msg-1" }));
+    expect(
+      queryClient.getQueryData<{ messages: Array<{ id: string }> }>(
+        qk.session.messages("session-1"),
+      )?.messages,
+    ).toEqual([expect.objectContaining({ id: "msg-1" })]);
     expect(mockQueueMessage).not.toHaveBeenCalled();
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Walkthrough request sent" }),

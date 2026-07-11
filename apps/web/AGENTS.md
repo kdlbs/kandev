@@ -29,8 +29,8 @@ WebSocket Events -> Query Bridge -> Query Cache -> Mounted UI
 
 **Never fetch server data directly in components.** Server-owned data should go
 through TanStack Query keys/options and domain hooks. Zustand is for
-client-only UI state, persisted user preferences, and explicitly documented
-temporary indexes during the TanStack migration.
+client-only UI state, persisted user preferences, and the explicitly documented
+live/runtime indexes below.
 
 ## Store Structure (Domain Slices)
 
@@ -108,15 +108,14 @@ Use subscription hooks only; the WS client auto-deduplicates.
 When changing task lifecycle WS handlers (`task.updated`, `task.deleted`,
 `task.state_changed`), check both kanban and Office surfaces. Archive/delete
 events may need to update kanban caches, `tasks.activeTaskId` / session pin
-state, recent/sidebar prefs, Office refetch triggers such as
-`setOfficeRefetchTrigger("tasks")`, and route redirects for `/t/:id`,
+state, recent/sidebar prefs, matching Office query keys, and route redirects for `/t/:id`,
 `/tasks/:id`, and `/office/tasks/:id`. Add focused tests for every affected
 surface.
 
 Server-state WS handlers should live in `lib/query/bridge/` and write or
 invalidate the same query keys the mounted UI reads. Legacy `lib/ws/handlers/*`
 files are only for retained client effects, high-frequency streams, or
-documented temporary migration paths.
+documented non-query transport paths.
 
 ## Component conventions
 

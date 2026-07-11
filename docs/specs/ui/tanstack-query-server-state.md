@@ -309,3 +309,20 @@ Final strict QA completed locally:
   Docker tests with strict WS accounting.
 - `rtk env KANDEV_E2E_CONTAINERS=1 pnpm --dir apps/web e2e --project=containers`
   passed 99 container-backed Docker/SSH executor tests / 1 skipped.
+
+Post-rebase CI follow-up completed locally on 2026-07-11 after rebasing onto
+`origin/main` at `9094659a`:
+
+- Preserved both upstream cancel-release handling and the migration's missing
+  session recovery in the only rebase conflict; the lifecycle package passed
+  765 tests.
+- Fixed `task.plan.updated` Query bridge projection so implementation-started
+  markers remain visible immediately after the toolbar action.
+- Made accepted walkthrough prompts cancel an older latest-message fetch and
+  update the Query cache as well as the retained live message index.
+- Focused unit regressions passed 2 files / 10 tests.
+- Docker E2E passed the desktop plan-toolbar implementation spec and the rebuilt
+  mobile plan-toolbar/walkthrough slice (4 tests) with strict WS accounting.
+- A pre-fix mobile stress reproduction also completed 20/20 focused repetitions;
+  the walkthrough cache race was confirmed by the failing unit regression rather
+  than a deterministic isolated browser failure.

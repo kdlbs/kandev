@@ -291,6 +291,28 @@ describe("session query bridge task-plan events", () => {
     cleanup();
   });
 
+  it("preserves implementation markers from task plan updates", () => {
+    const { ws, queryClient, cleanup } = setupBridge();
+
+    ws.emit({
+      type: "notification",
+      action: "task.plan.updated",
+      payload: makeTaskPlan({
+        implementation_started_at: TEST_UPDATED_AT,
+        implementation_started_session_id: TEST_SESSION_ID,
+        implementation_started_by: "user",
+      }) as unknown as Record<string, unknown>,
+    });
+
+    expect(queryClient.getQueryData(qk.taskPlan.detail(TEST_TASK_ID))).toMatchObject({
+      implementation_started_at: TEST_UPDATED_AT,
+      implementation_started_session_id: TEST_SESSION_ID,
+      implementation_started_by: "user",
+    });
+
+    cleanup();
+  });
+
   it("stores deleted task plans as null", () => {
     const { ws, queryClient, cleanup } = setupBridge();
     queryClient.setQueryData(qk.taskPlan.detail(TEST_TASK_ID), makeTaskPlan());
