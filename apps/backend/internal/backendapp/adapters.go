@@ -648,6 +648,11 @@ func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, 
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
 }
 
+// ForegroundActivity forwards to the orchestrator service (ADR-0035).
+func (w *orchestratorWrapper) ForegroundActivity(sessionID string) v1.ForegroundActivity {
+	return w.svc.ForegroundActivity(sessionID)
+}
+
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {
 	svc    *taskservice.Service

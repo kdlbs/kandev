@@ -129,7 +129,9 @@ export function SessionReopenMenuItems({
               session.state !== "STARTING" &&
               session.state !== "WAITING_FOR_INPUT" && (
                 <span className="shrink-0">
-                  {getSessionStateIcon(session.state, "h-3 w-3", session.foreground_activity)}
+                  {/* This branch only renders for non-RUNNING sessions, so the
+                      RUNNING-only foreground_activity substate is irrelevant here. */}
+                  {getSessionStateIcon(session.state, "h-3 w-3")}
                 </span>
               )}
           </DropdownMenuItem>

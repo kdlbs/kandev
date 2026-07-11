@@ -501,6 +501,13 @@ function applyForegroundActivity(
   const sessionId = toSessionId(payload.session_id);
   const existing = store.getState().taskSessions.items[sessionId];
   if (!existing) return;
+  // The substate is only meaningful while the session is RUNNING. Ignoring a
+  // flip for any other coarse state prevents a delayed/out-of-order background
+  // event from reopening the composer after the turn already ended (the coarse
+  // state governs then). Also guard the task binding so a stale or malformed
+  // payload cannot move the session onto another task's list.
+  if (existing.state !== "RUNNING") return;
+  if (existing.task_id && existing.task_id !== taskId) return;
   store.getState().upsertTaskSessionFromEvent(taskId, {
     id: sessionId,
     task_id: taskId,

@@ -261,8 +261,12 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	// holds the turn open while the foreground goes idle. Track it so
 	// checkSessionPromptable can tell "foreground generating" from "waiting on
 	// background". Child tool calls (ParentToolCallID set) are the subagent's
-	// internal work, not a new background task, so they are ignored here.
-	if payload.Data.ParentToolCallID == "" && normalizedIsBackgroundTask(payload.Data.Normalized) {
+	// internal work, not a new background task, so they are ignored here. A
+	// tool_call that already arrives terminal is not outstanding work — clearing
+	// is driven by tool_update, so registering it would leak into the hold and
+	// never clear.
+	if payload.Data.ParentToolCallID == "" && !isTerminalToolStatus(payload.Data.ToolStatus) &&
+		normalizedIsBackgroundTask(payload.Data.Normalized) {
 		if s.registerBackgroundTask(payload.SessionID, payload.Data.ToolCallID) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 		}
@@ -370,7 +374,9 @@ func (s *Service) handleStreamingEventKind(
 func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	// Streamed foreground output means the agent is actively generating again,
 	// even if a background task is still outstanding — narrows the busy signal.
-	if s.markForegroundGenerating(payload.SessionID) {
+	// Only genuine output flips the state: an empty/invalid frame is discarded by
+	// handleStreamingEventKind, so it must not spuriously reclose the prompt gate.
+	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID) {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
 	s.handleStreamingEventKind(ctx, payload, "message",
@@ -382,7 +388,9 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 // It creates a new thinking message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleThinkingStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	// Streamed foreground reasoning means the agent is actively generating again.
-	if s.markForegroundGenerating(payload.SessionID) {
+	// Only genuine output flips the state — an empty/invalid frame is discarded
+	// downstream, so it must not spuriously reclose the prompt gate.
+	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID) {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
 	s.handleStreamingEventKind(ctx, payload, "thinking message",
@@ -401,6 +409,12 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	if s.shouldDropCompletedExecutionStreamEvent(payload) {
 		return
 	}
+
+	// Background-work bookkeeping for the finer-grained busy signal runs
+	// regardless of message persistence — mirrors handleToolCallEvent — so a
+	// run-in-background shell or Monitor watch still drives the prompt gate even
+	// when no messageCreator is wired (tests, minimal configs).
+	s.trackBackgroundToolUpdate(ctx, payload)
 
 	if s.messageCreator == nil {
 		return

@@ -726,6 +726,10 @@ func (o *switchingTurnStartOrchestrator) ProcessOnTurnStart(context.Context, str
 	return nil
 }
 
+func (o *switchingTurnStartOrchestrator) ForegroundActivity(string) v1.ForegroundActivity {
+	return v1.ForegroundActivityGenerating
+}
+
 func (o *switchingTurnStartOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
 	return false
 }
@@ -866,4 +870,56 @@ func TestWSAddMessageFailsWhenSessionReloadAfterOnTurnStartFails(t *testing.T) {
 	assert.Empty(t, repo.messages)
 	assert.Empty(t, orch.getStartedSession())
 	assert.Empty(t, orch.getForwardedSession())
+}
+
+// fgActivityOrchestrator is a minimal OrchestratorService whose ForegroundActivity
+// is configurable, for testing the ADR-0035 message-add gate.
+type fgActivityOrchestrator struct {
+	activity v1.ForegroundActivity
+}
+
+func (o fgActivityOrchestrator) PromptTask(context.Context, string, string, string, string, bool, []v1.MessageAttachment, bool) (*orchestrator.PromptResult, error) {
+	return &orchestrator.PromptResult{}, nil
+}
+func (o fgActivityOrchestrator) ResumeTaskSession(context.Context, string, string) error { return nil }
+func (o fgActivityOrchestrator) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment) error {
+	return nil
+}
+func (o fgActivityOrchestrator) ProcessOnTurnStart(context.Context, string, string) error { return nil }
+func (o fgActivityOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
+	return false
+}
+func (o fgActivityOrchestrator) ForegroundActivity(string) v1.ForegroundActivity { return o.activity }
+
+// TestErrorForBlockedMessageSession_BackgroundIdleAccepts is the ADR-0035
+// message-add gate: a RUNNING session whose foreground turn has yielded to
+// background work must NOT be blocked at the message.add layer (it flows on to
+// PromptTask), while a foreground-generating RUNNING session stays blocked.
+func TestErrorForBlockedMessageSession_BackgroundIdleAccepts(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	msg := &ws.Message{ID: "1", Action: ws.ActionMessageAdd}
+
+	cases := []struct {
+		name      string
+		activity  v1.ForegroundActivity
+		state     models.TaskSessionState
+		wantBlock bool
+	}{
+		{"running + generating is blocked", v1.ForegroundActivityGenerating, models.TaskSessionStateRunning, true},
+		{"running + background is accepted", v1.ForegroundActivityBackground, models.TaskSessionStateRunning, false},
+		{"waiting is accepted regardless", v1.ForegroundActivityGenerating, models.TaskSessionStateWaitingForInput, false},
+		{"failed stays blocked", v1.ForegroundActivityBackground, models.TaskSessionStateFailed, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &MessageHandlers{orchestrator: fgActivityOrchestrator{activity: tc.activity}, logger: log}
+			got := h.errorForBlockedMessageSession(msg, "s1", tc.state)
+			if tc.wantBlock {
+				assert.NotNil(t, got, "expected the message to be blocked")
+			} else {
+				assert.Nil(t, got, "expected the message to be accepted")
+			}
+		})
+	}
 }

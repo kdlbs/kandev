@@ -2703,8 +2703,12 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// A fresh foreground prompt is, by definition, foreground generation — clear
 	// any lingering "waiting on background" state so this turn gates input while
 	// it runs (e.g. when the operator sent this message into a background-idle
-	// session that was just accepted by checkSessionPromptable).
-	s.markForegroundGenerating(sessionID)
+	// session that was just accepted by checkSessionPromptable). Publish the flip:
+	// setSessionRunning above no-ops on an already-RUNNING session, so this is the
+	// only signal that resets the client's stale foreground_activity=background.
+	if s.markForegroundGenerating(sessionID) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
 	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
