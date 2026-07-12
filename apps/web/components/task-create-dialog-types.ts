@@ -161,6 +161,12 @@ export type DialogComputedArgs = {
 
 export type TaskCreateEffectsArgs = {
   open: boolean;
+  /**
+   * True when the dialog is in create mode (`mode === "create"`). Gates the
+   * startup-prompt pre-fill so edit/session modes never inject a repository
+   * default into an existing task's description.
+   */
+  isCreateMode: boolean;
   workspaceId: string | null;
   workflowId: string | null;
   repositories: Repository[];

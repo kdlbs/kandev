@@ -614,7 +614,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     workflows,
   );
   useGitHubUrlErrorEffect(fs, open);
-  useRepositoryStartupPromptPrefillEffect(fs, open, repositories, fs.taskName);
+  useRepositoryStartupPromptPrefillEffect(fs, open, repositories, fs.taskName, args.isCreateMode);
 }
 
 // Reset row.branch on every "switch to local executor" transition so the

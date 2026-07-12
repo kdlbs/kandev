@@ -11,18 +11,22 @@ import { resolveStartupPromptForManualDialog } from "@/lib/repository/startup-pr
  * manual dialog (TASK_TITLE substitution + dropped ticket lines).
  *
  * Rules (see spec):
+ *  - Only fires in create mode. Edit mode opens an existing task whose
+ *    description belongs to the user; injecting a repository default into
+ *    an empty description there would silently rewrite persisted state on
+ *    save. Session mode is likewise a no-op — the mode targets an existing
+ *    session, not a new task.
  *  - Only fires when the description input is empty OR still holds the last
  *    prompt this effect wrote — never clobbers user text.
  *  - Re-runs when the selected repo changes, so switching repos re-pre-fills
  *    with the new repo's prompt (subject to the "not user-edited" rule).
- *  - No-op in edit mode (the caller keeps the effect out of the tree there by
- *    only running it in create mode).
  */
 export function useRepositoryStartupPromptPrefillEffect(
   fs: DialogFormState,
   open: boolean,
   repositories: Repository[],
   taskName: string,
+  isCreateMode: boolean,
 ): void {
   const { descriptionInputRef, setHasDescription, repositories: rows } = fs;
   const lastAppliedRef = useRef<string>("");
@@ -36,7 +40,7 @@ export function useRepositoryStartupPromptPrefillEffect(
     : "";
 
   useEffect(() => {
-    if (!open) {
+    if (!open || !isCreateMode) {
       lastAppliedRef.current = "";
       return;
     }
@@ -56,5 +60,5 @@ export function useRepositoryStartupPromptPrefillEffect(
     descriptionInputRef.current?.setValue(resolved);
     lastAppliedRef.current = resolved;
     setHasDescription(resolved.length > 0);
-  }, [open, startupPrompt, taskName, descriptionInputRef, setHasDescription]);
+  }, [open, isCreateMode, startupPrompt, taskName, descriptionInputRef, setHasDescription]);
 }
