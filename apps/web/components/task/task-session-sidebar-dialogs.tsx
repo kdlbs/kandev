@@ -3,10 +3,14 @@
 import { TaskRenameDialog } from "./task-rename-dialog";
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
+import { TaskExternalLinkDialog } from "./task-external-link-dialog";
 import { TaskGitHubIssueDialog } from "./task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "./task-github-pr-dialog";
 import type { Repository } from "@/lib/types/http";
-import type { SidebarLinkTarget } from "./task-session-sidebar-link-actions";
+import type {
+  SidebarExternalLinkTarget,
+  SidebarLinkTarget,
+} from "./task-session-sidebar-link-actions";
 
 type Target = { id: string; title: string; executorType?: string | null } | null;
 type LinkTarget = SidebarLinkTarget | null;
@@ -28,14 +32,18 @@ export type SidebarDialogsActions = {
   setLinkingPullRequestTask: (next: LinkTarget) => void;
   linkingIssueTask: LinkTarget;
   setLinkingIssueTask: (next: LinkTarget) => void;
+  linkingExternalIssueTask: SidebarExternalLinkTarget | null;
+  setLinkingExternalIssueTask: (next: SidebarExternalLinkTarget | null) => void;
 };
 
 export function SidebarDialogs({
   actions,
   repositories,
+  workspaceId,
 }: {
   actions: SidebarDialogsActions;
   repositories: Repository[];
+  workspaceId: string | null;
 }) {
   const {
     renamingTask,
@@ -50,10 +58,6 @@ export function SidebarDialogs({
     setDeletingTask,
     isDeleting,
     handleDeleteConfirm,
-    linkingPullRequestTask,
-    setLinkingPullRequestTask,
-    linkingIssueTask,
-    setLinkingIssueTask,
   } = actions;
   return (
     <>
@@ -87,6 +91,38 @@ export function SidebarDialogs({
         isDeleting={isDeleting}
         onConfirm={handleDeleteConfirm}
       />
+      <SidebarLinkDialogs actions={actions} repositories={repositories} workspaceId={workspaceId} />
+    </>
+  );
+}
+
+export function SidebarLinkDialogs({
+  actions,
+  repositories,
+  workspaceId,
+}: {
+  actions: Pick<
+    SidebarDialogsActions,
+    | "linkingPullRequestTask"
+    | "setLinkingPullRequestTask"
+    | "linkingIssueTask"
+    | "setLinkingIssueTask"
+    | "linkingExternalIssueTask"
+    | "setLinkingExternalIssueTask"
+  >;
+  repositories: Repository[];
+  workspaceId: string | null;
+}) {
+  const {
+    linkingPullRequestTask,
+    setLinkingPullRequestTask,
+    linkingIssueTask,
+    setLinkingIssueTask,
+    linkingExternalIssueTask,
+    setLinkingExternalIssueTask,
+  } = actions;
+  return (
+    <>
       {linkingPullRequestTask && (
         <TaskGitHubPRDialog
           open={true}
@@ -105,6 +141,17 @@ export function SidebarDialogs({
           }}
           task={linkingIssueTask}
           repositories={repositories}
+        />
+      )}
+      {linkingExternalIssueTask && workspaceId && (
+        <TaskExternalLinkDialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setLinkingExternalIssueTask(null);
+          }}
+          provider={linkingExternalIssueTask.provider}
+          task={linkingExternalIssueTask.task}
+          workspaceId={workspaceId}
         />
       )}
     </>

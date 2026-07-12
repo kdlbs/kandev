@@ -106,6 +106,7 @@ describe("fetchDatabaseStats", () => {
   it("GETs /database", async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({
+        driver: "sqlite",
         path: "/data/kandev.db",
         size_bytes: 1,
         wal_size_bytes: 0,
@@ -116,6 +117,7 @@ describe("fetchDatabaseStats", () => {
     const stats = await fetchDatabaseStats();
     expect(lastCall().url).toBe(`${BASE}/database`);
     expect(method()).toBe("GET");
+    expect(stats.driver).toBe("sqlite");
     expect(stats.path).toBe("/data/kandev.db");
   });
 });

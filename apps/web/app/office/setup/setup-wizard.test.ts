@@ -11,7 +11,12 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
 
 import { completeOnboarding } from "@/lib/api/domains/office-api";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
-import { submitOnboarding } from "./setup-wizard";
+import {
+  DEFAULT_ONBOARDING_TASK_DESCRIPTION,
+  DEFAULT_ONBOARDING_TASK_TITLE,
+  getInitialData,
+  submitOnboarding,
+} from "./setup-wizard";
 
 const mockCompleteOnboarding = vi.mocked(completeOnboarding);
 const mockUpdateUserSettings = vi.mocked(updateUserSettings);
@@ -24,6 +29,11 @@ const BASE_WIZARD_DATA = {
   taskPrefix: "MY",
   agentName: "CEO",
   agentProfileId: "profile-1",
+  tierProfileIds: {
+    frontier: "profile-frontier",
+    balanced: "profile-balanced",
+    economy: "profile-economy",
+  },
   executorPreference: "local_pc",
   taskTitle: "",
   taskDescription: "",
@@ -40,12 +50,39 @@ beforeEach(() => {
 });
 
 describe("submitOnboarding", () => {
+  it("starts new workspaces with a CEO setup task brief", () => {
+    const data = getInitialData(WORKSPACE_NAME, "profile-1");
+
+    expect(data.taskTitle).toBe(DEFAULT_ONBOARDING_TASK_TITLE);
+    expect(data.taskDescription).toBe(DEFAULT_ONBOARDING_TASK_DESCRIPTION);
+    expect(data.taskDescription).toContain("https://github.com/org/repo");
+    expect(data.taskDescription).toContain("Create one project per repository");
+    expect(data.taskDescription).toContain("Create the agent team");
+    expect(data.taskDescription).toContain("proposed plan");
+    expect(data.taskDescription).toContain("Wait for the human to approve");
+    expect(data.taskDescription).not.toContain("Assign agents to the right projects");
+    expect(data.taskDescription).not.toContain("Create the first backlog");
+    expect(data.defaultTier).toBe("frontier");
+    expect(data.tierProfileIds).toEqual({
+      frontier: "profile-1",
+      balanced: "profile-1",
+      economy: "profile-1",
+    });
+  });
+
   it("calls completeOnboarding with the wizard data", async () => {
     await submitOnboarding(BASE_WIZARD_DATA);
 
     expect(mockCompleteOnboarding).toHaveBeenCalledOnce();
     expect(mockCompleteOnboarding).toHaveBeenCalledWith(
-      expect.objectContaining({ workspaceName: WORKSPACE_NAME }),
+      expect.objectContaining({
+        workspaceName: WORKSPACE_NAME,
+        tier_profiles: {
+          frontier: "profile-frontier",
+          balanced: "profile-balanced",
+          economy: "profile-economy",
+        },
+      }),
     );
   });
 

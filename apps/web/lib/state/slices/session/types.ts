@@ -1,4 +1,11 @@
-import type { Message, TaskSession, Turn, TaskPlan, TaskPlanRevision } from "@/lib/types/http";
+import type {
+  Message,
+  TaskSession,
+  Turn,
+  TaskPlan,
+  TaskPlanRevision,
+  TaskWalkthrough,
+} from "@/lib/types/http";
 
 export type MessagesState = {
   bySession: Record<string, Message[]>;
@@ -83,6 +90,15 @@ export type TaskPlansState = {
   lastSeenUpdatedAtByTaskId: Record<string, string>;
 };
 
+export type WalkthroughsState = {
+  /** The current walkthrough per task (null = explicitly none). */
+  byTaskId: Record<string, TaskWalkthrough | null>;
+  /** The active step index per task (drives the popover position). */
+  activeStepByTaskId: Record<string, number>;
+  /** The last `updated_at` the user has opened, for the unseen-dot indicator. */
+  lastSeenUpdatedAtByTaskId: Record<string, string>;
+};
+
 export type QueuedMessageMetadata = Record<string, unknown> & {
   workflow_message?: boolean;
   workflow_auto_start?: boolean;
@@ -145,6 +161,7 @@ export type SessionSliceState = {
   pendingModel: PendingModelState;
   activeModel: ActiveModelState;
   taskPlans: TaskPlansState;
+  walkthroughs: WalkthroughsState;
   queue: QueueState;
 };
 
@@ -212,6 +229,10 @@ export type SessionSliceActions = {
   setPreviewRevision: (taskId: string, revisionId: string | null) => void;
   toggleComparePair: (taskId: string, revisionId: string) => void;
   clearComparePair: (taskId: string) => void;
+  // Walkthrough actions
+  setWalkthrough: (taskId: string, walkthrough: TaskWalkthrough | null) => void;
+  setWalkthroughActiveStep: (taskId: string, stepIndex: number) => void;
+  markWalkthroughSeen: (taskId: string) => void;
   // Queue actions
   setQueueEntries: (sessionId: string, entries: QueuedMessage[], meta: QueueMeta) => void;
   removeQueueEntry: (sessionId: string, entryId: string) => void;

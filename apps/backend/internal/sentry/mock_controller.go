@@ -1,7 +1,9 @@
 package sentry
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -11,7 +13,8 @@ import (
 
 // MockController exposes HTTP endpoints that drive the in-memory MockClient
 // during E2E tests. Mounted by RegisterMockRoutes only when the service was
-// built with a MockClient.
+// built with a MockClient. Every data endpoint is scoped to an instance via the
+// `?instanceId=` query param so tests can seed distinct datasets per instance.
 type MockController struct {
 	mock  *MockClient
 	store *Store
@@ -36,14 +39,28 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.DELETE("/reset", c.reset)
 }
 
+func (c *MockController) requireInstanceID(ctx *gin.Context) (string, bool) {
+	instanceID := strings.TrimSpace(ctx.Query("instanceId"))
+	if instanceID == "" {
+		writeErr(ctx, http.StatusBadRequest, "instanceId query parameter required")
+		return "", false
+	}
+	return instanceID, true
+}
+
+// setAuthResult seeds an instance's TestAuth response. instanceId is
+// optional (unlike the other seed routes): TestConnectionCandidate builds a
+// client for a not-yet-persisted config using the empty-string instance ID,
+// so pre-save "Test connection" specs must be able to seed that dataset too.
 func (c *MockController) setAuthResult(ctx *gin.Context) {
 	var req TestConnectionResult
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
+	instanceID := strings.TrimSpace(ctx.Query("instanceId"))
 	r := req
-	c.mock.SetAuthResult(&r)
+	c.mock.SetAuthResult(instanceID, &r)
 	ctx.JSON(http.StatusOK, gin.H{"set": true})
 }
 
@@ -53,11 +70,19 @@ func (c *MockController) setAuthHealth(ctx *gin.Context) {
 		Error string `json:"error"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
-	if err := c.store.UpdateAuthHealth(ctx.Request.Context(), req.OK, req.Error, time.Now().UTC()); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
+		return
+	}
+	if err := c.store.UpdateAuthHealthForInstance(ctx.Request.Context(), instanceID, req.OK, req.Error, time.Now().UTC()); err != nil {
+		if errors.Is(err, ErrInstanceNotFound) {
+			writeErr(ctx, http.StatusNotFound, err.Error())
+			return
+		}
+		writeErr(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"set": true})
@@ -68,10 +93,14 @@ func (c *MockController) setOrganizations(ctx *gin.Context) {
 		Organizations []SentryOrganization `json:"organizations"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
-	c.mock.SetOrganizations(req.Organizations)
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
+		return
+	}
+	c.mock.SetOrganizations(instanceID, req.Organizations)
 	ctx.JSON(http.StatusOK, gin.H{"count": len(req.Organizations)})
 }
 
@@ -80,10 +109,14 @@ func (c *MockController) setProjects(ctx *gin.Context) {
 		Projects []SentryProject `json:"projects"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
-	c.mock.SetProjects(req.Projects)
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
+		return
+	}
+	c.mock.SetProjects(instanceID, req.Projects)
 	ctx.JSON(http.StatusOK, gin.H{"count": len(req.Projects)})
 }
 
@@ -92,11 +125,15 @@ func (c *MockController) addIssues(ctx *gin.Context) {
 		Issues []SentryIssue `json:"issues"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
+		return
+	}
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
 		return
 	}
 	for i := range req.Issues {
-		c.mock.AddIssue(&req.Issues[i])
+		c.mock.AddIssue(instanceID, &req.Issues[i])
 	}
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Issues)})
 }
@@ -107,13 +144,17 @@ func (c *MockController) setGetIssueError(ctx *gin.Context) {
 		Message    string `json:"message"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
+		return
+	}
+	instanceID, ok := c.requireInstanceID(ctx)
+	if !ok {
 		return
 	}
 	if req.StatusCode == 0 {
-		c.mock.SetGetIssueError(nil)
+		c.mock.SetGetIssueError(instanceID, nil)
 	} else {
-		c.mock.SetGetIssueError(&APIError{StatusCode: req.StatusCode, Message: req.Message})
+		c.mock.SetGetIssueError(instanceID, &APIError{StatusCode: req.StatusCode, Message: req.Message})
 	}
 	ctx.JSON(http.StatusOK, gin.H{"set": true})
 }

@@ -32,7 +32,9 @@ export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileVi
   const activeSession = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const worktreePath = activeSession?.worktree_path ?? undefined;
+  const repositoryId = activeSession?.repository_id ?? undefined;
   const viewerKind = useMemo(() => resolveViewerKind(file), [file]);
   const markdownFile = isMarkdownFile(file.path);
 
@@ -86,10 +88,14 @@ export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileVi
                 path={file.path}
                 content={content}
                 worktreePath={worktreePath}
+                sessionId={sessionId ?? undefined}
+                taskId={activeTaskId}
+                repositoryId={repositoryId}
+                enableComments={!!sessionId}
                 onTogglePreview={() => setMarkdownPreview((current) => !current)}
               />
             ) : (
-              <FileViewerContent path={file.path} content={content} />
+              <FileViewerContent path={file.path} repo={file.repo} content={content} />
             ))}
         </div>
       </PanelBody>

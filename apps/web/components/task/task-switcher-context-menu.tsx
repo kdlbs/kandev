@@ -3,16 +3,16 @@
 import { cloneElement, isValidElement, useState } from "react";
 import {
   IconArchive,
-  IconCheck,
+  IconBrandSentry,
   IconCopy,
   IconCircleDot,
   IconGitPullRequest,
   IconLink,
   IconLoader,
-  IconPalette,
   IconPencil,
   IconPin,
   IconPinFilled,
+  IconTicket,
   IconTrash,
 } from "@tabler/icons-react";
 import {
@@ -30,14 +30,7 @@ import {
   type TaskMoveWorkflow,
 } from "@/components/task/task-move-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
-import { useSetTaskColor, useTaskColor } from "@/hooks/use-task-color";
-import {
-  TASK_COLORS,
-  TASK_COLOR_BAR_CLASS,
-  TASK_COLOR_LABEL,
-  type TaskColor,
-} from "@/lib/task-colors";
-import { cn } from "@/lib/utils";
+import { TaskColorMenu } from "./task-switcher-color-menu";
 import type { TaskSwitcherItem } from "./task-switcher";
 
 export type StepDef = {
@@ -56,12 +49,25 @@ type ContextMenuProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
+  onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
+  onLinkIssue?: (taskId: string, taskTitle?: string) => void;
+  onLinkJiraTicket?: (taskId: string, taskTitle?: string) => void;
+  onLinkLinearIssue?: (taskId: string, taskTitle?: string) => void;
+  onLinkSentryIssue?: (taskId: string, taskTitle?: string) => void;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
+  pinnedTaskIds?: string[];
   isDeleting?: boolean;
+  /** Active multi-selection; when this task is part of it, actions apply to the whole set. */
+  selectedTaskIds?: Set<string>;
+  onBulkArchive?: (taskIds: string[]) => void;
+  onBulkDelete?: (taskIds: string[]) => void;
+  onBulkPin?: (taskIds: string[]) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+  onClearSelection?: () => void;
+  /** True when the selection spans more than one workflow (disables bulk "Move to step"). */
+  isMixedWorkflowSelection?: boolean;
 };
 
 export function TaskItemWithContextMenu({
@@ -75,10 +81,21 @@ export function TaskItemWithContextMenu({
   onDeleteTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   onMoveToStep,
   onTogglePin,
   isPinned,
+  pinnedTaskIds,
   isDeleting,
+  selectedTaskIds,
+  onBulkArchive,
+  onBulkDelete,
+  onBulkPin,
+  onBulkMove,
+  onClearSelection,
+  isMixedWorkflowSelection,
 }: ContextMenuProps) {
   const [contextOpen, setContextOpen] = useState(false);
   const [menuKey, setMenuKey] = useState(0);
@@ -105,10 +122,21 @@ export function TaskItemWithContextMenu({
           onDeleteTask={onDeleteTask}
           onLinkPullRequest={onLinkPullRequest}
           onLinkIssue={onLinkIssue}
+          onLinkJiraTicket={onLinkJiraTicket}
+          onLinkLinearIssue={onLinkLinearIssue}
+          onLinkSentryIssue={onLinkSentryIssue}
           onMoveToStep={onMoveToStep}
           onTogglePin={onTogglePin}
           isPinned={isPinned}
+          pinnedTaskIds={pinnedTaskIds}
           isDeleting={isDeleting}
+          selectedTaskIds={selectedTaskIds}
+          onBulkArchive={onBulkArchive}
+          onBulkDelete={onBulkDelete}
+          onBulkPin={onBulkPin}
+          onBulkMove={onBulkMove}
+          onClearSelection={onClearSelection}
+          isMixedWorkflowSelection={isMixedWorkflowSelection}
           closeMenu={closeMenu}
           moveTasks={moveTasks}
         />
@@ -122,43 +150,92 @@ type TaskContextMenuItemsProps = Omit<ContextMenuProps, "children"> & {
   moveTasks: ReturnType<typeof useTaskWorkflowMove>;
 };
 
-function TaskContextMenuItems({
-  task,
-  workflows,
-  stepsByWorkflowId,
-  steps,
-  onRenameTask,
-  onArchiveTask,
-  onDeleteTask,
-  onLinkPullRequest,
-  onLinkIssue,
-  onMoveToStep,
-  onTogglePin,
-  isPinned,
-  isDeleting,
-  closeMenu,
-  moveTasks,
-}: TaskContextMenuItemsProps) {
+function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
+  const {
+    task,
+    workflows,
+    stepsByWorkflowId,
+    steps,
+    onRenameTask,
+    onArchiveTask,
+    onDeleteTask,
+    onMoveToStep,
+    onTogglePin,
+    isPinned,
+    pinnedTaskIds,
+    isDeleting,
+    selectedTaskIds,
+    onBulkArchive,
+    onBulkDelete,
+    onBulkPin,
+    onBulkMove,
+    onClearSelection,
+    isMixedWorkflowSelection,
+    closeMenu,
+    moveTasks,
+  } = props;
+  // Right-clicking any row that's part of the active selection acts on the whole
+  // selection (even a one-row selection, so the action clears it); right-clicking
+  // a non-selected row acts on just that task and leaves the selection intact.
+  const actingOnSelection = !!selectedTaskIds?.has(task.id);
+  const actingIds = actingOnSelection ? [...selectedTaskIds!] : [task.id];
+
+  // With several tasks selected, only actions that make sense for all of them
+  // are offered (Pin / Move / Archive / Delete) — the single-task actions
+  // (Rename, Color, Link, Duplicate) are hidden.
+  if (actingOnSelection && actingIds.length > 1) {
+    return (
+      <BulkSelectionMenuItems
+        task={task}
+        actingIds={actingIds}
+        workflows={workflows}
+        stepsByWorkflowId={stepsByWorkflowId}
+        steps={steps}
+        isMixedWorkflowSelection={isMixedWorkflowSelection}
+        pinnedTaskIds={pinnedTaskIds}
+        onBulkPin={onBulkPin}
+        onBulkArchive={onBulkArchive}
+        onBulkDelete={onBulkDelete}
+        onBulkMove={onBulkMove}
+        closeMenu={closeMenu}
+        moveTasks={moveTasks}
+      />
+    );
+  }
+
+  // Acting on a lone selected row (Pin / Delete) must drop it from the selection
+  // so later plain clicks navigate instead of toggling.
+  const withClear = (handler?: (id: string) => void) =>
+    actingOnSelection && onClearSelection && handler
+      ? (id: string) => {
+          onClearSelection();
+          handler(id);
+        }
+      : handler;
+  const onDelete = withClear(onDeleteTask);
   return (
     <>
       <TaskPinItem
         taskId={task.id}
         isPinned={isPinned}
         disabled={isDeleting}
-        onTogglePin={onTogglePin}
+        onTogglePin={withClear(onTogglePin)}
       />
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
       <ContextMenuItem disabled>
         <IconCopy className="mr-2 h-4 w-4" />
         Duplicate
       </ContextMenuItem>
-      <TaskArchiveItem taskId={task.id} disabled={isDeleting} onArchiveTask={onArchiveTask} />
-      <TaskColorMenu taskId={task.id} disabled={isDeleting} />
-      <TaskLinkMenu
+      <TaskArchiveItem
+        taskId={task.id}
+        actingIds={actingIds}
+        actingOnSelection={actingOnSelection}
         disabled={isDeleting}
-        onLinkPullRequest={selectTaskAction(task.id, onLinkPullRequest, closeMenu)}
-        onLinkIssue={selectTaskAction(task.id, onLinkIssue, closeMenu)}
+        onArchiveTask={onArchiveTask}
+        onBulkArchive={onBulkArchive}
       />
+      <TaskColorMenu taskId={task.id} disabled={isDeleting} />
+      <TaskLinkMenu disabled={isDeleting} {...selectTaskLinkActions(task, closeMenu, props)} />
       <TaskMoveItems
         task={task}
         workflows={workflows}
@@ -166,23 +243,127 @@ function TaskContextMenuItems({
         steps={steps}
         isDeleting={isDeleting}
         onMoveToStep={onMoveToStep}
+        actingIds={actingIds}
+        actingOnSelection={actingOnSelection}
+        onBulkMove={onBulkMove}
+        isMixedWorkflowSelection={isMixedWorkflowSelection}
         closeMenu={closeMenu}
         moveTasks={moveTasks}
       />
-      <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDeleteTask} />
+      <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDelete} />
     </>
   );
 }
 
-function selectTaskAction(
-  taskId: string,
-  handler: ((taskId: string) => void) | undefined,
+/** Reduced menu shown when 2+ tasks are selected — only bulk-valid actions. */
+function BulkSelectionMenuItems({
+  task,
+  actingIds,
+  workflows,
+  stepsByWorkflowId,
+  steps,
+  isMixedWorkflowSelection,
+  pinnedTaskIds,
+  onBulkPin,
+  onBulkArchive,
+  onBulkDelete,
+  onBulkMove,
+  closeMenu,
+  moveTasks,
+}: {
+  task: TaskSwitcherItem;
+  actingIds: string[];
+  workflows?: TaskMoveWorkflow[];
+  stepsByWorkflowId?: Record<string, StepDef[]>;
+  steps?: StepDef[];
+  isMixedWorkflowSelection?: boolean;
+  pinnedTaskIds?: string[];
+  onBulkPin?: (taskIds: string[]) => void;
+  onBulkArchive?: (taskIds: string[]) => void;
+  onBulkDelete?: (taskIds: string[]) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+  closeMenu: () => void;
+  moveTasks: ReturnType<typeof useTaskWorkflowMove>;
+}) {
+  const n = actingIds.length;
+  const allPinned =
+    actingIds.length > 0 && actingIds.every((id) => pinnedTaskIds?.includes(id) ?? false);
+  const pinLabel = `${allPinned ? "Unpin" : "Pin"} ${n} ${n === 1 ? "task" : "tasks"}`;
+  return (
+    <>
+      {onBulkPin && (
+        <ContextMenuItem onSelect={() => onBulkPin(actingIds)}>
+          {allPinned ? (
+            <IconPinFilled className="mr-2 h-4 w-4" />
+          ) : (
+            <IconPin className="mr-2 h-4 w-4" />
+          )}
+          {pinLabel}
+        </ContextMenuItem>
+      )}
+      <TaskArchiveItem
+        taskId={task.id}
+        actingIds={actingIds}
+        actingOnSelection
+        onArchiveTask={undefined}
+        onBulkArchive={onBulkArchive}
+      />
+      <TaskMoveItems
+        task={task}
+        workflows={workflows}
+        stepsByWorkflowId={stepsByWorkflowId}
+        steps={steps}
+        onMoveToStep={undefined}
+        actingIds={actingIds}
+        actingOnSelection
+        onBulkMove={onBulkMove}
+        isMixedWorkflowSelection={isMixedWorkflowSelection}
+        closeMenu={closeMenu}
+        moveTasks={moveTasks}
+      />
+      {onBulkDelete && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onSelect={() => onBulkDelete(actingIds)}>
+            <IconTrash className="mr-2 h-4 w-4" />
+            Delete {n} tasks
+          </ContextMenuItem>
+        </>
+      )}
+    </>
+  );
+}
+
+export function createTaskLinkSelectAction(
+  task: Pick<TaskSwitcherItem, "id" | "title">,
+  handler: ((taskId: string, taskTitle?: string) => void) | undefined,
   closeMenu: () => void,
 ) {
   if (!handler) return undefined;
   return () => {
     closeMenu();
-    handler(taskId);
+    handler(task.id, task.title);
+  };
+}
+
+function selectTaskLinkActions(
+  task: Pick<TaskSwitcherItem, "id" | "title">,
+  closeMenu: () => void,
+  handlers: Pick<
+    ContextMenuProps,
+    | "onLinkPullRequest"
+    | "onLinkIssue"
+    | "onLinkJiraTicket"
+    | "onLinkLinearIssue"
+    | "onLinkSentryIssue"
+  >,
+) {
+  return {
+    onLinkPullRequest: createTaskLinkSelectAction(task, handlers.onLinkPullRequest, closeMenu),
+    onLinkIssue: createTaskLinkSelectAction(task, handlers.onLinkIssue, closeMenu),
+    onLinkJiraTicket: createTaskLinkSelectAction(task, handlers.onLinkJiraTicket, closeMenu),
+    onLinkLinearIssue: createTaskLinkSelectAction(task, handlers.onLinkLinearIssue, closeMenu),
+    onLinkSentryIssue: createTaskLinkSelectAction(task, handlers.onLinkSentryIssue, closeMenu),
   };
 }
 
@@ -234,13 +415,30 @@ function TaskRenameItem({
 
 function TaskArchiveItem({
   taskId,
+  actingIds,
+  actingOnSelection,
   disabled,
   onArchiveTask,
+  onBulkArchive,
 }: {
   taskId: string;
+  actingIds: string[];
+  actingOnSelection: boolean;
   disabled?: boolean;
   onArchiveTask?: (taskId: string) => void;
+  onBulkArchive?: (taskIds: string[]) => void;
 }) {
+  // Acting on the selection routes through the bulk path (which clears the
+  // selection afterwards) even for a single selected row.
+  if (actingOnSelection && onBulkArchive) {
+    const n = actingIds.length;
+    return (
+      <ContextMenuItem disabled={disabled} onSelect={() => onBulkArchive(actingIds)}>
+        <IconArchive className="mr-2 h-4 w-4" />
+        {n > 1 ? `Archive ${n} tasks` : "Archive"}
+      </ContextMenuItem>
+    );
+  }
   if (!onArchiveTask) return null;
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onArchiveTask(taskId)}>
@@ -257,21 +455,62 @@ function TaskMoveItems({
   steps,
   isDeleting,
   onMoveToStep,
+  actingIds,
+  actingOnSelection,
+  onBulkMove,
+  isMixedWorkflowSelection,
   closeMenu,
   moveTasks,
-}: Omit<TaskContextMenuItemsProps, "onRenameTask" | "onArchiveTask" | "onDeleteTask">) {
+}: Omit<TaskContextMenuItemsProps, "onRenameTask" | "onArchiveTask" | "onDeleteTask"> & {
+  actingIds: string[];
+  actingOnSelection: boolean;
+}) {
   if (!task.workflowId) return null;
+  const workflowId = task.workflowId;
+  // Moving a selection routes through the sidebar hook's bulkMove, which clears
+  // the selection afterwards. Fall back to a raw move when no bulk handler is
+  // wired (e.g. the kanban-less callers that don't manage a selection).
+  const runSelectionMove = (targetWorkflowId: string, stepId: string) => {
+    closeMenu();
+    if (onBulkMove) {
+      onBulkMove(actingIds, targetWorkflowId, stepId);
+      return;
+    }
+    void moveTasks(actingIds, targetWorkflowId, stepId).catch(() => {
+      // useTaskWorkflowMove already shows the failure toast.
+    });
+  };
+
+  // Single-task right-click keeps the optimistic same-workflow move. A selection
+  // spanning workflows makes "Move to step" of one workflow ambiguous, so disable
+  // it there (Send to workflow remains the explicit path).
+  let moveToStep: ((stepId: string) => void) | undefined;
+  if (actingOnSelection) {
+    moveToStep = isMixedWorkflowSelection
+      ? undefined
+      : (stepId) => runSelectionMove(workflowId, stepId);
+  } else {
+    moveToStep = selectMoveAction(task.id, workflowId, onMoveToStep, closeMenu);
+  }
+
   return (
     <TaskMoveContextMenuItems
-      currentWorkflowId={task.workflowId}
-      currentStepId={task.workflowStepId}
+      currentWorkflowId={workflowId}
+      // For a selection spanning several steps, don't disable the clicked row's
+      // step — the backend bulk move skips tasks already there, and the other
+      // selected rows still need it as a target.
+      currentStepId={actingOnSelection ? undefined : task.workflowStepId}
       workflows={workflows ?? []}
-      stepsByWorkflowId={stepsByWorkflowId ?? (steps ? { [task.workflowId]: steps } : {})}
+      stepsByWorkflowId={stepsByWorkflowId ?? (steps ? { [workflowId]: steps } : {})}
       disabled={isDeleting || task.isArchived}
-      onMoveToStep={selectMoveAction(task.id, task.workflowId, onMoveToStep, closeMenu)}
-      onSendToWorkflow={(workflowId, stepId) => {
+      onMoveToStep={moveToStep}
+      onSendToWorkflow={(targetWorkflowId, stepId) => {
+        if (actingOnSelection) {
+          runSelectionMove(targetWorkflowId, stepId);
+          return;
+        }
         closeMenu();
-        void moveTasks([task.id], workflowId, stepId).catch(() => {
+        void moveTasks([task.id], targetWorkflowId, stepId).catch(() => {
           // useTaskWorkflowMove already shows the failure toast.
         });
       }}
@@ -325,12 +564,26 @@ function TaskLinkMenu({
   disabled,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
 }: {
   disabled?: boolean;
   onLinkPullRequest?: () => void;
   onLinkIssue?: () => void;
+  onLinkJiraTicket?: () => void;
+  onLinkLinearIssue?: () => void;
+  onLinkSentryIssue?: () => void;
 }) {
-  if (!onLinkPullRequest && !onLinkIssue) return null;
+  if (
+    !onLinkPullRequest &&
+    !onLinkIssue &&
+    !onLinkJiraTicket &&
+    !onLinkLinearIssue &&
+    !onLinkSentryIssue
+  ) {
+    return null;
+  }
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger disabled={disabled}>
@@ -338,69 +591,37 @@ function TaskLinkMenu({
         Link
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-56">
-        <ContextMenuItem disabled={disabled || !onLinkPullRequest} onSelect={onLinkPullRequest}>
-          <IconGitPullRequest className="mr-2 h-4 w-4" />
-          GitHub Pull Request
-        </ContextMenuItem>
-        <ContextMenuItem disabled={disabled || !onLinkIssue} onSelect={onLinkIssue}>
-          <IconCircleDot className="mr-2 h-4 w-4" />
-          GitHub Issue
-        </ContextMenuItem>
-      </ContextMenuSubContent>
-    </ContextMenuSub>
-  );
-}
-
-function TaskColorMenu({ taskId, disabled }: { taskId: string; disabled?: boolean }) {
-  const currentColor = useTaskColor(taskId);
-  const setColor = useSetTaskColor();
-  return (
-    <ContextMenuSub>
-      <ContextMenuSubTrigger disabled={disabled}>
-        <IconPalette className="mr-2 h-4 w-4" />
-        Color
-        {currentColor && (
-          <span
-            className={cn(
-              "ml-2 inline-block h-2 w-2 rounded-full",
-              TASK_COLOR_BAR_CLASS[currentColor],
-            )}
-          />
+        {onLinkPullRequest && (
+          <ContextMenuItem disabled={disabled} onSelect={onLinkPullRequest}>
+            <IconGitPullRequest className="mr-2 h-4 w-4" />
+            GitHub Pull Request
+          </ContextMenuItem>
         )}
-      </ContextMenuSubTrigger>
-      <ContextMenuSubContent className="w-40">
-        {TASK_COLORS.map((color) => (
-          <TaskColorMenuItem
-            key={color}
-            color={color}
-            selected={currentColor === color}
-            onSelect={() => setColor(taskId, color)}
-          />
-        ))}
-        <ContextMenuSeparator />
-        <ContextMenuItem disabled={!currentColor} onSelect={() => setColor(taskId, null)}>
-          <span className="mr-2 inline-block h-2 w-2 rounded-full border border-muted-foreground/40" />
-          None
-        </ContextMenuItem>
+        {onLinkIssue && (
+          <ContextMenuItem disabled={disabled} onSelect={onLinkIssue}>
+            <IconCircleDot className="mr-2 h-4 w-4" />
+            GitHub Issue
+          </ContextMenuItem>
+        )}
+        {onLinkJiraTicket && (
+          <ContextMenuItem disabled={disabled} onSelect={onLinkJiraTicket}>
+            <IconTicket className="mr-2 h-4 w-4" />
+            Jira Ticket
+          </ContextMenuItem>
+        )}
+        {onLinkLinearIssue && (
+          <ContextMenuItem disabled={disabled} onSelect={onLinkLinearIssue}>
+            <IconCircleDot className="mr-2 h-4 w-4" />
+            Linear Issue
+          </ContextMenuItem>
+        )}
+        {onLinkSentryIssue && (
+          <ContextMenuItem disabled={disabled} onSelect={onLinkSentryIssue}>
+            <IconBrandSentry className="mr-2 h-4 w-4" />
+            Sentry Issue
+          </ContextMenuItem>
+        )}
       </ContextMenuSubContent>
     </ContextMenuSub>
-  );
-}
-
-function TaskColorMenuItem({
-  color,
-  selected,
-  onSelect,
-}: {
-  color: TaskColor;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <ContextMenuItem onSelect={onSelect}>
-      <span className={cn("mr-2 inline-block h-2 w-2 rounded-full", TASK_COLOR_BAR_CLASS[color])} />
-      {TASK_COLOR_LABEL[color]}
-      {selected && <IconCheck className="ml-auto h-3.5 w-3.5" />}
-    </ContextMenuItem>
   );
 }

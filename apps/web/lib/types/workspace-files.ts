@@ -47,6 +47,7 @@ export type FileChangeNotificationPayload = {
 export type OpenFileTab = {
   path: string;
   name: string;
+  repo?: string;
   content: string;
   originalContent: string;
   originalHash: string;

@@ -467,6 +467,11 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// the user cancels, or agentctl shuts down.
 	go func() {
 		if err := adapter.Prompt(context.Background(), req.Text, req.Attachments); err != nil {
+			if acptransport.IsPromptAbandonedAfterCancel(err) {
+				s.logger.Info("async prompt abandoned after cancel; suppressing stale error event",
+					zap.Error(err))
+				return
+			}
 			s.logger.Error("async prompt failed", zap.Error(err))
 			s.procMgr.SendErrorEvent(err.Error())
 		}

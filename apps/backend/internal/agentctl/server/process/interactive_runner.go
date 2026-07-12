@@ -28,6 +28,7 @@ type InteractiveStartRequest struct {
 	TerminalID           string            `json:"terminal_id,omitempty"`            // User-shell terminal ID when applicable
 	Label                string            `json:"label,omitempty"`                  // User-facing terminal label when applicable
 	Env                  map[string]string `json:"env,omitempty"`                    // Additional environment variables
+	StripEnv             []string          `json:"strip_env,omitempty"`              // Environment variable keys to remove from the inherited environment
 	PromptPattern        string            `json:"prompt_pattern,omitempty"`         // Regex pattern to detect agent prompt for turn completion
 	IdleTimeout          time.Duration     `json:"idle_timeout,omitempty"`           // Idle timeout for turn detection
 	BufferMaxBytes       int64             `json:"buffer_max_bytes,omitempty"`       // Max output buffer size

@@ -1,9 +1,7 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import { IconChevronDown } from "@tabler/icons-react";
 import type { TaskState, TaskSessionState } from "@/lib/types/http";
-import { cn } from "@/lib/utils";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu, type StepDef } from "./task-switcher-context-menu";
 import {
@@ -13,6 +11,7 @@ import {
 } from "@/lib/sidebar/apply-view";
 import { type TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import { SortableTaskLevel, SortableTaskNode } from "./task-switcher-subtask-dnd";
+import { GroupHeader, TaskSwitcherSkeleton } from "./task-switcher-group";
 
 export type TaskSwitcherItem = {
   id: string;
@@ -59,8 +58,11 @@ type TaskSwitcherProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
@@ -69,60 +71,62 @@ type TaskSwitcherProps = {
   deletingTaskId?: string | null;
   isLoading?: boolean;
   totalTaskCount?: number;
+  // Multi-select (cmd/shift click). When the selection is non-empty, plain
+  // clicks toggle instead of navigating; the context menu acts on the selection.
+  selectedTaskIds?: Set<string>;
+  onToggleSelectTask?: (taskId: string) => void;
+  onSelectTaskRange?: (taskId: string) => void;
+  onBulkArchive?: (taskIds: string[]) => void;
+  onBulkDelete?: (taskIds: string[]) => void;
+  onBulkPin?: (taskIds: string[]) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+  onClearSelection?: () => void;
+  isMixedWorkflowSelection?: boolean;
 };
+
+type TaskLinkHandler = (taskId: string, taskTitle?: string) => void;
+
+/**
+ * Modifier-aware sidebar row click: cmd/ctrl toggles one task, shift extends a
+ * range, a plain click toggles while a selection is active and otherwise
+ * navigates to the task.
+ */
+/** @internal Exported for unit testing the modifier-aware click dispatch. */
+export function dispatchSidebarRowClick(
+  e: React.MouseEvent | React.KeyboardEvent,
+  taskId: string,
+  isSelecting: boolean,
+  handlers: {
+    onSelectTask: (taskId: string) => void;
+    onToggleSelectTask?: (taskId: string) => void;
+    onSelectTaskRange?: (taskId: string) => void;
+  },
+): void {
+  // Only intercept a modifier click when the matching handler is wired (the
+  // mobile switcher renders without selection handlers — there a Cmd/Shift click
+  // must still navigate rather than become a no-op).
+  if ((e.metaKey || e.ctrlKey) && handlers.onToggleSelectTask) {
+    e.preventDefault();
+    handlers.onToggleSelectTask(taskId);
+    return;
+  }
+  if (e.shiftKey && handlers.onSelectTaskRange) {
+    e.preventDefault();
+    handlers.onSelectTaskRange(taskId);
+    return;
+  }
+  if (isSelecting && handlers.onToggleSelectTask) {
+    handlers.onToggleSelectTask(taskId);
+    return;
+  }
+  handlers.onSelectTask(taskId);
+}
 
 type SubtaskToggleInfo = {
   subtaskCount: number;
   subtasksCollapsed: boolean;
   onToggleSubtasks: () => void;
 };
-
-function TaskSwitcherSkeleton() {
-  return (
-    <div className="animate-pulse">
-      <div className="h-10 bg-foreground/5" />
-      <div className="h-10 bg-foreground/5 mt-px" />
-      <div className="h-10 bg-foreground/5 mt-px" />
-      <div className="h-10 bg-foreground/5 mt-px" />
-    </div>
-  );
-}
-
-function GroupHeader({
-  label,
-  groupKey,
-  count,
-  isCollapsed,
-  onToggle,
-}: {
-  label: string;
-  groupKey: string;
-  count: number;
-  isCollapsed: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      data-testid="sidebar-group-header"
-      data-group-key={groupKey}
-      data-group-label={label}
-      className="flex w-full items-center gap-2 bg-background px-3 py-1.5 cursor-pointer hover:bg-foreground/[0.03]"
-    >
-      <span className="flex-1 truncate text-left text-[12px] font-medium text-foreground/80">
-        {label}
-      </span>
-      <span className="text-[11px] text-muted-foreground/50">{count}</span>
-      <IconChevronDown
-        className={cn(
-          "h-3 w-3 text-muted-foreground/40 transition-transform",
-          isCollapsed && "-rotate-90",
-        )}
-      />
-    </button>
-  );
-}
 
 type TaskRowProps = {
   task: TaskSwitcherItem;
@@ -137,12 +141,43 @@ type TaskRowProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
+  pinnedTaskIds?: string[];
   deletingTaskId?: string | null;
+  selectedTaskIds?: Set<string>;
+  onToggleSelectTask?: (taskId: string) => void;
+  onSelectTaskRange?: (taskId: string) => void;
+  onBulkArchive?: (taskIds: string[]) => void;
+  onBulkDelete?: (taskIds: string[]) => void;
+  onBulkPin?: (taskIds: string[]) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+  onClearSelection?: () => void;
+  isMixedWorkflowSelection?: boolean;
+};
+
+function taskLinkHandlerProps(props: Pick<TaskRowProps, keyof TaskLinkHandlerProps>) {
+  return {
+    onLinkPullRequest: props.onLinkPullRequest,
+    onLinkIssue: props.onLinkIssue,
+    onLinkJiraTicket: props.onLinkJiraTicket,
+    onLinkLinearIssue: props.onLinkLinearIssue,
+    onLinkSentryIssue: props.onLinkSentryIssue,
+  };
+}
+
+type TaskLinkHandlerProps = {
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
 };
 
 function TaskRow({
@@ -158,14 +193,25 @@ function TaskRow({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
-  onLinkPullRequest,
-  onLinkIssue,
   onMoveToStep,
   onTogglePin,
   isPinned,
+  pinnedTaskIds,
   deletingTaskId,
+  selectedTaskIds,
+  onToggleSelectTask,
+  onSelectTaskRange,
+  onBulkArchive,
+  onBulkDelete,
+  onBulkPin,
+  onBulkMove,
+  onClearSelection,
+  isMixedWorkflowSelection,
+  ...props
 }: TaskRowProps) {
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
+  const isMultiSelected = selectedTaskIds?.has(task.id) ?? false;
+  const isSelecting = (selectedTaskIds?.size ?? 0) > 0;
   const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
   return (
     <TaskItemWithContextMenu
@@ -176,14 +222,29 @@ function TaskRow({
       onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
-      onLinkPullRequest={onLinkPullRequest}
-      onLinkIssue={onLinkIssue}
+      {...taskLinkHandlerProps(props)}
       onMoveToStep={onMoveToStep}
       onTogglePin={onTogglePin}
       isPinned={isPinned}
+      pinnedTaskIds={pinnedTaskIds}
       isDeleting={deletingTaskId === task.id}
+      selectedTaskIds={selectedTaskIds}
+      onBulkArchive={onBulkArchive}
+      onBulkDelete={onBulkDelete}
+      onBulkPin={onBulkPin}
+      onBulkMove={onBulkMove}
+      onClearSelection={onClearSelection}
+      isMixedWorkflowSelection={isMixedWorkflowSelection}
     >
       <TaskItem
+        isMultiSelected={isMultiSelected}
+        onSelect={(e) =>
+          dispatchSidebarRowClick(e, task.id, isSelecting, {
+            onSelectTask,
+            onToggleSelectTask,
+            onSelectTaskRange,
+          })
+        }
         title={task.title}
         state={task.state}
         sessionState={task.sessionState}
@@ -335,14 +396,27 @@ type GroupSectionProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
-  onLinkPullRequest?: (taskId: string) => void;
-  onLinkIssue?: (taskId: string) => void;
+  onLinkPullRequest?: TaskLinkHandler;
+  onLinkIssue?: TaskLinkHandler;
+  onLinkJiraTicket?: TaskLinkHandler;
+  onLinkLinearIssue?: TaskLinkHandler;
+  onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
+  pinnedTaskIds?: string[];
   pinnedSet: Set<string>;
   deletingTaskId?: string | null;
+  selectedTaskIds?: Set<string>;
+  onToggleSelectTask?: (taskId: string) => void;
+  onSelectTaskRange?: (taskId: string) => void;
+  onBulkArchive?: (taskIds: string[]) => void;
+  onBulkDelete?: (taskIds: string[]) => void;
+  onBulkPin?: (taskIds: string[]) => void;
+  onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
+  onClearSelection?: () => void;
+  isMixedWorkflowSelection?: boolean;
 };
 
 function GroupSection({
@@ -363,12 +437,25 @@ function GroupSection({
   onDeleteTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   onMoveToStep,
   onTogglePin,
   onReorderGroup,
   onReorderSubtasks,
+  pinnedTaskIds,
   pinnedSet,
   deletingTaskId,
+  selectedTaskIds,
+  onToggleSelectTask,
+  onSelectTaskRange,
+  onBulkArchive,
+  onBulkDelete,
+  onBulkPin,
+  onBulkMove,
+  onClearSelection,
+  isMixedWorkflowSelection,
 }: GroupSectionProps) {
   const totalCount = countGroupTasks(group.tasks, subTasksByParentId);
   const ctx: TaskTreeContext = {
@@ -387,9 +474,22 @@ function GroupSection({
       onDeleteTask,
       onLinkPullRequest,
       onLinkIssue,
+      onLinkJiraTicket,
+      onLinkLinearIssue,
+      onLinkSentryIssue,
       onMoveToStep,
       onTogglePin,
+      pinnedTaskIds,
       deletingTaskId,
+      selectedTaskIds,
+      onToggleSelectTask,
+      onSelectTaskRange,
+      onBulkArchive,
+      onBulkDelete,
+      onBulkPin,
+      onBulkMove,
+      onClearSelection,
+      isMixedWorkflowSelection,
     },
     onReorderGroup,
     onReorderSubtasks,
@@ -429,6 +529,9 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onDeleteTask,
   onLinkPullRequest,
   onLinkIssue,
+  onLinkJiraTicket,
+  onLinkLinearIssue,
+  onLinkSentryIssue,
   onMoveToStep,
   onTogglePin,
   onReorderGroup,
@@ -437,6 +540,15 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   deletingTaskId,
   isLoading = false,
   totalTaskCount,
+  selectedTaskIds,
+  onToggleSelectTask,
+  onSelectTaskRange,
+  onBulkArchive,
+  onBulkDelete,
+  onBulkPin,
+  onBulkMove,
+  onClearSelection,
+  isMixedWorkflowSelection,
 }: TaskSwitcherProps) {
   const pinnedSet = useMemo(() => new Set(pinnedTaskIds ?? []), [pinnedTaskIds]);
   if (isLoading) return <TaskSwitcherSkeleton />;
@@ -472,12 +584,25 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onDeleteTask={onDeleteTask}
           onLinkPullRequest={onLinkPullRequest}
           onLinkIssue={onLinkIssue}
+          onLinkJiraTicket={onLinkJiraTicket}
+          onLinkLinearIssue={onLinkLinearIssue}
+          onLinkSentryIssue={onLinkSentryIssue}
           onMoveToStep={onMoveToStep}
           onTogglePin={onTogglePin}
           onReorderGroup={onReorderGroup}
           onReorderSubtasks={onReorderSubtasks}
+          pinnedTaskIds={pinnedTaskIds}
           pinnedSet={pinnedSet}
           deletingTaskId={deletingTaskId}
+          selectedTaskIds={selectedTaskIds}
+          onToggleSelectTask={onToggleSelectTask}
+          onSelectTaskRange={onSelectTaskRange}
+          onBulkArchive={onBulkArchive}
+          onBulkDelete={onBulkDelete}
+          onBulkPin={onBulkPin}
+          onBulkMove={onBulkMove}
+          onClearSelection={onClearSelection}
+          isMixedWorkflowSelection={isMixedWorkflowSelection}
         />
       ))}
     </div>

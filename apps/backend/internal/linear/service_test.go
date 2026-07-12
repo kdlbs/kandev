@@ -186,7 +186,7 @@ func TestService_SetConfig_UpsertsAndStoresSecret(t *testing.T) {
 	if !cfg.HasSecret {
 		t.Error("expected HasSecret=true")
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "lin_api_xyz" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("default")); got != "lin_api_xyz" {
 		t.Errorf("secret stored = %q", got)
 	}
 }
@@ -242,7 +242,7 @@ func TestService_SetConfig_EmptySecret_KeepsExisting(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if got, _ := f.secrets.Reveal(ctx, SecretKey); got != "first" {
+	if got, _ := f.secrets.Reveal(ctx, SecretKeyForWorkspace("default")); got != "first" {
 		t.Errorf("secret should be preserved, got %q", got)
 	}
 }

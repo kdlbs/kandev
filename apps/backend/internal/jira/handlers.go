@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -33,7 +34,9 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.POST("/config", c.httpSetConfig)
 	api.DELETE("/config", c.httpDeleteConfig)
 	api.POST("/config/test", c.httpTestConfig)
+	api.POST("/config/copy", c.httpCopyConfig)
 	api.GET("/projects", c.httpListProjects)
+	api.GET("/projects/:key/statuses", c.httpListProjectStatuses)
 	api.GET("/tickets", c.httpSearchTickets)
 	api.GET("/tickets/:key", c.httpGetTicket)
 	api.POST("/tickets/:key/transitions", c.httpDoTransition)
@@ -50,7 +53,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 // --- HTTP handlers ---
 
 func (c *Controller) httpGetConfig(ctx *gin.Context) {
-	cfg, err := c.service.GetConfig(ctx.Request.Context())
+	cfg, err := c.service.GetConfigForWorkspace(ctx.Request.Context(), c.workspaceID(ctx))
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -68,7 +71,7 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	cfg, err := c.service.SetConfig(ctx.Request.Context(), &req)
+	cfg, err := c.service.SetConfigForWorkspace(ctx.Request.Context(), c.workspaceID(ctx), &req)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if errors.Is(err, ErrInvalidConfig) {
@@ -81,7 +84,7 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 }
 
 func (c *Controller) httpDeleteConfig(ctx *gin.Context) {
-	if err := c.service.DeleteConfig(ctx.Request.Context()); err != nil {
+	if err := c.service.DeleteConfigForWorkspace(ctx.Request.Context(), c.workspaceID(ctx)); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -94,7 +97,7 @@ func (c *Controller) httpTestConfig(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	result, err := c.service.TestConnection(ctx.Request.Context(), &req)
+	result, err := c.service.TestConnectionForWorkspace(ctx.Request.Context(), c.workspaceID(ctx), &req)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -103,7 +106,12 @@ func (c *Controller) httpTestConfig(ctx *gin.Context) {
 }
 
 func (c *Controller) httpListProjects(ctx *gin.Context) {
-	projects, err := c.service.ListProjects(ctx.Request.Context())
+	client, err := c.service.clientFor(ctx.Request.Context(), c.workspaceID(ctx))
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	projects, err := client.ListProjects(ctx.Request.Context())
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
@@ -111,11 +119,25 @@ func (c *Controller) httpListProjects(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"projects": projects})
 }
 
+func (c *Controller) httpListProjectStatuses(ctx *gin.Context) {
+	key := ctx.Param("key")
+	statuses, err := c.service.ListProjectStatusesForWorkspace(
+		ctx.Request.Context(),
+		c.workspaceID(ctx),
+		key,
+	)
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"statuses": statuses})
+}
+
 func (c *Controller) httpSearchTickets(ctx *gin.Context) {
 	jql := ctx.Query("jql")
 	pageToken := ctx.Query("page_token")
 	maxResults, _ := strconv.Atoi(ctx.Query("max_results"))
-	result, err := c.service.SearchTickets(ctx.Request.Context(), jql, pageToken, maxResults)
+	result, err := c.service.SearchTicketsForWorkspace(ctx.Request.Context(), c.workspaceID(ctx), jql, pageToken, maxResults)
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
@@ -125,7 +147,12 @@ func (c *Controller) httpSearchTickets(ctx *gin.Context) {
 
 func (c *Controller) httpGetTicket(ctx *gin.Context) {
 	key := ctx.Param("key")
-	ticket, err := c.service.GetTicket(ctx.Request.Context(), key)
+	client, err := c.service.clientFor(ctx.Request.Context(), c.workspaceID(ctx))
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	ticket, err := client.GetTicket(ctx.Request.Context(), key)
 	if err != nil {
 		c.writeClientError(ctx, err)
 		return
@@ -142,11 +169,56 @@ func (c *Controller) httpDoTransition(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "transitionId required"})
 		return
 	}
-	if err := c.service.DoTransition(ctx.Request.Context(), key, req.TransitionID); err != nil {
+	client, err := c.service.clientFor(ctx.Request.Context(), c.workspaceID(ctx))
+	if err != nil {
+		c.writeClientError(ctx, err)
+		return
+	}
+	if err := client.DoTransition(ctx.Request.Context(), key, req.TransitionID); err != nil {
 		c.writeClientError(ctx, err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"transitioned": true})
+}
+
+func (c *Controller) workspaceID(ctx *gin.Context) string {
+	return strings.TrimSpace(ctx.Query("workspace_id"))
+}
+
+// copyConfigRequest is the payload for the copy-config endpoint. The source
+// workspace comes from the workspace_id query param; the body carries the
+// target.
+type copyConfigRequest struct {
+	TargetWorkspaceID string `json:"targetWorkspaceId"`
+}
+
+func (c *Controller) httpCopyConfig(ctx *gin.Context) {
+	sourceWorkspaceID := c.workspaceID(ctx)
+	if sourceWorkspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	var req copyConfigRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	targetWorkspaceID := strings.TrimSpace(req.TargetWorkspaceID)
+	if targetWorkspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "targetWorkspaceId required"})
+		return
+	}
+	cfg, err := c.service.CopyConfigToWorkspace(ctx.Request.Context(), sourceWorkspaceID, targetWorkspaceID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrNothingToCopy), errors.Is(err, ErrInvalidConfig):
+			status = http.StatusBadRequest
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, cfg)
 }
 
 // --- Issue watch HTTP handlers ---

@@ -92,6 +92,21 @@ surface.
 - Components: <200 lines, extract to domain components, composition over props.
 - Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
+- **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
+  activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),
+  so per-dialog "submit on Enter" input handlers are unnecessary — let the base own it.
+  Resolution: `AlertDialogAction` → an explicit `data-dialog-default-action` button → the single
+  primary (`type="submit"` or `data-variant="default"|"destructive"`) button in `DialogFooter`.
+  More than one primary candidate (counting disabled ones), a disabled resolved action, or one inside
+  a `hidden`/`aria-hidden` subtree → no-op (never guesses). Left alone: `textarea`/contenteditable,
+  Shift/Cmd/Ctrl/Alt+Enter, `event.repeat` auto-repeat, mid-IME composition (`isComposing` or keyCode
+  229), already-`preventDefault`ed events, and Enter fired from a focused interactive control that owns
+  Enter (any action button — including outline/secondary like Copy/Back — `<select>`, combobox, or a
+  listbox option / menu item). Only a slot-marked `alert-dialog-cancel` / `dialog-close` is treated as
+  a dismiss control and overridden (the Radix-focuses-Cancel case). A plain single-line `<input>` is
+  _not_ exempt — type-to-confirm dialogs rely on Enter firing the primary.
+  Pass `enterConfirms={false}` to opt a dialog out; mark the intended button with
+  `data-dialog-default-action` when a footer has several action buttons.
 - **Radix tooltip on disabled buttons:** disabled buttons do not receive pointer/focus events, so wrap the disabled `Button` in a focusable span and put `TooltipTrigger asChild` on that span:
   ```tsx
   <Tooltip>

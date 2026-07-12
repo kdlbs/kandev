@@ -20,6 +20,8 @@ export const STATS_PERIOD_OPTIONS: { value: string; label: string }[] = [
 
 export interface FormState {
   workspaceId: string;
+  /** The Sentry instance to poll. Required; immutable after create. */
+  sentryInstanceId: string;
   orgSlug: string;
   projectSlug: string;
   environment: string;
@@ -44,6 +46,7 @@ export interface FormState {
 export function makeEmptyForm(workspaceId: string): FormState {
   return {
     workspaceId,
+    sentryInstanceId: "",
     orgSlug: "",
     projectSlug: "",
     environment: "",
@@ -68,6 +71,7 @@ export function formStateFromWatch(w: SentryIssueWatch): FormState {
   const f: SentrySearchFilter = w.filter ?? { orgSlug: "" };
   return {
     workspaceId: w.workspaceId,
+    sentryInstanceId: w.sentryInstanceId ?? "",
     orgSlug: f.orgSlug ?? "",
     projectSlug: f.projectSlug ?? "",
     environment: f.environment ?? "",
@@ -144,9 +148,13 @@ export function projectSelectItems(projects: SentryProject[], current: string): 
 
 // isWatchFormReady aggregates the dialog's "can Save enable?" rule. Kept here
 // so the rule has one named home and the dialog stays under its line limit.
-export function isWatchFormReady(form: FormState): boolean {
+export function isWatchFormReady(
+  form: FormState,
+  { requiresInstance = true }: { requiresInstance?: boolean } = {},
+): boolean {
   return (
     !!form.workspaceId &&
+    (!requiresInstance || !!form.sentryInstanceId) &&
     !!form.orgSlug.trim() &&
     !!form.projectSlug.trim() &&
     !!form.workflowId &&
@@ -168,5 +176,26 @@ export function buildFilterPayload(form: FormState): SentrySearchFilter {
     statuses: form.statuses.length > 0 ? form.statuses : undefined,
     query: form.query.trim() || undefined,
     statsPeriod: form.statsPeriod || undefined,
+  };
+}
+
+// buildWatchPayload assembles the create/update watch fields shared by both
+// paths (everything except workspaceId + sentryInstanceId, which only create
+// carries). maxInflightTasks is resolved by the caller via parseMaxInflightTasks.
+export function buildWatchPayload(form: FormState, maxInflightTasks: number | null) {
+  return {
+    filter: buildFilterPayload(form),
+    workflowId: form.workflowId,
+    workflowStepId: form.workflowStepId,
+    // Empty repositoryId clears the binding; empty base branch is sent verbatim
+    // so the backend fills the repo's default at save time.
+    repositoryId: form.repositoryId,
+    baseBranch: form.repositoryId ? form.baseBranch : "",
+    agentProfileId: form.agentProfileId,
+    executorProfileId: form.executorProfileId,
+    prompt: form.prompt,
+    enabled: form.enabled,
+    pollIntervalSeconds: form.pollInterval,
+    maxInflightTasks,
   };
 }

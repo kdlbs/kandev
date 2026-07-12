@@ -394,6 +394,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         selectedRepositoryIds={s.userSettings.repositoryIds}
         selectedIds={s.multiSelect.selectedIds}
         onToggleSelect={s.multiSelect.toggleSelect}
+        onSelectRange={s.multiSelect.selectRange}
         isMultiSelectMode={s.multiSelect.isMultiSelectMode}
         onToggleMultiSelect={s.multiSelect.toggleMultiSelect}
       />

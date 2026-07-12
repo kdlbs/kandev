@@ -13,17 +13,27 @@ import { useProcessedMessages } from "@/hooks/use-processed-messages";
 import { useSessionModel } from "@/hooks/domains/session/use-session-model";
 import { useQueue } from "@/hooks/domains/session/use-queue";
 import { useContextFilesStore, type ContextFile } from "@/lib/state/context-files-store";
-import { useCommentsStore, isPlanComment, isPRFeedbackComment } from "@/lib/state/slices/comments";
+import {
+  useCommentsStore,
+  isPlanComment,
+  isPRFeedbackComment,
+  isWalkthroughComment,
+} from "@/lib/state/slices/comments";
 import { usePendingDiffCommentsByFile } from "@/hooks/domains/comments/use-diff-comments";
 import {
   usePendingPlanComments,
   usePendingPRFeedback,
+  usePendingWalkthroughComments,
 } from "@/hooks/domains/comments/use-pending-comments";
 import { buildContextItems } from "../chat-context-items";
 import { useAutoDisablePlanMode, usePlanLayoutHandlers } from "./use-plan-mode-helpers";
 import type { ContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
-import type { PlanComment, PRFeedbackComment } from "@/lib/state/slices/comments";
+import type {
+  PlanComment,
+  PRFeedbackComment,
+  WalkthroughComment,
+} from "@/lib/state/slices/comments";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
@@ -42,11 +52,14 @@ export type CommentsState = {
   planComments: PlanComment[];
   pendingCommentsByFile: Record<string, DiffComment[]>;
   pendingPRFeedback: PRFeedbackComment[];
+  walkthroughComments: WalkthroughComment[];
   markCommentsSent: (ids: string[]) => void;
   handleRemoveCommentFile: (filePath: string) => void;
   handleRemoveComment: (commentId: string) => void;
   handleRemovePRFeedback: (commentId: string) => void;
   handleClearPRFeedback: () => void;
+  handleRemoveWalkthroughComment: (commentId: string) => void;
+  handleClearWalkthroughComments: () => void;
   clearSessionPlanComments: () => void;
 };
 
@@ -248,6 +261,7 @@ export function useCommentsState(resolvedSessionId: string | null): CommentsStat
   const planComments = usePendingPlanComments(resolvedSessionId);
   const pendingCommentsByFile = usePendingDiffCommentsByFile(resolvedSessionId);
   const pendingPRFeedback = usePendingPRFeedback(resolvedSessionId);
+  const walkthroughComments = usePendingWalkthroughComments(resolvedSessionId);
   const markCommentsSent = useCommentsStore((state) => state.markCommentsSent);
   const removeComment = useCommentsStore((state) => state.removeComment);
   const clearSessionPlanComments = useCallback(() => {
@@ -286,15 +300,33 @@ export function useCommentsState(resolvedSessionId: string | null): CommentsStat
       }
     }
   }, [resolvedSessionId]);
+  const handleRemoveWalkthroughComment = useCallback(
+    (commentId: string) => removeComment(commentId),
+    [removeComment],
+  );
+  const handleClearWalkthroughComments = useCallback(() => {
+    if (!resolvedSessionId) return;
+    const state = useCommentsStore.getState();
+    const allPending = [...state.pendingForChat];
+    for (const id of allPending) {
+      const c = state.byId[id];
+      if (c && isWalkthroughComment(c) && c.sessionId === resolvedSessionId) {
+        state.removeComment(id);
+      }
+    }
+  }, [resolvedSessionId]);
   return {
     planComments,
     pendingCommentsByFile,
     pendingPRFeedback,
+    walkthroughComments,
     markCommentsSent,
     handleRemoveCommentFile,
     handleRemoveComment,
     handleRemovePRFeedback,
     handleClearPRFeedback,
+    handleRemoveWalkthroughComment,
+    handleClearWalkthroughComments,
     clearSessionPlanComments,
   };
 }
@@ -352,6 +384,9 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
         pendingPRFeedback: comments.pendingPRFeedback,
         handleRemovePRFeedback: comments.handleRemovePRFeedback,
         handleClearPRFeedback: comments.handleClearPRFeedback,
+        walkthroughComments: comments.walkthroughComments,
+        handleRemoveWalkthroughComment: comments.handleRemoveWalkthroughComment,
+        handleClearWalkthroughComments: comments.handleClearWalkthroughComments,
         taskId,
       }),
     [
@@ -372,6 +407,9 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
       comments.pendingPRFeedback,
       comments.handleRemovePRFeedback,
       comments.handleClearPRFeedback,
+      comments.walkthroughComments,
+      comments.handleRemoveWalkthroughComment,
+      comments.handleClearWalkthroughComments,
       taskId,
     ],
   );

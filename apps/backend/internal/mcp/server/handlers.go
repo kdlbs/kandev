@@ -150,6 +150,7 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"workspace_id":        workspaceID,
 			"workflow_id":         workflowID,
 			"workflow_step_id":    workflowStepID,
+			"workspace_mode":      req.GetString("workspace_mode", ""),
 			"title":               title,
 			"description":         req.GetString("description", ""),
 			"agent_profile_id":    req.GetString("agent_profile_id", ""),
@@ -725,5 +726,65 @@ func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return mcp.NewToolResultText("Plan deleted successfully."), nil
+	}
+}
+
+func (s *Server) showWalkthroughHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		args := req.GetArguments()
+		stepsRaw, ok := args["steps"]
+		if !ok {
+			return mcp.NewToolResultError("steps is required (array of {file, line, text} objects)"), nil
+		}
+
+		payload := map[string]interface{}{
+			"task_id": taskID,
+			"title":   req.GetString("title", "Walkthrough"),
+			"steps":   stepsRaw,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPShowWalkthrough, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(fmt.Sprintf("Walkthrough saved:\n%s", string(data))), nil
+	}
+}
+
+func (s *Server) getWalkthroughHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		payload := map[string]string{"task_id": taskID}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetWalkthrough, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if len(result) == 0 {
+			return mcp.NewToolResultText("No walkthrough exists for this task yet."), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) deleteWalkthroughHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		payload := map[string]string{"task_id": taskID}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPDeleteWalkthrough, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		return mcp.NewToolResultText("Walkthrough deleted successfully."), nil
 	}
 }

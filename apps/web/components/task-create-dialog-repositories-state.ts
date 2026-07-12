@@ -72,7 +72,9 @@ export function useRemoteReposState() {
   }, []);
 
   const updateRemoteRepo = useCallback((key: string, patch: Partial<TaskRemoteRepoRow>) => {
-    setRemoteRepos((rows) => rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    setRemoteRepos((rows) =>
+      rows.map((row) => (row.key === key ? applyRemoteRepoPatch(row, patch) : row)),
+    );
   }, []);
 
   return {
@@ -82,6 +84,22 @@ export function useRemoteReposState() {
     removeRemoteRepo,
     updateRemoteRepo,
     newRemoteRepoKey: newKey,
+  };
+}
+
+function applyRemoteRepoPatch(
+  row: TaskRemoteRepoRow,
+  patch: Partial<TaskRemoteRepoRow>,
+): TaskRemoteRepoRow {
+  if (typeof patch.url !== "string" || patch.url.trim() === row.url.trim()) {
+    return { ...row, ...patch };
+  }
+  return {
+    ...row,
+    prNumber: undefined,
+    prBaseBranch: undefined,
+    prHeadBranch: undefined,
+    ...patch,
   };
 }
 

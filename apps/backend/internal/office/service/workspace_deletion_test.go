@@ -128,6 +128,7 @@ func (f *fakeWorkspaceTaskService) ListTasksByWorkspace(
 	string,
 	int,
 	int,
+	string,
 	bool,
 	bool,
 	bool,

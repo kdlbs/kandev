@@ -29,6 +29,7 @@ type acpAgentSpec struct {
 	passthroughArgv []string // PassthroughCmd (zero-args allowed)
 	installViaNpm   bool     // InstallScript starts with "npm install -g"
 	installScript   string   // expected InstallScript() value (empty = unchecked)
+	stripEnv        []string // expected Runtime().StripEnv (nil = unchecked)
 }
 
 var newACPAgentSpecs = []struct {
@@ -122,6 +123,14 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		passthroughArgv: []string{"omp"},
 		installViaNpm:   false,
 	}},
+	{func() Agent { return NewDevinACP() }, acpAgentSpec{
+		id: "devin-acp", displayName: "Devin", detectBinaries: []string{"devin"},
+		expectedArgv:    []string{"devin", "acp"},
+		inferenceArgv:   []string{"devin", "acp"},
+		passthroughArgv: []string{"devin"},
+		installViaNpm:   false,
+		stripEnv:        []string{"ACP_BACKEND"},
+	}},
 }
 
 func TestNewACPAgents_IDAndDisplay(t *testing.T) {
@@ -159,6 +168,14 @@ func TestNewACPAgents_AllCommandSurfaces(t *testing.T) {
 				t.Errorf("Runtime.Protocol = %q, want ACP", rt.Protocol)
 			}
 			assertArgvEqual(t, "Runtime.Cmd", rt.Cmd.Args(), tc.spec.expectedArgv)
+
+			// RuntimeConfig.StripEnv is the single source of truth for the
+			// persistent session path; inference derives from it separately.
+			if tc.spec.stripEnv != nil {
+				if !slices.Equal(rt.StripEnv, tc.spec.stripEnv) {
+					t.Errorf("Runtime.StripEnv = %v, want %v", rt.StripEnv, tc.spec.stripEnv)
+				}
+			}
 
 			ia, ok := ag.(InferenceAgent)
 			if !ok {

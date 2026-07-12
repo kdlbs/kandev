@@ -7,11 +7,18 @@ import (
 	"sync"
 )
 
-// MockClient implements Client with in-memory data for E2E tests. A single
-// shared instance per process, driven by HTTP control routes mounted in mock
-// mode.
+// MockClient backs the in-memory Client used by E2E tests. It is instance-aware:
+// each Sentry instance has its own dataset keyed by instance ID, so a test can
+// prove instance A and instance B return different data. A single shared
+// MockClient per process is driven by the HTTP control routes mounted in mock
+// mode; the ClientFactory hands each instance a view bound to its ID.
 type MockClient struct {
-	mu            sync.RWMutex
+	mu       sync.RWMutex
+	datasets map[string]*mockDataset // instance ID → dataset
+}
+
+// mockDataset is the per-instance seeded state.
+type mockDataset struct {
 	authResult    *TestConnectionResult
 	organizations []SentryOrganization
 	projects      []SentryProject
@@ -22,58 +29,88 @@ type MockClient struct {
 	getError   *APIError
 }
 
-// NewMockClient seeds a default-success TestAuth so a fresh config flips to
+// NewMockClient returns an empty instance-aware mock. Instances default to a
+// successful TestAuth (seeded lazily) so a freshly-created instance flips to
 // "Authenticated" without explicit seeding.
 func NewMockClient() *MockClient {
-	return &MockClient{
-		authResult: &TestConnectionResult{
-			OK:          true,
-			UserID:      "mock-user",
-			DisplayName: "Mock User",
-			Email:       "mock@example.com",
-		},
-		issues: make(map[string]*SentryIssue),
+	return &MockClient{datasets: make(map[string]*mockDataset)}
+}
+
+func newMockDataset() *mockDataset {
+	return &mockDataset{
+		authResult: defaultMockAuthResult(),
+		issues:     make(map[string]*SentryIssue),
 	}
 }
 
-// --- Client interface ---
+func defaultMockAuthResult() *TestConnectionResult {
+	return &TestConnectionResult{
+		OK:          true,
+		UserID:      "mock-user",
+		DisplayName: "Mock User",
+		Email:       "mock@example.com",
+	}
+}
 
-func (m *MockClient) TestAuth(context.Context) (*TestConnectionResult, error) {
+// dataset returns the dataset for instanceID, lazily creating it. The caller
+// must hold the write lock.
+func (m *MockClient) dataset(instanceID string) *mockDataset {
+	ds, ok := m.datasets[instanceID]
+	if !ok {
+		ds = newMockDataset()
+		m.datasets[instanceID] = ds
+	}
+	return ds
+}
+
+// --- instance-scoped read operations (used by the per-instance Client view) ---
+
+func (m *MockClient) testAuth(instanceID string) (*TestConnectionResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.authResult == nil {
-		return &TestConnectionResult{OK: false, Error: "mock: no auth result configured"}, nil
+	ds := m.datasets[instanceID]
+	if ds == nil || ds.authResult == nil {
+		return defaultMockAuthResult(), nil
 	}
-	r := *m.authResult
+	r := *ds.authResult
 	return &r, nil
 }
 
-func (m *MockClient) ListOrganizations(context.Context) ([]SentryOrganization, error) {
+func (m *MockClient) listOrganizations(instanceID string) ([]SentryOrganization, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]SentryOrganization, len(m.organizations))
-	copy(out, m.organizations)
+	ds := m.datasets[instanceID]
+	if ds == nil {
+		return nil, nil
+	}
+	out := make([]SentryOrganization, len(ds.organizations))
+	copy(out, ds.organizations)
 	return out, nil
 }
 
-func (m *MockClient) ListProjects(context.Context) ([]SentryProject, error) {
+func (m *MockClient) listProjects(instanceID string) ([]SentryProject, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]SentryProject, len(m.projects))
-	copy(out, m.projects)
+	ds := m.datasets[instanceID]
+	if ds == nil {
+		return nil, nil
+	}
+	out := make([]SentryProject, len(ds.projects))
+	copy(out, ds.projects)
 	return out, nil
 }
 
-func (m *MockClient) SearchIssues(_ context.Context, filter SearchFilter, _ string) (*SearchResult, error) {
+func (m *MockClient) searchIssues(instanceID string, filter SearchFilter) (*SearchResult, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]SentryIssue, 0, len(m.issueOrder))
-	for _, id := range m.issueOrder {
-		issue, ok := m.issues[id]
-		if !ok {
-			continue
-		}
-		if !mockMatchesFilter(issue, filter) {
+	ds := m.datasets[instanceID]
+	if ds == nil {
+		return &SearchResult{IsLast: true}, nil
+	}
+	out := make([]SentryIssue, 0, len(ds.issueOrder))
+	for _, id := range ds.issueOrder {
+		issue, ok := ds.issues[id]
+		if !ok || !mockMatchesFilter(issue, filter) {
 			continue
 		}
 		out = append(out, *issue)
@@ -81,19 +118,23 @@ func (m *MockClient) SearchIssues(_ context.Context, filter SearchFilter, _ stri
 	return &SearchResult{Issues: out, IsLast: true}, nil
 }
 
-func (m *MockClient) GetIssue(_ context.Context, idOrShortID string) (*SentryIssue, error) {
+func (m *MockClient) getIssue(instanceID, idOrShortID string) (*SentryIssue, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.getError != nil {
-		err := *m.getError
+	ds := m.datasets[instanceID]
+	if ds == nil {
+		return nil, &APIError{StatusCode: http.StatusNotFound, Message: "issue not found: " + idOrShortID}
+	}
+	if ds.getError != nil {
+		err := *ds.getError
 		return nil, &err
 	}
-	if issue, ok := m.issues[idOrShortID]; ok {
+	if issue, ok := ds.issues[idOrShortID]; ok {
 		cp := *issue
 		return &cp, nil
 	}
 	// Fall back to numeric ID lookup so callers can use either form.
-	for _, i := range m.issues {
+	for _, i := range ds.issues {
 		if i.ID == idOrShortID {
 			cp := *i
 			return &cp, nil
@@ -102,13 +143,68 @@ func (m *MockClient) GetIssue(_ context.Context, idOrShortID string) (*SentryIss
 	return nil, &APIError{StatusCode: http.StatusNotFound, Message: "issue not found: " + idOrShortID}
 }
 
+// --- setters used by MockController, scoped per instance ---
+
+// SetAuthResult sets the auth result an instance returns from TestAuth.
+func (m *MockClient) SetAuthResult(instanceID string, r *TestConnectionResult) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dataset(instanceID).authResult = r
+}
+
+// SetOrganizations replaces an instance's organization list.
+func (m *MockClient) SetOrganizations(instanceID string, organizations []SentryOrganization) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]SentryOrganization, len(organizations))
+	copy(cp, organizations)
+	m.dataset(instanceID).organizations = cp
+}
+
+// SetProjects replaces an instance's project list.
+func (m *MockClient) SetProjects(instanceID string, projects []SentryProject) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cp := make([]SentryProject, len(projects))
+	copy(cp, projects)
+	m.dataset(instanceID).projects = cp
+}
+
+// AddIssue appends an issue to an instance's dataset (idempotent by key).
+func (m *MockClient) AddIssue(instanceID string, issue *SentryIssue) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ds := m.dataset(instanceID)
+	cp := *issue
+	key := issue.ShortID
+	if key == "" {
+		key = issue.ID
+	}
+	if _, exists := ds.issues[key]; !exists {
+		ds.issueOrder = append(ds.issueOrder, key)
+	}
+	ds.issues[key] = &cp
+}
+
+// SetGetIssueError forces GetIssue on an instance to fail (nil clears it).
+func (m *MockClient) SetGetIssueError(instanceID string, err *APIError) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dataset(instanceID).getError = err
+}
+
+// Reset clears every instance dataset back to empty.
+func (m *MockClient) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.datasets = make(map[string]*mockDataset)
+}
+
 // mockMatchesFilter applies the filter predicates that map to a per-issue
 // field, so E2E tests can assert the backend forwarded the filter rather than
 // silently returning everything. Deliberately NOT enforced (no per-issue
-// analog on SentryIssue): OrgSlug (the mock's project list is one tenant),
-// Environment (issues carry no environment in our projection), and StatsPeriod
-// (a relative time window, not an issue attribute). The real REST client's
-// URL building for those params is covered in rest_client_test.go.
+// analog on SentryIssue): OrgSlug, Environment, and StatsPeriod. The real REST
+// client's URL building for those params is covered in rest_client_test.go.
 func mockMatchesFilter(issue *SentryIssue, f SearchFilter) bool {
 	if f.ProjectSlug != "" && issue.ProjectSlug != f.ProjectSlug {
 		return false
@@ -136,71 +232,41 @@ func containsFold(xs []string, target string) bool {
 	return false
 }
 
-// --- Setters used by MockController ---
-
-func (m *MockClient) SetAuthResult(r *TestConnectionResult) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.authResult = r
+// mockInstanceClient is a Client view bound to one instance ID, delegating to
+// the shared MockClient's per-instance dataset.
+type mockInstanceClient struct {
+	shared     *MockClient
+	instanceID string
 }
 
-func (m *MockClient) SetOrganizations(organizations []SentryOrganization) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	cp := make([]SentryOrganization, len(organizations))
-	copy(cp, organizations)
-	m.organizations = cp
+func (c *mockInstanceClient) TestAuth(context.Context) (*TestConnectionResult, error) {
+	return c.shared.testAuth(c.instanceID)
 }
 
-func (m *MockClient) SetProjects(projects []SentryProject) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	cp := make([]SentryProject, len(projects))
-	copy(cp, projects)
-	m.projects = cp
+func (c *mockInstanceClient) ListOrganizations(context.Context) ([]SentryOrganization, error) {
+	return c.shared.listOrganizations(c.instanceID)
 }
 
-func (m *MockClient) AddIssue(issue *SentryIssue) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	cp := *issue
-	key := issue.ShortID
-	if key == "" {
-		key = issue.ID
-	}
-	if _, exists := m.issues[key]; !exists {
-		m.issueOrder = append(m.issueOrder, key)
-	}
-	m.issues[key] = &cp
+func (c *mockInstanceClient) ListProjects(context.Context) ([]SentryProject, error) {
+	return c.shared.listProjects(c.instanceID)
 }
 
-func (m *MockClient) SetGetIssueError(err *APIError) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.getError = err
+func (c *mockInstanceClient) SearchIssues(_ context.Context, filter SearchFilter, _ string) (*SearchResult, error) {
+	return c.shared.searchIssues(c.instanceID, filter)
 }
 
-// Reset clears every seeded value back to defaults.
-func (m *MockClient) Reset() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.authResult = &TestConnectionResult{
-		OK:          true,
-		UserID:      "mock-user",
-		DisplayName: "Mock User",
-		Email:       "mock@example.com",
-	}
-	m.organizations = nil
-	m.projects = nil
-	m.issues = make(map[string]*SentryIssue)
-	m.issueOrder = nil
-	m.getError = nil
+func (c *mockInstanceClient) GetIssue(_ context.Context, idOrShortID string) (*SentryIssue, error) {
+	return c.shared.getIssue(c.instanceID, idOrShortID)
 }
 
-// MockClientFactory returns a ClientFactory that always hands back the shared
-// MockClient regardless of credentials.
+// MockClientFactory returns a ClientFactory that hands each instance a view of
+// the shared MockClient bound to that instance's ID.
 func MockClientFactory(shared *MockClient) ClientFactory {
-	return func(*SentryConfig, string) Client {
-		return shared
+	return func(cfg *SentryConfig, _ string) Client {
+		instanceID := ""
+		if cfg != nil {
+			instanceID = cfg.ID
+		}
+		return &mockInstanceClient{shared: shared, instanceID: instanceID}
 	}
 }

@@ -4,6 +4,7 @@ import {
   type RepositoryWithScripts,
 } from "@/app/settings/workspace/workspace-repositories-dirty";
 import { repositoryId as toRepositoryId, workspaceId as toWorkspaceId } from "@/lib/types/http";
+import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 
 function makeRepo(overrides: Partial<RepositoryWithScripts> = {}): RepositoryWithScripts {
   return {
@@ -18,6 +19,7 @@ function makeRepo(overrides: Partial<RepositoryWithScripts> = {}): RepositoryWit
     provider_name: "",
     default_branch: "main",
     worktree_branch_prefix: "feature/",
+    worktree_branch_template: defaultWorktreeBranchTemplate,
     pull_before_worktree: true,
     setup_script: "",
     cleanup_script: "",
@@ -42,6 +44,18 @@ describe("isRepositoryDirty", () => {
     const saved = makeRepo({ copy_files: "" });
     const repo = makeRepo({ copy_files: ".env" });
     expect(isRepositoryDirty(repo, saved)).toBe(true);
+  });
+
+  it("returns true when worktree branch template differs", () => {
+    const saved = makeRepo({ worktree_branch_template: defaultWorktreeBranchTemplate });
+    const repo = makeRepo({ worktree_branch_template: "feature/{ticket}-{title}" });
+    expect(isRepositoryDirty(repo, saved)).toBe(true);
+  });
+
+  it("treats an empty worktree branch template as the default", () => {
+    const saved = makeRepo({ worktree_branch_template: defaultWorktreeBranchTemplate });
+    const repo = makeRepo({ worktree_branch_template: "" });
+    expect(isRepositoryDirty(repo, saved)).toBe(false);
   });
 
   it("returns true when there is no saved repository", () => {

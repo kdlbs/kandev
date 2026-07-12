@@ -197,7 +197,7 @@ func providerProfilesEqual(a, b map[ProviderID]ProviderProfile) bool {
 }
 
 func providerProfileEqual(a, b ProviderProfile) bool {
-	if a.TierMap != b.TierMap || a.Mode != b.Mode {
+	if a.TierMap != b.TierMap || a.TierProfileIDs != b.TierProfileIDs || a.Mode != b.Mode {
 		return false
 	}
 	if !stringSliceEqual(a.Flags, b.Flags) {

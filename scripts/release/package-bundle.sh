@@ -10,6 +10,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUNDLE="$ROOT_DIR/dist/kandev"
 REMOTE_AGENTCTL_HELPERS=(
   agentctl-linux-amd64
+  agentctl-linux-arm64
   agentctl-darwin-arm64
   agentctl-darwin-amd64
 )

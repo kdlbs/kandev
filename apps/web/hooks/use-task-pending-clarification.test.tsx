@@ -47,6 +47,36 @@ describe("useTaskPendingClarification", () => {
     expect(result.current).toBe(false);
   });
 
+  it("falls back to the snapshot pending clarification when messages are not loaded", () => {
+    const { result } = renderHook(
+      () =>
+        useTaskPendingClarification("session-1", {
+          primarySessionState: "WAITING_FOR_INPUT",
+          primarySessionPendingAction: "clarification",
+        }),
+      {
+        wrapper: wrapper(),
+      },
+    );
+
+    expect(result.current).toBe(true);
+  });
+
+  it("prefers loaded messages over a stale snapshot pending clarification", () => {
+    const { result } = renderHook(
+      () =>
+        useTaskPendingClarification("session-1", {
+          primarySessionState: "WAITING_FOR_INPUT",
+          primarySessionPendingAction: "clarification",
+        }),
+      {
+        wrapper: wrapper({ "session-1": [] }),
+      },
+    );
+
+    expect(result.current).toBe(false);
+  });
+
   it("returns true when the session has a pending clarification", () => {
     const { result } = renderHook(() => useTaskPendingClarification("session-1"), {
       wrapper: wrapper({

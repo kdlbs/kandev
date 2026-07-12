@@ -184,4 +184,41 @@ describe("buildPendingFlags / readPendingFlags", () => {
     expect(readPendingFlags({}, null)).toEqual({ clarification: false, permission: false });
     expect(readPendingFlags({}, "missing")).toEqual({ clarification: false, permission: false });
   });
+
+  it("falls back to the snapshot pending action when messages are not loaded", () => {
+    expect(
+      readPendingFlags({}, "sess-1", {
+        primarySessionState: "WAITING_FOR_INPUT",
+        primarySessionPendingAction: "clarification",
+      }),
+    ).toEqual({ clarification: true, permission: false });
+  });
+
+  it("falls back to pending permission from the snapshot", () => {
+    expect(
+      readPendingFlags({}, "sess-1", {
+        primarySessionState: "WAITING_FOR_INPUT",
+        primarySessionPendingAction: "permission",
+      }),
+    ).toEqual({ clarification: false, permission: true });
+  });
+
+  it("prefers loaded messages over a stale snapshot pending action", () => {
+    const flags = buildPendingFlags({ "sess-1": [] }, ["sess-1"]);
+    expect(
+      readPendingFlags(flags, "sess-1", {
+        primarySessionState: "WAITING_FOR_INPUT",
+        primarySessionPendingAction: "clarification",
+      }),
+    ).toEqual({ clarification: false, permission: false });
+  });
+
+  it("does not use the snapshot pending action after the session moves on", () => {
+    expect(
+      readPendingFlags({}, "sess-1", {
+        primarySessionState: "RUNNING",
+        primarySessionPendingAction: "clarification",
+      }),
+    ).toEqual({ clarification: false, permission: false });
+  });
 });

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -1083,6 +1084,23 @@ func TestBuildPassthroughEnv_MergesProfileEnvVars(t *testing.T) {
 	}
 	if env["KANDEV_SESSION_ID"] != "session-1" {
 		t.Fatalf("profile env var must not override KANDEV_SESSION_ID: %+v", env)
+	}
+}
+
+func TestBuildInteractiveStartRequestCarriesStripEnv(t *testing.T) {
+	stripEnv := []string{"ACP_BACKEND"}
+	req := buildInteractiveStartRequest(
+		"session-1",
+		&AgentExecution{WorkspacePath: "/workspace"},
+		agents.PassthroughConfig{},
+		map[string]string{"KANDEV_SESSION_ID": "session-1"},
+		agents.NewCommand("devin"),
+		stripEnv,
+		true,
+	)
+
+	if !slices.Equal(req.StripEnv, stripEnv) {
+		t.Fatalf("StripEnv = %v, want %v", req.StripEnv, stripEnv)
 	}
 }
 

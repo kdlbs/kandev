@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/db"
@@ -107,8 +108,8 @@ func TestSQLiteRepository_CRUD(t *testing.T) {
 			t.Fatalf("expected custom prompt to be deleted, but it still exists")
 		}
 	}
-	if builtinCount != 4 {
-		t.Fatalf("expected 4 built-in prompts, got %d", builtinCount)
+	if builtinCount != 5 {
+		t.Fatalf("expected 5 built-in prompts, got %d", builtinCount)
 	}
 }
 
@@ -123,9 +124,10 @@ func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
 		t.Fatalf("list prompts: %v", err)
 	}
 
-	// Should include the CI auto-fix built-in prompt.
+	// Should include the CI auto-fix and changes walkthrough built-in prompts.
 	builtinCount := 0
 	var ciAutoFixContent string
+	var changesWalkthroughContent string
 	for _, p := range list {
 		if p.Builtin {
 			builtinCount++
@@ -133,10 +135,13 @@ func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
 		if p.ID == "builtin-ci-auto-fix" && p.Name == "ci-auto-fix" && p.Content != "" {
 			ciAutoFixContent = p.Content
 		}
+		if p.ID == "builtin-changes-walkthrough" && p.Name == "changes-walkthrough" && p.Content != "" {
+			changesWalkthroughContent = p.Content
+		}
 	}
 
-	if builtinCount != 4 {
-		t.Fatalf("expected 4 built-in prompts, got %d", builtinCount)
+	if builtinCount != 5 {
+		t.Fatalf("expected 5 built-in prompts, got %d", builtinCount)
 	}
 	if ciAutoFixContent == "" {
 		t.Fatalf("expected ci-auto-fix built-in prompt")
@@ -153,5 +158,67 @@ func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
 		if !strings.Contains(ciAutoFixContent, want) {
 			t.Fatalf("expected ci-auto-fix prompt to contain %q, got:\n%s", want, ciAutoFixContent)
 		}
+	}
+	if changesWalkthroughContent == "" {
+		t.Fatalf("expected changes-walkthrough built-in prompt")
+	}
+	for _, want := range []string{
+		"show_walkthrough_kandev",
+		"Inspect the changed files yourself",
+		"compare the PR head against the PR base branch",
+		"compare against the task/repository base",
+		"Use `line_end`",
+		"do not assume the PR head is checked out locally",
+		"first walkthrough step",
+		"ELI5:",
+	} {
+		if !strings.Contains(changesWalkthroughContent, want) {
+			t.Fatalf("expected changes-walkthrough prompt to contain %q, got:\n%s", want, changesWalkthroughContent)
+		}
+	}
+}
+
+func TestSQLiteRepository_BuiltinSeedIgnoresUserPromptNameConflict(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
+	if err != nil {
+		t.Fatalf("failed to open sqlite db: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	defer func() {
+		if err := sqlxDB.Close(); err != nil {
+			t.Errorf("failed to close sqlite db: %v", err)
+		}
+	}()
+	if _, err := sqlxDB.Exec(`
+		CREATE TABLE custom_prompts (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			content TEXT NOT NULL,
+			builtin INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+	`); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	now := time.Now().UTC()
+	if _, err := sqlxDB.Exec(
+		`INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`,
+		"user-walkthrough", "changes-walkthrough", "user-owned prompt", now, now,
+	); err != nil {
+		t.Fatalf("seed user prompt: %v", err)
+	}
+
+	repo, err := newSQLiteRepositoryWithDB(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("repo init should ignore built-in name conflicts: %v", err)
+	}
+	got, err := repo.GetPromptByName(context.Background(), "changes-walkthrough")
+	if err != nil {
+		t.Fatalf("get existing prompt: %v", err)
+	}
+	if got.ID != "user-walkthrough" || got.Builtin {
+		t.Fatalf("expected user prompt to remain canonical, got %+v", got)
 	}
 }

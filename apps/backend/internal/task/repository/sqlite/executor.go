@@ -164,10 +164,10 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO executors_running (
 			id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id) DO UPDATE SET
 			id = excluded.id,
 			task_id = excluded.task_id,
@@ -182,6 +182,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 			agentctl_url = excluded.agentctl_url,
 			agentctl_port = excluded.agentctl_port,
 			pid = excluded.pid,
+			local_pid = excluded.local_pid,
 			worktree_id = excluded.worktree_id,
 			worktree_path = excluded.worktree_path,
 			worktree_branch = excluded.worktree_branch,
@@ -204,6 +205,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		running.AgentctlURL,
 		running.AgentctlPort,
 		running.PID,
+		running.LocalPID,
 		running.WorktreeID,
 		running.WorktreePath,
 		running.WorktreeBranch,
@@ -219,7 +221,7 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 func (r *Repository) ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error) {
 	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
 		FROM executors_running
@@ -239,7 +241,7 @@ func (r *Repository) ListExecutorsRunningByTaskID(ctx context.Context, taskID st
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 			created_at, updated_at
 		FROM executors_running
@@ -265,7 +267,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, task_id, executor_id, runtime, status, resumable, resume_token,
-		       last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid,
+		       last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
 		       worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
 		       created_at, updated_at
 		FROM executors_running
@@ -285,6 +287,7 @@ func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionI
 		&running.AgentctlURL,
 		&running.AgentctlPort,
 		&running.PID,
+		&running.LocalPID,
 		&running.WorktreeID,
 		&running.WorktreePath,
 		&running.WorktreeBranch,
@@ -336,6 +339,7 @@ func scanExecutorRunningRows(rows *sql.Rows) ([]*models.ExecutorRunning, error) 
 			&running.AgentctlURL,
 			&running.AgentctlPort,
 			&running.PID,
+			&running.LocalPID,
 			&running.WorktreeID,
 			&running.WorktreePath,
 			&running.WorktreeBranch,
@@ -444,6 +448,36 @@ func (r *Repository) UpdateResumeToken(ctx context.Context, sessionID, expectedE
 			return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 		}
 		return models.ErrExecutionRotated
+	}
+	return nil
+}
+
+// RepairExecutorRunningDead repairs a row in place to reflect that its backing
+// process is gone, WITHOUT deleting it. The resume-safety invariant requires a
+// resumable / non-terminal row be repaired rather than pruned
+// (#1597 resume-safety invariant): flip status to "stopped", clear the local
+// liveness handle (local_pid = 0) so the row no longer claims a live process,
+// and re-stamp last_seen_at as a fresh liveness observation. resume_token,
+// worktree, and endpoint columns are intentionally preserved so the session
+// stays resumable.
+//
+// Returns ErrExecutorRunningNotFound when no row exists for the session.
+func (r *Repository) RepairExecutorRunningDead(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE executors_running
+		   SET status = ?, local_pid = 0, last_seen_at = ?, updated_at = ?
+		 WHERE session_id = ?
+	`), models.ExecutorRunningStatusStopped, now, now, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
 	}
 	return nil
 }

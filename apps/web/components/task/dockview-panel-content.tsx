@@ -94,6 +94,8 @@ function DiffViewerContent({
   const { openFile } = useFileEditors();
   const panelKind = (params?.kind as string) ?? "all";
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
+  const selectedRepositoryName =
+    panelKind === "file" ? (params?.repositoryName as string | undefined) : undefined;
   const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
   const handleClosePanel = useCallback(() => {
@@ -106,6 +108,7 @@ function DiffViewerContent({
     <TaskChangesPanel
       mode={panelKind as "all" | "file"}
       filePath={selectedPath}
+      fileRepositoryName={selectedRepositoryName}
       sourceFilter={sourceFilter}
       selectedDiff={panelSelectedDiff}
       onClearSelected={() => setSelectedDiff(null)}
@@ -189,7 +192,10 @@ function ChangesContent({ panelId }: { panelId: string }) {
     setPanelTitle(panelId, title);
   }, [totalCount, panelId]);
 
-  const handleEditFile = useCallback((path: string) => openFile(path), [openFile]);
+  const handleEditFile = useCallback(
+    (path: string, repo?: string) => openFile(path, repo),
+    [openFile],
+  );
   const handleOpenDiffFile = useCallback(
     (path: string, options?: OpenDiffOptions) =>
       addFileDiffPanel(path, { source: options?.source, repositoryName: options?.repositoryName }),

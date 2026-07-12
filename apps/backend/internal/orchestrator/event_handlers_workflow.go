@@ -56,6 +56,10 @@ func (s *Service) processOnTurnComplete(ctx context.Context, task *models.Task, 
 		return false
 	}
 
+	if s.turnCompleteBlockedByUserInput(ctx, taskID, sessionID, session) {
+		return false
+	}
+
 	// ADR 0015 — explicit completion signal gating (legacy path mirror of
 	// processOnTurnCompleteViaEngine). Steps marked
 	// `auto_advance_requires_signal=true` wait for a step_complete_kandev
@@ -266,6 +270,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Publish task updated event via the task service so the payload carries
 	// the full context (session counts, primary session, repositories).
 	s.publishTaskUpdated(ctx, task)
+	s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, toStepID)
 
 	s.logger.Info("workflow transition completed",
 		zap.String("task_id", taskID),
@@ -322,6 +327,8 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 	if s.workflowStepGetter == nil {
 		return
 	}
+
+	s.processParentChildrenCompletedForTerminalStepMove(ctx, data.TaskID, data.ToStepID)
 
 	// No session yet — check if we need to create one via auto-start
 	if data.SessionID == "" {
@@ -1051,6 +1058,8 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		zap.String("from_step_id", fromStepID),
 		zap.String("to_step_id", move.WorkflowStepID))
 
+	s.syncTaskStateForPendingMove(ctx, taskID, fromStepID, move.WorkflowStepID)
+
 	// Run on_exit + on_enter asynchronously. This call originated from
 	// handleAgentReady on the WS event reader goroutine; processStepExitAndEnter
 	// can take many seconds (resume + agentctl bootstrap) and would otherwise
@@ -1060,6 +1069,44 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// it's safe to defer the rest.
 	taskDescription := task.Description
 	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
+}
+
+func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromStepID, toStepID string) {
+	if s.workflowStepIsTerminal(ctx, toStepID) {
+		s.markTaskCompletedForTerminalStep(ctx, taskID, toStepID)
+		return
+	}
+	if fromStepID == toStepID || !s.workflowStepIsTerminal(ctx, fromStepID) {
+		return
+	}
+
+	s.taskRuntimeStateMu.Lock()
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.taskRuntimeStateMu.Unlock()
+		s.logger.Warn("pending move state sync: failed to load task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if task.WorkflowStepID != toStepID || task.State != v1.TaskStateCompleted {
+		s.taskRuntimeStateMu.Unlock()
+		return
+	}
+
+	oldState := task.State
+	task.State = v1.TaskStateTODO
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTask(ctx, task); err != nil {
+		s.taskRuntimeStateMu.Unlock()
+		s.logger.Warn("pending move state sync: failed to reopen completed task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	s.taskRuntimeStateMu.Unlock()
+	s.publishTaskUpdated(ctx, task)
+	s.publishTaskStateChanged(ctx, task, oldState)
 }
 
 // drainQueuedMessageForPromptableSession takes the next queued message and dispatches
@@ -2015,6 +2062,9 @@ func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID str
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
 	}
+	if s.turnCompleteBlockedByUserInput(ctx, taskID, session.ID, session) {
+		return false
+	}
 	if currentStep.AutoAdvanceRequiresSignal {
 		signal, has := models.LoadPendingStepSignal(session.Metadata)
 		if !has || signal.StepID != task.WorkflowStepID {
@@ -2100,6 +2150,8 @@ func (s *Service) applyEngineTransition(
 		}
 	}
 
+	terminalTarget := s.workflowStepIsTerminal(ctx, targetStep.ID)
+
 	fromStep, err := s.workflowStepGetter.GetStep(ctx, result.FromStepID)
 	if err != nil {
 		s.logger.Warn("failed to load from-step for on_exit",
@@ -2131,6 +2183,10 @@ func (s *Service) applyEngineTransition(
 				zap.String("session_id", session.ID),
 				zap.Error(err))
 		}
+	}
+
+	if terminalTarget {
+		s.markTaskCompletedForTerminalStep(ctx, taskID, targetStep.ID)
 	}
 
 	if !triggerOnEnter {
@@ -2165,7 +2221,9 @@ func (s *Service) applyEngineTransition(
 	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
 		s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateWaitingForInput, "", false, session)
 		session.State = models.TaskSessionStateWaitingForInput
-		s.writeTaskReviewState(ctx, taskID, session.ID)
+		if !terminalTarget {
+			s.writeTaskReviewState(ctx, taskID, session.ID)
+		}
 	}
 
 	// Launch processOnEnter asynchronously to avoid blocking the stream reader goroutine.

@@ -28,13 +28,19 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	settingsWorkspaceID := ""
 	settingsWorkflowID := ""
 	settingsRepositoryID := ""
+	settingsTasksListSort := ""
+	settingsTasksListGroup := ""
 	if hasSettings {
 		settingsWorkspaceID = settings.Settings.WorkspaceID
 		settingsWorkflowID = settings.Settings.WorkflowFilterID
+		settingsTasksListSort = settings.Settings.TasksListSort
+		settingsTasksListGroup = settings.Settings.TasksListGroup
 		if len(settings.Settings.RepositoryIDs) > 0 {
 			settingsRepositoryID = settings.Settings.RepositoryIDs[0]
 		}
 	}
+	tasksListSort := tasksListSortForRoute(queryValue(req, "sort"), settingsTasksListSort)
+	tasksListGroup := tasksListGroupForRoute(queryValue(req, "group"), settingsTasksListGroup)
 	workspaceIDs := workspaceIDSet(workspaces)
 	activeWorkspaceID := firstValidID(
 		workspaceIDs,
@@ -54,7 +60,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 		state["userSettings"] = mapUserSettingsState(settings, activeWorkspaceID)
 	}
 	if activeWorkspaceID == "" {
-		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "tasks": []any{}, "total": 0}
+		return state, map[string]any{"activeWorkspaceId": nil, "workflows": []any{}, "steps": []any{}, "repositories": []any{}, "tasks": []any{}, "total": 0, "tasksListSort": tasksListSort, "tasksListGroup": tasksListGroup}
 	}
 	workflows, err := b.p.taskSvc.ListWorkflows(ctx, activeWorkspaceID, false)
 	if err != nil {
@@ -69,7 +75,7 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 	}
 	repositories := b.repositoriesForState(ctx, activeWorkspaceID, state)
 	steps := b.workflowStepsForWorkspace(ctx, activeWorkspaceID)
-	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID)
+	tasks, total := b.tasksForWorkspace(ctx, activeWorkspaceID, activeWorkflowID, settingsRepositoryID, tasksListSort)
 	routeData := map[string]any{
 		"activeWorkspaceId": activeWorkspaceID,
 		"workflows":         workflowsToDTOs(workflows),
@@ -77,6 +83,8 @@ func (b bootStateBuilder) tasksPageBootData(ctx context.Context, req *http.Reque
 		"repositories":      repositories,
 		"tasks":             tasks,
 		"total":             total,
+		"tasksListSort":     tasksListSort,
+		"tasksListGroup":    tasksListGroup,
 	}
 	return state, routeData
 }
@@ -237,8 +245,8 @@ func (b bootStateBuilder) workflowStepsForWorkspace(ctx context.Context, workspa
 	return items
 }
 
-func (b bootStateBuilder) tasksForWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID string) ([]taskdto.TaskDTO, int) {
-	tasks, total, err := b.p.taskSvc.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, "", 1, 25, false, false, false, false)
+func (b bootStateBuilder) tasksForWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, sort string) ([]taskdto.TaskDTO, int) {
+	tasks, total, err := b.p.taskSvc.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, "", 1, 25, sort, false, false, false, false)
 	if err != nil {
 		b.logBootError("list tasks page tasks", err)
 		return []taskdto.TaskDTO{}, 0
@@ -438,6 +446,8 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"kanbanViewMode":              nullString(settings.KanbanViewMode),
 		"workflowId":                  nullString(settings.WorkflowFilterID),
 		"repositoryIds":               stringSlice(settings.RepositoryIDs),
+		"tasksListSort":               usermodels.NormalizeTasksListSort(settings.TasksListSort),
+		"tasksListGroup":              usermodels.NormalizeTasksListGroup(settings.TasksListGroup),
 		"preferredShell":              nullString(settings.PreferredShell),
 		"shellOptions":                response.ShellOptions,
 		"defaultEditorId":             nullString(settings.DefaultEditorID),
@@ -530,21 +540,22 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		})
 	}
 	return map[string]any{
-		"id":                  task.ID,
-		"workflowStepId":      task.WorkflowStepID,
-		"title":               task.Title,
-		"description":         task.Description,
-		"position":            task.Position,
-		"state":               task.State,
-		"repositoryId":        primaryRepositoryID,
-		"repositories":        repositories,
-		"primarySessionId":    task.PrimarySessionID,
-		"primarySessionState": task.PrimarySessionState,
-		"sessionCount":        task.SessionCount,
-		"reviewStatus":        nullString(string(task.ReviewStatus)),
-		"parentTaskId":        nullString(task.ParentID),
-		"updatedAt":           task.UpdatedAt,
-		"createdAt":           task.CreatedAt,
+		"id":                          task.ID,
+		"workflowStepId":              task.WorkflowStepID,
+		"title":                       task.Title,
+		"description":                 task.Description,
+		"position":                    task.Position,
+		"state":                       task.State,
+		"repositoryId":                primaryRepositoryID,
+		"repositories":                repositories,
+		"primarySessionId":            task.PrimarySessionID,
+		"primarySessionState":         task.PrimarySessionState,
+		"primarySessionPendingAction": task.PrimarySessionPendingAction,
+		"sessionCount":                task.SessionCount,
+		"reviewStatus":                nullString(string(task.ReviewStatus)),
+		"parentTaskId":                nullString(task.ParentID),
+		"updatedAt":                   task.UpdatedAt,
+		"createdAt":                   task.CreatedAt,
 	}
 }
 
@@ -633,6 +644,20 @@ func queryValue(req *http.Request, name string) string {
 		return ""
 	}
 	return strings.TrimSpace(parsed.Query().Get(name))
+}
+
+func tasksListSortForRoute(queryValue, settingsValue string) string {
+	if usermodels.IsValidTasksListSort(queryValue) {
+		return strings.TrimSpace(queryValue)
+	}
+	return usermodels.NormalizeTasksListSort(settingsValue)
+}
+
+func tasksListGroupForRoute(queryValue, settingsValue string) string {
+	if usermodels.IsValidTasksListGroup(queryValue) {
+		return strings.TrimSpace(queryValue)
+	}
+	return usermodels.NormalizeTasksListGroup(settingsValue)
 }
 
 func readActiveWorkspaceCookie(req *http.Request) string {

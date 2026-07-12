@@ -906,6 +906,37 @@ func (r *Repository) HasActiveTaskSessionsByEnvironment(ctx context.Context, env
 	return err == nil, err
 }
 
+func (r *Repository) HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (bool, error) {
+	var exists int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT 1 FROM task_sessions
+		WHERE task_environment_id = ?
+			AND task_id != ?
+			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		LIMIT 1
+	`), taskEnvironmentID, taskID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (r *Repository) FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (string, error) {
+	var borrowerTaskID string
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT task_id FROM task_sessions
+		WHERE task_environment_id = ?
+			AND task_id != ?
+			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		ORDER BY updated_at DESC
+		LIMIT 1
+	`), taskEnvironmentID, taskID).Scan(&borrowerTaskID)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return borrowerTaskID, err
+}
+
 func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	var exists int
 	// Only sessions of live (non-archived) tasks count; archived tasks never
@@ -1109,6 +1140,23 @@ func (r *Repository) UpdateTaskSessionWorktreeBranch(ctx context.Context, sessio
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_worktrees SET worktree_branch = ?, updated_at = ? WHERE session_id = ?
 	`), branch, now, sessionID)
+	return err
+}
+
+// UpdateTaskSessionWorktreeBranchByRepository updates the cached worktree_branch
+// for one repository row in a session. Use this for repo-scoped live git
+// operations in multi-repo tasks so sibling repositories keep their branch
+// snapshots.
+func (r *Repository) UpdateTaskSessionWorktreeBranchByRepository(ctx context.Context, sessionID, repositoryID, branch string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_session_worktrees
+		SET worktree_branch = ?, updated_at = ?
+		WHERE session_id = ?
+		  AND repository_id = ?
+		  AND deleted_at IS NULL
+		  AND status = 'active'
+	`), branch, now, sessionID, repositoryID)
 	return err
 }
 

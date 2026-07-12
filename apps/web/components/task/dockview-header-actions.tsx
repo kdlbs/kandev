@@ -26,6 +26,7 @@ import { createUserShell } from "@/lib/api/domains/user-shell-api";
 import { useRepositoryScripts } from "@/hooks/domains/workspace/use-repository-scripts";
 import { replaceTaskUrl } from "@/lib/links";
 import type { Task, ProcessInfo } from "@/lib/types/http";
+import { sessionId as toSessionId } from "@/lib/types/ids";
 import type { ProcessStatusEntry } from "@/lib/state/slices";
 import { AddPanelMenuItems, MENU_ITEM_CLASS } from "./dockview-add-panel-items";
 import { useUserShells } from "@/hooks/domains/session/use-user-shells";
@@ -328,9 +329,15 @@ function SidebarRightActions() {
       const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;
       setActiveTask(task.id);
       if (meta?.taskSessionId) {
-        setActiveSession(task.id, meta.taskSessionId);
-        const newEnvId = appStore.getState().environmentIdBySessionId[meta.taskSessionId] ?? null;
-        if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, meta.taskSessionId);
+        const taskSessionId = toSessionId(meta.taskSessionId);
+        setActiveSession(task.id, taskSessionId);
+        const nextState = appStore.getState();
+        const newEnvId = nextState.environmentIdBySessionId[taskSessionId] ?? null;
+        const sessionIds = (nextState.taskSessionsByTask.itemsByTaskId[task.id] ?? []).map(
+          (session) => session.id,
+        );
+        if (!sessionIds.includes(taskSessionId)) sessionIds.unshift(taskSessionId);
+        if (newEnvId) performLayoutSwitch(oldEnvId, newEnvId, taskSessionId, sessionIds);
       }
       replaceTaskUrl(task.id);
     },

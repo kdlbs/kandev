@@ -39,6 +39,8 @@ type UpdateUserSettingsRequest struct {
 	KanbanViewMode              *string
 	WorkflowFilterID            *string
 	RepositoryIDs               *[]string
+	TasksListSort               *string
+	TasksListGroup              *string
 	InitialSetupComplete        *bool
 	PreferredShell              *string
 	DefaultEditorID             *string
@@ -193,6 +195,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if req.RepositoryIDs != nil {
 		settings.RepositoryIDs = *req.RepositoryIDs
 	}
+	if err := applyTasksListPreferences(settings, req.TasksListSort, req.TasksListGroup); err != nil {
+		return err
+	}
 	if req.InitialSetupComplete != nil {
 		settings.InitialSetupComplete = *req.InitialSetupComplete
 	}
@@ -244,6 +249,30 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 			return errors.New("terminal_font_size must be 0 (default) or between 8 and 24")
 		}
 		settings.TerminalFontSize = v
+	}
+	return nil
+}
+
+func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupValue *string) error {
+	if sortValue != nil {
+		v := strings.TrimSpace(*sortValue)
+		if v == "" {
+			v = models.TasksListSortDefault
+		}
+		if !models.IsValidTasksListSort(v) {
+			return fmt.Errorf("tasks_list_sort must be one of %s", strings.Join(models.TasksListSortValues(), ", "))
+		}
+		settings.TasksListSort = v
+	}
+	if groupValue != nil {
+		v := strings.TrimSpace(*groupValue)
+		if v == "" {
+			v = models.TasksListGroupDefault
+		}
+		if !models.IsValidTasksListGroup(v) {
+			return fmt.Errorf("tasks_list_group must be one of %s", strings.Join(models.TasksListGroupValues(), ", "))
+		}
+		settings.TasksListGroup = v
 	}
 	return nil
 }
@@ -505,6 +534,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"kanban_view_mode":                settings.KanbanViewMode,
 		"workflow_filter_id":              settings.WorkflowFilterID,
 		"repository_ids":                  settings.RepositoryIDs,
+		"tasks_list_sort":                 settings.TasksListSort,
+		"tasks_list_group":                settings.TasksListGroup,
 		"initial_setup_complete":          settings.InitialSetupComplete,
 		"preferred_shell":                 settings.PreferredShell,
 		"default_editor_id":               settings.DefaultEditorID,

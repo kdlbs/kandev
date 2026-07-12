@@ -32,7 +32,7 @@ export function TopbarMetrics({ activeSessionId }: TopbarMetricsProps) {
   const sources = selectSources(snapshot?.sources ?? [], activeSessionId);
   if (sources.length === 0) {
     return (
-      <div className="flex h-8 items-center gap-1 rounded px-2 text-xs text-muted-foreground md:h-7 md:border md:border-border">
+      <div className="flex h-8 items-center gap-1 rounded px-2 text-xs text-muted-foreground md:border md:border-border">
         <IconActivity className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Metrics</span>
       </div>
@@ -83,7 +83,7 @@ function SourceMetrics({
   const metrics = source.metrics.slice(0, 4);
 
   return (
-    <div className="flex h-7 max-w-[220px] items-center gap-1 overflow-hidden rounded border border-border px-1.5 text-xs">
+    <div className="flex h-8 max-w-[220px] items-center gap-1 overflow-hidden rounded border border-border px-1.5 text-xs">
       {showSource ? <SourceBadge source={source} updatedAt={updatedAt} /> : null}
       {metrics.length > 0 ? (
         metrics.map((metric) => (

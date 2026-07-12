@@ -18,12 +18,15 @@ import (
 	"github.com/kandev/kandev/internal/common/gitref"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
 // defaultPriority is the default value for the task priority column.
 // Used when a caller omits priority so the DB CHECK constraint is satisfied.
 const defaultPriority = "medium"
+
+const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
 
 // ErrSubtaskDepthExceeded is returned when a caller tries to create a
 // subtask of a kanban subtask (nesting depth > 1). Office task trees are
@@ -48,6 +51,18 @@ type taskStopTarget struct {
 type taskEnvironmentCleanup struct {
 	env       *models.TaskEnvironment
 	deleteRow bool
+}
+
+type taskEnvironmentSessionUsageChecker interface {
+	HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (bool, error)
+}
+
+type taskEnvironmentSessionBorrowerFinder interface {
+	FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx context.Context, taskEnvironmentID, taskID string) (string, error)
+}
+
+type taskEnvironmentOwnerTransferer interface {
+	TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error
 }
 
 // Task operations
@@ -421,19 +436,7 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 	repositoryID = repoInput.RepositoryID
 	baseBranch = repoInput.BaseBranch
 	if repositoryID != "" {
-		// Verify the repository belongs to the target workspace. Without this
-		// check, an agent that knows a repository UUID from another workspace
-		// could associate it with a task in this workspace via the MCP tool's
-		// repository_id fast path (the github_url and local_path branches both
-		// scope through FindOrCreateRepository, which is workspace-bound).
-		repo, lookupErr := s.repoEntities.GetRepository(ctx, repositoryID)
-		if lookupErr != nil {
-			return "", "", false, fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
-		}
-		if repo == nil || repo.WorkspaceID != workspaceID {
-			return "", "", false, fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
-		}
-		return repositoryID, baseBranch, false, nil
+		return s.resolveRepoInputID(ctx, workspaceID, repositoryID, baseBranch)
 	}
 
 	// Handle GitHub URL: parse owner/name and use FindOrCreateRepository
@@ -447,6 +450,157 @@ func (s *Service) resolveRepoInput(ctx context.Context, workspaceID string, repo
 	return s.resolveRepoInputLocal(ctx, workspaceID, repoInput, repoByPath, baseBranch)
 }
 
+func (s *Service) resolveRepoInputID(ctx context.Context, workspaceID, repositoryID, baseBranch string) (string, string, bool, error) {
+	// Verify the repository belongs to the target workspace. Without this
+	// check, an agent that knows a repository UUID from another workspace
+	// could associate it with a task in this workspace via the MCP tool's
+	// repository_id fast path (the github_url and local_path branches both
+	// scope through FindOrCreateRepository, which is workspace-bound).
+	repo, lookupErr := s.repoEntities.GetRepository(ctx, repositoryID)
+	if lookupErr != nil {
+		return "", "", false, fmt.Errorf("looking up repository %q: %w", repositoryID, lookupErr)
+	}
+	if repo == nil || repo.WorkspaceID != workspaceID {
+		return "", "", false, fmt.Errorf("repository %q does not belong to workspace %q", repositoryID, workspaceID)
+	}
+	replacementID, replacementCreated, replacementErr := s.safeRepositoryIDForTaskWorktree(ctx, workspaceID, repo)
+	if replacementErr != nil {
+		return "", "", false, replacementErr
+	}
+	if replacementID != "" {
+		return replacementID, baseBranch, replacementCreated, nil
+	}
+	return repositoryID, baseBranch, false, nil
+}
+
+func (s *Service) safeRepositoryIDForTaskWorktree(ctx context.Context, workspaceID string, repo *models.Repository) (string, bool, error) {
+	if !s.isKandevTaskWorktreeRepository(repo) {
+		return "", false, nil
+	}
+	if repo.Provider == "" || repo.ProviderOwner == "" || repo.ProviderName == "" {
+		return "", false, fmt.Errorf("repository %q points at a Kandev task worktree; use the source repository or GitHub URL", repo.ID)
+	}
+	existing, err := s.findSafeReplacementRepository(ctx, workspaceID, repo)
+	if err != nil {
+		return "", false, err
+	}
+	if existing != nil {
+		return existing.ID, false, nil
+	}
+	created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:    workspaceID,
+		Name:           repo.ProviderOwner + "/" + repo.ProviderName,
+		SourceType:     sourceTypeProvider,
+		Provider:       repo.Provider,
+		ProviderRepoID: repo.ProviderRepoID,
+		ProviderOwner:  repo.ProviderOwner,
+		ProviderName:   repo.ProviderName,
+		DefaultBranch:  repo.DefaultBranch,
+	})
+	if createErr != nil {
+		return "", false, fmt.Errorf("create provider repository for task worktree %q: %w", repo.ID, createErr)
+	}
+	return created.ID, true, nil
+}
+
+func (s *Service) replaceTaskWorktreeRepositoryMatch(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, bool, error) {
+	replacementID, replacementCreated, err := s.safeRepositoryIDForTaskWorktree(ctx, workspaceID, repo)
+	if err != nil {
+		return nil, false, err
+	}
+	if replacementID == "" {
+		return repo, false, nil
+	}
+	replacement, lookupErr := s.repoEntities.GetRepository(ctx, replacementID)
+	if lookupErr != nil {
+		return nil, false, fmt.Errorf("looking up repository %q: %w", replacementID, lookupErr)
+	}
+	if replacement == nil {
+		return nil, false, fmt.Errorf("replacement repository %q no longer exists", replacementID)
+	}
+	return replacement, replacementCreated, nil
+}
+
+// findSafeReplacementRepository prefers an existing safe local clone over a
+// provider row so private/offline repositories can reuse the user's checkout.
+func (s *Service) findSafeReplacementRepository(ctx context.Context, workspaceID string, repo *models.Repository) (*models.Repository, error) {
+	repos, err := s.repoEntities.ListRepositories(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list repositories for task worktree replacement: %w", err)
+	}
+	var localClone *models.Repository
+	var providerRepo *models.Repository
+	for _, candidate := range repos {
+		if candidate == nil || candidate.ID == repo.ID {
+			continue
+		}
+		if !sameProviderIdentity(repo, candidate) {
+			continue
+		}
+		if s.isKandevTaskWorktreeRepository(candidate) {
+			continue
+		}
+		if candidate.SourceType == sourceTypeLocal && candidate.LocalPath != "" {
+			if localClone == nil {
+				localClone = candidate
+			}
+			continue
+		}
+		if candidate.SourceType == sourceTypeProvider && providerRepo == nil {
+			providerRepo = candidate
+		}
+	}
+	if localClone != nil {
+		return localClone, nil
+	}
+	if providerRepo != nil {
+		return providerRepo, nil
+	}
+	return nil, nil
+}
+
+func sameProviderIdentity(left, right *models.Repository) bool {
+	return left.Provider == right.Provider &&
+		left.ProviderOwner == right.ProviderOwner &&
+		left.ProviderName == right.ProviderName
+}
+
+func (s *Service) isKandevTaskWorktreeRepository(repo *models.Repository) bool {
+	return repo != nil && isKandevTaskWorktreePath(repo.LocalPath, s.discoveryConfig.TaskWorktreeRoots)
+}
+
+func isKandevTaskWorktreePath(path string, taskWorktreeRoots []string) bool {
+	normalized := normalizeTaskWorktreePath(path)
+	if normalized == "" {
+		return false
+	}
+	for _, root := range taskWorktreeRoots {
+		if pathAtOrInsideRoot(normalized, normalizeTaskWorktreePath(root)) {
+			return true
+		}
+	}
+	return strings.Contains(normalized, defaultKandevTaskWorktreePathSegment) ||
+		strings.HasSuffix(normalized, strings.TrimSuffix(defaultKandevTaskWorktreePathSegment, "/"))
+}
+
+func normalizeTaskWorktreePath(path string) string {
+	normalized := filepath.ToSlash(filepath.Clean(strings.TrimSpace(path)))
+	if normalized == "." || normalized == "" {
+		return ""
+	}
+	return normalized
+}
+
+func pathAtOrInsideRoot(path, root string) bool {
+	if path == "" || root == "" {
+		return false
+	}
+	if root != "/" {
+		root = strings.TrimRight(root, "/")
+	}
+	return path == root || strings.HasPrefix(path, root+"/")
+}
+
 // resolveRepoInputLocal handles the LocalPath branch of resolveRepoInput.
 // Looks the path up in the workspace snapshot; on miss, calls
 // CreateRepository (and reports created=true). Extracted to keep
@@ -458,6 +612,9 @@ func (s *Service) resolveRepoInputLocal(
 	repo := repoByPath[repoInput.LocalPath]
 	created := false
 	if repo == nil {
+		if isKandevTaskWorktreePath(repoInput.LocalPath, s.discoveryConfig.TaskWorktreeRoots) {
+			return "", "", false, fmt.Errorf("local path %q points at a Kandev task worktree; use the source repository or GitHub URL", repoInput.LocalPath)
+		}
 		name := strings.TrimSpace(repoInput.Name)
 		if name == "" {
 			name = filepath.Base(repoInput.LocalPath)
@@ -497,6 +654,13 @@ func (s *Service) resolveRepoInputLocal(
 			repoByPath[repoInput.LocalPath] = repo
 		}
 		created = true
+	} else {
+		replacement, replacementCreated, replaceErr := s.replaceTaskWorktreeRepositoryMatch(ctx, workspaceID, repo)
+		if replaceErr != nil {
+			return "", "", false, replaceErr
+		}
+		repo = replacement
+		created = replacementCreated
 	}
 	if baseBranch == "" {
 		baseBranch = repo.DefaultBranch
@@ -855,12 +1019,37 @@ func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) e
 }
 
 func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
+	_, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, reason, func(ctx context.Context, id string) (bool, error) {
+		if err := s.tasks.DeleteTask(ctx, id); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+	return err
+}
+
+func (s *Service) deleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	deleted, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, "", func(ctx context.Context, id string) (bool, error) {
+		return s.tasks.DeleteExpiredQuickChatTask(ctx, id, cutoff)
+	})
+	if errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return false, nil
+	}
+	return deleted, err
+}
+
+func (s *Service) deleteTaskWithReasonAndDBDelete(
+	ctx context.Context,
+	id string,
+	reason string,
+	deleteFromDB func(context.Context, string) (bool, error),
+) (bool, error) {
 	start := time.Now()
 
 	// 1. Get task (sync, fast)
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// 2. Gather data needed for cleanup BEFORE delete (sync, fast)
@@ -873,27 +1062,28 @@ func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) e
 
 	worktrees := s.gatherWorktreesForDelete(ctx, id)
 	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, id)
+	if preserved, err := s.preserveTaskEnvironmentForActiveBorrower(ctx, id, taskEnv); err != nil {
+		return false, err
+	} else if preserved {
+		s.logger.Info("transferred borrowed task environment before task delete",
+			zap.String("task_id", id),
+			zap.String("env_id", taskEnvironmentID(taskEnv)),
+			zap.String("new_owner_task_id", taskEnv.TaskID))
+	}
 
-	// 3. Get active sessions for stopping agents (sync, fast)
-	// Must query before delete since DB records will be gone
-	var stopTargets []taskStopTarget
-	if s.executionStopper != nil {
-		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
-		if err != nil {
-			s.logger.Warn("failed to list active sessions for delete",
-				zap.String("task_id", id),
-				zap.Error(err))
-		}
-		stopTargets, err = s.buildStopTargets(ctx, id, activeSessions)
-		if err != nil {
-			return fmt.Errorf("list runtime cleanup inventory: %w", err)
-		}
+	stopTargets, err := s.deleteTaskStopTargets(ctx, id)
+	if err != nil {
+		return false, err
 	}
 
 	// 4. Delete from DB (sync, fast)
-	if err := s.tasks.DeleteTask(ctx, id); err != nil {
+	deleted, err := deleteFromDB(ctx, id)
+	if err != nil {
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
-		return err
+		return false, err
+	}
+	if !deleted {
+		return false, nil
 	}
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
@@ -917,7 +1107,25 @@ func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) e
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")
 	}
 
-	return nil
+	return true, nil
+}
+
+func (s *Service) deleteTaskStopTargets(ctx context.Context, id string) ([]taskStopTarget, error) {
+	// Must query before delete since DB records will be gone.
+	if s.executionStopper == nil {
+		return nil, nil
+	}
+	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to list active sessions for delete",
+			zap.String("task_id", id),
+			zap.Error(err))
+	}
+	stopTargets, err := s.buildStopTargets(ctx, id, activeSessions)
+	if err != nil {
+		return nil, fmt.Errorf("list runtime cleanup inventory: %w", err)
+	}
+	return stopTargets, nil
 }
 
 // CleanupTaskResources tears down a task's runtime resources (container,
@@ -955,6 +1163,23 @@ func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, delet
 	}
 	worktrees := s.gatherWorktreesForDelete(ctx, taskID)
 	taskEnv := s.gatherTaskEnvironmentForCleanup(ctx, taskID)
+	if deleteEnvRow {
+		preserved, err := s.preserveTaskEnvironmentForActiveBorrower(ctx, taskID, taskEnv)
+		if err != nil {
+			s.logger.Warn("skipping cascade cleanup because task environment could not be preserved for borrower",
+				zap.String("task_id", taskID),
+				zap.String("env_id", taskEnvironmentID(taskEnv)),
+				zap.Error(err))
+			return
+		}
+		if preserved {
+			deleteEnvRow = false
+			s.logger.Info("transferred borrowed task environment before cascade delete",
+				zap.String("task_id", taskID),
+				zap.String("env_id", taskEnvironmentID(taskEnv)),
+				zap.String("new_owner_task_id", taskEnv.TaskID))
+		}
+	}
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvRow}
 	if len(sessions) == 0 && len(worktrees) == 0 && len(stopTargets) == 0 && taskEnv == nil {
 		return
@@ -1185,7 +1410,7 @@ func (s *Service) performTaskCleanup(
 			zap.String("task_id", taskID),
 			zap.Int("preserved_runtime_count", len(preserveExecutorRows)))
 	}
-	errs = append(errs, s.cleanupDestructiveTaskResources(ctx, taskID, worktrees, envCleanup, preserveExecutorRows)...)
+	errs = append(errs, s.cleanupDestructiveTaskResources(ctx, taskID, sessions, worktrees, envCleanup, preserveExecutorRows)...)
 
 	sessionIDs := cleanupSessionIDs(sessions, stopTargets)
 	for _, sessionID := range sessionIDs {
@@ -1286,15 +1511,31 @@ func (s *Service) cleanupQuickChatDirs(
 func (s *Service) cleanupDestructiveTaskResources(
 	ctx context.Context,
 	taskID string,
+	sessions []*models.TaskSession,
 	worktrees []*worktree.Worktree,
 	envCleanup taskEnvironmentCleanup,
 	preserveExecutorRows map[string]struct{},
 ) []error {
 	var errs []error
-	if len(preserveExecutorRows) == 0 {
+	skipOwnedEnvironment, err := s.hasActiveOtherTaskSessionsForEnvironment(ctx, taskID, envCleanup.env)
+	if err != nil {
+		s.logger.Warn("skipping task environment cleanup after shared-environment ownership check failed",
+			zap.String("task_id", taskID),
+			zap.String("env_id", taskEnvironmentID(envCleanup.env)),
+			zap.Error(err))
+		errs = append(errs, fmt.Errorf("check task environment ownership %s: %w", taskEnvironmentID(envCleanup.env), err))
+		skipOwnedEnvironment = true
+	}
+	if skipOwnedEnvironment {
+		s.logger.Info("skipping task environment cleanup while another task still uses it",
+			zap.String("task_id", taskID),
+			zap.String("env_id", taskEnvironmentID(envCleanup.env)))
+	}
+	if len(preserveExecutorRows) == 0 && !skipOwnedEnvironment {
 		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
 	}
 	originalWorktreeCount := len(worktrees)
+	worktrees = s.filterOwnedWorktreesForTaskCleanup(ctx, taskID, sessions, worktrees, envCleanup.env, skipOwnedEnvironment)
 	worktrees = cleanupEligibleWorktrees(worktrees, envCleanup.env, preserveExecutorRows)
 	if len(worktrees) == 0 {
 		if originalWorktreeCount > 0 {
@@ -1316,6 +1557,135 @@ func (s *Service) cleanupDestructiveTaskResources(
 		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", err))
 	}
 	return errs
+}
+
+func taskEnvironmentID(env *models.TaskEnvironment) string {
+	if env == nil {
+		return ""
+	}
+	return env.ID
+}
+
+func (s *Service) hasActiveOtherTaskSessionsForEnvironment(ctx context.Context, taskID string, env *models.TaskEnvironment) (bool, error) {
+	if env == nil || env.ID == "" || s.sessions == nil {
+		return false, nil
+	}
+	checker, ok := s.sessions.(taskEnvironmentSessionUsageChecker)
+	if !ok {
+		return false, nil
+	}
+	return checker.HasActiveTaskSessionsByTaskEnvironmentExcludingTask(ctx, env.ID, taskID)
+}
+
+func (s *Service) preserveTaskEnvironmentForActiveBorrower(ctx context.Context, taskID string, env *models.TaskEnvironment) (bool, error) {
+	if env == nil || env.ID == "" || s.sessions == nil {
+		return false, nil
+	}
+	finder, ok := s.sessions.(taskEnvironmentSessionBorrowerFinder)
+	if !ok {
+		return false, nil
+	}
+	borrowerTaskID, err := finder.FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(ctx, env.ID, taskID)
+	if err != nil {
+		return false, fmt.Errorf("find task environment borrower %s: %w", env.ID, err)
+	}
+	if borrowerTaskID == "" {
+		return false, nil
+	}
+	ownerTransfer, ok := s.taskEnvironments.(taskEnvironmentOwnerTransferer)
+	if !ok {
+		return false, fmt.Errorf("task environment repository cannot transfer borrowed environment %s", env.ID)
+	}
+	if err := ownerTransfer.TransferTaskEnvironmentToTask(ctx, env.ID, borrowerTaskID); err != nil {
+		return false, fmt.Errorf("transfer task environment %s to %s: %w", env.ID, borrowerTaskID, err)
+	}
+	env.TaskID = borrowerTaskID
+	return true, nil
+}
+
+func (s *Service) filterOwnedWorktreesForTaskCleanup(
+	ctx context.Context,
+	taskID string,
+	sessions []*models.TaskSession,
+	worktrees []*worktree.Worktree,
+	ownedEnv *models.TaskEnvironment,
+	skipOwnedEnvironment bool,
+) []*worktree.Worktree {
+	if len(worktrees) == 0 {
+		return worktrees
+	}
+	bySession := make(map[string]*models.TaskSession, len(sessions))
+	for _, sess := range sessions {
+		if sess != nil && sess.ID != "" {
+			bySession[sess.ID] = sess
+		}
+	}
+	envCache := map[string]*models.TaskEnvironment{}
+	filtered := worktrees[:0]
+	for _, wt := range worktrees {
+		if wt == nil {
+			continue
+		}
+		sess, sessionLoaded := bySession[wt.SessionID]
+		if s.taskOwnsSessionWorktree(ctx, taskID, wt.SessionID, sess, sessionLoaded, ownedEnv, skipOwnedEnvironment, envCache) {
+			filtered = append(filtered, wt)
+		}
+	}
+	return filtered
+}
+
+func (s *Service) taskOwnsSessionWorktree(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	session *models.TaskSession,
+	sessionLoaded bool,
+	ownedEnv *models.TaskEnvironment,
+	skipOwnedEnvironment bool,
+	envCache map[string]*models.TaskEnvironment,
+) bool {
+	if session == nil {
+		if sessionID == "" {
+			return true
+		}
+		if !sessionLoaded {
+			s.logger.Warn("skipping task worktree cleanup because session ownership cannot be checked",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+		}
+		return false
+	}
+	if session.TaskEnvironmentID == "" {
+		return true
+	}
+	if ownedEnv != nil && session.TaskEnvironmentID == ownedEnv.ID {
+		return !skipOwnedEnvironment
+	}
+	if s.taskEnvironments == nil {
+		s.logger.Warn("skipping task worktree cleanup because task environment ownership cannot be checked",
+			zap.String("task_id", taskID),
+			zap.String("session_id", session.ID),
+			zap.String("task_environment_id", session.TaskEnvironmentID))
+		return false
+	}
+	env, ok := envCache[session.TaskEnvironmentID]
+	if !ok {
+		var err error
+		env, err = s.taskEnvironments.GetTaskEnvironment(ctx, session.TaskEnvironmentID)
+		if err != nil {
+			s.logger.Warn("skipping task worktree cleanup because task environment lookup failed",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.String("task_environment_id", session.TaskEnvironmentID),
+				zap.Error(err))
+			return false
+		}
+		envCache[session.TaskEnvironmentID] = env
+	}
+	if env == nil || env.TaskID != taskID {
+		return false
+	}
+	return true
 }
 
 func cleanupEligibleWorktrees(worktrees []*worktree.Worktree, env *models.TaskEnvironment, preserveExecutorRows map[string]struct{}) []*worktree.Worktree {
@@ -1394,8 +1764,8 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 // ListTasksByWorkspace returns paginated tasks for a workspace with task repositories loaded.
 // If query is non-empty, filters by task title, description, repository name, or repository path.
 // workflowID and repositoryID, when non-empty, further restrict results to that workflow/repository.
-func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
-	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
+func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
 	if err != nil {
 		return nil, 0, err
 	}

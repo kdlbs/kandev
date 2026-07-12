@@ -113,7 +113,7 @@ function MobileTopBarActions({
   onMenuClick,
 }: MobileTopBarActionsProps) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
       <MobileRepoPill taskId={taskId ?? null} workspaceId={workspaceId ?? null} />
       {isRemoteExecutor && (
         <RemoteCloudTooltip

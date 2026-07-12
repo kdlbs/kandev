@@ -1029,7 +1029,7 @@ func TestHandleCreateTask_MetadataExecutorProfileClearsSessionExecutorID(t *test
 	assert.Empty(t, task.Metadata[models.MetaKeyExecutorID])
 }
 
-func TestHandleCreateTask_InvalidWorkflowProfileLookupReturnsInternalError(t *testing.T) {
+func TestHandleCreateTask_InvalidWorkflowReturnsValidationError(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
@@ -1049,11 +1049,12 @@ func TestHandleCreateTask_InvalidWorkflowProfileLookupReturnsInternalError(t *te
 
 	resp, err := h.handleCreateTask(ctx, msg)
 	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 
 	var ep ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
-	assert.Contains(t, ep.Message, "failed to resolve launch profile")
+	assert.Contains(t, ep.Message, "workflow_id")
+	assert.Contains(t, ep.Message, "was not found")
 }
 
 func TestHandleCreateTask_StartAgentUsesWorkspaceDefaultAgentProfile(t *testing.T) {
@@ -1654,6 +1655,191 @@ func TestHandleCreateTask_SubtaskBaseBranchOverride_ExplicitReposWin(t *testing.
 		"explicit per-repo base_branch must win over the top-level override")
 }
 
+func TestHandleCreateTask_SubtaskDefaultsToParentWorkspaceAndWorkflow(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Wrong"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Wrong Board"}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"workflow_step_id": "step-wrong-board",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "ws-1", subtask.WorkspaceID, "subtask workspace must come from parent")
+	assert.Equal(t, "wf-1", subtask.WorkflowID, "subtask workflow must come from parent")
+	assert.Empty(t, subtask.WorkflowStepID, "subtask workflow step must not come from caller-supplied step without an explicit workflow")
+
+	workspaceMeta, ok := subtask.Metadata["workspace"].(map[string]interface{})
+	require.True(t, ok, "MCP subtasks should persist a workspace policy by default")
+	assert.Equal(t, "inherit_parent", workspaceMeta["mode"], "MCP subtasks should reuse the parent's materialized workspace by default")
+}
+
+func TestHandleCreateTask_SubtaskCanRequestNewWorkspaceMode(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"workspace_mode":   "new_workspace",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	workspaceMeta, ok := subtask.Metadata["workspace"].(map[string]interface{})
+	require.True(t, ok, "explicit MCP workspace_mode should be persisted")
+	assert.Equal(t, "new_workspace", workspaceMeta["mode"])
+}
+
+func TestHandleCreateTask_SubtaskHonorsExplicitWorkspaceAndWorkflow(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Other Board"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-other", WorkspaceID: "ws-2", Name: "Other Repo", DefaultBranch: "main",
+	}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Cross-workspace child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"workspace_id":     "ws-2",
+		"workflow_id":      "wf-2",
+		"workflow_step_id": "step-other",
+		"repositories": []map[string]interface{}{
+			{"repository_id": "repo-other"},
+		},
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "ws-2", subtask.WorkspaceID, "explicit workspace should win over parent default")
+	assert.Equal(t, "wf-2", subtask.WorkflowID, "explicit workflow should win over parent default")
+	assert.Equal(t, "step-other", subtask.WorkflowStepID, "explicit step should be preserved with explicit workflow")
+	require.Len(t, subtask.Repositories, 1)
+	assert.Equal(t, "repo-other", subtask.Repositories[0].RepositoryID)
+}
+
+func TestHandleCreateTask_SubtaskExplicitWorkspaceAutoResolvesWorkflow(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Other Board"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-other", WorkspaceID: "ws-2", Name: "Other Repo", DefaultBranch: "main",
+	}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":        "Cross-workspace child",
+		"description":  "do the thing",
+		"parent_id":    parentID,
+		"workspace_id": "ws-2",
+		"repositories": []map[string]interface{}{
+			{"repository_id": "repo-other"},
+		},
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "ws-2", subtask.WorkspaceID)
+	assert.Equal(t, "wf-2", subtask.WorkflowID, "workflow should auto-resolve inside the explicitly chosen workspace")
+}
+
+func TestHandleCreateTask_SubtaskRejectsWorkflowFromDifferentWorkspace(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Other Board"}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Cross-workspace child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"workflow_id":      "wf-2",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+
+	var ep ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
+	assert.Contains(t, ep.Message, "belongs to workspace_id \"ws-2\", not \"ws-1\"")
+}
+
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parentID := seedParentWithRepo(t, svc, repo)
@@ -1999,7 +2185,7 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 	// Drain the in-memory store so the handler must fall back to DB-driven cleanup
 	store.CancelSession(sess.ID)
 
-	h := NewHandlers(svc, nil, store, canceller, nil, repo, repo, eventBus, nil, nil, nil, testLogger(t))
+	h := NewHandlers(svc, nil, store, canceller, nil, repo, repo, eventBus, nil, nil, nil, nil, testLogger(t))
 	msg := makeWSMessage(t, ws.ActionMCPClarificationTimeout, map[string]interface{}{"session_id": sess.ID})
 	resp, err := h.handleClarificationTimeout(ctx, msg)
 	require.NoError(t, err)
@@ -2042,7 +2228,7 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 
 	store := clarification.NewStore(time.Minute)
 	log := testLogger(t)
-	h := NewHandlers(svc, nil, store, nil, nil, repo, repo, nil, nil, nil, nil, log)
+	h := NewHandlers(svc, nil, store, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
 
 	payload := map[string]interface{}{
 		"session_id": sess.ID,

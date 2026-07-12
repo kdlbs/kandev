@@ -58,6 +58,9 @@ export class SessionPage {
   prMergedArchiveButton() {
     return this.page.getByTestId("pr-merged-archive-button");
   }
+  prMergedArchiveConfirmButton() {
+    return this.page.getByTestId("pr-merged-archive-confirm");
+  }
   prMergedDismissButton() {
     return this.page.getByTestId("pr-merged-dismiss-button");
   }
@@ -66,6 +69,9 @@ export class SessionPage {
   }
   prClosedArchiveButton() {
     return this.page.getByTestId("pr-closed-archive-button");
+  }
+  prClosedArchiveConfirmButton() {
+    return this.page.getByTestId("pr-closed-archive-confirm");
   }
   prClosedDismissButton() {
     return this.page.getByTestId("pr-closed-dismiss-button");
@@ -348,6 +354,11 @@ export class SessionPage {
     return this.page.getByTestId("clarification-input");
   }
 
+  /** Inline Send button shown next to the custom input on touch devices. */
+  clarificationCustomSubmit(): Locator {
+    return this.page.getByTestId("clarification-custom-submit");
+  }
+
   /** Deferred notice shown when agent has disconnected from clarification. */
   clarificationDeferredNotice(): Locator {
     return this.page.getByTestId("clarification-deferred-notice");
@@ -597,9 +608,9 @@ export class SessionPage {
     return this.page.getByTestId("pr-multi-popover");
   }
 
-  /** A single PR tab inside the multi-PR aggregate popover, by repo + PR number. */
-  prMultiPopoverTab(repo: string, prNumber: number): Locator {
-    return this.page.getByTestId(`pr-popover-tab-${repo}-${prNumber}`);
+  /** A single PR tab inside the multi-PR aggregate popover, by owner + repo + PR number. */
+  prMultiPopoverTab(owner: string, repo: string, prNumber: number): Locator {
+    return this.page.getByTestId(`pr-popover-tab-${owner}-${repo}-${prNumber}`);
   }
 
   /**
@@ -817,6 +828,44 @@ export class SessionPage {
    */
   async clickSessionChatTab(): Promise<void> {
     await this.page.locator('[data-testid^="session-tab-"]').first().click();
+  }
+
+  /** Main Changes-panel button that asks the agent to create a walkthrough. */
+  changesRequestWalkthroughButton(): Locator {
+    return this.changes.getByTestId("changes-request-walkthrough");
+  }
+
+  /** Compact request button in the expanded Review Changes toolbar. */
+  reviewRequestWalkthroughButton(): Locator {
+    return this.page.getByTestId("review-request-walkthrough");
+  }
+
+  walkthroughLauncher(): Locator {
+    return this.page.getByTestId("walkthrough-launcher");
+  }
+
+  walkthroughDiscardButton(): Locator {
+    return this.page.getByTestId("walkthrough-discard");
+  }
+
+  walkthroughDiscardDialog(): Locator {
+    return this.page.getByRole("alertdialog", { name: "Discard walkthrough?" });
+  }
+
+  walkthroughFloating(): Locator {
+    return this.page.getByTestId("walkthrough-floating");
+  }
+
+  walkthroughStepHeader(): Locator {
+    return this.walkthroughFloating().getByTestId("walkthrough-step-header");
+  }
+
+  walkthroughStepBody(): Locator {
+    return this.walkthroughFloating().getByTestId("walkthrough-step-body");
+  }
+
+  walkthroughEditorRange(): Locator {
+    return this.page.getByTestId("walkthrough-editor-range");
   }
 
   /** PR files section within the changes panel. */

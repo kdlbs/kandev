@@ -113,20 +113,27 @@ func TestResumeSession_LiveAgentReturnsAlreadyRunning(t *testing.T) {
 	}
 }
 
-// TestResumeSession_StaleExecutionCleansUpAndRetries ensures the pre-existing
-// stale-cleanup path still works when LaunchAgent reports "already has an agent
-// running" but the lifecycle manager confirms no live agent exists.
+// TestResumeSession_StaleExecutionCleansUpAndRetries is the "row looks live but
+// the process is gone" half of the corrected pause→resume contract
+// (#1597 pause→resume recovery): the session sits at WAITING_FOR_INPUT with a
+// resumable executors_running row, but its agent process is dead. LaunchAgent
+// reports "already has an agent running" (stale in-memory execution), the
+// runtime-aware liveness probe confirms no live agent, so resume cleans the
+// stale execution and relaunches — using the row's resume_token rather than
+// wedging on ErrExecutionAlreadyRunning against a process that no longer exists.
 func TestResumeSession_StaleExecutionCleansUpAndRetries(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
 
 	var launchCalls int
+	var retryResumeToken string
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalls++
 			if launchCalls == 1 {
 				return nil, fmt.Errorf("%w: session %q (execution: %s)", lifecycle.ErrAgentAlreadyRunning, req.SessionID, "exec-stale")
 			}
+			retryResumeToken = req.ACPSessionID
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-new",
 				Status:           v1.AgentStatusStarting,
@@ -153,6 +160,13 @@ func TestResumeSession_StaleExecutionCleansUpAndRetries(t *testing.T) {
 	}
 	if agentMgr.launchAgentCallCount != 2 {
 		t.Errorf("expected LaunchAgent called twice, got %d", agentMgr.launchAgentCallCount)
+	}
+	// The relaunch must resume the same conversation: the retry carries the
+	// executors_running row's resume_token (setupLiveResumeTestFixture seeds
+	// "token-abc"), so the operator's context is preserved rather than starting
+	// a fresh session.
+	if retryResumeToken != "token-abc" {
+		t.Errorf("expected relaunch to reuse resume_token %q, got %q", "token-abc", retryResumeToken)
 	}
 }
 

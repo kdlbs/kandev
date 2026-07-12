@@ -254,21 +254,22 @@ func (h *RepositoryHandlers) httpLocalRepositoryStatus(c *gin.Context) {
 }
 
 type httpCreateRepositoryRequest struct {
-	Name                 string `json:"name"`
-	SourceType           string `json:"source_type"`
-	LocalPath            string `json:"local_path"`
-	Provider             string `json:"provider"`
-	ProviderRepoID       string `json:"provider_repo_id"`
-	ProviderOwner        string `json:"provider_owner"`
-	ProviderName         string `json:"provider_name"`
-	DefaultBranch        string `json:"default_branch"`
-	WorktreeBranchPrefix string `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   *bool  `json:"pull_before_worktree"`
-	SetupScript          string `json:"setup_script"`
-	CleanupScript        string `json:"cleanup_script"`
-	DevScript            string `json:"dev_script"`
-	CopyFiles            string `json:"copy_files"`
-	StartupPrompt        string `json:"startup_prompt"`
+	Name                   string `json:"name"`
+	SourceType             string `json:"source_type"`
+	LocalPath              string `json:"local_path"`
+	Provider               string `json:"provider"`
+	ProviderRepoID         string `json:"provider_repo_id"`
+	ProviderOwner          string `json:"provider_owner"`
+	ProviderName           string `json:"provider_name"`
+	DefaultBranch          string `json:"default_branch"`
+	WorktreeBranchPrefix   string `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string `json:"worktree_branch_template"`
+	PullBeforeWorktree     *bool  `json:"pull_before_worktree"`
+	SetupScript            string `json:"setup_script"`
+	CleanupScript          string `json:"cleanup_script"`
+	DevScript              string `json:"dev_script"`
+	CopyFiles              string `json:"copy_files"`
+	StartupPrompt          string `json:"startup_prompt"`
 }
 
 func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
@@ -282,22 +283,23 @@ func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
 		return
 	}
 	repository, err := h.service.CreateRepository(c.Request.Context(), &service.CreateRepositoryRequest{
-		WorkspaceID:          c.Param("id"),
-		Name:                 body.Name,
-		SourceType:           body.SourceType,
-		LocalPath:            body.LocalPath,
-		Provider:             body.Provider,
-		ProviderRepoID:       body.ProviderRepoID,
-		ProviderOwner:        body.ProviderOwner,
-		ProviderName:         body.ProviderName,
-		DefaultBranch:        body.DefaultBranch,
-		WorktreeBranchPrefix: body.WorktreeBranchPrefix,
-		PullBeforeWorktree:   body.PullBeforeWorktree,
-		SetupScript:          body.SetupScript,
-		CleanupScript:        body.CleanupScript,
-		DevScript:            body.DevScript,
-		CopyFiles:            body.CopyFiles,
-		StartupPrompt:        body.StartupPrompt,
+		WorkspaceID:            c.Param("id"),
+		Name:                   body.Name,
+		SourceType:             body.SourceType,
+		LocalPath:              body.LocalPath,
+		Provider:               body.Provider,
+		ProviderRepoID:         body.ProviderRepoID,
+		ProviderOwner:          body.ProviderOwner,
+		ProviderName:           body.ProviderName,
+		DefaultBranch:          body.DefaultBranch,
+		WorktreeBranchPrefix:   body.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: body.WorktreeBranchTemplate,
+		PullBeforeWorktree:     body.PullBeforeWorktree,
+		SetupScript:            body.SetupScript,
+		CleanupScript:          body.CleanupScript,
+		DevScript:              body.DevScript,
+		CopyFiles:              body.CopyFiles,
+		StartupPrompt:          body.StartupPrompt,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -393,21 +395,22 @@ func (h *RepositoryHandlers) currentBranchAtPath(ctx context.Context, localPath 
 }
 
 type httpUpdateRepositoryRequest struct {
-	Name                 *string `json:"name"`
-	SourceType           *string `json:"source_type"`
-	LocalPath            *string `json:"local_path"`
-	Provider             *string `json:"provider"`
-	ProviderRepoID       *string `json:"provider_repo_id"`
-	ProviderOwner        *string `json:"provider_owner"`
-	ProviderName         *string `json:"provider_name"`
-	DefaultBranch        *string `json:"default_branch"`
-	WorktreeBranchPrefix *string `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   *bool   `json:"pull_before_worktree"`
-	SetupScript          *string `json:"setup_script"`
-	CleanupScript        *string `json:"cleanup_script"`
-	DevScript            *string `json:"dev_script"`
-	CopyFiles            *string `json:"copy_files"`
-	StartupPrompt        *string `json:"startup_prompt"`
+	Name                   *string `json:"name"`
+	SourceType             *string `json:"source_type"`
+	LocalPath              *string `json:"local_path"`
+	Provider               *string `json:"provider"`
+	ProviderRepoID         *string `json:"provider_repo_id"`
+	ProviderOwner          *string `json:"provider_owner"`
+	ProviderName           *string `json:"provider_name"`
+	DefaultBranch          *string `json:"default_branch"`
+	WorktreeBranchPrefix   *string `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate *string `json:"worktree_branch_template"`
+	PullBeforeWorktree     *bool   `json:"pull_before_worktree"`
+	SetupScript            *string `json:"setup_script"`
+	CleanupScript          *string `json:"cleanup_script"`
+	DevScript              *string `json:"dev_script"`
+	CopyFiles              *string `json:"copy_files"`
+	StartupPrompt          *string `json:"startup_prompt"`
 }
 
 func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
@@ -417,21 +420,22 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		return
 	}
 	repository, err := h.service.UpdateRepository(c.Request.Context(), c.Param("id"), &service.UpdateRepositoryRequest{
-		Name:                 body.Name,
-		SourceType:           body.SourceType,
-		LocalPath:            body.LocalPath,
-		Provider:             body.Provider,
-		ProviderRepoID:       body.ProviderRepoID,
-		ProviderOwner:        body.ProviderOwner,
-		ProviderName:         body.ProviderName,
-		DefaultBranch:        body.DefaultBranch,
-		WorktreeBranchPrefix: body.WorktreeBranchPrefix,
-		PullBeforeWorktree:   body.PullBeforeWorktree,
-		SetupScript:          body.SetupScript,
-		CleanupScript:        body.CleanupScript,
-		DevScript:            body.DevScript,
-		CopyFiles:            body.CopyFiles,
-		StartupPrompt:        body.StartupPrompt,
+		Name:                   body.Name,
+		SourceType:             body.SourceType,
+		LocalPath:              body.LocalPath,
+		Provider:               body.Provider,
+		ProviderRepoID:         body.ProviderRepoID,
+		ProviderOwner:          body.ProviderOwner,
+		ProviderName:           body.ProviderName,
+		DefaultBranch:          body.DefaultBranch,
+		WorktreeBranchPrefix:   body.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: body.WorktreeBranchTemplate,
+		PullBeforeWorktree:     body.PullBeforeWorktree,
+		SetupScript:            body.SetupScript,
+		CleanupScript:          body.CleanupScript,
+		DevScript:              body.DevScript,
+		CopyFiles:              body.CopyFiles,
+		StartupPrompt:          body.StartupPrompt,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -494,21 +498,22 @@ func (h *RepositoryHandlers) wsListRepositories(ctx context.Context, msg *ws.Mes
 }
 
 type wsCreateRepositoryRequest struct {
-	WorkspaceID          string `json:"workspace_id"`
-	Name                 string `json:"name"`
-	SourceType           string `json:"source_type"`
-	LocalPath            string `json:"local_path"`
-	Provider             string `json:"provider"`
-	ProviderRepoID       string `json:"provider_repo_id"`
-	ProviderOwner        string `json:"provider_owner"`
-	ProviderName         string `json:"provider_name"`
-	DefaultBranch        string `json:"default_branch"`
-	WorktreeBranchPrefix string `json:"worktree_branch_prefix"`
-	SetupScript          string `json:"setup_script"`
-	CleanupScript        string `json:"cleanup_script"`
-	DevScript            string `json:"dev_script"`
-	CopyFiles            string `json:"copy_files"`
-	StartupPrompt        string `json:"startup_prompt"`
+	WorkspaceID            string `json:"workspace_id"`
+	Name                   string `json:"name"`
+	SourceType             string `json:"source_type"`
+	LocalPath              string `json:"local_path"`
+	Provider               string `json:"provider"`
+	ProviderRepoID         string `json:"provider_repo_id"`
+	ProviderOwner          string `json:"provider_owner"`
+	ProviderName           string `json:"provider_name"`
+	DefaultBranch          string `json:"default_branch"`
+	WorktreeBranchPrefix   string `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string `json:"worktree_branch_template"`
+	SetupScript            string `json:"setup_script"`
+	CleanupScript          string `json:"cleanup_script"`
+	DevScript              string `json:"dev_script"`
+	CopyFiles              string `json:"copy_files"`
+	StartupPrompt          string `json:"startup_prompt"`
 }
 
 func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -520,21 +525,22 @@ func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "workspace_id and name are required", nil)
 	}
 	repository, err := h.service.CreateRepository(ctx, &service.CreateRepositoryRequest{
-		WorkspaceID:          req.WorkspaceID,
-		Name:                 req.Name,
-		SourceType:           req.SourceType,
-		LocalPath:            req.LocalPath,
-		Provider:             req.Provider,
-		ProviderRepoID:       req.ProviderRepoID,
-		ProviderOwner:        req.ProviderOwner,
-		ProviderName:         req.ProviderName,
-		DefaultBranch:        req.DefaultBranch,
-		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
-		SetupScript:          req.SetupScript,
-		CleanupScript:        req.CleanupScript,
-		DevScript:            req.DevScript,
-		CopyFiles:            req.CopyFiles,
-		StartupPrompt:        req.StartupPrompt,
+		WorkspaceID:            req.WorkspaceID,
+		Name:                   req.Name,
+		SourceType:             req.SourceType,
+		LocalPath:              req.LocalPath,
+		Provider:               req.Provider,
+		ProviderRepoID:         req.ProviderRepoID,
+		ProviderOwner:          req.ProviderOwner,
+		ProviderName:           req.ProviderName,
+		DefaultBranch:          req.DefaultBranch,
+		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
+		SetupScript:            req.SetupScript,
+		CleanupScript:          req.CleanupScript,
+		DevScript:              req.DevScript,
+		CopyFiles:              req.CopyFiles,
+		StartupPrompt:          req.StartupPrompt,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -566,21 +572,22 @@ func (h *RepositoryHandlers) wsGetRepository(ctx context.Context, msg *ws.Messag
 }
 
 type wsUpdateRepositoryRequest struct {
-	ID                   string  `json:"id"`
-	Name                 *string `json:"name,omitempty"`
-	SourceType           *string `json:"source_type,omitempty"`
-	LocalPath            *string `json:"local_path,omitempty"`
-	Provider             *string `json:"provider,omitempty"`
-	ProviderRepoID       *string `json:"provider_repo_id,omitempty"`
-	ProviderOwner        *string `json:"provider_owner,omitempty"`
-	ProviderName         *string `json:"provider_name,omitempty"`
-	DefaultBranch        *string `json:"default_branch,omitempty"`
-	WorktreeBranchPrefix *string `json:"worktree_branch_prefix,omitempty"`
-	SetupScript          *string `json:"setup_script,omitempty"`
-	CleanupScript        *string `json:"cleanup_script,omitempty"`
-	DevScript            *string `json:"dev_script,omitempty"`
-	CopyFiles            *string `json:"copy_files,omitempty"`
-	StartupPrompt        *string `json:"startup_prompt,omitempty"`
+	ID                     string  `json:"id"`
+	Name                   *string `json:"name,omitempty"`
+	SourceType             *string `json:"source_type,omitempty"`
+	LocalPath              *string `json:"local_path,omitempty"`
+	Provider               *string `json:"provider,omitempty"`
+	ProviderRepoID         *string `json:"provider_repo_id,omitempty"`
+	ProviderOwner          *string `json:"provider_owner,omitempty"`
+	ProviderName           *string `json:"provider_name,omitempty"`
+	DefaultBranch          *string `json:"default_branch,omitempty"`
+	WorktreeBranchPrefix   *string `json:"worktree_branch_prefix,omitempty"`
+	WorktreeBranchTemplate *string `json:"worktree_branch_template,omitempty"`
+	SetupScript            *string `json:"setup_script,omitempty"`
+	CleanupScript          *string `json:"cleanup_script,omitempty"`
+	DevScript              *string `json:"dev_script,omitempty"`
+	CopyFiles              *string `json:"copy_files,omitempty"`
+	StartupPrompt          *string `json:"startup_prompt,omitempty"`
 }
 
 func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -592,20 +599,21 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 	repository, err := h.service.UpdateRepository(ctx, req.ID, &service.UpdateRepositoryRequest{
-		Name:                 req.Name,
-		SourceType:           req.SourceType,
-		LocalPath:            req.LocalPath,
-		Provider:             req.Provider,
-		ProviderRepoID:       req.ProviderRepoID,
-		ProviderOwner:        req.ProviderOwner,
-		ProviderName:         req.ProviderName,
-		DefaultBranch:        req.DefaultBranch,
-		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
-		SetupScript:          req.SetupScript,
-		CleanupScript:        req.CleanupScript,
-		DevScript:            req.DevScript,
-		CopyFiles:            req.CopyFiles,
-		StartupPrompt:        req.StartupPrompt,
+		Name:                   req.Name,
+		SourceType:             req.SourceType,
+		LocalPath:              req.LocalPath,
+		Provider:               req.Provider,
+		ProviderRepoID:         req.ProviderRepoID,
+		ProviderOwner:          req.ProviderOwner,
+		ProviderName:           req.ProviderName,
+		DefaultBranch:          req.DefaultBranch,
+		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
+		SetupScript:            req.SetupScript,
+		CleanupScript:          req.CleanupScript,
+		DevScript:              req.DevScript,
+		CopyFiles:              req.CopyFiles,
+		StartupPrompt:          req.StartupPrompt,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- comprehensive session-state handler tests */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { registerTaskSessionHandlers } from "./agent-session";
 import type { StoreApi } from "zustand";
@@ -459,6 +460,9 @@ describe("session.state_changed → respects user-pinned session", () => {
   });
 
   it("hands off when the pinned active session reaches a terminal state", () => {
+    // Genuine RUNNING→COMPLETED transition: previousState is non-terminal,
+    // so the workflow handoff should still fire even though the session
+    // is pinned.
     const store = makeStore({
       tasks: {
         activeTaskId: "t-1",
@@ -489,6 +493,41 @@ describe("session.state_changed → respects user-pinned session", () => {
 
     expect(store.getState().setActiveSessionAuto).toHaveBeenCalledWith("t-1", "s-new");
     expect(store.getState().setActiveSession).not.toHaveBeenCalled();
+  });
+
+  it("does not hand off when a pinned terminal session receives a replay state_changed", () => {
+    // Replay: the session was already COMPLETED (previousState terminal) and
+    // the backend re-emits the same terminal state. The user clicked this
+    // session open to review it, so the pin must be honored — no handoff.
+    const store = makeStore({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-old",
+        pinnedSessionId: "s-old",
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "COMPLETED" } },
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "t-1": [
+            { id: "s-old", task_id: "t-1", state: "COMPLETED", started_at: "", updated_at: "" },
+            { id: "s-new", task_id: "t-1", state: "STARTING", started_at: "", updated_at: "" },
+          ],
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: STATE_CHANGED_EVENT,
+      payload: { task_id: "t-1", session_id: "s-old", new_state: "COMPLETED" },
+    });
+
+    expect(store.getState().setActiveSessionAuto).not.toHaveBeenCalled();
   });
 });
 

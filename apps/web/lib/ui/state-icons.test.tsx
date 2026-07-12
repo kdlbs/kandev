@@ -72,6 +72,24 @@ describe("shouldShowTaskRunningSpinner", () => {
     expect(shouldShowTaskRunningSpinner("IN_PROGRESS", "IDLE")).toBe(false);
   });
 
+  it("suppresses the spinner for a CREATED primary session on an inactive task", () => {
+    // Repro from the stuck kanban cards (PR #11571 / #11502): task CREATED,
+    // sitting in a Waiting column, with a primary session that was persisted in
+    // CREATED and never advanced (no executor, no turns). CREATED means "agent
+    // not started", so it must defer to the task state instead of spinning.
+    expect(shouldShowTaskRunningSpinner("CREATED", "CREATED")).toBe(false);
+    expect(shouldShowTaskRunningSpinner("REVIEW", "CREATED")).toBe(false);
+    expect(shouldShowTaskRunningSpinner("COMPLETED", "CREATED")).toBe(false);
+  });
+
+  it("still spins for a CREATED primary session during a genuine launch", () => {
+    // During an actual launch the task state is SCHEDULING/IN_PROGRESS while the
+    // session momentarily sits in CREATED. Deferring to the task state keeps the
+    // spinner on for that startup window.
+    expect(shouldShowTaskRunningSpinner("SCHEDULING", "CREATED")).toBe(true);
+    expect(shouldShowTaskRunningSpinner("IN_PROGRESS", "CREATED")).toBe(true);
+  });
+
   it("suppresses the spinner for TODO regardless of primary session state", () => {
     // TODO is the queued/not-started column. A stale primary session state
     // (e.g. task moved back from IN_PROGRESS with the session still alive)

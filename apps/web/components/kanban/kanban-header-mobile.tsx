@@ -10,6 +10,7 @@ import { useAppStore } from "@/components/state-provider";
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
   currentPage?: "kanban" | "tasks";
+  hideTitle?: boolean;
   title: string;
   workspaceLabel: string;
   searchQuery?: string;
@@ -22,6 +23,7 @@ type KanbanHeaderMobileProps = {
 export function KanbanHeaderMobile({
   workspaceId,
   currentPage = "kanban",
+  hideTitle = false,
   title,
   workspaceLabel,
   searchQuery = "",
@@ -48,18 +50,20 @@ export function KanbanHeaderMobile({
       {/* Keep mobile root chrome compact so metrics and actions stay visible. */}
       <PageTopbar
         title={title}
-        backLabel="Kandev"
+        backLabel={hideTitle ? "" : "Kandev"}
         className="h-10 px-3 py-1"
         variant="root"
         leftActions={
-          <span className="flex min-w-0 max-w-[38vw] flex-col leading-tight">
-            <span className="truncate text-sm font-medium text-muted-foreground">{title}</span>
-            {!isHome && (
-              <span className="truncate text-[10px] text-muted-foreground/60">
-                {workspaceLabel}
-              </span>
-            )}
-          </span>
+          hideTitle ? null : (
+            <span className="flex min-w-0 max-w-[38vw] flex-col leading-tight">
+              <span className="truncate text-sm font-medium text-muted-foreground">{title}</span>
+              {!isHome && (
+                <span className="truncate text-[10px] text-muted-foreground/60">
+                  {workspaceLabel}
+                </span>
+              )}
+            </span>
+          )
         }
         actionsClassName="gap-2"
         actions={

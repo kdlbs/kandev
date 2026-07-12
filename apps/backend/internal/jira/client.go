@@ -18,6 +18,7 @@ type Client interface {
 	ListTransitions(ctx context.Context, ticketKey string) ([]JiraTransition, error)
 	DoTransition(ctx context.Context, ticketKey, transitionID string) error
 	ListProjects(ctx context.Context) ([]JiraProject, error)
+	ListProjectStatuses(ctx context.Context, projectKey string) ([]JiraStatus, error)
 	SearchTickets(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error)
 }
 

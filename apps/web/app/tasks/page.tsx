@@ -3,21 +3,19 @@ import {
   listWorkflowsAction,
   listTasksByWorkspaceAction,
   listRepositoriesAction,
-  listWorkspaceWorkflowStepsAction,
 } from "@/app/actions/workspaces";
 import { fetchUserSettings } from "@/lib/api";
 import { StateHydrator } from "@/components/state-hydrator";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { TasksPageClient } from "./tasks-page-client";
-import type {
-  Workflow,
-  Task,
-  WorkflowStep,
-  Repository,
-  Workspace,
-  UserSettingsResponse,
-} from "@/lib/types/http";
+import {
+  parseTasksListGroup,
+  parseTasksListSort,
+  type TasksListGroup,
+  type TasksListSort,
+} from "@/lib/tasks/tasks-list-options";
+import type { Workflow, Task, Repository, Workspace, UserSettingsResponse } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 
 type WorkspaceData = {
@@ -25,30 +23,53 @@ type WorkspaceData = {
   repositories: Repository[];
   tasks: Task[];
   total: number;
-  steps: WorkflowStep[];
   activeWorkflowId: string | null;
 };
+
+type TasksListPreferences = {
+  sort: TasksListSort;
+  group: TasksListGroup;
+};
+
+function resolveTasksListPreferences(
+  sortParam: string | undefined,
+  groupParam: string | undefined,
+  settingsResponse: UserSettingsResponse | null,
+): TasksListPreferences {
+  return {
+    sort: parseTasksListSort(sortParam ?? settingsResponse?.settings?.tasks_list_sort),
+    group: parseTasksListGroup(groupParam ?? settingsResponse?.settings?.tasks_list_group),
+  };
+}
+
+function resolveTasksPageWorkspaceId(
+  workspaceParam: string | undefined,
+  settingsResponse: UserSettingsResponse | null,
+  workspaces: Workspace[],
+): string | undefined {
+  if (workspaceParam) return workspaceParam;
+  return settingsResponse?.settings?.workspace_id || workspaces[0]?.id;
+}
 
 async function fetchWorkspaceData(
   workspaceId: string,
   settingsResponse: UserSettingsResponse | null,
+  tasksListSort: TasksListSort,
 ): Promise<WorkspaceData> {
   const savedWorkflowId = settingsResponse?.settings?.workflow_filter_id ?? null;
   const savedRepositoryId = settingsResponse?.settings?.repository_ids?.[0] ?? null;
 
-  const [workflowsResponse, repositoriesResponse, tasksResponse, stepsResponse] = await Promise.all(
-    [
-      listWorkflowsAction(workspaceId),
-      listRepositoriesAction(workspaceId),
-      listTasksByWorkspaceAction(workspaceId, {
-        page: 1,
-        pageSize: 25,
-        workflowId: savedWorkflowId,
-        repositoryId: savedRepositoryId,
-      }),
-      listWorkspaceWorkflowStepsAction(workspaceId),
-    ],
-  );
+  const [workflowsResponse, repositoriesResponse, tasksResponse] = await Promise.all([
+    listWorkflowsAction(workspaceId),
+    listRepositoriesAction(workspaceId),
+    listTasksByWorkspaceAction(workspaceId, {
+      page: 1,
+      pageSize: 25,
+      workflowId: savedWorkflowId,
+      repositoryId: savedRepositoryId,
+      sort: tasksListSort,
+    }),
+  ]);
 
   const workflows = workflowsResponse.workflows;
   // Preserve "All Workflows" (null/empty saved filter) instead of falling back
@@ -64,7 +85,6 @@ async function fetchWorkspaceData(
     repositories: repositoriesResponse.repositories,
     tasks: tasksResponse.tasks,
     total: tasksResponse.total,
-    steps: stepsResponse.steps,
     activeWorkflowId,
   };
 }
@@ -72,19 +92,20 @@ async function fetchWorkspaceData(
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ workspace?: string }>;
+  searchParams: Promise<{ workspace?: string; sort?: string; group?: string }>;
 }) {
-  const { workspace: workspaceParam } = await searchParams;
+  const { workspace: workspaceParam, sort: sortParam, group: groupParam } = await searchParams;
 
   let workspaces: Workspace[] = [];
   let workflows: Workflow[] = [];
-  let steps: WorkflowStep[] = [];
   let repositories: Repository[] = [];
   let tasks: Task[] = [];
   let total = 0;
   let workspaceId = workspaceParam;
   let userSettingsResponse: UserSettingsResponse | null = null;
   let activeWorkflowId: string | null = null;
+  let tasksListSort: TasksListSort = parseTasksListSort(null);
+  let tasksListGroup: TasksListGroup = parseTasksListGroup(null);
 
   try {
     const [workspacesResponse, settingsResponse] = await Promise.all([
@@ -93,20 +114,20 @@ export default async function TasksPage({
     ]);
     workspaces = workspacesResponse.workspaces;
     userSettingsResponse = settingsResponse;
+    const preferences = resolveTasksListPreferences(sortParam, groupParam, settingsResponse);
+    tasksListSort = preferences.sort;
+    tasksListGroup = preferences.group;
 
     // Use workspace from user settings or URL param or first workspace
-    if (!workspaceId) {
-      workspaceId = settingsResponse?.settings?.workspace_id || workspaces[0]?.id;
-    }
+    workspaceId = resolveTasksPageWorkspaceId(workspaceId, settingsResponse, workspaces);
 
     if (workspaceId) {
       // Fetch all data in parallel; resolve active filters so the server applies them
-      const data = await fetchWorkspaceData(workspaceId, settingsResponse);
+      const data = await fetchWorkspaceData(workspaceId, settingsResponse, tasksListSort);
       workflows = data.workflows;
       repositories = data.repositories;
       tasks = data.tasks;
       total = data.total;
-      steps = data.steps;
       activeWorkflowId = data.activeWorkflowId;
     }
   } catch (error) {
@@ -131,7 +152,12 @@ export default async function TasksPage({
       })),
       activeId: activeWorkflowId,
     },
-    userSettings: { ...mappedUserSettings, workspaceId: workspaceId ?? null },
+    userSettings: {
+      ...mappedUserSettings,
+      workspaceId: workspaceId ?? null,
+      tasksListSort,
+      tasksListGroup,
+    },
     ...(workspaceId
       ? {
           repositories: {
@@ -150,10 +176,11 @@ export default async function TasksPage({
         workspaces={workspaces}
         initialWorkspaceId={workspaceId}
         initialWorkflows={workflows}
-        initialSteps={steps}
         initialRepositories={repositories}
         initialTasks={tasks}
         initialTotal={total}
+        initialSort={tasksListSort}
+        initialGroup={tasksListGroup}
       />
     </>
   );

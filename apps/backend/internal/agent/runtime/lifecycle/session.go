@@ -27,6 +27,7 @@ type SessionManager struct {
 	eventPublisher *EventPublisher
 	streamManager  *StreamManager
 	executionStore *ExecutionStore
+	statusUpdater  func(executionID string, status v1.AgentStatus) error
 	historyManager *SessionHistoryManager
 	stopCh         <-chan struct{} // For graceful shutdown coordination
 }
@@ -46,6 +47,10 @@ func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManage
 	sm.streamManager = strm
 	sm.executionStore = store
 	sm.historyManager = history
+}
+
+func (sm *SessionManager) SetStatusUpdater(updater func(executionID string, status v1.AgentStatus) error) {
+	sm.statusUpdater = updater
 }
 
 // InitializeResult contains the result of session initialization
@@ -514,10 +519,10 @@ func (sm *SessionManager) waitForPromptDone(ctx context.Context, execution *Agen
 				sm.logger.Error("prompt completed with error",
 					zap.String("execution_id", execution.ID),
 					zap.String("error", signal.Error))
-				// Wrap the cancel-escalation sentinel so PromptTask can identify it and
+				// Wrap cancel-release sentinels so PromptTask can identify them and
 				// skip the REVIEW task-state transition — the user is cancelling, not
 				// hitting a real agent failure.
-				if strings.HasPrefix(signal.Error, "cancel escalated") {
+				if isCancelReleaseError(signal.Error) {
 					return nil, fmt.Errorf("%w: %s: %w", ErrAgentReported, signal.Error, ErrCancelEscalated)
 				}
 				return nil, fmt.Errorf("%w: %s", ErrAgentReported, signal.Error)
@@ -556,6 +561,11 @@ func (sm *SessionManager) waitForPromptDone(ctx context.Context, execution *Agen
 			}
 		}
 	}
+}
+
+func isCancelReleaseError(msg string) bool {
+	return strings.HasPrefix(msg, "cancel escalated") ||
+		strings.Contains(msg, "prompt abandoned after cancel")
 }
 
 // SendPrompt sends a prompt to an agent execution and waits for completion.
@@ -605,7 +615,11 @@ func (sm *SessionManager) SendPrompt(
 		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
 			return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 		}
-		if sm.executionStore != nil {
+		if sm.statusUpdater != nil {
+			if err := sm.statusUpdater(execution.ID, v1.AgentStatusRunning); err != nil {
+				return nil, err
+			}
+		} else if sm.executionStore != nil {
 			sm.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
 		}
 	}
@@ -654,6 +668,12 @@ func (sm *SessionManager) SendPrompt(
 			sm.logger.Warn("prompt retry after stream reconnect failed",
 				zap.String("execution_id", execution.ID),
 				zap.Error(retryErr))
+		}
+		if isCancelReleaseError(err.Error()) {
+			sm.logger.Info("prompt trigger abandoned after cancel; requeueing",
+				zap.String("execution_id", execution.ID),
+				zap.Error(err))
+			return nil, fmt.Errorf("failed to trigger prompt: %w: %w", err, ErrCancelEscalated)
 		}
 		sm.logger.Error("failed to trigger prompt",
 			zap.String("execution_id", execution.ID),

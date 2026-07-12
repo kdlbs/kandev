@@ -581,8 +581,8 @@ func TestLaunchPreparedSession_WorkspaceOnly(t *testing.T) {
 
 // TestLaunchPreparedSession_WorkspaceOnly_FlipsExecutorRunningStatus asserts
 // the prepare-only branch in finalizeLaunch updates executors_running.status
-// from the lifecycle-manager default "starting" to "prepared", so the row
-// doesn't look stuck mid-launch on a session that's actually ready by design.
+// from an active launch status to "prepared", so the row doesn't look like an
+// agent process is running on a session that's actually ready by design.
 func TestLaunchPreparedSession_WorkspaceOnly_FlipsExecutorRunningStatus(t *testing.T) {
 	repo := newMockRepository()
 
@@ -597,11 +597,11 @@ func TestLaunchPreparedSession_WorkspaceOnly_FlipsExecutorRunningStatus(t *testi
 	repo.sessions[session.ID] = session
 
 	// Seed the executors_running row the way production's lifecycle manager
-	// would after LaunchAgent — status="starting" until something flips it.
+	// would after LaunchAgent — active until the prepare-only branch flips it.
 	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
 		SessionID: session.ID,
 		TaskID:    session.TaskID,
-		Status:    models.ExecutorRunningStatusStarting,
+		Status:    models.ExecutorRunningStatusRunning,
 	}
 
 	agentManager := &mockAgentManager{

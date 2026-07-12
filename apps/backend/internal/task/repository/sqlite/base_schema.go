@@ -17,6 +17,7 @@ func (r *Repository) initSchema() error {
 	steps := []func() error{
 		r.initCoreSchema,
 		r.initPlansSchema,
+		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
 		r.initGitSchema,
@@ -176,6 +177,7 @@ const infraSchemaDDL = `
 		agentctl_url TEXT DEFAULT '',
 		agentctl_port INTEGER DEFAULT 0,
 		pid INTEGER DEFAULT 0,
+		local_pid INTEGER DEFAULT 0,
 		worktree_id TEXT DEFAULT '',
 		worktree_path TEXT DEFAULT '',
 		worktree_branch TEXT DEFAULT '',
@@ -261,6 +263,7 @@ func (r *Repository) initTaskSchema() error {
 		provider_name TEXT DEFAULT '',
 		default_branch TEXT DEFAULT '',
 		worktree_branch_prefix TEXT DEFAULT 'feature/',
+		worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}',
 		pull_before_worktree INTEGER NOT NULL DEFAULT 1,
 		setup_script TEXT DEFAULT '',
 		cleanup_script TEXT DEFAULT '',
@@ -325,6 +328,9 @@ func (r *Repository) initPlansSchema() error {
 		created_by TEXT NOT NULL DEFAULT 'agent',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
+		implementation_started_at TIMESTAMP,
+		implementation_started_session_id TEXT,
+		implementation_started_by TEXT,
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_plans_task_id ON task_plans(task_id);
@@ -359,6 +365,26 @@ func (r *Repository) initPlansSchema() error {
 		return err
 	}
 	return r.backfillInitialPlanRevisions()
+}
+
+// initWalkthroughsSchema creates the task_walkthroughs table. Steps are stored
+// as a JSON array in a single column (read/written whole — there is no
+// per-step query path), keeping the artifact one row per task like task_plans.
+func (r *Repository) initWalkthroughsSchema() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_walkthroughs (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL UNIQUE,
+		title TEXT NOT NULL DEFAULT 'Walkthrough',
+		steps TEXT NOT NULL DEFAULT '[]',
+		created_by TEXT NOT NULL DEFAULT 'agent',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_walkthroughs_task_id ON task_walkthroughs(task_id);
+	`)
+	return err
 }
 
 // backfillInitialPlanRevisions ensures every existing task_plans row has at least

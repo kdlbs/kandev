@@ -266,6 +266,7 @@ service-bundle: install build
 	@mkdir -p "$(SERVICE_BUNDLE_DIR)/bin"
 	@cp "$(BACKEND_DIR)/bin/kandev" "$(BACKEND_DIR)/bin/agentctl" \
 		"$(BACKEND_DIR)/bin/agentctl-linux-amd64" \
+		"$(BACKEND_DIR)/bin/agentctl-linux-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-amd64" \
 		"$(SERVICE_BUNDLE_DIR)/bin/"
@@ -425,6 +426,7 @@ test-scripts:
 	@python3 scripts/opencode-code-review.test.py
 	@python3 scripts/lint-harness-files.test.py
 	@bash scripts/release-desktop.test.sh
+	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 
 .PHONY: test-e2e
 test-e2e: build-backend build-web

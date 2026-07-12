@@ -317,6 +317,28 @@ func TestHTTPCreateTaskRecordsRepositoryWithoutProfileIDs(t *testing.T) {
 	}, recorder.got)
 }
 
+func TestConvertCreateTaskRepositoriesForwardsPRNumber(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+
+	repos, ok := convertCreateTaskRepositories(c, []httpTaskRepositoryInput{{
+		GitHubURL:      "https://github.com/kdlbs/kandev",
+		BaseBranch:     "main",
+		CheckoutBranch: "feature/fork-pr",
+		PRNumber:       1567,
+	}})
+
+	require.True(t, ok)
+	require.Len(t, repos, 1)
+	assert.Equal(t, dto.TaskRepositoryInput{
+		BaseBranch:     "main",
+		CheckoutBranch: "feature/fork-pr",
+		PRNumber:       1567,
+		GitHubURL:      "https://github.com/kdlbs/kandev",
+	}, repos[0])
+}
+
 func TestBuildTaskCreateLastUsedPatchRecordsFirstWorkspaceRepository(t *testing.T) {
 	patch := buildTaskCreateLastUsedPatch(httpCreateTaskRequest{
 		AgentProfileID:    "agent-2",

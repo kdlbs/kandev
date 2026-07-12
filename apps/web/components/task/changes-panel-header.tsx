@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   IconCloudDownload,
   IconEye,
@@ -9,9 +10,15 @@ import {
   IconGitMerge,
   IconArrowRight,
   IconLoader2,
+  IconEdit,
+  IconRoute,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Input } from "@kandev/ui/input";
+import { Label } from "@kandev/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,6 +49,11 @@ type BranchRow = {
   repositoryName: string;
 };
 
+type RenameBranchResult = {
+  success: boolean;
+  error?: string;
+};
+
 /**
  * Builds per-repo rows for the branch hover card. Returns [] for single-repo
  * workspaces (callers fall back to the single-row layout); otherwise one row
@@ -64,13 +76,101 @@ function buildBranchRows(
   }));
 }
 
+function RenameBranchButton({
+  branch,
+  repositoryName,
+  onRenameBranch,
+  isRenaming,
+}: {
+  branch: string;
+  repositoryName: string;
+  onRenameBranch?: (newName: string, repo: string) => Promise<RenameBranchResult>;
+  isRenaming: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [newBranchName, setNewBranchName] = useState(branch);
+  const [error, setError] = useState<string | null>(null);
+  const trimmedBranchName = newBranchName.trim();
+  const canRename = !!onRenameBranch && trimmedBranchName !== "" && trimmedBranchName !== branch;
+  const submitRename = async () => {
+    if (!onRenameBranch || !canRename) return;
+    setError(null);
+    try {
+      const result = await onRenameBranch(trimmedBranchName, repositoryName);
+      if (!result.success) {
+        setError(result.error || "Failed to rename branch");
+        return;
+      }
+      setOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to rename branch");
+    }
+  };
+  const openDialog = () => {
+    setNewBranchName(branch);
+    setError(null);
+    setOpen(true);
+  };
+  return (
+    <>
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+        disabled={!onRenameBranch || isRenaming}
+        aria-label={`Edit branch ${branch}`}
+        onClick={openDialog}
+      >
+        <IconEdit className="h-3.5 w-3.5" />
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit branch</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor={`branch-name-${repositoryName || "default"}`}>Branch name</Label>
+            <Input
+              id={`branch-name-${repositoryName || "default"}`}
+              value={newBranchName}
+              onChange={(event) => setNewBranchName(event.target.value)}
+              autoFocus
+            />
+            {error && <p className="text-xs text-destructive">{error}</p>}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              data-dialog-default-action
+              disabled={!canRename || isRenaming}
+              onClick={submitRename}
+            >
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function BranchRowView({
   repoLabel,
   branch,
   baseBranch,
   repositoryName,
   taskId,
-}: BranchRow & { taskId: string | null }) {
+  onRenameBranch,
+  isRenaming,
+}: BranchRow & {
+  taskId: string | null;
+  onRenameBranch?: (newName: string, repo: string) => Promise<RenameBranchResult>;
+  isRenaming: boolean;
+}) {
   return (
     <div className="flex items-center gap-2">
       {repoLabel && (
@@ -78,12 +178,20 @@ function BranchRowView({
           {repoLabel}
         </span>
       )}
-      <span className="flex items-center gap-1.5 text-foreground font-medium">
-        <IconGitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-        {branch}
+      <span className="flex min-w-0 items-center gap-1.5 text-foreground font-medium">
+        <IconGitBranch className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate">{branch}</span>
       </span>
-      <div className="flex-1 border-t border-muted-foreground/20 min-w-8" />
-      <IconArrowRight className="h-3 w-3 text-muted-foreground/40" />
+      <RenameBranchButton
+        branch={branch}
+        repositoryName={repositoryName}
+        onRenameBranch={onRenameBranch}
+        isRenaming={isRenaming}
+      />
+      <div className="flex min-w-8 flex-1 items-center text-muted-foreground/40">
+        <div className="h-px flex-1 bg-muted-foreground/20" />
+        <IconArrowRight className="-ml-px h-3 w-3 shrink-0" />
+      </div>
       <BaseBranchPicker
         taskId={taskId}
         repositoryName={repositoryName}
@@ -98,6 +206,8 @@ function BranchHoverCard({
   baseBranchDisplay,
   rows,
   taskId,
+  onRenameBranch,
+  isRenaming,
 }: {
   displayBranch: string;
   baseBranchDisplay: string;
@@ -106,6 +216,8 @@ function BranchHoverCard({
   rows?: BranchRow[];
   /** Active task id, plumbed into BaseBranchPicker for the PATCH call. */
   taskId: string | null;
+  onRenameBranch?: (newName: string, repo: string) => Promise<RenameBranchResult>;
+  isRenaming: boolean;
 }) {
   const isMulti = rows && rows.length > 0;
   const headerLabel = isMulti ? "Your branches:" : "Your code lives in:";
@@ -120,7 +232,7 @@ function BranchHoverCard({
           <IconGitBranch className="h-3.5 w-3.5" />
         </button>
       </HoverCardTrigger>
-      <HoverCardContent side="bottom" align="end" className="w-auto p-3">
+      <HoverCardContent forceMount side="bottom" align="end" className="w-auto p-3">
         <div className="flex flex-col gap-2.5 text-xs">
           <div className="flex items-center justify-between gap-6">
             <span className="text-muted-foreground/60">{headerLabel}</span>
@@ -129,7 +241,13 @@ function BranchHoverCard({
           {isMulti ? (
             <div className="flex flex-col gap-1.5">
               {rows!.map((row) => (
-                <BranchRowView key={row.repoLabel ?? row.branch} {...row} taskId={taskId} />
+                <BranchRowView
+                  key={row.repoLabel ?? row.branch}
+                  {...row}
+                  taskId={taskId}
+                  onRenameBranch={onRenameBranch}
+                  isRenaming={isRenaming}
+                />
               ))}
             </div>
           ) : (
@@ -139,6 +257,8 @@ function BranchHoverCard({
               baseBranch={baseBranchDisplay}
               repositoryName=""
               taskId={taskId}
+              onRenameBranch={onRenameBranch}
+              isRenaming={isRenaming}
             />
           )}
         </div>
@@ -302,10 +422,14 @@ function ChangesPanelHeaderLeft({
   showDiffReview,
   onOpenDiffAll,
   onOpenReview,
+  onRequestWalkthrough,
+  requestWalkthroughDisabled,
 }: {
   showDiffReview: boolean;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
+  onRequestWalkthrough?: () => void;
+  requestWalkthroughDisabled?: boolean;
 }) {
   if (!showDiffReview) return null;
   return (
@@ -328,7 +452,46 @@ function ChangesPanelHeaderLeft({
         <IconEye className="h-3 w-3" />
         Review
       </Button>
+      {onRequestWalkthrough ? (
+        <ChangesPanelWalkthroughButton
+          onRequestWalkthrough={onRequestWalkthrough}
+          requestWalkthroughDisabled={requestWalkthroughDisabled}
+        />
+      ) : null}
     </>
+  );
+}
+
+function ChangesPanelWalkthroughButton({
+  onRequestWalkthrough,
+  requestWalkthroughDisabled,
+}: {
+  onRequestWalkthrough: () => void;
+  requestWalkthroughDisabled?: boolean;
+}) {
+  const tooltip = requestWalkthroughDisabled
+    ? "Loading changed files..."
+    : "Walk me through these changes";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex" tabIndex={requestWalkthroughDisabled ? 0 : undefined}>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-5 text-[11px] px-1.5 gap-1 cursor-pointer"
+            aria-label="Walk me through these changes"
+            data-testid="changes-request-walkthrough"
+            disabled={requestWalkthroughDisabled}
+            onClick={onRequestWalkthrough}
+          >
+            <IconRoute className="h-3 w-3" />
+            <span className="hidden min-[430px]:inline sm:inline">Walkthrough</span>
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -344,6 +507,8 @@ export function ChangesPanelHeader({
   loadingOperation,
   onOpenDiffAll,
   onOpenReview,
+  onRequestWalkthrough,
+  requestWalkthroughDisabled,
   repoNames,
   perRepoStatus,
   onRepoPull,
@@ -351,6 +516,7 @@ export function ChangesPanelHeader({
   onRepoMerge,
   repoDisplayName,
   taskId,
+  onRenameBranch,
 }: {
   hasChanges: boolean;
   hasCommits: boolean;
@@ -365,12 +531,15 @@ export function ChangesPanelHeader({
   loadingOperation: string | null;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
+  onRequestWalkthrough?: () => void;
+  requestWalkthroughDisabled?: boolean;
   /** Always non-empty (single-repo includes the empty-name entry). */
   repoNames: string[];
   perRepoStatus: PerRepoStatus[];
   onRepoPull: (repo: string) => void;
   onRepoRebase: (repo: string) => void;
   onRepoMerge: (repo: string) => void;
+  onRenameBranch?: (newName: string, repo: string) => Promise<RenameBranchResult>;
   repoDisplayName?: (repositoryName: string) => string | undefined;
   /** Active task id; piped into the base-branch picker so it can resolve
    *  the right task_repositories row to PATCH. Null while task data is
@@ -391,6 +560,8 @@ export function ChangesPanelHeader({
           showDiffReview={showDiffReview}
           onOpenDiffAll={onOpenDiffAll}
           onOpenReview={onOpenReview}
+          onRequestWalkthrough={onRequestWalkthrough}
+          requestWalkthroughDisabled={requestWalkthroughDisabled}
         />
       }
       right={
@@ -401,6 +572,8 @@ export function ChangesPanelHeader({
               baseBranchDisplay={baseBranchDisplay}
               rows={branchRows}
               taskId={taskId}
+              onRenameBranch={onRenameBranch}
+              isRenaming={loadingOperation === "rename_branch"}
             />
           )}
           <PullDropdown

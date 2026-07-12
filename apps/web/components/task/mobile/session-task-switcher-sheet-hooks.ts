@@ -11,9 +11,10 @@ import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-action
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import {
-  hasPendingClarificationForSession,
-  hasPendingPermissionForSession,
+  hasPendingClarification,
+  hasPendingPermissionRequest,
 } from "@/lib/utils/pending-clarification";
+import { toKanbanTask } from "@/lib/kanban/map-task";
 import {
   repositoryId as toRepositoryId,
   type TaskState,
@@ -22,6 +23,7 @@ import {
   type Repository,
   type Task,
   type WorkflowSnapshot,
+  type Message,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
@@ -52,30 +54,7 @@ function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) 
       show_in_command_panel: step.show_in_command_panel,
       agent_profile_id: step.agent_profile_id,
     })),
-    tasks: snapshot.tasks.map((task) => ({
-      id: task.id,
-      workflowStepId: task.workflow_step_id,
-      parentTaskId: task.parent_id ?? undefined,
-      title: task.title,
-      description: task.description ?? undefined,
-      position: task.position ?? 0,
-      state: task.state,
-      repositoryId: task.repositories?.[0]?.repository_id ?? undefined,
-      // Carry the full TaskRepository array so the mobile repo picker
-      // (useTaskRepoCount + MobileReposSection) keeps working after a workspace
-      // switch. Without this, the picker silently disappears for multi-repo
-      // tasks because length defaults to 0.
-      repositories: mapTaskRepositories(task.repositories),
-      primarySessionId: task.primary_session_id ?? undefined,
-      primarySessionState: task.primary_session_state ?? undefined,
-      sessionCount: task.session_count ?? undefined,
-      reviewStatus: task.review_status ?? undefined,
-      primaryExecutorId: task.primary_executor_id ?? undefined,
-      primaryExecutorType: task.primary_executor_type ?? undefined,
-      primaryExecutorName: task.primary_executor_name ?? undefined,
-      isRemoteExecutor: task.is_remote_executor ?? false,
-      updatedAt: task.updated_at,
-    })),
+    tasks: snapshot.tasks.map(toKanbanTask),
   };
 }
 
@@ -95,7 +74,7 @@ type SheetItemCtx = {
   sessionsByTaskId: Parameters<typeof getSessionInfoForTask>[1];
   gitStatusByEnvId: Parameters<typeof getSessionInfoForTask>[2];
   envIdBySessionId: Parameters<typeof getSessionInfoForTask>[3];
-  messagesBySession: Parameters<typeof hasPendingClarificationForSession>[0];
+  messagesBySession: Record<string, Message[] | undefined>;
   dismissedAgentErrors: Record<string, string>;
   acknowledgedAgentErrors: Record<string, string>;
 };
@@ -110,6 +89,9 @@ function toSheetItem(
     ctx.gitStatusByEnvId,
     ctx.envIdBySessionId,
   );
+  const resolvedSessionState =
+    sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
+  const pending = pendingFlagsForTask(task, resolvedSessionState, ctx.messagesBySession);
   return {
     id: task.id,
     title: task.title,
@@ -117,8 +99,7 @@ function toSheetItem(
     // way the desktop sidebar does (applyView/TaskSwitcher read parentTaskId).
     parentTaskId: task.parentTaskId ?? undefined,
     state: task.state as TaskState | undefined,
-    sessionState:
-      sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined),
+    sessionState: resolvedSessionState,
     description: task.description,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),
@@ -133,15 +114,31 @@ function toSheetItem(
     remoteExecutorType: task.primaryExecutorType ?? undefined,
     remoteExecutorName: task.primaryExecutorName ?? undefined,
     primarySessionId: task.primarySessionId ?? null,
-    hasPendingClarification: hasPendingClarificationForSession(
-      ctx.messagesBySession,
-      task.primarySessionId,
-    ),
-    hasPendingPermission: hasPendingPermissionForSession(
-      ctx.messagesBySession,
-      task.primarySessionId,
-    ),
+    hasPendingClarification: pending.clarification,
+    hasPendingPermission: pending.permission,
     agentErrorMessage: agentErrorMessageForTask(task, ctx.sessionsById, ctx.sessionsByTaskId, ctx),
+  };
+}
+
+function pendingFlagsForTask(
+  task: Pick<KanbanState["tasks"][number], "primarySessionId" | "primarySessionPendingAction">,
+  primarySessionState: TaskSessionState | undefined,
+  messagesBySession: Record<string, Message[] | undefined>,
+): { clarification: boolean; permission: boolean } {
+  if (!task.primarySessionId) return { clarification: false, permission: false };
+  const messages = messagesBySession[task.primarySessionId];
+  if (messages !== undefined) {
+    return {
+      clarification: hasPendingClarification(messages),
+      permission: hasPendingPermissionRequest(messages),
+    };
+  }
+  if (primarySessionState !== "WAITING_FOR_INPUT") {
+    return { clarification: false, permission: false };
+  }
+  return {
+    clarification: task.primarySessionPendingAction === "clarification",
+    permission: task.primarySessionPendingAction === "permission",
   };
 }
 
@@ -319,12 +316,49 @@ function mergeSessionFields(
   taskSessionId: string | null,
 ) {
   return {
-    primarySessionId:
-      taskSessionId ?? task.primary_session_id ?? existing?.primarySessionId ?? undefined,
-    primarySessionState: task.primary_session_state ?? existing?.primarySessionState ?? undefined,
-    sessionCount: task.session_count ?? existing?.sessionCount ?? (taskSessionId ? 1 : undefined),
-    reviewStatus: task.review_status ?? existing?.reviewStatus ?? undefined,
+    primarySessionId: resolvePrimarySessionId(task, existing, taskSessionId),
+    primarySessionState: resolvePrimarySessionState(task, existing),
+    primarySessionPendingAction: resolvePrimarySessionPendingAction(task, existing),
+    sessionCount: resolveSessionCount(task, existing, taskSessionId),
+    reviewStatus: resolveReviewStatus(task, existing),
   };
+}
+
+function resolvePrimarySessionId(
+  task: Task,
+  existing: KanbanState["tasks"][number] | undefined,
+  taskSessionId: string | null,
+) {
+  return taskSessionId ?? task.primary_session_id ?? existing?.primarySessionId ?? undefined;
+}
+
+function resolvePrimarySessionState(
+  task: Task,
+  existing: KanbanState["tasks"][number] | undefined,
+) {
+  return task.primary_session_state ?? existing?.primarySessionState ?? undefined;
+}
+
+function resolvePrimarySessionPendingAction(
+  task: Task,
+  existing: KanbanState["tasks"][number] | undefined,
+) {
+  if ("primary_session_pending_action" in task) {
+    return task.primary_session_pending_action ?? undefined;
+  }
+  return existing?.primarySessionPendingAction ?? undefined;
+}
+
+function resolveSessionCount(
+  task: Task,
+  existing: KanbanState["tasks"][number] | undefined,
+  taskSessionId: string | null,
+) {
+  return task.session_count ?? existing?.sessionCount ?? (taskSessionId ? 1 : undefined);
+}
+
+function resolveReviewStatus(task: Task, existing: KanbanState["tasks"][number] | undefined) {
+  return task.review_status ?? existing?.reviewStatus ?? undefined;
 }
 
 /**

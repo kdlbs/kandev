@@ -61,6 +61,22 @@ func callTool(t *testing.T, s *Server, toolName string, args map[string]interfac
 	return result
 }
 
+func toolInputProperties(t *testing.T, s *Server, toolName string) map[string]interface{} {
+	t.Helper()
+	toolsMap := s.mcpServer.ListTools()
+	st, ok := toolsMap[toolName]
+	require.True(t, ok, "tool %q not registered", toolName)
+
+	schema, err := json.Marshal(st.Tool.InputSchema)
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+	props, ok := parsed["properties"].(map[string]interface{})
+	require.True(t, ok, "schema should have properties")
+	return props
+}
+
 // --- Action constant tests ---
 
 func TestActionConstants_MatchWebSocketActions(t *testing.T) {
@@ -93,6 +109,17 @@ func TestActionConstants_MatchWebSocketActions(t *testing.T) {
 }
 
 // --- Workflow handler tests ---
+
+func TestWorkflowStepTools_SchemaExposesAutoAdvanceRequiresSignal(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	createProps := toolInputProperties(t, s, "create_workflow_step_kandev")
+	updateProps := toolInputProperties(t, s, "update_workflow_step_kandev")
+
+	assert.Contains(t, createProps, "auto_advance_requires_signal")
+	assert.Contains(t, updateProps, "auto_advance_requires_signal")
+}
 
 func TestCreateWorkflowHandler_Success(t *testing.T) {
 	backend := &testBackend{
@@ -253,14 +280,15 @@ func TestCreateWorkflowStepHandler_AllFields(t *testing.T) {
 	s := newTestServer(t, backend)
 
 	result := callTool(t, s, "create_workflow_step_kandev", map[string]interface{}{
-		"workflow_id":           "wf-123",
-		"name":                  "Deploy",
-		"position":              float64(0),
-		"color":                 "#22c55e",
-		"prompt":                "Deploy prompt",
-		"is_start_step":         true,
-		"allow_manual_move":     true,
-		"show_in_command_panel": true,
+		"workflow_id":                  "wf-123",
+		"name":                         "Deploy",
+		"position":                     float64(0),
+		"color":                        "#22c55e",
+		"prompt":                       "Deploy prompt",
+		"is_start_step":                true,
+		"allow_manual_move":            true,
+		"show_in_command_panel":        true,
+		"auto_advance_requires_signal": true,
 		"events": map[string]interface{}{
 			"on_enter": []interface{}{map[string]interface{}{"type": "auto_start_agent"}},
 		},
@@ -273,6 +301,7 @@ func TestCreateWorkflowStepHandler_AllFields(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, true, payload["allow_manual_move"])
 	assert.Equal(t, true, payload["show_in_command_panel"])
+	assert.Equal(t, true, payload["auto_advance_requires_signal"])
 	assert.NotNil(t, payload["events"])
 }
 
@@ -320,12 +349,13 @@ func TestUpdateWorkflowStepHandler_AllFields(t *testing.T) {
 	s := newTestServer(t, backend)
 
 	result := callTool(t, s, "update_workflow_step_kandev", map[string]interface{}{
-		"step_id":                  "step-1",
-		"name":                     "In Review",
-		"color":                    "#3b82f6",
-		"allow_manual_move":        true,
-		"show_in_command_panel":    true,
-		"auto_archive_after_hours": float64(48),
+		"step_id":                      "step-1",
+		"name":                         "In Review",
+		"color":                        "#3b82f6",
+		"allow_manual_move":            true,
+		"show_in_command_panel":        true,
+		"auto_advance_requires_signal": false,
+		"auto_archive_after_hours":     float64(48),
 		"events": map[string]interface{}{
 			"on_enter": []interface{}{map[string]interface{}{"type": "enable_plan_mode"}},
 		},
@@ -337,6 +367,7 @@ func TestUpdateWorkflowStepHandler_AllFields(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, true, payload["allow_manual_move"])
 	assert.Equal(t, true, payload["show_in_command_panel"])
+	assert.Equal(t, false, payload["auto_advance_requires_signal"])
 	assert.Equal(t, float64(48), payload["auto_archive_after_hours"])
 	assert.NotNil(t, payload["events"])
 }

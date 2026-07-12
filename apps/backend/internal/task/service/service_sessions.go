@@ -107,6 +107,12 @@ func (s *Service) GetPrimarySessionInfoForTasks(ctx context.Context, taskIDs []s
 	return s.sessions.GetPrimarySessionInfoByTaskIDs(ctx, taskIDs)
 }
 
+// GetPendingActionsForSessions returns pending user-action projections for
+// sessions whose messages may not be loaded by list views.
+func (s *Service) GetPendingActionsForSessions(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
+	return s.messages.GetPendingActionsBySessionIDs(ctx, sessionIDs)
+}
+
 // BatchGetSessionsForTasks returns all sessions for the given task IDs grouped
 // by task ID. Wraps the repository batch loader so callers in the handler
 // layer can derive primary session, session count, and per-task session info

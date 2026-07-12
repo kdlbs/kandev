@@ -50,6 +50,8 @@ function makeUnloadedSettings(): UserSettingsState {
     workflowId: null,
     kanbanViewMode: null,
     repositoryIds: [],
+    tasksListSort: "updated_desc",
+    tasksListGroup: "state",
     preferredShell: null,
     shellOptions: [],
     defaultEditorId: null,
@@ -171,6 +173,7 @@ describe("useEnsureUserSettings", () => {
       branch: "main",
       agentProfileId: "agent-2",
       executorProfileId: "exec-profile-1",
+      synced: true,
     });
   });
 

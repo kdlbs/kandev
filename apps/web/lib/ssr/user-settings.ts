@@ -1,3 +1,9 @@
+import {
+  DEFAULT_TASKS_LIST_GROUP,
+  DEFAULT_TASKS_LIST_SORT,
+  parseTasksListGroup,
+  parseTasksListSort,
+} from "@/lib/tasks/tasks-list-options";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/state/slices/settings/types";
@@ -64,12 +70,21 @@ function parseSidebarTaskPrefs(value: SidebarTaskPrefsApi | undefined) {
   };
 }
 
+export function taskCreateLastUsedHasValue(
+  value: UserSettingsData["task_create_last_used"] | undefined,
+) {
+  return Boolean(
+    value?.repository_id || value?.branch || value?.agent_profile_id || value?.executor_profile_id,
+  );
+}
+
 function parseTaskCreateLastUsed(value: UserSettingsData["task_create_last_used"] | undefined) {
   return {
     repositoryId: value?.repository_id || null,
     branch: value?.branch || null,
     agentProfileId: value?.agent_profile_id || null,
     executorProfileId: value?.executor_profile_id || null,
+    synced: taskCreateLastUsedHasValue(value),
   };
 }
 
@@ -79,6 +94,8 @@ function buildIdentityFields(s: UserSettingsData) {
     workflowId: s.workflow_filter_id || null,
     kanbanViewMode: s.kanban_view_mode || null,
     repositoryIds: s.repository_ids ?? [],
+    tasksListSort: parseTasksListSort(s.tasks_list_sort),
+    tasksListGroup: parseTasksListGroup(s.tasks_list_group),
     preferredShell: s.preferred_shell || null,
     defaultEditorId: s.default_editor_id || null,
     defaultUtilityAgentId: s.default_utility_agent_id || null,
@@ -140,6 +157,8 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       workflowId: null,
       kanbanViewMode: null,
       repositoryIds: [] as string[],
+      tasksListSort: DEFAULT_TASKS_LIST_SORT,
+      tasksListGroup: DEFAULT_TASKS_LIST_GROUP,
       preferredShell: null,
       shellOptions,
       defaultEditorId: null,

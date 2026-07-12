@@ -39,6 +39,7 @@ const resumeReasonErrorRecovery = "error_recovery"
 const resumeReasonFailedSessionResumable = "failed_session_resumable"
 
 var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
+var ErrAgentNotReadyForPrompt = errors.New("agent not ready for prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
 
 // ErrSessionNotPromptable is returned when a session cannot accept a prompt
@@ -47,13 +48,19 @@ var ErrSessionResetInProgress = errors.New("session reset in progress")
 // the two misleads the UI and any caller doing errors.Is checks.
 var ErrSessionNotPromptable = errors.New("session not promptable")
 
-const (
+var (
 	// Backend restart recovery can restore the session state before the ACP
 	// stream is promptable again. Keep this above CI's slow-start tail so a
 	// valid resume waits instead of surfacing "Failed to send message to agent".
 	agentPromptReadyTimeout  = 30 * time.Second
 	agentPromptReadyInterval = 100 * time.Millisecond
 )
+
+const promptReadinessRecoveryStopReason = "prompt readiness recovery"
+
+type agentPromptStreamRecoverer interface {
+	RecoverAgentPromptStream(ctx context.Context, sessionID string) error
+}
 
 func isAgentPromptInProgressError(err error) bool {
 	return err != nil && errors.Is(err, ErrAgentPromptInProgress)
@@ -1048,47 +1055,48 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 	// Session resume can take time and shouldn't be tied to the WS request lifecycle.
 	resumeCtx := context.WithoutCancel(ctx)
 	execution, err := s.executor.ResumeSession(resumeCtx, session, true)
+	var readySession *models.TaskSession
 	if err != nil {
 		// If the execution is already running (duplicate resume request), return it as success.
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
-			if existing, ok := s.executor.GetExecutionBySession(sessionID); ok && existing != nil {
-				readySession, waitErr := s.waitForResumedSessionReady(ctx, sessionID)
-				if waitErr != nil {
-					return nil, waitErr
-				}
-				existing.SessionState = v1.TaskSessionState(readySession.State)
-				return existing, nil
+			execution, readySession, err = s.recoverAlreadyRunningResume(resumeCtx, taskID, sessionID)
+			if err != nil && errors.Is(err, ErrAgentNotReadyForPrompt) {
+				return nil, err
 			}
 		}
-		// Task was archived while the resume was in flight — return the error
-		// without mutating task/session state (archive already handled cleanup).
-		// Check both the sentinel (early rejection) and re-read the task to catch
-		// the race where archive completed after the executor's archived check.
-		if errors.Is(err, executor.ErrTaskArchived) {
+		if err != nil {
+			// Task was archived while the resume was in flight — return the error
+			// without mutating task/session state (archive already handled cleanup).
+			// Check both the sentinel (early rejection) and re-read the task to catch
+			// the race where archive completed after the executor's archived check.
+			if errors.Is(err, executor.ErrTaskArchived) {
+				return nil, err
+			}
+			if task, taskErr := s.repo.GetTask(resumeCtx, taskID); taskErr == nil && task != nil && task.ArchivedAt != nil {
+				return nil, executor.ErrTaskArchived
+			}
+			// Use resumeCtx (WithoutCancel) for the failure-recording writes too —
+			// if the caller's ctx was already cancelled (e.g. WS client navigated
+			// away), the SessionStateFailed and TaskStateFailed updates would
+			// themselves fail with "context canceled" and leave the task stuck
+			// looking "running" forever.
+			s.updateTaskSessionState(resumeCtx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
+			if stateErr := s.taskRepo.UpdateTaskState(resumeCtx, taskID, v1.TaskStateFailed); stateErr != nil {
+				s.logger.Warn("failed to update task state to FAILED after resume error",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.Error(stateErr))
+			} else {
+				s.processParentChildrenCompletedForTaskState(resumeCtx, taskID, v1.TaskStateFailed)
+			}
 			return nil, err
 		}
-		if task, taskErr := s.repo.GetTask(resumeCtx, taskID); taskErr == nil && task != nil && task.ArchivedAt != nil {
-			return nil, executor.ErrTaskArchived
-		}
-		// Use resumeCtx (WithoutCancel) for the failure-recording writes too —
-		// if the caller's ctx was already cancelled (e.g. WS client navigated
-		// away), the SessionStateFailed and TaskStateFailed updates would
-		// themselves fail with "context canceled" and leave the task stuck
-		// looking "running" forever.
-		s.updateTaskSessionState(resumeCtx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
-		if stateErr := s.taskRepo.UpdateTaskState(resumeCtx, taskID, v1.TaskStateFailed); stateErr != nil {
-			s.logger.Warn("failed to update task state to FAILED after resume error",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID),
-				zap.Error(stateErr))
-		} else {
-			s.processParentChildrenCompletedForTaskState(resumeCtx, taskID, v1.TaskStateFailed)
-		}
-		return nil, err
 	}
-	readySession, err := s.waitForResumedSessionReady(ctx, sessionID)
-	if err != nil {
-		return nil, err
+	if readySession == nil {
+		readySession, err = s.waitForResumedSessionReady(resumeCtx, sessionID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
 
@@ -1123,6 +1131,49 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 
 func (s *Service) waitForResumedSessionReady(ctx context.Context, sessionID string) (*models.TaskSession, error) {
 	return s.waitForSessionAndAgentReady(ctx, sessionID, "after resume")
+}
+
+func (s *Service) recoverAlreadyRunningResume(
+	resumeCtx context.Context,
+	taskID string,
+	sessionID string,
+) (*executor.TaskExecution, *models.TaskSession, error) {
+	existing, ok := s.executor.GetExecutionBySession(sessionID)
+	if !ok || existing == nil {
+		return nil, nil, executor.ErrExecutionAlreadyRunning
+	}
+
+	readySession, waitErr := s.waitForResumedSessionReady(resumeCtx, sessionID)
+	if waitErr == nil {
+		existing.SessionState = v1.TaskSessionState(readySession.State)
+		return existing, readySession, nil
+	}
+	if !errors.Is(waitErr, ErrAgentNotReadyForPrompt) {
+		return nil, nil, waitErr
+	}
+
+	if err := s.reapPromptUnreadyExecution(resumeCtx, sessionID, waitErr); err != nil {
+		return nil, nil, fmt.Errorf("%w: failed to stop prompt-unready execution: %w", ErrAgentNotReadyForPrompt, err)
+	}
+
+	session, err := s.repo.GetTaskSession(resumeCtx, sessionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to reload session after prompt-readiness recovery: %w", err)
+	}
+	if session.TaskID != taskID {
+		return nil, nil, fmt.Errorf("task session does not belong to task")
+	}
+
+	execution, err := s.executor.ResumeSession(resumeCtx, session, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	readySession, err = s.waitForResumedSessionReady(resumeCtx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	execution.SessionState = v1.TaskSessionState(readySession.State)
+	return execution, readySession, nil
 }
 
 func (s *Service) waitForSessionAndAgentReady(ctx context.Context, sessionID, waitContext string) (*models.TaskSession, error) {
@@ -1243,10 +1294,23 @@ func (s *Service) advanceTaskWorkflowStep(ctx context.Context, task *models.Task
 func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, session *models.TaskSession) error {
 	// Check if agent is genuinely running (in-memory execution store, not just DB state)
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
+		s.recoverAgentPromptStreamIfNeeded(ctx, sessionID)
 		if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
-			return err
+			if !errors.Is(err, ErrAgentNotReadyForPrompt) {
+				return err
+			}
+			recoveryCtx := context.WithoutCancel(ctx)
+			if stopErr := s.reapPromptUnreadyExecution(recoveryCtx, sessionID, err); stopErr != nil {
+				return fmt.Errorf("failed to stop prompt-unready execution: %w", stopErr)
+			}
+			refreshed, refreshErr := s.repo.GetTaskSession(recoveryCtx, sessionID)
+			if refreshErr != nil {
+				return fmt.Errorf("failed to reload session after prompt-readiness recovery: %w", refreshErr)
+			}
+			session = refreshed
+		} else {
+			return nil
 		}
-		return nil
 	}
 
 	s.logger.Debug("agent not running for session, attempting resume",
@@ -1281,10 +1345,14 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	resumeCtx := context.WithoutCancel(ctx)
 	if _, err = s.executor.ResumeSession(resumeCtx, session, true); err != nil {
 		if errors.Is(err, executor.ErrExecutionAlreadyRunning) {
-			return nil // Agent is already running, nothing to do
+			s.recoverAgentPromptStreamIfNeeded(resumeCtx, sessionID)
+			if readyErr := s.waitForAgentPromptReady(resumeCtx, sessionID); readyErr != nil {
+				return fmt.Errorf("agent not ready after resume race: %w", readyErr)
+			}
+			return nil
 		}
-		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
-		if stateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
+		s.updateTaskSessionState(resumeCtx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
+		if stateErr := s.taskRepo.UpdateTaskState(resumeCtx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
 			s.logger.Warn("failed to update task state to FAILED after session ensure resume error",
 				zap.String("task_id", session.TaskID),
 				zap.String("session_id", sessionID),
@@ -1297,14 +1365,65 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 
 	// ResumeSession launches the agent asynchronously. Wait for it to finish
 	// initializing before returning, so the caller can send a prompt immediately.
-	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
+	//
+	// Use resumeCtx (context.WithoutCancel) here too, not the original ctx: the
+	// resume itself is already shielded from the caller's request deadline (see
+	// comment above), but a short-lived caller context (WebSocket request,
+	// MCP tool-call timeout, etc.) would otherwise still abort these polling
+	// waits early with a misleading "context deadline exceeded" even though the
+	// resume is progressing fine in the background and would succeed within its
+	// own bounded timeouts (waitForSessionReady's 90s, waitForAgentPromptReady's
+	// 30s below).
+	if err := s.waitForSessionReady(resumeCtx, sessionID); err != nil {
 		return fmt.Errorf("session not ready after resume: %w", err)
 	}
-	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+	if err := s.waitForAgentPromptReady(resumeCtx, sessionID); err != nil {
 		return fmt.Errorf("agent not ready after resume: %w", err)
 	}
 
 	s.logger.Debug("session resumed and ready for prompt")
+	return nil
+}
+
+func (s *Service) recoverAgentPromptStreamIfNeeded(ctx context.Context, sessionID string) {
+	if s.agentManager == nil || s.agentManager.IsAgentReadyForPrompt(ctx, sessionID) {
+		return
+	}
+	recoverer, ok := s.agentManager.(agentPromptStreamRecoverer)
+	if !ok {
+		return
+	}
+	if err := recoverer.RecoverAgentPromptStream(ctx, sessionID); err != nil {
+		s.logger.Debug("agent prompt stream recovery did not make session ready",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID string, cause error) error {
+	if s.agentManager == nil {
+		return fmt.Errorf("agent manager is not configured")
+	}
+	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if err != nil || executionID == "" {
+		if running, runErr := s.repo.GetExecutorRunningBySessionID(ctx, sessionID); runErr == nil && running != nil {
+			executionID = running.AgentExecutionID
+		}
+	}
+	if executionID == "" {
+		if err != nil {
+			return fmt.Errorf("execution id for session %s: %w", sessionID, err)
+		}
+		return fmt.Errorf("execution id for session %s not found", sessionID)
+	}
+
+	s.logger.Warn("stopping prompt-unready agent execution before resume",
+		zap.String("session_id", sessionID),
+		zap.String("agent_execution_id", executionID),
+		zap.Error(cause))
+	if err := s.executor.StopExecution(ctx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1326,7 +1445,10 @@ func (s *Service) waitForAgentPromptReady(ctx context.Context, sessionID string)
 
 		select {
 		case <-readyCtx.Done():
-			return fmt.Errorf("agent not ready for prompt: %w", readyCtx.Err())
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("%w: %w", ErrAgentNotReadyForPrompt, readyCtx.Err())
 		case <-ticker.C:
 		}
 	}
@@ -1357,10 +1479,13 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 		return fmt.Errorf("failed to start agent on prepared workspace: %w", err)
 	}
 
-	if err := s.waitForSessionReady(ctx, sessionID); err != nil {
+	// Same reasoning as ensureSessionRunning's resume path: use launchCtx
+	// (already WithoutCancel'd for the launch call above) so a short-lived
+	// caller context doesn't abort these polling waits early.
+	if err := s.waitForSessionReady(launchCtx, sessionID); err != nil {
 		return fmt.Errorf("session not ready after starting agent: %w", err)
 	}
-	if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
+	if err := s.waitForAgentPromptReady(launchCtx, sessionID); err != nil {
 		return fmt.Errorf("agent not ready after starting agent: %w", err)
 	}
 	s.logger.Debug("agent started on prepared workspace and ready for prompt")
@@ -1373,17 +1498,27 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) err
 		pollInterval = 500 * time.Millisecond
 		maxWait      = 90 * time.Second
 	)
-	deadline := time.Now().Add(maxWait)
+	// Derive a bounded context so the overall wait AND each GetTaskSession query
+	// inside the loop honor maxWait. Callers pass context.WithoutCancel(ctx) so
+	// the wait survives the caller's request timeout during resume/launch — but
+	// that context carries no deadline of its own, so without this a single
+	// blocking query could hang well past maxWait (the loop only checks the
+	// wall clock between iterations). Mirrors waitForAgentPromptReady.
+	readyCtx, cancel := context.WithTimeout(ctx, maxWait)
+	defer cancel()
+	// Ticker rather than time.After(pollInterval) in the loop: time.After
+	// allocates a fresh timer each iteration that lives until it fires, so a
+	// long wait would pile up ~maxWait/pollInterval live timers. Mirrors
+	// waitForAgentPromptReady.
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
 	for {
-		if time.Now().After(deadline) {
-			return fmt.Errorf("timeout waiting for agent to become ready")
-		}
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(pollInterval):
+		case <-readyCtx.Done():
+			return fmt.Errorf("timeout waiting for agent to become ready: %w", readyCtx.Err())
+		case <-ticker.C:
 		}
-		sess, err := s.repo.GetTaskSession(ctx, sessionID)
+		sess, err := s.repo.GetTaskSession(readyCtx, sessionID)
 		if err != nil {
 			return fmt.Errorf("failed to check session state: %w", err)
 		}
@@ -2499,6 +2634,25 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// Complete the turn since the agent was cancelled. Idempotent w.r.t. a
 	// concurrent agent.complete event having already closed the turn.
 	s.completeTurnForSession(ctx, sessionID)
+
+	// Clear the duplicate-cancel guard early so drainQueuedMessageForPromptableSession
+	// can dispatch the queued prompt without being blocked by the in-flight sentinel.
+	// The defer at function entry remains as the error-path safety net.
+	s.cancelInFlight.Delete(sessionID)
+
+	// Deliver any message the operator queued while the turn was running
+	// (#1597 pause→resume recovery). On a normal cancel the agent emits
+	// complete(cancelled) → handleAgentReady → on_turn_complete, which drains
+	// the queue. But an escalated cancel (agent hung) or a dead-process cancel
+	// fires no agent.ready event, so nothing would drain it — leaving the
+	// operator's queued message stranded until a second manual send. Draining
+	// here after the turn is completed covers those paths. It is idempotent with
+	// the event-driven drain: drainQueuedMessageForPromptableSession pops via
+	// TakeQueued atomically, so a normal cancel that also fires handleAgentReady
+	// cannot double-deliver.
+	if session != nil {
+		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
+	}
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil

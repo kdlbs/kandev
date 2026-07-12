@@ -320,7 +320,7 @@ func (s *Service) listAllTasksForWorkspaceDelete(ctx context.Context, workspaceI
 	var all []*models.Task
 	for page := 1; ; page++ {
 		tasks, total, err := s.tasks.ListTasksByWorkspace(
-			ctx, workspaceID, "", "", "", page, workspaceDeletePageSize, true, true, false, false,
+			ctx, workspaceID, "", "", "", page, workspaceDeletePageSize, "", true, true, false, false,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("list workspace tasks: %w", err)
@@ -518,7 +518,7 @@ func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, work
 func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryRequest) (*models.Repository, error) {
 	sourceType := req.SourceType
 	if sourceType == "" {
-		sourceType = "local"
+		sourceType = sourceTypeLocal
 	}
 	prefix := strings.TrimSpace(req.WorktreeBranchPrefix)
 	if err := worktree.ValidateBranchPrefix(prefix); err != nil {
@@ -527,28 +527,33 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 	if prefix == "" {
 		prefix = worktree.DefaultBranchPrefix
 	}
+	template := worktree.NormalizeBranchNameTemplate(req.WorktreeBranchTemplate)
+	if err := worktree.ValidateBranchNameTemplate(template); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
+	}
 	pullBeforeWorktree := true
 	if req.PullBeforeWorktree != nil {
 		pullBeforeWorktree = *req.PullBeforeWorktree
 	}
 	repository := &models.Repository{
-		ID:                   uuid.New().String(),
-		WorkspaceID:          req.WorkspaceID,
-		Name:                 req.Name,
-		SourceType:           sourceType,
-		LocalPath:            req.LocalPath,
-		Provider:             req.Provider,
-		ProviderRepoID:       req.ProviderRepoID,
-		ProviderOwner:        req.ProviderOwner,
-		ProviderName:         req.ProviderName,
-		DefaultBranch:        req.DefaultBranch,
-		WorktreeBranchPrefix: prefix,
-		PullBeforeWorktree:   pullBeforeWorktree,
-		SetupScript:          req.SetupScript,
-		CleanupScript:        req.CleanupScript,
-		DevScript:            req.DevScript,
-		CopyFiles:            req.CopyFiles,
-		StartupPrompt:        req.StartupPrompt,
+		ID:                     uuid.New().String(),
+		WorkspaceID:            req.WorkspaceID,
+		Name:                   req.Name,
+		SourceType:             sourceType,
+		LocalPath:              req.LocalPath,
+		Provider:               req.Provider,
+		ProviderRepoID:         req.ProviderRepoID,
+		ProviderOwner:          req.ProviderOwner,
+		ProviderName:           req.ProviderName,
+		DefaultBranch:          req.DefaultBranch,
+		WorktreeBranchPrefix:   prefix,
+		WorktreeBranchTemplate: template,
+		PullBeforeWorktree:     pullBeforeWorktree,
+		SetupScript:            req.SetupScript,
+		CleanupScript:          req.CleanupScript,
+		DevScript:              req.DevScript,
+		CopyFiles:              req.CopyFiles,
+		StartupPrompt:          req.StartupPrompt,
 	}
 
 	// Auto-detect GitHub provider info from git remote if not provided
@@ -595,6 +600,11 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}
 	if existing != nil {
+		replacement, replacementCreated, replacementErr := s.replaceTaskWorktreeRepositoryMatch(ctx, req.WorkspaceID, existing)
+		if replacementErr != nil {
+			return nil, false, replacementErr
+		}
+		existing = replacement
 		dirty := false
 		if existing.LocalPath == "" && req.LocalPath != "" {
 			existing.LocalPath = req.LocalPath
@@ -614,14 +624,14 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 					zap.String("repository_id", existing.ID), zap.Error(updateErr))
 			}
 		}
-		return existing, false, nil
+		return existing, replacementCreated, nil
 	}
 
 	name := fmt.Sprintf("%s/%s", req.ProviderOwner, req.ProviderName)
 	created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
 		WorkspaceID:   req.WorkspaceID,
 		Name:          name,
-		SourceType:    "provider",
+		SourceType:    sourceTypeProvider,
 		LocalPath:     req.LocalPath,
 		Provider:      req.Provider,
 		ProviderOwner: req.ProviderOwner,
@@ -687,6 +697,13 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 			return fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
 		}
 		repository.WorktreeBranchPrefix = prefix
+	}
+	if req.WorktreeBranchTemplate != nil {
+		template := worktree.NormalizeBranchNameTemplate(*req.WorktreeBranchTemplate)
+		if err := worktree.ValidateBranchNameTemplate(template); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
+		}
+		repository.WorktreeBranchTemplate = template
 	}
 	if req.PullBeforeWorktree != nil {
 		repository.PullBeforeWorktree = *req.PullBeforeWorktree

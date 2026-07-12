@@ -198,13 +198,12 @@ test.describe("Chat model selector — persistence", () => {
 /**
  * Verifies the chat-input model selector's popover stays open after picking a
  * model when extra config options (reasoning effort, thought level, …) are
- * present on the same popover. Picking a model is rarely the last thing a user
- * wants to do when there are other knobs in the same surface — they typically
- * want to adjust effort too. Auto-closing on model select forces a second open.
+ * present in the same selector. Picking a model is rarely the last thing a user
+ * wants to do when there are other knobs available — they typically want to
+ * adjust effort too. Auto-closing on model select forces a second open.
  *
  * mock-agent ships with model + effort config options, so the popover renders
- * the Effort section alongside the model list — exactly the layout this guard
- * protects.
+ * an Effort row below the model list and opens the Effort picker from there.
  */
 test.describe("Chat model selector — popover open/close behavior", () => {
   test("stays open after picking a model when extra config options exist", async ({
@@ -234,12 +233,10 @@ test.describe("Chat model selector — popover open/close behavior", () => {
     await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
 
     await trigger.click();
-    // The effort config section is the rendered marker that the popover
-    // content is mounted — it sits below the model list inside the same
-    // PopoverContent. Selecting by testid mirrors the suite-wide convention
-    // (apps/web/e2e/README.md).
-    const effortSection = testPage.getByTestId("config-option-section-effort");
-    await expect(effortSection).toBeVisible({ timeout: 5_000 });
+    // The effort config row is the rendered marker that the popover content is
+    // mounted. It opens the nested effort selector inside the same popover.
+    const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
+    await expect(effortTrigger).toBeVisible({ timeout: 5_000 });
 
     await testPage.getByRole("option", { name: /Mock Smart/ }).click();
 
@@ -248,8 +245,9 @@ test.describe("Chat model selector — popover open/close behavior", () => {
     await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
 
     // Popover must still be open so the user can also pick an effort level
-    // without re-opening. The effort section is rendered only when the
-    // PopoverContent is mounted (Radix unmounts it on close).
-    await expect(effortSection).toBeVisible();
+    // without re-opening. The effort row is rendered only while PopoverContent
+    // is mounted (Radix unmounts it on close).
+    const updatedEffortTrigger = testPage.getByTestId("config-option-trigger-effort");
+    await expect(updatedEffortTrigger).toBeVisible();
   });
 });

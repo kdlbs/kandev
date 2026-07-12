@@ -15,6 +15,7 @@ import { IssueWatchTable } from "./issue-watch-table";
 import { IssueWatchDialog } from "./issue-watch-dialog";
 import { ActionPresetsSection } from "./action-presets-section";
 import { DefaultQueriesSection } from "./default-queries-section";
+import { GitHubRepoScopeSection } from "./github-repo-scope-section";
 import { PRStatsPanel } from "./pr-stats";
 import { useReviewWatches } from "@/hooks/domains/github/use-review-watches";
 import { useIssueWatches } from "@/hooks/domains/github/use-issue-watches";
@@ -80,14 +81,19 @@ function useWatchActions(workspaceId?: string | null) {
 
   const handleDelete = useCallback(
     async (id: string) => {
+      const watch = watches.find((item) => item.id === id);
+      if (!watch) {
+        toast({ description: "Review watch not found", variant: "error" });
+        return;
+      }
       try {
-        await remove(id);
+        await remove(id, watch.workspace_id);
         toast({ description: "Review watch deleted", variant: "success" });
       } catch {
         toast({ description: "Failed to delete review watch", variant: "error" });
       }
     },
-    [remove, toast],
+    [remove, toast, watches],
   );
 
   const handleTrigger = useCallback(
@@ -118,7 +124,7 @@ function useWatchActions(workspaceId?: string | null) {
   const handleToggleEnabled = useCallback(
     async (watch: ReviewWatch) => {
       try {
-        await update(watch.id, { enabled: !watch.enabled });
+        await update(watch.id, watch.workspace_id, { enabled: !watch.enabled });
         toast({
           description: watch.enabled ? "Watch paused" : "Watch enabled",
           variant: "success",
@@ -175,20 +181,30 @@ function useIssueWatchActions(workspaceId?: string | null) {
 
   const handleDelete = useCallback(
     async (id: string) => {
+      const watch = watches.find((item) => item.id === id);
+      if (!watch) {
+        toast({ description: "Issue watch not found", variant: "error" });
+        return;
+      }
       try {
-        await remove(id);
+        await remove(id, watch.workspace_id);
         toast({ description: "Issue watch deleted", variant: "success" });
       } catch {
         toast({ description: "Failed to delete issue watch", variant: "error" });
       }
     },
-    [remove, toast],
+    [remove, toast, watches],
   );
 
   const handleTrigger = useCallback(
     async (id: string) => {
+      const watch = watches.find((item) => item.id === id);
+      if (!watch) {
+        toast({ description: "Issue watch not found", variant: "error" });
+        return;
+      }
       try {
-        const result = await trigger(id);
+        const result = await trigger(id, watch.workspace_id);
         const count = result?.new_issues_found ?? 0;
         if (count > 0) {
           toast({
@@ -202,13 +218,13 @@ function useIssueWatchActions(workspaceId?: string | null) {
         toast({ description: "Failed to check for issues", variant: "error" });
       }
     },
-    [trigger, toast],
+    [trigger, toast, watches],
   );
 
   const handleToggleEnabled = useCallback(
     async (watch: IssueWatch) => {
       try {
-        await update(watch.id, { enabled: !watch.enabled });
+        await update(watch.id, watch.workspace_id, { enabled: !watch.enabled });
         toast({
           description: watch.enabled ? "Watch paused" : "Watch enabled",
           variant: "success",
@@ -255,7 +271,10 @@ export function GitHubConnectionSection() {
   return (
     <>
       <div>
-        <h2 className="text-2xl font-bold flex items-center gap-2">
+        <h2
+          className="text-2xl font-bold flex items-center gap-2"
+          data-testid="github-integration-heading"
+        >
           <IconBrandGithub className="h-6 w-6" />
           GitHub Integration
         </h2>
@@ -276,40 +295,39 @@ export function GitHubConnectionSection() {
   );
 }
 
-// PerWorkspaceSection wraps the still-per-workspace surfaces (action presets,
-// PR analytics) under a workspace switcher. Watchers don't go in here — they
-// list flat across every workspace via their own sections.
 function PerWorkspaceSection({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-8">
+      <GitHubRepoScopeSection workspaceId={workspaceId} />
+      <ReviewWatchSection workspaceId={workspaceId} />
+      <IssueWatchSection workspaceId={workspaceId} />
       <ActionPresetsSection workspaceId={workspaceId} />
       <SettingsSection title="PR Analytics" description="Pull request activity for this workspace.">
         <PRStatsPanel workspaceId={workspaceId} />
       </SettingsSection>
+      <DefaultQueriesSection workspaceId={workspaceId} />
     </div>
   );
 }
 
-export function GitHubIntegrationPage() {
+type GitHubIntegrationPageProps = {
+  workspaceId?: string;
+};
+
+export function GitHubIntegrationPage({ workspaceId }: GitHubIntegrationPageProps = {}) {
   return (
     <TooltipProvider>
       <div className="space-y-8">
         <GitHubConnectionSection />
-        <ReviewWatchSection />
-        <IssueWatchSection />
-        <WorkspaceScopedSection label="Presets and analytics for">
+        <WorkspaceScopedSection workspaceId={workspaceId}>
           {(ws) => <PerWorkspaceSection key={ws} workspaceId={ws} />}
         </WorkspaceScopedSection>
-        <DefaultQueriesSection />
       </div>
     </TooltipProvider>
   );
 }
 
-// ReviewWatchSection lists every review watch across every workspace in a
-// single flat table. Pass `undefined` to the hook so it fetches all rows; the
-// dialog's create flow asks the user to pick the workspace.
-function ReviewWatchSection() {
+function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
   const {
     watches,
     create,
@@ -319,7 +337,7 @@ function ReviewWatchSection() {
     handleTrigger,
     handleReset,
     handleToggleEnabled,
-  } = useWatchActions(undefined);
+  } = useWatchActions(workspaceId);
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWatch, setEditingWatch] = useState<ReviewWatch | null>(null);
@@ -349,7 +367,10 @@ function ReviewWatchSection() {
         description="Automatically create tasks for PRs that need your review."
         action={
           <div className="flex items-center gap-2">
-            <CleanupNowButton label="Clean up merged" run={cleanupMergedReviewTasks} />
+            <CleanupNowButton
+              label="Clean up merged"
+              run={() => cleanupMergedReviewTasks(workspaceId)}
+            />
             <Button
               size="sm"
               onClick={() => {
@@ -368,7 +389,6 @@ function ReviewWatchSection() {
           <CardContent className="p-0">
             <ReviewWatchTable
               watches={watches}
-              showWorkspace
               onEdit={handleEdit}
               onDelete={handleDelete}
               onTrigger={handleTrigger}
@@ -382,13 +402,15 @@ function ReviewWatchSection() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         watch={editingWatch}
-        // No workspaceId — dialog shows a workspace picker for new watches.
+        workspaceId={workspaceId}
         onCreate={async (req) => {
           await create(req);
           toast({ description: "Review watch created", variant: "success" });
         }}
         onUpdate={async (id, req) => {
-          await update(id, req);
+          const watch = watches.find((item) => item.id === id);
+          if (!watch) throw new Error("review watch not found");
+          await update(id, watch.workspace_id, req);
           toast({ description: "Review watch updated", variant: "success" });
         }}
       />
@@ -405,8 +427,8 @@ function ReviewWatchSection() {
   );
 }
 
-function IssueWatchSection() {
-  const issueActions = useIssueWatchActions(undefined);
+function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
+  const issueActions = useIssueWatchActions(workspaceId);
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWatch, setEditingIssueWatch] = useState<IssueWatch | null>(null);
@@ -436,7 +458,10 @@ function IssueWatchSection() {
         description="Automatically create tasks for GitHub issues matching your criteria."
         action={
           <div className="flex items-center gap-2">
-            <CleanupNowButton label="Clean up closed" run={cleanupClosedIssueTasks} />
+            <CleanupNowButton
+              label="Clean up closed"
+              run={() => cleanupClosedIssueTasks(workspaceId)}
+            />
             <Button
               size="sm"
               onClick={() => {
@@ -455,7 +480,6 @@ function IssueWatchSection() {
           <CardContent className="p-0">
             <IssueWatchTable
               watches={issueActions.watches}
-              showWorkspace
               onEdit={handleEdit}
               onDelete={issueActions.handleDelete}
               onTrigger={issueActions.handleTrigger}
@@ -469,12 +493,15 @@ function IssueWatchSection() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         watch={editingWatch}
+        workspaceId={workspaceId}
         onCreate={async (req) => {
           await issueActions.create(req);
           toast({ description: "Issue watch created", variant: "success" });
         }}
         onUpdate={async (id, req) => {
-          await issueActions.update(id, req);
+          const watch = issueActions.watches.find((item) => item.id === id);
+          if (!watch) throw new Error("issue watch not found");
+          await issueActions.update(id, watch.workspace_id, req);
           toast({ description: "Issue watch updated", variant: "success" });
         }}
       />

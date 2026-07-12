@@ -454,8 +454,18 @@ test.describe("Chat status bar", () => {
 
     const urlBeforeArchive = testPage.url();
 
-    // Click archive in the PR merged banner
+    // Cancelling the confirmation dialog must not archive anything
     await session.prMergedArchiveButton().click();
+    await expect(session.prMergedArchiveConfirmButton()).toBeVisible({ timeout: 10_000 });
+    await testPage.getByRole("alertdialog").getByRole("button", { name: "Cancel" }).click();
+    await expect(session.prMergedArchiveConfirmButton()).not.toBeVisible();
+    await expect(session.prMergedBanner()).toBeVisible();
+    expect(testPage.url()).toBe(urlBeforeArchive);
+
+    // Click archive in the PR merged banner, then confirm in the dialog
+    await session.prMergedArchiveButton().click();
+    await expect(session.prMergedArchiveConfirmButton()).toBeVisible({ timeout: 10_000 });
+    await session.prMergedArchiveConfirmButton().click();
 
     // Should switch to task B
     await expect(session.taskInSidebar("Archive Banner Task A")).not.toBeVisible({

@@ -101,7 +101,10 @@ export function Graph2StepNode({
 }: Graph2StepNodeProps) {
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
-  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
+  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId, {
+    primarySessionState: task.primarySessionState,
+    primarySessionPendingAction: task.primarySessionPendingAction,
+  });
 
   if (phase === "past") return <PastNode step={step} />;
   if (phase === "future") return <FutureNode step={step} />;

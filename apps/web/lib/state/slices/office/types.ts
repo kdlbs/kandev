@@ -505,6 +505,7 @@ export type TierMap = {
 
 export type ProviderProfile = {
   tier_map: TierMap;
+  tier_profile_ids?: Partial<Record<Tier, string>>;
   mode?: string;
   flags?: string[];
   env?: Record<string, string>;

@@ -2,13 +2,17 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import { fetchWorkflowSnapshot } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { toKanbanTask } from "@/lib/kanban/map-task";
-import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { Task } from "@/lib/types/http";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 
 type KanbanTask = KanbanState["tasks"][number];
 type Workflow = { id: string; name: string };
+
+function isBootHydratedSnapshot(snapshot: WorkflowSnapshotData | undefined): boolean {
+  return !!snapshot && snapshot.isPlaceholder !== true;
+}
 
 async function fetchAndWriteSnapshot(
   wf: Workflow,
@@ -17,6 +21,8 @@ async function fetchAndWriteSnapshot(
   myGen: number,
 ): Promise<void> {
   try {
+    const snapshotAtFetchStart = store.getState().kanbanMulti.snapshots[wf.id];
+    const taskIdsAtFetchStart = new Set((snapshotAtFetchStart?.tasks ?? []).map((t) => t.id));
     const snapshot = await fetchWorkflowSnapshot(wf.id, { cache: "no-store" });
     if (fetchGenRef.current !== myGen) return;
 
@@ -51,12 +57,20 @@ async function fetchAndWriteSnapshot(
         return mapped;
       })
       .filter((t): t is KanbanTask => t !== null);
+    const snapshotTaskIds = new Set(tasks.map((t) => t.id));
+    const preserveExistingPlaceholderTasks = snapshotAtFetchStart?.isPlaceholder === true;
+    const inFlightCreatedTasks = (existingSnapshot?.tasks ?? []).filter(
+      (task) =>
+        (preserveExistingPlaceholderTasks || !taskIdsAtFetchStart.has(task.id)) &&
+        !snapshotTaskIds.has(task.id) &&
+        stepIds.has(task.workflowStepId),
+    );
 
     store.getState().setWorkflowSnapshot(wf.id, {
       workflowId: wf.id,
       workflowName: wf.name,
       steps,
-      tasks,
+      tasks: [...tasks, ...inFlightCreatedTasks],
     });
   } catch (err) {
     console.error(
@@ -112,7 +126,9 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
     }
     if (
       lastFetchedRef.current === "" &&
-      workspaceWorkflows.every((wf) => store.getState().kanbanMulti.snapshots[wf.id])
+      workspaceWorkflows.every((wf) =>
+        isBootHydratedSnapshot(store.getState().kanbanMulti.snapshots[wf.id]),
+      )
     ) {
       lastFetchedRef.current = key;
       return;

@@ -38,6 +38,7 @@ export function PassthroughComposerPanel({
   taskId,
   isMoving,
   isSending,
+  onImplementPlan,
 }: {
   refHandle: RefObject<ChatInputContainerHandle | null>;
   onSubmit: PassthroughSubmitHandler;
@@ -46,9 +47,12 @@ export function PassthroughComposerPanel({
   taskId: string | null;
   isMoving: boolean;
   isSending: boolean;
+  onImplementPlan?: (fresh: boolean) => void;
 }) {
   const hasContextComments =
-    panelState.planComments.length > 0 || panelState.pendingPRFeedback.length > 0;
+    panelState.planComments.length > 0 ||
+    panelState.pendingPRFeedback.length > 0 ||
+    panelState.walkthroughComments.length > 0;
   return (
     <div
       data-testid="passthrough-composer"
@@ -83,6 +87,7 @@ export function PassthroughComposerPanel({
         contextFiles={panelState.contextFiles}
         onToggleContextFile={panelState.handleToggleContextFile}
         onAddContextFile={panelState.handleAddContextFile}
+        onImplementPlan={onImplementPlan}
         hideSessionsDropdown
         hideAgentControls
       />
@@ -106,7 +111,8 @@ export function formatPassthroughBaseMessage(
   const hasStructuredComments =
     !!reviewComments ||
     panelState.pendingPRFeedback.length > 0 ||
-    panelState.planComments.length > 0;
+    panelState.planComments.length > 0 ||
+    panelState.walkthroughComments.length > 0;
   if (hasStructuredComments) {
     return {
       formatted: buildSubmitMessage(
@@ -114,6 +120,7 @@ export function formatPassthroughBaseMessage(
         commentsToSend.length > 0 ? commentsToSend : undefined,
         panelState.pendingPRFeedback,
         panelState.planComments,
+        panelState.walkthroughComments,
       ),
       commentsToSend,
     };
@@ -247,6 +254,9 @@ export function clearPassthroughComposerContext(panelState: ReturnType<typeof us
   }
   if (panelState.planComments.length > 0) {
     panelState.clearSessionPlanComments();
+  }
+  if (panelState.walkthroughComments.length > 0) {
+    panelState.handleClearWalkthroughComments();
   }
   if (!panelState.resolvedSessionId) return;
   panelState.clearEphemeral(panelState.resolvedSessionId);

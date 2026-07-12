@@ -43,6 +43,22 @@ func (b *captureBroadcaster) actions() []string {
 	return out
 }
 
+func (b *captureBroadcaster) waitForAction(t *testing.T, action string) []string {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		actions := b.actions()
+		for _, got := range actions {
+			if got == action {
+				return actions
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("broadcast action %s did not arrive in time; got %v", action, b.actions())
+	return nil
+}
+
 // withStubStreamingRunner swaps streamingInstallRunner for the duration of
 // the test. The stub invokes onChunk synchronously to make ordering deterministic.
 func withStubStreamingRunner(t *testing.T, fn func(ctx context.Context, script string, onChunk func(string)) error) {
@@ -111,7 +127,7 @@ func TestEnqueueInstall_StreamsAndSucceeds(t *testing.T) {
 
 	// Must have broadcast a started and a finished message; output messages
 	// land in between but exact count depends on the flush timing.
-	actions := hub.actions()
+	actions := hub.waitForAction(t, ws.ActionAgentInstallFinished)
 	if len(actions) < 2 {
 		t.Fatalf("expected ≥2 broadcasts, got %v", actions)
 	}

@@ -8,6 +8,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -456,7 +457,8 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			zap.String("queue_id", queuedMsg.ID),
 			zap.Error(err))
 
-		if isSessionBusyError(err) || isTransientPromptError(err) || isSessionResetInProgressError(err) {
+		if isSessionBusyError(err) || isTransientPromptError(err) ||
+			errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) {
 			s.logger.Warn("queued message execution failed transiently; requeueing",
 				zap.String("session_id", callerSessionID),
 				zap.String("task_id", queuedMsg.TaskID),

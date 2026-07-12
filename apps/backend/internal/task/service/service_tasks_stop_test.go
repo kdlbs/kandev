@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // --- isCleanableSessionState ---
@@ -264,5 +265,225 @@ func TestCleanupTaskResources_NonTerminalSessionStopFailureBlocksCleanup(t *test
 
 	if _, err := repo.GetExecutorRunningBySessionID(context.Background(), "sess-running"); err != nil {
 		t.Error("executor_running row must be preserved when stop fails for a non-terminal (RUNNING) session")
+	}
+}
+
+func TestCleanupTaskResources_SkipsBorrowedInheritedWorktree(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedParentChildWorkspace(t, repo, "ws-inherited", "wf-inherited", "parent-task", "child-task")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:           "env-parent",
+		TaskID:       "parent-task",
+		WorktreeID:   "wt-parent",
+		WorktreePath: "/tmp/parent-worktree",
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create parent environment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "child-task",
+		State:             models.TaskSessionStateCancelled,
+		TaskEnvironmentID: "env-parent",
+	}); err != nil {
+		t.Fatalf("create child session: %v", err)
+	}
+
+	cleanup := &recordingWorktreeCleanup{
+		worktreesByTaskID: map[string][]*worktree.Worktree{
+			"child-task": {{
+				ID:        "wt-parent",
+				TaskID:    "child-task",
+				SessionID: "session-child",
+				Path:      "/tmp/parent-worktree",
+			}},
+		},
+	}
+	svc.SetWorktreeCleanup(cleanup)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	svc.CleanupTaskResources(ctx, "child-task", true)
+	waitForCleanupDone(t, svc)
+
+	if cleanedIDs := cleanup.cleanedIDs(); len(cleanedIDs) != 0 {
+		t.Fatalf("child cleanup must not clean inherited parent worktrees, got %#v", cleanedIDs)
+	}
+}
+
+func TestCleanupTaskResources_SkipsWorktreeWhenSessionOwnershipUnknown(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedParentChildWorkspace(t, repo, "ws-unknown", "wf-unknown", "parent-task", "child-task")
+
+	cleanup := &recordingWorktreeCleanup{
+		worktreesByTaskID: map[string][]*worktree.Worktree{
+			"child-task": {{
+				ID:        "wt-unknown",
+				TaskID:    "child-task",
+				SessionID: "missing-session",
+				Path:      "/tmp/unknown-worktree",
+			}},
+		},
+	}
+	svc.SetWorktreeCleanup(cleanup)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	svc.CleanupTaskResources(ctx, "child-task", true)
+	waitForCleanupDone(t, svc)
+
+	if cleanedIDs := cleanup.cleanedIDs(); len(cleanedIDs) != 0 {
+		t.Fatalf("cleanup must fail closed when session ownership is unknown, got %#v", cleanedIDs)
+	}
+}
+
+func TestCleanupTaskResources_PreservesOwnedEnvironmentWithActiveInheritedChild(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedParentChildWorkspace(t, repo, "ws-shared", "wf-shared", "parent-task", "child-task")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:           "env-parent",
+		TaskID:       "parent-task",
+		WorktreeID:   "wt-parent",
+		WorktreePath: "/tmp/parent-worktree",
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create parent environment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-parent",
+		TaskID:            "parent-task",
+		State:             models.TaskSessionStateCancelled,
+		TaskEnvironmentID: "env-parent",
+	}); err != nil {
+		t.Fatalf("create parent session: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "child-task",
+		State:             models.TaskSessionStateRunning,
+		TaskEnvironmentID: "env-parent",
+	}); err != nil {
+		t.Fatalf("create child session: %v", err)
+	}
+
+	destroyer := &stubDestroyer{}
+	svc.SetEnvironmentDestroyer(destroyer)
+	cleanup := &recordingWorktreeCleanup{
+		worktreesByTaskID: map[string][]*worktree.Worktree{
+			"parent-task": {{
+				ID:        "wt-parent",
+				TaskID:    "parent-task",
+				SessionID: "session-parent",
+				Path:      "/tmp/parent-worktree",
+			}},
+		},
+	}
+	svc.SetWorktreeCleanup(cleanup)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	svc.CleanupTaskResources(ctx, "parent-task", false)
+	waitForCleanupDone(t, svc)
+
+	if len(destroyer.worktreeCalls) != 0 {
+		t.Fatalf("parent cleanup must not destroy a worktree while an active child inherits it, got %#v", destroyer.worktreeCalls)
+	}
+	if cleanedIDs := cleanup.cleanedIDs(); len(cleanedIDs) != 0 {
+		t.Fatalf("parent cleanup must not batch-clean a shared inherited worktree, got %#v", cleanedIDs)
+	}
+}
+
+func TestDeleteTask_TransfersBorrowedEnvironmentBeforeDeletingOwner(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedParentChildWorkspace(t, repo, "ws-transfer", "wf-transfer", "parent-task", "child-task")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:           "env-parent",
+		TaskID:       "parent-task",
+		WorktreeID:   "wt-parent",
+		WorktreePath: "/tmp/parent-worktree",
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create parent environment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "child-task",
+		State:             models.TaskSessionStateRunning,
+		TaskEnvironmentID: "env-parent",
+	}); err != nil {
+		t.Fatalf("create child session: %v", err)
+	}
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	if err := svc.DeleteTask(ctx, "parent-task"); err != nil {
+		t.Fatalf("delete parent task: %v", err)
+	}
+
+	env, err := repo.GetTaskEnvironment(ctx, "env-parent")
+	if err != nil {
+		t.Fatalf("borrowed environment should survive parent delete: %v", err)
+	}
+	if env.TaskID != "child-task" {
+		t.Fatalf("borrowed environment owner = %q, want child-task", env.TaskID)
+	}
+}
+
+func TestCleanupTaskResources_TransfersBorrowedEnvironmentBeforeCascadeDelete(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedParentChildWorkspace(t, repo, "ws-cascade-transfer", "wf-cascade-transfer", "parent-task", "child-task")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:           "env-parent",
+		TaskID:       "parent-task",
+		WorktreeID:   "wt-parent",
+		WorktreePath: "/tmp/parent-worktree",
+		Status:       models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("create parent environment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "session-child",
+		TaskID:            "child-task",
+		State:             models.TaskSessionStateRunning,
+		TaskEnvironmentID: "env-parent",
+	}); err != nil {
+		t.Fatalf("create child session: %v", err)
+	}
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	svc.CleanupTaskResources(ctx, "parent-task", true)
+	waitForCleanupDone(t, svc)
+	if err := repo.DeleteTask(ctx, "parent-task"); err != nil {
+		t.Fatalf("delete parent task: %v", err)
+	}
+
+	env, err := repo.GetTaskEnvironment(ctx, "env-parent")
+	if err != nil {
+		t.Fatalf("borrowed environment should survive cascade owner delete: %v", err)
+	}
+	if env.TaskID != "child-task" {
+		t.Fatalf("borrowed environment owner = %q, want child-task", env.TaskID)
+	}
+}
+
+func seedParentChildWorkspace(t *testing.T, repo interface {
+	CreateWorkspace(context.Context, *models.Workspace) error
+	CreateWorkflow(context.Context, *models.Workflow) error
+	CreateTask(context.Context, *models.Task) error
+}, wsID, wfID, parentID, childID string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: wsID, Name: "Workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: wfID, WorkspaceID: wsID, Name: "Workflow"}); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: parentID, WorkspaceID: wsID, WorkflowID: wfID, WorkflowStepID: "step-1", Title: "Parent", Priority: "medium"}); err != nil {
+		t.Fatalf("create parent task: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: childID, WorkspaceID: wsID, WorkflowID: wfID, WorkflowStepID: "step-1", ParentID: parentID, Title: "Child", Priority: "medium"}); err != nil {
+		t.Fatalf("create child task: %v", err)
 	}
 }

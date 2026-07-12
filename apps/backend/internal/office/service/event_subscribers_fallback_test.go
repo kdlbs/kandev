@@ -29,7 +29,7 @@ func (s *stubTaskWorkspace) DeleteWorkspace(_ context.Context, _ string) error {
 	return nil
 }
 func (s *stubTaskWorkspace) ListTasksByWorkspace(
-	_ context.Context, _, _, _, _ string, _, _ int, _, _, _, _ bool,
+	_ context.Context, _, _, _, _ string, _, _ int, _ string, _, _, _, _ bool,
 ) ([]*taskmodels.Task, int, error) {
 	return nil, 0, nil
 }

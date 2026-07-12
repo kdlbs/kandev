@@ -370,7 +370,9 @@ jobs:
   desktop-e2e:
     name: Desktop E2E Smoke
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Includes Ubuntu WebKit/Tauri system package installation; GitHub apt mirrors
+    # can spend more than 20 minutes there before tests start.
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash

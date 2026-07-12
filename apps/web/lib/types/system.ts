@@ -34,6 +34,7 @@ export interface DiskUsageResponse {
 }
 
 export interface DatabaseStats {
+  driver: string;
   path: string;
   size_bytes: number;
   wal_size_bytes: number;

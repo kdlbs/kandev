@@ -54,30 +54,31 @@ func Provide(writer, reader *sqlx.DB, secrets SecretStore, eventBus bus.EventBus
 	return svc, cleanup, nil
 }
 
-// migrateLegacySecret copies the per-workspace token from the pre-singleton
-// secret key onto the new install-wide key, then deletes the legacy entry.
+// migrateLegacySecret copies the old install-wide token onto the
+// workspace-scoped key created by the config migration, then deletes the legacy
+// entry. If the workspace key already exists, it leaves both values alone.
 // Best-effort: any error is logged and ignored — the worst case is the user
 // re-pastes their token in the settings UI.
 func migrateLegacySecret(store *Store, secrets SecretStore, log *logger.Logger) {
-	source := store.MigratedFromWorkspace()
-	if source == "" || secrets == nil {
+	target := store.MigratedFromWorkspace()
+	if target == "" || secrets == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if exists, err := secrets.Exists(ctx, SecretKey); err == nil && exists {
+	targetKey := SecretKeyForWorkspace(target)
+	if exists, err := secrets.Exists(ctx, targetKey); err == nil && exists {
 		return
 	}
-	legacyKey := LegacySecretKeyForWorkspace(source)
-	value, err := secrets.Reveal(ctx, legacyKey)
+	value, err := secrets.Reveal(ctx, SecretKey)
 	if err != nil || value == "" {
 		return
 	}
-	if err := secrets.Set(ctx, SecretKey, "Jira token", value); err != nil {
+	if err := secrets.Set(ctx, targetKey, "Jira token", value); err != nil {
 		log.Warn("jira: legacy secret migration failed", zap.Error(err))
 		return
 	}
-	if err := secrets.Delete(ctx, legacyKey); err != nil {
+	if err := secrets.Delete(ctx, SecretKey); err != nil {
 		log.Warn("jira: legacy secret cleanup failed", zap.Error(err))
 	}
 }

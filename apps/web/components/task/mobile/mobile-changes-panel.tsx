@@ -11,13 +11,14 @@ import { ChangesPanelHeader } from "../changes-panel-header";
 import { MobileDiffSheet } from "./mobile-diff-sheet";
 import { useReviewSources } from "@/hooks/domains/session/use-review-sources";
 import { useAppStore } from "@/components/state-provider";
+import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import type { SelectedDiff } from "../task-layout";
 import type { OpenDiffOptions, DiffSheetMode } from "../changes-diff-target";
 
 type MobileChangesPanelProps = {
   selectedDiff: SelectedDiff | null;
   onClearSelected: () => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
 };
 
 /**
@@ -34,6 +35,11 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const { sourceCounts } = useReviewSources(activeSessionId);
   const [diffSheet, setDiffSheet] = useState<DiffSheetMode | null>(null);
+  const requestWalkthrough = useRequestChangesWalkthrough({
+    taskId: data.activeTaskId,
+    sessionId: data.activeSessionId,
+    ready: data.walkthroughRequestReady,
+  });
 
   // Track the previous selectedDiff to detect changes
   const prevSelectedDiffRef = useRef<SelectedDiff | null>(null);
@@ -100,11 +106,14 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           loadingOperation={data.git.loadingOperation}
           onOpenDiffAll={handleOpenDiffAll}
           onOpenReview={handleOpenReview}
+          onRequestWalkthrough={requestWalkthrough}
+          requestWalkthroughDisabled={!data.walkthroughRequestReady}
           repoNames={data.git.repoNames}
           perRepoStatus={data.git.perRepoStatus}
           onRepoPull={data.repoCallbacks.onRepoPull}
           onRepoRebase={data.repoCallbacks.onRepoRebase}
           onRepoMerge={data.repoCallbacks.onRepoMerge}
+          onRenameBranch={data.git.renameBranch}
           repoDisplayName={data.repoDisplayName}
           taskId={data.activeTaskId}
         />

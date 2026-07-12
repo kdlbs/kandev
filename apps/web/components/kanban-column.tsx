@@ -6,6 +6,7 @@ import { KanbanCard, resolveTaskRepositoryChips, Task } from "./kanban-card";
 import { Badge } from "@kandev/ui/badge";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
+import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { Repository } from "@/lib/types/http";
 
 export interface WorkflowStep {
@@ -34,7 +35,10 @@ interface KanbanColumnProps {
   hideHeader?: boolean;
   selectedIds?: Set<string>;
   onToggleSelect?: (taskId: string) => void;
+  /** Shift-click range select; receives the clicked id + this column's ordered ids. */
+  onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
+  externalLinkAvailability: KanbanExternalLinkAvailability;
 }
 
 export function KanbanColumn({
@@ -53,11 +57,14 @@ export function KanbanColumn({
   hideHeader = false,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
+  externalLinkAvailability,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: step.id,
   });
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
 
   // Access repositories from store to pass repository names to cards
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
@@ -65,6 +72,10 @@ export function KanbanColumn({
     () => Object.values(repositoriesByWorkspace).flat() as Repository[],
     [repositoriesByWorkspace],
   );
+
+  // Ordered ids of the cards rendered in this column — the source of truth for
+  // shift-click range selection (matches exactly what the user sees).
+  const columnTaskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
 
   return (
     <div
@@ -95,6 +106,8 @@ export function KanbanColumn({
           <KanbanCard
             key={task.id}
             task={task}
+            workspaceId={activeWorkspaceId}
+            externalLinkAvailability={externalLinkAvailability}
             repositoryChips={resolveTaskRepositoryChips(task, repositories)}
             onClick={onPreviewTask}
             onOpenFullPage={onOpenTask}
@@ -109,6 +122,9 @@ export function KanbanColumn({
             isSelected={selectedIds?.has(task.id)}
             selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
+            onRangeSelect={
+              onSelectRange ? (taskId) => onSelectRange(taskId, columnTaskIds) : undefined
+            }
             isMultiSelectMode={isMultiSelectMode}
           />
         ))}

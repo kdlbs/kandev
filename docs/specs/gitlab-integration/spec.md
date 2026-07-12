@@ -21,13 +21,13 @@ Tracked in [#820](https://github.com/kdlbs/kandev/issues/820).
 
 - A GitLab integration runs alongside the GitHub one. Both can be configured at
   the same time; neither replaces the other.
-- Users authenticate GitLab via one of:
+- Users authenticate GitLab per Kandev workspace via one of:
   - `glab` CLI (auto-detected if installed and logged in).
-  - Personal access token stored in the secret store as `GITLAB_TOKEN` (or set
-    via the env var of the same name on the backend host).
+  - Personal access token stored in the secret store for that workspace (or set
+    via `GITLAB_TOKEN` on the backend host as a process-wide fallback).
 - Self-managed instances are supported by configuring a GitLab host URL
-  (default `https://gitlab.com`). The host applies to API calls, clone URLs,
-  and web links.
+  per workspace (default `https://gitlab.com`). The host applies to API calls,
+  clone URLs, and web links for that workspace.
 - Repositories can be added with `provider = "gitlab"`. The repo cloner builds
   SSH (`git@<host>:<owner>/<name>.git`) and HTTPS clone URLs against the
   configured host, and authenticates HTTPS clones with the GitLab token when
@@ -48,8 +48,9 @@ Tracked in [#820](https://github.com/kdlbs/kandev/issues/820).
   REST API with the stored token), targeting the same base branch logic used
   for GitHub.
 - Settings live under `/settings/integrations/gitlab` with a page parallel to
-  the GitHub one: connection status, host URL field, auth method (CLI vs PAT),
-  reconnect CTA, and a token field that writes to the secret store.
+  the GitHub one: workspace selector, connection status, host URL field, auth
+  method (CLI vs PAT), reconnect CTA, token field that writes to the secret
+  store, and a copy action for duplicating the config to another workspace.
 - The orchestrator and credential providers pass `GITLAB_TOKEN` into agent
   environments the same way `GITHUB_TOKEN` is passed today, so agents running
   in containers can run `glab` or `git push` without extra setup.
@@ -63,9 +64,9 @@ Tracked in [#820](https://github.com/kdlbs/kandev/issues/820).
 
 - **GIVEN** a user on a self-managed GitLab at `https://gitlab.acme.corp`,
   **WHEN** they enter the host URL and a personal access token in
-  Settings → Integrations → GitLab, **THEN** the connection status flips to
-  connected, MR/issue lists populate against the custom host, and clone URLs
-  for added repos use `gitlab.acme.corp`.
+  Settings → Integrations → GitLab for Workspace A, **THEN** Workspace A's
+  connection status flips to connected, MR/issue lists populate against the
+  custom host, and clone URLs for Workspace A repos use `gitlab.acme.corp`.
 
 - **GIVEN** a task whose repository has `provider = "gitlab"`, **WHEN** the
   agent runs the `pr` skill, **THEN** a merge request is opened on the
@@ -82,8 +83,9 @@ Tracked in [#820](https://github.com/kdlbs/kandev/issues/820).
 
 - **GIVEN** the user revokes their GitLab token externally, **WHEN** the
   background poller next runs, **THEN** the integration's status flips to
-  "auth required" with a reconnect banner on the GitLab page and the settings
-  page, and no further API calls are issued until the user reconnects.
+  "auth required" for the affected workspace with a reconnect banner on the
+  GitLab page and the settings page, and no further API calls are issued for
+  that workspace until the user reconnects.
 
 - **GIVEN** no GitLab auth is configured, **WHEN** the GitLab page is opened,
   **THEN** it shows a "not connected" notice linking to settings, and no

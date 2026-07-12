@@ -8,6 +8,7 @@ import type {
   Message,
   Turn,
   TaskSession,
+  TaskWalkthrough,
 } from "@/lib/types/http";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
@@ -155,6 +156,7 @@ export type AppState = {
   pendingModel: (typeof defaultSessionState)["pendingModel"];
   activeModel: (typeof defaultSessionState)["activeModel"];
   taskPlans: (typeof defaultSessionState)["taskPlans"];
+  walkthroughs: (typeof defaultSessionState)["walkthroughs"];
   queue: (typeof defaultSessionState)["queue"];
 
   // Session Runtime slice
@@ -469,6 +471,10 @@ export type AppState = {
   setPreviewRevision: (taskId: string, revisionId: string | null) => void;
   toggleComparePair: (taskId: string, revisionId: string) => void;
   clearComparePair: (taskId: string) => void;
+  // Walkthrough actions
+  setWalkthrough: (taskId: string, walkthrough: TaskWalkthrough | null) => void;
+  setWalkthroughActiveStep: (taskId: string, stepIndex: number) => void;
+  markWalkthroughSeen: (taskId: string) => void;
   // Queue actions
   setQueueEntries: (
     sessionId: string,
@@ -526,6 +532,8 @@ export type AppState = {
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
   setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
   togglePinnedTask: UIA["togglePinnedTask"];
+  pinTasks: UIA["pinTasks"];
+  unpinTasks: UIA["unpinTasks"];
   setSidebarTaskOrder: UIA["setSidebarTaskOrder"];
   setSubtaskOrder: UIA["setSubtaskOrder"];
   removeTaskFromSidebarPrefs: UIA["removeTaskFromSidebarPrefs"];

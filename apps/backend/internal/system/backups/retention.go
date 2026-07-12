@@ -32,6 +32,10 @@ const (
 	autoPrefix   = "kandev-"
 	manualPrefix = "manual-"
 	dbSuffix     = ".db"
+	// tmpSuffix marks an in-progress VACUUM INTO sidecar. classify() skips
+	// it (no .db suffix) so it is never listed, and runCreate sweeps any
+	// leftovers from a crashed run before writing a new snapshot.
+	tmpSuffix = ".tmp"
 )
 
 // preResetPrefix marks recovery snapshots written by the Factory Reset

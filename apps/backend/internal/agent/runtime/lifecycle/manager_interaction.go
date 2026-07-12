@@ -739,7 +739,9 @@ func (m *Manager) initializeACPSessionForRestart(
 	// Mark execution as ready. This is a *boot* signal — initializeACPSessionForRestart
 	// is the post-restart init path and no turn has run yet, so AgentBootReady (not
 	// AgentReady) is what subscribers want to route on.
-	m.executionStore.UpdateStatus(execution.ID, v1.AgentStatusReady)
+	if err := m.updateStatusAndPersist(ctx, execution.ID, v1.AgentStatusReady); err != nil {
+		return err
+	}
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentBootReady, execution)
 
 	return nil
@@ -987,10 +989,63 @@ func (m *Manager) IsAgentReadyForPrompt(ctx context.Context, sessionID string) b
 	return execution.agentctl.HasAgentStream()
 }
 
+func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string) error {
+	execution, exists := m.GetExecutionBySessionID(sessionID)
+	if !exists {
+		return fmt.Errorf("session %q has no execution: %w", sessionID, ErrExecutionNotFound)
+	}
+	if execution.PassthroughProcessID != "" || execution.IsPassthrough || execution.agentctl == nil {
+		return nil
+	}
+	if execution.agentctl.HasAgentStream() {
+		return nil
+	}
+	if m.streamManager == nil {
+		return fmt.Errorf("stream manager is not configured")
+	}
+
+	ready := make(chan struct{})
+	// Prompt recovery is reached through the per-session prompt path. Avoid a
+	// broader reconnect registry here; HasAgentStream above covers steady state.
+	m.streamManager.connectUpdatesStreamAsync(execution, ready)
+	select {
+	case <-ready:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	if !execution.agentctl.HasAgentStream() {
+		return fmt.Errorf("agent stream not connected")
+	}
+	if execution.Status == v1.AgentStatusFailed && execution.sessionInitialized && execution.ACPSessionID != "" {
+		return m.restoreRecoveredFailedExecution(ctx, execution)
+	}
+	return nil
+}
+
+func (m *Manager) restoreRecoveredFailedExecution(ctx context.Context, execution *AgentExecution) error {
+	status, err := execution.agentctl.GetStatus(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to verify agent status after stream recovery: %w", err)
+	}
+	if !status.IsAgentRunning() {
+		return fmt.Errorf("agent process is not running after stream recovery: %s", status.AgentStatus)
+	}
+	if err := m.markBootReadyFromFailed(ctx, execution.ID); err != nil {
+		return err
+	}
+	return nil
+}
+
 // UpdateStatus updates the status of an execution
 func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error {
+	return m.updateStatusAndPersist(context.Background(), executionID, status)
+}
+
+func (m *Manager) updateStatusAndPersist(ctx context.Context, executionID string, status v1.AgentStatus) error {
+	var updated *AgentExecution
 	if err := m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
 		execution.Status = status
+		updated = execution
 	}); err != nil {
 		if errors.Is(err, ErrExecutionNotFound) {
 			return fmt.Errorf("execution %q not found", executionID)
@@ -1002,6 +1057,9 @@ func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error 
 		zap.String("execution_id", executionID),
 		zap.String("status", string(status)))
 
+	if updated != nil {
+		m.persistExecutorRunning(context.WithoutCancel(ctx), updated)
+	}
 	return nil
 }
 
@@ -1036,12 +1094,27 @@ func (m *Manager) MarkReady(executionID string) error {
 //
 // Publishes events.AgentBootReady. Returns error if execution not found.
 func (m *Manager) MarkBootReady(executionID string) error {
-	return m.markReadyEvent(executionID, events.AgentBootReady)
+	return m.markReadyEventWithContext(context.Background(), executionID, events.AgentBootReady)
 }
 
 // markReadyEvent is the shared body of MarkReady / MarkBootReady — both flip
 // the execution to the Ready status and publish their respective event type.
 func (m *Manager) markReadyEvent(executionID, eventType string) error {
+	return m.markReadyEventWithContext(context.Background(), executionID, eventType)
+}
+
+func (m *Manager) markBootReadyFromFailed(ctx context.Context, executionID string) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	if execution.Status != v1.AgentStatusFailed {
+		return nil
+	}
+	return m.markReadyEventWithContext(ctx, executionID, events.AgentBootReady)
+}
+
+func (m *Manager) markReadyEventWithContext(ctx context.Context, executionID, eventType string) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
@@ -1054,13 +1127,15 @@ func (m *Manager) markReadyEvent(executionID, eventType string) error {
 		return nil
 	}
 
-	m.executionStore.UpdateStatus(executionID, v1.AgentStatusReady)
+	if err := m.updateStatusAndPersist(ctx, executionID, v1.AgentStatusReady); err != nil {
+		return err
+	}
 
 	m.logger.Info("execution ready",
 		zap.String("execution_id", executionID),
 		zap.String("event_type", eventType))
 
-	m.eventPublisher.PublishAgentEvent(context.Background(), eventType, execution)
+	m.eventPublisher.PublishAgentEvent(ctx, eventType, execution)
 	return nil
 }
 
@@ -1116,6 +1191,14 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 
 	// End session trace span
 	execution.EndSessionSpan()
+
+	// Persist the terminal status to executors_running. Unlike the Ready/Running
+	// transitions (which flow through updateStatusAndPersist), MarkCompleted is
+	// the process-exit/crash boundary and historically skipped persistence — so a
+	// row kept claiming a `running`/`starting` process after it had exited
+	// (#1597). Re-stamping here leaves the row truthful (terminal
+	// status + fresh last_seen_at) the moment the process is gone.
+	m.persistExecutorRunning(context.Background(), execution)
 
 	m.logger.Info("execution completed",
 		zap.String("execution_id", executionID),

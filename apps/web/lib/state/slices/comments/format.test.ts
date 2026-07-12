@@ -3,9 +3,10 @@ import {
   formatPlanCommentsAsMarkdown,
   formatReviewCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
+  formatWalkthroughCommentsAsMarkdown,
   formatCommentsForMessage,
 } from "./format";
-import type { PlanComment, DiffComment, PRFeedbackComment } from "./types";
+import type { PlanComment, DiffComment, PRFeedbackComment, WalkthroughComment } from "./types";
 
 function makePlanComment(overrides: Partial<PlanComment> = {}): PlanComment {
   return {
@@ -141,6 +142,42 @@ describe("formatPRFeedbackAsMarkdown", () => {
   });
 });
 
+describe("formatWalkthroughCommentsAsMarkdown", () => {
+  function makeWalkthroughComment(overrides: Partial<WalkthroughComment> = {}): WalkthroughComment {
+    return {
+      id: "wtc-1",
+      sessionId: "sess-1",
+      source: "walkthrough",
+      taskId: "task-1",
+      walkthroughId: "wt-1",
+      walkthroughTitle: "Implementation tour",
+      stepIndex: 1,
+      stepCount: 4,
+      repo: "frontend",
+      filePath: "apps/web/main.ts",
+      startLine: 10,
+      endLine: 12,
+      stepText: "The agent explanation",
+      text: "Can you simplify this?",
+      createdAt: new Date().toISOString(),
+      status: "pending",
+      ...overrides,
+    };
+  }
+
+  it("formats walkthrough feedback with step and anchor context", () => {
+    const result = formatWalkthroughCommentsAsMarkdown([makeWalkthroughComment()]);
+
+    expect(result).toContain("### Walkthrough Feedback");
+    expect(result).toContain("**Implementation tour · Step 2 / 4**");
+    expect(result).toContain("**frontend/apps/web/main.ts:10-12**");
+    expect(result).toContain("Agent walkthrough text:");
+    expect(result).toContain("> The agent explanation");
+    expect(result).toContain("User feedback:");
+    expect(result).toContain("> Can you simplify this?");
+  });
+});
+
 describe("formatCommentsForMessage", () => {
   it("separates comments by type", () => {
     const diff: DiffComment = {
@@ -171,5 +208,6 @@ describe("formatCommentsForMessage", () => {
     expect(result.diffComments).toHaveLength(1);
     expect(result.planComments).toHaveLength(1);
     expect(result.prFeedbackComments).toHaveLength(0);
+    expect(result.walkthroughComments).toHaveLength(0);
   });
 });

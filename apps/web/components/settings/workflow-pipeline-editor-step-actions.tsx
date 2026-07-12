@@ -263,7 +263,7 @@ export function TurnCompleteSelect({
           <Label htmlFor={`${step.id}-disable-plan`} className="text-sm">
             Disable plan mode on complete
           </Label>
-          <HelpTip text="Turn off plan mode after the agent finishes this step." />
+          <HelpTip text="Turn off plan mode after the agent finishes a turn, even when the task remains in this step." />
         </div>
       )}
       {transitionType !== "none" && (

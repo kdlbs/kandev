@@ -30,7 +30,7 @@ The first thing you do — before fetching PR state, before reading logs, before
 
 Create these tasks immediately (use your task/todo tracking tool if available):
 
-1. **Gather PR state** — Use `pr-poller` when available; otherwise gather compact CI + bot review state via `scripts/pr-state`
+1. **Gather PR state** — Use `pr-poller` when available; otherwise gather compact CI + bot review state via `scripts/pr-state`; always check PR mergeability and local conflict state
 2. **Fix failing CI checks** — Read failing run logs (via `scripts/run-quiet gh-run -- gh run view ...`), fix issues, run E2E tests locally if needed
 3. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
 4. **Address each comment** — Fix or reply with reasoning, resolve threads
@@ -54,12 +54,18 @@ If available, invoke the `pr-poller` subagent with the PR number (or let it reso
 - Counts unresolved review threads and bot issue comments
 - Returns a structured report between `=== pr-poller report ===` and `=== end ===` markers
 
+### Merge-conflict gate
+
+Always check for merge conflicts during task 1 before acting on any clean-poller shortcut. A PR can be blocked by conflicts before any check fails.
+
+Inspect GitHub's `mergeable` / `mergeStateStatus` fields and the local index (`git ls-files -u`) before fixing CI or review comments. If GitHub reports file-level conflicts, the local index is unmerged, or conflict markers exist in tracked source files, load `references/merge-conflicts.md` and resolve the conflicts first. Do not start a new merge/rebase while the index is already unmerged, and do not discard unrelated user changes to make conflict resolution easier.
+
 **Parse the report.** The fields you care about:
 
 - `ci_failed` — list of `{name, run_id, conclusion, url}`. Empty list ⇒ CI is green.
 - `ci_pending` — anything still running when the 20-min cap hit. Decide whether to re-invoke `pr-poller` after a short delay, or proceed with what you have and re-check at step 6.
 - `bots.<name>` — `done` / `rate_limited` / `pending` / `timeout`. Anything in `done` or `rate_limited` has had its chance; treat the rest as missing data, not a blocker.
-- `unresolved_review_threads` and `issue_comments_from_bots` — drive steps 3-4. If both are 0 and `ci_failed` is empty, skip to step 5 (still run verify + push if you have fixes from earlier).
+- `unresolved_review_threads` and `issue_comments_from_bots` — drive steps 3-4. If both are 0, `ci_failed` is empty, and the merge-conflict gate is clean, skip to step 5 (still run verify + push if you have fixes from earlier).
 
 **E2E CI outlasts the poller.** The pr-poller caps at ~20 minutes. Standard E2E shards plus container shards often run longer. GitHub can expand E2E matrix jobs late, and the shard matrix may appear only after the build job finishes; if pending checks briefly drop near zero and then jump when E2E shards appear, keep treating that as normal pending CI unless a shard reports failure. If the report shows `ci_pending` with only E2E/lint jobs and `ci_failed` is empty, re-invoke pr-poller once those jobs finish — do not spin a manual `gh pr checks` loop in the parent. If the cap hits with E2E still pending, report "CI in progress" to the user instead of blocking, and include the exact pending shard names from `ci_pending`.
 

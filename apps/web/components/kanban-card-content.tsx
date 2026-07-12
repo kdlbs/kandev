@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CSS, type Transform } from "@dnd-kit/utilities";
 import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
 import {
@@ -20,9 +20,10 @@ import {
   KanbanCardDropdownMenuItems,
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
   getTaskStateIcon,
   shouldShowTaskRunningSpinner,
@@ -31,6 +32,8 @@ import {
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
+
+const kanbanStatusDebug = createDebugLogger("kanban:task-status");
 
 type KanbanCardActionProps = {
   task: Task;
@@ -55,7 +58,7 @@ export type KanbanCardShellProps = KanbanCardActionProps &
     isSelected?: boolean;
     isMultiSelectMode?: boolean;
     isPreviewed: boolean;
-    onClick: () => void;
+    onClick: (e: React.MouseEvent) => void;
     onCheckboxClick: (e: React.MouseEvent) => void;
   };
 
@@ -217,10 +220,24 @@ function KanbanCardActions({
   isArchiving,
 }: KanbanCardActionProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [storePrimarySessionState, setStorePrimarySessionState] = useState<string | null>(null);
+  const storeApi = useAppStoreApi();
+  const debugEnabled = isDebug();
   const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
-  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId);
+  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId, {
+    primarySessionState: task.primarySessionState,
+    primarySessionPendingAction: task.primarySessionPendingAction,
+  });
   const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarificationRequest);
   const showRunningSpinner = shouldShowTaskRunningSpinner(task.state, task.primarySessionState);
+  const storeWouldShowRunningSpinner =
+    storePrimarySessionState === null
+      ? null
+      : shouldShowTaskRunningSpinner(task.state, storePrimarySessionState);
+  const hasSpinnerMismatch =
+    showRunningSpinner &&
+    storeWouldShowRunningSpinner === false &&
+    task.primarySessionState !== storePrimarySessionState;
   const statusIcon = showRunningSpinner ? (
     <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />
   ) : (
@@ -228,6 +245,45 @@ function KanbanCardActions({
   );
   const hasKnownSession =
     Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
+
+  useEffect(() => {
+    if (!debugEnabled || !task.primarySessionId) {
+      setStorePrimarySessionState(null);
+      return;
+    }
+
+    const primarySessionId = task.primarySessionId;
+    const readPrimarySessionState = () =>
+      storeApi.getState().taskSessions.items[primarySessionId]?.state ?? null;
+    const syncPrimarySessionState = () => {
+      const nextState = readPrimarySessionState();
+      setStorePrimarySessionState((current) => (current === nextState ? current : nextState));
+    };
+
+    syncPrimarySessionState();
+    return storeApi.subscribe(syncPrimarySessionState);
+  }, [debugEnabled, storeApi, task.primarySessionId]);
+
+  useEffect(() => {
+    if (!hasSpinnerMismatch || !debugEnabled) return;
+    kanbanStatusDebug("spinner mismatch", {
+      task_id: task.id,
+      taskState: task.state ?? "-",
+      primarySessionId: task.primarySessionId ?? "-",
+      taskPrimarySessionState: task.primarySessionState ?? "-",
+      storePrimarySessionState: storePrimarySessionState ?? "-",
+      showSpinner: showRunningSpinner,
+    });
+  }, [
+    debugEnabled,
+    hasSpinnerMismatch,
+    showRunningSpinner,
+    storePrimarySessionState,
+    task.id,
+    task.primarySessionId,
+    task.primarySessionState,
+    task.state,
+  ]);
 
   return (
     <div className="flex items-center gap-2">

@@ -13,6 +13,7 @@ import { useEditorViewZoneComments } from "@/hooks/use-editor-view-zone-comments
 import { MonacoEditorToolbar } from "./monaco-editor-toolbar";
 import { useMonacoEditorComments } from "./use-monaco-editor-state";
 import { useMonacoEditorLsp, useMonacoDiffDecorations } from "./use-monaco-editor-lsp";
+import { useMonacoWalkthroughRange } from "./use-monaco-walkthrough-range";
 import { initMonacoThemes } from "./monaco-init";
 
 initMonacoThemes();
@@ -27,6 +28,7 @@ type MonacoCodeEditorProps = {
   isSaving: boolean;
   sessionId?: string;
   worktreePath?: string;
+  repo?: string;
   enableComments?: boolean;
   onToggleMarkdownPreview?: () => void;
   onChange: (newContent: string) => void;
@@ -116,6 +118,7 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
     vcsDiff,
     sessionId,
     worktreePath,
+    repo,
     enableComments = false,
     onChange,
     onSave,
@@ -125,6 +128,7 @@ function useMonacoCodeEditorSetup(props: MonacoCodeEditorProps) {
   const language = getMonacoLanguage(path);
   const state = useMonacoEditorComments({
     path,
+    repo,
     enableComments,
     sessionId,
     wrapperRef,
@@ -175,6 +179,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
     isSaving,
     sessionId,
     worktreePath,
+    repo,
     enableComments = false,
     onToggleMarkdownPreview,
     onSave,
@@ -183,6 +188,13 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
   } = props;
   const { resolvedTheme } = useTheme();
   const { wrapperRef, language, state, lsp, diffStats, options } = useMonacoCodeEditorSetup(props);
+  const editorAreaRef = useRef<HTMLDivElement>(null);
+  const walkthroughRange = useMonacoWalkthroughRange({
+    editor: state.editorInstance,
+    editorAreaRef,
+    path,
+    repo,
+  });
 
   return (
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
@@ -209,7 +221,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
         onDelete={onDelete}
         onToggleMarkdownPreview={onToggleMarkdownPreview}
       />
-      <div className="flex-1 overflow-hidden relative">
+      <div className="flex-1 overflow-hidden relative" ref={editorAreaRef}>
         <Editor
           height="100%"
           language={language}
@@ -226,6 +238,21 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
             </div>
           }
         />
+        {walkthroughRange ? (
+          <div
+            aria-hidden="true"
+            data-testid="walkthrough-editor-range"
+            data-line-range={`${walkthroughRange.startLine}-${walkthroughRange.endLine}`}
+            className="pointer-events-none absolute z-20 rounded-sm border-l-2 border-primary/70 bg-primary/10"
+            style={{
+              top: walkthroughRange.top,
+              left: walkthroughRange.left,
+              width: walkthroughRange.width,
+              height: walkthroughRange.height,
+              boxShadow: "inset 0 0 0 1px color-mix(in oklab, var(--primary) 22%, transparent)",
+            }}
+          />
+        ) : null}
         {state.floatingButtonPos && !state.formZoneRange && (
           <Button
             size="sm"

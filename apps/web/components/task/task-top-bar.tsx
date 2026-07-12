@@ -12,9 +12,7 @@ import { DocumentControls } from "@/components/task/document/document-controls";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 import { JiraTicketButton, extractJiraKey } from "@/components/jira/jira-ticket-button";
-import { JiraLinkButton } from "@/components/jira/jira-link-button";
 import { LinearIssueButton, extractLinearKey } from "@/components/linear/linear-issue-button";
-import { LinearLinkButton } from "@/components/linear/linear-link-button";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
@@ -96,7 +94,6 @@ const TaskTopBar = memo(function TaskTopBar({
         )}
       </div>
       <TopBarRight
-        taskId={taskId}
         activeSessionId={activeSessionId}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
@@ -113,23 +110,21 @@ const TaskTopBar = memo(function TaskTopBar({
   );
 });
 
-// IssueTrackerButtons picks the right ticket button for a task. Jira and
-// Linear use the same TEAM-NUMBER identifier shape, so both `extract` calls
-// would match "ENG-123" — we resolve ambiguity by preferring whichever
-// integration is currently available for the workspace, with Jira winning the
-// tie-break since it shipped first. When the title carries no identifier,
-// both link buttons are offered (each gated on its own availability).
+// IssueTrackerButtons picks the right ticket status button for a task whose
+// title already carries an external issue key. Jira and Linear use the same
+// TEAM-NUMBER identifier shape, so both `extract` calls would match
+// "ENG-123" — we resolve ambiguity by preferring whichever integration is
+// currently available for the workspace, with Jira winning the tie-break since
+// it shipped first. Creating new links lives in the task Link menu.
 function IssueTrackerButtons({
-  taskId,
   workspaceId,
   taskTitle,
 }: {
-  taskId: string | null | undefined;
   workspaceId: string | null | undefined;
   taskTitle: string | null | undefined;
 }) {
-  const jiraAvailable = useJiraAvailable();
-  const linearAvailable = useLinearAvailable();
+  const jiraAvailable = useJiraAvailable(workspaceId);
+  const linearAvailable = useLinearAvailable(workspaceId);
   const jiraKey = extractJiraKey(taskTitle);
   const linearKey = extractLinearKey(taskTitle);
 
@@ -139,12 +134,7 @@ function IssueTrackerButtons({
   if (linearKey && linearAvailable) {
     return <LinearIssueButton workspaceId={workspaceId} taskTitle={taskTitle} />;
   }
-  return (
-    <>
-      <JiraLinkButton taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
-      <LinearLinkButton taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
-    </>
-  );
+  return null;
 }
 
 /** Left section: task name breadcrumb + executor info. Home + integrations
@@ -158,13 +148,13 @@ function TopBarLeft({
 }: TopBarLeftProps) {
   const showExecutorSettings = shouldShowExecutorEnvironmentControls(remoteExecutorType);
   return (
-    <div className="flex items-center gap-2.5 min-w-0 overflow-hidden">
-      <Breadcrumb className="min-w-0">
-        <BreadcrumbList className="flex-nowrap text-sm min-w-0">
-          <BreadcrumbItem className="min-w-0">
+    <div className="flex min-w-0 max-w-[min(44rem,45vw)] items-center gap-2.5 overflow-hidden">
+      <Breadcrumb className="min-w-0 max-w-full">
+        <BreadcrumbList className="min-w-0 max-w-full flex-nowrap text-sm">
+          <BreadcrumbItem className="min-w-0 max-w-full">
             <Tooltip>
               <TooltipTrigger asChild>
-                <BreadcrumbPage className="font-medium truncate">
+                <BreadcrumbPage className="block max-w-full truncate font-medium">
                   {taskTitle ?? "Task details"}
                 </BreadcrumbPage>
               </TooltipTrigger>
@@ -227,7 +217,6 @@ function DebugOverlayToggle({
 }
 
 function AttentionStatusGroup({
-  taskId,
   activeSessionId,
   isArchived,
   workspaceId,
@@ -237,7 +226,6 @@ function AttentionStatusGroup({
   issueUrl,
   issueNumber,
 }: {
-  taskId?: string | null;
   activeSessionId?: string | null;
   isArchived?: boolean;
   workspaceId?: string | null;
@@ -273,7 +261,7 @@ function AttentionStatusGroup({
           <GitHubIssueTopbarButton issueUrl={issueUrl} issueNumber={issueNumber} />
           <PRTopbarButton />
           <MRTopbarButton />
-          <IssueTrackerButtons taskId={taskId} workspaceId={workspaceId} taskTitle={taskTitle} />
+          <IssueTrackerButtons workspaceId={workspaceId} taskTitle={taskTitle} />
         </>
       )}
     </TopbarCluster>
@@ -347,7 +335,6 @@ function TopbarToolsGroup({
  *  The former overflow popover was removed in the UI overhaul — every cluster
  *  is always visible so users don't have to discover the dots menu. */
 function TopBarRight({
-  taskId,
   activeSessionId,
   showDebugOverlay,
   onToggleDebugOverlay,
@@ -360,7 +347,6 @@ function TopBarRight({
   issueNumber,
   officeTaskHref,
 }: {
-  taskId?: string | null;
   activeSessionId?: string | null;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
@@ -384,7 +370,6 @@ function TopBarRight({
         </TopbarCluster>
       )}
       <AttentionStatusGroup
-        taskId={taskId}
         activeSessionId={activeSessionId}
         isArchived={isArchived}
         workspaceId={workspaceId}

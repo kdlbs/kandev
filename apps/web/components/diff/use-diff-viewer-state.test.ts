@@ -2,7 +2,11 @@ import { describe, it, expect } from "vitest";
 import { parsePatchFiles } from "@pierre/diffs";
 import type { FileDiffMetadata, DiffLineAnnotation } from "@pierre/diffs";
 
-import { buildHunkAnnotations, type HunkOutputs } from "./use-diff-viewer-state";
+import {
+  buildHunkAnnotations,
+  buildWalkthroughSelectedLines,
+  type HunkOutputs,
+} from "./use-diff-viewer-state";
 import type { RevertBlockInfo } from "./diff-viewer";
 import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
 
@@ -108,5 +112,34 @@ describe("buildHunkAnnotations", () => {
     expect(info.addCount).toBe(1);
     expect(info.oldLines).toEqual([]);
     expect(out.result[0].side).toBe("additions");
+  });
+});
+
+describe("buildWalkthroughSelectedLines", () => {
+  it("returns the active walkthrough line range for a matching file", () => {
+    expect(
+      buildWalkthroughSelectedLines(
+        { path: "apps/web/main.ts", repository_name: "frontend" },
+        { file: "main.ts", repo: "frontend", line: 10, line_end: 12, text: "explain" },
+      ),
+    ).toEqual({ side: "additions", start: 10, end: 12 });
+  });
+
+  it("returns null for mismatched repos", () => {
+    expect(
+      buildWalkthroughSelectedLines(
+        { path: "apps/web/main.ts", repository_name: "backend" },
+        { file: "main.ts", repo: "frontend", line: 10, text: "explain" },
+      ),
+    ).toBeNull();
+  });
+
+  it("defaults line_end to line when the walkthrough step has no line_end", () => {
+    expect(
+      buildWalkthroughSelectedLines(
+        { path: "apps/web/main.ts", repository_name: "frontend" },
+        { file: "main.ts", repo: "frontend", line: 15, text: "see this" },
+      ),
+    ).toEqual({ side: "additions", start: 15, end: 15 });
   });
 });

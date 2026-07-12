@@ -48,6 +48,9 @@ export type TaskRemoteRepoRow = {
   url: string; // canonical https://… or paste-as-typed
   branch: string;
   source: "picker" | "paste";
+  prNumber?: number;
+  prBaseBranch?: string;
+  prHeadBranch?: string;
   // Optional metadata when source === "picker":
   provider?: "github" | "gitlab";
   fullName?: string; // "owner/name"
@@ -74,6 +77,8 @@ export type TaskCreateDialogInitialValues = {
   /** When set, opens the dialog in GitHub URL mode pre-filled with this value
    * (e.g. "github.com/owner/repo"). Used when no matching workspace repo exists. */
   githubUrl?: string;
+  prNumber?: number;
+  prBaseBranch?: string;
 };
 
 export type StoreSelections = {

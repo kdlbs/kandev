@@ -484,11 +484,15 @@ func wsTriggerIssueWatch(svc *Service, log *logger.Logger) func(ctx context.Cont
 		if id == "" {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgIDRequired, nil)
 		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		if workspaceID == "" {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "workspace_id is required", nil)
+		}
 		watch, err := svc.GetIssueWatch(ctx, id)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		if watch == nil {
+		if watch == nil || watch.WorkspaceID != workspaceID {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "issue watch not found", nil)
 		}
 		newIssues, err := svc.CheckIssueWatch(ctx, watch)

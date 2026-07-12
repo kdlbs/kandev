@@ -1,6 +1,7 @@
 export type LinearAuthMethod = "api_key";
 
 export interface LinearConfig {
+  workspaceId?: string;
   authMethod: LinearAuthMethod;
   defaultTeamKey: string;
   hasSecret: boolean;

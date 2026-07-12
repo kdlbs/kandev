@@ -26,12 +26,15 @@ func TestCatalogPermissionSettings_MergesCursorForce(t *testing.T) {
 	}
 }
 
-func TestCatalogPermissionSettings_MergesCodexCLIFlags(t *testing.T) {
+func TestCatalogPermissionSettings_ExcludesCodexBridgeCLIFlags(t *testing.T) {
 	catalog := CatalogPermissionSettings(NewCodexACP())
-	if len(codexACPPermSettings) != 2 {
-		t.Fatalf("codexACPPermSettings len = %d, want 2", len(codexACPPermSettings))
+	if _, ok := catalog["config_approval_policy_never"]; ok {
+		t.Fatal("catalog must not expose stale codex -c config override")
 	}
-	if _, ok := catalog["config_approval_policy_never"]; !ok {
-		t.Fatal("missing codex config_approval_policy_never")
+	if _, ok := catalog["config_sandbox_disk_full_read"]; ok {
+		t.Fatal("catalog must not expose stale codex sandbox override")
+	}
+	if _, ok := catalog[PermissionKeyAutoApprove]; !ok {
+		t.Fatal("catalog missing universal auto_approve")
 	}
 }

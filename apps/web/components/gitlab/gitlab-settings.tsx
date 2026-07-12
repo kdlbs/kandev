@@ -20,6 +20,7 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
 import { Spinner } from "@kandev/ui/spinner";
+import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import {
@@ -227,7 +228,19 @@ function ClearTokenButton({ onCleared }: { onCleared: () => void }) {
   );
 }
 
-export function GitLabIntegrationPage() {
+type GitLabIntegrationPageProps = {
+  workspaceId?: string;
+};
+
+export function GitLabIntegrationPage({ workspaceId }: GitLabIntegrationPageProps = {}) {
+  return (
+    <WorkspaceScopedSection workspaceId={workspaceId}>
+      {(ws) => <GitLabConnectionSection key={ws} />}
+    </WorkspaceScopedSection>
+  );
+}
+
+function GitLabConnectionSection() {
   const [status, setStatus] = useState<GitLabStatus | null>(null);
   const [loading, setLoading] = useState(true);
 

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -53,7 +54,7 @@ func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workfl
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflows (id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, hidden, style, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, workflow.Hidden, normalizeWorkflowStyle(workflow.Style), workflow.CreatedAt, workflow.UpdatedAt)
+	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), workflow.CreatedAt, workflow.UpdatedAt)
 
 	return err
 }
@@ -81,6 +82,7 @@ type workflowScanner interface {
 func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 	workflow := &models.Workflow{}
 	var workflowTemplateID, agentProfileID, style sql.NullString
+	var hidden int
 	if err := scanner.Scan(
 		&workflow.ID,
 		&workflow.WorkspaceID,
@@ -89,13 +91,14 @@ func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 		&agentProfileID,
 		&workflowTemplateID,
 		&workflow.SortOrder,
-		&workflow.Hidden,
+		&hidden,
 		&style,
 		&workflow.CreatedAt,
 		&workflow.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
+	workflow.Hidden = hidden != 0
 	if agentProfileID.Valid {
 		workflow.AgentProfileID = agentProfileID.String
 	}
@@ -143,7 +146,7 @@ func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workfl
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflows SET name = ?, description = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, updated_at = ? WHERE id = ?
-	`), workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.Hidden, normalizeWorkflowStyle(workflow.Style), workflow.UpdatedAt, workflow.ID)
+	`), workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), workflow.UpdatedAt, workflow.ID)
 	if err != nil {
 		return err
 	}

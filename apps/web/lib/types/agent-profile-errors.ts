@@ -12,3 +12,9 @@ export type WatcherReference = {
   kind: "linear" | "jira" | "github_issue" | "github_review";
   label: string;
 };
+
+export type RoutingTierReference = {
+  workspace_id: string;
+  provider_id: string;
+  tier: "frontier" | "balanced" | "economy";
+};

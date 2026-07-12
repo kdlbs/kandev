@@ -49,6 +49,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [runtime-cleanup](tasks/runtime-cleanup.md) | draft |
 | [link-existing-task-github-issue](tasks/link-existing-task-github-issue.md) | building |
 | [multi-branch](tasks/multi-branch/spec.md) | shipped |
+| [quick-chat-expiration](tasks/quick-chat-expiration.md) | draft |
 
 ## agents/ — agent governance
 
@@ -69,6 +70,7 @@ Per-workspace credentials and triage triggers for external services.
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
+| [jira-status-filter](jira-status-filter/spec.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
 
@@ -92,6 +94,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [ci-pr-automation](ui/ci-pr-automation.md) | draft |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
+| [slash-command-composer](ui/slash-command-composer.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

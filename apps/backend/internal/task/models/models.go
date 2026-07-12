@@ -18,6 +18,9 @@ var ErrExecutorRunningNotFound = errors.New("executor running not found")
 // ErrTaskSessionNotFound is returned when no task session record exists.
 var ErrTaskSessionNotFound = errors.New("task session not found")
 
+// ErrTaskWalkthroughNotFound is returned when no walkthrough record exists.
+var ErrTaskWalkthroughNotFound = errors.New("task walkthrough not found")
+
 // ErrExecutorNotFound is returned by the executor repository when no
 // executor row exists for the given ID. Callers should use errors.Is to
 // distinguish "row doesn't exist" (404 semantically) from transport-level
@@ -33,12 +36,17 @@ var ErrExecutorNotFound = errors.New("executor not found")
 // will produce its own events.
 var ErrExecutionRotated = errors.New("execution rotated; CAS write rejected")
 
-// Status values for executors_running.status. The lifecycle manager defaults
-// rows to "starting" on creation (see runtime/lifecycle/persistence.go); the
-// orchestrator flips a row to "prepared" when a prepare-only launch finishes
-// with the agent process intentionally not started.
+// Status values for executors_running.status. The lifecycle manager mirrors
+// active execution state into this column; the orchestrator flips a row to
+// "prepared" when a prepare-only launch finishes with the agent process
+// intentionally not started.
 const (
 	ExecutorRunningStatusStarting = "starting"
+	ExecutorRunningStatusRunning  = "running"
+	ExecutorRunningStatusReady    = "ready"
+	ExecutorRunningStatusFailed   = "failed"
+	ExecutorRunningStatusStopped  = "stopped"
+	ExecutorRunningStatusComplete = "completed"
 	ExecutorRunningStatusPrepared = "prepared"
 )
 
@@ -356,10 +364,12 @@ type Task struct {
 // ChildCompletionRow is the compact active-child projection used to decide
 // whether a parent task's on_children_completed trigger is ready to fire.
 type ChildCompletionRow struct {
-	ID        string       `json:"id" db:"id"`
-	State     v1.TaskState `json:"state" db:"state"`
-	Title     string       `json:"title" db:"title"`
-	UpdatedAt time.Time    `json:"updated_at" db:"updated_at"`
+	ID                   string       `json:"id" db:"id"`
+	State                v1.TaskState `json:"state" db:"state"`
+	Title                string       `json:"title" db:"title"`
+	WorkflowStepID       string       `json:"workflow_step_id" db:"workflow_step_id"`
+	TerminalWorkflowStep bool         `json:"terminal_workflow_step"` // computed by annotateTerminalChildSteps, not a DB column
+	UpdatedAt            time.Time    `json:"updated_at" db:"updated_at"`
 }
 
 // IsTerminalTaskState reports whether a task state means no further child work
@@ -516,6 +526,15 @@ const (
 	// event), or agentctl rejected the response because the pending entry was
 	// already gone. No ACP outcome ever reaches the wire in this state.
 	PermissionStatusExpired PermissionStatus = "expired"
+)
+
+// TaskPendingAction is the compact task-list projection for a primary session
+// blocked on user input.
+type TaskPendingAction string
+
+const (
+	TaskPendingActionClarification TaskPendingAction = "clarification"
+	TaskPendingActionPermission    TaskPendingAction = "permission"
 )
 
 // Message represents a message in a task session
@@ -765,21 +784,22 @@ type Repository struct {
 	// populated after the repo is cloned/synced on the agent host.
 	LocalPath string `json:"local_path"`
 	// Provider fields describe the upstream source (e.g. github/gitlab) for future syncing.
-	Provider             string     `json:"provider"`
-	ProviderRepoID       string     `json:"provider_repo_id"`
-	ProviderOwner        string     `json:"provider_owner"`
-	ProviderName         string     `json:"provider_name"`
-	DefaultBranch        string     `json:"default_branch"`
-	WorktreeBranchPrefix string     `json:"worktree_branch_prefix"`
-	PullBeforeWorktree   bool       `json:"pull_before_worktree"`
-	SetupScript          string     `json:"setup_script"`
-	CleanupScript        string     `json:"cleanup_script"`
-	DevScript            string     `json:"dev_script"`
-	CopyFiles            string     `json:"copy_files"`
-	StartupPrompt        string     `json:"startup_prompt"`
-	CreatedAt            time.Time  `json:"created_at"`
-	UpdatedAt            time.Time  `json:"updated_at"`
-	DeletedAt            *time.Time `json:"deleted_at,omitempty"`
+	Provider               string     `json:"provider"`
+	ProviderRepoID         string     `json:"provider_repo_id"`
+	ProviderOwner          string     `json:"provider_owner"`
+	ProviderName           string     `json:"provider_name"`
+	DefaultBranch          string     `json:"default_branch"`
+	WorktreeBranchPrefix   string     `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string     `json:"worktree_branch_template"`
+	PullBeforeWorktree     bool       `json:"pull_before_worktree"`
+	SetupScript            string     `json:"setup_script"`
+	CleanupScript          string     `json:"cleanup_script"`
+	DevScript              string     `json:"dev_script"`
+	CopyFiles              string     `json:"copy_files"`
+	StartupPrompt          string     `json:"startup_prompt"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+	DeletedAt              *time.Time `json:"deleted_at,omitempty"`
 }
 
 // RepositoryScript represents a custom script for a repository
@@ -886,28 +906,36 @@ type Executor struct {
 
 // ExecutorRunning tracks an active executor instance for a session.
 type ExecutorRunning struct {
-	ID               string                 `json:"id"`
-	SessionID        string                 `json:"session_id"`
-	TaskID           string                 `json:"task_id"`
-	ExecutorID       string                 `json:"executor_id"`
-	Runtime          agentruntime.Runtime   `json:"runtime,omitempty"`
-	Status           string                 `json:"status"`
-	Resumable        bool                   `json:"resumable"`
-	ResumeToken      string                 `json:"resume_token,omitempty"`
-	LastMessageUUID  string                 `json:"last_message_uuid,omitempty"`
-	AgentExecutionID string                 `json:"agent_execution_id,omitempty"`
-	ContainerID      string                 `json:"container_id,omitempty"`
-	AgentctlURL      string                 `json:"agentctl_url,omitempty"`
-	AgentctlPort     int                    `json:"agentctl_port,omitempty"`
-	PID              int                    `json:"pid,omitempty"`
-	WorktreeID       string                 `json:"worktree_id,omitempty"`
-	WorktreePath     string                 `json:"worktree_path,omitempty"`
-	WorktreeBranch   string                 `json:"worktree_branch,omitempty"`
-	ErrorMessage     string                 `json:"error_message,omitempty"`
-	Metadata         map[string]interface{} `json:"metadata,omitempty"`
-	LastSeenAt       *time.Time             `json:"last_seen_at,omitempty"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
+	ID               string               `json:"id"`
+	SessionID        string               `json:"session_id"`
+	TaskID           string               `json:"task_id"`
+	ExecutorID       string               `json:"executor_id"`
+	Runtime          agentruntime.Runtime `json:"runtime,omitempty"`
+	Status           string               `json:"status"`
+	Resumable        bool                 `json:"resumable"`
+	ResumeToken      string               `json:"resume_token,omitempty"`
+	LastMessageUUID  string               `json:"last_message_uuid,omitempty"`
+	AgentExecutionID string               `json:"agent_execution_id,omitempty"`
+	ContainerID      string               `json:"container_id,omitempty"`
+	AgentctlURL      string               `json:"agentctl_url,omitempty"`
+	AgentctlPort     int                  `json:"agentctl_port,omitempty"`
+	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
+	// executor's remote-pid stop path. It is 0 for local/standalone rows.
+	PID int `json:"pid,omitempty"`
+	// LocalPID is a host-local liveness handle: the PID of the standalone
+	// agentctl control-server process Kandev spawned on this host. Populated for
+	// local/standalone runtimes so a dead row is distinguishable from a live one
+	// without external context. 0 for SSH/remote rows (their process lives on
+	// another host — see PID). Never probe LocalPID for SSH rows.
+	LocalPID       int                    `json:"local_pid,omitempty"`
+	WorktreeID     string                 `json:"worktree_id,omitempty"`
+	WorktreePath   string                 `json:"worktree_path,omitempty"`
+	WorktreeBranch string                 `json:"worktree_branch,omitempty"`
+	ErrorMessage   string                 `json:"error_message,omitempty"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	LastSeenAt     *time.Time             `json:"last_seen_at,omitempty"`
+	CreatedAt      time.Time              `json:"created_at"`
+	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
 // ProfileEnvVar represents an environment variable for an executor profile.
@@ -1113,13 +1141,16 @@ func (r *TaskEnvironmentRepo) ToAPI() map[string]interface{} {
 
 // TaskPlan represents a plan associated with a task
 type TaskPlan struct {
-	ID        string    `json:"id"`
-	TaskID    string    `json:"task_id"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	CreatedBy string    `json:"created_by"` // "agent" or "user"
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID                             string     `json:"id"`
+	TaskID                         string     `json:"task_id"`
+	Title                          string     `json:"title"`
+	Content                        string     `json:"content"`
+	CreatedBy                      string     `json:"created_by"` // "agent" or "user"
+	CreatedAt                      time.Time  `json:"created_at"`
+	UpdatedAt                      time.Time  `json:"updated_at"`
+	ImplementationStartedAt        *time.Time `json:"implementation_started_at,omitempty"`
+	ImplementationStartedSessionID *string    `json:"implementation_started_session_id,omitempty"`
+	ImplementationStartedBy        *string    `json:"implementation_started_by,omitempty"`
 }
 
 // TaskPlanRevision is one immutable snapshot in the revision history of a task plan.
@@ -1135,6 +1166,32 @@ type TaskPlanRevision struct {
 	RevertOfRevisionID *string   `json:"revert_of_revision_id,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"` // bumps on coalesce merge
+}
+
+// TaskWalkthrough is an agent-authored guided code tour attached to a task.
+// It is the "what & where" of a review narration: an ordered list of Steps,
+// each anchored to a concrete repo/file/line, rendered as popovers over the
+// review diff. Mirrors the TaskPlan artifact pattern (one per task, agent-authored).
+type TaskWalkthrough struct {
+	ID        string            `json:"id"`
+	TaskID    string            `json:"task_id"`
+	Title     string            `json:"title"`
+	Steps     []WalkthroughStep `json:"steps"`
+	CreatedBy string            `json:"created_by"` // always "agent"
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+// WalkthroughStep is a single anchored stop in a TaskWalkthrough. Text is
+// markdown shown in the popover; File/Line locate the anchor inside the diff
+// (Repo disambiguates in multi-repo reviews, LineEnd optionally spans a range).
+type WalkthroughStep struct {
+	Title   string `json:"title,omitempty"`
+	Repo    string `json:"repo,omitempty"`
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	LineEnd int    `json:"line_end,omitempty"`
+	Text    string `json:"text"`
 }
 
 // TaskDocument represents a named document (plan, spec, notes, etc.) associated with a task.

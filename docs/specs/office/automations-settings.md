@@ -21,7 +21,7 @@ The Automations feature, originating in PR #406, gives kandev a standalone trigg
 - `execution_mode = run`: trigger fires → an ephemeral task is created (`is_ephemeral = true`, `origin = "automation_run"`) so the existing session pipeline still launches an agent. The kanban hides ephemeral tasks. The AutomationRun row is the surfaced artifact; the linked task is plumbing only.
 - Run-mode automations **auto-start** their agent regardless of the workflow step's `auto_start_agent` setting — the user never opens the task to drag it, so the trigger MUST be the start signal.
 - The sidebar exposes a single top-level **Automations** entry pointing at `/settings/automations`. The per-workspace `Automations` sub-link is removed (PR #406 added it; this spec drops it).
-- `/settings/automations` is a server-side router:
+- `/settings/automations` is a client route that branches on the workspace list already loaded into the SPA (from the boot payload / store) — it does **not** fetch the workspace list on load:
   - 0 workspaces → empty state with "Create workspace" CTA.
   - 1 workspace → redirect to `/settings/workspace/<id>/automations`.
   - 2+ workspaces → workspace picker (grid of cards, click to enter).
@@ -70,15 +70,15 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 
 ## Failure modes
 
-| Dependency / invariant | Behavior |
-|---|---|
-| `listWorkspaces` fails on the flat page | Page renders the empty state (treating "couldn't load" as "no workspaces"). |
-| Run-mode automation's task starts but agent fails | AutomationRun transitions from `task_created` to `failed`; the row surfaces the failure instead of remaining "Running". |
-| Run-mode automation's agent completes its turn successfully | AutomationRun transitions from `task_created` to `succeeded`; the agent execution and ephemeral worktree are torn down. |
-| Run-mode automation's turn is cancelled by the user | AutomationRun transitions from `task_created` to `failed` with a cancellation error; the hidden session is marked `CANCELLED` and the agent execution is torn down. |
-| User manually drags a run-mode task on the kanban | Cannot happen — ephemeral tasks are hidden from the kanban. The "auto-start" rule fires once at trigger time; no manual recovery path. |
-| Existing automation upgraded from pre-execution_mode version | Migration sets `execution_mode = 'task'` for all existing rows. UI shows them with "Task" badge. |
-| User edits `execution_mode` from `task` to `run` on an enabled automation | Next firing uses the new mode. In-flight runs are unaffected. |
+| Dependency / invariant                                                    | Behavior                                                                                                                                                                             |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| No workspaces are loaded into the SPA store when the flat page renders    | Page renders the empty state (treating "none loaded" as "no workspaces"). The page reads the store and never fetches on load, so there is no per-render fetch that can fail or loop. |
+| Run-mode automation's task starts but agent fails                         | AutomationRun transitions from `task_created` to `failed`; the row surfaces the failure instead of remaining "Running".                                                              |
+| Run-mode automation's agent completes its turn successfully               | AutomationRun transitions from `task_created` to `succeeded`; the agent execution and ephemeral worktree are torn down.                                                              |
+| Run-mode automation's turn is cancelled by the user                       | AutomationRun transitions from `task_created` to `failed` with a cancellation error; the hidden session is marked `CANCELLED` and the agent execution is torn down.                  |
+| User manually drags a run-mode task on the kanban                         | Cannot happen — ephemeral tasks are hidden from the kanban. The "auto-start" rule fires once at trigger time; no manual recovery path.                                               |
+| Existing automation upgraded from pre-execution_mode version              | Migration sets `execution_mode = 'task'` for all existing rows. UI shows them with "Task" badge.                                                                                     |
+| User edits `execution_mode` from `task` to `run` on an enabled automation | Next firing uses the new mode. In-flight runs are unaffected.                                                                                                                        |
 
 ## Persistence guarantees
 
@@ -92,6 +92,7 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 - **GIVEN** a user opens `/settings/automations` in an install with one workspace, **WHEN** the page loads, **THEN** the browser redirects to `/settings/workspace/<id>/automations`.
 - **GIVEN** a user opens `/settings/automations` in an install with three workspaces, **WHEN** the page loads, **THEN** a workspace picker is shown; clicking one navigates to its automations.
 - **GIVEN** a user opens `/settings/automations` in a fresh install with zero workspaces, **WHEN** the page loads, **THEN** an empty-state card explains "create a workspace first" with a CTA.
+- **GIVEN** a user opens `/settings/automations` in a multi-workspace install, **WHEN** the page loads, **THEN** it renders the picker from the already-loaded workspace list and issues **no** additional `GET /api/v1/workspaces` request on load (guards against the render/refetch loop that a server-style `await listWorkspaces()` in the page body caused after the SPA migration).
 - **GIVEN** a user toggles an existing task-mode automation to run mode in the editor, **WHEN** the next trigger fires, **THEN** the resulting task is hidden from the kanban; previously-created tasks (from task-mode firings) remain visible.
 - **GIVEN** a run-mode automation triggered by a GitHub PR event, **WHEN** the trigger fires, **THEN** the PR is associated with the ephemeral task via `AssociatePRWithTask` exactly as in task mode.
 - **GIVEN** a scheduled automation with `repository_id` set to a specific repo, **WHEN** the cron fires, **THEN** the resulting task is pinned to that repo's default branch — regardless of whether the workspace has other repositories.

@@ -15,3 +15,18 @@ export function compareTasksByCreatedDesc(a: CreatedTask, b: CreatedTask): numbe
   if (bTime < aTime) return -1;
   return 0;
 }
+
+/**
+ * Sort `ids` into the board's visible created-desc order using `taskById` for
+ * lookups. Ids without a known task keep their relative order. Used before a
+ * kanban bulk move so a backward range selection doesn't land scrambled when
+ * sequential positions are assigned.
+ */
+export function sortIdsByCreatedDesc(ids: string[], taskById: Map<string, CreatedTask>): string[] {
+  // Missing ids fall back to `{}`, which `compareTasksByCreatedDesc` treats as
+  // the oldest (sorts last) — keeping the comparator transitive rather than
+  // returning 0 whenever either side is unknown.
+  return [...ids].sort((a, b) =>
+    compareTasksByCreatedDesc(taskById.get(a) ?? {}, taskById.get(b) ?? {}),
+  );
+}

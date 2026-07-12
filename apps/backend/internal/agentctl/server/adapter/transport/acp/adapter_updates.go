@@ -160,6 +160,7 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
 			event.Type, rawData, event)
 		a.sendUpdate(*event)
+		a.maybeScheduleAsyncTurnComplete(*event)
 	} else if updateJSON, err := json.Marshal(n.Update); err == nil {
 		a.logger.Warn("unhandled ACP session notification",
 			zap.String("session_id", sessionID),
@@ -466,7 +467,9 @@ func (a *Adapter) routeMonitorEvents(sessionID, text string) string {
 		payload := a.activeToolCalls[toolCallID]
 		appendMonitorEvent(payload, ev.TaskID, monitorCommandFromPayload(payload), ev.Body)
 		a.mu.Unlock()
-		a.sendUpdate(monitorEventEvent(sessionID, toolCallID, ev.Body, payload))
+		update := monitorEventEvent(sessionID, toolCallID, ev.Body, payload)
+		a.sendUpdate(update)
+		a.maybeScheduleAsyncTurnComplete(update)
 		a.logger.Debug("monitor event routed",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", ev.TaskID),

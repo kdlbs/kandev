@@ -45,6 +45,47 @@ function ObserveLastUsedCache({ onSeen }: { onSeen: (value: string | null) => vo
   return null;
 }
 
+const cachedTaskCreateChoices = {
+  repositoryId: "repo-cached",
+  branch: "feature-cached",
+  agentProfileId: "agent-cached",
+  executorProfileId: "exec-cached",
+};
+
+function seedCachedTaskCreateChoices() {
+  window.localStorage.setItem(
+    STORAGE_KEYS.LAST_REPOSITORY_ID,
+    JSON.stringify(cachedTaskCreateChoices.repositoryId),
+  );
+  window.localStorage.setItem(
+    STORAGE_KEYS.LAST_BRANCH,
+    JSON.stringify(cachedTaskCreateChoices.branch),
+  );
+  window.localStorage.setItem(
+    STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
+    JSON.stringify(cachedTaskCreateChoices.agentProfileId),
+  );
+  window.localStorage.setItem(
+    STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
+    JSON.stringify(cachedTaskCreateChoices.executorProfileId),
+  );
+}
+
+function expectCachedTaskCreateChoices() {
+  expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBe(
+    JSON.stringify(cachedTaskCreateChoices.repositoryId),
+  );
+  expect(window.localStorage.getItem(STORAGE_KEYS.LAST_BRANCH)).toBe(
+    JSON.stringify(cachedTaskCreateChoices.branch),
+  );
+  expect(window.localStorage.getItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID)).toBe(
+    JSON.stringify(cachedTaskCreateChoices.agentProfileId),
+  );
+  expect(window.localStorage.getItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID)).toBe(
+    JSON.stringify(cachedTaskCreateChoices.executorProfileId),
+  );
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   resetTaskCreateLastUsedSync({ clearQueued: true });
@@ -156,16 +197,10 @@ describe("StateProvider task-create cache", () => {
   });
 });
 
-describe("StateProvider task-create cache clearing", () => {
-  it("lets children read cached task-create choices before clearing missing backend values", async () => {
+describe("StateProvider task-create cache fallback", () => {
+  it("keeps cached task-create choices when loaded backend settings omit them", async () => {
     const onSeen = vi.fn();
-    window.localStorage.setItem(STORAGE_KEYS.LAST_REPOSITORY_ID, JSON.stringify("repo-cached"));
-    window.localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("feature-cached"));
-    window.localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify("agent-cached"));
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-      JSON.stringify("exec-cached"),
-    );
+    seedCachedTaskCreateChoices();
 
     render(
       <StateProvider
@@ -186,12 +221,76 @@ describe("StateProvider task-create cache clearing", () => {
       </StateProvider>,
     );
 
-    expect(onSeen).toHaveBeenCalledWith(JSON.stringify("repo-cached"));
+    expect(onSeen).toHaveBeenCalledWith(JSON.stringify(cachedTaskCreateChoices.repositoryId));
+    // Give any potential deferred deletions a chance to fire (old code used setTimeout(0)).
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expectCachedTaskCreateChoices();
+  });
+
+  it("keeps cached task-create choices when loaded backend settings sync an empty object", async () => {
+    seedCachedTaskCreateChoices();
+
+    render(
+      <StateProvider
+        initialState={{
+          userSettings: {
+            ...defaultSettingsState.userSettings,
+            loaded: true,
+            taskCreateLastUsed: {
+              repositoryId: null,
+              branch: null,
+              agentProfileId: null,
+              executorProfileId: null,
+              synced: false,
+            },
+          },
+        }}
+      >
+        <div>ready</div>
+      </StateProvider>,
+    );
+
     await waitFor(() => {
-      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBeNull();
+      expectCachedTaskCreateChoices();
+    });
+  });
+
+  it("clears stale cached fields when loaded backend settings contain real task-create choices", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_BRANCH,
+      JSON.stringify(cachedTaskCreateChoices.branch),
+    );
+    window.localStorage.setItem(
+      STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
+      JSON.stringify(cachedTaskCreateChoices.agentProfileId),
+    );
+
+    render(
+      <StateProvider
+        initialState={{
+          userSettings: {
+            ...defaultSettingsState.userSettings,
+            loaded: true,
+            taskCreateLastUsed: {
+              repositoryId: "repo-server",
+              branch: null,
+              agentProfileId: null,
+              executorProfileId: null,
+              synced: true,
+            },
+          },
+        }}
+      >
+        <div>ready</div>
+      </StateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_REPOSITORY_ID)).toBe(
+        JSON.stringify("repo-server"),
+      );
       expect(window.localStorage.getItem(STORAGE_KEYS.LAST_BRANCH)).toBeNull();
       expect(window.localStorage.getItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID)).toBeNull();
-      expect(window.localStorage.getItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID)).toBeNull();
     });
   });
 });

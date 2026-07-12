@@ -25,6 +25,7 @@ import type { ComponentProps, RefObject } from "react";
 type KanbanHeaderProps = {
   workspaceId?: string;
   currentPage?: "kanban" | "tasks";
+  hideTitle?: boolean;
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
@@ -43,7 +44,7 @@ const VIEW_TOGGLE_ITEMS: ViewToggleItem[] = [
 ];
 
 const WORKBENCH_TOPBAR_CLASSNAME = "h-12 border-b-0 px-3 py-2";
-const DESKTOP_HEADER_NARROW_PX = 1100;
+const DESKTOP_HEADER_NARROW_PX = 800;
 
 function getWorkspaceLabel(
   workspaces: Array<{ id: string; name: string }>,
@@ -137,6 +138,7 @@ function TabletHeader({
   setMenuOpen,
   showHealthIndicator,
   onOpenHealthDialog,
+  hideTitle,
 }: {
   title: string;
   workspaceLabel: string;
@@ -148,16 +150,17 @@ function TabletHeader({
   setMenuOpen: (open: boolean) => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
+  hideTitle?: boolean;
 }) {
   const isHome = title === "Home";
 
   return (
     <PageTopbar
-      title={title}
-      subtitle={workspaceLabel}
-      backLabel={isHome ? "" : "Kandev"}
+      title={hideTitle ? "" : title}
+      subtitle={hideTitle ? undefined : workspaceLabel}
+      backLabel={hideTitle || isHome ? "" : "Kandev"}
       className={WORKBENCH_TOPBAR_CLASSNAME}
-      variant={isHome ? "root" : "breadcrumb"}
+      variant={hideTitle || isHome ? "root" : "breadcrumb"}
       actionsClassName="gap-2"
       actions={
         <>
@@ -205,6 +208,7 @@ function DesktopHeader({
   handleViewChange,
   showHealthIndicator,
   onOpenHealthDialog,
+  hideTitle,
 }: {
   title: string;
   workspaceLabel: string;
@@ -215,6 +219,7 @@ function DesktopHeader({
   handleViewChange: (value: string) => void;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
+  hideTitle?: boolean;
 }) {
   const headerRef = useRef<HTMLElement>(null);
   const isNarrow = useIsHeaderNarrow(headerRef);
@@ -229,20 +234,18 @@ function DesktopHeader({
   ) : null;
   const isHome = title === "Home";
   const centerSearch =
-    isHome && searchInput && !isNarrow ? (
-      <div data-testid="kanban-header-search">{searchInput}</div>
-    ) : null;
-  const actionsSearch = !isHome || isNarrow ? searchInput : null;
+    searchInput && !isNarrow ? <div data-testid="kanban-header-search">{searchInput}</div> : null;
+  const actionsSearch = isNarrow ? searchInput : null;
 
   return (
     <PageTopbar
       ref={headerRef}
-      title={title}
-      subtitle={workspaceLabel}
-      backLabel={isHome ? "" : "Kandev"}
+      title={hideTitle ? "" : title}
+      subtitle={hideTitle ? undefined : workspaceLabel}
+      backLabel={hideTitle || isHome ? "" : "Kandev"}
       center={centerSearch}
       className={WORKBENCH_TOPBAR_CLASSNAME}
-      variant={isHome ? "root" : "breadcrumb"}
+      variant={hideTitle || isHome ? "root" : "breadcrumb"}
       actions={
         <>
           {actionsSearch}
@@ -284,6 +287,7 @@ function useHeaderViewChange(
 export function KanbanHeader({
   workspaceId,
   currentPage = "kanban",
+  hideTitle = false,
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
@@ -314,6 +318,7 @@ export function KanbanHeader({
           currentPage={currentPage}
           title={title}
           workspaceLabel={workspaceLabel}
+          hideTitle={hideTitle}
           {...sharedSearch}
           {...healthProps}
         />
@@ -325,6 +330,7 @@ export function KanbanHeader({
           <TabletHeader
             title={title}
             workspaceLabel={workspaceLabel}
+            hideTitle={hideTitle}
             {...sharedSearch}
             toggleValue={toggleValue}
             handleViewChange={handleViewChange}
@@ -346,6 +352,7 @@ export function KanbanHeader({
       <DesktopHeader
         title={title}
         workspaceLabel={workspaceLabel}
+        hideTitle={hideTitle}
         {...sharedSearch}
         toggleValue={toggleValue}
         handleViewChange={handleViewChange}

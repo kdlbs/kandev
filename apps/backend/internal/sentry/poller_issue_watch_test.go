@@ -49,7 +49,7 @@ func (r *recordingSubscriber) snapshot() []*NewSentryIssueEvent {
 func TestPoller_CheckIssueWatches_PublishesNewIssuesOnly(t *testing.T) {
 	f := newPollerFixture(t)
 	ctx := context.Background()
-	f.saveConfig(t, "tok")
+	f.saveConfigForWorkspace(t, "ws-1", "tok")
 
 	eb := bus.NewMemoryEventBus(logger.Default())
 	defer eb.Close()
@@ -105,10 +105,57 @@ func TestPoller_CheckIssueWatches_PublishesNewIssuesOnly(t *testing.T) {
 	}
 }
 
+// TestPoller_CheckIssueWatches_PublishesResolvedInstanceIDForUnboundWatch pins
+// the fix for the bug where CheckIssueWatch resolves the instance actually
+// polled (via resolveWatchInstanceID) but publishNewSentryIssueEvent read
+// w.SentryInstanceID directly, leaving NewSentryIssueEvent.SentryInstanceID
+// empty for every unbound legacy watch. The published event must carry the
+// resolved instance, not the watch's raw (possibly empty) SentryInstanceID.
+func TestPoller_CheckIssueWatches_PublishesResolvedInstanceIDForUnboundWatch(t *testing.T) {
+	f := newPollerFixture(t)
+	ctx := context.Background()
+	cfg := f.saveConfigForWorkspace(t, "ws-1", "tok") // workspace's sole instance
+
+	eb := bus.NewMemoryEventBus(logger.Default())
+	defer eb.Close()
+	f.svc.SetEventBus(eb)
+
+	sub, err := newRecordingSubscriber(eb, 1)
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	w := newTestIssueWatch("ws-1") // unbound: SentryInstanceID left empty
+	if w.SentryInstanceID != "" {
+		t.Fatalf("expected unbound watch, got instance %q", w.SentryInstanceID)
+	}
+	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	f.client.searchIssuesFn = func(_ SearchFilter, _ string) (*SearchResult, error) {
+		return &SearchResult{
+			Issues: []SentryIssue{{ShortID: "PROJ-1", Title: "first", Permalink: "https://sentry.io/issues/PROJ-1"}},
+			IsLast: true,
+		}, nil
+	}
+
+	f.poller.checkIssueWatches(ctx)
+
+	<-sub.done
+	got := sub.snapshot()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 published event, got %d", len(got))
+	}
+	if got[0].SentryInstanceID != cfg.ID {
+		t.Errorf("published event SentryInstanceID = %q, want resolved instance %q", got[0].SentryInstanceID, cfg.ID)
+	}
+}
+
 func TestPoller_CheckIssueWatches_SkipsDisabled(t *testing.T) {
 	f := newPollerFixture(t)
 	ctx := context.Background()
-	f.saveConfig(t, "tok")
+	f.saveConfigForWorkspace(t, "ws-1", "tok")
 
 	eb := bus.NewMemoryEventBus(logger.Default())
 	defer eb.Close()
@@ -183,7 +230,7 @@ func TestIsIssueWatchDue(t *testing.T) {
 func TestPoller_CheckIssueWatches_RespectsPerWatchInterval(t *testing.T) {
 	f := newPollerFixture(t)
 	ctx := context.Background()
-	f.saveConfig(t, "tok")
+	f.saveConfigForWorkspace(t, "ws-1", "tok")
 
 	eb := bus.NewMemoryEventBus(logger.Default())
 	defer eb.Close()

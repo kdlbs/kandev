@@ -1,8 +1,7 @@
 // Package database serves the System -> Database page. It exposes read-only
-// SQLite stats (path, size, WAL size, schema version, last-backup timestamp)
-// and three maintenance operations: VACUUM, PRAGMA optimize, and Factory
-// Reset. Long-running operations are tracked via the jobs.Tracker so the
-// frontend can observe progress over the event bus.
+// database stats plus SQLite maintenance operations: VACUUM, PRAGMA optimize,
+// and Factory Reset. Long-running operations are tracked via the jobs.Tracker
+// so the frontend can observe progress over the event bus.
 package database
 
 import (
@@ -17,18 +16,26 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/system/jobs"
 )
 
-// Stats is the read-only SQLite-state payload returned to the frontend.
+const (
+	databaseDriverPostgres = "postgres"
+	databaseDriverSQLite   = "sqlite"
+)
+
+// Stats is the read-only database-state payload returned to the frontend.
 //
 // LastBackupAt is a pointer so the JSON shape is `null` when no backup
 // exists. Serialising a zero time.Time as "0001-01-01T00:00:00Z" would
 // defeat the frontend's "Never" fallback in database-stats-card.tsx.
 type Stats struct {
+	Driver        string     `json:"driver"`
 	Path          string     `json:"path"`
 	SizeBytes     int64      `json:"size_bytes"`
 	WALSizeBytes  int64      `json:"wal_size_bytes"`
@@ -80,14 +87,19 @@ func NewService(pool *db.Pool, dataDir string, dirs ResetDirs, j *jobs.Tracker, 
 	}
 }
 
-// Stats returns the current SQLite stats. The size is computed from
-// PRAGMA page_count * page_size (cheaper than os.Stat on hot writes and
-// more accurate during a VACUUM that creates a sibling file).
+// Stats returns the current database stats. SQLite size is computed from
+// PRAGMA page_count * page_size (cheaper than os.Stat on hot writes and more
+// accurate during a VACUUM that creates a sibling file). Postgres size is
+// reported from pg_database_size(current_database()).
 func (s *Service) Stats() (Stats, error) {
-	out := Stats{Path: s.dbPath}
+	driver := s.databaseDriver()
+	out := Stats{Driver: driver}
+	if driver == databaseDriverSQLite {
+		out.Path = s.dbPath
+	}
 
 	if s.pool != nil {
-		size, err := readDBSize(s.pool.Reader())
+		size, err := readDatabaseSize(s.pool.Reader())
 		if err != nil {
 			return Stats{}, err
 		}
@@ -100,19 +112,42 @@ func (s *Service) Stats() (Stats, error) {
 		out.SchemaVersion = version
 	}
 
-	if wal, err := walSize(s.dbPath); err == nil {
-		out.WALSizeBytes = wal
-	}
+	if driver == databaseDriverSQLite {
+		if wal, err := walSize(s.dbPath); err == nil {
+			out.WALSizeBytes = wal
+		}
 
-	if last := lastBackupAt(filepath.Join(s.dataDir, "backups")); !last.IsZero() {
-		out.LastBackupAt = &last
+		if last := lastBackupAt(filepath.Join(s.dataDir, "backups")); !last.IsZero() {
+			out.LastBackupAt = &last
+		}
 	}
 	return out, nil
 }
 
-// readDBSize returns the database size in bytes via PRAGMA page_count *
+func (s *Service) databaseDriver() string {
+	if s.pool == nil || s.pool.Writer() == nil {
+		return databaseDriverSQLite
+	}
+	switch driver := s.pool.Writer().DriverName(); {
+	case dialect.IsPostgres(driver):
+		return databaseDriverPostgres
+	case driver == dialect.SQLite3:
+		return databaseDriverSQLite
+	default:
+		return driver
+	}
+}
+
+func readDatabaseSize(d *sqlx.DB) (int64, error) {
+	if dialect.IsPostgres(d.DriverName()) {
+		return readPostgresDBSize(d)
+	}
+	return readSQLiteDBSize(d)
+}
+
+// readSQLiteDBSize returns the database size in bytes via PRAGMA page_count *
 // page_size. Both PRAGMAs return a single integer row.
-func readDBSize(d interface {
+func readSQLiteDBSize(d interface {
 	QueryRow(query string, args ...interface{}) *sql.Row
 }) (int64, error) {
 	var pages, pageSize int64
@@ -125,14 +160,22 @@ func readDBSize(d interface {
 	return pages * pageSize, nil
 }
 
+func readPostgresDBSize(d interface {
+	QueryRow(query string, args ...interface{}) *sql.Row
+}) (int64, error) {
+	var size int64
+	if err := d.QueryRow("SELECT pg_database_size(current_database())").Scan(&size); err != nil {
+		return 0, fmt.Errorf("pg_database_size: %w", err)
+	}
+	return size, nil
+}
+
 // readSchemaVersion reads the binary version recorded by
 // cmd/kandev/storage.go:recordSchemaVersion. Missing key returns "" with
 // no error (fresh DB on first boot).
-func readSchemaVersion(d interface {
-	QueryRow(query string, args ...interface{}) *sql.Row
-}) (string, error) {
+func readSchemaVersion(d *sqlx.DB) (string, error) {
 	var value string
-	err := d.QueryRow(`SELECT value FROM kandev_meta WHERE key = ?`, "kandev_version").Scan(&value)
+	err := d.QueryRow(d.Rebind(`SELECT value FROM kandev_meta WHERE key = ?`), "kandev_version").Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", nil
 	}

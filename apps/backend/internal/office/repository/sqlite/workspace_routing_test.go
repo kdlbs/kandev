@@ -42,10 +42,11 @@ func TestUpsertAndGetWorkspaceRouting_RoundTrip(t *testing.T) {
 		ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
 			"claude-acp": {
-				TierMap: routing.TierMap{Frontier: "opus", Balanced: "sonnet"},
-				Mode:    "default",
-				Flags:   []string{"--quiet"},
-				Env:     map[string]string{"FOO": "bar"},
+				TierMap:        routing.TierMap{Frontier: "opus", Balanced: "sonnet"},
+				TierProfileIDs: routing.TierProfileIDs{Frontier: "profile-frontier", Balanced: "profile-balanced"},
+				Mode:           "default",
+				Flags:          []string{"--quiet"},
+				Env:            map[string]string{"FOO": "bar"},
 			},
 			"codex-acp": {
 				TierMap: routing.TierMap{Balanced: "gpt-5.4"},
@@ -80,6 +81,84 @@ func TestUpsertAndGetWorkspaceRouting_RoundTrip(t *testing.T) {
 	}
 	if len(claude.Flags) != 1 || claude.Flags[0] != "--quiet" {
 		t.Errorf("claude flags = %v", claude.Flags)
+	}
+	if claude.TierProfileIDs.Frontier != "profile-frontier" {
+		t.Errorf("claude tier profile ids lost: %+v", claude.TierProfileIDs)
+	}
+}
+
+func TestListRoutingTierReferencesByAgentProfile(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	cfg := &routing.WorkspaceConfig{
+		Enabled:       false,
+		DefaultTier:   routing.TierBalanced,
+		ProviderOrder: []routing.ProviderID{"codex-acp"},
+		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
+			"codex-acp": {
+				TierMap: routing.TierMap{
+					Frontier: "gpt-5-high",
+					Balanced: "gpt-5-medium",
+					Economy:  "gpt-5-low",
+				},
+				TierProfileIDs: routing.TierProfileIDs{
+					Frontier: "profile-frontier",
+					Balanced: "profile-balanced",
+					Economy:  "profile-economy",
+				},
+			},
+		},
+	}
+	if err := repo.UpsertWorkspaceRouting(ctx, "ws-1", cfg); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	refs, err := repo.ListRoutingTierReferencesByAgentProfile(ctx, "profile-balanced")
+	if err != nil {
+		t.Fatalf("list refs: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("refs len = %d, want 1: %+v", len(refs), refs)
+	}
+	if refs[0].WorkspaceID != "ws-1" || refs[0].ProviderID != "codex-acp" || refs[0].Tier != routing.TierBalanced {
+		t.Errorf("unexpected ref: %+v", refs[0])
+	}
+
+	refs, err = repo.ListRoutingTierReferencesByAgentProfile(ctx, "profile")
+	if err != nil {
+		t.Fatalf("list substring refs: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("substring profile id matched exact refs: %+v", refs)
+	}
+}
+
+func TestListRoutingTierReferencesByAgentProfile_IgnoresRemovedProviders(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	cfg := &routing.WorkspaceConfig{
+		Enabled:       false,
+		DefaultTier:   routing.TierBalanced,
+		ProviderOrder: []routing.ProviderID{"codex-acp"},
+		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
+			"codex-acp": {
+				TierProfileIDs: routing.TierProfileIDs{Balanced: "active-profile"},
+			},
+			"claude-acp": {
+				TierProfileIDs: routing.TierProfileIDs{Balanced: "removed-profile"},
+			},
+		},
+	}
+	if err := repo.UpsertWorkspaceRouting(ctx, "ws-1", cfg); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	refs, err := repo.ListRoutingTierReferencesByAgentProfile(ctx, "removed-profile")
+	if err != nil {
+		t.Fatalf("list removed provider refs: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("removed provider should not block profile deletion: %+v", refs)
 	}
 }
 

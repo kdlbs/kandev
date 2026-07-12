@@ -3,16 +3,20 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/common/logger"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -248,6 +252,44 @@ func TestHandleWSPrompt_NoAdapter(t *testing.T) {
 	}
 }
 
+func TestHandleWSPrompt_SuppressesPromptAbandonedAfterCancel(t *testing.T) {
+	s := newTestServer(t)
+	prompted := make(chan struct{}, 1)
+	s.procMgr.SetAdapterForTest(&promptErrorAdapter{
+		sessionID: "session-123",
+		err:       errors.New("prompt failed: prompt abandoned after cancel"),
+		prompted:  prompted,
+	})
+
+	msg, _ := ws.NewRequest("req-1", "agent.prompt", map[string]string{
+		"text": "hello",
+	})
+	resp := s.handleWSPrompt(context.Background(), msg)
+
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("expected response type, got %q", resp.Type)
+	}
+	var result PromptResponse
+	if err := resp.ParsePayload(&result); err != nil {
+		t.Fatalf("failed to parse response: %v", err)
+	}
+	if !result.Success {
+		t.Fatal("expected prompt response success")
+	}
+
+	select {
+	case <-prompted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("prompt was not called")
+	}
+
+	select {
+	case event := <-s.procMgr.GetUpdates():
+		t.Fatalf("expected no error event for prompt abandoned after cancel, got %+v", event)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestHandleWSCancel_NoAdapter(t *testing.T) {
 	s := newTestServer(t)
 	ctx := context.Background()
@@ -265,6 +307,73 @@ func TestHandleWSCancel_NoAdapter(t *testing.T) {
 	if !strings.Contains(errPayload.Message, "agent not running") {
 		t.Errorf("expected 'agent not running', got %q", errPayload.Message)
 	}
+}
+
+type promptErrorAdapter struct {
+	sessionID string
+	err       error
+	prompted  chan<- struct{}
+}
+
+func (a *promptErrorAdapter) PrepareEnvironment() (map[string]string, error) {
+	return nil, nil
+}
+
+func (a *promptErrorAdapter) PrepareCommandArgs() []string {
+	return nil
+}
+
+func (a *promptErrorAdapter) Connect(_ io.Writer, _ io.Reader) error {
+	return nil
+}
+
+func (a *promptErrorAdapter) Initialize(_ context.Context) error {
+	return nil
+}
+
+func (a *promptErrorAdapter) GetAgentInfo() *adapter.AgentInfo {
+	return nil
+}
+
+func (a *promptErrorAdapter) NewSession(_ context.Context, _ []types.McpServer) (string, error) {
+	return a.sessionID, nil
+}
+
+func (a *promptErrorAdapter) LoadSession(_ context.Context, sessionID string, _ []types.McpServer) error {
+	a.sessionID = sessionID
+	return nil
+}
+
+func (a *promptErrorAdapter) Prompt(_ context.Context, _ string, _ []v1.MessageAttachment) error {
+	a.prompted <- struct{}{}
+	return a.err
+}
+
+func (a *promptErrorAdapter) Cancel(_ context.Context) error {
+	return nil
+}
+
+func (a *promptErrorAdapter) Updates() <-chan adapter.AgentEvent {
+	return nil
+}
+
+func (a *promptErrorAdapter) GetSessionID() string {
+	return a.sessionID
+}
+
+func (a *promptErrorAdapter) GetOperationID() string {
+	return ""
+}
+
+func (a *promptErrorAdapter) SetPermissionHandler(_ adapter.PermissionHandler) {
+}
+
+func (a *promptErrorAdapter) Close() error {
+	return nil
+}
+
+func (a *promptErrorAdapter) RequiresProcessKill() bool {
+	return false
 }
 
 func TestHandleWSStderr_Empty(t *testing.T) {

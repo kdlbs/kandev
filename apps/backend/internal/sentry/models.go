@@ -1,6 +1,9 @@
-// Package sentry implements the Sentry integration (Phase 1: configure + browse).
-// A single install-wide configuration, a REST client for projects and issues,
-// and the HTTP handlers that expose these capabilities to the frontend.
+// Package sentry implements the Sentry integration: multiple named Sentry
+// instances per workspace, a REST client for projects and issues, and the HTTP
+// handlers that expose these capabilities to the frontend. Each workspace may
+// hold several instances (e.g. a SaaS org plus a self-hosted host); every
+// instance carries its own URL + token + auth-health, and issue-watches bind to
+// exactly one instance.
 package sentry
 
 import (
@@ -9,16 +12,39 @@ import (
 	"github.com/kandev/kandev/internal/integrations/optional"
 )
 
-// AuthMethodAuthToken is the only auth method Sentry supports in Phase 1: a
-// user or organization auth token sent as `Authorization: Bearer <token>`.
+// AuthMethodAuthToken is the only auth method Sentry supports: a user or
+// organization auth token sent as `Authorization: Bearer <token>`.
 const AuthMethodAuthToken = "auth_token"
 
-// SecretKey is the secret-store key used for the install-wide Sentry token.
+// SecretKey is the legacy secret-store key used for the pre-workspace
+// install-wide Sentry token. Retained for the boot migration only.
 const SecretKey = "sentry:singleton:token"
 
-// SentryConfig is the install-wide configuration for the Sentry integration.
-// The token is stored separately in the encrypted secret store under SecretKey.
+// SecretKeyForWorkspace returns the workspace-scoped Sentry secret key used by
+// the (now superseded) one-config-per-workspace model. Retained for the boot
+// migration only; live reads/writes use secretKeyForInstance.
+func SecretKeyForWorkspace(workspaceID string) string {
+	return "sentry:" + workspaceID + ":token"
+}
+
+// secretKeyForInstance returns the per-instance Sentry secret key. The
+// "instance:" segment keeps this namespace disjoint from the legacy
+// singleton/workspace keys so a workspace UUID can never collide with an
+// instance UUID.
+func secretKeyForInstance(instanceID string) string {
+	return "sentry:instance:" + instanceID + ":token"
+}
+
+// SentryConfig is a single named Sentry instance within a workspace. The token
+// is stored separately in the encrypted secret store under
+// secretKeyForInstance(ID).
 type SentryConfig struct {
+	// ID is the instance UUID, stable for the life of the instance and used as
+	// the secret key, the client-cache key, and the watch foreign key.
+	ID          string `json:"id" db:"id"`
+	WorkspaceID string `json:"workspaceId" db:"workspace_id"`
+	// Name is the user-facing label, required and unique within a workspace.
+	Name       string `json:"name" db:"name"`
 	AuthMethod string `json:"authMethod" db:"auth_method"`
 	// URL is the base URL of the Sentry instance (e.g. https://sentry.io for
 	// SaaS, or a self-hosted host). The REST client appends /api/0. Defaults
@@ -35,15 +61,34 @@ type SentryConfig struct {
 	UpdatedAt     time.Time  `json:"updatedAt" db:"updated_at"`
 }
 
-// SetConfigRequest is the payload sent by the UI to create or update the
-// Sentry configuration. When Secret is empty on update, the existing secret
-// is retained; when non-empty it replaces the stored value.
-type SetConfigRequest struct {
-	AuthMethod string `json:"authMethod"`
+// CreateConfigRequest is the payload sent by the UI to create a new Sentry
+// instance in a workspace.
+type CreateConfigRequest struct {
+	WorkspaceID string `json:"workspaceId"`
+	Name        string `json:"name"`
+	AuthMethod  string `json:"authMethod"`
 	// URL is the Sentry instance base URL. Optional: blank defaults to the
-	// sentry.io SaaS endpoint, preserving the prior single-tenant behavior.
+	// sentry.io SaaS endpoint.
 	URL    string `json:"url"`
 	Secret string `json:"secret"`
+}
+
+// UpdateConfigRequest updates an existing instance identified by its ID. When
+// Secret is empty the existing secret is retained; when non-empty it replaces
+// the stored value. Name/URL/AuthMethod replace the stored values.
+type UpdateConfigRequest struct {
+	Name       string `json:"name"`
+	AuthMethod string `json:"authMethod"`
+	URL        string `json:"url"`
+	Secret     string `json:"secret"`
+}
+
+// CopyConfigRequest copies every instance from SourceWorkspaceID into
+// TargetWorkspaceID: fresh instance IDs, secrets copied under the new keys,
+// names deduped, no watches carried over.
+type CopyConfigRequest struct {
+	SourceWorkspaceID string `json:"sourceWorkspaceId"`
+	TargetWorkspaceID string `json:"targetWorkspaceId"`
 }
 
 // TestConnectionResult reports what the backend learned when pinging Sentry
@@ -131,10 +176,15 @@ const (
 // whenever a new matching issue appears. Mirrors the Linear/Jira shape so the
 // orchestrator's WatcherSource pipeline applies uniformly.
 type IssueWatch struct {
-	ID             string `json:"id" db:"id"`
-	WorkspaceID    string `json:"workspaceId" db:"workspace_id"`
-	WorkflowID     string `json:"workflowId" db:"workflow_id"`
-	WorkflowStepID string `json:"workflowStepId" db:"workflow_step_id"`
+	ID          string `json:"id" db:"id"`
+	WorkspaceID string `json:"workspaceId" db:"workspace_id"`
+	// SentryInstanceID binds the watch to exactly one Sentry instance. Empty =
+	// legacy unbound watch (stored as SQL NULL); the poller resolves an unbound
+	// watch to the workspace's sole instance at poll time. Immutable once set:
+	// changing instance means creating a new watch.
+	SentryInstanceID string `json:"sentryInstanceId" db:"-"`
+	WorkflowID       string `json:"workflowId" db:"workflow_id"`
+	WorkflowStepID   string `json:"workflowStepId" db:"workflow_step_id"`
 	// RepositoryID optionally binds watcher-created tasks to a repository so the
 	// agent launches in an isolated worktree of that repo instead of a blank
 	// scratch checkout. Empty = unbound, which preserves the historical
@@ -181,10 +231,14 @@ type IssueWatchTask struct {
 // issue matching a watch that has no existing dedup row. The orchestrator
 // consumes this to create (and optionally auto-start) a Kandev task.
 type NewSentryIssueEvent struct {
-	IssueWatchID   string `json:"issueWatchId"`
-	WorkspaceID    string `json:"workspaceId"`
-	WorkflowID     string `json:"workflowId"`
-	WorkflowStepID string `json:"workflowStepId"`
+	IssueWatchID string `json:"issueWatchId"`
+	WorkspaceID  string `json:"workspaceId"`
+	// SentryInstanceID is the instance the originating watch is bound to (empty
+	// for a migrated legacy watch resolved to its workspace's sole instance).
+	// Carried onto the created task's metadata for traceability.
+	SentryInstanceID string `json:"sentryInstanceId,omitempty"`
+	WorkflowID       string `json:"workflowId"`
+	WorkflowStepID   string `json:"workflowStepId"`
 	// RepositoryID / BaseBranch carry the watch's optional repository binding so
 	// the orchestrator source can populate IssueTaskRequest.Repositories without
 	// reloading the watch row. Empty RepositoryID = unbound (repo-less task).
@@ -202,7 +256,10 @@ type NewSentryIssueEvent struct {
 
 // CreateIssueWatchRequest is the payload for POST /api/v1/sentry/watches/issue.
 type CreateIssueWatchRequest struct {
-	WorkspaceID         string       `json:"workspaceId"`
+	WorkspaceID string `json:"workspaceId"`
+	// SentryInstanceID binds the watch to a Sentry instance. Required and must
+	// belong to WorkspaceID. Immutable after creation.
+	SentryInstanceID    string       `json:"sentryInstanceId"`
 	WorkflowID          string       `json:"workflowId"`
 	WorkflowStepID      string       `json:"workflowStepId"`
 	RepositoryID        string       `json:"repositoryId"`
@@ -218,6 +275,8 @@ type CreateIssueWatchRequest struct {
 
 // UpdateIssueWatchRequest is the payload for PATCH /api/v1/sentry/watches/issue/:id.
 // All fields are pointers so the caller can omit ones it doesn't want to change.
+// Note: the bound Sentry instance is deliberately absent — instance binding is
+// immutable, so changing it means creating a new watch.
 type UpdateIssueWatchRequest struct {
 	WorkflowID          *string       `json:"workflowId,omitempty"`
 	WorkflowStepID      *string       `json:"workflowStepId,omitempty"`

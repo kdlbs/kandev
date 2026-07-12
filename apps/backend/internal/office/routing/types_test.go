@@ -1,6 +1,7 @@
 package routing_test
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -10,6 +11,31 @@ import (
 
 var testKnown = []routing.ProviderID{
 	"claude-acp", "codex-acp", "opencode-acp", "copilot-acp", "amp-acp",
+}
+
+func TestProviderProfileMarshalJSON_OmitsEmptyTierProfileIDs(t *testing.T) {
+	raw, err := json.Marshal(routing.ProviderProfile{
+		TierMap: routing.TierMap{Balanced: "sonnet"},
+	})
+	if err != nil {
+		t.Fatalf("marshal empty tier profile ids: %v", err)
+	}
+	if strings.Contains(string(raw), "tier_profile_ids") {
+		t.Fatalf("empty tier_profile_ids should be omitted, got %s", raw)
+	}
+
+	raw, err = json.Marshal(routing.ProviderProfile{
+		TierMap: routing.TierMap{Balanced: "sonnet"},
+		TierProfileIDs: routing.TierProfileIDs{
+			Balanced: "profile-balanced",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal tier profile ids: %v", err)
+	}
+	if !strings.Contains(string(raw), `"tier_profile_ids":{"balanced":"profile-balanced"}`) {
+		t.Fatalf("non-empty tier_profile_ids should be present, got %s", raw)
+	}
 }
 
 func TestValidateWorkspaceConfig(t *testing.T) {

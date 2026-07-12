@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import {
   MarkdownFileLinkContext,
   markdownComponents,
@@ -21,18 +21,21 @@ import { normalizeCached } from "@/lib/markdown/normalize-cache";
  */
 type MemoizedMarkdownProps = MarkdownFileLinkContextValue & {
   content: string;
+  components?: Components;
 };
 
 export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   content,
   worktreePath,
   onOpenFile,
+  components,
 }: MemoizedMarkdownProps) {
   const fileLinkContext = useMemo(() => ({ worktreePath, onOpenFile }), [worktreePath, onOpenFile]);
+  const resolvedComponents = components ?? markdownComponents;
 
   return (
     <MarkdownFileLinkContext.Provider value={fileLinkContext}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={resolvedComponents}>
         {normalizeCached(content)}
       </ReactMarkdown>
     </MarkdownFileLinkContext.Provider>

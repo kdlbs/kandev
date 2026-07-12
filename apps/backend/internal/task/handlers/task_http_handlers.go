@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
@@ -53,6 +54,7 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	}
 
 	query := c.Query("query")
+	sort := usermodels.NormalizeTasksListSort(c.Query("sort"))
 	workflowID := c.Query("workflow_id")
 	repositoryID := c.Query("repository_id")
 	includeArchived := c.Query("include_archived") == queryValueTrue
@@ -61,7 +63,7 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 	excludeConfig := c.Query("exclude_config") == queryValueTrue
 
 	tasks, total, err := h.service.ListTasksByWorkspace(
-		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
+		c.Request.Context(), c.Param("id"), workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig,
 	)
 	if err != nil {
 		handleNotFound(c, h.logger, err, "tasks not found")
@@ -89,7 +91,12 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 // method (the persisted ExecutorSnapshot JSON uses different keys), so the
 // batch loader alone can't supply them without a regression. Two queries
 // total, down from three pre-batch.
-func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tasks []*models.Task) ([]dto.TaskDTO, error) {
+func buildTaskDTOsWithSessionInfo(
+	ctx context.Context,
+	svc *service.Service,
+	log *logger.Logger,
+	tasks []*models.Task,
+) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
 		return []dto.TaskDTO{}, nil
 	}
@@ -104,6 +111,11 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 	primarySessionInfoMap, err := svc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
 	if err != nil {
 		return nil, err
+	}
+	pendingActionsBySession, err := pendingActionsForWaitingPrimarySessions(ctx, svc, primarySessionInfoMap)
+	if err != nil {
+		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(err))
+		pendingActionsBySession = map[string]models.TaskPendingAction{}
 	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
@@ -132,12 +144,14 @@ func buildTaskDTOsWithSessionInfo(ctx context.Context, svc *service.Service, tas
 			si.agentName,
 			si.workingDirectory,
 			si.sessionState,
+			pendingActionPtr(si.sessionID, pendingActionsBySession),
 		))
 	}
 	return result, nil
 }
 
 type sessionInfoFields struct {
+	sessionID        *string
 	reviewStatus     models.ReviewStatus
 	sessionState     *string
 	executorID       *string
@@ -151,6 +165,10 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 	var si sessionInfoFields
 	if info == nil {
 		return si
+	}
+	if info.ID != "" {
+		val := info.ID
+		si.sessionID = &val
 	}
 	si.reviewStatus = info.ReviewStatus
 	if info.State != "" {
@@ -182,8 +200,40 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 	return si
 }
 
+func pendingActionsForWaitingPrimarySessions(
+	ctx context.Context,
+	svc *service.Service,
+	primarySessionInfoMap map[string]*models.TaskSession,
+) (map[string]models.TaskPendingAction, error) {
+	sessionIDs := make([]string, 0, len(primarySessionInfoMap))
+	for _, info := range primarySessionInfoMap {
+		if info != nil && info.State == models.TaskSessionStateWaitingForInput {
+			sessionIDs = append(sessionIDs, info.ID)
+		}
+	}
+	if len(sessionIDs) == 0 {
+		return map[string]models.TaskPendingAction{}, nil
+	}
+	return svc.GetPendingActionsForSessions(ctx, sessionIDs)
+}
+
+func pendingActionPtr(
+	sessionID *string,
+	pendingActionsBySession map[string]models.TaskPendingAction,
+) *string {
+	if sessionID == nil {
+		return nil
+	}
+	action, ok := pendingActionsBySession[*sessionID]
+	if !ok {
+		return nil
+	}
+	value := string(action)
+	return &value
+}
+
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, tasks)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {
@@ -192,7 +242,7 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, []*models.Task{task})
+	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, []*models.Task{task})
 	if err != nil {
 		h.logger.Error("failed to build task DTO with session info", zap.Error(err))
 		c.JSON(http.StatusOK, dto.FromTask(task))
@@ -396,6 +446,7 @@ type httpTaskRepositoryInput struct {
 	RepositoryID   string `json:"repository_id"`
 	BaseBranch     string `json:"base_branch"`
 	CheckoutBranch string `json:"checkout_branch"`
+	PRNumber       int    `json:"pr_number,omitempty"`
 	LocalPath      string `json:"local_path"`
 	Name           string `json:"name"`
 	DefaultBranch  string `json:"default_branch"`
@@ -811,6 +862,7 @@ func convertCreateTaskRepositories(c *gin.Context, inputs []httpTaskRepositoryIn
 			RepositoryID:   r.RepositoryID,
 			BaseBranch:     r.BaseBranch,
 			CheckoutBranch: r.CheckoutBranch,
+			PRNumber:       r.PRNumber,
 			LocalPath:      r.LocalPath,
 			Name:           r.Name,
 			DefaultBranch:  r.DefaultBranch,

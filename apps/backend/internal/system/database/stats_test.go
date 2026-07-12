@@ -2,8 +2,13 @@ package database
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +22,79 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/system/jobs"
 )
+
+const fakePostgresStatsDriverName = "kandev-system-database-stats-postgres"
+
+var registerFakePostgresStatsDriverOnce sync.Once
+
+type fakePostgresStatsDriver struct{}
+
+func (fakePostgresStatsDriver) Open(string) (driver.Conn, error) {
+	return fakePostgresStatsConn{}, nil
+}
+
+type fakePostgresStatsConn struct{}
+
+func (fakePostgresStatsConn) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("prepare is not implemented")
+}
+
+func (fakePostgresStatsConn) Close() error {
+	return nil
+}
+
+func (fakePostgresStatsConn) Begin() (driver.Tx, error) {
+	return nil, fmt.Errorf("transactions are not implemented")
+}
+
+func (fakePostgresStatsConn) QueryContext(
+	_ context.Context,
+	query string,
+	args []driver.NamedValue,
+) (driver.Rows, error) {
+	normalized := strings.Join(strings.Fields(query), " ")
+	switch normalized {
+	case "SELECT pg_database_size(current_database())":
+		return newFakeRows([]string{"pg_database_size"}, []driver.Value{int64(4096)}), nil
+	case "SELECT value FROM kandev_meta WHERE key = $1":
+		if len(args) != 1 || args[0].Value != "kandev_version" {
+			return nil, fmt.Errorf("unexpected args for schema version: %#v", args)
+		}
+		return newFakeRows([]string{"value"}, []driver.Value{"v0.99.0"}), nil
+	default:
+		if strings.HasPrefix(normalized, "PRAGMA ") {
+			return nil, fmt.Errorf(`ERROR: syntax error at or near "PRAGMA" (SQLSTATE 42601)`)
+		}
+		return nil, fmt.Errorf("unexpected query: %s", normalized)
+	}
+}
+
+type fakeRows struct {
+	columns []string
+	values  []driver.Value
+	read    bool
+}
+
+func newFakeRows(columns []string, values []driver.Value) *fakeRows {
+	return &fakeRows{columns: columns, values: values}
+}
+
+func (r *fakeRows) Columns() []string {
+	return r.columns
+}
+
+func (r *fakeRows) Close() error {
+	return nil
+}
+
+func (r *fakeRows) Next(dest []driver.Value) error {
+	if r.read {
+		return io.EOF
+	}
+	r.read = true
+	copy(dest, r.values)
+	return nil
+}
 
 func newTestLogger(t *testing.T) *logger.Logger {
 	t.Helper()
@@ -131,6 +209,21 @@ func newTestService(t *testing.T) (*Service, *jobs.Tracker, *stubBus, string) {
 	return svc, tracker, stub, dataDir
 }
 
+func newFakePostgresStatsPool(t *testing.T) *db.Pool {
+	t.Helper()
+	registerFakePostgresStatsDriverOnce.Do(func() {
+		sql.Register(fakePostgresStatsDriverName, fakePostgresStatsDriver{})
+	})
+	raw, err := sql.Open(fakePostgresStatsDriverName, "")
+	if err != nil {
+		t.Fatalf("open fake postgres: %v", err)
+	}
+	pg := sqlx.NewDb(raw, "pgx")
+	pool := db.NewPool(pg, pg)
+	t.Cleanup(func() { _ = pool.Close() })
+	return pool
+}
+
 // waitForState mirrors jobs.waitForState — wait until the tracker reports
 // the target state for the given id, or fail after 2s.
 func waitForState(t *testing.T, tracker *jobs.Tracker, id string, target jobs.State) *jobs.Job {
@@ -166,6 +259,34 @@ func TestStats_ReturnsPathSizeAndSchemaVersion(t *testing.T) {
 	}
 	if stats.LastBackupAt != nil {
 		t.Errorf("LastBackupAt = %v, want nil (no backups yet)", *stats.LastBackupAt)
+	}
+}
+
+func TestStats_PostgresDoesNotUseSQLitePragmas(t *testing.T) {
+	dataDir := t.TempDir()
+	svc := NewService(newFakePostgresStatsPool(t), dataDir, ResetDirs{}, nil, nil)
+
+	stats, err := svc.Stats()
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if stats.Driver != "postgres" {
+		t.Errorf("Driver = %q, want postgres", stats.Driver)
+	}
+	if stats.Path != "" {
+		t.Errorf("Path = %q, want empty for postgres", stats.Path)
+	}
+	if stats.SizeBytes != 4096 {
+		t.Errorf("SizeBytes = %d, want 4096", stats.SizeBytes)
+	}
+	if stats.WALSizeBytes != 0 {
+		t.Errorf("WALSizeBytes = %d, want 0 for postgres", stats.WALSizeBytes)
+	}
+	if stats.SchemaVersion != "v0.99.0" {
+		t.Errorf("SchemaVersion = %q, want v0.99.0", stats.SchemaVersion)
+	}
+	if stats.LastBackupAt != nil {
+		t.Errorf("LastBackupAt = %v, want nil for postgres", *stats.LastBackupAt)
 	}
 }
 
@@ -213,7 +334,7 @@ func TestHandleStats_Returns200JSON(t *testing.T) {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !contains(body, `"path"`) || !contains(body, `"schema_version"`) {
+	if !contains(body, `"driver"`) || !contains(body, `"path"`) || !contains(body, `"schema_version"`) {
 		t.Errorf("body missing fields: %s", body)
 	}
 }

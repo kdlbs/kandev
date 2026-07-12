@@ -32,12 +32,19 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if err := validateIssueWatchCreate(req); err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(req.SentryInstanceID) == "" {
+		return nil, fmt.Errorf("%w: sentryInstanceId is required", ErrInstanceRequired)
+	}
+	if _, err := s.requireInstance(ctx, req.WorkspaceID, req.SentryInstanceID); err != nil {
+		return nil, err
+	}
 	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, req.WorkspaceID, req.RepositoryID, req.BaseBranch)
 	if err != nil {
 		return nil, err
 	}
 	w := &IssueWatch{
 		WorkspaceID:         req.WorkspaceID,
+		SentryInstanceID:    req.SentryInstanceID,
 		WorkflowID:          req.WorkflowID,
 		WorkflowStepID:      req.WorkflowStepID,
 		RepositoryID:        repositoryID,
@@ -172,19 +179,27 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 	return res.TasksDeleted, err
 }
 
-// CheckIssueWatch runs the watch's filter once and returns the issues that
-// haven't been turned into tasks yet. last_polled_at is stamped regardless of
-// whether the search succeeded — a failing search still counts as "we tried".
+// CheckIssueWatch runs the watch's filter once and returns the Sentry
+// instance actually polled (resolved via resolveWatchInstanceID — never
+// w.SentryInstanceID directly, which is empty for an unbound legacy watch)
+// plus the issues that haven't been turned into tasks yet. last_polled_at is
+// stamped regardless of whether the search succeeded — a failing search
+// still counts as "we tried".
 //
 // Concurrency note: callers must tolerate being handed an issue that gets
 // stolen by a concurrent reserver. The duplicate publish is harmless — the
 // second reserver loses the INSERT OR IGNORE race in the orchestrator and
 // bails. Same pattern as the Linear / Jira watchers.
-func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*SentryIssue, error) {
+func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) (string, []*SentryIssue, error) {
 	defer s.stampWatchLastPolled(w.ID)
-	client, err := s.clientFor(ctx)
+	instanceID, err := s.resolveWatchInstanceID(ctx, w)
 	if err != nil {
-		return nil, err
+		s.stampWatchError(w.ID, err.Error())
+		return "", nil, err
+	}
+	client, err := s.clientForInstance(ctx, instanceID)
+	if err != nil {
+		return instanceID, nil, err
 	}
 	// Intentionally reads only the first page per tick (bounded-page-per-tick
 	// invariant, matching the Linear/Jira watchers). SearchIssues sorts results
@@ -192,14 +207,14 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Sentry
 	// on page one and are not missed by the single-page read.
 	res, err := client.SearchIssues(ctx, w.Filter, "")
 	if err != nil {
-		return nil, err
+		return instanceID, nil, err
 	}
 	seen, err := s.store.ListSeenIssueShortIDs(ctx, w.ID)
 	if err != nil {
 		// Skip this tick rather than treat a failed dedup read as "nothing seen":
 		// a nil map would let the whole page (up to 100 issues) publish as events.
 		// The next tick retries with a working dedup set.
-		return nil, fmt.Errorf("load dedup set for watch %s: %w", w.ID, err)
+		return instanceID, nil, fmt.Errorf("load dedup set for watch %s: %w", w.ID, err)
 	}
 	out := make([]*SentryIssue, 0, len(res.Issues))
 	for i := range res.Issues {
@@ -209,7 +224,8 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Sentry
 		}
 		out = append(out, &issue)
 	}
-	return out, nil
+	s.clearWatchError(w.ID)
+	return instanceID, out, nil
 }
 
 // stampWatchLastPolled writes the current timestamp using a fresh background
@@ -220,6 +236,75 @@ func (s *Service) stampWatchLastPolled(watchID string) {
 	defer cancel()
 	if err := s.store.UpdateIssueWatchLastPolled(ctx, watchID, time.Now().UTC()); err != nil {
 		s.log.Warn("sentry: update last_polled_at failed",
+			zap.String("watch_id", watchID), zap.Error(err))
+	}
+}
+
+// resolveWatchInstanceID picks the Sentry instance a watch should poll. A
+// bound watch uses its stored instance. An unbound (migrated legacy) watch
+// resolves to the workspace's sole instance per ADR-0030, regardless of that
+// instance's health — matching the pre-existing single-instance contract.
+// When the workspace has several instances, the choice is otherwise
+// ambiguous, so it narrows to the healthy subset: a single healthy instance
+// wins, and zero or several healthy instances still cannot run unambiguously.
+func (s *Service) resolveWatchInstanceID(ctx context.Context, w *IssueWatch) (string, error) {
+	if w.SentryInstanceID != "" {
+		return w.SentryInstanceID, nil
+	}
+	instances, err := s.store.ListInstances(ctx, w.WorkspaceID)
+	if err != nil {
+		return "", err
+	}
+	switch len(instances) {
+	case 0:
+		return "", fmt.Errorf("%w: watch is unbound and its workspace has no Sentry instance", ErrNotConfigured)
+	case 1:
+		return instances[0].ID, nil
+	default:
+		return resolveAmbiguousWatchInstance(instances)
+	}
+}
+
+// resolveAmbiguousWatchInstance breaks a multi-instance tie by preferring the
+// workspace's sole healthy instance; zero or several healthy instances remain
+// ambiguous and require an explicit binding.
+func resolveAmbiguousWatchInstance(instances []*SentryConfig) (string, error) {
+	healthyInstances := make([]*SentryConfig, 0, len(instances))
+	for _, instance := range instances {
+		if instance.LastOk {
+			healthyInstances = append(healthyInstances, instance)
+		}
+	}
+	switch len(healthyInstances) {
+	case 1:
+		return healthyInstances[0].ID, nil
+	case 0:
+		return "", fmt.Errorf("%w: watch is unbound and its workspace has no healthy Sentry instance", ErrNotConfigured)
+	default:
+		return "", fmt.Errorf("%w: watch is unbound and its workspace has %d healthy Sentry instances; bind one to the watch", ErrInvalidConfig, len(healthyInstances))
+	}
+}
+
+// stampWatchError records a non-fatal poll-time failure cause on the watch row
+// without disabling it, using a detached short-deadline context so a cancelled
+// caller ctx does not drop the record.
+func (s *Service) stampWatchError(watchID, cause string) {
+	ctx, cancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
+	defer cancel()
+	if err := s.store.StampIssueWatchError(ctx, watchID, cause); err != nil {
+		s.log.Warn("sentry: stamp watch error failed",
+			zap.String("watch_id", watchID), zap.Error(err))
+	}
+}
+
+// clearWatchError removes stale poll error state using a detached context so a
+// successful check still clears it if the caller context is subsequently
+// cancelled.
+func (s *Service) clearWatchError(watchID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
+	defer cancel()
+	if err := s.store.ClearIssueWatchError(ctx, watchID); err != nil {
+		s.log.Warn("sentry: clear watch error failed",
 			zap.String("watch_id", watchID), zap.Error(err))
 	}
 }
@@ -243,9 +328,11 @@ func (s *Service) ReleaseIssueWatchTask(ctx context.Context, watchID, shortID st
 }
 
 // publishNewSentryIssueEvent emits the orchestrator-facing event for one
-// freshly-observed issue. No-op when the event bus is not wired (tests, early
-// boot).
-func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch, issue *SentryIssue) {
+// freshly-observed issue. instanceID must be the instance actually polled
+// (CheckIssueWatch's resolved return value) rather than w.SentryInstanceID,
+// which is empty for an unbound legacy watch. No-op when the event bus is not
+// wired (tests, early boot).
+func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch, instanceID string, issue *SentryIssue) {
 	s.mu.Lock()
 	eb := s.eventBus
 	s.mu.Unlock()
@@ -255,6 +342,7 @@ func (s *Service) publishNewSentryIssueEvent(ctx context.Context, w *IssueWatch,
 	evt := bus.NewEvent(events.SentryNewIssue, "sentry", &NewSentryIssueEvent{
 		IssueWatchID:      w.ID,
 		WorkspaceID:       w.WorkspaceID,
+		SentryInstanceID:  instanceID,
 		WorkflowID:        w.WorkflowID,
 		WorkflowStepID:    w.WorkflowStepID,
 		RepositoryID:      w.RepositoryID,

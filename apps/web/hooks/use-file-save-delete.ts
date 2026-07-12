@@ -6,7 +6,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
 import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
 import type { useToast } from "@/components/toast-provider";
-import { PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
+import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 
 /** Read openFiles from the store without subscribing to changes. */
 function getOpenFiles() {
@@ -14,13 +14,14 @@ function getOpenFiles() {
 }
 
 /** Update dockview panel dirty state after a successful save. */
-export function updatePanelAfterSave(path: string, name: string) {
+export function updatePanelAfterSave(path: string, name: string, repo?: string) {
   const dockApi = useDockviewStore.getState().api;
+  const itemId = buildRepoScopedItemId(path, repo);
   const panel =
-    dockApi?.getPanel(`file:${path}`) ??
+    dockApi?.getPanel(`file:${itemId}`) ??
     (() => {
       const preview = dockApi?.getPanel(PREVIEW_FILE_EDITOR_ID);
-      return (preview?.params as Record<string, unknown> | undefined)?.previewItemId === path
+      return (preview?.params as Record<string, unknown> | undefined)?.previewItemId === itemId
         ? preview
         : undefined;
     })();
@@ -31,15 +32,16 @@ export function updatePanelAfterSave(path: string, name: string) {
 }
 
 /** Close the pinned (or preview) editor panel for a path after a remote delete. */
-function closeFileEditorPanel(path: string) {
+function closeFileEditorPanel(path: string, repo?: string) {
   const dockApi = useDockviewStore.getState().api;
-  const pinned = dockApi?.getPanel(`file:${path}`);
+  const itemId = buildRepoScopedItemId(path, repo);
+  const pinned = dockApi?.getPanel(`file:${itemId}`);
   if (pinned) {
     dockApi?.removePanel(pinned);
     return;
   }
   const preview = dockApi?.getPanel(PREVIEW_FILE_EDITOR_ID);
-  if (preview && (preview.params as Record<string, unknown>)?.previewItemId === path) {
+  if (preview && (preview.params as Record<string, unknown>)?.previewItemId === itemId) {
     dockApi?.removePanel(preview);
   }
 }
@@ -51,17 +53,18 @@ export type SaveDeleteParams = {
   toast: ReturnType<typeof useToast>["toast"];
 };
 
-async function performSaveFile(path: string, params: SaveDeleteParams) {
-  const file = getOpenFiles().get(path);
+async function performSaveFile(path: string, repo: string | undefined, params: SaveDeleteParams) {
+  const fileKey = buildRepoScopedItemId(path, repo);
+  const file = getOpenFiles().get(fileKey);
   if (!file || !file.isDirty) return;
   const client = getWebSocketClient();
   const currentSessionId = params.activeSessionIdRef.current;
   if (!client || !currentSessionId) return;
-  params.setSavingFiles((prev) => new Set(prev).add(path));
+  params.setSavingFiles((prev) => new Set(prev).add(fileKey));
   try {
     const diff = generateUnifiedDiff(file.originalContent, file.content, file.path);
     const response = await updateFileContent(client, currentSessionId, {
-      path,
+      path: file.path,
       diff,
       originalHash: file.originalHash,
       desiredContent: file.content,
@@ -70,9 +73,9 @@ async function performSaveFile(path: string, params: SaveDeleteParams) {
     if (response.success && response.new_hash) {
       // Re-read current state: user may have typed more while the save was
       // in flight. Only mark clean if content still matches what was saved.
-      const current = getOpenFiles().get(path);
+      const current = getOpenFiles().get(fileKey);
       const stillClean = current?.content === file.content;
-      params.updateFileState(path, {
+      params.updateFileState(fileKey, {
         originalContent: file.content,
         originalHash: response.new_hash,
         isDirty: !stillClean,
@@ -80,7 +83,7 @@ async function performSaveFile(path: string, params: SaveDeleteParams) {
         remoteContent: undefined,
         remoteOriginalHash: undefined,
       });
-      if (stillClean) updatePanelAfterSave(path, file.name);
+      if (stillClean) updatePanelAfterSave(file.path, file.name, file.repo);
       if (response.resolution === "overwritten") {
         params.toast({
           title: "File saved (overwritten)",
@@ -105,7 +108,7 @@ async function performSaveFile(path: string, params: SaveDeleteParams) {
   } finally {
     params.setSavingFiles((prev) => {
       const next = new Set(prev);
-      next.delete(path);
+      next.delete(fileKey);
       return next;
     });
   }
@@ -114,16 +117,20 @@ async function performSaveFile(path: string, params: SaveDeleteParams) {
 export function useSaveDeleteActions(params: SaveDeleteParams) {
   const { activeSessionIdRef, updateFileState, toast } = params;
 
-  const saveFile = useCallback((path: string) => performSaveFile(path, params), [params]);
+  const saveFile = useCallback(
+    (path: string, repo?: string) => performSaveFile(path, repo, params),
+    [params],
+  );
 
   const deleteFileAction = useCallback(
-    async (path: string) => {
+    async (path: string, repo?: string) => {
       const client = getWebSocketClient();
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
       try {
-        const repo = getOpenFiles().get(path)?.repo;
-        const response = await deleteFile(client, currentSessionId, path, repo);
+        const fileKey = buildRepoScopedItemId(path, repo);
+        const fileRepo = getOpenFiles().get(fileKey)?.repo ?? repo;
+        const response = await deleteFile(client, currentSessionId, path, fileRepo);
         if (!response.success) {
           toast({
             title: "Delete failed",
@@ -142,17 +149,18 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
         return;
       }
       // Close the panel only after the remote delete succeeds.
-      closeFileEditorPanel(path);
+      closeFileEditorPanel(path, repo);
     },
     [activeSessionIdRef, toast],
   );
 
   const applyRemoteUpdate = useCallback(
-    async (path: string) => {
-      const file = getOpenFiles().get(path);
+    async (path: string, repo?: string) => {
+      const fileKey = buildRepoScopedItemId(path, repo);
+      const file = getOpenFiles().get(fileKey);
       if (!file || !file.hasRemoteUpdate || file.remoteContent === undefined) return;
       const remoteHash = file.remoteOriginalHash ?? (await calculateHash(file.remoteContent));
-      updateFileState(path, {
+      updateFileState(fileKey, {
         content: file.remoteContent,
         originalContent: file.remoteContent,
         originalHash: remoteHash,
@@ -161,7 +169,7 @@ export function useSaveDeleteActions(params: SaveDeleteParams) {
         remoteContent: undefined,
         remoteOriginalHash: undefined,
       });
-      updatePanelAfterSave(path, file.name);
+      updatePanelAfterSave(file.path, file.name, file.repo);
     },
     [updateFileState],
   );

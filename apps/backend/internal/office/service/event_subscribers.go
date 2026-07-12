@@ -163,6 +163,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		subject string
 		handler bus.EventHandler
 	}{
+		{events.TaskCreated, s.handleTaskCreated},
 		{events.TaskUpdated, s.handleTaskUpdated},
 		{events.TaskMoved, s.handleTaskMoved},
 		{events.OfficeApprovalResolved, s.handleApprovalResolved},
@@ -644,15 +645,48 @@ func (s *Service) projectIDForTask(ctx context.Context, taskID string) string {
 	return projectID
 }
 
+// handleTaskCreated fires a task_assigned run when a newly-created task
+// already has a runner. The task.created payload may not carry the
+// projected assignee, so this falls back to the stored runner row.
+func (s *Service) handleTaskCreated(ctx context.Context, event *bus.Event) error {
+	data, err := decodeEventData[TaskUpdatedData](event)
+	if err != nil {
+		return nil
+	}
+	return s.queueTaskAssignedRun(ctx, data.TaskID, data.AssigneeAgentProfileID, true)
+}
+
 // handleTaskUpdated fires a task_assigned run when an agent is assigned.
 func (s *Service) handleTaskUpdated(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[TaskUpdatedData](event)
-	if err != nil || data.AssigneeAgentProfileID == "" {
+	if err != nil {
 		return nil
 	}
-	payload := mustJSON(map[string]string{"task_id": data.TaskID})
-	key := fmt.Sprintf("task_assigned:%s", data.TaskID)
-	return s.QueueRun(ctx, data.AssigneeAgentProfileID, RunReasonTaskAssigned, payload, key)
+	return s.queueTaskAssignedRun(ctx, data.TaskID, data.AssigneeAgentProfileID, false)
+}
+
+func (s *Service) queueTaskAssignedRun(
+	ctx context.Context,
+	taskID string,
+	agentProfileID string,
+	fallbackToStoredRunner bool,
+) error {
+	if taskID == "" {
+		return nil
+	}
+	if agentProfileID == "" && fallbackToStoredRunner {
+		fields, err := s.repo.GetTaskExecutionFields(ctx, taskID)
+		if err != nil || fields == nil {
+			return nil
+		}
+		agentProfileID = fields.AssigneeAgentProfileID
+	}
+	if agentProfileID == "" {
+		return nil
+	}
+	payload := mustJSON(map[string]string{"task_id": taskID})
+	key := fmt.Sprintf("task_assigned:%s:%s", taskID, agentProfileID)
+	return s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
 }
 
 // handleTaskMoved logs the step change to the activity log and queues

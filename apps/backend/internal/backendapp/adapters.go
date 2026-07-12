@@ -109,16 +109,18 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		SetupScript:         req.SetupScript,
 		CopyFiles:           req.CopyFiles,
 		// Worktree configuration for concurrent agent execution
-		UseWorktree:          req.UseWorktree,
-		WorktreeID:           req.WorktreeID,
-		RepositoryID:         req.RepositoryID,
-		RepositoryPath:       req.RepositoryPath,
-		BaseBranch:           req.BaseBranch,
-		DefaultBranch:        req.DefaultBranch,
-		CheckoutBranch:       req.CheckoutBranch,
-		PRNumber:             req.PRNumber,
-		WorktreeBranchPrefix: req.WorktreeBranchPrefix,
-		PullBeforeWorktree:   req.PullBeforeWorktree,
+		UseWorktree:            req.UseWorktree,
+		WorktreeID:             req.WorktreeID,
+		RepositoryID:           req.RepositoryID,
+		RepositoryPath:         req.RepositoryPath,
+		BaseBranch:             req.BaseBranch,
+		DefaultBranch:          req.DefaultBranch,
+		CheckoutBranch:         req.CheckoutBranch,
+		PRNumber:               req.PRNumber,
+		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:   req.WorktreeBranchTicket,
+		PullBeforeWorktree:     req.PullBeforeWorktree,
 		// Task directory mode
 		TaskDirName:        req.TaskDirName,
 		RepoName:           req.RepoName,
@@ -142,22 +144,24 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		specs := make([]lifecycle.RepoLaunchSpec, 0, len(req.Repositories))
 		for _, r := range req.Repositories {
 			specs = append(specs, lifecycle.RepoLaunchSpec{
-				RepositoryID:         r.RepositoryID,
-				RepositoryPath:       r.RepositoryPath,
-				RepositoryURL:        r.RepositoryURL,
-				RepoName:             r.RepoName,
-				BaseBranch:           r.BaseBranch,
-				DefaultBranch:        r.DefaultBranch,
-				CheckoutBranch:       r.CheckoutBranch,
-				PRNumber:             r.PRNumber,
-				WorktreeID:           r.WorktreeID,
-				WorktreeBranchPrefix: r.WorktreeBranchPrefix,
-				PullBeforeWorktree:   r.PullBeforeWorktree,
-				RepoSetupScript:      r.RepoSetupScript,
-				RepoCleanupScript:    r.RepoCleanupScript,
-				CopyFiles:            r.CopyFiles,
-				BranchSlug:           r.BranchSlug,
-				BranchIdentitySlug:   r.BranchIdentitySlug,
+				RepositoryID:           r.RepositoryID,
+				RepositoryPath:         r.RepositoryPath,
+				RepositoryURL:          r.RepositoryURL,
+				RepoName:               r.RepoName,
+				BaseBranch:             r.BaseBranch,
+				DefaultBranch:          r.DefaultBranch,
+				CheckoutBranch:         r.CheckoutBranch,
+				PRNumber:               r.PRNumber,
+				WorktreeID:             r.WorktreeID,
+				WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
+				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
+				WorktreeBranchTicket:   r.WorktreeBranchTicket,
+				PullBeforeWorktree:     r.PullBeforeWorktree,
+				RepoSetupScript:        r.RepoSetupScript,
+				RepoCleanupScript:      r.RepoCleanupScript,
+				CopyFiles:              r.CopyFiles,
+				BranchSlug:             r.BranchSlug,
+				BranchIdentitySlug:     r.BranchIdentitySlug,
 			})
 		}
 		launchReq.Repositories = specs
@@ -276,6 +280,16 @@ func (a *lifecycleAdapter) StopAgentWithReason(ctx context.Context, agentInstanc
 	return a.mgr.StopAgentWithReason(ctx, agentInstanceID, reason, force)
 }
 
+// RowLiveness classifies the liveness of the OS process backing an
+// executors_running row using the runtime-aware host-local probe. It is the
+// orchestrator's window into the platform-split liveness check (kept in the
+// lifecycle package) used by startup reconciliation
+// (#1597 runtime-aware liveness). A local check never runs against a
+// remote/SSH row — such rows return Unknown.
+func (a *lifecycleAdapter) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
+	return lifecycle.RowProcessLiveness(row)
+}
+
 // GetAgentStatus returns the status of an agent execution
 func (a *lifecycleAdapter) GetAgentStatus(ctx context.Context, agentInstanceID string) (*v1.AgentExecution, error) {
 	execution, found := a.mgr.GetExecution(agentInstanceID)
@@ -377,6 +391,10 @@ func (a *lifecycleAdapter) IsAgentRunningForSession(ctx context.Context, session
 // IsAgentReadyForPrompt checks if the session can accept a prompt immediately.
 func (a *lifecycleAdapter) IsAgentReadyForPrompt(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsAgentReadyForPrompt(ctx, sessionID)
+}
+
+func (a *lifecycleAdapter) RecoverAgentPromptStream(ctx context.Context, sessionID string) error {
+	return a.mgr.RecoverAgentPromptStream(ctx, sessionID)
 }
 
 // IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.

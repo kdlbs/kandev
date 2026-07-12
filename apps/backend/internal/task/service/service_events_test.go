@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -14,6 +15,16 @@ type failingTaskRepoRepository struct {
 	err error
 }
 
+type failingMessageRepository struct {
+	repository.MessageRepository
+	err error
+}
+
+type primarySessionInfoRepository struct {
+	repository.SessionRepository
+	info map[string]*models.TaskSession
+}
+
 type taskEventTestRepository interface {
 	CreateWorkspace(context.Context, *models.Workspace) error
 	CreateWorkflow(context.Context, *models.Workflow) error
@@ -22,6 +33,18 @@ type taskEventTestRepository interface {
 
 func (r failingTaskRepoRepository) ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error) {
 	return nil, r.err
+}
+
+func (r failingMessageRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
+	return nil, r.err
+}
+
+func (r primarySessionInfoRepository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs []string) (map[string]*models.TaskSession, error) {
+	return r.info, nil
+}
+
+func (r primarySessionInfoRepository) GetSessionCountsByTaskIDs(ctx context.Context, taskIDs []string) (map[string]int, error) {
+	return map[string]int{}, nil
 }
 
 // TestPublishTaskUpdated_FallbackRepositoryID exercises the DB fallback in
@@ -100,6 +123,137 @@ func TestPublishTaskUpdated_EmitsEmptyRepositories(t *testing.T) {
 	}
 	if len(repos) != 0 {
 		t.Fatalf("expected empty repositories payload, got %#v", repos)
+	}
+}
+
+func TestPublishTaskUpdated_EmitsNullPrimarySessionFieldsWhenNoPrimaryExists(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	createTaskWithoutRepositories(t, ctx, repo)
+	eventBus.ClearEvents()
+
+	svc.PublishTaskUpdated(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	if value, ok := data["primary_session_id"]; !ok || value != nil {
+		t.Fatalf("primary_session_id = %#v, want explicit nil", value)
+	}
+	if value, ok := data["primary_session_state"]; !ok || value != nil {
+		t.Fatalf("primary_session_state = %#v, want explicit nil", value)
+	}
+	if value, ok := data["primary_session_pending_action"]; !ok || value != nil {
+		t.Fatalf("primary_session_pending_action = %#v, want explicit nil", value)
+	}
+}
+
+func TestPublishTaskUpdated_EmitsPrimarySessionPendingAction(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	task := &models.Task{
+		ID:             "task-1",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "T",
+		Priority:       "medium",
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "session-1",
+		TaskID:    task.ID,
+		State:     models.TaskSessionStateWaitingForInput,
+		IsPrimary: true,
+		StartedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-1",
+		TaskSessionID: "session-1",
+		TaskID:        task.ID,
+	}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID:            "message-1",
+		TaskSessionID: "session-1",
+		TaskID:        task.ID,
+		TurnID:        "turn-1",
+		AuthorType:    models.MessageAuthorAgent,
+		Content:       "question",
+		Type:          models.MessageTypeClarificationRequest,
+		Metadata:      map[string]interface{}{"status": "pending"},
+		CreatedAt:     now,
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	svc.PublishTaskUpdated(ctx, task)
+
+	data := singlePublishedEventData(t, eventBus)
+	if value := data["primary_session_pending_action"]; value != "clarification" {
+		t.Fatalf("primary_session_pending_action = %#v, want clarification", value)
+	}
+}
+
+func TestAddTaskSessionEventFields_EmitsNullPrimarySessionStateWhenEmpty(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.sessions = primarySessionInfoRepository{
+		info: map[string]*models.TaskSession{
+			"task-1": {ID: "session-1", TaskID: "task-1"},
+		},
+	}
+	data := map[string]interface{}{}
+
+	svc.addTaskSessionEventFields(context.Background(), "task-1", data)
+
+	if value := data["primary_session_id"]; value != "session-1" {
+		t.Fatalf("primary_session_id = %#v, want session-1", value)
+	}
+	if value, ok := data["primary_session_state"]; !ok || value != nil {
+		t.Fatalf("primary_session_state = %#v, want explicit nil", value)
+	}
+}
+
+func TestAddTaskSessionEventFields_OmitsPendingActionOnLookupErrorForWaitingSession(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.sessions = primarySessionInfoRepository{
+		info: map[string]*models.TaskSession{
+			"task-1": {
+				ID:     "session-1",
+				TaskID: "task-1",
+				State:  models.TaskSessionStateWaitingForInput,
+			},
+		},
+	}
+	svc.messages = failingMessageRepository{err: errors.New("pending lookup failed")}
+	data := map[string]interface{}{}
+
+	svc.addTaskSessionEventFields(context.Background(), "task-1", data)
+
+	if value := data["primary_session_id"]; value != "session-1" {
+		t.Fatalf("primary_session_id = %#v, want session-1", value)
+	}
+	if value := data["primary_session_state"]; value != string(models.TaskSessionStateWaitingForInput) {
+		t.Fatalf("primary_session_state = %#v, want WAITING_FOR_INPUT", value)
+	}
+	if value, ok := data["primary_session_pending_action"]; ok {
+		t.Fatalf("primary_session_pending_action should be omitted on lookup error, got %#v", value)
 	}
 }
 

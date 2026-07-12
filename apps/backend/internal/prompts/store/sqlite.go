@@ -176,7 +176,7 @@ func (r *sqliteRepository) seedBuiltinPrompts() error {
 		_, err := r.db.Exec(r.db.Rebind(`
 			INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
 			VALUES (?, ?, ?, 1, ?, ?)
-			ON CONFLICT(id) DO NOTHING
+			ON CONFLICT DO NOTHING
 		`), prompt.ID, prompt.Name, prompt.Content, prompt.CreatedAt, prompt.UpdatedAt)
 		if err != nil {
 			return fmt.Errorf("failed to upsert built-in prompt %s: %w", prompt.ID, err)
@@ -193,5 +193,6 @@ func (r *sqliteRepository) getBuiltinPrompts() []*models.Prompt {
 		{ID: "builtin-open-pr", Name: "open-pr", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("open-pr")},
 		{ID: "builtin-merge-base", Name: "merge-base", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("merge-base")},
 		{ID: "builtin-ci-auto-fix", Name: "ci-auto-fix", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("ci-auto-fix")},
+		{ID: "builtin-changes-walkthrough", Name: "changes-walkthrough", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("changes-walkthrough")},
 	}
 }

@@ -89,6 +89,7 @@ RUN mkdir -p /app/apps/backend/bin /data/worktrees
 #   bundle/bin/kandev                  - native Go backend (per-arch)
 #   bundle/bin/agentctl                - native agentctl (per-arch)
 #   bundle/bin/agentctl-linux-amd64    - linux/amd64 agentctl helper
+#   bundle/bin/agentctl-linux-arm64    - linux/arm64 agentctl helper
 #   bundle/bin/agentctl-darwin-arm64   - darwin/arm64 agentctl helper
 #   bundle/bin/agentctl-darwin-amd64   - darwin/amd64 agentctl helper
 #
@@ -98,6 +99,7 @@ RUN mkdir -p /app/apps/backend/bin /data/worktrees
 # manual configuration.
 COPY bundle/bin/kandev                 /app/apps/backend/bin/kandev
 COPY bundle/bin/agentctl-linux-amd64   /app/apps/backend/bin/agentctl-linux-amd64
+COPY bundle/bin/agentctl-linux-arm64   /app/apps/backend/bin/agentctl-linux-arm64
 COPY bundle/bin/agentctl-darwin-arm64  /app/apps/backend/bin/agentctl-darwin-arm64
 COPY bundle/bin/agentctl-darwin-amd64  /app/apps/backend/bin/agentctl-darwin-amd64
 COPY bundle/bin/agentctl               /usr/local/bin/agentctl
@@ -108,6 +110,7 @@ COPY docker-entrypoint.sh              /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x \
         /app/apps/backend/bin/kandev \
         /app/apps/backend/bin/agentctl-linux-amd64 \
+        /app/apps/backend/bin/agentctl-linux-arm64 \
         /app/apps/backend/bin/agentctl-darwin-arm64 \
         /app/apps/backend/bin/agentctl-darwin-amd64 \
         /usr/local/bin/agentctl \

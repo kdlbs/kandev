@@ -14,67 +14,26 @@ import {
 import { calculateHash } from "@/lib/utils/file-diff";
 import { useToast } from "@/components/toast-provider";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import type { FileContentResponse } from "@/lib/types/backend";
 import { useSaveDeleteActions } from "./use-file-save-delete";
-import { PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
+import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
 import { useOpenFileWorkspaceSync } from "./file-editors-sync";
-import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
+import {
+  fetchFileEditorState,
+  getPreviewItemIdToRemoveOnReplace,
+  isFileEditorPanelAlreadyRestored,
+  isRestoreWriteCurrent,
+  type FileEditorRequestToken,
+} from "./file-editor-state";
+import { scrollEditorIfMounted, setPendingCursorPosition } from "./file-editor-cursor";
+export {
+  consumePendingCursorPosition,
+  scrollEditorIfMounted,
+  setPendingCursorPosition,
+} from "./file-editor-cursor";
 
 // Module-level guard: ensures restoration only runs once across all hook instances
 let _restoredSessionId: string | null = null;
 let _restorationInProgress = false;
-
-// Pending cursor positions: set before opening a file, consumed by the editor on mount.
-// Used by LSP Go-to-Definition to jump to the correct line/column.
-const _pendingCursorPositions = new Map<string, { line: number; column: number }>();
-
-export function setPendingCursorPosition(path: string, line: number, column: number) {
-  _pendingCursorPositions.set(path, { line, column });
-}
-
-export function consumePendingCursorPosition(
-  path: string,
-): { line: number; column: number } | undefined {
-  const pos = _pendingCursorPositions.get(path);
-  if (pos) _pendingCursorPositions.delete(path);
-  return pos;
-}
-
-/**
- * Scroll an already-mounted Monaco editor for `path` to the given position.
- * Returns true if an editor was found and scrolled. The editor's model URI is
- * built as `${worktreePath}/${path}` (see use-monaco-editor-lsp), so the same
- * `path` used for setPendingCursorPosition resolves the right editor here.
- *
- * Used for the already-open case: when a file link is clicked but its tab is
- * already open, no editor mounts, so handleEditorDidMount never consumes the
- * pending position — this scrolls the live editor instead (and consumes the
- * pending entry so a later remount doesn't double-apply it).
- */
-export function scrollEditorIfMounted(
-  path: string,
-  worktreePath: string | null,
-  line: number,
-  column: number,
-): boolean {
-  const monaco = getMonacoInstance();
-  if (!monaco) return false;
-
-  const monacoPath = worktreePath ? `${worktreePath}/${path}` : path;
-  for (const editor of monaco.editor.getEditors()) {
-    const model = editor.getModel();
-    if (!model) continue;
-    const modelPath = model.uri.path;
-    if (modelPath === `/${monacoPath}` || modelPath === monacoPath) {
-      consumePendingCursorPosition(path);
-      editor.setPosition({ lineNumber: line, column });
-      editor.revealLineInCenter(line);
-      editor.focus();
-      return true;
-    }
-  }
-  return false;
-}
 
 export function useOpenFileAtLine(
   onOpenFile: ((path: string) => void) | undefined,
@@ -101,49 +60,6 @@ function getOpenFiles() {
 }
 
 /**
- * Build a FileEditorState from a file content response. `repo` is the
- * multi-repo subpath (repository_name) the file belongs to; it is recorded on
- * the state so subsequent save/sync/delete requests stay scoped to the right
- * repository instead of resolving against the bare task root.
- */
-export async function buildFileEditorState(
-  filePath: string,
-  response: FileContentResponse,
-  repo?: string,
-): Promise<FileEditorState> {
-  const fileName = filePath.split("/").pop() || filePath;
-  const hash = await calculateHash(response.content);
-  return {
-    path: filePath,
-    repo,
-    name: fileName,
-    content: response.content,
-    originalContent: response.content,
-    originalHash: hash,
-    isDirty: false,
-    isBinary: response.is_binary,
-    resolvedPath: response.resolved_path,
-  };
-}
-
-/**
- * Fetch a file's content and build its editor state, returning null if the
- * active session changed while the request was in flight — a late response must
- * not write content for a file the user has navigated away from.
- */
-export async function fetchFileEditorState(
-  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
-  sessionId: string,
-  filePath: string,
-  repo: string | undefined,
-  activeSessionIdRef: React.MutableRefObject<string | null>,
-): Promise<FileEditorState | null> {
-  const response = await requestFileContent(client, sessionId, filePath, repo);
-  if (activeSessionIdRef.current !== sessionId) return null;
-  return buildFileEditorState(filePath, response, repo);
-}
-
-/**
  * Apply an editor buffer change, auto-promoting a preview tab to pinned on the
  * first edit so the user's unsaved changes aren't discarded when another file
  * is opened. Promote BEFORE updating state so the openFiles subscription sees
@@ -151,20 +67,22 @@ export async function fetchFileEditorState(
  */
 function applyFileChange(
   path: string,
+  repo: string | undefined,
   newContent: string,
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void,
   promotePreviewToPinned: (type: "file-editor") => void,
 ) {
-  const file = getOpenFiles().get(path);
+  const fileKey = buildRepoScopedItemId(path, repo);
+  const file = getOpenFiles().get(fileKey);
   if (!file) return;
   const nextIsDirty = newContent !== file.originalContent;
   if (nextIsDirty && !file.isDirty) {
     const preview = useDockviewStore.getState().api?.getPanel(PREVIEW_FILE_EDITOR_ID);
-    if ((preview?.params as Record<string, unknown> | undefined)?.previewItemId === path) {
+    if ((preview?.params as Record<string, unknown> | undefined)?.previewItemId === fileKey) {
       promotePreviewToPinned("file-editor");
     }
   }
-  updateFileState(path, { content: newContent, isDirty: nextIsDirty });
+  updateFileState(fileKey, { content: newContent, isDirty: nextIsDirty });
 }
 
 /** Build the sessionStorage tab records from live openFiles + dockview state. */
@@ -174,11 +92,12 @@ function buildPersistedTabs(
 ) {
   const preview = api?.getPanel(PREVIEW_FILE_EDITOR_ID);
   const previewParams = preview?.params as Record<string, unknown> | undefined;
-  const previewPath = (previewParams?.previewItemId ?? null) as string | null;
+  const previewItemId = (previewParams?.previewItemId ?? null) as string | null;
   const isPromoted = previewParams?.promoted === true;
   return Array.from(openFiles.values()).flatMap(({ path, name, repo, markdownPreview }) => {
-    const isPinned = !!api?.getPanel(`file:${path}`);
-    const isPreview = !isPinned && path === previewPath;
+    const itemId = buildRepoScopedItemId(path, repo);
+    const isPinned = !!api?.getPanel(`file:${itemId}`);
+    const isPreview = !isPinned && itemId === previewItemId;
     if (!isPinned && !isPreview) return [];
     // Promoted previews persist as pinned so edits survive refresh
     const persistAsPinned = isPinned || (isPreview && isPromoted);
@@ -196,6 +115,7 @@ function buildPersistedTabs(
 
 type RestoreTabsParams = {
   activeSessionId: string;
+  activeSessionIdRef: React.MutableRefObject<string | null>;
   savedTabs: Array<{
     path: string;
     name: string;
@@ -212,27 +132,15 @@ type RestoreTabsParams = {
   ) => void;
 };
 
-/**
- * Skip persisted tabs the dockview snapshot already restored (preview slot or
- * existing pinned panel). Re-adding with `pin: true` here would create a
- * duplicate `file:<path>` alongside the existing `preview:file-editor` —
- * see the round-trip task switch where a promoted preview was persisted as
- * pinned in localStorage and then re-opened on top of the restored preview.
- */
-function isAlreadyRestored(
-  dockApi: ReturnType<typeof useDockviewStore.getState>["api"],
-  path: string,
-): boolean {
-  if (!dockApi) return false;
-  if (dockApi.getPanel(`file:${path}`)) return true;
-  const previewParams = dockApi.getPanel(PREVIEW_FILE_EDITOR_ID)?.params as
-    | Record<string, unknown>
-    | undefined;
-  return previewParams?.previewItemId === path;
-}
-
 async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Promise<void> {
-  const { activeSessionId, savedTabs, savedActiveTab, setFileState, addFileEditorPanel } = params;
+  const {
+    activeSessionId,
+    activeSessionIdRef,
+    savedTabs,
+    savedActiveTab,
+    setFileState,
+    addFileEditorPanel,
+  } = params;
   const client = getWebSocketClient();
   if (!client) {
     if (retryCount < 5) {
@@ -251,7 +159,8 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
   // FileEditorPanel retries when the executor becomes available.
   const dockApi = useDockviewStore.getState().api;
   for (const savedTab of savedTabs) {
-    if (isAlreadyRestored(dockApi, savedTab.path)) continue;
+    const itemId = buildRepoScopedItemId(savedTab.path, savedTab.repo);
+    if (isFileEditorPanelAlreadyRestored(dockApi, savedTab.path, savedTab.repo)) continue;
     addFileEditorPanel(savedTab.path, savedTab.name, {
       quiet: true,
       pin: savedTab.pinned,
@@ -264,7 +173,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
     // setFileState (a wholesale replace), and useFileLoader's state has no
     // markdownPreview — so when it wins the race (common under CPU load) the
     // restored preview flag is clobbered and the tab reopens in code view.
-    setFileState(savedTab.path, {
+    setFileState(itemId, {
       path: savedTab.path,
       repo: savedTab.repo,
       name: savedTab.name,
@@ -277,6 +186,7 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
   }
   for (const savedTab of savedTabs) {
     try {
+      const itemId = buildRepoScopedItemId(savedTab.path, savedTab.repo);
       const response = await requestFileContent(
         client,
         activeSessionId,
@@ -284,7 +194,11 @@ async function loadAndRestoreTabs(params: RestoreTabsParams, retryCount = 0): Pr
         savedTab.repo,
       );
       const hash = await calculateHash(response.content);
-      setFileState(savedTab.path, {
+      if (!isRestoreWriteCurrent(_restoredSessionId, activeSessionId, activeSessionIdRef)) {
+        if (_restoredSessionId === activeSessionId) _restorationInProgress = false;
+        return;
+      }
+      setFileState(itemId, {
         path: savedTab.path,
         repo: savedTab.repo,
         name: savedTab.name,
@@ -342,6 +256,7 @@ function useFileEditorEffects({
     }
     void loadAndRestoreTabs({
       activeSessionId,
+      activeSessionIdRef,
       savedTabs,
       savedActiveTab,
       setFileState,
@@ -382,10 +297,10 @@ function useFileEditorEffects({
       // pinned panel; wiping the file state here would drop the user's dirty
       // buffer during auto-promote-on-edit).
       if (event.id === PREVIEW_FILE_EDITOR_ID) {
-        const path = (event.params?.previewItemId as string | undefined) ?? null;
-        if (!path) return;
-        const pinnedStillOpen = !!api.getPanel(`file:${path}`);
-        if (!pinnedStillOpen) removeFileState(path);
+        const itemId = (event.params?.previewItemId as string | undefined) ?? null;
+        if (!itemId) return;
+        const pinnedStillOpen = !!api.getPanel(`file:${itemId}`);
+        if (!pinnedStillOpen) removeFileState(itemId);
       }
     });
     return () => disposable.dispose();
@@ -396,6 +311,7 @@ type FileEditorActionsParams = {
   activeSessionIdRef: React.MutableRefObject<string | null>;
   setFileState: (path: string, state: FileEditorState) => void;
   updateFileState: (path: string, updates: Partial<FileEditorState>) => void;
+  removeFileState: (path: string) => void;
   addFileEditorPanel: (
     path: string,
     name: string,
@@ -406,40 +322,91 @@ type FileEditorActionsParams = {
   toast: ReturnType<typeof useToast>["toast"];
 };
 
-function useFileEditorActions({
+function addFileEditorPanelWithPreviewCleanup(
+  filePath: string,
+  name: string,
+  repo: string | undefined,
+  addFileEditorPanel: FileEditorActionsParams["addFileEditorPanel"],
+  removeFileState: FileEditorActionsParams["removeFileState"],
+) {
+  const itemId = buildRepoScopedItemId(filePath, repo);
+  const previewItemIdToRemove = getPreviewItemIdToRemoveOnReplace(
+    useDockviewStore.getState().api,
+    itemId,
+  );
+  addFileEditorPanel(filePath, name, { repo });
+  if (previewItemIdToRemove) removeFileState(previewItemIdToRemove);
+}
+
+function markActiveFileRequest(
+  ref: React.MutableRefObject<FileEditorRequestToken | null>,
+  fileKey: string,
+): FileEditorRequestToken {
+  const requestToken = {
+    fileKey,
+    generation: (ref.current?.generation ?? 0) + 1,
+  };
+  ref.current = requestToken;
+  return requestToken;
+}
+
+type OpenFileActionParams = Pick<
+  FileEditorActionsParams,
+  "activeSessionIdRef" | "setFileState" | "removeFileState" | "addFileEditorPanel" | "toast"
+> & {
+  activeFileRequestRef: React.MutableRefObject<FileEditorRequestToken | null>;
+};
+
+function useOpenFileAction({
   activeSessionIdRef,
+  activeFileRequestRef,
   setFileState,
-  updateFileState,
+  removeFileState,
   addFileEditorPanel,
-  promotePreviewToPinned,
-  setSavingFiles,
   toast,
-}: FileEditorActionsParams) {
-  const openFile = useCallback(
+}: OpenFileActionParams) {
+  return useCallback(
     async (filePath: string, repo?: string) => {
       const client = getWebSocketClient();
       const currentSessionId = activeSessionIdRef.current;
       if (!client || !currentSessionId) return;
+      const fileKey = buildRepoScopedItemId(filePath, repo);
       const files = getOpenFiles();
-      if (files.has(filePath)) {
+      if (files.has(fileKey)) {
+        const existing = files.get(fileKey);
         const tabName = filePath.split("/").pop() || filePath;
-        addFileEditorPanel(filePath, tabName, { repo: files.get(filePath)?.repo });
+        addFileEditorPanelWithPreviewCleanup(
+          filePath,
+          tabName,
+          existing?.repo,
+          addFileEditorPanel,
+          removeFileState,
+        );
         return;
       }
+      const requestToken = markActiveFileRequest(activeFileRequestRef, fileKey);
       try {
-        const state = await fetchFileEditorState(
+        const state = await fetchFileEditorState({
           client,
-          currentSessionId,
+          sessionId: currentSessionId,
           filePath,
           repo,
           activeSessionIdRef,
-        );
+          activeRequestRef: activeFileRequestRef,
+          requestToken,
+        });
         if (!state) return;
         // Create the panel BEFORE setting file state. The openFiles subscription
         // triggers tab persistence — it needs the dockview panel to already exist
         // so buildPersistedTabs can detect whether the file is preview or pinned.
-        addFileEditorPanel(filePath, state.name, { repo });
-        setFileState(filePath, state);
+        addFileEditorPanelWithPreviewCleanup(
+          filePath,
+          state.name,
+          repo,
+          addFileEditorPanel,
+          removeFileState,
+        );
+        setFileState(fileKey, state);
       } catch (error) {
         toast({
           title: "Failed to open file",
@@ -448,12 +415,121 @@ function useFileEditorActions({
         });
       }
     },
-    [activeSessionIdRef, addFileEditorPanel, setFileState, toast],
+    [
+      activeSessionIdRef,
+      activeFileRequestRef,
+      addFileEditorPanel,
+      removeFileState,
+      setFileState,
+      toast,
+    ],
   );
+}
+
+type MarkdownPreviewActionParams = Pick<
+  FileEditorActionsParams,
+  | "activeSessionIdRef"
+  | "setFileState"
+  | "updateFileState"
+  | "removeFileState"
+  | "addFileEditorPanel"
+  | "toast"
+> & {
+  activeFileRequestRef: React.MutableRefObject<FileEditorRequestToken | null>;
+};
+
+function useMarkdownPreviewAction({
+  activeSessionIdRef,
+  activeFileRequestRef,
+  setFileState,
+  updateFileState,
+  removeFileState,
+  addFileEditorPanel,
+  toast,
+}: MarkdownPreviewActionParams) {
+  return useCallback(
+    async (filePath: string, repo?: string) => {
+      const client = getWebSocketClient();
+      const currentSessionId = activeSessionIdRef.current;
+      if (!client || !currentSessionId) return;
+      const fileKey = buildRepoScopedItemId(filePath, repo);
+      const files = getOpenFiles();
+      if (files.has(fileKey)) {
+        updateFileState(fileKey, { markdownPreview: true });
+        const name = filePath.split("/").pop() || filePath;
+        addFileEditorPanelWithPreviewCleanup(
+          filePath,
+          name,
+          files.get(fileKey)?.repo,
+          addFileEditorPanel,
+          removeFileState,
+        );
+        return;
+      }
+      const requestToken = markActiveFileRequest(activeFileRequestRef, fileKey);
+      try {
+        const state = await fetchFileEditorState({
+          client,
+          sessionId: currentSessionId,
+          filePath,
+          repo,
+          activeSessionIdRef,
+          activeRequestRef: activeFileRequestRef,
+          requestToken,
+        });
+        if (!state) return;
+        addFileEditorPanelWithPreviewCleanup(
+          filePath,
+          state.name,
+          repo,
+          addFileEditorPanel,
+          removeFileState,
+        );
+        setFileState(fileKey, { ...state, markdownPreview: true });
+      } catch (error) {
+        toast({
+          title: "Failed to open file",
+          description: error instanceof Error ? error.message : "Unknown error",
+          variant: "error",
+        });
+      }
+    },
+    [activeSessionIdRef, setFileState, updateFileState, addFileEditorPanel, removeFileState, toast],
+  );
+}
+
+function useFileEditorActions({
+  activeSessionIdRef,
+  setFileState,
+  updateFileState,
+  removeFileState,
+  addFileEditorPanel,
+  promotePreviewToPinned,
+  setSavingFiles,
+  toast,
+}: FileEditorActionsParams) {
+  const activeFileRequestRef = useRef<FileEditorRequestToken | null>(null);
+  const openFile = useOpenFileAction({
+    activeSessionIdRef,
+    activeFileRequestRef,
+    setFileState,
+    removeFileState,
+    addFileEditorPanel,
+    toast,
+  });
+  const openFileInMarkdownPreview = useMarkdownPreviewAction({
+    activeSessionIdRef,
+    activeFileRequestRef,
+    setFileState,
+    updateFileState,
+    removeFileState,
+    addFileEditorPanel,
+    toast,
+  });
 
   const handleFileChange = useCallback(
-    (path: string, newContent: string) =>
-      applyFileChange(path, newContent, updateFileState, promotePreviewToPinned),
+    (path: string, newContent: string, repo?: string) =>
+      applyFileChange(path, repo, newContent, updateFileState, promotePreviewToPinned),
     [updateFileState, promotePreviewToPinned],
   );
 
@@ -463,40 +539,6 @@ function useFileEditorActions({
     setSavingFiles,
     toast,
   });
-
-  const openFileInMarkdownPreview = useCallback(
-    async (filePath: string, repo?: string) => {
-      const client = getWebSocketClient();
-      const currentSessionId = activeSessionIdRef.current;
-      if (!client || !currentSessionId) return;
-      const files = getOpenFiles();
-      if (files.has(filePath)) {
-        updateFileState(filePath, { markdownPreview: true });
-        const name = filePath.split("/").pop() || filePath;
-        addFileEditorPanel(filePath, name, { repo: files.get(filePath)?.repo });
-        return;
-      }
-      try {
-        const state = await fetchFileEditorState(
-          client,
-          currentSessionId,
-          filePath,
-          repo,
-          activeSessionIdRef,
-        );
-        if (!state) return;
-        addFileEditorPanel(filePath, state.name, { repo });
-        setFileState(filePath, { ...state, markdownPreview: true });
-      } catch (error) {
-        toast({
-          title: "Failed to open file",
-          description: error instanceof Error ? error.message : "Unknown error",
-          variant: "error",
-        });
-      }
-    },
-    [activeSessionIdRef, setFileState, updateFileState, addFileEditorPanel, toast],
-  );
 
   return {
     openFile,
@@ -556,6 +598,7 @@ export function useFileEditors() {
     activeSessionIdRef,
     setFileState,
     updateFileState,
+    removeFileState,
     addFileEditorPanel,
     promotePreviewToPinned,
     setSavingFiles,

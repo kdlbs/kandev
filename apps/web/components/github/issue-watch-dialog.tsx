@@ -237,6 +237,7 @@ function IssueFilterFields({
         selectedRepos={form.selectedRepos}
         onAllReposChange={onAllReposChange}
         onSelectedReposChange={onSelectedReposChange}
+        workspaceId={form.workspaceId}
       />
       <div className="space-y-1.5">
         <Label>Labels (comma-separated)</Label>

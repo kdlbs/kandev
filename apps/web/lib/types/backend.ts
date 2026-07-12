@@ -1,84 +1,10 @@
-export type BackendMessageType =
-  | "kanban.update"
-  | "task.created"
-  | "task.updated"
-  | "task.deleted"
-  | "task.state_changed"
-  | "task.plan.created"
-  | "task.plan.updated"
-  | "task.plan.deleted"
-  | "task.plan.revision.created"
-  | "task.plan.reverted"
-  | "agent.updated"
-  | "agent.available.updated"
-  | "agent.install.started"
-  | "agent.install.output"
-  | "agent.install.finished"
-  | "terminal.output"
-  | "diff.update"
-  | "session.git.event"
-  | "system.error"
-  | "system.job.update"
-  | "system.metrics.updated"
-  | "workspace.created"
-  | "workspace.updated"
-  | "workspace.deleted"
-  | "workflow.created"
-  | "workflow.updated"
-  | "workflow.deleted"
-  | "workflow.step.created"
-  | "workflow.step.updated"
-  | "workflow.step.deleted"
-  | "session.message.added"
-  | "session.message.updated"
-  | "session.message.deleted"
-  | "session.state_changed"
-  | "session.waiting_for_input"
-  | "session.agentctl_starting"
-  | "session.agentctl_ready"
-  | "session.agentctl_error"
-  | "session.turn.started"
-  | "session.turn.completed"
-  | "session.available_commands"
-  | "session.mode_changed"
-  | "session.agent_capabilities"
-  | "session.models_updated"
-  | "session.info_updated"
-  | "session.todos_updated"
-  | "session.prompt_usage"
-  | "session.poll_mode_changed"
-  | "executor.created"
-  | "executor.updated"
-  | "executor.deleted"
-  | "executor.profile.created"
-  | "executor.profile.updated"
-  | "executor.profile.deleted"
-  | "executor.prepare.progress"
-  | "executor.prepare.completed"
-  | "environment.created"
-  | "environment.updated"
-  | "environment.deleted"
-  | "agent.profile.deleted"
-  | "agent.profile.created"
-  | "agent.profile.updated"
-  | "user.settings.updated"
-  | "session.workspace.file.changes"
-  | "session.shell.output"
-  | "session.process.output"
-  | "session.process.status"
-  | "secrets.created"
-  | "secrets.updated"
-  | "secrets.deleted"
-  | "message.queue.status_changed"
-  | "github.task_pr.updated"
-  | "github.task_ci_options.updated"
-  | "github.rate_limit.updated"
-  | OfficeEventType
-  | "run.event.appended";
+import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
+
+export type BackendMessageType = keyof BackendMessageMap;
 
 export type { BackendMessage } from "./backend-message";
 import type { BackendMessage } from "./backend-message";
-import type { OfficeEventType, OfficeBackendMessageMap } from "./office-events";
+import type { OfficeBackendMessageMap } from "./office-events";
 export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 
 import type {
@@ -88,6 +14,8 @@ import type {
   SidebarViewDraftApi,
   SidebarTaskPrefsApi,
   TaskCreateLastUsedApi,
+  TaskPendingAction,
+  TaskSessionState,
   StepEvents,
   TaskState,
   ToolStatus,
@@ -154,6 +82,8 @@ export type TaskEventPayload = {
     position?: number;
   }>;
   primary_session_id?: string | null;
+  primary_session_state?: TaskSessionState | null;
+  primary_session_pending_action?: TaskPendingAction | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;
@@ -485,28 +415,7 @@ export {
   type SessionTodosPayload,
 } from "./session-runtime-payloads";
 
-export type TaskPlanEventPayload = {
-  id: string;
-  task_id: string;
-  title: string;
-  content: string;
-  created_by: "agent" | "user";
-  created_at: string;
-  updated_at: string;
-};
-
-export type TaskPlanRevisionEventPayload = {
-  id: string;
-  task_id: string;
-  revision_number: number;
-  title: string;
-  author_kind: "agent" | "user";
-  author_name: string;
-  revert_of_revision_id?: string | null;
-  coalesced?: boolean;
-  created_at: string;
-  updated_at: string;
-};
+export type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
 
 export type QueuedMessagePayload = {
   content: string;
@@ -524,121 +433,125 @@ export type QueueStatusChangedPayload = {
   max?: number;
 };
 
-export type BackendMessageMap = OfficeBackendMessageMap & {
-  "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
-  "task.created": BackendMessage<"task.created", TaskEventPayload>;
-  "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
-  "task.deleted": BackendMessage<"task.deleted", TaskEventPayload>;
-  "task.state_changed": BackendMessage<"task.state_changed", TaskEventPayload>;
-  "task.plan.created": BackendMessage<"task.plan.created", TaskPlanEventPayload>;
-  "task.plan.updated": BackendMessage<"task.plan.updated", TaskPlanEventPayload>;
-  "task.plan.deleted": BackendMessage<"task.plan.deleted", TaskPlanEventPayload>;
-  "task.plan.revision.created": BackendMessage<
-    "task.plan.revision.created",
-    TaskPlanRevisionEventPayload
-  >;
-  "task.plan.reverted": BackendMessage<"task.plan.reverted", TaskPlanRevisionEventPayload>;
-  "agent.updated": BackendMessage<"agent.updated", AgentUpdatePayload>;
-  "agent.available.updated": BackendMessage<
-    "agent.available.updated",
-    AgentAvailableUpdatedPayload
-  >;
-  "agent.install.started": BackendMessage<"agent.install.started", AgentInstallJobPayload>;
-  "agent.install.output": BackendMessage<"agent.install.output", AgentInstallOutputPayload>;
-  "agent.install.finished": BackendMessage<"agent.install.finished", AgentInstallJobPayload>;
-  "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
-  "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
-  "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
-  "system.error": BackendMessage<"system.error", SystemErrorPayload>;
-  "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
-  "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
-  "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
-  "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
-  "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;
-  "workflow.created": BackendMessage<"workflow.created", WorkflowPayload>;
-  "workflow.updated": BackendMessage<"workflow.updated", WorkflowPayload>;
-  "workflow.deleted": BackendMessage<"workflow.deleted", WorkflowPayload>;
-  "workflow.step.created": BackendMessage<"workflow.step.created", WorkflowStepEventPayload>;
-  "workflow.step.updated": BackendMessage<"workflow.step.updated", WorkflowStepEventPayload>;
-  "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
-  "session.message.added": BackendMessage<"session.message.added", MessageAddedPayload>;
-  "session.message.updated": BackendMessage<"session.message.updated", MessageAddedPayload>;
-  "session.message.deleted": BackendMessage<"session.message.deleted", MessageAddedPayload>;
-  "session.state_changed": BackendMessage<"session.state_changed", TaskSessionStateChangedPayload>;
-  "session.waiting_for_input": BackendMessage<
-    "session.waiting_for_input",
-    TaskSessionWaitingForInputPayload
-  >;
-  "session.agentctl_starting": BackendMessage<
-    "session.agentctl_starting",
-    TaskSessionAgentctlPayload
-  >;
-  "session.agentctl_ready": BackendMessage<"session.agentctl_ready", TaskSessionAgentctlPayload>;
-  "session.agentctl_error": BackendMessage<"session.agentctl_error", TaskSessionAgentctlPayload>;
-  "session.turn.started": BackendMessage<"session.turn.started", TurnEventPayload>;
-  "session.turn.completed": BackendMessage<"session.turn.completed", TurnEventPayload>;
-  "session.available_commands": BackendMessage<
-    "session.available_commands",
-    AvailableCommandsPayload
-  >;
-  "session.mode_changed": BackendMessage<"session.mode_changed", SessionModeChangedPayload>;
-  "session.agent_capabilities": BackendMessage<
-    "session.agent_capabilities",
-    AgentCapabilitiesPayload
-  >;
-  "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
-  "session.info_updated": BackendMessage<"session.info_updated", SessionInfoPayload>;
-  "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
-  "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
-  "session.poll_mode_changed": BackendMessage<
-    "session.poll_mode_changed",
-    { session_id: string; poll_mode: string }
-  >;
-  "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
-  "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
-  "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;
-  "executor.profile.created": BackendMessage<"executor.profile.created", ExecutorProfilePayload>;
-  "executor.profile.updated": BackendMessage<"executor.profile.updated", ExecutorProfilePayload>;
-  "executor.profile.deleted": BackendMessage<"executor.profile.deleted", { id: string }>;
-  "executor.prepare.progress": BackendMessage<"executor.prepare.progress", PrepareProgressPayload>;
-  "executor.prepare.completed": BackendMessage<
-    "executor.prepare.completed",
-    PrepareCompletedPayload
-  >;
-  "environment.created": BackendMessage<"environment.created", EnvironmentPayload>;
-  "environment.updated": BackendMessage<"environment.updated", EnvironmentPayload>;
-  "environment.deleted": BackendMessage<"environment.deleted", EnvironmentPayload>;
-  "agent.profile.deleted": BackendMessage<"agent.profile.deleted", AgentProfileDeletedPayload>;
-  "agent.profile.created": BackendMessage<"agent.profile.created", AgentProfileChangedPayload>;
-  "agent.profile.updated": BackendMessage<"agent.profile.updated", AgentProfileChangedPayload>;
-  "user.settings.updated": BackendMessage<"user.settings.updated", UserSettingsUpdatedPayload>;
-  "session.workspace.file.changes": BackendMessage<
-    "session.workspace.file.changes",
-    FileChangeNotificationPayload
-  >;
-  "session.shell.output": BackendMessage<"session.shell.output", ShellOutputPayload>;
-  "session.process.output": BackendMessage<"session.process.output", ProcessOutputPayload>;
-  "session.process.status": BackendMessage<"session.process.status", ProcessStatusPayload>;
-  "secrets.created": BackendMessage<"secrets.created", SecretListItem>;
-  "secrets.updated": BackendMessage<"secrets.updated", SecretListItem>;
-  "secrets.deleted": BackendMessage<"secrets.deleted", { id: string }>;
-  "message.queue.status_changed": BackendMessage<
-    "message.queue.status_changed",
-    QueueStatusChangedPayload
-  >;
-  "github.task_pr.updated": BackendMessage<"github.task_pr.updated", TaskPR>;
-  "github.task_ci_options.updated": BackendMessage<
-    "github.task_ci_options.updated",
-    TaskCIAutomationOptions
-  >;
-  "github.rate_limit.updated": BackendMessage<"github.rate_limit.updated", GitHubRateLimitUpdate>;
-  "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
-};
+export type BackendMessageMap = OfficeBackendMessageMap &
+  import("@/lib/types/http").WalkthroughBackendMessageMap & {
+    "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
+    "task.created": BackendMessage<"task.created", TaskEventPayload>;
+    "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
+    "task.deleted": BackendMessage<"task.deleted", TaskEventPayload>;
+    "task.state_changed": BackendMessage<"task.state_changed", TaskEventPayload>;
+    "task.plan.created": BackendMessage<"task.plan.created", TaskPlanEventPayload>;
+    "task.plan.updated": BackendMessage<"task.plan.updated", TaskPlanEventPayload>;
+    "task.plan.deleted": BackendMessage<"task.plan.deleted", TaskPlanEventPayload>;
+    "task.plan.revision.created": BackendMessage<
+      "task.plan.revision.created",
+      TaskPlanRevisionEventPayload
+    >;
+    "task.plan.reverted": BackendMessage<"task.plan.reverted", TaskPlanRevisionEventPayload>;
+    "agent.updated": BackendMessage<"agent.updated", AgentUpdatePayload>;
+    "agent.available.updated": BackendMessage<
+      "agent.available.updated",
+      AgentAvailableUpdatedPayload
+    >;
+    "agent.install.started": BackendMessage<"agent.install.started", AgentInstallJobPayload>;
+    "agent.install.output": BackendMessage<"agent.install.output", AgentInstallOutputPayload>;
+    "agent.install.finished": BackendMessage<"agent.install.finished", AgentInstallJobPayload>;
+    "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
+    "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
+    "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
+    "system.error": BackendMessage<"system.error", SystemErrorPayload>;
+    "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
+    "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
+    "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
+    "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
+    "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;
+    "workflow.created": BackendMessage<"workflow.created", WorkflowPayload>;
+    "workflow.updated": BackendMessage<"workflow.updated", WorkflowPayload>;
+    "workflow.deleted": BackendMessage<"workflow.deleted", WorkflowPayload>;
+    "workflow.step.created": BackendMessage<"workflow.step.created", WorkflowStepEventPayload>;
+    "workflow.step.updated": BackendMessage<"workflow.step.updated", WorkflowStepEventPayload>;
+    "workflow.step.deleted": BackendMessage<"workflow.step.deleted", WorkflowStepEventPayload>;
+    "session.message.added": BackendMessage<"session.message.added", MessageAddedPayload>;
+    "session.message.updated": BackendMessage<"session.message.updated", MessageAddedPayload>;
+    "session.message.deleted": BackendMessage<"session.message.deleted", MessageAddedPayload>;
+    "session.state_changed": BackendMessage<
+      "session.state_changed",
+      TaskSessionStateChangedPayload
+    >;
+    "session.waiting_for_input": BackendMessage<
+      "session.waiting_for_input",
+      TaskSessionWaitingForInputPayload
+    >;
+    "session.agentctl_starting": BackendMessage<
+      "session.agentctl_starting",
+      TaskSessionAgentctlPayload
+    >;
+    "session.agentctl_ready": BackendMessage<"session.agentctl_ready", TaskSessionAgentctlPayload>;
+    "session.agentctl_error": BackendMessage<"session.agentctl_error", TaskSessionAgentctlPayload>;
+    "session.turn.started": BackendMessage<"session.turn.started", TurnEventPayload>;
+    "session.turn.completed": BackendMessage<"session.turn.completed", TurnEventPayload>;
+    "session.available_commands": BackendMessage<
+      "session.available_commands",
+      AvailableCommandsPayload
+    >;
+    "session.mode_changed": BackendMessage<"session.mode_changed", SessionModeChangedPayload>;
+    "session.agent_capabilities": BackendMessage<
+      "session.agent_capabilities",
+      AgentCapabilitiesPayload
+    >;
+    "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
+    "session.info_updated": BackendMessage<"session.info_updated", SessionInfoPayload>;
+    "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
+    "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
+    "session.poll_mode_changed": BackendMessage<
+      "session.poll_mode_changed",
+      { session_id: string; poll_mode: string }
+    >;
+    "executor.created": BackendMessage<"executor.created", ExecutorPayload>;
+    "executor.updated": BackendMessage<"executor.updated", ExecutorPayload>;
+    "executor.deleted": BackendMessage<"executor.deleted", ExecutorPayload>;
+    "executor.profile.created": BackendMessage<"executor.profile.created", ExecutorProfilePayload>;
+    "executor.profile.updated": BackendMessage<"executor.profile.updated", ExecutorProfilePayload>;
+    "executor.profile.deleted": BackendMessage<"executor.profile.deleted", { id: string }>;
+    "executor.prepare.progress": BackendMessage<
+      "executor.prepare.progress",
+      PrepareProgressPayload
+    >;
+    "executor.prepare.completed": BackendMessage<
+      "executor.prepare.completed",
+      PrepareCompletedPayload
+    >;
+    "environment.created": BackendMessage<"environment.created", EnvironmentPayload>;
+    "environment.updated": BackendMessage<"environment.updated", EnvironmentPayload>;
+    "environment.deleted": BackendMessage<"environment.deleted", EnvironmentPayload>;
+    "agent.profile.deleted": BackendMessage<"agent.profile.deleted", AgentProfileDeletedPayload>;
+    "agent.profile.created": BackendMessage<"agent.profile.created", AgentProfileChangedPayload>;
+    "agent.profile.updated": BackendMessage<"agent.profile.updated", AgentProfileChangedPayload>;
+    "user.settings.updated": BackendMessage<"user.settings.updated", UserSettingsUpdatedPayload>;
+    "session.workspace.file.changes": BackendMessage<
+      "session.workspace.file.changes",
+      FileChangeNotificationPayload
+    >;
+    "session.shell.output": BackendMessage<"session.shell.output", ShellOutputPayload>;
+    "session.process.output": BackendMessage<"session.process.output", ProcessOutputPayload>;
+    "session.process.status": BackendMessage<"session.process.status", ProcessStatusPayload>;
+    "secrets.created": BackendMessage<"secrets.created", SecretListItem>;
+    "secrets.updated": BackendMessage<"secrets.updated", SecretListItem>;
+    "secrets.deleted": BackendMessage<"secrets.deleted", { id: string }>;
+    "message.queue.status_changed": BackendMessage<
+      "message.queue.status_changed",
+      QueueStatusChangedPayload
+    >;
+    "github.task_pr.updated": BackendMessage<"github.task_pr.updated", TaskPR>;
+    "github.task_ci_options.updated": BackendMessage<
+      "github.task_ci_options.updated",
+      TaskCIAutomationOptions
+    >;
+    "github.rate_limit.updated": BackendMessage<"github.rate_limit.updated", GitHubRateLimitUpdate>;
+    "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
+  };
 
-// Run event payload — the WS gateway forwards the bus event verbatim,
-// which means the run id sits at the top level and the full RunEvent
-// row sits under `event`. The handler dispatches to subscribers keyed
-// on `run_id`.
+// The WS gateway forwards run events verbatim: id at top level, row under `event`.
 export type RunEventAppendedPayload = {
   run_id: string;
   event: {

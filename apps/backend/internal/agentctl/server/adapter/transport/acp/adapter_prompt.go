@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/coder/acp-go-sdk"
@@ -76,6 +77,7 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 			zap.String("session_id", sessionID),
 			zap.Int("context_length", len(pendingContext)))
 	}
+	a.beginPromptTurn(sessionID)
 
 	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
 
@@ -136,7 +138,7 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 	promptSpan.End()
 
 	if err != nil {
-		return err
+		return normalizePromptErrorAfterCancel(promptCtx, err)
 	}
 
 	// Drain queued ACP notifications before running the post-prompt sweeps and
@@ -169,6 +171,7 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 	a.logger.Debug("emitting complete event after prompt",
 		zap.String("session_id", sessionID),
 		zap.String("stop_reason", stopReason))
+	a.cancelAsyncTurnComplete(sessionID)
 	usage := extractUsage(&resp)
 	// codex-acp emits no per-turn usage frame, only cumulative
 	// usage_update.used. Fall back to the inferred delta so the office
@@ -201,6 +204,16 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 	})
 
 	return nil
+}
+
+func normalizePromptErrorAfterCancel(promptCtx context.Context, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(context.Cause(promptCtx), ErrTurnCancelNotAcknowledged) {
+		return errPromptAbandonedAfterCancel
+	}
+	return err
 }
 
 func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.MessageAttachment) []acp.ContentBlock {

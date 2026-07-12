@@ -43,7 +43,7 @@ type Service struct {
 	log       *logger.Logger
 	mu        sync.Mutex
 	clientFn  ClientFactory
-	client    Client // singleton, cleared on config change.
+	clients   map[string]Client
 	probeHook func()
 	eventBus  bus.EventBus
 	// taskDeleter is the cascade-delete entry point used by the watch
@@ -111,6 +111,7 @@ func NewService(store *Store, secrets SecretStore, clientFn ClientFactory, log *
 		secrets:  secrets,
 		log:      log,
 		clientFn: clientFn,
+		clients:  make(map[string]Client),
 	}
 }
 
@@ -119,20 +120,35 @@ func NewService(store *Store, secrets SecretStore, clientFn ClientFactory, log *
 // session_cookie auth, it also tries to decode the JWT in the stored cookie
 // and surface its expiry so the UI can warn the user before the session dies.
 func (s *Service) GetConfig(ctx context.Context) (*JiraConfig, error) {
-	cfg, err := s.store.GetConfig(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.GetConfigForWorkspace(ctx, workspaceID)
+}
+
+// GetConfigForWorkspace returns a workspace config enriched with a HasSecret
+// flag so the UI can distinguish "configured but empty" from "needs
+// credentials".
+func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string) (*JiraConfig, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil || cfg == nil {
 		return cfg, err
 	}
 	if s.secrets == nil {
 		return cfg, nil
 	}
-	exists, existsErr := s.secrets.Exists(ctx, SecretKey)
+	exists, existsErr := s.secretExists(ctx, workspaceID)
 	if existsErr != nil {
 		s.log.Warn("jira: secret exists check failed", zap.Error(existsErr))
 	}
 	cfg.HasSecret = exists
 	if exists && cfg.AuthMethod == AuthMethodSessionCookie {
-		secret, revealErr := s.secrets.Reveal(ctx, SecretKey)
+		secret, revealErr := s.revealSecret(ctx, workspaceID)
 		if revealErr != nil {
 			s.log.Warn("jira: secret reveal failed", zap.Error(revealErr))
 		} else {
@@ -151,6 +167,19 @@ var ErrInvalidConfig = errors.New("jira: invalid configuration")
 // "keep the existing token" — this lets the UI edit auxiliary fields without
 // forcing the user to paste the token again.
 func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*JiraConfig, error) {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.SetConfigForWorkspace(ctx, workspaceID, req)
+}
+
+// SetConfigForWorkspace is upsert for one workspace.
+func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string, req *SetConfigRequest) (*JiraConfig, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	if err := validateConfigRequest(req); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidConfig, err.Error())
 	}
@@ -161,23 +190,23 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*JiraCo
 		InstanceType:      req.InstanceType,
 		DefaultProjectKey: req.DefaultProjectKey,
 	}
-	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
+	if err := s.store.UpsertConfigForWorkspace(ctx, workspaceID, cfg); err != nil {
 		return nil, fmt.Errorf("upsert jira config: %w", err)
 	}
 	if req.Secret != "" && s.secrets != nil {
-		if err := s.secrets.Set(ctx, SecretKey, "Jira token", req.Secret); err != nil {
+		if err := s.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID), "Jira token", req.Secret); err != nil {
 			return nil, fmt.Errorf("store jira secret: %w", err)
 		}
 	}
-	s.invalidateClient()
+	s.invalidateClient(workspaceID)
 	// Probe asynchronously so a slow Atlassian doesn't stall the save response.
 	// RecordAuthHealth manages its own probe timeout, so a fresh
 	// context.Background() is enough — the request ctx may be cancelled when
 	// this returns, but the probe and the DB write must still complete.
 	go func() {
-		s.RecordAuthHealth(context.Background())
+		s.RecordAuthHealthForWorkspace(context.Background(), workspaceID)
 	}()
-	return s.GetConfig(ctx)
+	return s.GetConfigForWorkspace(ctx, workspaceID)
 }
 
 // DeleteConfig removes both the config row and the stored secret. A failure to
@@ -185,15 +214,28 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*JiraCo
 // surfaces success — the orphaned secret is rare and the user can retry by
 // re-saving + deleting again.
 func (s *Service) DeleteConfig(ctx context.Context) error {
-	if err := s.store.DeleteConfig(ctx); err != nil {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	return s.DeleteConfigForWorkspace(ctx, workspaceID)
+}
+
+// DeleteConfigForWorkspace removes both the config row and the stored secret.
+func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := s.store.DeleteConfigForWorkspace(ctx, workspaceID); err != nil {
 		return err
 	}
 	if s.secrets != nil {
-		if err := s.secrets.Delete(ctx, SecretKey); err != nil {
+		if err := s.secrets.Delete(ctx, SecretKeyForWorkspace(workspaceID)); err != nil {
 			s.log.Warn("jira: secret delete failed", zap.Error(err))
 		}
 	}
-	s.invalidateClient()
+	s.invalidateClient(workspaceID)
 	return nil
 }
 
@@ -202,7 +244,20 @@ func (s *Service) DeleteConfig(ctx context.Context) error {
 // structured result rather than an error so the UI can render the failure
 // inline.
 func (s *Service) TestConnection(ctx context.Context, req *SetConfigRequest) (*TestConnectionResult, error) {
-	cfg, secret, err := s.resolveCredentials(ctx, req)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	return s.TestConnectionForWorkspace(ctx, workspaceID, req)
+}
+
+// TestConnectionForWorkspace validates credentials for one workspace.
+func (s *Service) TestConnectionForWorkspace(ctx context.Context, workspaceID string, req *SetConfigRequest) (*TestConnectionResult, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	cfg, secret, err := s.resolveCredentials(ctx, workspaceID, req)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
@@ -216,7 +271,20 @@ func (s *Service) TestConnection(ctx context.Context, req *SetConfigRequest) (*T
 // tab that would 303. Errors are returned as a result so the poller can
 // persist them as a failure rather than dropping them.
 func (s *Service) ProbeAuth(ctx context.Context) (*TestConnectionResult, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	return s.ProbeAuthForWorkspace(ctx, workspaceID)
+}
+
+// ProbeAuthForWorkspace validates the stored credentials for one workspace.
+func (s *Service) ProbeAuthForWorkspace(ctx context.Context, workspaceID string) (*TestConnectionResult, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
@@ -254,9 +322,31 @@ func (s *Service) SetProbeHook(fn func()) {
 // the persist step are logged but not returned: this is a best-effort health
 // signal, never the source of truth for callers.
 func (s *Service) RecordAuthHealth(ctx context.Context) {
+	workspaceIDs, err := s.store.ListConfigWorkspaceIDs(ctx)
+	if err != nil {
+		s.log.Warn("jira: list config workspaces failed", zap.Error(err))
+		return
+	}
+	if len(workspaceIDs) == 0 {
+		s.fireProbeHook()
+		return
+	}
+	for _, workspaceID := range workspaceIDs {
+		s.RecordAuthHealthForWorkspace(ctx, workspaceID)
+	}
+}
+
+// RecordAuthHealthForWorkspace probes credentials and writes the outcome onto
+// one workspace row.
+func (s *Service) RecordAuthHealthForWorkspace(ctx context.Context, workspaceID string) {
+	workspaceID, normalizeErr := s.normalizeWorkspaceID(workspaceID)
+	if normalizeErr != nil {
+		s.log.Warn("jira: resolve workspace for auth health failed", zap.Error(normalizeErr))
+		return
+	}
 	probeCtx, cancel := context.WithTimeout(ctx, authProbeTimeout)
 	defer cancel()
-	res, err := s.ProbeAuth(probeCtx)
+	res, err := s.ProbeAuthForWorkspace(probeCtx, workspaceID)
 	ok := err == nil && res != nil && res.OK
 	errMsg := ""
 	switch {
@@ -271,9 +361,13 @@ func (s *Service) RecordAuthHealth(ctx context.Context) {
 	// failed" until the next poll).
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
 	defer writeCancel()
-	if updateErr := s.store.UpdateAuthHealth(writeCtx, ok, errMsg, time.Now().UTC()); updateErr != nil {
+	if updateErr := s.store.UpdateAuthHealthForWorkspace(writeCtx, workspaceID, ok, errMsg, time.Now().UTC()); updateErr != nil {
 		s.log.Warn("jira: update auth health failed", zap.Error(updateErr))
 	}
+	s.fireProbeHook()
+}
+
+func (s *Service) fireProbeHook() {
 	s.mu.Lock()
 	hook := s.probeHook
 	s.mu.Unlock()
@@ -284,7 +378,11 @@ func (s *Service) RecordAuthHealth(ctx context.Context) {
 
 // GetTicket loads a Jira ticket by key using the stored credentials.
 func (s *Service) GetTicket(ctx context.Context, ticketKey string) (*JiraTicket, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +391,11 @@ func (s *Service) GetTicket(ctx context.Context, ticketKey string) (*JiraTicket,
 
 // DoTransition applies a transition to a ticket.
 func (s *Service) DoTransition(ctx context.Context, ticketKey, transitionID string) error {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return err
 	}
@@ -302,18 +404,58 @@ func (s *Service) DoTransition(ctx context.Context, ticketKey, transitionID stri
 
 // ListProjects is used by the settings UI to populate the project selector.
 func (s *Service) ListProjects(ctx context.Context) ([]JiraProject, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	return client.ListProjects(ctx)
 }
 
+// ListProjectStatuses returns the workflow statuses defined for a project,
+// used by the ticket-list status filter so users can filter by the real
+// statuses in the selected project rather than the three coarse categories.
+func (s *Service) ListProjectStatuses(ctx context.Context, projectKey string) ([]JiraStatus, error) {
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.ListProjectStatusesForWorkspace(ctx, workspaceID, projectKey)
+}
+
+func (s *Service) ListProjectStatusesForWorkspace(ctx context.Context, workspaceID, projectKey string) ([]JiraStatus, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return client.ListProjectStatuses(ctx, projectKey)
+}
+
 // SearchTickets runs a JQL search, returning a page of tickets. pageToken is
 // the cursor returned in the previous page's NextPageToken; pass "" for the
 // first page.
 func (s *Service) SearchTickets(ctx context.Context, jql, pageToken string, maxResults int) (*SearchResult, error) {
-	client, err := s.clientFor(ctx)
+	workspaceID, err := s.defaultWorkspaceID()
+	if err != nil {
+		return nil, err
+	}
+	return s.SearchTicketsForWorkspace(ctx, workspaceID, jql, pageToken, maxResults)
+}
+
+// SearchTicketsForWorkspace runs a JQL search against one workspace's client.
+func (s *Service) SearchTicketsForWorkspace(ctx context.Context, workspaceID, jql, pageToken string, maxResults int) (*SearchResult, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.clientFor(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -322,16 +464,23 @@ func (s *Service) SearchTickets(ctx context.Context, jql, pageToken string, maxR
 
 // clientFor returns the cached client, creating it if needed. The cache is
 // invalidated whenever the config changes so stale credentials never linger.
-func (s *Service) clientFor(ctx context.Context) (Client, error) {
+func (s *Service) clientFor(ctx context.Context, workspaceID string) (Client, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
 	s.mu.Lock()
-	if s.client != nil {
-		c := s.client
+	if s.clients == nil {
+		s.clients = make(map[string]Client)
+	}
+	if s.clients[workspaceID] != nil {
+		c := s.clients[workspaceID]
 		s.mu.Unlock()
 		return c, nil
 	}
 	s.mu.Unlock()
 
-	cfg, err := s.store.GetConfig(ctx)
+	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +489,7 @@ func (s *Service) clientFor(ctx context.Context) (Client, error) {
 	}
 	secret := ""
 	if s.secrets != nil {
-		secret, err = s.secrets.Reveal(ctx, SecretKey)
+		secret, err = s.revealSecret(ctx, workspaceID)
 		if err != nil {
 			// Don't conflate a transient secret-store failure with "user never
 			// configured Jira". The UI gates on ErrNotConfigured to render a
@@ -358,25 +507,30 @@ func (s *Service) clientFor(ctx context.Context) (Client, error) {
 	// Re-check: another caller may have populated the cache while we were
 	// fetching the config and secret. Returning the existing client keeps the
 	// cache identity stable so callers comparing pointers don't see flapping.
-	if s.client != nil {
-		return s.client, nil
+	if s.clients == nil {
+		s.clients = make(map[string]Client)
 	}
-	s.client = client
+	if s.clients[workspaceID] != nil {
+		return s.clients[workspaceID], nil
+	}
+	s.clients[workspaceID] = client
 	return client, nil
 }
 
 // invalidateClient drops the cached client so the next request rebuilds it
 // with fresh credentials.
-func (s *Service) invalidateClient() {
+func (s *Service) invalidateClient(workspaceID string) {
 	s.mu.Lock()
-	s.client = nil
+	if s.clients != nil {
+		delete(s.clients, workspaceID)
+	}
 	s.mu.Unlock()
 }
 
 // resolveCredentials picks the credentials to test: if the request carries a
 // secret, use it inline (pre-save); otherwise fall back to the stored secret
 // (post-save re-test).
-func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest) (*JiraConfig, string, error) {
+func (s *Service) resolveCredentials(ctx context.Context, workspaceID string, req *SetConfigRequest) (*JiraConfig, string, error) {
 	cfg := &JiraConfig{
 		SiteURL:      normalizeSiteURL(req.SiteURL),
 		Email:        req.Email,
@@ -391,7 +545,7 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 			return nil, "", errors.New("no secret store configured")
 		}
 		var err error
-		secret, err = s.secrets.Reveal(ctx, SecretKey)
+		secret, err = s.revealSecret(ctx, workspaceID)
 		if err != nil {
 			// Don't conflate a transient secret-store failure with "no token
 			// stored". Surfacing the real error gives the user a path to retry
@@ -414,7 +568,7 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 		cfg.InstanceType == "" ||
 		(cfg.AuthMethod == AuthMethodAPIToken && cfg.Email == "")
 	if needsStoredConfig {
-		if err := s.fillConfigFromStored(ctx, cfg); err != nil {
+		if err := s.fillConfigFromStored(ctx, workspaceID, cfg); err != nil {
 			return nil, "", err
 		}
 	}
@@ -435,8 +589,8 @@ func (s *Service) resolveCredentials(ctx context.Context, req *SetConfigRequest)
 // callers don't mask DB errors as opaque "missing field" validation errors;
 // a missing row (stored == nil) is treated as "nothing to fill" rather than
 // an error so first-time TestConnection requests still go through.
-func (s *Service) fillConfigFromStored(ctx context.Context, cfg *JiraConfig) error {
-	stored, err := s.store.GetConfig(ctx)
+func (s *Service) fillConfigFromStored(ctx context.Context, workspaceID string, cfg *JiraConfig) error {
+	stored, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("read jira config: %w", err)
 	}
@@ -456,6 +610,46 @@ func (s *Service) fillConfigFromStored(ctx context.Context, cfg *JiraConfig) err
 		cfg.InstanceType = stored.InstanceType
 	}
 	return nil
+}
+
+func (s *Service) defaultWorkspaceID() (string, error) {
+	return s.store.defaultWorkspaceID()
+}
+
+func (s *Service) normalizeWorkspaceID(workspaceID string) (string, error) {
+	if workspaceID != "" {
+		return workspaceID, nil
+	}
+	return s.defaultWorkspaceID()
+}
+
+func (s *Service) secretExists(ctx context.Context, workspaceID string) (bool, error) {
+	if s.secrets == nil {
+		return false, nil
+	}
+	exists, err := s.secrets.Exists(ctx, SecretKeyForWorkspace(workspaceID))
+	if err != nil || exists {
+		return exists, err
+	}
+	return s.secrets.Exists(ctx, SecretKey)
+}
+
+func (s *Service) revealSecret(ctx context.Context, workspaceID string) (string, error) {
+	if s.secrets == nil {
+		return "", nil
+	}
+	secret, err := s.secrets.Reveal(ctx, SecretKeyForWorkspace(workspaceID))
+	if err == nil && secret != "" {
+		return secret, nil
+	}
+	legacy, legacyErr := s.secrets.Reveal(ctx, SecretKey)
+	if legacyErr == nil && legacy != "" {
+		return legacy, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return "", legacyErr
 }
 
 func validateConfigRequest(req *SetConfigRequest) error {
@@ -689,7 +883,7 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 // so the UI can show liveness.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*JiraTicket, error) {
 	defer s.stampLastPolled(w.ID)
-	client, err := s.clientFor(ctx)
+	client, err := s.clientFor(ctx, w.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}

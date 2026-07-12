@@ -230,6 +230,7 @@ func TestBuildContainerConfig_SessionDirIsKandevManagedForEveryAgent(t *testing.
 		{"codex-acp", agents.NewCodexACP()},
 		{"claude-acp", agents.NewClaudeACP()},
 		{"opencode-acp", agents.NewOpenCodeACP()},
+		{"devin-acp", agents.NewDevinACP()},
 		{"copilot-acp", agents.NewCopilotACP()},
 		{"amp-acp", agents.NewAmpACP()},
 		{"gemini", agents.NewGemini()},
@@ -287,6 +288,30 @@ func TestBuildContainerConfig_SessionDirIsKandevManagedForEveryAgent(t *testing.
 			}
 		})
 	}
+}
+
+func TestBuildContainerConfig_MountsDevinCredentialSessionDir(t *testing.T) {
+	cm := newCMTest(t)
+	cm.kandevHomeDir = "/tmp/kandev-test-home"
+	instanceID := "devin-instance"
+
+	got, err := cm.buildContainerConfig(ContainerConfig{
+		AgentConfig: agents.NewDevinACP(),
+		InstanceID:  instanceID,
+		TaskID:      "task-1",
+	})
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+
+	wantSource := filepath.Join(cm.kandevHomeDir, "agent-sessions", instanceID, ".local/share/devin")
+	wantTarget := "/root/.local/share/devin"
+	for _, mount := range got.Mounts {
+		if mount.Source == wantSource && mount.Target == wantTarget {
+			return
+		}
+	}
+	t.Fatalf("expected Devin credential mount %s -> %s, got %+v", wantSource, wantTarget, got.Mounts)
 }
 
 func TestBuildContainerConfig_MountsLocalClonePath(t *testing.T) {

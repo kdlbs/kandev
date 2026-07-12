@@ -109,6 +109,7 @@ type TurnService interface {
 // payloads itself.
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task)
+	PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState)
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.
@@ -170,6 +171,11 @@ type sessionExecutorStore interface {
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 	UpdateResumeToken(ctx context.Context, sessionID, expectedExecID, resumeToken, lastMessageUUID string) error
 	UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error
+	// RepairExecutorRunningDead repairs a row in place (status=stopped, local_pid
+	// cleared, last_seen re-stamped) while preserving resume_token/worktree — used
+	// by reconciliation to honor the resume-safety invariant instead of deleting a
+	// resumable row.
+	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
 	// Executor
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	// Task
@@ -603,6 +609,13 @@ func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task) {
 		return
 	}
 	s.taskEvents.PublishTaskUpdated(ctx, task)
+}
+
+func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {
+	if s.taskEvents == nil || task == nil {
+		return
+	}
+	s.taskEvents.PublishTaskStateChanged(ctx, task, oldState)
 }
 
 // StepRequiresCompletionSignal reports whether the workflow step bound to taskID
@@ -1067,11 +1080,10 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	if previousState == models.TaskSessionStateCreated {
 		s.logger.Info("session was never started; cleaning up",
 			zap.String("session_id", sessionID))
-		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-			s.logger.Warn("failed to remove executor record for unstarted session",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
+		// A never-started session has no conversation to lose, so its row is
+		// prunable — but route through the invariant so the rare case of a
+		// Created row that still carries a resume_token is repaired, not deleted.
+		s.pruneOrRepairExecutorRow(ctx, running, previousState)
 		return
 	}
 
@@ -1083,6 +1095,15 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	// the chat UI render as "working" because the office session shape
 	// uses IDLE specifically to avoid that.
 	if previousState == models.TaskSessionStateIdle {
+		// Keep the IDLE session state (no flip to WAITING_FOR_INPUT), but still
+		// make the ROW true: an office turn writes IDLE and then tears down, so a
+		// crash/restart in that window leaves a row claiming status=running with a
+		// dead local_pid. If the local process is confirmed dead, repair the row
+		// in place — resume_token/worktree are preserved (RowMustBePreserved
+		// treats IDLE as resumable). Remote rows report Unknown and are untouched.
+		if s.rowLiveness(running) == models.ProcessLivenessDead {
+			s.repairDeadRowLiveness(ctx, running)
+		}
 		s.logger.Info("session reconciled for lazy recovery (idle, no state change)",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
@@ -1100,6 +1121,7 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 				zap.Error(err))
 		}
 	}
+	s.abandonOpenTurnsOnStartup(ctx, sessionID, "active session reconciled to waiting")
 
 	// PRESERVE executors_running.agent_execution_id post-restart. The in-memory
 	// process is gone, but the stored ID still serves as a "this session was
@@ -1125,7 +1147,15 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 	}
 
 	// PRESERVE the ExecutorRunning record — it holds the resume token and worktree info
-	// needed for lazy recovery when the user opens the session.
+	// needed for lazy recovery when the user opens the session. But make the row
+	// TRUE: after a restart the spawned process is normally gone, so if the local
+	// liveness handle is confirmed dead, repair the row (status=stopped, local_pid
+	// cleared) so it never keeps claiming a live process (#1597 expected behavior).
+	// resume_token/worktree are preserved by the repair. Remote rows report Unknown
+	// and are left to their own runtime's status poll.
+	if s.rowLiveness(running) == models.ProcessLivenessDead {
+		s.repairDeadRowLiveness(ctx, running)
+	}
 
 	s.logger.Info("session reconciled for lazy recovery",
 		zap.String("session_id", sessionID),
@@ -1160,6 +1190,19 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 	}
 }
 
+func (s *Service) abandonOpenTurnsOnStartup(ctx context.Context, sessionID, reason string) {
+	if s.turnService == nil {
+		return
+	}
+	s.activeTurns.Delete(sessionID)
+	if err := s.turnService.AbandonOpenTurns(ctx, sessionID); err != nil {
+		s.logger.Warn("failed to abandon open turns during startup reconciliation",
+			zap.String("session_id", sessionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+	}
+}
+
 func isTaskSessionNotFound(err error) bool {
 	return errors.Is(err, models.ErrTaskSessionNotFound)
 }
@@ -1174,6 +1217,7 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID),
 			zap.String("state", string(previousState)))
+		s.abandonOpenTurnsOnStartup(ctx, sessionID, "terminal session cleanup")
 		executionID := strings.TrimSpace(running.AgentExecutionID)
 		if executionID != "" && s.agentManager != nil {
 			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup terminal session cleanup", true); err != nil {
@@ -1184,11 +1228,11 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 				return true
 			}
 		}
-		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-			s.logger.Warn("failed to remove executor record for terminal session",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
+		// Resume-safety invariant: prune the row only if it is not still resumable
+		// (no resume_token). A terminal session that kept a resume_token — e.g. an
+		// office run that COMPLETED a turn but stays resumable — is repaired in
+		// place instead of deleted.
+		s.pruneOrRepairExecutorRow(ctx, running, previousState)
 		return true
 	case models.TaskSessionStateFailed:
 		s.handleFailedSessionOnStartup(ctx, session, running)
@@ -1200,6 +1244,7 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 // handleFailedSessionOnStartup handles a failed session during startup recovery.
 func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *models.TaskSession, running *models.ExecutorRunning) {
 	sessionID := session.ID
+	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if session.TaskID != "" {
 		task, taskErr := s.taskRepo.GetTask(ctx, session.TaskID)
@@ -1232,11 +1277,9 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 				return
 			}
 		}
-		if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-			s.logger.Warn("failed to remove executor record for failed session",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
+		// Prune only subject to the resume-safety invariant (a lingering
+		// resume_token is repaired in place rather than deleted).
+		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateFailed)
 	}
 }
 

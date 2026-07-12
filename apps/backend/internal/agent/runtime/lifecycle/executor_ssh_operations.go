@@ -204,6 +204,7 @@ func normalizeSSHRemoteArch(arch string) string {
 func requireSupportedRemotePlatform(platform SSHRemotePlatform) error {
 	switch platform.String() {
 	case sshRemoteGOOSLinux + "/" + sshRemoteGOARCHAMD64,
+		sshRemoteGOOSLinux + "/" + sshRemoteGOARCHARM64,
 		sshRemoteGOOSDarwin + "/" + sshRemoteGOARCHARM64,
 		sshRemoteGOOSDarwin + "/" + sshRemoteGOARCHAMD64:
 		return nil
@@ -213,7 +214,7 @@ func requireSupportedRemotePlatform(platform SSHRemotePlatform) error {
 			reported = fmt.Sprintf("%s/%s", platform.UnameOS, platform.UnameArch)
 		}
 		return fmt.Errorf(
-			"unsupported remote platform %q — SSH executor supports linux/amd64, darwin/arm64, and darwin/amd64",
+			"unsupported remote platform %q — SSH executor supports linux/{amd64,arm64} and darwin/{amd64,arm64}",
 			reported,
 		)
 	}
@@ -559,7 +560,9 @@ func createRemoteAgentInstance(
 		McpServers:          req.McpServers,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKillFromReq(req),
+		StripEnv:            stripEnvFromReq(req),
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		Env:                 sshRemoteAgentEnv(req),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
@@ -611,6 +614,61 @@ func createRemoteAgentInstance(
 		zap.Int("instance_port", resp.Port),
 		zap.String("instance_id", resp.ID))
 	return resp.Port, nil
+}
+
+// sshRemoteAgentCredentialEnvKeys are the agent-authentication environment
+// variables forwarded to the remote agent instance. Unlike containerized
+// executors (Docker/Sprites) the SSH executor's CreateInstanceRequest never
+// carried Env, so env-authenticated agents — notably claude-acp, which reads
+// CLAUDE_CODE_OAUTH_TOKEN, not a credentials file — failed with "Authentication
+// required" on every SSH remote. We forward ONLY this credential allowlist (not
+// the control plane's HOME/PATH/etc., which would break a different remote).
+// Credential env var names. Named constants keep each string single-sourced
+// (several also appear in the Docker/Sprites credential paths) so goconst stays
+// satisfied and the allowlist reads as intent rather than magic strings.
+const (
+	envKeyClaudeCodeOAuthToken = "CLAUDE_CODE_OAUTH_TOKEN"
+	envKeyAnthropicAPIKey      = "ANTHROPIC_API_KEY"
+	envKeyOpenAIAPIKey         = "OPENAI_API_KEY"
+	envKeyGeminiAPIKey         = "GEMINI_API_KEY"
+	envKeyGoogleAPIKey         = "GOOGLE_API_KEY"
+	envKeyGitHubToken          = "GITHUB_TOKEN"
+	envKeyGHToken              = "GH_TOKEN"
+)
+
+var sshRemoteAgentCredentialEnvKeys = []string{
+	envKeyClaudeCodeOAuthToken,
+	envKeyAnthropicAPIKey,
+	envKeyOpenAIAPIKey,
+	envKeyGeminiAPIKey,
+	envKeyGoogleAPIKey,
+	envKeyGitHubToken,
+	envKeyGHToken,
+}
+
+// sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
+// credential key is taken ONLY from the resolved request env — credentials the
+// orchestrator explicitly resolved for this executor/session (profile env vars,
+// profile remote_auth_secrets, or the GITHUB_TOKEN resolution chain, see the
+// orchestrator's applyContainerCredentials). It deliberately does NOT fall back
+// to the control plane's own process environment: that would forward whatever the kandev host
+// happens to have exported (OPENAI_API_KEY, GITHUB_TOKEN, …) to any SSH host the
+// executor connects to, bypassing per-executor credential scoping. Empty values
+// are skipped so we never clobber a remote-side value with a blank.
+func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
+	if req == nil || req.Env == nil {
+		return nil
+	}
+	env := make(map[string]string)
+	for _, key := range sshRemoteAgentCredentialEnvKeys {
+		if val := req.Env[key]; val != "" {
+			env[key] = val
+		}
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
 }
 
 // sshAgentTypeFromReq returns the agent type ID for the create-instance call,

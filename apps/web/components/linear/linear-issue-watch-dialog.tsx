@@ -132,7 +132,7 @@ function FilterFields({
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
 }) {
   const { teams, states, labels, users, loadingStates, loadingLabels, loadingUsers } =
-    useTeamsAndStates(form.teamKey);
+    useTeamsAndStates(form.workspaceId, form.teamKey);
   const toggleState = useCallback(
     (id: string) =>
       setForm((p) => ({

@@ -15,9 +15,11 @@ import {
   IconSettings,
   IconTimeline,
 } from "@tabler/icons-react";
+import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import { TaskSearchInput } from "./task-search-input";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
+import { cn } from "@/lib/utils";
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 
@@ -32,6 +34,13 @@ type MobileMenuSheetProps = {
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 };
+
+const mobileSectionClass = "space-y-2";
+const mobileSectionTitleClass = "text-sm font-medium";
+const mobileFieldClass = "space-y-1.5";
+const mobileFieldLabelClass = "text-xs font-medium text-muted-foreground";
+const mobileControlClass = "h-10 w-full px-3 text-sm";
+const mobileControlIconClass = "h-4 w-4 shrink-0";
 
 function getRepositoryPlaceholder(loading: boolean, empty: boolean): string {
   if (loading) return "Loading repositories...";
@@ -68,13 +77,13 @@ function MobileDisplaySelects({
 }: Omit<MobileDisplayOptionsProps, "enablePreviewOnClick" | "onTogglePreviewOnClick">) {
   return (
     <>
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground">Workflow</label>
+      <div className={mobileFieldClass}>
+        <label className={mobileFieldLabelClass}>Workflow</label>
         <Select
           value={activeWorkflowId ?? ""}
           onValueChange={(value) => onWorkflowChange(value || null)}
         >
-          <SelectTrigger className="w-full">
+          <SelectTrigger className={mobileControlClass}>
             <SelectValue placeholder="Select workflow" />
           </SelectTrigger>
           <SelectContent>
@@ -87,14 +96,14 @@ function MobileDisplaySelects({
         </Select>
       </div>
 
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground">Repository</label>
+      <div className={mobileFieldClass}>
+        <label className={mobileFieldLabelClass}>Repository</label>
         <Select
           value={repositoryValue}
           onValueChange={(value) => onRepositoryChange(value as string | "all")}
           disabled={repositories.length === 0}
         >
-          <SelectTrigger className="w-full">
+          <SelectTrigger className={mobileControlClass}>
             <SelectValue
               placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)}
             />
@@ -117,11 +126,11 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
   const { enablePreviewOnClick, onTogglePreviewOnClick, ...selectProps } = props;
   return (
     <div className="space-y-4">
-      <label className="text-sm font-medium">Display Options</label>
+      <label className={mobileSectionTitleClass}>Display Options</label>
       <MobileDisplaySelects {...selectProps} />
-      <div className="space-y-2">
-        <label className="text-xs text-muted-foreground">Preview Panel</label>
-        <label className="flex items-center gap-2 cursor-pointer">
+      <div className={mobileFieldClass}>
+        <label className={mobileFieldLabelClass}>Preview Panel</label>
+        <label className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
           <Checkbox
             checked={enablePreviewOnClick ?? false}
             onCheckedChange={(checked) => {
@@ -147,14 +156,31 @@ function MobileSearchSection({
   if (!onSearchChange) return null;
 
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium">Search</label>
+    <div className={mobileSectionClass}>
+      <label className={mobileSectionTitleClass}>Search</label>
       <TaskSearchInput
         value={searchQuery}
         onChange={onSearchChange}
         placeholder="Search tasks..."
         isLoading={isSearchLoading}
-        className="w-full"
+        className="w-full [&_[data-slot=input]]:h-10 [&_[data-slot=input]]:pl-9 [&_[data-slot=input]]:pr-9 [&_[data-slot=input]]:text-sm"
+      />
+    </div>
+  );
+}
+
+function MobileWorkspaceSection({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+  return (
+    <div className={mobileSectionClass}>
+      <label className={mobileSectionTitleClass}>Workspace</label>
+      <AppSidebarWorkspacePicker
+        modal={false}
+        onActionComplete={() => onOpenChange(false)}
+        triggerClassName={cn("flex-none", mobileControlClass)}
+        triggerTestId="mobile-workspace-trigger"
+        chevronTestId="mobile-workspace-trigger-chevron"
+        itemTestIdPrefix="mobile-workspace-item"
+        contentClassName="w-80 max-w-[calc(100vw-2rem)]"
       />
     </div>
   );
@@ -168,8 +194,8 @@ function MobileViewSection({
   onViewChange: (value: string) => void;
 }) {
   return (
-    <div className="space-y-2">
-      <label className="text-sm font-medium">View</label>
+    <div className={mobileSectionClass}>
+      <label className={mobileSectionTitleClass}>View</label>
       <ToggleGroup
         type="single"
         value={viewValue}
@@ -179,23 +205,23 @@ function MobileViewSection({
       >
         <ToggleGroupItem
           value="kanban"
-          className="cursor-pointer flex-1 data-[state=on]:bg-muted data-[state=on]:text-foreground"
+          className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
         >
-          <IconLayoutKanban className="h-4 w-4 mr-2" />
+          <IconLayoutKanban className={mobileControlIconClass} />
           Kanban
         </ToggleGroupItem>
         <ToggleGroupItem
           value="pipeline"
-          className="cursor-pointer flex-1 data-[state=on]:bg-muted data-[state=on]:text-foreground"
+          className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
         >
-          <IconTimeline className="h-4 w-4 mr-2" />
+          <IconTimeline className={mobileControlIconClass} />
           Pipeline
         </ToggleGroupItem>
         <ToggleGroupItem
           value="list"
-          className="cursor-pointer flex-1 data-[state=on]:bg-muted data-[state=on]:text-foreground"
+          className="h-10 min-w-0 flex-1 cursor-pointer gap-2 text-sm data-[state=on]:bg-muted data-[state=on]:text-foreground"
         >
-          <IconList className="h-4 w-4 mr-2" />
+          <IconList className={mobileControlIconClass} />
           List
         </ToggleGroupItem>
       </ToggleGroup>
@@ -220,10 +246,14 @@ function MobileUtilityActions({
 
   return (
     <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-border">
-      <div className="text-sm font-medium">Utilities</div>
-      <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
+      <div className={mobileSectionTitleClass}>Utilities</div>
+      <Button
+        asChild
+        variant="outline"
+        className={cn(mobileControlClass, "cursor-pointer justify-start gap-3")}
+      >
         <Link href="/settings" onClick={closeSheet}>
-          <IconSettings className="h-4 w-4" />
+          <IconSettings className={mobileControlIconClass} />
           Settings
         </Link>
       </Button>
@@ -231,10 +261,10 @@ function MobileUtilityActions({
         <Button
           type="button"
           variant="outline"
-          className="w-full cursor-pointer justify-start gap-2"
+          className={cn(mobileControlClass, "cursor-pointer justify-start gap-3")}
           onClick={openHealth}
         >
-          <IconAlertTriangle className="h-4 w-4 text-warning" />
+          <IconAlertTriangle className={cn(mobileControlIconClass, "text-warning")} />
           Health issues
         </Button>
       )}
@@ -310,6 +340,7 @@ export function MobileMenuSheet({
             onSearchChange={onSearchChange}
             isSearchLoading={isSearchLoading}
           />
+          <MobileWorkspaceSection onOpenChange={onOpenChange} />
           <MobileViewSection viewValue={viewValue} onViewChange={handleViewChange} />
 
           <MobileDisplayOptions

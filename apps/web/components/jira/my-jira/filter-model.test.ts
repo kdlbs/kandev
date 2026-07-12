@@ -17,13 +17,27 @@ describe("filtersToJql", () => {
     );
   });
 
-  it("maps status categories to Jira labels", () => {
+  it("emits status clause for selected status names", () => {
     const jql = filtersToJql({
       ...DEFAULT_FILTERS,
-      statusCategories: ["new", "indeterminate"],
+      statuses: ["In Development", "Ready for review"],
       assignee: "anyone",
     });
-    expect(jql).toBe(`statusCategory in ("To Do", "In Progress") ORDER BY updated DESC`);
+    expect(jql).toBe(`status in ("In Development", "Ready for review") ORDER BY updated DESC`);
+  });
+
+  it("omits status clause when no statuses selected", () => {
+    const jql = filtersToJql({ ...DEFAULT_FILTERS, statuses: [], assignee: "anyone" });
+    expect(jql).toBe("ORDER BY updated DESC");
+  });
+
+  it("escapes quotes in status names", () => {
+    const jql = filtersToJql({
+      ...DEFAULT_FILTERS,
+      statuses: [`Needs "review"`],
+      assignee: "anyone",
+    });
+    expect(jql).toBe(`status in ("Needs \\"review\\"") ORDER BY updated DESC`);
   });
 
   it("detects ticket key in search text", () => {
@@ -72,5 +86,9 @@ describe("filtersEqual", () => {
 
   it("returns false when arrays differ", () => {
     expect(filtersEqual(DEFAULT_FILTERS, { ...DEFAULT_FILTERS, projectKeys: ["X"] })).toBe(false);
+  });
+
+  it("returns false when statuses differ", () => {
+    expect(filtersEqual(DEFAULT_FILTERS, { ...DEFAULT_FILTERS, statuses: ["Done"] })).toBe(false);
   });
 });
