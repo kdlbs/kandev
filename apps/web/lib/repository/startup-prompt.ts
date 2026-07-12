@@ -38,8 +38,10 @@ export function resolveStartupPromptForManualDialog(prompt: string, taskTitle: s
   }
   // Trim only newlines — preserve any leading/trailing spaces or tabs a
   // user intentionally put on the first or last kept line (e.g. indented
-  // bullet content).
-  return kept.join("\n").replace(/^\n+|\n+$/g, "");
+  // bullet content). Collapse to "" when the whole result is blank so the
+  // dialog's hasDescription state matches what the user sees.
+  const trimmed = kept.join("\n").replace(/^\n+|\n+$/g, "");
+  return trimmed.trim() === "" ? "" : trimmed;
 }
 
 function hasUnknownPlaceholder(line: string): boolean {

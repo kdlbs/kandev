@@ -56,11 +56,5 @@ export function useRepositoryStartupPromptPrefillEffect(
     descriptionInputRef.current?.setValue(resolved);
     lastAppliedRef.current = resolved;
     setHasDescription(resolved.length > 0);
-  }, [
-    open,
-    startupPrompt,
-    taskName,
-    descriptionInputRef,
-    setHasDescription,
-  ]);
+  }, [open, startupPrompt, taskName, descriptionInputRef, setHasDescription]);
 }

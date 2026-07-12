@@ -102,7 +102,6 @@ function RepositoryBasicFields({
   );
 }
 
-
 type RepositoryCustomScriptsProps = {
   repositoryId: string;
   scripts: RepositoryScript[];

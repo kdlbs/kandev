@@ -79,3 +79,59 @@ func TestService_ResolveRepositoryStartupPrompt(t *testing.T) {
 		}
 	})
 }
+
+// TestService_FindRepositoryForInput_WorkspaceOwnership pins that
+// FindRepositoryForInput enforces workspace ownership on the RepositoryID
+// branch: a caller from workspace A that supplies a repository_id from
+// workspace B receives nil, not the foreign repo. Prevents a
+// cross-workspace startup_prompt leak via the MCP path.
+func TestService_FindRepositoryForInput_WorkspaceOwnership(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	wsA, err := svc.CreateWorkspace(ctx, &CreateWorkspaceRequest{Name: "ws-a", OwnerID: "u"})
+	if err != nil {
+		t.Fatalf("create workspace A: %v", err)
+	}
+	wsB, err := svc.CreateWorkspace(ctx, &CreateWorkspaceRequest{Name: "ws-b", OwnerID: "u"})
+	if err != nil {
+		t.Fatalf("create workspace B: %v", err)
+	}
+	repoB := &models.Repository{
+		ID:            "repo-in-ws-b",
+		WorkspaceID:   wsB.ID,
+		Name:          "foreign",
+		SourceType:    "local",
+		StartupPrompt: "leaked prompt",
+	}
+	if err := repo.CreateRepository(ctx, repoB); err != nil {
+		t.Fatalf("create workspace-B repo: %v", err)
+	}
+
+	// Caller says "I'm in workspace A", but supplies workspace B's repo id.
+	got, err := svc.FindRepositoryForInput(ctx, wsA.ID, TaskRepositoryInput{RepositoryID: repoB.ID})
+	if err != nil {
+		t.Fatalf("FindRepositoryForInput: %v", err)
+	}
+	if got != nil {
+		t.Errorf("cross-workspace lookup returned repo %+v, want nil", got)
+	}
+
+	// Same repo, correct workspace, does resolve.
+	got, err = svc.FindRepositoryForInput(ctx, wsB.ID, TaskRepositoryInput{RepositoryID: repoB.ID})
+	if err != nil {
+		t.Fatalf("FindRepositoryForInput (own ws): %v", err)
+	}
+	if got == nil || got.ID != repoB.ID {
+		t.Errorf("same-workspace lookup got %+v, want repo id %s", got, repoB.ID)
+	}
+
+	// Empty workspaceID is treated as "no scope" (used by legacy callers).
+	got, err = svc.FindRepositoryForInput(ctx, "", TaskRepositoryInput{RepositoryID: repoB.ID})
+	if err != nil {
+		t.Fatalf("FindRepositoryForInput (no scope): %v", err)
+	}
+	if got == nil || got.ID != repoB.ID {
+		t.Errorf("no-scope lookup got %+v, want repo id %s", got, repoB.ID)
+	}
+}

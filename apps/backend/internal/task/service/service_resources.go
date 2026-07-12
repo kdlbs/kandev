@@ -777,7 +777,17 @@ func (s *Service) ResolveRepositoryStartupPrompt(ctx context.Context, repository
 // repository's startup_prompt applied.
 func (s *Service) FindRepositoryForInput(ctx context.Context, workspaceID string, input TaskRepositoryInput) (*models.Repository, error) {
 	if input.RepositoryID != "" {
-		return s.repoEntities.GetRepository(ctx, input.RepositoryID)
+		repo, err := s.repoEntities.GetRepository(ctx, input.RepositoryID)
+		if err != nil || repo == nil {
+			return repo, err
+		}
+		// Enforce workspace ownership so a caller from workspace A can't
+		// reach into workspace B by supplying a foreign repository_id and
+		// unintentionally pick up that repo's startup_prompt.
+		if workspaceID != "" && repo.WorkspaceID != workspaceID {
+			return nil, nil
+		}
+		return repo, nil
 	}
 	if input.GitHubURL != "" {
 		if owner, name, err := parseGitHubRepoURL(input.GitHubURL); err == nil && workspaceID != "" {

@@ -20,16 +20,12 @@ describe("resolveStartupPromptForManualDialog", () => {
   });
 
   it("drops lines with unresolved TICKET_ID", () => {
-    expect(
-      resolveStartupPromptForManualDialog("Pick up {{TICKET_ID}}.\nDone.", "X"),
-    ).toBe("Done.");
+    expect(resolveStartupPromptForManualDialog("Pick up {{TICKET_ID}}.\nDone.", "X")).toBe("Done.");
   });
 
   it("collapses whitespace after dropping ticket-only line", () => {
     const prompt = "Read {{TICKET_URL}}.\n\nStart with {{TASK_TITLE}}.";
-    expect(resolveStartupPromptForManualDialog(prompt, "Refactor")).toBe(
-      "Start with Refactor.",
-    );
+    expect(resolveStartupPromptForManualDialog(prompt, "Refactor")).toBe("Start with Refactor.");
   });
 
   it("returns empty string when every line references a ticket", () => {
@@ -43,16 +39,12 @@ describe("resolveStartupPromptForManualDialog", () => {
 
   it("normalizes CRLF line endings to LF", () => {
     const prompt = "Read {{TICKET_URL}}.\r\nStart with {{TASK_TITLE}}.";
-    expect(resolveStartupPromptForManualDialog(prompt, "Refactor")).toBe(
-      "Start with Refactor.",
-    );
+    expect(resolveStartupPromptForManualDialog(prompt, "Refactor")).toBe("Start with Refactor.");
   });
 
   it("does not leave stray CR characters in resolved output", () => {
     const prompt = "Start with {{TASK_TITLE}}.\r\nSecond line.";
-    expect(resolveStartupPromptForManualDialog(prompt, "X")).toBe(
-      "Start with X.\nSecond line.",
-    );
+    expect(resolveStartupPromptForManualDialog(prompt, "X")).toBe("Start with X.\nSecond line.");
   });
 
   it("task titles containing $ replacement tokens are inserted literally", () => {
@@ -60,9 +52,7 @@ describe("resolveStartupPromptForManualDialog", () => {
     // treats $&, $$, $', $` as substitution patterns; the callback form
     // avoids that.
     const prompt = "Fixing: {{TASK_TITLE}}.";
-    expect(resolveStartupPromptForManualDialog(prompt, "Fix $& bug")).toBe(
-      "Fixing: Fix $& bug.",
-    );
+    expect(resolveStartupPromptForManualDialog(prompt, "Fix $& bug")).toBe("Fixing: Fix $& bug.");
     expect(resolveStartupPromptForManualDialog(prompt, "Price $$ update")).toBe(
       "Fixing: Price $$ update.",
     );
@@ -80,8 +70,14 @@ describe("resolveStartupPromptForManualDialog", () => {
 
   it("preserves leading whitespace on kept lines", () => {
     const prompt = "  - Read {{TICKET_URL}}\n  - Start on {{TASK_TITLE}}";
-    expect(resolveStartupPromptForManualDialog(prompt, "Refactor")).toBe(
-      "  - Start on Refactor",
-    );
+    expect(resolveStartupPromptForManualDialog(prompt, "Refactor")).toBe("  - Start on Refactor");
+  });
+
+  it("whitespace-only resolved result collapses to empty string", () => {
+    // The dialog effect gates hasDescription on resolved.length > 0, so a
+    // whitespace-only survivor line would otherwise mark an empty-looking
+    // input as "has description".
+    const prompt = "   \nRead {{TICKET_URL}}.";
+    expect(resolveStartupPromptForManualDialog(prompt, "")).toBe("");
   });
 });

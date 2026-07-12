@@ -203,4 +203,15 @@ func TestResolveStartupPrompt(t *testing.T) {
 			t.Errorf("got %q, want %q", got, want)
 		}
 	})
+
+	t.Run("whitespace-only resolved result collapses to empty string", func(t *testing.T) {
+		// Ticket-only prompt where every line drops → result is a bare
+		// whitespace-only kept line. Callers that gate on empty description
+		// (MCP fallback, dialog hasDescription) need the empty string here.
+		prompt := "   \nRead {{TICKET_URL}}."
+		got := ResolveStartupPrompt(prompt, "", nil)
+		if got != "" {
+			t.Errorf("got %q, want empty", got)
+		}
+	})
 }

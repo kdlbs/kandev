@@ -13,6 +13,14 @@ const (
 	placeholderTaskTitle      = "TASK_TITLE"
 )
 
+// Ticket-provider identifiers surfaced by TicketContextProvider under
+// {{TICKET_PROVIDER}}. Kept as constants so ResolveStartupPrompt and its
+// tests share the same wire format.
+const (
+	TicketProviderJira   = "jira"
+	TicketProviderLinear = "linear"
+)
+
 // placeholderToken matches any `{{...}}` sequence. Used by ResolveStartupPrompt
 // to inspect the ORIGINAL line's tokens against the resolver's known keys, so
 // substituted values that happen to contain a `{{...}}` literal (e.g. a task
@@ -45,13 +53,13 @@ func TicketContextProvider(taskTitle string, metadata map[string]interface{}) Pl
 		if id, url, ok := jiraTicketFrom(metadata); ok {
 			vars[placeholderTicketID] = id
 			vars[placeholderTicketURL] = url
-			vars[placeholderTicketProvider] = "jira"
+			vars[placeholderTicketProvider] = TicketProviderJira
 			return vars
 		}
 		if id, url, ok := linearTicketFrom(metadata); ok {
 			vars[placeholderTicketID] = id
 			vars[placeholderTicketURL] = url
-			vars[placeholderTicketProvider] = "linear"
+			vars[placeholderTicketProvider] = TicketProviderLinear
 			return vars
 		}
 		return vars
@@ -112,6 +120,12 @@ func ResolveStartupPrompt(prompt, taskTitle string, metadata map[string]interfac
 	}
 	// Trim only newlines — preserve any leading/trailing spaces or tabs a
 	// user intentionally put on the first or last kept line (e.g. indented
-	// bullet content).
-	return strings.Trim(strings.Join(kept, "\n"), "\n")
+	// bullet content). Collapse to "" when the whole result is blank so
+	// callers that gate on the length see an accurate "no prompt to apply"
+	// signal.
+	trimmed := strings.Trim(strings.Join(kept, "\n"), "\n")
+	if strings.TrimSpace(trimmed) == "" {
+		return ""
+	}
+	return trimmed
 }
