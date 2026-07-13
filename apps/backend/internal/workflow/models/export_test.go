@@ -254,6 +254,15 @@ func TestValidate(t *testing.T) {
 		e.Workflows[0].Steps[1].PullFromStepPosition = &pos
 		assert.ErrorContains(t, e.Validate(), "cannot reference itself")
 	})
+
+	t.Run("pull source cycle fails", func(t *testing.T) {
+		e := validExport()
+		firstPosition := 0
+		secondPosition := 1
+		e.Workflows[0].Steps[0].PullFromStepPosition = &secondPosition
+		e.Workflows[0].Steps[1].PullFromStepPosition = &firstPosition
+		assert.ErrorContains(t, e.Validate(), "cannot create a pull cycle")
+	})
 }
 
 func TestConvertStepIDToPosition(t *testing.T) {

@@ -157,6 +157,7 @@ func (e *WorkflowExport) Validate() error {
 }
 
 func validatePullSourceRefs(steps []StepPortable, validPositions map[int]bool) error {
+	pullSources := make(map[int]int, len(steps))
 	for _, step := range steps {
 		if step.PullFromStepPosition == nil {
 			continue
@@ -168,8 +169,44 @@ func validatePullSourceRefs(steps []StepPortable, validPositions map[int]bool) e
 		if !validPositions[pos] {
 			return fmt.Errorf("step %q: pull_from_step_position %d does not match any step", step.Name, pos)
 		}
+		pullSources[step.Position] = pos
+	}
+	if hasPullSourceCycle(pullSources) {
+		return fmt.Errorf("pull_from_step_position cannot create a pull cycle")
 	}
 	return nil
+}
+
+func hasPullSourceCycle(pullSources map[int]int) bool {
+	const (
+		visiting = 1
+		visited  = 2
+	)
+
+	states := make(map[int]int, len(pullSources))
+	for start := range pullSources {
+		if states[start] == visited {
+			continue
+		}
+		current := start
+		path := make([]int, 0)
+		for states[current] != visited {
+			if states[current] == visiting {
+				return true
+			}
+			states[current] = visiting
+			path = append(path, current)
+			next, ok := pullSources[current]
+			if !ok {
+				break
+			}
+			current = next
+		}
+		for _, position := range path {
+			states[position] = visited
+		}
+	}
+	return false
 }
 
 // PullFromStepID maps the portable pull-source position to a workflow-step ID.
