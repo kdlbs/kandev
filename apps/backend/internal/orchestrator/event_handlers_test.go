@@ -383,10 +383,11 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 }
 
 func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
-	if onDispatched != nil {
+	result, err := m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+	if err == nil && onDispatched != nil {
 		onDispatched()
 	}
-	return m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+	return result, err
 }
 func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error {
 	m.cancelAgentCalls.Add(1)
