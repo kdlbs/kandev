@@ -326,3 +326,15 @@ Post-rebase CI follow-up completed locally on 2026-07-11 after rebasing onto
 - A pre-fix mobile stress reproduction also completed 20/20 focused repetitions;
   the walkthrough cache race was confirmed by the failing unit regression rather
   than a deterministic isolated browser failure.
+
+Post-rebase audit completed locally on 2026-07-13 after rebasing onto
+`origin/main` at `c4dd45f9`:
+
+- Resolved the kanban conflict by retaining Query-backed repository and workflow
+  snapshot reads while preserving upstream WIP-limit presentation.
+- Migrated the upstream workflow-step WIP fields through the Query snapshot
+  mapper; focused bridge, hydration, snapshot, and kanban hook tests passed
+  29 assertions.
+- Reviewed the remaining upstream worktree and mobile-action changes. They add
+  local UI/configuration behavior only; repository updates already use the
+  workspace Query bridge, so no further server-state migration was required.

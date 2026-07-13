@@ -69,6 +69,15 @@ Post-rebase CI follow-up (2026-07-11):
   plan-toolbar/walkthrough tests with strict WS accounting.
 - The lifecycle rebase resolution passed all 765 package tests.
 
+Post-rebase audit (2026-07-13):
+
+- Rebased onto `origin/main` at `c4dd45f9`; kanban conflicts retained Query
+  cache ownership and upstream WIP-limit behavior.
+- Added a Query snapshot mapper regression for workflow-step WIP metadata.
+- Focused mapper, hydration, Query bridge, and kanban hook tests passed 29
+  assertions. The remaining upstream worktree/mobile changes did not add new
+  server-state reads or cache ownership paths.
+
 ## Files Likely Touched
 
 - `apps/web/e2e/tests/**`
