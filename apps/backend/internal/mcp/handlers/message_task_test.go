@@ -311,6 +311,15 @@ func senderPayload(targetTaskID, prompt, senderTaskID string) map[string]interfa
 	}
 }
 
+// senderPayloadWithMode is senderPayload plus an explicit delivery_mode —
+// used by tests that must opt into (or explicitly stay on) a specific
+// message_task_kandev delivery_mode rather than relying on the default.
+func senderPayloadWithMode(targetTaskID, prompt, senderTaskID, deliveryMode string) map[string]interface{} {
+	payload := senderPayload(targetTaskID, prompt, senderTaskID)
+	payload["delivery_mode"] = deliveryMode
+	return payload
+}
+
 func TestHandleMessageTask_MissingTaskID(t *testing.T) {
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
@@ -395,7 +404,7 @@ func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) 
 
 	h, orch := newMessageTaskHandler(t, svc)
 
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(child.ID, "stop and pivot to X", parent.ID))
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop and pivot to X", parent.ID, "interrupt"))
 	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -438,7 +447,7 @@ func TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMes
 	h, orch := newMessageTaskHandler(t, svc)
 	orch.interruptErr = errors.New("cancel agent: agent manager unreachable")
 
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(child.ID, "stop now", parent.ID))
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop now", parent.ID, "interrupt"))
 	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -466,7 +475,7 @@ func TestHandleMessageTask_ParentToChildRunningSession_InterruptSkipped_KeepsQue
 	h, orch := newMessageTaskHandler(t, svc)
 	orch.interruptSkippedNoError = true
 
-	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(child.ID, "stop now", parent.ID))
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop now", parent.ID, "interrupt"))
 	resp, err := h.handleMessageTask(context.Background(), msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -487,6 +496,106 @@ func TestHandleMessageTask_ParentToChildRunningSession_InterruptSkipped_KeepsQue
 	require.Len(t, orch.interruptCalls, 1)
 	assert.Equal(t, child.ID, orch.interruptCalls[0].taskID)
 	assert.Equal(t, sess.ID, orch.interruptCalls[0].sessionID)
+}
+
+// TestHandleMessageTask_ParentToChildRunningSession_OmittedDeliveryMode_DoesNotInterrupt
+// pins the new default: since delivery_mode now defaults to "queued", a
+// parent messaging a busy child *without* specifying delivery_mode no
+// longer interrupts — this is the behavior change from the previous round,
+// where any parent-to-child message always interrupted. The message is
+// still queued and delivered normally once the child's current turn ends.
+func TestHandleMessageTask_ParentToChildRunningSession_OmittedDeliveryMode_DoesNotInterrupt(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayload(child.ID, "fyi, no rush", parent.ID))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Contains(t, status.Entries[0].Content, "fyi, no rush")
+	assert.Empty(t, orch.interruptCalls, "omitted delivery_mode must default to queued, not interrupt, even from a parent sender")
+}
+
+// TestHandleMessageTask_ParentToChildRunningSession_ExplicitQueued_DoesNotInterrupt
+// is the explicit-value twin of the omitted-default case above: a parent
+// sender that explicitly passes delivery_mode="queued" gets exactly the
+// same queue-and-wait behavior as omitting it.
+func TestHandleMessageTask_ParentToChildRunningSession_ExplicitQueued_DoesNotInterrupt(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "fyi, no rush", parent.ID, "queued"))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "queued", payload["status"])
+
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	require.Equal(t, 1, status.Count)
+	assert.Empty(t, orch.interruptCalls, `explicit delivery_mode="queued" from a parent sender must not interrupt`)
+}
+
+// TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected pins
+// the authorization contract: delivery_mode="interrupt" is only ever
+// honored when the sender is the target's direct parent. A non-parent
+// (sibling/unrelated) sender explicitly requesting "interrupt" must get a
+// hard rejection — not a silent downgrade to "queued" — and the rejection
+// must have no side effect: nothing is queued, dispatched, or interrupted.
+// A silent downgrade would misreport what happened and hide caller misuse
+// instead of telling the caller its request was rejected.
+func TestHandleMessageTask_NonParentSender_InterruptRequest_HardRejected(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(target.ID, "stop now", sender.ID, "interrupt"))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeForbidden)
+
+	var errPayload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &errPayload))
+	assert.Contains(t, errPayload.Message, "direct parent")
+
+	// No side effect from the rejected request: the target's queue stays
+	// empty and neither the interrupt nor any other dispatch path ran.
+	status := orch.queue.GetStatus(context.Background(), sess.ID)
+	assert.Equal(t, 0, status.Count, "a rejected interrupt request must not be queued as a side effect")
+	assert.Empty(t, orch.interruptCalls)
+	assert.Empty(t, orch.promptCalls)
+	assert.Empty(t, orch.startCreatedCalls)
+}
+
+// TestHandleMessageTask_InvalidDeliveryMode_Rejected pins plain input
+// validation: any delivery_mode value other than "queued"/"interrupt"
+// (or omitted) is rejected before any task/session lookup.
+func TestHandleMessageTask_InvalidDeliveryMode_Rejected(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	parent, child, _ := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, _ := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, senderPayloadWithMode(child.ID, "stop now", parent.ID, "immediately"))
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
 func TestHandleMessageTask_AppendsPromptReferenceExpansions(t *testing.T) {

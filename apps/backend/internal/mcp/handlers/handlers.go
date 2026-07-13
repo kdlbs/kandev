@@ -1555,6 +1555,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		Prompt          string `json:"prompt"`
 		SenderTaskID    string `json:"sender_task_id"`
 		SenderSessionID string `json:"sender_session_id"`
+		DeliveryMode    string `json:"delivery_mode"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -1570,6 +1571,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	}
 	if req.SenderTaskID == req.TaskID {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task cannot send a message to itself", nil)
+	}
+	if req.DeliveryMode != "" && req.DeliveryMode != deliveryModeQueued && req.DeliveryMode != deliveryModeInterrupt {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			fmt.Sprintf("delivery_mode must be %q or %q", deliveryModeQueued, deliveryModeInterrupt), nil)
 	}
 
 	// Sender lookup is global, not workspace-scoped: cross-workspace agent
@@ -1612,15 +1617,27 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
 	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID)
 
-	// A parent messaging its own child subtask is a control/steering signal,
-	// not an FYI — interrupt a busy child's current turn so delivery doesn't
-	// wait behind the FIFO queue for the whole turn to finish naturally (see
-	// queueThenInterruptTaskMessage / InterruptForPeerMessage). Regular peer
-	// messages between siblings or to a parent keep the default queue-and-
-	// wait behavior documented on message_task_kandev.
+	// Interrupt intent is explicit, never inferred: a parent/child
+	// relationship alone no longer drives interruption (see
+	// dispatchTaskMessage's interruptIfBusy parameter and
+	// queueThenInterruptTaskMessage). The server still authorizes
+	// delivery_mode="interrupt" only when the sender is the target's
+	// direct parent — the same relationship check as before, now gating
+	// an explicit request instead of driving an implicit one. A non-parent
+	// sender explicitly requesting "interrupt" is hard-rejected rather than
+	// silently downgraded to "queued": a silent downgrade would misreport
+	// what happened and hide caller misuse instead of telling the caller
+	// its request was rejected. Omitted or "queued" keeps the default
+	// queue-and-wait behavior documented on message_task_kandev, even for
+	// a parent sender.
 	isParentToChild := targetTask.ParentID != "" && targetTask.ParentID == senderTask.ID
+	wantsInterrupt := req.DeliveryMode == deliveryModeInterrupt
+	if wantsInterrupt && !isParentToChild {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
+	}
 
-	result, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta, isParentToChild)
+	result, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt)
 	if err != nil {
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
@@ -1880,6 +1897,20 @@ const taskMessageStatusSent = "sent"
 // later delivery rather than dispatched immediately. Extracted alongside
 // taskMessageStatusSent to satisfy goconst's repeated-string rule.
 const taskMessageStatusQueued = "queued"
+
+// deliveryModeQueued and deliveryModeInterrupt are the two accepted values
+// for message_task_kandev's delivery_mode request parameter — distinct
+// from taskMessageStatusQueued/taskMessageStatusSent above, which describe
+// the *response* status enum instead. "queued" happens to be a shared
+// literal between the two concepts (a delivery_mode request value and a
+// dispatch-result status value), but they are different fields on
+// different structs (request vs. response) and are kept as separate
+// constants so a change to one enum's spelling can't silently drift the
+// other.
+const (
+	deliveryModeQueued    = "queued"
+	deliveryModeInterrupt = "interrupt"
+)
 
 // queuedEntryID is set only by queueTaskMessage (the message queue's
 // returned entry id) so queueThenInterruptTaskMessage can target that exact

@@ -481,14 +481,19 @@ func (s *Server) registerKanbanTools() {
 Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward.
 
 Behaviour by session state:
-- Running/starting: the message is queued and delivered when the current turn ends — unless you are the target's parent task, in which case its current turn is interrupted immediately so the message is delivered without waiting (keeps a parent's steering/stop messages from piling up behind a long-running child's turn).
-- Idle (waiting for input or completed): the message is sent immediately as a new turn.
-- Created (not yet started): the agent is started with this message as its first prompt.
+- Running/starting: the message is queued and delivered when the current turn ends. Pass delivery_mode="interrupt" to instead interrupt the target's current turn immediately so the message is delivered without waiting — keeps a parent's steering/stop messages from piling up behind a long-running child's turn. Only honored when you are the target task's direct parent; a non-parent sender requesting "interrupt" gets a hard error instead of being silently downgraded to "queued".
+- Idle (waiting for input or completed): the message is sent immediately as a new turn (delivery_mode has no effect).
+- Created (not yet started): the agent is started with this message as its first prompt (delivery_mode has no effect).
 - Failed/cancelled: an error is returned (use create_task_kandev to start fresh).
 
 Returns the dispatch status: "queued", "sent", or "started".`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
+			mcp.WithString("delivery_mode",
+				mcp.Enum("queued", "interrupt"),
+				mcp.DefaultString("queued"),
+				mcp.Description(`How to deliver this message if the target is currently running/starting. "queued" (default): wait for the current turn to finish, like any other peer message. "interrupt": cancel the target's current turn now and deliver this message immediately instead — only allowed when you are the target task's direct parent; requesting "interrupt" as a non-parent is rejected with an error rather than silently queued.`),
+			),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)

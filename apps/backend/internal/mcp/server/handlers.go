@@ -243,6 +243,7 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 			"sender_task_id":    s.taskID,
 			"sender_session_id": s.sessionID,
 		}
+		copyOptionalStringArg(payload, req, "delivery_mode")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
