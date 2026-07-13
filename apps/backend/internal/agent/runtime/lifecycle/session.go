@@ -842,7 +842,7 @@ func (sm *SessionManager) dispatchPrompt(
 	sm.logger.Warn("prompt retry after stream reconnect failed",
 		zap.String("execution_id", execution.ID),
 		zap.Error(retryErr))
-	return err
+	return retryErr
 }
 
 // beginPromptBarrier sets up a completion signal on the execution so CancelAgent

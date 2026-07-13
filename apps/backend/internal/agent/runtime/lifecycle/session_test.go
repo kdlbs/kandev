@@ -1109,6 +1109,44 @@ func TestSendPrompt_RetriesUntilUpdateStreamReconnects(t *testing.T) {
 	}
 }
 
+func TestSendPrompt_MapsCancelErrorFromReconnectRetry(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "prompt abandoned after cancel", nil)
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	sm.SetDependencies(nil, streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		TaskID:       "test-task",
+		SessionID:    "test-session",
+		agentctl:     client,
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := sm.SendPrompt(ctx, execution, "hello after cancel", false, nil, true)
+	if !errors.Is(err, ErrCancelEscalated) {
+		t.Fatalf("retry-side cancel release must map to ErrCancelEscalated, got: %v", err)
+	}
+}
+
 // TestSendPrompt_DispatchOnlyReturnsWithoutWaiting verifies that dispatch-only
 // mode returns immediately after agentctl.Prompt succeeds, without blocking on
 // the agent's complete event. This is what message_task_kandev relies on so the
