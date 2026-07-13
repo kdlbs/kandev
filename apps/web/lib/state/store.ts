@@ -181,6 +181,7 @@ export type AppState = {
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
   taskPRs: (typeof defaultGitHubState)["taskPRs"];
+  taskIssues: (typeof defaultGitHubState)["taskIssues"];
   pendingPrUrlByTaskId: (typeof defaultGitHubState)["pendingPrUrlByTaskId"];
   prWatches: (typeof defaultGitHubState)["prWatches"];
   reviewWatches: (typeof defaultGitHubState)["reviewWatches"];

@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -39,6 +40,7 @@ type LinkTaskIssueRequest struct {
 
 type TaskIssueLinkResponse struct {
 	TaskID      string `json:"task_id"`
+	TaskTitle   string `json:"task_title"`
 	Owner       string `json:"owner"`
 	Repo        string `json:"repo"`
 	IssueNumber int    `json:"issue_number"`
@@ -90,7 +92,23 @@ func (s *Service) LinkTaskIssue(ctx context.Context, taskID string, req LinkTask
 	if _, err := store.UpdateTaskMetadata(context.WithoutCancel(ctx), taskID, metadata); err != nil {
 		return nil, err
 	}
-	return taskIssueResponse(taskID, issue), nil
+	return taskIssueResponse(taskID, task.Title, issue), nil
+}
+
+// ListWorkspaceTaskIssues returns persisted GitHub issue links for one workspace.
+func (s *Service) ListWorkspaceTaskIssues(ctx context.Context, workspaceID string) (map[string]TaskIssueLinkResponse, error) {
+	rows, err := s.store.ListTaskIssueMetadataByWorkspaceID(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]TaskIssueLinkResponse)
+	for _, row := range rows {
+		link, ok := taskIssueLinkFromMetadata(row)
+		if ok {
+			result[row.TaskID] = link
+		}
+	}
+	return result, nil
 }
 
 func (s *Service) UnlinkTaskIssue(ctx context.Context, taskID string) error {
@@ -185,9 +203,49 @@ func copyMetadata(metadata map[string]interface{}) map[string]interface{} {
 	return out
 }
 
-func taskIssueResponse(taskID string, issue *Issue) *TaskIssueLinkResponse {
+func taskIssueLinkFromMetadata(row taskIssueMetadataRow) (TaskIssueLinkResponse, bool) {
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(row.Metadata), &metadata); err != nil {
+		return TaskIssueLinkResponse{}, false
+	}
+	issueURL, ok := metadata[taskMetaIssueURL].(string)
+	if !ok || issueURL == "" {
+		return TaskIssueLinkResponse{}, false
+	}
+	metadataNumber, ok := positiveMetadataInt(metadata[taskMetaIssueNumber])
+	if !ok {
+		return TaskIssueLinkResponse{}, false
+	}
+	owner, repo, issueNumber, err := parseIssueReference(issueURL, "", "")
+	if err != nil || issueNumber != metadataNumber {
+		return TaskIssueLinkResponse{}, false
+	}
+	return TaskIssueLinkResponse{
+		TaskID:      row.TaskID,
+		TaskTitle:   row.TaskTitle,
+		Owner:       owner,
+		Repo:        repo,
+		IssueNumber: issueNumber,
+		IssueURL:    issueURL,
+	}, true
+}
+
+func positiveMetadataInt(value interface{}) (int, bool) {
+	switch number := value.(type) {
+	case int:
+		return number, number > 0
+	case float64:
+		integer := int(number)
+		return integer, integer > 0 && float64(integer) == number
+	default:
+		return 0, false
+	}
+}
+
+func taskIssueResponse(taskID, taskTitle string, issue *Issue) *TaskIssueLinkResponse {
 	return &TaskIssueLinkResponse{
 		TaskID:      taskID,
+		TaskTitle:   taskTitle,
 		Owner:       issue.RepoOwner,
 		Repo:        issue.RepoName,
 		IssueNumber: issue.Number,

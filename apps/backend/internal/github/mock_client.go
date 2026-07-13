@@ -228,11 +228,21 @@ func (m *MockClient) ListReviewRequestedPRs(context.Context, string, string, str
 }
 
 func (m *MockClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
-	return nil, nil
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]*Issue, 0, len(m.issues))
+	for _, issue := range m.issues {
+		result = append(result, issue)
+	}
+	return result, nil
 }
 
-func (m *MockClient) ListIssuesPaged(context.Context, string, string, int, int) (*IssueSearchPage, error) {
-	return &IssueSearchPage{Issues: []*Issue{}, TotalCount: 0, Page: 1, PerPage: 50}, nil
+func (m *MockClient) ListIssuesPaged(ctx context.Context, _, _ string, page, perPage int) (*IssueSearchPage, error) {
+	issues, err := m.ListIssues(ctx, "", "")
+	if err != nil {
+		return nil, err
+	}
+	return &IssueSearchPage{Issues: issues, TotalCount: len(issues), Page: page, PerPage: perPage}, nil
 }
 
 func (m *MockClient) SearchPRs(context.Context, string, string) ([]*PR, error) {

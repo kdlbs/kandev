@@ -3,7 +3,12 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createGitHubSlice } from "./github-slice";
 import type { GitHubSlice } from "./types";
-import type { GitHubStatus, TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
+import type {
+  GitHubStatus,
+  TaskCIAutomationOptions,
+  TaskIssueLink,
+  TaskPR,
+} from "@/lib/types/github";
 
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
@@ -213,6 +218,28 @@ describe("setTaskPR", () => {
 
     expect(Array.isArray(store.getState().taskPRs.byTaskId["task-1"])).toBe(true);
     expect(store.getState().taskPRs.byTaskId["task-1"]).toEqual([pr]);
+  });
+});
+
+describe("setTaskIssues", () => {
+  it("replaces workspace issue links by task id", () => {
+    const store = makeStore();
+    const link: TaskIssueLink = {
+      task_id: "task-1",
+      task_title: "Fix issue",
+      owner: "kdlbs",
+      repo: "kandev",
+      issue_number: 1672,
+      issue_url: "https://github.com/kdlbs/kandev/issues/1672",
+      issue_title: "Issue title",
+    };
+
+    store.getState().setTaskIssues("ws-1", { "task-1": link });
+
+    expect(store.getState().taskIssues).toEqual({
+      workspaceId: "ws-1",
+      byTaskId: { "task-1": link },
+    });
   });
 });
 

@@ -6,6 +6,7 @@ import {
   repositoryId,
   workspaceId,
   type Repository,
+  type Task,
   type Workflow,
   type WorkflowStep,
 } from "@/lib/types/http";
@@ -21,9 +22,12 @@ const REPO_URL = "https://github.com/kdlbs/kandev/pull/1567";
 const ISSUE_URL = "https://github.com/kdlbs/kandev/issues/1567";
 
 const mocks = vi.hoisted(() => ({
-  dialogProps: undefined as { initialValues?: Record<string, unknown> } | undefined,
+  dialogProps: undefined as
+    | { initialValues?: Record<string, unknown>; onSuccess?: (task: Task) => void }
+    | undefined,
   push: vi.fn(),
   createTaskPR: vi.fn(),
+  linkTaskIssue: vi.fn(),
 }));
 
 vi.mock("@/components/task-create-dialog", () => ({
@@ -39,6 +43,7 @@ vi.mock("@/lib/routing/client-router", () => ({
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   createTaskPR: mocks.createTaskPR,
+  linkTaskIssue: mocks.linkTaskIssue,
 }));
 
 const preset: TaskPreset = {
@@ -176,6 +181,7 @@ afterEach(() => {
   mocks.dialogProps = undefined;
   mocks.push.mockClear();
   mocks.createTaskPR.mockClear();
+  mocks.linkTaskIssue.mockClear();
 });
 
 describe("QuickTaskLauncher repository defaults", () => {
@@ -250,5 +256,17 @@ describe("QuickTaskLauncher repository defaults", () => {
       prBaseBranch: "main",
     });
     expect(initialValues?.repositoryId).toBeUndefined();
+  });
+});
+
+describe("QuickTaskLauncher issue linking", () => {
+  it("links a newly created task to the launched issue", () => {
+    mocks.linkTaskIssue.mockResolvedValue(undefined);
+    renderIssueLauncher([repo({ id: "local-repo" })]);
+
+    mocks.dialogProps?.onSuccess?.({ id: "task-1" } as Task);
+
+    expect(mocks.linkTaskIssue).toHaveBeenCalledWith("task-1", { issue: ISSUE_URL });
+    expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
   });
 });

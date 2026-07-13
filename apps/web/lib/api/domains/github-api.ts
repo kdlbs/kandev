@@ -21,6 +21,7 @@ import type {
   TriggerIssueResponse,
   GitHubIssue,
   TaskIssueLink,
+  TaskIssueLinksResponse,
   SearchPRsResponse,
   SearchIssuesResponse,
   GitHubPRStatus,
@@ -101,6 +102,13 @@ export async function linkTaskIssue(
       body: JSON.stringify(data),
     },
   });
+}
+
+export async function listWorkspaceTaskIssues(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<TaskIssueLinksResponse>(
+    `/api/v1/github/task-issues?workspace_id=${encodeURIComponent(workspaceId)}`,
+    options,
+  );
 }
 
 export async function unlinkTaskIssue(taskId: string, options?: ApiRequestOptions) {

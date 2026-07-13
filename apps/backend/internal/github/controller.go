@@ -41,6 +41,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/task-prs", c.httpListTaskPRs)
 	api.POST("/task-prs", c.httpCreateTaskPR)
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
+	api.GET("/task-issues", c.httpListTaskIssues)
 	api.PUT("/tasks/:taskId/issue", c.httpLinkTaskIssue)
 	api.DELETE("/tasks/:taskId/issue", c.httpUnlinkTaskIssue)
 	api.GET("/tasks/:taskId/ci-options", c.httpGetTaskCIOptions)
@@ -204,6 +205,20 @@ func (c *Controller) httpGetTaskPR(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, tp)
+}
+
+func (c *Controller) httpListTaskIssues(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	result, err := c.service.ListWorkspaceTaskIssues(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"task_issues": result})
 }
 
 func (c *Controller) httpLinkTaskIssue(ctx *gin.Context) {

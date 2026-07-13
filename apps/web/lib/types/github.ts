@@ -452,11 +452,16 @@ export type GitHubIssue = {
 
 export type TaskIssueLink = {
   task_id: string;
+  task_title: string;
   owner: string;
   repo: string;
   issue_number: number;
   issue_url: string;
   issue_title: string;
+};
+
+export type TaskIssueLinksResponse = {
+  task_issues: Record<string, TaskIssueLink>;
 };
 
 export type SearchPRsResponse = {

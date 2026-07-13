@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import type { Icon } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
-import { createTaskPR } from "@/lib/api/domains/github-api";
+import { createTaskPR, linkTaskIssue } from "@/lib/api/domains/github-api";
 import type { Repository, Task, TaskRepository, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { GitHubPR, GitHubIssue } from "@/lib/types/github";
 
@@ -220,6 +220,11 @@ export function QuickTaskLauncher({
       }).catch(() => {
         // Silently ignore — the indicator will populate via the poller path
         // (legacy behavior) if branch matching succeeds.
+      });
+    }
+    if (payload?.kind === "issue") {
+      void linkTaskIssue(task.id, { issue: payload.issue.html_url }).catch(() => {
+        // Task creation succeeded; keep navigation available if GitHub linking fails.
       });
     }
     onClose();

@@ -100,6 +100,23 @@ func TestMockClient_AddIssueGetIssueAndReset(t *testing.T) {
 	}
 }
 
+func TestMockClient_ListIssuesPaged(t *testing.T) {
+	m := NewMockClient()
+	m.AddIssue(&Issue{Number: 1, RepoOwner: "owner", RepoName: "repo"})
+	m.AddIssue(&Issue{Number: 2, RepoOwner: "owner", RepoName: "repo"})
+
+	page, err := m.ListIssuesPaged(context.Background(), "state:open", "", 2, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(page.Issues) != 2 || page.TotalCount != 2 {
+		t.Fatalf("expected two issues, got %#v", page)
+	}
+	if page.Page != 2 || page.PerPage != 10 {
+		t.Fatalf("expected pagination metadata to be preserved, got %#v", page)
+	}
+}
+
 func TestMockClient_FindPRByBranch(t *testing.T) {
 	m := NewMockClient()
 	ctx := context.Background()

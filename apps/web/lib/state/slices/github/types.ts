@@ -2,6 +2,7 @@ import type {
   GitHubStatus,
   GitHubRateLimitUpdate,
   TaskPR,
+  TaskIssueLink,
   PRWatch,
   ReviewWatch,
   IssueWatch,
@@ -19,6 +20,11 @@ export type GitHubStatusState = {
 export type TaskPRsState = {
   /** Each task may have multiple PRs (one per repository for multi-repo tasks). */
   byTaskId: Record<string, TaskPR[]>;
+};
+
+export type TaskIssuesState = {
+  workspaceId: string | null;
+  byTaskId: Record<string, TaskIssueLink>;
 };
 
 export type PendingPrUrlsState = {
@@ -72,6 +78,7 @@ export type TaskCIAutomationOptionsState = {
 export type GitHubSliceState = {
   githubStatus: GitHubStatusState;
   taskPRs: TaskPRsState;
+  taskIssues: TaskIssuesState;
   pendingPrUrlByTaskId: PendingPrUrlsState;
   prWatches: PRWatchesState;
   reviewWatches: ReviewWatchesState;
@@ -85,6 +92,7 @@ export type GitHubSliceActions = {
   setGitHubStatus: (status: GitHubStatus | null) => void;
   setGitHubStatusLoading: (loading: boolean) => void;
   setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
+  setTaskIssues: (workspaceId: string, issues: Record<string, TaskIssueLink>) => void;
   setTaskPR: (taskId: string, pr: TaskPR) => void;
   setPendingPrUrlForTask: (taskId: string, repoKey: string, prUrl: string) => void;
   setPRWatches: (watches: PRWatch[]) => void;
