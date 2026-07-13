@@ -26,13 +26,6 @@ func (p *fakeRepoProvider) GetRepository(_ context.Context, id string) (*worktre
 	return &worktree.Repository{ID: id}, nil
 }
 
-func (p *fakeRepoProvider) GetRepositoryByPath(_ context.Context, path string) (*worktree.Repository, error) {
-	if r, ok := p.repos[path]; ok {
-		return r, nil
-	}
-	return &worktree.Repository{ID: path}, nil
-}
-
 // recordingScriptHandler records every ExecuteSetupScript invocation and
 // runs the script on disk (matching production DefaultScriptMessageHandler
 // behaviour). The recorded calls let tests assert how many times the script

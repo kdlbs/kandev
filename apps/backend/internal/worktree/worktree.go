@@ -112,12 +112,6 @@ type Worktree struct {
 	// (e.g. missing patterns, traversal-rejected paths). Like CopiedFiles,
 	// this is in-memory only and read by the env preparer.
 	CopyFilesWarnings []string `json:"-"`
-
-	// WorktreeFilesWarnings lists non-fatal per-file warnings emitted while
-	// materializing the repository's WorktreeFiles (copy/symlink), e.g. a path
-	// that escapes the repo, a source resolving outside it, or a permission
-	// error. In-memory only, like CopyFilesWarnings.
-	WorktreeFilesWarnings []string `json:"-"`
 }
 
 // CreateRequest contains the parameters for creating a new worktree.

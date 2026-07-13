@@ -25,7 +25,6 @@ function makeRepo(overrides: Partial<RepositoryWithScripts> = {}): RepositoryWit
     cleanup_script: "",
     dev_script: "",
     copy_files: "",
-    worktree_files: [],
     created_at: "",
     updated_at: "",
     scripts: [],
@@ -63,26 +62,15 @@ describe("isRepositoryDirty", () => {
     expect(isRepositoryDirty(repo, undefined)).toBe(true);
   });
 
-  it("returns true when a worktree file's mode changes", () => {
-    const saved = makeRepo({ worktree_files: [{ path: ".env", mode: "copy" }] });
-    const repo = makeRepo({ worktree_files: [{ path: ".env", mode: "symlink" }] });
-    expect(isRepositoryDirty(repo, saved)).toBe(true);
-  });
-
-  it("returns true when the worktree file list changes", () => {
-    const saved = makeRepo({ worktree_files: [{ path: ".env", mode: "copy" }] });
-    const repo = makeRepo({
-      worktree_files: [
-        { path: ".env", mode: "copy" },
-        { path: ".env.local", mode: "symlink" },
-      ],
-    });
-    expect(isRepositoryDirty(repo, saved)).toBe(true);
-  });
-
-  it("treats equal worktree file lists as clean", () => {
-    const saved = makeRepo({ worktree_files: [{ path: ".env.local", mode: "symlink" }] });
-    const repo = makeRepo({ worktree_files: [{ path: ".env.local", mode: "symlink" }] });
+  it("treats a copy_files entry with a :symlink keyword as clean when unchanged", () => {
+    const saved = makeRepo({ copy_files: ".env, .env.local:symlink" });
+    const repo = makeRepo({ copy_files: ".env, .env.local:symlink" });
     expect(isRepositoryDirty(repo, saved)).toBe(false);
+  });
+
+  it("returns true when a copy_files entry's keyword changes", () => {
+    const saved = makeRepo({ copy_files: ".env.local" });
+    const repo = makeRepo({ copy_files: ".env.local:symlink" });
+    expect(isRepositoryDirty(repo, saved)).toBe(true);
   });
 });

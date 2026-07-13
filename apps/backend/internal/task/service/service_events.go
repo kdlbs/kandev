@@ -425,7 +425,7 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 		"setup_script":           repository.SetupScript,
 		"cleanup_script":         repository.CleanupScript,
 		"dev_script":             repository.DevScript,
-		"worktree_files":         worktreeFilesForEvent(repository.WorktreeFiles),
+		"copy_files":             repository.CopyFiles,
 		"created_at":             repository.CreatedAt.Format(time.RFC3339),
 		"updated_at":             repository.UpdatedAt.Format(time.RFC3339),
 	}
@@ -436,15 +436,6 @@ func (s *Service) publishRepositoryEvent(ctx context.Context, eventType string, 
 			zap.String("repository_id", repository.ID),
 			zap.Error(err))
 	}
-}
-
-// worktreeFilesForEvent coerces a nil worktree-file slice to an empty slice so
-// the WS event payload matches the HTTP DTO shape (always a JSON array).
-func worktreeFilesForEvent(files []models.WorktreeFile) []models.WorktreeFile {
-	if files == nil {
-		return []models.WorktreeFile{}
-	}
-	return files
 }
 
 func (s *Service) publishRepositoryScriptEvent(ctx context.Context, eventType string, script *models.RepositoryScript) {

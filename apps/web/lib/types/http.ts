@@ -197,19 +197,14 @@ export type Repository = {
   setup_script: string;
   cleanup_script: string;
   dev_script: string;
+  /**
+   * Comma-separated gitignored files/globs seeded into each new worktree.
+   * Append `:symlink` to an entry (e.g. `.env.local:symlink`) to link it back
+   * to the main repo instead of copying it; the default is copy.
+   */
   copy_files: string;
-  /** Files materialized into each new worktree, each with its own copy/symlink mode. */
-  worktree_files: WorktreeFile[];
   created_at: string;
   updated_at: string;
-};
-
-/** A single file materialized into new worktrees. `mode` is "copy" or "symlink". */
-export type WorktreeFileMode = "copy" | "symlink";
-
-export type WorktreeFile = {
-  path: string;
-  mode: WorktreeFileMode;
 };
 
 export type RepositoryScript = {

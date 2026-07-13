@@ -11,6 +11,15 @@ import (
 	"testing"
 )
 
+// toSpecs wraps bare patterns as copy-mode PatternSpecs for the Copy tests.
+func toSpecs(patterns ...string) []PatternSpec {
+	out := make([]PatternSpec, len(patterns))
+	for i, p := range patterns {
+		out[i] = PatternSpec{Pattern: p}
+	}
+	return out
+}
+
 func TestParse(t *testing.T) {
 	t.Parallel()
 
@@ -79,7 +88,7 @@ func TestCopy_LiteralFile(t *testing.T) {
 
 	writeFile(t, filepath.Join(src, ".env"), "X=1", 0o600)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{".env"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs(".env"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -110,7 +119,7 @@ func TestCopy_Glob(t *testing.T) {
 	writeFile(t, filepath.Join(src, "b.local"), "B", 0o644)
 	writeFile(t, filepath.Join(src, "c.txt"), "C", 0o644)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{"*.local"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs("*.local"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -136,7 +145,7 @@ func TestCopy_DirectoryRecursive(t *testing.T) {
 	writeFile(t, filepath.Join(src, "config", "local.yml"), "y", 0o644)
 	writeFile(t, filepath.Join(src, "config", "sub", "dev.json"), "j", 0o644)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{"config"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs("config"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -158,7 +167,7 @@ func TestCopy_NestedFile(t *testing.T) {
 
 	writeFile(t, filepath.Join(src, "config", "local.yml"), "y", 0o644)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{"config/local.yml"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs("config/local.yml"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -175,7 +184,7 @@ func TestCopy_MissingPattern(t *testing.T) {
 	src := t.TempDir()
 	dst := t.TempDir()
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{".env"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs(".env"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -202,7 +211,7 @@ func TestCopy_DoubleStarRecursive(t *testing.T) {
 	writeFile(t, filepath.Join(src, "apps", "backend", "nested", ".env"), "DEEP", 0o644)
 	writeFile(t, filepath.Join(src, "apps", "web", "ignore.txt"), "IGN", 0o644)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{"**/.env"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs("**/.env"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -235,7 +244,7 @@ func TestCopy_DoubleStarScoped(t *testing.T) {
 	writeFile(t, filepath.Join(src, "apps", "backend", "deep", "config.yml"), "BACK", 0o644)
 	writeFile(t, filepath.Join(src, "services", "config.yml"), "SVC", 0o644)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{"apps/**/config.yml"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs("apps/**/config.yml"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -262,7 +271,7 @@ func TestCopy_BraceAlternation(t *testing.T) {
 	writeFile(t, filepath.Join(src, ".env.local"), "L", 0o644)
 	writeFile(t, filepath.Join(src, ".envrc"), "R", 0o644)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{".env{,.local}"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs(".env{,.local}"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -294,7 +303,7 @@ func TestCopy_ParseBraceRoundTrip(t *testing.T) {
 	writeFile(t, filepath.Join(src, "config", "prod.yml"), "P", 0o644)
 
 	patterns := Parse(".env, config/{local,dev}.yml")
-	_, warnings, err := Copy(context.Background(), src, dst, patterns, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs(patterns...), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -322,7 +331,7 @@ func TestCopy_GlobNoMatch(t *testing.T) {
 
 	writeFile(t, filepath.Join(src, "foo.txt"), "foo", 0o644)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{"*.local"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs("*.local"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -343,7 +352,7 @@ func TestCopy_PathTraversal_Relative(t *testing.T) {
 	// Create a file outside src
 	writeFile(t, filepath.Join(parent, "escape.txt"), "leak", 0o644)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{"../escape.txt"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs("../escape.txt"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -371,7 +380,7 @@ func TestCopy_PathTraversal_Absolute(t *testing.T) {
 	outside := filepath.Join(parent, "abs_escape.txt")
 	writeFile(t, outside, "leak", 0o644)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{outside}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs(outside), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -397,7 +406,7 @@ func TestCopy_SymlinkInside(t *testing.T) {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{".env"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs(".env"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -438,7 +447,7 @@ func TestCopy_SymlinkOutside(t *testing.T) {
 		t.Skipf("symlink unsupported: %v", err)
 	}
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{"leak"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs("leak"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -458,7 +467,7 @@ func TestCopy_Idempotent(t *testing.T) {
 	writeFile(t, filepath.Join(src, ".env"), "SRC", 0o644)
 	writeFile(t, filepath.Join(dst, ".env"), "DST_ORIGINAL", 0o644)
 
-	_, warnings, err := Copy(context.Background(), src, dst, []string{".env"}, nil)
+	_, warnings, err := Copy(context.Background(), src, dst, toSpecs(".env"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -477,7 +486,7 @@ func TestCopy_EmptyPatterns(t *testing.T) {
 	dst := t.TempDir()
 
 	for _, patterns := range [][]string{nil, {}} {
-		_, warnings, err := Copy(context.Background(), src, dst, patterns, nil)
+		_, warnings, err := Copy(context.Background(), src, dst, toSpecs(patterns...), nil)
 		if err != nil {
 			t.Fatalf("Copy err: %v", err)
 		}
@@ -500,7 +509,7 @@ func TestCopy_NilLogger(t *testing.T) {
 		}
 	}()
 
-	if _, _, err := Copy(context.Background(), src, dst, []string{".env"}, nil); err != nil {
+	if _, _, err := Copy(context.Background(), src, dst, toSpecs(".env"), nil); err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
 }
@@ -518,7 +527,7 @@ func TestCopy_SymlinkedSourceDir(t *testing.T) {
 	writeFile(t, filepath.Join(realDir, ".env"), "X=1", 0o600)
 
 	target := t.TempDir()
-	_, warnings, err := Copy(context.Background(), linkedDir, target, []string{".env"}, nil)
+	_, warnings, err := Copy(context.Background(), linkedDir, target, toSpecs(".env"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}
@@ -533,7 +542,7 @@ func TestCopy_SymlinkedSourceDir(t *testing.T) {
 
 func TestCopy_MissingSourceDir(t *testing.T) {
 	t.Parallel()
-	_, _, err := Copy(context.Background(), "/nonexistent-dir-xyz", t.TempDir(), []string{".env"}, nil)
+	_, _, err := Copy(context.Background(), "/nonexistent-dir-xyz", t.TempDir(), toSpecs(".env"), nil)
 	if err == nil {
 		t.Fatalf("expected error for missing source dir")
 	}
@@ -549,7 +558,7 @@ func TestCopy_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err := Copy(ctx, src, dst, []string{".env"}, nil)
+	_, _, err := Copy(ctx, src, dst, toSpecs(".env"), nil)
 	if err == nil {
 		t.Fatalf("expected error from cancelled context")
 	}
@@ -825,7 +834,7 @@ func TestCopy_ReturnsCopiedRelPaths(t *testing.T) {
 	writeFile(t, filepath.Join(dst, "already.txt"), "preexisting", 0o644)
 
 	copied, warnings, err := Copy(context.Background(), src, dst,
-		[]string{".env", "config", "already.txt"}, nil)
+		toSpecs(".env", "config", "already.txt"), nil)
 	if err != nil {
 		t.Fatalf("Copy err: %v", err)
 	}

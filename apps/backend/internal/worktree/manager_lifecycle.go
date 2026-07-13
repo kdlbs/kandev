@@ -298,10 +298,6 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 
 	m.copyConfiguredFiles(ctx, req, wt)
 
-	// Per-file copy/symlink materialization. Runs before the setup script so the
-	// script can rely on the files being present. Non-fatal, like copy-files.
-	m.materializeWorktreeFiles(ctx, wt, req.RepositoryPath)
-
 	// Setup script failures are non-fatal — runWorktreeSetupScript records a
 	// warning on wt and keeps the worktree so the agent can still launch.
 	m.runWorktreeSetupScript(ctx, wt)
@@ -809,11 +805,11 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wt
 	if repo == nil || repo.CopyFiles == "" {
 		return
 	}
-	patterns := copyfiles.Parse(repo.CopyFiles)
-	if len(patterns) == 0 {
+	specs := copyfiles.ParseSpecs(repo.CopyFiles)
+	if len(specs) == 0 {
 		return
 	}
-	copied, warnings, err := copyfiles.Copy(ctx, req.RepositoryPath, wt.Path, patterns, m.logger.Zap())
+	copied, warnings, err := copyfiles.Copy(ctx, req.RepositoryPath, wt.Path, specs, m.logger.Zap())
 	if err != nil {
 		m.logger.Warn("worktree copy-files failed",
 			zap.String("session_id", req.SessionID),
@@ -828,54 +824,6 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wt
 	}
 	wt.CopiedFiles = copied
 	wt.CopyFilesWarnings = warnings
-}
-
-// materializeWorktreeFiles copies or symlinks the repository's configured
-// worktree files into the freshly created worktree, honoring each file's mode.
-// The launch path doesn't always carry a RepositoryID (only RepositoryPath), so
-// the config is resolved by ID when available and otherwise by local path.
-// Non-fatal (like copy-files): missing config or an empty list is a no-op, and
-// copy/symlink failures are logged rather than aborting worktree creation.
-// There is no silent fallback from symlink to copy — a failed symlink is logged.
-func (m *Manager) materializeWorktreeFiles(ctx context.Context, wt *Worktree, repositoryPath string) {
-	if m.repoProvider == nil {
-		return
-	}
-	repo, err := m.resolveRepositoryConfig(ctx, wt.RepositoryID, repositoryPath)
-	if err != nil {
-		m.logger.Warn("failed to fetch repository for worktree file materialization",
-			zap.String("repository_id", wt.RepositoryID),
-			zap.String("repository_path", repositoryPath),
-			zap.Error(err))
-		return
-	}
-	if repo == nil || len(repo.WorktreeFiles) == 0 {
-		return
-	}
-	warnings := MaterializeWorktreeFiles(repositoryPath, wt.Path, repo.WorktreeFiles)
-	wt.WorktreeFilesWarnings = warnings
-	for _, w := range warnings {
-		m.logger.Warn("worktree file materialization warning",
-			zap.String("worktree_id", wt.ID),
-			zap.String("repository_path", repositoryPath),
-			zap.String("warning", w))
-	}
-	m.logger.Info("materialized worktree files",
-		zap.String("worktree_id", wt.ID),
-		zap.Int("file_count", len(repo.WorktreeFiles)),
-		zap.Int("warnings", len(warnings)))
-}
-
-// resolveRepositoryConfig fetches the repository config by ID when available,
-// otherwise by local path. Returns (nil, nil) when neither locates a repository.
-func (m *Manager) resolveRepositoryConfig(ctx context.Context, repositoryID, repositoryPath string) (*Repository, error) {
-	if repositoryID != "" {
-		return m.repoProvider.GetRepository(ctx, repositoryID)
-	}
-	if repositoryPath != "" {
-		return m.repoProvider.GetRepositoryByPath(ctx, repositoryPath)
-	}
-	return nil, nil
 }
 
 // recreate recreates a worktree from stored metadata.

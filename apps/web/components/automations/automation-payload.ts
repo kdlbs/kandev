@@ -60,7 +60,6 @@ export async function resolveRepositoryId(
     cleanup_script: "",
     dev_script: "",
     copy_files: "",
-    worktree_files: [],
   });
   return created.id;
 }

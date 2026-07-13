@@ -13,7 +13,6 @@ import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { EditableCard } from "@/components/settings/editable-card";
-import { RepositoryWorktreeFiles } from "@/components/settings/repository-worktree-files";
 import { RepositoryBranchTemplateHelp } from "@/components/settings/repository-branch-template-help";
 import { DeleteRepositoryDialog } from "@/components/settings/repository-delete-dialog";
 import { CopyFilesField } from "@/components/settings/repository-copy-files-help";
@@ -298,12 +297,6 @@ function RepositoryEditView({
               repository.worktree_branch_template ?? defaultWorktreeBranchTemplate
             }
             pullBeforeWorktree={repository.pull_before_worktree ?? true}
-          />
-
-          <RepositoryWorktreeFiles
-            repositoryId={repository.id}
-            worktreeFiles={repository.worktree_files ?? []}
-            onUpdate={onUpdate}
           />
 
           <RepositoryScriptFields

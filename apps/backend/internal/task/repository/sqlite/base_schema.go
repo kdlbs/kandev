@@ -269,7 +269,6 @@ func (r *Repository) initTaskSchema() error {
 		cleanup_script TEXT DEFAULT '',
 		dev_script TEXT DEFAULT '',
 		copy_files TEXT DEFAULT '',
-		worktree_files TEXT DEFAULT '[]',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,

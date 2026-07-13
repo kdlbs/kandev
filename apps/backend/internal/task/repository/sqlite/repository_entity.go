@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -13,62 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
-
-// worktree file materialization modes. Kept as local constants so the
-// persistence layer doesn't import the worktree package (which would create an
-// import cycle via worktree's test dependencies).
-const (
-	worktreeFileModeCopy    = "copy"
-	worktreeFileModeSymlink = "symlink"
-)
-
-// normalizeWorktreeFileMode defaults empty/unknown values to copy.
-func normalizeWorktreeFileMode(mode string) string {
-	if strings.EqualFold(strings.TrimSpace(mode), worktreeFileModeSymlink) {
-		return worktreeFileModeSymlink
-	}
-	return worktreeFileModeCopy
-}
-
-// marshalWorktreeFiles serializes a repository's worktree file list to the JSON
-// text stored in the repositories.worktree_files column. A nil/empty list is
-// persisted as "[]".
-func marshalWorktreeFiles(files []models.WorktreeFile) string {
-	if len(files) == 0 {
-		return "[]"
-	}
-	data, err := json.Marshal(files)
-	if err != nil {
-		return "[]"
-	}
-	return string(data)
-}
-
-// unmarshalWorktreeFiles parses the JSON text from worktree_files back into a
-// slice, normalizing each file's mode and dropping blank paths. Blank or
-// malformed values (including pre-feature rows and the old string-array format)
-// yield an empty slice.
-func unmarshalWorktreeFiles(raw string) []models.WorktreeFile {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return nil
-	}
-	var files []models.WorktreeFile
-	if err := json.Unmarshal([]byte(trimmed), &files); err != nil {
-		return nil
-	}
-	out := make([]models.WorktreeFile, 0, len(files))
-	for _, f := range files {
-		if strings.TrimSpace(f.Path) == "" {
-			continue
-		}
-		out = append(out, models.WorktreeFile{
-			Path: f.Path,
-			Mode: normalizeWorktreeFileMode(f.Mode),
-		})
-	}
-	return out
-}
 
 // CreateRepository creates a new repository
 func (r *Repository) CreateRepository(ctx context.Context, repository *models.Repository) error {
@@ -83,12 +26,12 @@ func (r *Repository) CreateRepository(ctx context.Context, repository *models.Re
 		INSERT INTO repositories (
 			id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
 			provider_name, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script,
-			copy_files, worktree_files, created_at, updated_at, deleted_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			copy_files, created_at, updated_at, deleted_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), repository.ID, repository.WorkspaceID, repository.Name, repository.SourceType, repository.LocalPath, repository.Provider,
 		repository.ProviderRepoID, repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix,
 		repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree), repository.SetupScript, repository.CleanupScript, repository.DevScript,
-		repository.CopyFiles, marshalWorktreeFiles(repository.WorktreeFiles),
+		repository.CopyFiles,
 		repository.CreatedAt, repository.UpdatedAt, repository.DeletedAt)
 
 	return err
@@ -98,7 +41,7 @@ func (r *Repository) CreateRepository(ctx context.Context, repository *models.Re
 // order expected by scanRepository.
 const repositoryColumns = `id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_owner,
 	provider_name, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script,
-	copy_files, worktree_files, created_at, updated_at, deleted_at`
+	copy_files, created_at, updated_at, deleted_at`
 
 // rowScanner abstracts *sql.Row and *sql.Rows so a single scan routine serves
 // both single-row and iterating queries.
@@ -106,22 +49,19 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-// scanRepository decodes one repository row, converting the stored JSON file
-// list and normalizing the materialization mode.
+// scanRepository decodes one repository row into a models.Repository.
 func scanRepository(s rowScanner) (*models.Repository, error) {
 	repository := &models.Repository{}
-	var worktreeFiles string
 	err := s.Scan(
 		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
 		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderOwner, &repository.ProviderName,
 		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.WorktreeBranchTemplate, &repository.PullBeforeWorktree, &repository.SetupScript,
-		&repository.CleanupScript, &repository.DevScript, &repository.CopyFiles, &worktreeFiles,
+		&repository.CleanupScript, &repository.DevScript, &repository.CopyFiles,
 		&repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
-	repository.WorktreeFiles = unmarshalWorktreeFiles(worktreeFiles)
 	return repository, nil
 }
 
@@ -144,12 +84,12 @@ func (r *Repository) UpdateRepository(ctx context.Context, repository *models.Re
 		UPDATE repositories SET
 			name = ?, source_type = ?, local_path = ?, provider = ?, provider_repo_id = ?, provider_owner = ?,
 			provider_name = ?, default_branch = ?, worktree_branch_prefix = ?, worktree_branch_template = ?, pull_before_worktree = ?, setup_script = ?, cleanup_script = ?, dev_script = ?,
-			copy_files = ?, worktree_files = ?, updated_at = ?
+			copy_files = ?, updated_at = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), repository.Name, repository.SourceType, repository.LocalPath, repository.Provider, repository.ProviderRepoID,
 		repository.ProviderOwner, repository.ProviderName, repository.DefaultBranch, repository.WorktreeBranchPrefix, repository.WorktreeBranchTemplate, dialect.BoolToInt(repository.PullBeforeWorktree),
 		repository.SetupScript, repository.CleanupScript, repository.DevScript,
-		repository.CopyFiles, marshalWorktreeFiles(repository.WorktreeFiles),
+		repository.CopyFiles,
 		repository.UpdatedAt, repository.ID)
 	if err != nil {
 		return err
@@ -205,20 +145,6 @@ func (r *Repository) GetRepositoryByProviderInfo(ctx context.Context, workspaceI
 		`SELECT `+repositoryColumns+` FROM repositories
 		WHERE workspace_id = ? AND provider = ? AND provider_owner = ? AND provider_name = ? AND deleted_at IS NULL`),
 		workspaceID, provider, owner, name)
-	repository, err := scanRepository(row)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	return repository, err
-}
-
-// GetRepositoryByLocalPath finds a non-deleted repository by its local_path.
-// Returns nil, nil if not found. Used to resolve repository config during
-// worktree creation, where only the repository path (not its ID) is available.
-func (r *Repository) GetRepositoryByLocalPath(ctx context.Context, localPath string) (*models.Repository, error) {
-	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(
-		`SELECT `+repositoryColumns+` FROM repositories WHERE local_path = ? AND deleted_at IS NULL`),
-		localPath)
 	repository, err := scanRepository(row)
 	if err == sql.ErrNoRows {
 		return nil, nil

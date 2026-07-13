@@ -96,12 +96,6 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.workspace_path", `ALTER TABLE task_sessions ADD COLUMN workspace_path TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
-	// Per-file worktree materialization (copy | symlink). JSON list column;
-	// default '[]' preserves current behavior (no files materialized).
-	r.migrate.Apply("repositories.worktree_files", `ALTER TABLE repositories ADD COLUMN worktree_files TEXT DEFAULT '[]'`)
-	// Index the path used by GetRepositoryByLocalPath (worktree creation resolves
-	// config by path when the launch request has no RepositoryID).
-	r.migrate.Apply("repositories.local_path.index", `CREATE INDEX IF NOT EXISTS idx_repositories_local_path ON repositories(local_path)`)
 	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}'`)
 	r.migrate.Apply("repositories.worktree_branch_template.backfill", `UPDATE repositories SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'`)
 	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)

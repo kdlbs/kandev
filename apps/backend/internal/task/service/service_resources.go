@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
+	"github.com/kandev/kandev/internal/worktree/copyfiles"
 )
 
 const (
@@ -534,9 +535,8 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 	if req.PullBeforeWorktree != nil {
 		pullBeforeWorktree = *req.PullBeforeWorktree
 	}
-	worktreeFiles, err := validateAndNormalizeWorktreeFiles(req.WorktreeFiles)
-	if err != nil {
-		return nil, err
+	if err := copyfiles.ValidateSpec(req.CopyFiles); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
 	}
 	repository := &models.Repository{
 		ID:                     uuid.New().String(),
@@ -556,7 +556,6 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		CleanupScript:          req.CleanupScript,
 		DevScript:              req.DevScript,
 		CopyFiles:              req.CopyFiles,
-		WorktreeFiles:          worktreeFiles,
 	}
 
 	// Auto-detect GitHub provider info from git remote if not provided
@@ -580,12 +579,6 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 
 func (s *Service) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
 	return s.repoEntities.GetRepository(ctx, id)
-}
-
-// GetRepositoryByLocalPath resolves a repository by its local_path. Returns
-// nil (with nil error) when no matching repository exists.
-func (s *Service) GetRepositoryByLocalPath(ctx context.Context, localPath string) (*models.Repository, error) {
-	return s.repoEntities.GetRepositoryByLocalPath(ctx, localPath)
 }
 
 // GetRepositoryByProviderInfo looks up a repository by workspace and provider identity.
@@ -727,42 +720,12 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 		repository.DevScript = *req.DevScript
 	}
 	if req.CopyFiles != nil {
+		if err := copyfiles.ValidateSpec(*req.CopyFiles); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
+		}
 		repository.CopyFiles = *req.CopyFiles
 	}
-	if req.WorktreeFiles != nil {
-		files, err := validateAndNormalizeWorktreeFiles(*req.WorktreeFiles)
-		if err != nil {
-			return err
-		}
-		repository.WorktreeFiles = files
-	}
 	return nil
-}
-
-// validateAndNormalizeWorktreeFiles trims each file path, drops blank paths, and
-// validates + normalizes each file's materialization mode (empty -> copy).
-// Returns ErrInvalidRepositorySettings when a mode is neither copy nor symlink.
-func validateAndNormalizeWorktreeFiles(files []models.WorktreeFile) ([]models.WorktreeFile, error) {
-	out := make([]models.WorktreeFile, 0, len(files))
-	for _, f := range files {
-		// Reject absolute/traversal/.git paths at save time so an invalid entry
-		// can't be persisted and then break every subsequent worktree creation.
-		path, err := worktree.CleanWorktreeFilePath(f.Path)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
-		}
-		if path == "" {
-			continue
-		}
-		if err := worktree.ValidateFileMaterializeMode(f.Mode); err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
-		}
-		out = append(out, models.WorktreeFile{
-			Path: path,
-			Mode: string(worktree.NormalizeFileMaterializeMode(f.Mode)),
-		})
-	}
-	return out, nil
 }
 
 func (s *Service) DeleteRepository(ctx context.Context, id string) error {

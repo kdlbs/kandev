@@ -21,11 +21,15 @@ export function CopyFilesField({ repositoryId, copyFiles, onUpdate }: CopyFilesF
       <Textarea
         value={copyFiles}
         onChange={(e) => onUpdate(repositoryId, { copy_files: e.target.value })}
-        placeholder=".env, .env.*, apps/**/.env, config/{local,dev}.yml"
+        placeholder=".env, .env.*, apps/**/.env, .env.local:symlink"
         rows={2}
         className="font-mono text-sm"
       />
-      <p className="text-xs text-muted-foreground">Gitignored paths copied into new worktrees.</p>
+      <p className="text-xs text-muted-foreground">
+        Gitignored paths copied into new worktrees. Append{" "}
+        <code className="px-1 py-0.5 bg-muted rounded">:symlink</code> to an entry to link it back
+        to the main repo instead.
+      </p>
     </div>
   );
 }
@@ -60,6 +64,12 @@ function CopyFilesHelpTip() {
             <li>
               <code className="px-1 py-0.5 bg-muted rounded">{"{a,b}"}</code> brace alternation,
               e.g. <code className="px-1 py-0.5 bg-muted rounded">.env{"{,.local}"}</code>
+            </li>
+            <li>
+              <code className="px-1 py-0.5 bg-muted rounded">:symlink</code> suffix links the entry
+              back to the main repo instead of copying it, e.g.{" "}
+              <code className="px-1 py-0.5 bg-muted rounded">.env.local:symlink</code> (default is
+              copy; symlinks fall back to a copy on remote executors)
             </li>
           </ul>
           <p className="text-muted-foreground">

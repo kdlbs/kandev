@@ -71,7 +71,6 @@ function buildContext(): RecentTaskBuildContext {
     cleanup_script: "",
     dev_script: "",
     copy_files: "",
-    worktree_files: [],
     created_at: visitedAt,
     updated_at: visitedAt,
   };

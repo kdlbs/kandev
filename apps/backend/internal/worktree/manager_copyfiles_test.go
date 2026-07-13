@@ -22,13 +22,6 @@ func (f *fakeRepoProvider) GetRepository(_ context.Context, _ string) (*Reposito
 	return f.repo, nil
 }
 
-func (f *fakeRepoProvider) GetRepositoryByPath(_ context.Context, _ string) (*Repository, error) {
-	if f.err != nil {
-		return nil, f.err
-	}
-	return f.repo, nil
-}
-
 // writeSourceFile creates a file (and any parent dirs) inside repoPath with
 // the given content. Returned path is the absolute file path.
 func writeSourceFile(t *testing.T, repoPath, rel, content string) string {

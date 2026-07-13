@@ -1,4 +1,4 @@
-import type { Repository, RepositoryScript, WorktreeFile } from "@/lib/types/http";
+import type { Repository, RepositoryScript } from "@/lib/types/http";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 
 export type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
@@ -24,18 +24,6 @@ function branchTemplate(repo: RepositoryWithScripts): string {
   return repo.worktree_branch_template || defaultWorktreeBranchTemplate;
 }
 
-function areWorktreeFilesEqual(
-  a: WorktreeFile[] | undefined,
-  b: WorktreeFile[] | undefined,
-): boolean {
-  const left = a ?? [];
-  const right = b ?? [];
-  if (left.length !== right.length) return false;
-  return left.every(
-    (file, index) => file.path === right[index].path && file.mode === right[index].mode,
-  );
-}
-
 export function cloneRepository(repo: RepositoryWithScripts): RepositoryWithScripts {
   return { ...repo, scripts: repo.scripts.map((script) => ({ ...script })) };
 }
@@ -47,8 +35,7 @@ export function isRepositoryDirty(
   if (!saved) return true;
   return (
     repositoryFields.some((field) => repo[field] !== saved[field]) ||
-    branchTemplate(repo) !== branchTemplate(saved) ||
-    !areWorktreeFilesEqual(repo.worktree_files, saved.worktree_files)
+    branchTemplate(repo) !== branchTemplate(saved)
   );
 }
 

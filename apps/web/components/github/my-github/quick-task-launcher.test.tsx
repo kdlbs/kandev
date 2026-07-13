@@ -133,7 +133,6 @@ function repo(overrides: RepoOverrides): Repository {
     cleanup_script: "",
     dev_script: "",
     copy_files: "",
-    worktree_files: [],
     created_at: NOW,
     updated_at: NOW,
     ...rest,

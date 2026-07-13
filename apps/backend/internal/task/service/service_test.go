@@ -852,7 +852,7 @@ func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
 	}
 }
 
-func TestService_CreateRepository_WorktreeFileDefaults(t *testing.T) {
+func TestService_CreateRepository_CopyFilesSymlinkKeyword(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
@@ -860,76 +860,32 @@ func TestService_CreateRepository_WorktreeFileDefaults(t *testing.T) {
 	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
 		WorkspaceID: "ws-1",
 		Name:        "Test Repo",
+		CopyFiles:   ".env, .env.local:symlink",
 	})
 	if err != nil {
 		t.Fatalf("CreateRepository failed: %v", err)
 	}
-	if len(created.WorktreeFiles) != 0 {
-		t.Fatalf("expected no worktree files by default, got %v", created.WorktreeFiles)
+	if created.CopyFiles != ".env, .env.local:symlink" {
+		t.Fatalf("copy_files not persisted verbatim: %q", created.CopyFiles)
 	}
 }
 
-func TestService_CreateRepository_WorktreeFilesPerFileModeAndTrim(t *testing.T) {
-	svc, _, repo := createTestService(t)
-	ctx := context.Background()
-	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-
-	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
-		WorkspaceID: "ws-1",
-		Name:        "Test Repo",
-		WorktreeFiles: []models.WorktreeFile{
-			{Path: " .env.local ", Mode: "symlink"},
-			{Path: "", Mode: "copy"}, // dropped (blank path)
-			{Path: "config.env"},     // empty mode defaults to copy
-		},
-	})
-	if err != nil {
-		t.Fatalf("CreateRepository failed: %v", err)
-	}
-	if len(created.WorktreeFiles) != 2 {
-		t.Fatalf("expected 2 files after trim, got %+v", created.WorktreeFiles)
-	}
-	if created.WorktreeFiles[0] != (models.WorktreeFile{Path: ".env.local", Mode: "symlink"}) {
-		t.Fatalf("file[0] = %+v", created.WorktreeFiles[0])
-	}
-	if created.WorktreeFiles[1] != (models.WorktreeFile{Path: "config.env", Mode: "copy"}) {
-		t.Fatalf("file[1] = %+v (empty mode should default to copy)", created.WorktreeFiles[1])
-	}
-}
-
-func TestService_CreateRepository_InvalidWorktreeFileMode(t *testing.T) {
+func TestService_CreateRepository_InvalidCopyFilesKeyword(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 
 	_, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
-		WorkspaceID:   "ws-1",
-		Name:          "Test Repo",
-		WorktreeFiles: []models.WorktreeFile{{Path: ".env", Mode: "hardlink"}},
+		WorkspaceID: "ws-1",
+		Name:        "Test Repo",
+		CopyFiles:   ".env.local:hardlink",
 	})
 	if !errors.Is(err, ErrInvalidRepositorySettings) {
 		t.Fatalf("expected ErrInvalidRepositorySettings, got %v", err)
 	}
 }
 
-func TestService_CreateRepository_InvalidWorktreeFilePath(t *testing.T) {
-	svc, _, repo := createTestService(t)
-	ctx := context.Background()
-	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
-
-	for _, bad := range []string{"/etc/passwd", "../secret", ".git/config"} {
-		_, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
-			WorkspaceID:   "ws-1",
-			Name:          "Test Repo",
-			WorktreeFiles: []models.WorktreeFile{{Path: bad, Mode: "copy"}},
-		})
-		if !errors.Is(err, ErrInvalidRepositorySettings) {
-			t.Fatalf("path %q: expected ErrInvalidRepositorySettings, got %v", bad, err)
-		}
-	}
-}
-
-func TestService_UpdateRepository_InvalidWorktreeFileMode(t *testing.T) {
+func TestService_UpdateRepository_InvalidCopyFilesKeyword(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
@@ -938,8 +894,8 @@ func TestService_UpdateRepository_InvalidWorktreeFileMode(t *testing.T) {
 		t.Fatalf("CreateRepository failed: %v", err)
 	}
 
-	bad := []models.WorktreeFile{{Path: ".env", Mode: "move"}}
-	_, err = svc.UpdateRepository(ctx, created.ID, &UpdateRepositoryRequest{WorktreeFiles: &bad})
+	bad := ".env:move"
+	_, err = svc.UpdateRepository(ctx, created.ID, &UpdateRepositoryRequest{CopyFiles: &bad})
 	if !errors.Is(err, ErrInvalidRepositorySettings) {
 		t.Fatalf("expected ErrInvalidRepositorySettings, got %v", err)
 	}
