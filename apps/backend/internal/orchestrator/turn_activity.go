@@ -32,6 +32,22 @@ type turnActivity struct {
 	mu         sync.Mutex
 	background map[string]struct{} // outstanding background/spawned tool-call IDs
 	yielded    bool                // foreground handed off to background work
+
+	// promptInFlight marks an admitted prompt that has claimed the foreground turn
+	// but has not yet been handed to the agent. It is deliberately independent of
+	// `yielded`: during that window the session must stay un-promptable no matter
+	// what happens to the background set. Otherwise a background tool_call landing
+	// mid-admission (registerBackgroundTask re-sets `yielded`) would reopen the gate
+	// under the in-flight prompt and let a second one through — two prompts reaching
+	// one ACP session, which is the exact overlap the claim exists to prevent.
+	promptInFlight bool
+	// claimEpoch is bumped by every event that redefines who owns the foreground:
+	// a claim, or genuine foreground output. releaseForegroundClaim carries the
+	// epoch it claimed at and only re-yields when that epoch is still current — so a
+	// prompt that fails *after* the agent's foreground started generating again
+	// cannot hand the turn back to "background-idle" and let a second prompt overlap
+	// a live turn.
+	claimEpoch uint64
 }
 
 // turnActivityFor returns the per-session activity record, creating it when
@@ -62,6 +78,10 @@ func (s *Service) markForegroundGenerating(sessionID string) bool {
 	ta.mu.Lock()
 	changed := ta.yielded
 	ta.yielded = false
+	// Real foreground output redefines ownership of the turn: it invalidates any
+	// outstanding claim's epoch, so a prompt that later fails cannot release the
+	// gate back open on top of a foreground that is now genuinely generating.
+	ta.claimEpoch++
 	ta.mu.Unlock()
 	return changed
 }
@@ -151,6 +171,17 @@ func (s *Service) isForegroundTurnGenerating(sessionID string) bool {
 	}
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
+	return ta.generatingLocked()
+}
+
+// generatingLocked is the single definition of "the foreground turn is busy".
+// An admitted-but-not-yet-dispatched prompt counts as busy in its own right: until
+// it reaches the agent the session must not admit another, regardless of what the
+// background set does underneath it.
+func (ta *turnActivity) generatingLocked() bool {
+	if ta.promptInFlight {
+		return true
+	}
 	return !ta.yielded
 }
 
@@ -170,10 +201,67 @@ func (s *Service) isForegroundTurnGenerating(sessionID string) bool {
 // rejected with ErrAgentPromptInProgress exactly as it would have been before
 // ADR-0035.
 //
-// Returns false for an untracked session — no background work is outstanding, so
-// there is nothing to claim and the historical reject-while-RUNNING default
-// stands.
-func (s *Service) claimForegroundTurn(sessionID string) bool {
+// The claim is held until the prompt is dispatched (completeForegroundClaim) or
+// handed back (releaseForegroundClaim). It returns the claim's epoch, which the
+// release must present to prove it still owns the turn.
+//
+// Returns ok=false for an untracked session — no background work is outstanding,
+// so there is nothing to claim and the historical reject-while-RUNNING default
+// stands — and for a session that already has a prompt in flight.
+func (s *Service) claimForegroundTurn(sessionID string) (uint64, bool) {
+	if sessionID == "" {
+		return 0, false
+	}
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil {
+		return 0, false
+	}
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	if ta.generatingLocked() {
+		return 0, false
+	}
+	ta.yielded = false
+	ta.promptInFlight = true
+	ta.claimEpoch++
+	return ta.claimEpoch, true
+}
+
+// completeForegroundClaim ends the admission window: the prompt has been handed to
+// the agent, so this is now an ordinary foreground turn and the background set
+// governs promptability again (a subagent spawned by *this* turn may legitimately
+// yield it back to background-idle).
+func (s *Service) completeForegroundClaim(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil {
+		return
+	}
+	ta.mu.Lock()
+	ta.promptInFlight = false
+	ta.mu.Unlock()
+}
+
+// releaseForegroundClaim hands a claimForegroundTurn claim back when the prompt
+// it was taken for never made it to the agent (ensureSessionRunning failed, the
+// model switch failed). Without it the session would sit in RUNNING advertising a
+// generating foreground it does not have, locking the operator out for the rest
+// of the turn — the exact lockout ADR-0035 exists to remove.
+//
+// It reports whether the turn was actually handed back to background-idle, so the
+// caller can broadcast the restored substate. Two things stop a release from
+// opening the gate when it shouldn't:
+//
+//   - The epoch. If the agent's foreground streamed real output while this prompt
+//     was in preflight, markForegroundGenerating bumped the epoch: the turn is
+//     genuinely generating now, and handing it back to background-idle would let a
+//     second prompt overlap a live turn.
+//   - The background set. If the last background task finished while the failing
+//     prompt was in flight, nothing is outstanding and the generating default is
+//     correct.
+func (s *Service) releaseForegroundClaim(sessionID string, epoch uint64) bool {
 	if sessionID == "" {
 		return false
 	}
@@ -183,35 +271,15 @@ func (s *Service) claimForegroundTurn(sessionID string) bool {
 	}
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
-	if !ta.yielded {
+	if !ta.promptInFlight {
 		return false
 	}
-	ta.yielded = false
+	ta.promptInFlight = false
+	if ta.claimEpoch != epoch || len(ta.background) == 0 {
+		return false
+	}
+	ta.yielded = true
 	return true
-}
-
-// releaseForegroundClaim hands a claimForegroundTurn claim back when the prompt
-// it was taken for never made it to the agent (ensureSessionRunning failed, the
-// model switch failed). Without it the session would sit in RUNNING advertising a
-// generating foreground it does not have, locking the operator out for the rest
-// of the turn — the exact lockout ADR-0035 exists to remove.
-//
-// Only re-yields while background work is genuinely still outstanding: if the
-// last background task completed while the failing prompt was in flight, the turn
-// is no longer waiting on anything and the generating default is correct.
-func (s *Service) releaseForegroundClaim(sessionID string) {
-	if sessionID == "" {
-		return
-	}
-	ta := s.turnActivityFor(sessionID, false)
-	if ta == nil {
-		return
-	}
-	ta.mu.Lock()
-	if len(ta.background) > 0 {
-		ta.yielded = true
-	}
-	ta.mu.Unlock()
 }
 
 // foregroundActivityValue reports the fine-grained busy substate of a session

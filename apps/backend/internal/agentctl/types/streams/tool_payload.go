@@ -54,6 +54,14 @@ type NormalizedPayload struct {
 	showPlan     *ShowPlanPayload
 	manageTodos  *ManageTodosPayload
 	misc         *MiscPayload
+	// monitor is adapter-only provenance, deliberately a sibling of generic
+	// rather than a key inside GenericPayload.Output. Output is assigned the
+	// agent's raw tool result verbatim (see NormalizeToolResult), so anything
+	// carried inside it is agent-shaped data and cannot attest to its own origin.
+	// This slot is written solely by the ACP adapter's Monitor recognizer, which
+	// gates on ACP `_meta.claudeCode.toolName` — set by the claude-agent-acp
+	// wrapper, not by model tool output. IsActiveMonitor classifies on this.
+	monitor *MonitorPayload
 }
 
 // --- Getters for NormalizedPayload ---
@@ -86,6 +94,7 @@ func (p *NormalizedPayload) MarshalJSON() ([]byte, error) {
 		ShowPlan     *ShowPlanPayload     `json:"show_plan,omitempty"`
 		ManageTodos  *ManageTodosPayload  `json:"manage_todos,omitempty"`
 		Misc         *MiscPayload         `json:"misc,omitempty"`
+		Monitor      *MonitorPayload      `json:"monitor,omitempty"`
 	}
 	return json.Marshal(jsonPayload{
 		Kind:         p.kind,
@@ -100,6 +109,7 @@ func (p *NormalizedPayload) MarshalJSON() ([]byte, error) {
 		ShowPlan:     p.showPlan,
 		ManageTodos:  p.manageTodos,
 		Misc:         p.misc,
+		Monitor:      p.monitor,
 	})
 }
 
@@ -119,12 +129,14 @@ func (p *NormalizedPayload) UnmarshalJSON(data []byte) error {
 		ShowPlan     *ShowPlanPayload     `json:"show_plan,omitempty"`
 		ManageTodos  *ManageTodosPayload  `json:"manage_todos,omitempty"`
 		Misc         *MiscPayload         `json:"misc,omitempty"`
+		Monitor      *MonitorPayload      `json:"monitor,omitempty"`
 	}
 	var jp jsonPayload
 	if err := json.Unmarshal(data, &jp); err != nil {
 		return err
 	}
 	p.kind = jp.Kind
+	p.monitor = jp.Monitor
 	p.readFile = jp.ReadFile
 	p.modifyFile = jp.ModifyFile
 	p.shellExec = jp.ShellExec

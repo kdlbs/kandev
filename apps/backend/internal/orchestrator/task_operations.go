@@ -2666,23 +2666,31 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// same read and start an overlapping turn on one ACP session. Losing the claim
 	// means another prompt got there first — reject exactly as before ADR-0036.
 	foregroundClaimed := false
+	var foregroundClaimEpoch uint64
 	if session.State == models.TaskSessionStateRunning {
-		if !s.claimForegroundTurn(sessionID) {
+		epoch, ok := s.claimForegroundTurn(sessionID)
+		if !ok {
 			s.logger.Warn("rejected prompt: another prompt claimed the background-idle foreground turn first",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID))
 			return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
 		}
-		foregroundClaimed = true
+		foregroundClaimed, foregroundClaimEpoch = true, epoch
 	}
 	// Hand the claim back if this prompt fails before it reaches the agent —
 	// otherwise the session would advertise a generating foreground it doesn't have
 	// and lock the operator out for the rest of the turn. Once executor.Prompt is
 	// under way the normal turn-close paths (handlePromptError → completeTurnForSession)
 	// own the reset.
+	//
+	// Broadcast the restored substate: a client that loaded the page *during* the
+	// admission window read foreground_activity=generating off the DTO, and with no
+	// event it would sit there with a disabled composer even though the turn is
+	// background-idle again. releaseForegroundClaim only reports true when it really
+	// did reopen the gate, so this can't publish a lie.
 	releaseForegroundClaimOnFailure := func() {
-		if foregroundClaimed {
-			s.releaseForegroundClaim(sessionID)
+		if foregroundClaimed && s.releaseForegroundClaim(sessionID, foregroundClaimEpoch) {
+			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 		}
 	}
 
@@ -2713,10 +2721,17 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 
 	// Check if model switching is requested. A switch that fails never reaches the
 	// agent, so it releases the claim; a switch that succeeds delivered the prompt
-	// itself (trySwitchModel opens the turn) and keeps it.
+	// itself (trySwitchModel opens the turn), which spends the claim.
 	if result, switched, err := s.trySwitchModel(ctx, taskID, sessionID, model, effectivePrompt, session); switched || err != nil {
 		if err != nil {
 			releaseForegroundClaimOnFailure()
+		} else if foregroundClaimed {
+			// This return skips the publish below, so a prompt admitted through the
+			// background-idle gate and then delivered by a model switch would leave live
+			// clients showing "background" with an enabled composer while the server has
+			// already flipped to generating and would reject their next send.
+			s.completeForegroundClaim(sessionID)
+			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 		}
 		return result, err
 	}
@@ -2748,6 +2763,14 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if flippedToGenerating || foregroundClaimed {
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
+
+	// The prompt is about to reach the agent, so the admission window closes here.
+	// It has to close *before* executor.Prompt, which blocks for the whole turn: a
+	// claim still held across it would keep the session un-promptable for the entire
+	// turn, defeating the very lockout this feature removes. From here on the
+	// background set governs promptability again — work this turn spawns may
+	// legitimately yield it back to background-idle.
+	s.completeForegroundClaim(sessionID)
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
 	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
