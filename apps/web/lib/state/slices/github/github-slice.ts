@@ -78,7 +78,8 @@ function createTaskPRActions(
       }),
     upsertTaskIssue: (workspaceId, issue) =>
       set((draft) => {
-        if (draft.taskIssues.workspaceId !== workspaceId) return;
+        if (draft.taskIssues.workspaceId && draft.taskIssues.workspaceId !== workspaceId) return;
+        draft.taskIssues.workspaceId = workspaceId;
         draft.taskIssues.byTaskId[issue.task_id] = issue;
       }),
     setTaskPR: (taskId, pr) =>

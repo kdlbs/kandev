@@ -253,6 +253,17 @@ describe("setTaskIssues", () => {
     store.getState().upsertTaskIssue("ws-1", link);
     expect(store.getState().taskIssues.byTaskId).toEqual({ "task-1": link });
   });
+
+  it("initializes an unloaded workspace with a newly linked issue", () => {
+    const store = makeStore();
+
+    store.getState().upsertTaskIssue("ws-1", link);
+
+    expect(store.getState().taskIssues).toEqual({
+      workspaceId: "ws-1",
+      byTaskId: { "task-1": link },
+    });
+  });
 });
 
 describe("setPendingPrUrlForTask", () => {

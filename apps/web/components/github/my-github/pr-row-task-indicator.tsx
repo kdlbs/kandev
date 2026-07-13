@@ -11,7 +11,7 @@ export function PRRowTaskIndicator({ tasks }: PRRowTaskIndicatorProps) {
   return (
     <TaskRowIndicator
       tasks={tasks?.map((task) => ({
-        id: task.task_id,
+        id: task.id,
         taskId: task.task_id,
         fallbackTitle: task.pr_title,
       }))}
