@@ -86,5 +86,6 @@ describe("PRRowTaskIndicator", () => {
     renderWithStore(<PRRowTaskIndicator tasks={[makeTaskPR({ pr_title: longTitle })]} />);
     const btn = screen.getByRole("button");
     expect(btn.textContent).toContain(longTitle);
+    expect(screen.getByText(longTitle).classList.contains("truncate")).toBe(true);
   });
 });
