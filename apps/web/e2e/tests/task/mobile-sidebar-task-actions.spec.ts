@@ -46,7 +46,14 @@ test.describe("Mobile sidebar task actions", () => {
       clientX: 120,
       clientY: 240,
     });
-    await testPage.waitForTimeout(750);
+    await testPage.waitForTimeout(1000);
+    await taskRow.dispatchEvent("pointerup", {
+      pointerType: "touch",
+      isPrimary: true,
+      button: 0,
+      clientX: 120,
+      clientY: 240,
+    });
 
     await expect(testPage.getByRole("menuitem", { name: "Archive" })).toBeVisible();
   });

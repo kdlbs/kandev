@@ -560,7 +560,8 @@ function TaskMenuButton({ visible }: { visible: boolean }) {
   return (
     <div
       className={cn(
-        "self-center shrink-0 flex items-center transition-opacity duration-100 [@media(hover:none)]:hidden",
+        "self-center shrink-0 flex items-center transition-opacity duration-100",
+        !visible && "[@media(hover:none)]:hidden",
         visible
           ? "opacity-100"
           : "opacity-0 pointer-events-none [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
