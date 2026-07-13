@@ -49,7 +49,7 @@ func TestClaimForegroundTurn_OnlyOneConcurrentPromptWins(t *testing.T) {
 		go func() {
 			defer done.Done()
 			start.Wait() // release them all into the window together
-			if _, ok := svc.claimForegroundTurn(sessionID); ok {
+			if svc.claimForegroundTurn(sessionID) != nil {
 				mu.Lock()
 				won++
 				mu.Unlock()
@@ -175,7 +175,8 @@ func TestClaimForegroundTurn_BackgroundRegistrationCannotReopenTheAdmissionWindo
 	const sessionID = "session-reopen"
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
 
-	if _, ok := svc.claimForegroundTurn(sessionID); !ok {
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
 		t.Fatal("the first prompt must win the claim")
 	}
 
@@ -186,13 +187,13 @@ func TestClaimForegroundTurn_BackgroundRegistrationCannotReopenTheAdmissionWindo
 	if !svc.isForegroundTurnGenerating(sessionID) {
 		t.Fatal("a session with a prompt in flight must stay un-promptable")
 	}
-	if _, ok := svc.claimForegroundTurn(sessionID); ok {
+	if svc.claimForegroundTurn(sessionID) != nil {
 		t.Fatal("a new background task must not reopen the admission window under an in-flight prompt")
 	}
 
 	// Once the prompt is handed to the agent, the admission window closes and the
 	// background set governs again — work THIS turn spawned may legitimately yield it.
-	svc.completeForegroundClaim(sessionID)
+	svc.completeForegroundClaim(claim)
 	if svc.isForegroundTurnGenerating(sessionID) {
 		t.Fatal("after handoff the outstanding background work must make the turn background-idle again")
 	}
@@ -208,8 +209,8 @@ func TestReleaseForegroundClaim_DoesNotReopenGateOverALiveForeground(t *testing.
 	const sessionID = "session-stale-release"
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
 
-	epoch, ok := svc.claimForegroundTurn(sessionID)
-	if !ok {
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
 		t.Fatal("the prompt must win the claim")
 	}
 
@@ -218,13 +219,13 @@ func TestReleaseForegroundClaim_DoesNotReopenGateOverALiveForeground(t *testing.
 	svc.markForegroundGenerating(sessionID)
 
 	// The prompt then fails. Its claim is stale — releasing must not reopen the gate.
-	if svc.releaseForegroundClaim(sessionID, epoch) {
+	if svc.releaseForegroundClaim(claim) {
 		t.Fatal("a stale claim must not hand a live generating foreground back to background-idle")
 	}
 	if !svc.isForegroundTurnGenerating(sessionID) {
 		t.Fatal("the foreground is generating; the gate must stay closed")
 	}
-	if _, ok := svc.claimForegroundTurn(sessionID); ok {
+	if svc.claimForegroundTurn(sessionID) != nil {
 		t.Fatal("no prompt may claim a turn whose foreground is actively generating")
 	}
 }
@@ -235,10 +236,10 @@ func TestClaimForegroundTurn_UntrackedSessionCannotBeClaimed(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
-	if _, ok := svc.claimForegroundTurn("session-never-seen"); ok {
+	if svc.claimForegroundTurn("session-never-seen") != nil {
 		t.Fatal("a session with no outstanding background work must not be claimable")
 	}
-	if _, ok := svc.claimForegroundTurn(""); ok {
+	if svc.claimForegroundTurn("") != nil {
 		t.Fatal("an empty session ID must not be claimable")
 	}
 }
@@ -255,8 +256,8 @@ func TestReleaseForegroundClaim_FailedPromptReopensTheGate(t *testing.T) {
 	const sessionID = "session-release"
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
 
-	epoch, ok := svc.claimForegroundTurn(sessionID)
-	if !ok {
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
 		t.Fatal("the first prompt must win the claim")
 	}
 	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
@@ -264,7 +265,7 @@ func TestReleaseForegroundClaim_FailedPromptReopensTheGate(t *testing.T) {
 	}
 
 	// The prompt fails before reaching the agent.
-	if !svc.releaseForegroundClaim(sessionID, epoch) {
+	if !svc.releaseForegroundClaim(claim) {
 		t.Fatal("releasing a live claim with background work outstanding must reopen the gate")
 	}
 
@@ -273,7 +274,7 @@ func TestReleaseForegroundClaim_FailedPromptReopensTheGate(t *testing.T) {
 	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("a released claim must return the turn to background-idle, got %q", got)
 	}
-	if _, ok := svc.claimForegroundTurn(sessionID); !ok {
+	if svc.claimForegroundTurn(sessionID) == nil {
 		t.Fatal("a retried prompt must be able to claim the released turn")
 	}
 }
@@ -287,19 +288,51 @@ func TestReleaseForegroundClaim_DoesNotReopenGateWithoutBackgroundWork(t *testin
 
 	const sessionID = "session-release-nobg"
 	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
-	epoch, ok := svc.claimForegroundTurn(sessionID)
-	if !ok {
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
 		t.Fatal("the prompt must win the claim")
 	}
 
 	// The background task completes while the prompt is still in flight, then the
 	// prompt fails.
 	svc.completeBackgroundTask(sessionID, "tool-subagent-1")
-	if svc.releaseForegroundClaim(sessionID, epoch) {
+	if svc.releaseForegroundClaim(claim) {
 		t.Fatal("with no background work outstanding the release must not reopen the gate")
 	}
 
 	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("with no background work outstanding the turn must read as generating, got %q", got)
+	}
+}
+
+func TestForegroundClaim_StaleTokenCannotCompleteOrReleaseNewClaim(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	const sessionID = "session-claim-generation"
+	svc.registerBackgroundTask(sessionID, "background-1")
+	first := svc.claimForegroundTurn(sessionID)
+	if first == nil {
+		t.Fatal("first prompt must win the claim")
+	}
+	// Work registered during admission becomes visible after agentctl accepts the
+	// prompt, allowing the dispatched turn to yield again.
+	svc.registerBackgroundTask(sessionID, "background-2")
+	if !svc.completeForegroundClaim(first) {
+		t.Fatal("first claim must complete")
+	}
+	second := svc.claimForegroundTurn(sessionID)
+	if second == nil {
+		t.Fatal("second prompt must claim the newly yielded turn")
+	}
+
+	if svc.completeForegroundClaim(first) {
+		t.Fatal("a stale completion must not clear a newer admission")
+	}
+	if svc.releaseForegroundClaim(first) {
+		t.Fatal("a stale release must not clear a newer admission")
+	}
+	if svc.claimForegroundTurn(sessionID) != nil {
+		t.Fatal("the newer claim must remain active after stale token operations")
 	}
 }

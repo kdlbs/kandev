@@ -2665,17 +2665,15 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// is check-then-act window in which a second prompt could otherwise pass the
 	// same read and start an overlapping turn on one ACP session. Losing the claim
 	// means another prompt got there first — reject exactly as before ADR-0036.
-	foregroundClaimed := false
-	var foregroundClaimEpoch uint64
+	var foregroundClaim *foregroundClaim
 	if session.State == models.TaskSessionStateRunning {
-		epoch, ok := s.claimForegroundTurn(sessionID)
-		if !ok {
+		foregroundClaim = s.claimForegroundTurn(sessionID)
+		if foregroundClaim == nil {
 			s.logger.Warn("rejected prompt: another prompt claimed the background-idle foreground turn first",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID))
 			return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
 		}
-		foregroundClaimed, foregroundClaimEpoch = true, epoch
 	}
 	// Hand the claim back if this prompt fails before it reaches the agent —
 	// otherwise the session would advertise a generating foreground it doesn't have
@@ -2689,7 +2687,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// background-idle again. releaseForegroundClaim only reports true when it really
 	// did reopen the gate, so this can't publish a lie.
 	releaseForegroundClaimOnFailure := func() {
-		if foregroundClaimed && s.releaseForegroundClaim(sessionID, foregroundClaimEpoch) {
+		if s.releaseForegroundClaim(foregroundClaim) {
 			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 		}
 	}
@@ -2725,12 +2723,12 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if result, switched, err := s.trySwitchModel(ctx, taskID, sessionID, model, effectivePrompt, session); switched || err != nil {
 		if err != nil {
 			releaseForegroundClaimOnFailure()
-		} else if foregroundClaimed {
+		} else if foregroundClaim != nil {
 			// This return skips the publish below, so a prompt admitted through the
 			// background-idle gate and then delivered by a model switch would leave live
 			// clients showing "background" with an enabled composer while the server has
 			// already flipped to generating and would reject their next send.
-			s.completeForegroundClaim(sessionID)
+			s.completeForegroundClaim(foregroundClaim)
 			s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 		}
 		return result, err
@@ -2760,23 +2758,22 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// markForegroundGenerating has nothing left to change and reports false —
 	// the claim is the transition, and it still has to be broadcast.
 	flippedToGenerating := s.markForegroundGenerating(sessionID)
-	if flippedToGenerating || foregroundClaimed {
+	if flippedToGenerating || foregroundClaim != nil {
 		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
 	}
-
-	// The prompt is about to reach the agent, so the admission window closes here.
-	// It has to close *before* executor.Prompt, which blocks for the whole turn: a
-	// claim still held across it would keep the session un-promptable for the entire
-	// turn, defeating the very lockout this feature removes. From here on the
-	// background set governs promptability again — work this turn spawns may
-	// legitimately yield it back to background-idle.
-	s.completeForegroundClaim(sessionID)
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
 	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
 	// We still want to log and respond, but the prompt should continue regardless.
 	promptCtx := context.WithoutCancel(ctx)
-	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly, session)
+	result, err := s.executor.PromptWithDispatchCallback(
+		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
+		func() {
+			if s.completeForegroundClaim(foregroundClaim) {
+				s.publishForegroundActivityChanged(promptCtx, taskID, sessionID)
+			}
+		}, session,
+	)
 	if err != nil {
 		return s.handlePromptDispatchFailure(ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments, previousSessionState, err)
 	}

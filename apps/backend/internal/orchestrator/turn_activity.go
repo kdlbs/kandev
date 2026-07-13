@@ -40,14 +40,18 @@ type turnActivity struct {
 	// mid-admission (registerBackgroundTask re-sets `yielded`) would reopen the gate
 	// under the in-flight prompt and let a second one through — two prompts reaching
 	// one ACP session, which is the exact overlap the claim exists to prevent.
-	promptInFlight bool
-	// claimEpoch is bumped by every event that redefines who owns the foreground:
-	// a claim, or genuine foreground output. releaseForegroundClaim carries the
-	// epoch it claimed at and only re-yields when that epoch is still current — so a
-	// prompt that fails *after* the agent's foreground started generating again
-	// cannot hand the turn back to "background-idle" and let a second prompt overlap
-	// a live turn.
-	claimEpoch uint64
+	promptInFlight  bool
+	claimGeneration uint64 // identifies the current admission owner
+	foregroundEpoch uint64 // increments on genuine foreground output
+}
+
+// foregroundClaim binds admission to the exact activity record and generation
+// it claimed. The foreground epoch separately detects output that makes a failed
+// prompt's background-idle restoration stale.
+type foregroundClaim struct {
+	activity        *turnActivity
+	claimGeneration uint64
+	foregroundEpoch uint64
 }
 
 // turnActivityFor returns the per-session activity record, creating it when
@@ -81,7 +85,7 @@ func (s *Service) markForegroundGenerating(sessionID string) bool {
 	// Real foreground output redefines ownership of the turn: it invalidates any
 	// outstanding claim's epoch, so a prompt that later fails cannot release the
 	// gate back open on top of a foreground that is now genuinely generating.
-	ta.claimEpoch++
+	ta.foregroundEpoch++
 	ta.mu.Unlock()
 	return changed
 }
@@ -98,7 +102,7 @@ func (s *Service) registerBackgroundTask(sessionID, toolCallID string) bool {
 	}
 	ta := s.turnActivityFor(sessionID, true)
 	ta.mu.Lock()
-	changed := !ta.yielded
+	changed := !ta.yielded && !ta.promptInFlight
 	ta.background[toolCallID] = struct{}{}
 	ta.yielded = true
 	ta.mu.Unlock()
@@ -201,47 +205,53 @@ func (ta *turnActivity) generatingLocked() bool {
 // rejected with ErrAgentPromptInProgress exactly as it would have been before
 // ADR-0035.
 //
-// The claim is held until the prompt is dispatched (completeForegroundClaim) or
-// handed back (releaseForegroundClaim). It returns the claim's epoch, which the
-// release must present to prove it still owns the turn.
+// The claim is held until agentctl accepts the prompt (completeForegroundClaim)
+// or it is handed back (releaseForegroundClaim). The returned token binds both
+// operations to this activity record and admission generation.
 //
-// Returns ok=false for an untracked session — no background work is outstanding,
-// so there is nothing to claim and the historical reject-while-RUNNING default
+// Returns nil for an untracked session — no background work is outstanding, so
+// there is nothing to claim and the historical reject-while-RUNNING default
 // stands — and for a session that already has a prompt in flight.
-func (s *Service) claimForegroundTurn(sessionID string) (uint64, bool) {
+func (s *Service) claimForegroundTurn(sessionID string) *foregroundClaim {
 	if sessionID == "" {
-		return 0, false
+		return nil
 	}
 	ta := s.turnActivityFor(sessionID, false)
 	if ta == nil {
-		return 0, false
+		return nil
 	}
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
 	if ta.generatingLocked() {
-		return 0, false
+		return nil
 	}
 	ta.yielded = false
 	ta.promptInFlight = true
-	ta.claimEpoch++
-	return ta.claimEpoch, true
+	ta.claimGeneration++
+	return &foregroundClaim{
+		activity:        ta,
+		claimGeneration: ta.claimGeneration,
+		foregroundEpoch: ta.foregroundEpoch,
+	}
 }
 
 // completeForegroundClaim ends the admission window: the prompt has been handed to
 // the agent, so this is now an ordinary foreground turn and the background set
 // governs promptability again (a subagent spawned by *this* turn may legitimately
-// yield it back to background-idle).
-func (s *Service) completeForegroundClaim(sessionID string) {
-	if sessionID == "" {
-		return
+// yield it back to background-idle). It reports whether background work hidden by
+// the active claim became visible, so the caller can publish that transition.
+func (s *Service) completeForegroundClaim(claim *foregroundClaim) bool {
+	if claim == nil || claim.activity == nil {
+		return false
 	}
-	ta := s.turnActivityFor(sessionID, false)
-	if ta == nil {
-		return
-	}
+	ta := claim.activity
 	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	if !ta.promptInFlight || ta.claimGeneration != claim.claimGeneration {
+		return false
+	}
 	ta.promptInFlight = false
-	ta.mu.Unlock()
+	return ta.yielded
 }
 
 // releaseForegroundClaim hands a claimForegroundTurn claim back when the prompt
@@ -261,21 +271,18 @@ func (s *Service) completeForegroundClaim(sessionID string) {
 //   - The background set. If the last background task finished while the failing
 //     prompt was in flight, nothing is outstanding and the generating default is
 //     correct.
-func (s *Service) releaseForegroundClaim(sessionID string, epoch uint64) bool {
-	if sessionID == "" {
+func (s *Service) releaseForegroundClaim(claim *foregroundClaim) bool {
+	if claim == nil || claim.activity == nil {
 		return false
 	}
-	ta := s.turnActivityFor(sessionID, false)
-	if ta == nil {
-		return false
-	}
+	ta := claim.activity
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
-	if !ta.promptInFlight {
+	if !ta.promptInFlight || ta.claimGeneration != claim.claimGeneration {
 		return false
 	}
 	ta.promptInFlight = false
-	if ta.claimEpoch != epoch || len(ta.background) == 0 {
+	if ta.foregroundEpoch != claim.foregroundEpoch || len(ta.background) == 0 {
 		return false
 	}
 	ta.yielded = true

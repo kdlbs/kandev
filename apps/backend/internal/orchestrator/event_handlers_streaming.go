@@ -265,9 +265,12 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	// tool_call that already arrives terminal is not outstanding work — clearing
 	// is driven by tool_update, so registering it would leak into the hold and
 	// never clear.
-	if payload.Data.ParentToolCallID == "" && !isTerminalToolStatus(payload.Data.ToolStatus) &&
-		normalizedIsBackgroundTask(payload.Data.Normalized) {
-		if s.registerBackgroundTask(payload.SessionID, payload.Data.ToolCallID) {
+	if payload.Data.ParentToolCallID == "" && !isTerminalToolStatus(payload.Data.ToolStatus) {
+		if normalizedIsBackgroundTask(payload.Data.Normalized) {
+			if s.registerBackgroundTask(payload.SessionID, payload.Data.ToolCallID) {
+				s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
+			}
+		} else if s.markForegroundGenerating(payload.SessionID) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 		}
 	}
@@ -506,8 +509,13 @@ func (s *Service) trackBackgroundToolUpdate(ctx context.Context, payload *lifecy
 		}
 		return
 	}
-	if s.hasBackgroundTask(payload.SessionID, payload.Data.ToolCallID) ||
-		!normalizedIsBackgroundTask(payload.Data.Normalized) {
+	if s.hasBackgroundTask(payload.SessionID, payload.Data.ToolCallID) {
+		return
+	}
+	if !normalizedIsBackgroundTask(payload.Data.Normalized) {
+		if s.markForegroundGenerating(payload.SessionID) {
+			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
+		}
 		return
 	}
 	// Both of Claude's background shapes only become recognizable on a

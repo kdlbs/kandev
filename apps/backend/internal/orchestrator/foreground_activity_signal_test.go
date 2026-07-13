@@ -7,6 +7,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -140,5 +142,112 @@ func TestForegroundActivitySignal_NoPublishWithoutFlip(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("flip %d: expected %q, got %q (all: %v)", i, want[i], got[i], got)
 		}
+	}
+}
+
+func TestForegroundActivitySignal_ClaimReleasePublishesRestoredBackground(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	const (
+		taskID    = "task1"
+		sessionID = "session-release-signal"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	svc.registerBackgroundTask(sessionID, "background-1")
+
+	// Admission claims the foreground, but the missing executor row makes
+	// ensureSessionRunning fail before the prompt reaches the agent. Releasing
+	// that claim must tell every client that background-idle was restored.
+	if _, err := svc.PromptTask(context.Background(), taskID, sessionID, "retry", "", false, nil, false); err == nil {
+		t.Fatal("expected prompt preflight to fail without an executor record")
+	}
+
+	got := activityValues(eb)
+	want := []string{string(v1.ForegroundActivityBackground)}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("expected restored background activity broadcast %v, got %v", want, got)
+	}
+}
+
+func TestForegroundActivitySignal_ModelSwitchPublishesClaimedGenerating(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true,
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-2"}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	const (
+		taskID    = "task1"
+		sessionID = "session-model-switch-signal"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	session.AgentProfileSnapshot = map[string]interface{}{"model": "old-model"}
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-1")
+	svc.registerBackgroundTask(sessionID, "background-1")
+
+	result, err := svc.PromptTask(context.Background(), taskID, sessionID, "continue", "new-model", false, nil, false)
+	if err != nil {
+		t.Fatalf("model-switch prompt failed: %v", err)
+	}
+	if result == nil || result.StopReason != "model_switched" {
+		t.Fatalf("expected restart-based model switch result, got %#v", result)
+	}
+
+	got := activityValues(eb)
+	want := []string{string(v1.ForegroundActivityGenerating)}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("expected claimed foreground activity broadcast %v, got %v", want, got)
+	}
+}
+
+func TestForegroundActivitySignal_DispatchPublishesBackgroundRegisteredDuringClaim(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+
+	const (
+		taskID    = "task1"
+		sessionID = "session-dispatch-signal"
+	)
+	svc.registerBackgroundTask(sessionID, "background-1")
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("prompt must claim the background-idle turn")
+	}
+	if svc.registerBackgroundTask(sessionID, "background-2") {
+		t.Fatal("background registration must not publish through an active claim")
+	}
+	if s := svc.ForegroundActivity(sessionID); s != v1.ForegroundActivityGenerating {
+		t.Fatalf("active claim must remain generating, got %q", s)
+	}
+
+	if !svc.completeForegroundClaim(claim) {
+		t.Fatal("dispatch must expose the background work registered during admission")
+	}
+	svc.publishForegroundActivityChanged(context.Background(), taskID, sessionID)
+
+	got := activityValues(eb)
+	want := []string{string(v1.ForegroundActivityBackground)}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("expected dispatch-time background activity broadcast %v, got %v", want, got)
 	}
 }

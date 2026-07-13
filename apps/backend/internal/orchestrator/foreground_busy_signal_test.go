@@ -49,6 +49,30 @@ func TestCheckSessionPromptable_BackgroundTaskAcceptsInput(t *testing.T) {
 	}
 }
 
+func TestForegroundToolCallClosesBackgroundIdleGate(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = &mockMessageCreator{}
+
+	const sessionID = "session-foreground-tool"
+	svc.registerBackgroundTask(sessionID, "background-1")
+
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task1",
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       agentEventToolCall,
+			ToolCallID: "read-1",
+			ToolStatus: "running",
+			Normalized: streams.NewReadFile("/repo/main.go", 0, 0),
+		},
+	})
+
+	if err := svc.checkSessionPromptable("task1", sessionID, models.TaskSessionStateRunning); !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("top-level foreground tool activity must close the prompt gate, got: %v", err)
+	}
+}
+
 // TestTurnActivity_ForegroundBackgroundTransitions locks in the state machine
 // behind isForegroundTurnGenerating.
 // TestForegroundActivity_ExportedValue covers the seam the page-load / list
