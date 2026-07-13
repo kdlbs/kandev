@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconWand } from "@tabler/icons-react";
 import {
   listUtilityAgents,
   listInferenceAgents,
@@ -10,6 +11,7 @@ import {
   type InferenceAgent,
 } from "@/lib/api/domains/utility-api";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
+import { SettingsSection } from "@/components/settings/settings-section";
 import { UtilityAgentDialog } from "@/components/settings/utility-agent-dialog";
 import {
   DefaultModelSection,
@@ -107,41 +109,41 @@ export function UtilityAgentsSection() {
 
   return (
     <>
-      <div className="space-y-4">
-        <div>
-          <h2 className="text-2xl font-bold">Utility Agents</h2>
-          <p className="text-sm text-muted-foreground">
-            One-shot AI helpers for commits, PRs, and prompts.
-          </p>
+      <SettingsSection
+        icon={<IconWand className="h-5 w-5" />}
+        title="Utility Agents"
+        description="One-shot AI helpers for commits, PRs, and prompts."
+      >
+        <div className="space-y-4">
+          <DefaultModelSection
+            inferenceAgents={inferenceAgents}
+            defaultAgentId={defaultAgentId}
+            defaultModel={defaultModel}
+            onDefaultChange={handleDefaultChange}
+            onRefreshAgent={refreshAgent}
+          />
+          <PerActionOverridesSection
+            builtins={builtins}
+            allModels={allModels}
+            defaultModel={defaultModel}
+            onModelChange={(agent, value) => handleBuiltinChange(agent, value, setAgents)}
+            onEdit={openEditDialog}
+          />
+          <CustomAgentsSection
+            agents={customAgents}
+            onAdd={() => openEditDialog(null)}
+            onEdit={openEditDialog}
+            onDelete={async (agent) => {
+              try {
+                await deleteUtilityAgent(agent.id);
+                setAgents((prev) => prev.filter((a) => a.id !== agent.id));
+              } catch {
+                // Error already logged by API layer
+              }
+            }}
+          />
         </div>
-        <DefaultModelSection
-          inferenceAgents={inferenceAgents}
-          defaultAgentId={defaultAgentId}
-          defaultModel={defaultModel}
-          onDefaultChange={handleDefaultChange}
-          onRefreshAgent={refreshAgent}
-        />
-        <PerActionOverridesSection
-          builtins={builtins}
-          allModels={allModels}
-          defaultModel={defaultModel}
-          onModelChange={(agent, value) => handleBuiltinChange(agent, value, setAgents)}
-          onEdit={openEditDialog}
-        />
-        <CustomAgentsSection
-          agents={customAgents}
-          onAdd={() => openEditDialog(null)}
-          onEdit={openEditDialog}
-          onDelete={async (agent) => {
-            try {
-              await deleteUtilityAgent(agent.id);
-              setAgents((prev) => prev.filter((a) => a.id !== agent.id));
-            } catch {
-              // Error already logged by API layer
-            }
-          }}
-        />
-      </div>
+      </SettingsSection>
       <UtilityAgentDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}

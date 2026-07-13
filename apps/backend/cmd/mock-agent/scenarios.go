@@ -36,6 +36,9 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"multi-permission":        scenarioMultiPermission,
 	"kandev-mcp-permission":   scenarioKandevMCPPermission,
 	"review-cumulative-setup": scenarioReviewCumulativeSetup,
+	"walkthrough-setup":       scenarioWalkthroughSetup,
+	"walkthrough-basic":       scenarioWalkthroughBasic,
+	"walkthrough-reemit":      scenarioWalkthroughReemit,
 	"symlink-file-setup":      scenarioSymlinkFileSetup,
 	"markdown-table":          scenarioMarkdownTable,
 	"empty-turn":              scenarioEmptyTurn,
@@ -773,6 +776,187 @@ func scenarioReviewCumulativeSetup(e *emitter) {
 
 	fixedDelay(100)
 	e.text("review-cumulative-setup complete: " + filePath + " has COMMITTED_CHANGE and UNCOMMITTED_CHANGE")
+}
+
+// walkthroughDemoArgs is the show_walkthrough_kandev payload used by
+// scenarioWalkthroughBasic. task_id is resolved server-side from the session's
+// env (KANDEV_TASK_ID), mirroring the clarification path, so it is omitted here.
+// Walkthrough step JSON keys, hoisted to constants to satisfy goconst.
+const (
+	wtKeyTitle   = "title"
+	wtKeyFile    = "file"
+	wtKeyLine    = "line"
+	wtKeyLineEnd = "line_end"
+	wtKeyText    = "text"
+	wtKeySteps   = "steps"
+)
+
+// wtStep builds one show_walkthrough step map. Keeping the JSON keys in one
+// place avoids repeating string literals (goconst).
+func wtStep(title, file, text string, line, lineEnd int) map[string]interface{} {
+	m := map[string]interface{}{wtKeyTitle: title, wtKeyFile: file, wtKeyLine: line, wtKeyText: text}
+	if lineEnd > 0 {
+		m[wtKeyLineEnd] = lineEnd
+	}
+	return m
+}
+
+// wtArgs assembles show_walkthrough_kandev args from a title and steps.
+func wtArgs(title string, steps ...map[string]interface{}) map[string]interface{} {
+	return map[string]interface{}{wtKeyTitle: title, wtKeySteps: steps}
+}
+
+// scenarioWalkthroughReemit emits one walkthrough, waits, then emits a second
+// (different) one — exercising the live `task.walkthrough.updated` path so the
+// UI must reflect the re-emit without a page reload.
+func scenarioWalkthroughReemit(e *emitter) {
+	fixedDelay(50)
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text("walkthrough-reemit: getwd failed: " + err.Error())
+		return
+	}
+	runGitCmd := makeGitRunner(wd)
+	if !writeWalkthroughFile(e, runGitCmd, "walkthrough-reemit", "reemit.txt", "line 1\nline 2\n", "line 1\nREEMIT_CHANGE\n") {
+		return
+	}
+
+	e.text("First tour incoming.")
+	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("First",
+		wtStep("First step", "reemit.txt", "REEMIT_FIRST step one.", 1, 0),
+		wtStep("First step 2", "reemit.txt", "REEMIT_FIRST step two.", 2, 0),
+	)); err != nil {
+		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))
+		return
+	}
+	e.text("reemit-first-done")
+
+	fixedDelay(200)
+
+	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
+		wtStep("Second step", "reemit.txt", "REEMIT_SECOND step one.", 1, 0),
+		wtStep("Second step 2", "reemit.txt", "REEMIT_SECOND step two.", 2, 0),
+		wtStep("Second step 3", "reemit.txt", "REEMIT_SECOND step three.", 1, 0),
+	)); err != nil {
+		e.text(fmt.Sprintf("show_walkthrough re-emit failed: %s", err))
+		return
+	}
+	e.text("reemit-second-done")
+}
+
+// walkthroughDemoArgs builds a 5-step tour spanning three changed files plus
+// one clean committed file (exercising both the diff-anchored card and the
+// full-file / editor-mode floating window).
+func walkthroughDemoArgs() map[string]interface{} {
+	return map[string]interface{}{
+		wtKeyTitle: "Tour of the change",
+		wtKeySteps: []map[string]interface{}{
+			wtStep("Overview", "walkthrough_a.txt",
+				"Big picture: this tour explains how the sample changes connect across the touched files.\n\nELI5: first we show the map, then we explain each changed line.", 1, 0),
+			wtStep("The change in A", "walkthrough_a.txt",
+				"Step 2: this is WALKTHROUGH_CHANGE_A the tour narrates.", 2, 3),
+			wtStep("File B", "walkthrough_b.txt",
+				"Step 3: WALKTHROUGH_CHANGE_B lives in file B.", 2, 0),
+			wtStep("File C", "walkthrough_c.txt",
+				"Step 4: WALKTHROUGH_CHANGE_C lives in file C.", 2, 0),
+			wtStep("Unchanged file", "walkthrough_base.txt",
+				"Step 5: WALKTHROUGH_UNCHANGED — this base file did not change; shown from its current state.", 1, 0),
+		},
+	}
+}
+
+// writeWalkthroughFile writes content and commits it, then (when changed is
+// non-empty) leaves an uncommitted modification so the file appears in review.
+func writeWalkthroughFile(e *emitter, runGitCmd func(args ...string) error, prefix, path, base, changed string) bool {
+	if err := os.WriteFile(path, []byte(base), 0o644); err != nil {
+		e.text(prefix + ": write base failed: " + err.Error())
+		return false
+	}
+	if err := runGitCmd("add", path); err != nil {
+		e.text(prefix + ": git add failed: " + err.Error())
+		return false
+	}
+	if err := runGitCmd("commit", "-m", "add "+path); err != nil {
+		e.text(prefix + ": git commit failed: " + err.Error())
+		return false
+	}
+	if changed == "" {
+		return true
+	}
+	if err := os.WriteFile(path, []byte(changed), 0o644); err != nil {
+		e.text(prefix + ": write change failed: " + err.Error())
+		return false
+	}
+	return true
+}
+
+func setupWalkthroughFiles(e *emitter, prefix string) bool {
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text(prefix + ": getwd failed: " + err.Error())
+		return false
+	}
+	runGitCmd := makeGitRunner(wd)
+
+	fixtures := []string{"walkthrough_a.txt", "walkthrough_b.txt", "walkthrough_c.txt", "walkthrough_base.txt"}
+	_ = runGitCmd(append([]string{"rm", "--force"}, fixtures...)...)
+	_ = runGitCmd("commit", "-m", "cleanup walkthrough fixtures")
+
+	// Three changed files (diff-anchored steps) + one clean committed file (editor-mode step).
+	ok := writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_a.txt",
+		"line 1: ENTRY\nline 2: BASE\nline 3: BASE\n",
+		"line 1: ENTRY\nline 2: WALKTHROUGH_CHANGE_A\nline 3: WALKTHROUGH_CHANGE_A\n")
+	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_b.txt",
+		"line 1: B\nline 2: BASE\n", "line 1: B\nline 2: WALKTHROUGH_CHANGE_B\n")
+	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_c.txt",
+		"line 1: C\nline 2: BASE\n", "line 1: C\nline 2: WALKTHROUGH_CHANGE_C\n")
+	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_base.txt",
+		"line 1: WALKTHROUGH_UNCHANGED\nline 2: supporting context\n", "")
+	return ok
+}
+
+func emitWalkthroughTour(e *emitter, doneText string) {
+	fixedDelay(100)
+	e.text("Let me walk you through the change.")
+	toolID := nextToolID()
+	toolName := "show_walkthrough_kandev"
+	args := walkthroughDemoArgs()
+	e.startTool(toolID, toolName, acp.ToolKindOther, args)
+	result, err := callMCPTool("kandev", toolName, args)
+	if err != nil {
+		e.completeTool(toolID, map[string]any{"error": "MCP error: " + err.Error()})
+		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))
+		return
+	}
+	e.completeTool(toolID, map[string]any{"result": result})
+	fixedDelay(50)
+	e.text(doneText)
+}
+
+// scenarioWalkthroughSetup creates changed files without emitting a walkthrough.
+// It lets E2E tests click the actual Changes-panel Walkthrough request button.
+func scenarioWalkthroughSetup(e *emitter) {
+	fixedDelay(50)
+	if !setupWalkthroughFiles(e, "walkthrough-setup") {
+		return
+	}
+	e.text("walkthrough-setup complete: changes ready")
+}
+
+// scenarioWalkthroughRequested is the mock-agent response to the prompt generated
+// by the Changes-panel Walkthrough button.
+func scenarioWalkthroughRequested(e *emitter) {
+	emitWalkthroughTour(e, "walkthrough-request complete: 5-step tour emitted")
+}
+
+// scenarioWalkthroughBasic creates changed files, then emits a 5-step code
+// walkthrough over them via the show_walkthrough_kandev MCP tool.
+func scenarioWalkthroughBasic(e *emitter) {
+	fixedDelay(50)
+	if !setupWalkthroughFiles(e, "walkthrough-basic") {
+		return
+	}
+	emitWalkthroughTour(e, "walkthrough-basic complete: 5-step tour emitted")
 }
 
 // scenarioSymlinkFileSetup creates a file and a symlink to it, commits both,

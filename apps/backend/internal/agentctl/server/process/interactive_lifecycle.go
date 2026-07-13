@@ -225,7 +225,7 @@ func (r *InteractiveRunner) startProcess(proc *interactiveProcess, cols, rows in
 	if proc.startDir != "" {
 		cmd.Dir = proc.startDir
 	}
-	cmd.Env = mergeEnv(proc.startEnv)
+	cmd.Env = mergeEnvWithStrip(proc.startEnv, req.StripEnv)
 	// Note: Do NOT set Setpgid when using PTY - it conflicts with terminal control
 	// The PTY session handles process group management
 

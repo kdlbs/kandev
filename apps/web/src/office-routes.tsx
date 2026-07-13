@@ -35,7 +35,12 @@ import {
 } from "@/lib/api/domains/office-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
-import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
+import {
+  LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE,
+  mapWorkspaceItem,
+  readActiveWorkspaceCookie,
+  readCookie,
+} from "@/lib/routing/route-bootstrap";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import {
@@ -125,6 +130,38 @@ export function resolveOfficeHomeSetupRedirect(
   return hasOfficeWorkspace(workspaceItems) ? null : "/office/setup?mode=new";
 }
 
+// The Next.js App Router page/layout convention passes route params as a
+// Promise so async server components can `await` them. In this SPA we render
+// those same components with `Promise.resolve({ id })`, but every render of
+// `OfficeRoutes` would otherwise mint a fresh Promise identity. That makes
+// `use(params)` in the consumer re-suspend forever, keeping the enclosing
+// `<Suspense>` in fallback and hiding the office tree (`display: none`).
+// Caching the resolved promise per id keeps identity stable across renders.
+// Bound the cache so long-lived sessions in large workspaces (thousands of
+// tasks/agents/projects) don't retain entries for every id ever visited. A
+// simple FIFO eviction is enough — identity only needs to be stable across the
+// renders that happen while a given route is mounted, and the current route's
+// id is always re-inserted on render (which no-ops if it's already present).
+const MAX_ID_PARAMS_PROMISE_CACHE = 500;
+const idParamsPromiseCache = new Map<string, Promise<{ id: string }>>();
+export function idParamsPromise(id: string): Promise<{ id: string }> {
+  let promise = idParamsPromiseCache.get(id);
+  if (!promise) {
+    promise = Promise.resolve({ id });
+    if (idParamsPromiseCache.size >= MAX_ID_PARAMS_PROMISE_CACHE) {
+      const oldestKey = idParamsPromiseCache.keys().next().value;
+      if (oldestKey !== undefined) idParamsPromiseCache.delete(oldestKey);
+    }
+    idParamsPromiseCache.set(id, promise);
+  }
+  return promise;
+}
+
+/** Test-only: reset the module-level cache so each test starts clean. */
+export function __resetIdParamsPromiseCacheForTests(): void {
+  idParamsPromiseCache.clear();
+}
+
 function renderOfficeRoute(pathname: string) {
   const agentRoute = matchAgentRoute(pathname);
   if (agentRoute) {
@@ -133,7 +170,7 @@ function renderOfficeRoute(pathname: string) {
 
   const projectId = matchSingle(pathname, /^\/office\/projects\/([^/]+)$/);
   if (projectId) {
-    return <ProjectDetailPage params={Promise.resolve({ id: projectId })} />;
+    return <ProjectDetailPage params={idParamsPromise(projectId)} />;
   }
 
   const routineId = matchSingle(pathname, /^\/office\/routines\/([^/]+)$/);
@@ -143,7 +180,7 @@ function renderOfficeRoute(pathname: string) {
 
   const taskId = matchSingle(pathname, /^\/office\/tasks\/([^/]+)$/);
   if (taskId) {
-    return <IssueDetailPage params={Promise.resolve({ id: taskId })} />;
+    return <IssueDetailPage params={idParamsPromise(taskId)} />;
   }
 
   return OFFICE_ROUTES[pathname]?.() ?? <OfficeRouteFallback pathname={pathname} />;
@@ -196,6 +233,7 @@ function useOfficeRouteBootstrap(
         officeWorkspaceItems,
         routeWorkspaceId,
         readActiveWorkspaceCookie(),
+        readCookie(LEGACY_OFFICE_ACTIVE_WORKSPACE_COOKIE),
         userSettingsResponse?.settings?.workspace_id ?? null,
       );
 
@@ -209,6 +247,10 @@ function useOfficeRouteBootstrap(
       store.getState().setMeta(metaResponse);
 
       if (!activeWorkspaceId) {
+        store.getState().setOfficeAgentProfiles([]);
+        store.getState().setProjects([]);
+        store.getState().setInboxItems([]);
+        store.getState().setInboxCount(0);
         setBootstrap({ complete: true, onboardingComplete });
         return;
       }
@@ -241,15 +283,17 @@ function useOfficeRouteBootstrap(
   return bootstrap;
 }
 
-function resolveActiveOfficeWorkspaceId(
-  workspaceItems: { id: string }[],
+export function resolveActiveOfficeWorkspaceId(
+  workspaceItems: { id: string; office_workflow_id?: string | null }[],
   routeWorkspaceId: string | null,
-  cookieWorkspaceId: string | null,
+  activeCookieWorkspaceId: string | null,
+  officeCookieWorkspaceId: string | null,
   settingsWorkspaceId: string | null,
 ): string | null {
   return (
     workspaceItems.find((workspace) => workspace.id === routeWorkspaceId)?.id ??
-    workspaceItems.find((workspace) => workspace.id === cookieWorkspaceId)?.id ??
+    workspaceItems.find((workspace) => workspace.id === activeCookieWorkspaceId)?.id ??
+    workspaceItems.find((workspace) => workspace.id === officeCookieWorkspaceId)?.id ??
     workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
     workspaceItems[0]?.id ??
     null
@@ -264,7 +308,7 @@ type AgentRouteMatch = {
 };
 
 function renderAgentRoute(route: AgentRouteMatch) {
-  const params = Promise.resolve({ id: route.id });
+  const params = idParamsPromise(route.id);
   if (route.bare) {
     return (
       <AgentDetailLayout params={params}>

@@ -283,7 +283,6 @@ function buildEditorAreaProps(
     onAddContextFile: p.onAddContextFile,
     onToggleContextFile: p.onToggleContextFile,
     planContextEnabled: p.planContextEnabled,
-    handleAgentCommand: s.handleAgentCommand,
     addFiles: s.addFiles,
     fileInputRef: s.fileInputRef,
     showRequestChangesTooltip: p.showRequestChangesTooltip,

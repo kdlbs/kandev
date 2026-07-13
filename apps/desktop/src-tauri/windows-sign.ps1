@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if ($env:ALLOW_UNSIGNED_DESKTOP -eq "true") {
+if ($env:WINDOWS_SIGNING_ENABLED -eq "false") {
   Write-Warning "Skipping Windows signing for unsigned desktop artifact."
   exit 0
 }

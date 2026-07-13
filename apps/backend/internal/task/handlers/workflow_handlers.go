@@ -497,5 +497,5 @@ func (h *WorkflowHandlers) convertTasksWithPrimarySessions(
 	ctx context.Context,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, tasks)
 }

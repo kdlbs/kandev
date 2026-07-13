@@ -3,9 +3,13 @@ import { describe, expect, it } from "vitest";
 import type { Message, TaskSession } from "@/lib/types/http";
 import { sessionId, taskId } from "@/lib/types/http";
 import { lastAgentErrorStamp } from "@/lib/session-last-agent-error";
-import { agentErrorMessageForTask } from "./task-agent-error";
+import {
+  agentErrorMessageForTask,
+  resolvedAgentErrorAcknowledgementStamp,
+} from "./task-agent-error";
 
 const ERROR_OCCURRED_AT = "2026-06-14T10:00:00Z";
+const AGENT_MESSAGE_AFTER_ERROR_AT = "2026-06-14T10:00:01Z";
 const PRIMARY_ERROR = "primary error";
 const PRIMARY_TASK = { id: "task-1", primarySessionId: "primary" };
 
@@ -97,6 +101,24 @@ describe("agentErrorMessageForTask", () => {
     ).toBeNull();
   });
 
+  it("hides the error when the matching stamp is sidebar-acknowledged", () => {
+    const primary = primarySession();
+    const stamp = lastAgentErrorStamp({
+      message: PRIMARY_ERROR,
+      occurredAt: ERROR_OCCURRED_AT,
+    });
+    expect(
+      agentErrorMessageForTask(
+        PRIMARY_TASK,
+        { primary },
+        { "task-1": [primary] },
+        { acknowledgedAgentErrors: { primary: stamp } },
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("agentErrorMessageForTask (hide conditions)", () => {
   it("hides the error when the session metadata is server-dismissed", () => {
     const primary = primarySession({
       metadata: {
@@ -129,7 +151,11 @@ describe("agentErrorMessageForTask", () => {
         PRIMARY_TASK,
         { primary },
         { "task-1": [primary] },
-        { messagesBySession: { primary: [agentMessage({ created_at: "2026-06-14T10:00:01Z" })] } },
+        {
+          messagesBySession: {
+            primary: [agentMessage({ created_at: AGENT_MESSAGE_AFTER_ERROR_AT })],
+          },
+        },
       ),
     ).toBeNull();
   });
@@ -143,11 +169,48 @@ describe("agentErrorMessageForTask", () => {
         { "task-1": [primary] },
         {
           messagesBySession: {
-            primary: [agentMessage({ author_type: "user", created_at: "2026-06-14T10:00:01Z" })],
+            primary: [
+              agentMessage({ author_type: "user", created_at: AGENT_MESSAGE_AFTER_ERROR_AT }),
+            ],
           },
         },
       ),
     ).toBe(PRIMARY_ERROR);
+  });
+});
+
+describe("resolvedAgentErrorAcknowledgementStamp", () => {
+  it("returns a stamp when a later agent message makes the sidebar error stale", () => {
+    const primary = primarySession();
+    const stamp = lastAgentErrorStamp({
+      message: PRIMARY_ERROR,
+      occurredAt: ERROR_OCCURRED_AT,
+    });
+
+    expect(
+      resolvedAgentErrorAcknowledgementStamp("primary", primary, {
+        messagesBySession: {
+          primary: [agentMessage({ created_at: AGENT_MESSAGE_AFTER_ERROR_AT })],
+        },
+      }),
+    ).toBe(stamp);
+  });
+
+  it("does not return a stamp when the sidebar acknowledgement is already stored", () => {
+    const primary = primarySession();
+    const stamp = lastAgentErrorStamp({
+      message: PRIMARY_ERROR,
+      occurredAt: ERROR_OCCURRED_AT,
+    });
+
+    expect(
+      resolvedAgentErrorAcknowledgementStamp("primary", primary, {
+        acknowledgedAgentErrors: { primary: stamp },
+        messagesBySession: {
+          primary: [agentMessage({ created_at: AGENT_MESSAGE_AFTER_ERROR_AT })],
+        },
+      }),
+    ).toBeNull();
   });
 });
 

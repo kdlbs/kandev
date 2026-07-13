@@ -35,15 +35,16 @@ func isTerminalSessionState(state models.TaskSessionState) bool {
 
 // repoInfo holds resolved repository details for agent launch.
 type repoInfo struct {
-	RepositoryID         string
-	RepositoryPath       string
-	BaseBranch           string
-	CheckoutBranch       string
-	PRNumber             int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
-	Position             int
-	WorktreeBranchPrefix string
-	PullBeforeWorktree   bool
-	Repository           *models.Repository
+	RepositoryID           string
+	RepositoryPath         string
+	BaseBranch             string
+	CheckoutBranch         string
+	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; sourced from task_repositories.metadata["pr_number"].
+	Position               int
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	PullBeforeWorktree     bool
+	Repository             *models.Repository
 }
 
 // resolvePrimaryRepoInfo fetches and resolves the primary repository info for a task.
@@ -130,6 +131,7 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 	info.Repository = repo
 	info.RepositoryPath = repo.LocalPath
 	info.WorktreeBranchPrefix = repo.WorktreeBranchPrefix
+	info.WorktreeBranchTemplate = repo.WorktreeBranchTemplate
 	info.PullBeforeWorktree = repo.PullBeforeWorktree
 	if info.BaseBranch == "" && repo.DefaultBranch != "" {
 		info.BaseBranch = repo.DefaultBranch
@@ -199,7 +201,7 @@ func (e *Executor) backfillRepoDefaultBranch(ctx context.Context, repo *models.R
 	if repo.DefaultBranch != "" || localPath == "" {
 		return
 	}
-	detected, err := gitref.DefaultBranch(localPath)
+	detected, err := gitref.DefaultBranchOrEmpty(localPath)
 	if err != nil || detected == "" {
 		e.logger.Debug("could not detect default branch from clone; leaving empty",
 			zap.String("repository_id", repo.ID),
@@ -230,7 +232,7 @@ func (e *Executor) backfillRepoDefaultBranch(ctx context.Context, repo *models.R
 // What remains here: state transitions (e.g., STARTING) and prepare-result
 // metadata merge, both of which are session-row concerns the lifecycle manager
 // doesn't know about.
-func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time) {
+func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, resp *LaunchAgentResponse, startAgent bool, now time.Time) error {
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 	}
@@ -247,12 +249,20 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 		session.Metadata["prepare_result"] = buildPrepareResultMetadata(resp.PrepareResult)
 	}
 
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	var updateErr error
+	if startAgent {
+		updateErr = e.updateSessionStarting(ctx, taskID, session, true)
+	} else {
+		updateErr = e.repo.UpdateTaskSession(ctx, session)
+	}
+	if updateErr != nil {
 		e.logger.Error("failed to update agent session after launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
-			zap.Error(err))
+			zap.Error(updateErr))
+		return updateErr
 	}
+	return nil
 }
 
 // buildPrepareResultMetadata serializes a prepare result for storage in session metadata.
@@ -389,7 +399,10 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		return nil, err
 	}
 
-	e.persistResumeState(ctx, task.ID, session, startAgent)
+	if err := e.persistResumeState(ctx, task.ID, session, startAgent); err != nil {
+		e.stopUnstartedExecution(ctx, session.ID, resp.AgentExecutionID)
+		return nil, err
+	}
 	e.persistWorktreeAssociation(ctx, task.ID, session, repositoryID, resp)
 	// Refresh task_environments after a successful resume so the row reflects
 	// the new worktree, container, and ready status. Without this, sessions
@@ -532,6 +545,7 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	if len(session.Worktrees) > 0 && session.Worktrees[0].WorktreeID != "" {
 		metadata["worktree_id"] = session.Worktrees[0].WorktreeID
 	}
+	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 
 	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
 
@@ -765,6 +779,9 @@ func (e *Executor) applyResumeMultiRepoConfig(ctx context.Context, task *v1.Task
 	}
 	if len(allRepos) > 1 {
 		req.Repositories = buildRepoSpecs(allRepos)
+		for i := range req.Repositories {
+			req.Repositories[i].WorktreeBranchTicket = req.WorktreeBranchTicket
+		}
 		req.TaskDirName = resolveResumeTaskDirName(existingEnv, task)
 	}
 	return nil
@@ -796,6 +813,7 @@ func (e *Executor) applyResumeWorktreeConfig(
 		req.PRNumber = prNumberFromMetadata(primaryTaskRepo.Metadata)
 	}
 	req.WorktreeBranchPrefix = repository.WorktreeBranchPrefix
+	req.WorktreeBranchTemplate = repository.WorktreeBranchTemplate
 	req.PullBeforeWorktree = repository.PullBeforeWorktree
 	// Worktree manager requires TaskDirName and RepoName. Mirror the
 	// initial-launch path (applyRepositoryConfig) so resumes of single-repo
@@ -827,19 +845,27 @@ func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task
 // and not touched here — see lifecycle.persistExecutorRunning. The
 // orchestrator's only remaining responsibility is the session-row state
 // machine (STARTING / CompletedAt-clear).
-func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, startAgent bool) {
+func (e *Executor) persistResumeState(ctx context.Context, taskID string, session *models.TaskSession, startAgent bool) error {
 	session.ErrorMessage = ""
 	if startAgent {
 		session.State = models.TaskSessionStateStarting
 		session.CompletedAt = nil
 	}
 
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	var updateErr error
+	if startAgent {
+		updateErr = e.updateSessionStarting(ctx, taskID, session, false)
+	} else {
+		updateErr = e.repo.UpdateTaskSession(ctx, session)
+	}
+	if updateErr != nil {
 		e.logger.Error("failed to update task session for resume",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
-			zap.Error(err))
+			zap.Error(updateErr))
+		return updateErr
 	}
+	return nil
 }
 
 // prNumberFromMetadata extracts a GitHub PR number from a task_repository's
@@ -876,9 +902,50 @@ func prNumberFromMetadata(metadata map[string]interface{}) int {
 // just logs successful process start.
 func (e *Executor) startAgentProcessOnResume(ctx context.Context, taskID string, session *models.TaskSession, agentExecutionID string) {
 	e.runAgentProcessAsync(ctx, taskID, session.ID, agentExecutionID, func(updCtx context.Context) {
+		if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, session.ID); updateErr != nil {
+			e.logger.Warn("failed to update task state to IN_PROGRESS after resume start",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID),
+				zap.Error(updateErr))
+		}
 		e.logger.Debug("agent resumed successfully",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.String("session_state", string(session.State)))
 	}, false, true)
+}
+
+func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID, sessionID string) error {
+	task, err := e.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task != nil && task.ArchivedAt != nil {
+		e.logger.Debug("skipping IN_PROGRESS transition for archived task",
+			zap.String("task_id", taskID))
+		return nil
+	}
+	if task != nil && task.AssigneeAgentProfileID != "" {
+		e.logger.Debug("skipping IN_PROGRESS transition for office task",
+			zap.String("task_id", taskID))
+		return nil
+	}
+	if sessionID != "" {
+		session, err := e.repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		if session == nil || !isRuntimeWorkingSessionState(session.State) {
+			state := ""
+			if session != nil {
+				state = string(session.State)
+			}
+			e.logger.Debug("skipping IN_PROGRESS transition because resumed session is no longer active",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("session_state", state))
+			return nil
+		}
+	}
+	return e.updateTaskState(ctx, taskID, v1.TaskStateInProgress)
 }

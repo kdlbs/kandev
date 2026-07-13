@@ -242,7 +242,7 @@ func TestService_CheckIssueWatch_FiltersAlreadySeen(t *testing.T) {
 	ctx := context.Background()
 
 	// Configure JIRA so clientFor succeeds.
-	if _, err := f.svc.SetConfig(ctx, &SetConfigRequest{
+	if _, err := f.svc.SetConfigForWorkspace(ctx, "ws-1", &SetConfigRequest{
 		SiteURL: "https://a.net", Email: "e",
 		AuthMethod: AuthMethodAPIToken, InstanceType: InstanceTypeCloud, Secret: "tok",
 	}); err != nil {

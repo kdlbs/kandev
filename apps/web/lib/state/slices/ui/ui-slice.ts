@@ -91,6 +91,7 @@ export const defaultUIState: UISliceState = {
   quickChat: { isOpen: false, sessions: [], activeSessionId: null },
   configChat: { isOpen: false, sessions: [], activeSessionId: null, workspaceId: null },
   sessionFailureNotification: null,
+  taskDeletedNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
   sidebarViews: loadSidebarState(),
   collapsedSubtaskParents: [],
@@ -102,6 +103,7 @@ export const defaultUIState: UISliceState = {
     width: APP_SIDEBAR_EXPANDED_WIDTH,
     settingsMode: false,
   },
+  acknowledgedAgentErrors: {},
   dismissedAgentErrors: {},
 };
 
@@ -292,6 +294,19 @@ function buildConfigChatActions(set: ImmerSet) {
   };
 }
 
+function buildNotificationActions(set: ImmerSet) {
+  return {
+    setSessionFailureNotification: (n: UISlice["sessionFailureNotification"]) =>
+      set((draft) => {
+        draft.sessionFailureNotification = n;
+      }),
+    setTaskDeletedNotification: (n: UISlice["taskDeletedNotification"]) =>
+      set((draft) => {
+        draft.taskDeletedNotification = n;
+      }),
+  };
+}
+
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
   set,
   get,
@@ -316,6 +331,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildCollapsedSubtaskActions(set, get),
   ...buildSystemHealthActions(set),
   ...buildDismissedAgentErrors(set),
+  ...buildNotificationActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;
@@ -393,8 +409,4 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     });
     if (renamed) setStoredQuickChatName(sessionId, name);
   },
-  setSessionFailureNotification: (n) =>
-    set((draft) => {
-      draft.sessionFailureNotification = n;
-    }),
 });

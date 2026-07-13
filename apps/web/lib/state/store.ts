@@ -8,6 +8,7 @@ import type {
   Message,
   Turn,
   TaskSession,
+  TaskWalkthrough,
 } from "@/lib/types/http";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
@@ -155,6 +156,7 @@ export type AppState = {
   pendingModel: (typeof defaultSessionState)["pendingModel"];
   activeModel: (typeof defaultSessionState)["activeModel"];
   taskPlans: (typeof defaultSessionState)["taskPlans"];
+  walkthroughs: (typeof defaultSessionState)["walkthroughs"];
   queue: (typeof defaultSessionState)["queue"];
 
   // Session Runtime slice
@@ -228,12 +230,14 @@ export type AppState = {
   quickChat: (typeof defaultUIState)["quickChat"];
   configChat: (typeof defaultUIState)["configChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
+  taskDeletedNotification: (typeof defaultUIState)["taskDeletedNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
   kanbanPreviewedTaskId: (typeof defaultUIState)["kanbanPreviewedTaskId"];
   sidebarTaskPrefs: (typeof defaultUIState)["sidebarTaskPrefs"];
   appSidebar: (typeof defaultUIState)["appSidebar"];
+  acknowledgedAgentErrors: (typeof defaultUIState)["acknowledgedAgentErrors"];
   dismissedAgentErrors: (typeof defaultUIState)["dismissedAgentErrors"];
 
   // GitLab actions
@@ -380,6 +384,7 @@ export type AppState = {
   setActiveConfigChatSession: (sessionId: string) => void;
   renameConfigChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
+  setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;
@@ -403,6 +408,7 @@ export type AppState = {
   ) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
   updateMessage: (message: Message) => void;
+  removeMessage: (sessionId: string, messageId: string) => void;
   prependMessages: (
     sessionId: string,
     messages: Message[],
@@ -465,6 +471,10 @@ export type AppState = {
   setPreviewRevision: (taskId: string, revisionId: string | null) => void;
   toggleComparePair: (taskId: string, revisionId: string) => void;
   clearComparePair: (taskId: string) => void;
+  // Walkthrough actions
+  setWalkthrough: (taskId: string, walkthrough: TaskWalkthrough | null) => void;
+  setWalkthroughActiveStep: (taskId: string, stepIndex: number) => void;
+  markWalkthroughSeen: (taskId: string) => void;
   // Queue actions
   setQueueEntries: (
     sessionId: string,
@@ -522,6 +532,8 @@ export type AppState = {
   migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
   setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
   togglePinnedTask: UIA["togglePinnedTask"];
+  pinTasks: UIA["pinTasks"];
+  unpinTasks: UIA["unpinTasks"];
   setSidebarTaskOrder: UIA["setSidebarTaskOrder"];
   setSubtaskOrder: UIA["setSubtaskOrder"];
   removeTaskFromSidebarPrefs: UIA["removeTaskFromSidebarPrefs"];
@@ -530,6 +542,7 @@ export type AppState = {
   toggleAppSidebarSection: UIA["toggleAppSidebarSection"];
   setAppSidebarWidth: UIA["setAppSidebarWidth"];
   toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
+  acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
   // Office actions
   setOfficeAgentProfiles: (agents: AgentProfile[]) => void;

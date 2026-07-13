@@ -1,4 +1,4 @@
-import type { TaskState as TaskStatus } from "@/lib/types/http";
+import type { TaskPendingAction, TaskState as TaskStatus } from "@/lib/types/http";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -57,6 +57,7 @@ export type KanbanState = {
     }>;
     primarySessionId?: string | null;
     primarySessionState?: string | null;
+    primarySessionPendingAction?: TaskPendingAction | null;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     primaryExecutorId?: string | null;
@@ -79,6 +80,7 @@ export type WorkflowSnapshotData = {
   workflowName: string;
   steps: KanbanState["steps"];
   tasks: KanbanState["tasks"];
+  isPlaceholder?: boolean;
 };
 
 export type KanbanMultiState = {

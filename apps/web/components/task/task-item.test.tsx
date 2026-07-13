@@ -94,6 +94,29 @@ describe("TaskItem status icon", () => {
     expectPreparingSpinner();
   });
 
+  it("does not show a spinner for a created task waiting for manual start", () => {
+    renderTaskItem({ state: "CREATED" });
+
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("task-state-backlog")).not.toBeNull();
+  });
+
+  it("does not show a spinner for a created task with a prepared CREATED session", () => {
+    renderTaskItem({ state: "CREATED", sessionState: "CREATED" });
+
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("task-state-backlog")).not.toBeNull();
+  });
+
+  it("shows a running spinner while an in-progress session is created but not started", () => {
+    renderTaskItem({ state: "IN_PROGRESS", sessionState: "CREATED" });
+
+    const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
+    expect(icon.getAttribute("data-loading-phase")).toBe("running");
+    expect(icon.classList.contains("text-yellow-500")).toBe(true);
+    expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
+  });
+
   it("does not show preparing spinner for a review task whose session transiently hits STARTING", () => {
     renderTaskItem({ state: "REVIEW", sessionState: "STARTING" });
 

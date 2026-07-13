@@ -34,13 +34,17 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
 ## Steps
 
-**Create a task for each step below and mark them as completed as you go.**
+Track these steps with an internal todo/checklist and mark them complete as you go.
+Do not create, update, or delete Kandev subtasks for this workflow unless the user
+explicitly requests task tracking.
 
 1. **Uncommitted changes:** If there are dirty or staged changes, run `/commit` first (it runs `/verify` internally).
 
 2. **Branch:** If on `main`, create a new branch from the commits (use a descriptive name like `feat/short-description` or `fix/short-description`) and switch to it. If already on a feature branch, use it as-is.
 
 3. **Push** the branch to origin with `-u` to set upstream tracking.
+
+   If the branch modifies `.github/workflows/*` and GitHub rejects the push with a message like `refusing to allow an OAuth App to create or update workflow ... without workflow scope`, treat it as push authentication/scope, not a code or branch-protection failure. Retry with an SSH remote when available, for example `git push git@github.com:<owner>/<repo>.git <branch>`, or tell the user the token needs `workflow` scope.
 
 4. **Create the PR.** Use `--draft` flag if the user requested draft mode, otherwise create as ready-for-review.
 
@@ -72,7 +76,7 @@ description: Commit, push, and create a PR. Default is ready-for-review with aut
 
    After pushing review fixes, interpret `scripts/pr-state --summary <PR>` thread counts carefully. The command filters thread details by the latest head commit, so `filtered_review_thread_count` can include resolved historical threads from the current filtered view. Treat `unresolved_review_thread_count` as the blocker. For example, a re-check may show `unresolved_review_thread_count: 0` and `filtered_review_thread_count: 3`; do not turn the filtered historical count into new unresolved work.
 
-   A ready PR may still end with "CI pending" after fixup when no checks have failed and no review threads remain unresolved, especially after a late fixup push restarts CodeQL, E2E, or preview jobs. When PR checks include long E2E shard queues, continue fixing failed checks and unresolved review threads, but it is acceptable to report the PR as ready locally once full local verification is green, CodeQL/security alerts are intentionally handled, required non-E2E checks are passing, and only queued/in-progress E2E shards remain with no failures. Do not wait indefinitely; include the exact pending checks from the final re-check in the response.
+   A ready PR may still end with "CI pending" after fixup when no checks have failed and no review threads remain unresolved, especially after a late fixup push restarts CodeQL, E2E, or preview jobs. Continue fixing failed checks and unresolved review threads, but it is acceptable to report the PR as ready locally once full local verification is green, `failed_checks: []`, `unresolved_review_thread_count: 0`, and only queued/in-progress long-running checks remain. This includes CodeQL and preview deploy as well as E2E shards; do not wait indefinitely. Include the exact pending checks from the final re-check in the response, and stop immediately if a pending check fails or a new unresolved thread appears.
 
 6. **PR screenshots:** After creating the PR, check if `apps/web/.pr-assets/manifest.json` exists. If it does:
    - Read the manifest to list available screenshots/GIFs

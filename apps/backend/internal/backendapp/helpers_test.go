@@ -22,6 +22,7 @@ import (
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	sqlitetaskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 	userservice "github.com/kandev/kandev/internal/user/service"
@@ -30,6 +31,7 @@ import (
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -113,6 +115,82 @@ func TestAppendAgentctlStatusMessage_IncludesWorkspacePathForReload(t *testing.T
 	}
 	if got != workspacePath {
 		t.Fatalf("expected worktree_path=%q, got %v", workspacePath, got)
+	}
+}
+
+func TestResolveRepositoryIDForSessionSubpathMatchesSanitizedRepositoryName(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "backendapp-session.db")
+	dbConn, err := db.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	repo, err := sqlitetaskrepo.NewWithDB(sqlxDB, sqlxDB, nil)
+	if err != nil {
+		t.Fatalf("new task repo: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+
+	log, err := logger.NewLogger(logger.LoggingConfig{
+		Level:      "error",
+		Format:     "console",
+		OutputPath: "stdout",
+	})
+	if err != nil {
+		t.Fatalf("NewLogger: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if _, err := sqlxDB.Exec(sqlxDB.Rebind(`
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`), "workspace-1", "Workspace", now, now); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if _, err := sqlxDB.Exec(sqlxDB.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-1", "workspace-1", "Test task", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if _, err := sqlxDB.Exec(sqlxDB.Rebind(`
+		INSERT INTO task_sessions (id, task_id, started_at, updated_at)
+		VALUES (?, ?, ?, ?)
+	`), "session-1", "task-1", now, now); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID:                     "repo-1",
+		WorkspaceID:            "workspace-1",
+		Name:                   "kdlbs/kandev",
+		SourceType:             "remote",
+		Provider:               "github",
+		ProviderOwner:          "kdlbs",
+		ProviderName:           "kandev",
+		DefaultBranch:          "main",
+		WorktreeBranchPrefix:   "feature/",
+		WorktreeBranchTemplate: "feature/{title}-{suffix}",
+		PullBeforeWorktree:     true,
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID:             "session-worktree-1",
+		SessionID:      "session-1",
+		WorktreeID:     "worktree-1",
+		RepositoryID:   "repo-1",
+		WorktreePath:   "/tmp/worktree",
+		WorktreeBranch: "feature/test",
+		BranchSlug:     "test",
+		Position:       0,
+	}); err != nil {
+		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+	}
+
+	got := resolveRepositoryIDForSessionSubpath(ctx, repo, "session-1", "kdlbs-kandev", log)
+	if got != "repo-1" {
+		t.Fatalf("resolveRepositoryIDForSessionSubpath = %q, want repo-1", got)
 	}
 }
 
@@ -212,7 +290,8 @@ func (s *shutdownDeadlineExecutor) ShouldApplyPreferredShell() bool { return tru
 func (s *shutdownDeadlineExecutor) IsAlwaysResumable() bool { return false }
 
 func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
-	taskSvc, workflowSvc := newBootStateTestServices(t)
+	harness := newBootStateTestHarness(t)
+	taskSvc, workflowSvc := harness.taskSvc, harness.workflowSvc
 	ctx := context.Background()
 
 	workspaces, err := taskSvc.ListWorkspaces(ctx)
@@ -228,6 +307,57 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 	}
 	if len(workflows) == 0 {
 		t.Fatal("expected seeded default workflow")
+	}
+	steps, err := workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	if len(steps) == 0 {
+		t.Fatal("expected seeded default workflow step")
+	}
+	task, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID:    workspaces[0].ID,
+		WorkflowID:     workflows[0].ID,
+		WorkflowStepID: steps[0].ID,
+		Title:          "Boot home task",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := harness.taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:        "boot-session-waiting",
+		TaskID:    task.ID,
+		State:     models.TaskSessionStateWaitingForInput,
+		IsPrimary: true,
+		StartedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := harness.taskRepo.CreateTurn(ctx, &models.Turn{
+		ID:            "boot-turn-waiting",
+		TaskID:        task.ID,
+		TaskSessionID: "boot-session-waiting",
+		StartedAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	if err := harness.taskRepo.CreateMessage(ctx, &models.Message{
+		ID:            "boot-clarification",
+		TaskID:        task.ID,
+		TaskSessionID: "boot-session-waiting",
+		TurnID:        "boot-turn-waiting",
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          models.MessageTypeClarificationRequest,
+		Content:       "Need input",
+		Metadata:      map[string]interface{}{"status": "pending"},
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
 	}
 
 	state := bootInitialState(
@@ -268,8 +398,10 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 					Title string `json:"title"`
 				} `json:"steps"`
 				Tasks []struct {
-					ID             string `json:"id"`
-					WorkflowStepID string `json:"workflowStepId"`
+					ID                          string  `json:"id"`
+					WorkflowStepID              string  `json:"workflowStepId"`
+					PrimarySessionState         *string `json:"primarySessionState"`
+					PrimarySessionPendingAction *string `json:"primarySessionPendingAction"`
 				} `json:"tasks"`
 			} `json:"snapshots"`
 			IsLoading bool `json:"isLoading"`
@@ -281,8 +413,10 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 				Title string `json:"title"`
 			} `json:"steps"`
 			Tasks []struct {
-				ID             string `json:"id"`
-				WorkflowStepID string `json:"workflowStepId"`
+				ID                          string  `json:"id"`
+				WorkflowStepID              string  `json:"workflowStepId"`
+				PrimarySessionState         *string `json:"primarySessionState"`
+				PrimarySessionPendingAction *string `json:"primarySessionPendingAction"`
 			} `json:"tasks"`
 			IsLoading bool `json:"isLoading"`
 		} `json:"kanban"`
@@ -300,8 +434,25 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 	if _, ok := decoded.KanbanMulti.Snapshots[workflows[0].ID]; !ok {
 		t.Fatalf("expected snapshot for workflow %q in boot payload", workflows[0].ID)
 	}
+	snapshotTask := decoded.KanbanMulti.Snapshots[workflows[0].ID].Tasks[0]
+	if snapshotTask.PrimarySessionState == nil || *snapshotTask.PrimarySessionState != "WAITING_FOR_INPUT" {
+		t.Fatalf("snapshot primarySessionState = %#v, want WAITING_FOR_INPUT", snapshotTask.PrimarySessionState)
+	}
+	if snapshotTask.PrimarySessionPendingAction == nil || *snapshotTask.PrimarySessionPendingAction != "clarification" {
+		t.Fatalf(
+			"snapshot primarySessionPendingAction = %#v, want clarification",
+			snapshotTask.PrimarySessionPendingAction,
+		)
+	}
 	if decoded.Kanban.WorkflowID != workflows[0].ID {
 		t.Fatalf("active kanban workflow = %q, want %q", decoded.Kanban.WorkflowID, workflows[0].ID)
+	}
+	activeTask := decoded.Kanban.Tasks[0]
+	if activeTask.PrimarySessionPendingAction == nil || *activeTask.PrimarySessionPendingAction != "clarification" {
+		t.Fatalf(
+			"active primarySessionPendingAction = %#v, want clarification",
+			activeTask.PrimarySessionPendingAction,
+		)
 	}
 	if decoded.KanbanMulti.IsLoading || decoded.Kanban.IsLoading {
 		t.Fatal("boot payload should mark kanban data loaded")
@@ -612,6 +763,139 @@ func TestBootPayloadIncludesDebugRuntimeWhenDevMode(t *testing.T) {
 	}
 }
 
+func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	repo := harness.taskRepo
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-qc", Name: "Quick Chats"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-qc", WorkspaceID: "ws-qc", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-old", title: "Older Chat", updatedAt: base.Add(-2 * time.Hour),
+		sessionUpdatedAt: base.Add(-90 * time.Minute), agentProfileID: "agent-old",
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-new", title: "Newer Chat", updatedAt: base.Add(-4 * time.Hour),
+		sessionUpdatedAt: base.Add(-10 * time.Minute), agentProfileID: "agent-new",
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-config", title: "Config", updatedAt: base, sessionUpdatedAt: base,
+		agentProfileID: "agent-config", metadata: map[string]interface{}{"config_mode": true},
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-automation", title: "Automation", updatedAt: base, sessionUpdatedAt: base,
+		agentProfileID: "agent-automation", origin: models.TaskOriginAutomationRun,
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-workflow", title: "Workflow Ephemeral", updatedAt: base, sessionUpdatedAt: base,
+		agentProfileID: "agent-workflow", workflowID: "wf-qc",
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/?workspaceId=ws-qc", nil)
+	payload := bootPayload(ctx, req, routeParams{
+		taskSvc:  harness.taskSvc,
+		services: &Services{Workflow: harness.workflowSvc},
+		userCtrl: harness.userCtrl,
+	}, webapp.ClassifyRoute("/"))
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	var decoded struct {
+		InitialState struct {
+			QuickChat struct {
+				Sessions []struct {
+					SessionID      string `json:"sessionId"`
+					WorkspaceID    string `json:"workspaceId"`
+					Name           string `json:"name"`
+					AgentProfileID string `json:"agentProfileId"`
+				} `json:"sessions"`
+				IsOpen bool `json:"isOpen"`
+			} `json:"quickChat"`
+			TaskSessions struct {
+				Items map[string]struct {
+					TaskID string `json:"task_id"`
+				} `json:"items"`
+			} `json:"taskSessions"`
+		} `json:"initialState"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal payload: %v", err)
+	}
+
+	sessions := decoded.InitialState.QuickChat.Sessions
+	if len(sessions) != 2 {
+		t.Fatalf("quickChat sessions = %#v, want 2 restored sessions", sessions)
+	}
+	if got := sessions[0].SessionID; got != "task-new-session" {
+		t.Fatalf("first restored session = %q, want newest task-new-session", got)
+	}
+	if sessions[0].AgentProfileID != "agent-new" || sessions[1].AgentProfileID != "agent-old" {
+		t.Fatalf("agent profile IDs = %#v", sessions)
+	}
+	if got := decoded.InitialState.TaskSessions.Items["task-new-session"].TaskID; got != "task-new" {
+		t.Fatalf("quick chat task session task_id = %q, want task-new", got)
+	}
+	if decoded.InitialState.QuickChat.IsOpen {
+		t.Fatal("quick chat should hydrate closed")
+	}
+}
+
+type bootQuickChatFixture struct {
+	id               string
+	title            string
+	workflowID       string
+	origin           string
+	agentProfileID   string
+	metadata         map[string]interface{}
+	updatedAt        time.Time
+	sessionUpdatedAt time.Time
+}
+
+func seedBootQuickChatTask(t *testing.T, repo *sqlitetaskrepo.Repository, ctx context.Context, f bootQuickChatFixture) {
+	t.Helper()
+	metadata := map[string]interface{}{models.MetaKeyAgentProfileID: f.agentProfileID}
+	for key, value := range f.metadata {
+		metadata[key] = value
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:          f.id,
+		WorkspaceID: "ws-qc",
+		WorkflowID:  f.workflowID,
+		Title:       f.title,
+		State:       v1.TaskStateTODO,
+		Priority:    "medium",
+		IsEphemeral: true,
+		Origin:      f.origin,
+		Metadata:    metadata,
+	}); err != nil {
+		t.Fatalf("CreateTask(%s): %v", f.id, err)
+	}
+	if _, err := repo.DB().ExecContext(ctx,
+		`UPDATE tasks SET created_at = ?, updated_at = ? WHERE id = ?`,
+		f.updatedAt.Add(-time.Hour), f.updatedAt, f.id,
+	); err != nil {
+		t.Fatalf("backdate task(%s): %v", f.id, err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:             f.id + "-session",
+		TaskID:         f.id,
+		AgentProfileID: f.agentProfileID,
+		State:          models.TaskSessionStateCompleted,
+		StartedAt:      f.sessionUpdatedAt.Add(-time.Hour),
+		UpdatedAt:      f.sessionUpdatedAt,
+		IsPrimary:      true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession(%s): %v", f.id, err)
+	}
+}
+
 func TestBootRouteDataIntegrationRouteIncludesOnlyLocalContext(t *testing.T) {
 	taskSvc, workflowSvc := newBootStateTestServices(t)
 	ctx := context.Background()
@@ -827,6 +1111,7 @@ func TestQueryValueReadsRouteQueryFromAppStatePath(t *testing.T) {
 
 type bootStateTestHarness struct {
 	taskSvc     *taskservice.Service
+	taskRepo    *sqlitetaskrepo.Repository
 	workflowSvc *workflowservice.Service
 	userCtrl    *usercontroller.Controller
 	userSvc     *userservice.Service
@@ -901,6 +1186,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
 	return bootStateTestHarness{
 		taskSvc:     taskSvc,
+		taskRepo:    taskRepo,
 		workflowSvc: workflowSvc,
 		userCtrl:    usercontroller.NewController(userSvc),
 		userSvc:     userSvc,

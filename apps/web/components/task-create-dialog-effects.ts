@@ -16,30 +16,23 @@ import type {
   DialogFormState,
   StoreSelections,
   TaskCreateEffectsArgs,
-  TaskRepoRow,
 } from "@/components/task-create-dialog-types";
 import {
   useAgentProfileAutopickEffect,
   useWorkflowAgentProfileEffect,
 } from "@/components/task-create-dialog-autopick";
+import { useMultiRepoGuardEffect } from "@/components/task-create-dialog-multi-repo-guard";
+import { useRepositoryAutoSelectEffect } from "@/components/task-create-dialog-repository-autopick";
 import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 // Re-export autopick hooks for callers that imported them from this module.
 export { useWorkflowAgentProfileEffect };
+export { useRepositoryAutoSelectEffect } from "@/components/task-create-dialog-repository-autopick";
 // Also re-exported for the test file, which expects the symbol to live here.
 export { decideAgentProfileAutopick } from "@/components/task-create-dialog-autopick";
 
 const selectionDebug = createDebugLogger("task-create:selection");
-
-type RepositoryAutoPickDecision = {
-  pickId: string | null;
-  source: string;
-  localStorageRepoId: string | null;
-  localStorageValid: boolean;
-  settingsRepoId: string | null;
-  settingsValid: boolean;
-};
 
 export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
   const { selectedWorkflowId, setFetchedSteps } = fs;
@@ -62,122 +55,6 @@ export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string |
       cancelled = true;
     };
   }, [selectedWorkflowId, workflowId, setFetchedSteps]);
-}
-
-export function useRepositoryAutoSelectEffect(
-  fs: DialogFormState,
-  open: boolean,
-  workspaceId: string | null,
-  repositories: Repository[],
-  lastUsedRepositoryId?: string | null,
-) {
-  // On open, ensure there's always at least one chip rendered: prefer the
-  // user's last-used repo (or the workspace's only repo) so the chip lands
-  // pre-filled, but fall back to an empty row so the picker is visible
-  // instead of just the "+" button. URL mode is excluded — that flow swaps
-  // the chip row for a URL input.
-  const { repositories: rows, useRemote, setRepositories } = fs;
-  useEffect(() => {
-    if (!open || !workspaceId || useRemote) return;
-    const decision = decideRepositoryAutoPick(repositories, lastUsedRepositoryId);
-    const { pickId } = decision;
-    if (rows.length > 0 && !canReplaceEmptyRepositoryPlaceholder(rows, pickId)) return;
-    logRepositoryAutoPick(workspaceId, repositories.length, decision);
-    // Use the functional setter so the deferred microtask sees fresh state.
-    // Without this, a sibling effect (resetTaskForm / useLockedFieldSync) that
-    // seeds rows from `initialValues.repositoryId` synchronously races with
-    // this microtask — the microtask captured rows.length === 0 at queue time
-    // and would blindly clobber the initialValues-seeded row.
-    void Promise.resolve().then(() => {
-      setRepositories((prev) => {
-        if (prev.length > 0) {
-          if (canReplaceEmptyRepositoryPlaceholder(prev, pickId)) {
-            return [buildRepositoryAutoPickRow(prev[0]?.key ?? "row-0", pickId!)];
-          }
-          if (isDebug()) {
-            selectionDebug("repository-autopick-skip", {
-              reason: "rows-seeded-before-microtask",
-              row_count: prev.length,
-            });
-          }
-          return prev;
-        }
-        return [
-          pickId ? buildRepositoryAutoPickRow("row-0", pickId) : { key: "row-0", branch: "" },
-        ];
-      });
-    });
-  }, [open, repositories, rows, useRemote, workspaceId, setRepositories, lastUsedRepositoryId]);
-}
-
-function decideRepositoryAutoPick(
-  repositories: Repository[],
-  lastUsedRepositoryId?: string | null,
-): RepositoryAutoPickDecision {
-  const localStorageRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
-  const settingsRepoId = lastUsedRepositoryId ?? null;
-  const localStorageValid = isRepositoryIdValid(localStorageRepoId, repositories);
-  const settingsValid = isRepositoryIdValid(settingsRepoId, repositories);
-  if (localStorageRepoId && localStorageValid) {
-    return {
-      pickId: localStorageRepoId,
-      source: "localStorage:lastRepositoryId",
-      localStorageRepoId,
-      localStorageValid,
-      settingsRepoId,
-      settingsValid,
-    };
-  }
-  if (settingsRepoId && settingsValid) {
-    return {
-      pickId: settingsRepoId,
-      source: "settings:taskCreateLastUsed",
-      localStorageRepoId,
-      localStorageValid,
-      settingsRepoId,
-      settingsValid,
-    };
-  }
-  return {
-    pickId: repositories.length === 1 ? repositories[0].id : null,
-    source: repositories.length === 1 ? "single-workspace-repo" : "empty-row",
-    localStorageRepoId,
-    localStorageValid,
-    settingsRepoId,
-    settingsValid,
-  };
-}
-
-function isRepositoryIdValid(repositoryId: string | null, repositories: Repository[]): boolean {
-  return Boolean(repositoryId && repositories.some((r: Repository) => r.id === repositoryId));
-}
-
-function logRepositoryAutoPick(
-  workspaceId: string,
-  repoCount: number,
-  decision: RepositoryAutoPickDecision,
-) {
-  if (!isDebug()) return;
-  selectionDebug("repository-autopick", {
-    workspace_id: workspaceId,
-    local_storage_id: decision.localStorageRepoId ?? "-",
-    local_storage_valid: decision.localStorageValid,
-    settings_id: decision.settingsRepoId ?? "-",
-    settings_valid: decision.settingsValid,
-    repo_count: repoCount,
-    source: decision.source,
-    pick: decision.pickId ?? "-",
-  });
-}
-
-function buildRepositoryAutoPickRow(key: string, repositoryId: string): TaskRepoRow {
-  return { key, repositoryId, branch: "" };
-}
-
-function canReplaceEmptyRepositoryPlaceholder(rows: TaskRepoRow[], pickId: string | null): boolean {
-  if (!pickId || rows.length !== 1) return false;
-  const row = rows[0];
-  return Boolean(row && !row.repositoryId && !row.localPath && !row.branch);
 }
 
 export function useDiscoverReposEffect(
@@ -342,6 +219,7 @@ function pickDefaultExecutorProfileId(
   workspaceDefaults: { default_executor_id?: string | null } | null | undefined,
   noRepository: boolean,
   preferLocalExecutor: boolean,
+  lastUsedExecutorProfileId?: string | null,
 ): string | null {
   const allProfiles = flattenExecutorProfiles(executors);
   if (allProfiles.length === 0) return null;
@@ -352,6 +230,12 @@ function pickDefaultExecutorProfileId(
   if (eligibleProfiles.length === 0) return null;
 
   const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
+  if (
+    lastUsedExecutorProfileId &&
+    eligibleProfiles.some((p) => p.id === lastUsedExecutorProfileId)
+  ) {
+    return lastUsedExecutorProfileId;
+  }
   if (lastId && eligibleProfiles.some((p) => p.id === lastId)) return lastId;
 
   const executorId = pickDefaultExecutorId(
@@ -367,40 +251,94 @@ function pickDefaultExecutorProfileId(
 type ExecutorAutopickContext = {
   executors: Executor[];
   workspaceDefaults: StoreSelections["workspaceDefaults"];
+  userSettingsLoaded?: boolean;
+  lastUsedExecutorProfileId?: string | null;
   noRepository: boolean;
   preferLocalExecutor: boolean;
 };
 
-function useMultiRepoGuardEffect(
-  open: boolean,
-  executorProfileId: string,
-  setExecutorProfileId: (id: string) => void,
-  executors: Executor[],
-  selectedRepoCount: number,
+type ExecutorProfileLastUsedState = {
+  allProfiles: ExecutorProfileCandidate[];
+  eligibleProfiles: ExecutorProfileCandidate[];
+  localStorageId: string | null;
+  localStorageValid: boolean;
+  settingsId: string | null;
+  settingsValid: boolean;
+};
+
+function getExecutorProfileLastUsedState(
+  context: ExecutorAutopickContext,
+  settingsId: string | null,
+): ExecutorProfileLastUsedState {
+  const { executors, noRepository, preferLocalExecutor } = context;
+  const allProfiles = flattenExecutorProfiles(executors);
+  const eligibleProfiles =
+    noRepository || preferLocalExecutor
+      ? allProfiles.filter((p) => !isWorktreeExecutorType(p._executorType))
+      : allProfiles;
+  const localStorageId = getLocalStorage<string | null>(
+    STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
+    null,
+  );
+  return {
+    allProfiles,
+    eligibleProfiles,
+    localStorageId,
+    localStorageValid: Boolean(
+      localStorageId && eligibleProfiles.some((p) => p.id === localStorageId),
+    ),
+    settingsId,
+    settingsValid: Boolean(settingsId && eligibleProfiles.some((p) => p.id === settingsId)),
+  };
+}
+
+function shouldDeferExecutorProfileAutopick(
+  context: ExecutorAutopickContext,
+  _lastUsed: ExecutorProfileLastUsedState,
 ) {
-  // Multi-repo guard: when 2+ repos are selected, only worktree profiles can
-  // run the task (Docker / Sprites / standalone don't yet provision sibling
-  // repos under one task root). If the current profile is non-worktree, swap
-  // to a worktree profile — preferring the last-used worktree, otherwise the
-  // first one available. Single-repo selections leave the profile alone.
-  useEffect(() => {
-    if (!open || !executorProfileId || executors.length === 0) return;
-    if (selectedRepoCount <= 1) return;
-    const profileToType = new Map<string, string | undefined>();
-    const worktreeProfileIds: string[] = [];
-    for (const e of executors) {
-      for (const p of e.profiles ?? []) {
-        const type = p.executor_type ?? e.type;
-        profileToType.set(p.id, type);
-        if (type === "worktree") worktreeProfileIds.push(p.id);
-      }
-    }
-    if (worktreeProfileIds.length === 0) return;
-    if (profileToType.get(executorProfileId) === "worktree") return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
-    const pick = lastId && worktreeProfileIds.includes(lastId) ? lastId : worktreeProfileIds[0];
-    void Promise.resolve().then(() => setExecutorProfileId(pick));
-  }, [open, executorProfileId, executors, selectedRepoCount, setExecutorProfileId]);
+  return context.userSettingsLoaded === false;
+}
+
+export function shouldWaitForLastUsedExecutorProfile(context: ExecutorAutopickContext) {
+  const lastUsedProfile = getExecutorProfileLastUsedState(
+    context,
+    context.lastUsedExecutorProfileId ?? null,
+  );
+  if (!lastUsedProfile.localStorageValid && !lastUsedProfile.settingsValid) return false;
+  if (isDebug()) {
+    selectionDebug("executor-autopick", {
+      current: "-",
+      pick: "-",
+      executor_count: context.executors.length,
+      workspace_default: context.workspaceDefaults?.default_executor_id ?? "-",
+      no_repository: context.noRepository,
+      prefer_local_executor: context.preferLocalExecutor,
+      source: "executor-profile-last-used",
+    });
+  }
+  return true;
+}
+
+function logExecutorProfileAutopick(
+  pick: string | null,
+  context: ExecutorAutopickContext,
+  lastUsed: ExecutorProfileLastUsedState,
+  source?: string,
+) {
+  if (!isDebug()) return;
+  selectionDebug("executor-profile-autopick", {
+    current: "-",
+    pick: pick ?? "-",
+    local_storage_id: lastUsed.localStorageId ?? "-",
+    local_storage_valid: lastUsed.localStorageValid,
+    settings_id: lastUsed.settingsId ?? "-",
+    settings_valid: lastUsed.settingsValid,
+    profile_count: lastUsed.allProfiles.length,
+    workspace_default_executor: context.workspaceDefaults?.default_executor_id ?? "-",
+    no_repository: context.noRepository,
+    prefer_local_executor: context.preferLocalExecutor,
+    ...(source ? { source } : {}),
+  });
 }
 
 function useExecutorIdAutopickEffect({
@@ -417,6 +355,23 @@ function useExecutorIdAutopickEffect({
   const { executors, workspaceDefaults, noRepository, preferLocalExecutor } = context;
   useEffect(() => {
     if (!open || executorId || executors.length === 0) return;
+    if (context.userSettingsLoaded === false) {
+      if (isDebug()) {
+        selectionDebug("executor-autopick", {
+          current: "-",
+          pick: "-",
+          executor_count: executors.length,
+          workspace_default: workspaceDefaults?.default_executor_id ?? "-",
+          no_repository: noRepository,
+          prefer_local_executor: preferLocalExecutor,
+          source: "user-settings-loading",
+        });
+      }
+      return;
+    }
+    if (shouldWaitForLastUsedExecutorProfile(context)) {
+      return;
+    }
     const pick = pickDefaultExecutorId(
       executors,
       workspaceDefaults,
@@ -442,6 +397,8 @@ function useExecutorIdAutopickEffect({
     setExecutorId,
     noRepository,
     preferLocalExecutor,
+    context.userSettingsLoaded,
+    context.lastUsedExecutorProfileId,
   ]);
 }
 
@@ -461,26 +418,22 @@ function useExecutorProfileAutopickEffect({
     // Auto-select executor profile: last used (localStorage) → source-aware
     // executor default → first eligible profile.
     if (!open || executorProfileId || executors.length === 0) return;
+    const lastUsed = getExecutorProfileLastUsedState(
+      context,
+      context.lastUsedExecutorProfileId ?? null,
+    );
+    if (shouldDeferExecutorProfileAutopick(context, lastUsed)) {
+      logExecutorProfileAutopick(null, context, lastUsed, "user-settings-loading");
+      return;
+    }
     const pick = pickDefaultExecutorProfileId(
       executors,
       workspaceDefaults,
       noRepository,
       preferLocalExecutor,
+      context.lastUsedExecutorProfileId,
     );
-    if (isDebug()) {
-      const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
-      const allProfiles = flattenExecutorProfiles(executors);
-      selectionDebug("executor-profile-autopick", {
-        current: "-",
-        pick: pick ?? "-",
-        local_storage_id: lastId ?? "-",
-        local_storage_valid: Boolean(lastId && allProfiles.some((p) => p.id === lastId)),
-        profile_count: allProfiles.length,
-        workspace_default_executor: workspaceDefaults?.default_executor_id ?? "-",
-        no_repository: noRepository,
-        prefer_local_executor: preferLocalExecutor,
-      });
-    }
+    logExecutorProfileAutopick(pick, context, lastUsed);
     if (pick) void Promise.resolve().then(() => setExecutorProfileId(pick));
   }, [
     open,
@@ -490,6 +443,8 @@ function useExecutorProfileAutopickEffect({
     setExecutorProfileId,
     noRepository,
     preferLocalExecutor,
+    context.lastUsedExecutorProfileId,
+    context.userSettingsLoaded,
   ]);
 }
 
@@ -513,8 +468,22 @@ export function useDefaultSelectionsEffect(
   const preferLocalExecutor =
     !noRepository && !useRemote && repositories.some((row) => Boolean(row.localPath));
   const executorAutopickContext = useMemo(
-    () => ({ executors, workspaceDefaults, noRepository, preferLocalExecutor }),
-    [executors, workspaceDefaults, noRepository, preferLocalExecutor],
+    () => ({
+      executors,
+      workspaceDefaults,
+      userSettingsLoaded: sel.userSettingsLoaded,
+      lastUsedExecutorProfileId: sel.lastUsedExecutorProfileId,
+      noRepository,
+      preferLocalExecutor,
+    }),
+    [
+      executors,
+      workspaceDefaults,
+      sel.userSettingsLoaded,
+      sel.lastUsedExecutorProfileId,
+      noRepository,
+      preferLocalExecutor,
+    ],
   );
   useAgentProfileAutopickEffect(fs, open, sel, workflows);
   useExecutorIdAutopickEffect({
@@ -548,14 +517,6 @@ export function useDefaultSelectionsEffect(
     }
   }, [executorProfileId, executors, setExecutorId]);
 
-  // Count is mode-aware: Remote mode counts non-empty URL rows, workspace
-  // mode counts rows with a repo/path. Without this, 2 Remote rows + 0
-  // workspace rows would slip past the guard because the legacy check only
-  // inspected `fs.repositories` — `computeSelectedRepoCount` handles both.
-  // Depend on the count primitive, not the whole `fs` object. `fs` is a fresh
-  // literal every render, so listing it in the dep array would re-run this
-  // effect on every render. computeSelectedRepoCount only reads noRepository /
-  // useRemote / remoteRepos / repositories, so memoize over exactly those.
   const selectedRepoCount = useMemo(
     () =>
       computeSelectedRepoCount({
@@ -624,15 +585,31 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     isLocalExecutor,
   } = args;
   useWorkflowStepsEffect(fs, workflowId);
-  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles);
-  useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories, args.lastUsedRepositoryId);
+  useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles, {
+    lastUsedAgentProfileId: args.lastUsedAgentProfileId,
+    authLoaded,
+    userSettingsLoaded: args.userSettingsLoaded,
+  });
+  useRepositoryAutoSelectEffect(fs, open, workspaceId, repositories, {
+    lastUsedRepositoryId: args.lastUsedRepositoryId,
+    userSettingsLoaded: args.userSettingsLoaded,
+  });
   useDiscoverReposEffect(fs, open, workspaceId, repositoriesLoading, toast);
   useCurrentLocalBranchEffect(fs, open, workspaceId, repositories);
   useResetBranchOnLocalSwitchEffect(fs, isLocalExecutor, args.preserveBranch);
   useDefaultSelectionsEffect(
     fs,
     open,
-    { agentProfiles, compatibleAgentProfiles, authLoaded, executors, workspaceDefaults },
+    {
+      agentProfiles,
+      compatibleAgentProfiles,
+      authLoaded,
+      executors,
+      workspaceDefaults,
+      userSettingsLoaded: args.userSettingsLoaded,
+      lastUsedAgentProfileId: args.lastUsedAgentProfileId,
+      lastUsedExecutorProfileId: args.lastUsedExecutorProfileId,
+    },
     workflows,
   );
   useGitHubUrlErrorEffect(fs, open);

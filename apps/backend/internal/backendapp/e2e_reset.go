@@ -18,6 +18,7 @@ import (
 
 // errKey is the JSON field used for error responses from the E2E endpoints.
 const errKey = "error"
+const statusKey = "status"
 
 // registerE2EResetRoutes registers the E2E test-only endpoints.
 // The endpoints are available when KANDEV_MOCK_AGENT is "true" or "only" (dev/E2E modes).
@@ -40,6 +41,12 @@ func registerE2EResetRoutes(
 	// workflow path (e.g. improve-kandev) without depending on the real
 	// bootstrap endpoint, which clones from GitHub and shells out to gh.
 	api.POST("/hidden-workflow", handleE2ECreateHiddenWorkflow(taskSvc, log))
+	// Automation seeding helpers for E2E tests that need runs without going
+	// through the WS API (works on any Node version).
+	if automationSvc != nil {
+		api.POST("/automations", handleE2ECreateAutomation(automationSvc, log))
+		api.POST("/automation-runs", handleE2ECreateAutomationRun(automationSvc, log))
+	}
 
 	log.Info("registered E2E endpoints (test-only)")
 }
@@ -82,6 +89,9 @@ func handleE2EReset(
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM runtime_flag_overrides`); err != nil {
 			log.Warn("e2e reset: runtime flag override cleanup failed", zap.Error(err))
 		}
+		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID); err != nil {
+			log.Warn("e2e reset: GitHub workspace settings cleanup failed", zap.Error(err))
+		}
 
 		// Reset every agent's routing override to the inherit-markers
 		// shape onboarding writes. Without this, an agent-override test
@@ -122,7 +132,7 @@ func handleE2EReset(
 		// accumulate across tests in the same Playwright worker and
 		// eventually exhaust the per-worker port range.
 		const resetPageSize = 10000
-		tasks, total, err := repo.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, resetPageSize, true, true, false, false)
+		tasks, total, err := repo.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, resetPageSize, "", true, true, false, false)
 		if err != nil {
 			log.Error("e2e reset: failed to list tasks", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
@@ -212,6 +222,77 @@ func handleE2ECreateHiddenWorkflow(taskSvc *taskservice.Service, log *logger.Log
 			"workspace_id": workflow.WorkspaceID,
 			"name":         workflow.Name,
 			"hidden":       workflow.Hidden,
+		})
+	}
+}
+
+type e2eCreateAutomationRequest struct {
+	WorkspaceID    string `json:"workspace_id"`
+	Name           string `json:"name"`
+	WorkflowID     string `json:"workflow_id"`
+	WorkflowStepID string `json:"workflow_step_id"`
+}
+
+// handleE2ECreateAutomation seeds an automation for E2E tests via HTTP so tests
+// don't require Node 24 (WS API requires a global WebSocket that isn't in Node 20).
+func handleE2ECreateAutomation(svc *automation.Service, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body e2eCreateAutomationRequest
+		if err := c.ShouldBindJSON(&body); err != nil || body.WorkspaceID == "" || body.Name == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "workspace_id and name are required"})
+			return
+		}
+		a, err := svc.CreateAutomation(c.Request.Context(), &automation.CreateAutomationRequest{
+			WorkspaceID:       body.WorkspaceID,
+			Name:              body.Name,
+			WorkflowID:        body.WorkflowID,
+			WorkflowStepID:    body.WorkflowStepID,
+			MaxConcurrentRuns: 10,
+		})
+		if err != nil {
+			log.Error("e2e: failed to create automation", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{"id": a.ID, "workspace_id": a.WorkspaceID, "name": a.Name})
+	}
+}
+
+type e2eCreateAutomationRunRequest struct {
+	AutomationID string `json:"automation_id"`
+	Status       string `json:"status"`
+	// TaskID optionally links the seeded run to a real task so E2E tests can
+	// exercise task-lifecycle interactions (e.g. archiving the task and
+	// asserting the run's displayed status/concurrency accounting reacts).
+	TaskID string `json:"task_id"`
+}
+
+// handleE2ECreateAutomationRun seeds an automation run row for E2E tests.
+func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body e2eCreateAutomationRunRequest
+		if err := c.ShouldBindJSON(&body); err != nil || body.AutomationID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "automation_id is required"})
+			return
+		}
+		status := automation.RunStatus(body.Status)
+		if status == "" {
+			status = automation.RunStatusSkipped
+		}
+		run := &automation.AutomationRun{
+			AutomationID: body.AutomationID,
+			TriggerType:  automation.TriggerTypeScheduled,
+			Status:       status,
+			TaskID:       body.TaskID,
+			TriggerData:  []byte(`{}`),
+		}
+		if err := svc.RecordRun(c.Request.Context(), run); err != nil {
+			log.Error("e2e: failed to create automation run", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{
+			"id": run.ID, "automation_id": run.AutomationID, statusKey: run.Status, taskIDPayloadKey: run.TaskID,
 		})
 	}
 }

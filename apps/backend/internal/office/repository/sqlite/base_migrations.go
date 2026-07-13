@@ -21,6 +21,7 @@ import (
 func (r *Repository) runMigrations() {
 	r.migrateSchedulerColumns()
 	r.migrateFailureColumns()
+	r.migrateRunPayloadIndexes()
 	if err := r.migrateTaskPriorityToText(); err != nil {
 		// Surface to stderr; this stage runs from initSchema which doesn't
 		// have a logger handle. The recreate is wrapped in a transaction
@@ -37,6 +38,13 @@ func (r *Repository) runMigrations() {
 	// CREATE TABLE statements, so this migration only creates the
 	// auxiliary tables.
 	r.migrateProviderRouting()
+}
+
+func (r *Repository) migrateRunPayloadIndexes() {
+	r.migrate.Apply(
+		"runs.idx_run_payload_comment_id",
+		runPayloadCommentIDIndexSQL(r.db.DriverName()),
+	)
 }
 
 // migrateProviderRouting creates the office_workspace_routing,

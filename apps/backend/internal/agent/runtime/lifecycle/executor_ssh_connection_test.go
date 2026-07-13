@@ -112,16 +112,73 @@ func TestExpandHome(t *testing.T) {
 	}
 }
 
-func TestRequireSupportedArch(t *testing.T) {
-	if err := requireSupportedArch("x86_64"); err != nil {
-		t.Errorf("x86_64 should be supported, got %v", err)
-	}
-	err := requireSupportedArch("aarch64")
+func TestSSHExecutorTargetFromMetadataMissingFingerprintNamesConnectionSettings(t *testing.T) {
+	exec := &SSHExecutor{}
+	_, err := exec.targetFromMetadata(map[string]interface{}{
+		MetadataKeySSHHost:           "example.com",
+		MetadataKeySSHUser:           "alice",
+		MetadataKeySSHIdentitySource: string(SSHIdentitySourceAgent),
+	})
 	if err == nil {
-		t.Fatal("aarch64 should not be supported")
+		t.Fatal("expected missing host_fingerprint error")
 	}
-	if !strings.Contains(err.Error(), "aarch64") || !strings.Contains(err.Error(), "linux/amd64") {
-		t.Errorf("error should name the arch and the supported one: %v", err)
+	msg := err.Error()
+	for _, want := range []string{"host_fingerprint is required", "SSH executor connection settings", "Test connection", "trust the host"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error message %q missing %q", msg, want)
+		}
+	}
+}
+
+func TestNormalizeSSHRemotePlatform(t *testing.T) {
+	cases := []struct {
+		name     string
+		osName   string
+		arch     string
+		wantOS   string
+		wantArch string
+		wantOK   bool
+	}{
+		{"linux amd64", "Linux", "x86_64", "linux", "amd64", true},
+		{"darwin arm64", "Darwin", "arm64", "darwin", "arm64", true},
+		{"darwin amd64", "Darwin", "x86_64", "darwin", "amd64", true},
+		{"linux arm64", "Linux", "aarch64", "linux", "arm64", true},
+		{"freebsd amd64 unsupported", "FreeBSD", "x86_64", "", "amd64", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := normalizeSSHRemotePlatform(tc.osName, tc.arch)
+			if ok != tc.wantOK {
+				t.Fatalf("normalizeSSHRemotePlatform(%q, %q) ok = %v, want %v", tc.osName, tc.arch, ok, tc.wantOK)
+			}
+			if got.GOOS != tc.wantOS || got.GOARCH != tc.wantArch {
+				t.Errorf("normalizeSSHRemotePlatform(%q, %q) = %s/%s, want %s/%s",
+					tc.osName, tc.arch, got.GOOS, got.GOARCH, tc.wantOS, tc.wantArch)
+			}
+		})
+	}
+}
+
+func TestRequireSupportedRemotePlatform(t *testing.T) {
+	for _, platform := range []SSHRemotePlatform{
+		{GOOS: "linux", GOARCH: "amd64", UnameOS: "Linux", UnameArch: "x86_64"},
+		{GOOS: "linux", GOARCH: "arm64", UnameOS: "Linux", UnameArch: "aarch64"},
+		{GOOS: "darwin", GOARCH: "arm64", UnameOS: "Darwin", UnameArch: "arm64"},
+		{GOOS: "darwin", GOARCH: "amd64", UnameOS: "Darwin", UnameArch: "x86_64"},
+	} {
+		if err := requireSupportedRemotePlatform(platform); err != nil {
+			t.Errorf("%s should be supported, got %v", platform.String(), err)
+		}
+	}
+	unsupported := SSHRemotePlatform{GOOS: "", GOARCH: "amd64", UnameOS: "FreeBSD", UnameArch: "x86_64"}
+	err := requireSupportedRemotePlatform(unsupported)
+	if err == nil {
+		t.Fatal("freebsd/amd64 should not be supported")
+	}
+	for _, want := range []string{"unsupported remote platform", "linux/{amd64,arm64}", "darwin/{amd64,arm64}", "FreeBSD"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err.Error(), want)
+		}
 	}
 }
 
@@ -313,5 +370,68 @@ func TestParseLiteralProxyJump(t *testing.T) {
 					c.in, user, host, port, ok, c.wantUser, c.wantHost, c.wantPort, c.wantOK)
 			}
 		})
+	}
+}
+
+func TestSSHRemoteAgentEnv(t *testing.T) {
+	// Fixture values — named so it's clear these are arbitrary test inputs,
+	// not real credentials or host config.
+	const (
+		tokenFromReq      = "claude-token-from-req"
+		tokenFromEnv      = "claude-token-from-controlplane"
+		openAIKey         = "openai-key-from-req"
+		anthropicFromEnv  = "anthropic-key-from-controlplane"
+		nonCredentialHome = "/home/agent"
+		nonCredentialPath = "/usr/bin"
+	)
+
+	// req.Env credential keys are forwarded; non-credential keys (HOME/PATH) are not.
+	req := &ExecutorCreateRequest{Env: map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN": tokenFromReq,
+		"HOME":                    nonCredentialHome,
+		"PATH":                    nonCredentialPath,
+		"OPENAI_API_KEY":          openAIKey,
+	}}
+	got := sshRemoteAgentEnv(req)
+	if got["CLAUDE_CODE_OAUTH_TOKEN"] != tokenFromReq {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want %q", got["CLAUDE_CODE_OAUTH_TOKEN"], tokenFromReq)
+	}
+	if got["OPENAI_API_KEY"] != openAIKey {
+		t.Fatalf("OPENAI_API_KEY = %q, want %q", got["OPENAI_API_KEY"], openAIKey)
+	}
+	if _, ok := got["HOME"]; ok {
+		t.Error("HOME must NOT be forwarded to the remote agent")
+	}
+	if _, ok := got["PATH"]; ok {
+		t.Error("PATH must NOT be forwarded to the remote agent")
+	}
+
+	// Credentials present ONLY in the control-plane process env must NOT be
+	// forwarded (that would leak the kandev host's own credentials to any SSH
+	// target). Only keys explicitly resolved into req.Env are sent.
+	t.Setenv("ANTHROPIC_API_KEY", anthropicFromEnv)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", tokenFromEnv)
+	got = sshRemoteAgentEnv(&ExecutorCreateRequest{Env: map[string]string{}})
+	if _, ok := got["ANTHROPIC_API_KEY"]; ok {
+		t.Error("ANTHROPIC_API_KEY from control-plane env must NOT be forwarded when absent from req.Env")
+	}
+	if got != nil {
+		t.Fatalf("expected nil when req.Env has no credential keys, got %v", got)
+	}
+
+	// req.Env is the sole source; the control-plane env is ignored even when set.
+	got = sshRemoteAgentEnv(&ExecutorCreateRequest{Env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": tokenFromReq}})
+	if got["CLAUDE_CODE_OAUTH_TOKEN"] != tokenFromReq {
+		t.Fatalf("req.Env should be the source, got %q", got["CLAUDE_CODE_OAUTH_TOKEN"])
+	}
+}
+
+func TestSSHRemoteAgentEnvEmpty(t *testing.T) {
+	// nil req and empty req.Env both yield nil (no control-plane fallback).
+	if got := sshRemoteAgentEnv(nil); got != nil {
+		t.Fatalf("expected nil for nil req, got %v", got)
+	}
+	if got := sshRemoteAgentEnv(&ExecutorCreateRequest{}); got != nil {
+		t.Fatalf("expected nil for no credentials, got %v", got)
 	}
 }

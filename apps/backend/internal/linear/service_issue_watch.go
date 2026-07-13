@@ -49,6 +49,7 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		Prompt:              req.Prompt,
 		PollIntervalSeconds: req.PollIntervalSeconds,
 		MaxInflightTasks:    req.MaxInflightTasks,
+		SortBy:              req.SortBy,
 		Enabled:             true,
 	}
 	if req.Enabled != nil {
@@ -104,6 +105,9 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		return nil, err
 	}
 	if err := validateMaxInflightTasks(w.MaxInflightTasks); err != nil {
+		return nil, err
+	}
+	if err := validateSortBy(w.SortBy); err != nil {
 		return nil, err
 	}
 	// Only validate/resolve the binding when its value actually changed. The
@@ -183,11 +187,7 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 // the JIRA watcher.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*LinearIssue, error) {
 	defer s.stampWatchLastPolled(w.ID)
-	client, err := s.clientFor(ctx)
-	if err != nil {
-		return nil, err
-	}
-	res, err := client.SearchIssues(ctx, w.Filter, "", issueWatchSearchPageSize)
+	client, err := s.clientFor(ctx, w.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -197,14 +197,51 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) ([]*Linear
 			zap.String("watch_id", w.ID), zap.Error(err))
 		seen = nil
 	}
-	out := make([]*LinearIssue, 0, len(res.Issues))
-	for i := range res.Issues {
-		issue := res.Issues[i]
-		if _, ok := seen[issue.Identifier]; ok {
-			continue
-		}
-		out = append(out, &issue)
+	// Page through matches (bounded by maxPages) so the sort below ranks the
+	// whole unseen backlog. Linear only orders by created/updated, so priority
+	// ordering must be done here over the full fetched set. Default order is a
+	// no-op for sortIssues, so paginating a default watch buys nothing but
+	// extra Linear calls and larger dispatch bursts — keep it on the legacy
+	// single-page fetch.
+	maxPages := issueWatchMaxPages
+	if w.SortBy == SortByDefault {
+		maxPages = 1
 	}
+	out := make([]*LinearIssue, 0, issueWatchSearchPageSize)
+	pageToken := ""
+	for page := 0; page < maxPages; page++ {
+		res, err := client.SearchIssues(ctx, w.Filter, pageToken, issueWatchSearchPageSize)
+		if err != nil {
+			if page == 0 {
+				return nil, err
+			}
+			// A canceled/expired context means the poll is being torn down.
+			// Abort instead of publishing issues from an incomplete fetch —
+			// dispatch detaches the context, so partial results would still
+			// create tasks during shutdown or a canceled manual trigger.
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			// Any other later-page error is non-fatal: rank/dispatch what we
+			// have; the next poll retries from the top.
+			s.log.Debug("linear: issue watch pagination stopped early",
+				zap.String("watch_id", w.ID), zap.Int("page", page), zap.Error(err))
+			break
+		}
+		for i := range res.Issues {
+			issue := res.Issues[i]
+			if _, ok := seen[issue.Identifier]; ok {
+				continue
+			}
+			out = append(out, &issue)
+		}
+		if res.IsLast || res.NextPageToken == "" {
+			break
+		}
+		pageToken = res.NextPageToken
+	}
+	// Order dispatch so the most important issues win the in-flight slots.
+	sortIssues(out, w.SortBy)
 	return out, nil
 }
 
@@ -253,6 +290,13 @@ func (s *Service) publishNewLinearIssueEvent(ctx context.Context, w *IssueWatch,
 // pulls from Linear. Mirrors the Jira watcher's limit so per-tick cost stays
 // bounded for very broad filters.
 const issueWatchSearchPageSize = 50
+
+// issueWatchMaxPages bounds how many pages CheckIssueWatch scans per poll.
+// Combined with issueWatchSearchPageSize this caps per-tick cost at
+// issueWatchMaxPages*issueWatchSearchPageSize issues while letting the sort
+// rank enough of the backlog that high-priority issues on later pages can
+// still win the in-flight slots. A caught-up watch fetches a single page.
+const issueWatchMaxPages = 5
 
 // MinIssueWatchPollInterval / MaxIssueWatchPollInterval bound the per-watch
 // search re-run cadence.
@@ -317,7 +361,21 @@ func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
 	if err := validateMaxInflightTasks(req.MaxInflightTasks); err != nil {
 		return err
 	}
+	if err := validateSortBy(req.SortBy); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateSortBy rejects sort keys outside the known wire set. The empty value
+// (Linear default order) is allowed.
+func validateSortBy(v IssueSortBy) error {
+	switch v {
+	case SortByDefault, SortByPriorityDesc, SortByPriorityAsc,
+		SortByCreatedDesc, SortByCreatedAsc, SortByUpdatedDesc, SortByUpdatedAsc:
+		return nil
+	}
+	return fmt.Errorf("%w: invalid sortBy %q", ErrInvalidConfig, v)
 }
 
 // validateMaxInflightTasks rejects non-positive caps. A nil pointer is
@@ -465,5 +523,8 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	// leaves the cap intact. Present+null clears the cap; present+int sets it.
 	if req.MaxInflightTasks.Present {
 		w.MaxInflightTasks = req.MaxInflightTasks.Value
+	}
+	if req.SortBy != nil {
+		w.SortBy = *req.SortBy
 	}
 }

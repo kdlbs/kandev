@@ -7,6 +7,7 @@ import {
   formatReviewCommentsAsMarkdown,
   formatPlanCommentsAsMarkdown,
   formatPRFeedbackAsMarkdown,
+  formatWalkthroughCommentsAsMarkdown,
 } from "@/lib/state/slices/comments/format";
 import type {
   Comment,
@@ -14,6 +15,7 @@ import type {
   PlanComment,
   FileEditorComment,
   PRFeedbackComment,
+  WalkthroughComment,
 } from "@/lib/state/slices/comments";
 import type { Message } from "@/lib/types/http";
 
@@ -28,6 +30,8 @@ function formatSingleComment(comment: Comment): string {
       return formatPlanCommentsAsMarkdown([comment as PlanComment]);
     case "pr-feedback":
       return formatPRFeedbackAsMarkdown([comment as PRFeedbackComment]);
+    case "walkthrough":
+      return formatWalkthroughCommentsAsMarkdown([comment as WalkthroughComment]);
     case "file-editor": {
       const fc = comment as FileEditorComment;
       const lines: string[] = ["### File Comment", ""];

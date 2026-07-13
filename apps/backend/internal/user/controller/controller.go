@@ -48,6 +48,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		KanbanViewMode:              req.KanbanViewMode,
 		WorkflowFilterID:            req.WorkflowFilterID,
 		RepositoryIDs:               req.RepositoryIDs,
+		TasksListSort:               req.TasksListSort,
+		TasksListGroup:              req.TasksListGroup,
 		InitialSetupComplete:        req.InitialSetupComplete,
 		PreferredShell:              req.PreferredShell,
 		DefaultEditorID:             req.DefaultEditorID,

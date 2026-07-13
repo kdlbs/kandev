@@ -78,7 +78,15 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 			zap.String("task_id", result.Session.TaskID),
 			zap.Error(err))
 	} else {
+		oldState := task.State
 		task.WorkflowStepID = newStepID
+		if err := s.syncTaskStateForWorkflowMove(ctx, task, step.ID, newStepID); err != nil {
+			s.logger.Error("failed to sync task state for approval transition",
+				zap.String("task_id", result.Session.TaskID),
+				zap.String("step_id", newStepID),
+				zap.Error(err))
+			return
+		}
 		task.UpdatedAt = time.Now().UTC()
 		if err := s.tasks.UpdateTask(ctx, task); err != nil {
 			s.logger.Error("failed to move task to next step after approval",
@@ -87,6 +95,9 @@ func (s *Service) applyApprovalStepTransition(ctx context.Context, sessionID str
 				zap.Error(err))
 		} else {
 			s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+			if oldState != task.State {
+				s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+			}
 			result.Task = task
 		}
 	}
@@ -289,11 +300,15 @@ func (s *Service) MoveTaskWithOptions(
 
 	oldWorkflowID := task.WorkflowID
 	oldStepID := task.WorkflowStepID
+	oldState := task.State
 	stepChanged := oldStepID != workflowStepID
 
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
 	task.Position = position
+	if err := s.syncTaskStateForWorkflowMove(ctx, task, oldStepID, workflowStepID); err != nil {
+		return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
+	}
 	task.UpdatedAt = time.Now().UTC()
 
 	if err := s.tasks.UpdateTask(ctx, task); err != nil {
@@ -308,6 +323,9 @@ func (s *Service) MoveTaskWithOptions(
 	}
 
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
+	if oldState != task.State {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+	}
 
 	// Publish task.moved event so the orchestrator can process on_exit/on_enter actions
 	if stepChanged {
@@ -336,6 +354,73 @@ func (s *Service) MoveTaskWithOptions(
 	}
 
 	return result, nil
+}
+
+func (s *Service) terminalWorkflowStep(ctx context.Context, workflowStepID string) (bool, error) {
+	if s.workflowStepGetter == nil || workflowStepID == "" {
+		return false, nil
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil {
+		return false, fmt.Errorf("failed to get workflow step %s: %w", workflowStepID, err)
+	}
+	if step == nil {
+		return false, nil
+	}
+	nextStep, err := s.workflowStepGetter.GetNextStepByPosition(ctx, step.WorkflowID, step.Position)
+	if err != nil {
+		return false, fmt.Errorf("failed to get next workflow step after %s: %w", workflowStepID, err)
+	}
+	return wfmodels.IsTerminalStep(step, nextStep), nil
+}
+
+func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models.Task, oldStepID, newStepID string) error {
+	newTerminal, err := s.terminalWorkflowStep(ctx, newStepID)
+	if err != nil {
+		return err
+	}
+	if newTerminal {
+		if !models.IsTerminalTaskState(task.State) {
+			task.State = v1.TaskStateCompleted
+		}
+		return nil
+	}
+	if oldStepID == newStepID || task.State != v1.TaskStateCompleted {
+		return nil
+	}
+	oldTerminal, err := s.terminalWorkflowStep(ctx, oldStepID)
+	if err != nil {
+		return err
+	}
+	if oldTerminal {
+		task.State = v1.TaskStateTODO
+	}
+	return nil
+}
+
+func (s *Service) syncTaskStateForBulkWorkflowMove(ctx context.Context, task *models.Task, oldStepID, targetStepID string, targetIsTerminal, sourceIsTerminal, sourceTerminalKnown bool) error {
+	if targetIsTerminal {
+		if !models.IsTerminalTaskState(task.State) {
+			task.State = v1.TaskStateCompleted
+		}
+		return nil
+	}
+	if oldStepID == targetStepID || task.State != v1.TaskStateCompleted {
+		return nil
+	}
+
+	oldTerminal := sourceIsTerminal
+	if !sourceTerminalKnown {
+		var err error
+		oldTerminal, err = s.terminalWorkflowStep(ctx, oldStepID)
+		if err != nil {
+			return err
+		}
+	}
+	if oldTerminal {
+		task.State = v1.TaskStateTODO
+	}
+	return nil
 }
 
 func (s *Service) validateTaskMove(ctx context.Context, task *models.Task, workflowID, workflowStepID string, opts MoveTaskOptions) error {
@@ -509,12 +594,32 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 		return &BulkMoveTasksResult{MovedCount: 0}, nil
 	}
 
+	targetIsTerminal, err := s.terminalWorkflowStep(ctx, targetStepID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check target step terminal status: %w", err)
+	}
+	sourceIsTerminal := false
+	sourceTerminalKnown := false
+	if sourceStepID != "" {
+		sourceIsTerminal, err = s.terminalWorkflowStep(ctx, sourceStepID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to check source step terminal status: %w", err)
+		}
+		sourceTerminalKnown = true
+	}
+
 	now := time.Now().UTC()
 	for i, task := range tasks {
 		oldWorkflowID := task.WorkflowID
+		oldStepID := task.WorkflowStepID
+		oldState := task.State
 		task.WorkflowID = targetWorkflowID
 		task.WorkflowStepID = targetStepID
 		task.Position = i
+		err := s.syncTaskStateForBulkWorkflowMove(ctx, task, oldStepID, targetStepID, targetIsTerminal, sourceIsTerminal, sourceTerminalKnown)
+		if err != nil {
+			return nil, fmt.Errorf("failed to sync task state for bulk move %s: %w", task.ID, err)
+		}
 		task.UpdatedAt = now
 
 		if err := s.tasks.UpdateTask(ctx, task); err != nil {
@@ -525,6 +630,9 @@ func (s *Service) BulkMoveTasks(ctx context.Context, sourceWorkflowID, sourceSte
 		}
 
 		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowID)
+		if oldState != task.State {
+			s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+		}
 	}
 
 	s.logger.Info("bulk moved tasks",

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
-import { fetchUserSettings, updateUserSettings } from "@/lib/api";
+import { updateUserSettings } from "@/lib/api";
 import { useSearchParams } from "@/lib/routing/client-router";
 import { mapSelectedRepositoryIds } from "@/lib/kanban/filters";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
-import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
 import { repositoryId, type Repository } from "@/lib/types/http";
+import { DEFAULT_TASKS_LIST_GROUP, DEFAULT_TASKS_LIST_SORT } from "@/lib/tasks/tasks-list-options";
 import {
   DEFAULT_VOICE_MODE_STATE,
   type UserSettingsState,
@@ -59,6 +60,8 @@ function carryForwardCoreSettings(current: DisplaySettings) {
     savedLayouts: current.savedLayouts ?? [],
     defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
     keyboardShortcuts: current.keyboardShortcuts ?? {},
+    tasksListSort: current.tasksListSort ?? DEFAULT_TASKS_LIST_SORT,
+    tasksListGroup: current.tasksListGroup ?? DEFAULT_TASKS_LIST_GROUP,
     changesPanelLayout: current.changesPanelLayout ?? "tree",
     systemMetricsDisplay: current.systemMetricsDisplay ?? { showInTopbar: false },
     voiceMode: current.voiceMode ?? { ...DEFAULT_VOICE_MODE_STATE },
@@ -153,25 +156,6 @@ function useUserSettingsRef(userSettings: DisplaySettings) {
   return userSettingsRef;
 }
 
-function useLoadUserSettings(
-  loaded: boolean,
-  setUserSettings: (settings: DisplaySettings) => void,
-) {
-  useEffect(() => {
-    if (loaded) return;
-    fetchUserSettings({ cache: "no-store" })
-      .then((data) => {
-        if (!data?.settings) return;
-        const mapped = mapUserSettingsResponse(data);
-        if (!mapped.loaded) return;
-        setUserSettings(mapped);
-      })
-      .catch(() => {
-        /* Ignore settings fetch errors for now. */
-      });
-  }, [loaded, setUserSettings]);
-}
-
 function usePruneStaleRepositoryIds(
   userSettings: DisplaySettings,
   repositories: Repository[],
@@ -237,7 +221,7 @@ export function useUserDisplaySettings({
     [setUserSettings, userSettingsRef],
   );
 
-  useLoadUserSettings(userSettings.loaded, setUserSettings);
+  useEnsureUserSettings();
 
   useEffect(() => {
     if (!userSettings.loaded) return;

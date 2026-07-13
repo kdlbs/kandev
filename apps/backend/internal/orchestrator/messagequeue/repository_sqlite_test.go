@@ -187,6 +187,30 @@ func TestSQLiteRepository_UpdateContent(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ReplaceCoalescedDetectsMissingRow(t *testing.T) {
+	repo := newTestSQLiteRepo(t).(*sqliteRepository)
+	ctx := context.Background()
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = repo.replaceCoalesced(ctx, tx,
+		&QueuedMessage{ID: "missing", SessionID: "s1", QueuedBy: QueuedByWorkflow},
+		&QueuedMessage{
+			SessionID: "s1",
+			TaskID:    "t1",
+			Content:   "new",
+			QueuedBy:  QueuedByWorkflow,
+			Metadata:  map[string]interface{}{MetadataCoalesceKey: "ci-key"},
+		},
+	)
+	if !errors.Is(err, ErrEntryNotFound) {
+		t.Fatalf("expected ErrEntryNotFound for vanished coalesced row, got %v", err)
+	}
+}
+
 func TestSQLiteRepository_DeleteByID(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
@@ -277,6 +301,58 @@ func TestSQLiteRepository_TransferSession(t *testing.T) {
 	count, _ := repo.CountBySession(ctx, "s-old")
 	if count != 0 {
 		t.Errorf("source still has %d entries after transfer", count)
+	}
+}
+
+func TestSQLiteRepository_ReplaceSessionPreservesQueuedIdentity(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	original := &QueuedMessage{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "original",
+		Model:     "model-a",
+		PlanMode:  true,
+		Metadata:  map[string]interface{}{"sender": "task-a"},
+		QueuedBy:  "agent",
+	}
+	if err := repo.Insert(ctx, original, 0); err != nil {
+		t.Fatalf("insert original: %v", err)
+	}
+	if err := repo.SetPendingMove(ctx, "s1", &PendingMove{TaskID: "t1", WorkflowStepID: "step-a"}); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
+	if err := repo.Insert(ctx, &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "mutated", QueuedBy: "user"}, 0); err != nil {
+		t.Fatalf("insert mutated: %v", err)
+	}
+
+	if err := repo.ReplaceSession(ctx, "s1", []QueuedMessage{*original}, &PendingMove{
+		TaskID:         "t1",
+		WorkflowStepID: "step-a",
+		QueuedAt:       original.QueuedAt,
+	}); err != nil {
+		t.Fatalf("replace session: %v", err)
+	}
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 restored entry, got %d", len(entries))
+	}
+	restored := entries[0]
+	if restored.ID != original.ID || restored.Position != original.Position || !restored.QueuedAt.Equal(original.QueuedAt) {
+		t.Fatalf("identity changed: got id=%s pos=%d queued_at=%s want id=%s pos=%d queued_at=%s",
+			restored.ID, restored.Position, restored.QueuedAt, original.ID, original.Position, original.QueuedAt)
+	}
+	move, err := repo.TakePendingMove(ctx, "s1")
+	if err != nil {
+		t.Fatalf("take pending move: %v", err)
+	}
+	if move == nil || move.WorkflowStepID != "step-a" {
+		t.Fatalf("pending move = %#v, want step-a", move)
 	}
 }
 

@@ -31,7 +31,6 @@ export type ChatInputEditorAreaProps = {
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled: boolean;
-  handleAgentCommand: (command: string) => void;
   addFiles: (files: File[]) => Promise<void>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   showRequestChangesTooltip: boolean;
@@ -126,7 +125,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
   const { isDisabled, hasClarification, planModeEnabled, planModeAvailable, mcpServers } = p;
   const { submitKey, setIsInputFocused, sessionId, taskId, planContextEnabled } = p;
-  const { onAddContextFile, onToggleContextFile, handleAgentCommand, addFiles, fileInputRef } = p;
+  const { onAddContextFile, onToggleContextFile, addFiles, fileInputRef } = p;
   const { showRequestChangesTooltip, isAgentBusy, onPlanModeChange, taskTitle, taskDescription } =
     p;
   const { isSending, onCancel, contextCount, contextPopoverOpen, setContextPopoverOpen } = p;
@@ -164,7 +163,6 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
           onAddContextFile={onAddContextFile}
           onToggleContextFile={onToggleContextFile}
           planContextEnabled={planContextEnabled}
-          onAgentCommand={handleAgentCommand}
           onImagePaste={addFiles}
           onPlanModeChange={onPlanModeChange}
         />

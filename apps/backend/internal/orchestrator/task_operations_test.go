@@ -597,10 +597,30 @@ func TestCancelAgent_TaskStateReconcile(t *testing.T) {
 	}
 }
 
-func TestCancelAgent_LeavesQueuedMessageForManualDrain(t *testing.T) {
+// TestCancelAgent_DeliversQueuedMessageOnResume pins the corrected pause→resume
+// contract (#1597 pause→resume recovery): a message queued while the agent was
+// running is DELIVERED once cancel settles the session to WAITING_FOR_INPUT, not
+// stranded on the queue for indefinite manual drain.
+//
+// This replaces the former TestCancelAgent_LeavesQueuedMessageForManualDrain,
+// which codified the wedge as expected. On a normal cancel the agent's
+// complete(cancelled) event fires handleAgentReady → on_turn_complete → drain,
+// but on an escalated / dead-process cancel no agent.ready event ever fires, so
+// nothing drained the queue and the operator's queued message was lost until a
+// second manual send. Cancel now drains directly after reconciling the session.
+//
+// Proof of delivery is the queue emptying: drainQueuedMessageForPromptableSession
+// pops the message synchronously (TakeQueued) before dispatching it, so a
+// Count==0 immediately after CancelAgent returns is deterministic. The actual
+// PromptTask dispatch runs in a goroutine (state may already be RUNNING by the
+// time we re-read), mirroring TestHandleAgentBootReady_DrainsOrphanedQueuedMessage.
+func TestCancelAgent_DeliversQueuedMessageOnResume(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	agentMgr := &mockAgentManager{isAgentRunning: true}
+	// repoForExecutionLookup + isAgentRunning let the executeQueuedMessage
+	// goroutine's PromptTask → ensureSessionRunning → GetExecutionBySession land
+	// on a working path instead of nil-derefing s.executor under -race.
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
 
@@ -616,23 +636,63 @@ func TestCancelAgent_LeavesQueuedMessageForManualDrain(t *testing.T) {
 		t.Fatalf("cancel agent: %v", err)
 	}
 
+	// Cancel settles the session so a new prompt can land. The drain goroutine
+	// may already have moved it back to RUNNING; either state proves the wedge
+	// (stuck RUNNING with a full queue) is gone.
 	updated, err := repo.GetTaskSession(ctx, "session1")
 	if err != nil {
 		t.Fatalf("get updated session: %v", err)
 	}
-	if updated.State != models.TaskSessionStateWaitingForInput {
-		t.Fatalf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, updated.State)
+	if updated.State != models.TaskSessionStateWaitingForInput &&
+		updated.State != models.TaskSessionStateRunning {
+		t.Fatalf("expected session state WAITING_FOR_INPUT or RUNNING after cancel, got %q", updated.State)
 	}
 
 	status := svc.messageQueue.GetStatus(ctx, "session1")
-	if status.Count != 1 {
-		t.Fatalf("expected cancel to leave queued message for manual drain, count=%d entries=%+v", status.Count, status.Entries)
+	if status.Count != 0 {
+		t.Fatalf("expected cancel to deliver the queued message on resume, count=%d entries=%+v", status.Count, status.Entries)
 	}
-	if got := status.Entries[0].Content; got != "queued after cancel" {
-		t.Fatalf("queued prompt = %q, want %q", got, "queued after cancel")
+}
+
+func TestCancelAgent_DrainsQueuedMessageAfterCancelGuardClears(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	promptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             promptDone,
 	}
-	if len(agentMgr.capturedPrompts) != 0 {
-		t.Fatalf("expected cancel not to prompt queued message, got %d prompts", len(agentMgr.capturedPrompts))
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	agentMgr.promptAgentFunc = func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
+		if svc.isCancelInFlight("session1") {
+			return nil, fmt.Errorf("prompt abandoned after cancel: %w", lifecycle.ErrCancelEscalated)
+		}
+		return &executor.PromptResult{}, nil
+	}
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "queued after cancel", "", messagequeue.QueuedByUser, false, nil,
+	); err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+
+	if err := svc.CancelAgent(ctx, "session1"); err != nil {
+		t.Fatalf("cancel agent: %v", err)
+	}
+
+	select {
+	case <-promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queued prompt dispatch")
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	if status.Count != 0 {
+		t.Fatalf("expected queued prompt to stay drained after cancel guard clears, count=%d entries=%+v", status.Count, status.Entries)
 	}
 }
 
@@ -808,14 +868,57 @@ func TestStartCreatedSession_EmptyProfileFallsBackToWorkflowDefault(t *testing.T
 	}
 }
 
+func TestStartCreatedSession_OfficeTaskSkipsSchedulingState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	dbTask, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	dbTask.State = v1.TaskStateReview
+	dbTask.WorkflowStepID = "step-office"
+	dbTask.AssigneeAgentProfileID = "office-agent"
+	if err := repo.UpdateTask(ctx, dbTask); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Office Task", State: v1.TaskStateReview}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-office"] = &wfmodels.WorkflowStep{ID: "step-office", WorkflowID: "wf1"}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+
+	if _, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Do the work", true, false, true, nil); err != nil {
+		t.Fatalf("StartCreatedSession: %v", err)
+	}
+
+	if writes := taskRepo.stateWrites["task1"]; writes != 0 {
+		t.Fatalf("office task should not write SCHEDULING, got %d state writes", writes)
+	}
+	if got := taskRepo.tasks["task1"].State; got != v1.TaskStateReview {
+		t.Fatalf("office task state = %s, want REVIEW", got)
+	}
+}
+
 // --- recordInitialMessage ---
 
 // mockMessageCreator implements MessageCreator for testing.
 // Only CreateUserMessage is tracked; all other methods are no-op stubs.
 type mockMessageCreator struct {
-	userMessages    []mockUserMessage
-	sessionMessages []mockSessionMessage
-	userMessageErr  error
+	userMessages       []mockUserMessage
+	sessionMessages    []mockSessionMessage
+	agentMessages      []mockAgentMessage
+	agentMessageWrites int
+	agentStreamWrites  int
+	thinkingWrites     int
+	toolCallWrites     int
+	toolUpdateWrites   int
+	userMessageErr     error
 }
 
 type mockUserMessage struct {
@@ -829,6 +932,10 @@ type mockSessionMessage struct {
 	requestsInput                                   bool
 }
 
+type mockAgentMessage struct {
+	taskID, content, sessionID, turnID string
+}
+
 func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, content, sessionID, turnID string, metadata map[string]interface{}) error {
 	if m.userMessageErr != nil {
 		return m.userMessageErr
@@ -837,15 +944,19 @@ func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, conten
 	return nil
 }
 
-func (m *mockMessageCreator) CreateAgentMessage(context.Context, string, string, string, string) error {
+func (m *mockMessageCreator) CreateAgentMessage(_ context.Context, taskID, content, sessionID, turnID string) error {
+	m.agentMessages = append(m.agentMessages, mockAgentMessage{taskID, content, sessionID, turnID})
+	m.agentMessageWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) CreateToolCallMessage(context.Context, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+	m.toolCallWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, string, string, string, string, string, string, string, string, *streams.NormalizedPayload) error {
+	m.toolUpdateWrites++
 	return nil
 }
 
@@ -871,18 +982,22 @@ func (m *mockMessageCreator) UpdatePermissionMessage(context.Context, string, st
 }
 
 func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {
+	m.agentStreamWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) AppendAgentMessage(context.Context, string, string) error {
+	m.agentStreamWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) CreateThinkingMessageStreaming(context.Context, string, string, string, string, string) error {
+	m.thinkingWrites++
 	return nil
 }
 
 func (m *mockMessageCreator) AppendThinkingMessage(context.Context, string, string) error {
+	m.thinkingWrites++
 	return nil
 }
 func (m *mockMessageCreator) InvalidateModelCache(string) {}

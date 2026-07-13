@@ -30,6 +30,13 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0022 | [Embedded Vite assets](0022-embedded-vite-assets.md)                                                                                | accepted   | backend, frontend, cli      | 2026-06-17 |
 | 0023 | [Active workspace cookie for boot state](0023-active-workspace-cookie.md)                                                           | accepted   | backend, frontend           | 2026-06-18 |
 | 0024 | [Go-fronted Vite dev mode](0024-go-fronted-vite-dev-mode.md)                                                                        | accepted   | backend, frontend, cli      | 2026-06-18 |
-| 0025 | [Runtime cleanup uses `executors_running`](0025-runtime-cleanup-uses-executors-running.md)                                          | accepted   | backend                     | 2026-06-22 |
+| 0025 | [Runtime cleanup uses `executors_running`](0025-runtime-cleanup-uses-executors-running.md)                                          | accepted (amended 2026-07-06) | backend            | 2026-06-22 |
 | 0026 | [Tauri desktop shell over native runtime](0026-tauri-desktop-shell.md)                                                              | accepted   | frontend, backend, cli, infra | 2026-06-23 |
 | 0027 | [Replayable schema migrations across SQLite and Postgres](0027-replayable-schema-migrations.md)                                     | accepted   | backend                     | 2026-06-24 |
+| 0028 | [Backend-owned task-create last-used preferences](0028-task-create-last-used-source-of-truth.md)                                    | accepted   | backend, frontend           | 2026-06-29 |
+| 0029 | [Release backfill and desktop diagnostics](0029-release-backfill-and-desktop-diagnostics.md)                                        | accepted   | infra, workflow             | 2026-07-01 |
+| 0030 | [Workspace-scoped integration settings](0030-workspace-scoped-integration-settings.md)                                             | accepted   | backend, frontend           | 2026-07-01 |
+| 0031 | [Office skill reference files](0031-office-skill-reference-files.md)                                                                | accepted   | backend                     | 2026-07-06 |
+| 0032 | [Configurable worktree branch names](0032-configurable-worktree-branch-names.md)                                                    | accepted   | backend, frontend           | 2026-07-07 |
+| 0033 | [Durable plan implementation start marker](0033-durable-plan-implementation-start.md)                                               | accepted   | backend, frontend           | 2026-07-09 |
+| 0034 | [Agent Client Protocol Codex ACP Bridge](0034-agentclientprotocol-codex-acp.md)                                                     | accepted   | backend, protocol           | 2026-07-10 |

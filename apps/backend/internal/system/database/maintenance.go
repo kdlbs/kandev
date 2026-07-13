@@ -18,14 +18,14 @@ func (s *Service) Vacuum(ctx context.Context) string {
 }
 
 func (s *Service) runVacuum(_ context.Context) (map[string]interface{}, error) {
-	if s.pool == nil {
-		return nil, fmt.Errorf("vacuum: no database pool")
+	if err := s.requireSQLiteMaintenance("vacuum"); err != nil {
+		return nil, err
 	}
-	before, _ := readDBSize(s.pool.Reader())
+	before, _ := readDatabaseSize(s.pool.Reader())
 	if _, err := s.pool.Writer().Exec("VACUUM"); err != nil {
 		return nil, fmt.Errorf("vacuum: %w", err)
 	}
-	after, _ := readDBSize(s.pool.Reader())
+	after, _ := readDatabaseSize(s.pool.Reader())
 	reclaimed := before - after
 	if reclaimed < 0 {
 		reclaimed = 0
@@ -47,13 +47,24 @@ func (s *Service) Optimize(ctx context.Context) string {
 }
 
 func (s *Service) runOptimize(_ context.Context) (map[string]interface{}, error) {
-	if s.pool == nil {
-		return nil, fmt.Errorf("optimize: no database pool")
+	if err := s.requireSQLiteMaintenance("optimize"); err != nil {
+		return nil, err
 	}
 	if _, err := s.pool.Writer().Exec("PRAGMA optimize"); err != nil {
 		return nil, fmt.Errorf("pragma optimize: %w", err)
 	}
 	return map[string]interface{}{"status": "ok"}, nil
+}
+
+func (s *Service) requireSQLiteMaintenance(operation string) error {
+	if s.pool == nil || s.pool.Writer() == nil {
+		return fmt.Errorf("%s: no database pool", operation)
+	}
+	driver := s.databaseDriver()
+	if driver != databaseDriverSQLite {
+		return fmt.Errorf("%s: not supported for %s driver", operation, driver)
+	}
+	return nil
 }
 
 // HandleVacuum returns a gin handler for POST /api/v1/system/database/vacuum.

@@ -50,7 +50,14 @@ function createAutomationsActions(
 
 function createRunsActions(
   set: ImmerSet,
-): Pick<AutomationsSlice, "setAutomationRuns" | "setAutomationRunsLoading"> {
+): Pick<
+  AutomationsSlice,
+  | "setAutomationRuns"
+  | "setAutomationRunsLoading"
+  | "removeAutomationRun"
+  | "clearAutomationRuns"
+  | "restoreAutomationRun"
+> {
   return {
     setAutomationRuns: (automationId, runs) =>
       set((draft) => {
@@ -59,6 +66,35 @@ function createRunsActions(
     setAutomationRunsLoading: (automationId, loading) =>
       set((draft) => {
         draft.automationRuns.loading[automationId] = loading;
+      }),
+    removeAutomationRun: (automationId, runId) =>
+      set((draft) => {
+        const runs = draft.automationRuns.byAutomationId[automationId];
+        if (runs) {
+          draft.automationRuns.byAutomationId[automationId] = runs.filter((r) => r.id !== runId);
+        }
+      }),
+    clearAutomationRuns: (automationId) =>
+      set((draft) => {
+        draft.automationRuns.byAutomationId[automationId] = [];
+      }),
+    // Re-inserts a single run that was optimistically removed but whose
+    // deletion could not be confirmed AND whose recovery refresh also
+    // failed — the last-resort fallback so the UI never silently drifts
+    // from a known state. Idempotent (no-op if already present) and keeps
+    // the list sorted by created_at desc, matching the server's ordering.
+    restoreAutomationRun: (automationId, run) =>
+      set((draft) => {
+        const runs = draft.automationRuns.byAutomationId[automationId] ?? [];
+        if (runs.some((r) => r.id === run.id)) return;
+        const insertAt = runs.findIndex((r) => r.created_at < run.created_at);
+        const next = runs.slice();
+        if (insertAt === -1) {
+          next.push(run);
+        } else {
+          next.splice(insertAt, 0, run);
+        }
+        draft.automationRuns.byAutomationId[automationId] = next;
       }),
   };
 }

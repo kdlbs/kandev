@@ -9,6 +9,8 @@ import { isTerminalSessionState } from "@/lib/ws/handlers/agent-session";
 export type AgentErrorOptions = {
   /** Most recently dismissed `last_agent_error` stamp per sessionId. */
   dismissedAgentErrors?: Record<string, string>;
+  /** Sidebar-only acknowledgements for stale errors that should no longer badge task rows. */
+  acknowledgedAgentErrors?: Record<string, string>;
   /** Messages keyed by sessionId. Used to auto-hide the icon once the agent
    *  produces a new message after the error timestamp. */
   messagesBySession?: Record<string, readonly Message[] | undefined>;
@@ -43,8 +45,30 @@ function shouldHideError(
   error: LastAgentError,
   options: AgentErrorOptions,
 ): boolean {
-  if (options.dismissedAgentErrors?.[sessionId] === lastAgentErrorStamp(error)) return true;
+  const stamp = lastAgentErrorStamp(error);
+  if (hasStoredStamp(sessionId, stamp, options)) return true;
   return hasAgentMessageAfter(options.messagesBySession?.[sessionId], error.occurredAt);
+}
+
+export function resolvedAgentErrorAcknowledgementStamp(
+  sessionId: string,
+  session: Pick<TaskSession, "metadata"> | null | undefined,
+  options: AgentErrorOptions = {},
+): string | null {
+  const error = readLastAgentError(session?.metadata);
+  if (!error) return null;
+  const stamp = lastAgentErrorStamp(error);
+  if (hasStoredStamp(sessionId, stamp, options)) return null;
+  return hasAgentMessageAfter(options.messagesBySession?.[sessionId], error.occurredAt)
+    ? stamp
+    : null;
+}
+
+function hasStoredStamp(sessionId: string, stamp: string, options: AgentErrorOptions): boolean {
+  return (
+    options.dismissedAgentErrors?.[sessionId] === stamp ||
+    options.acknowledgedAgentErrors?.[sessionId] === stamp
+  );
 }
 
 function hasAgentMessageAfter(

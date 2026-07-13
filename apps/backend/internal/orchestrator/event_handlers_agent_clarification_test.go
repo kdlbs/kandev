@@ -19,6 +19,7 @@ type repoBackedTurnService struct {
 type testRepo interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
 	CompleteTurn(ctx context.Context, id string) error
+	GetTurn(ctx context.Context, id string) (*models.Turn, error)
 	GetActiveTurnBySessionID(ctx context.Context, sessionID string) (*models.Turn, error)
 	UpdateTurn(ctx context.Context, turn *models.Turn) error
 }
@@ -37,6 +38,10 @@ func (s *repoBackedTurnService) StartTurn(ctx context.Context, sessionID string)
 
 func (s *repoBackedTurnService) CompleteTurn(ctx context.Context, turnID string) error {
 	return s.repo.CompleteTurn(ctx, turnID)
+}
+
+func (s *repoBackedTurnService) GetTurn(ctx context.Context, turnID string) (*models.Turn, error) {
+	return s.repo.GetTurn(ctx, turnID)
 }
 
 func (s *repoBackedTurnService) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {

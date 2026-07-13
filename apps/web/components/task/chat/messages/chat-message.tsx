@@ -1,6 +1,15 @@
 "use client";
 
-import { memo, useState, useCallback } from "react";
+import {
+  Children,
+  memo,
+  useState,
+  useCallback,
+  useMemo,
+  type ComponentPropsWithoutRef,
+  type ReactNode,
+} from "react";
+import type { Components } from "react-markdown";
 import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
@@ -9,7 +18,15 @@ import { MessageActions } from "@/components/task/chat/messages/message-actions"
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
+import { markdownComponents } from "@/components/shared/markdown-components";
 import { ImagePreviewDialog } from "@/components/task/chat/image-preview-dialog";
+import { useAppStore } from "@/components/state-provider";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@kandev/ui/hover-card";
+import { PromptPreview } from "@/components/task/chat/context-items/prompt-preview";
+import {
+  buildPromptMentionNames,
+  splitPreparedPromptMentionSegments,
+} from "@/lib/prompts/prompt-mention-segments";
 import {
   WorkflowStepMessageBadge,
   workflowMessageInfoFromMetadata,
@@ -78,6 +95,7 @@ type UserMessageBodyOptions = {
   hasAttachments: boolean;
   content: string;
   rawContent?: string;
+  promptMentionComponents?: Components;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 };
@@ -88,6 +106,7 @@ function renderUserMessageBody({
   hasAttachments,
   content,
   rawContent,
+  promptMentionComponents,
   worktreePath,
   onOpenFile,
 }: UserMessageBodyOptions): React.ReactNode {
@@ -97,7 +116,12 @@ function renderUserMessageBody({
   if (hasContent) {
     return (
       <div className="markdown-body markdown-body-user max-w-none">
-        <MemoizedMarkdown content={content} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+        <MemoizedMarkdown
+          content={content}
+          components={promptMentionComponents}
+          worktreePath={worktreePath}
+          onOpenFile={onOpenFile}
+        />
       </div>
     );
   }
@@ -129,6 +153,157 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   sender_task_title?: string;
   sender_session_id?: string;
 };
+
+type PromptMentionMarkdownTag =
+  | "p"
+  | "li"
+  | "h1"
+  | "h2"
+  | "h3"
+  | "h4"
+  | "h5"
+  | "h6"
+  | "blockquote"
+  | "td"
+  | "th";
+
+type MarkdownChildrenProps<T extends PromptMentionMarkdownTag> = ComponentPropsWithoutRef<T> & {
+  children?: ReactNode;
+  node?: unknown;
+};
+
+function usePromptMentionNames() {
+  const prompts = useAppStore((state) => state.prompts.items);
+  return useMemo(() => prompts.map((prompt) => prompt.name), [prompts]);
+}
+
+function usePromptMentionMarkdownComponents(promptNames: string[]): Components | undefined {
+  return useMemo(() => {
+    const mentionNames = buildPromptMentionNames(promptNames);
+    if (mentionNames.length === 0) return undefined;
+    const renderChildren = (children: ReactNode, keyPrefix: string) =>
+      renderChildrenWithPromptMentions(children, mentionNames, keyPrefix);
+    return {
+      ...markdownComponents,
+      p: ({ children, node, ...props }: MarkdownChildrenProps<"p">) => {
+        void node;
+        return <p {...props}>{renderChildren(children, "p")}</p>;
+      },
+      li: ({ children, node, ...props }: MarkdownChildrenProps<"li">) => {
+        void node;
+        return <li {...props}>{renderChildren(children, "li")}</li>;
+      },
+      h1: ({ children, node, ...props }: MarkdownChildrenProps<"h1">) => {
+        void node;
+        return <h1 {...props}>{renderChildren(children, "h1")}</h1>;
+      },
+      h2: ({ children, node, ...props }: MarkdownChildrenProps<"h2">) => {
+        void node;
+        return <h2 {...props}>{renderChildren(children, "h2")}</h2>;
+      },
+      h3: ({ children, node, ...props }: MarkdownChildrenProps<"h3">) => {
+        void node;
+        return <h3 {...props}>{renderChildren(children, "h3")}</h3>;
+      },
+      h4: ({ children, node, ...props }: MarkdownChildrenProps<"h4">) => {
+        void node;
+        return <h4 {...props}>{renderChildren(children, "h4")}</h4>;
+      },
+      h5: ({ children, node, ...props }: MarkdownChildrenProps<"h5">) => {
+        void node;
+        return <h5 {...props}>{renderChildren(children, "h5")}</h5>;
+      },
+      h6: ({ children, node, ...props }: MarkdownChildrenProps<"h6">) => {
+        void node;
+        return <h6 {...props}>{renderChildren(children, "h6")}</h6>;
+      },
+      blockquote: ({ children, node, ...props }: MarkdownChildrenProps<"blockquote">) => {
+        void node;
+        return <blockquote {...props}>{renderChildren(children, "blockquote")}</blockquote>;
+      },
+      td: ({ children, node, ...props }: MarkdownChildrenProps<"td">) => {
+        void node;
+        return <td {...props}>{renderChildren(children, "td")}</td>;
+      },
+      th: ({ children, node, ...props }: MarkdownChildrenProps<"th">) => {
+        void node;
+        return <th {...props}>{renderChildren(children, "th")}</th>;
+      },
+    };
+  }, [promptNames]);
+}
+
+function renderChildrenWithPromptMentions(
+  children: ReactNode,
+  promptNames: string[],
+  keyPrefix: string,
+) {
+  return Children.toArray(children).flatMap((child, index) => {
+    if (typeof child !== "string") return child;
+    return renderTextWithPromptMentions(child, promptNames, `${keyPrefix}-${index}`);
+  });
+}
+
+function renderTextWithPromptMentions(text: string, promptNames: string[], keyPrefix: string) {
+  return splitPreparedPromptMentionSegments(text, promptNames).map((segment, index) => {
+    if (segment.kind === "text") return segment.value;
+    return (
+      <PromptMentionChip
+        key={`${keyPrefix}-prompt-${index}`}
+        name={segment.name}
+        value={segment.value}
+      />
+    );
+  });
+}
+
+const PROMPT_MENTION_CHIP_CLASS =
+  "inline rounded-md border border-emerald-300/35 bg-emerald-400/20 px-1.5 py-0.5 font-mono text-[0.88em] font-semibold text-emerald-950 box-decoration-clone break-all dark:text-emerald-100";
+
+/**
+ * Renders a saved-prompt @mention as a chip. When the referenced prompt is
+ * loaded in the store, hovering the chip reveals its contents so the reader
+ * doesn't need to switch to the raw message view.
+ */
+function PromptMentionChip({ name, value }: { name: string; value: string }) {
+  const content = useAppStore(
+    useCallback(
+      (state) => state.prompts.items.find((prompt) => prompt.name === name)?.content ?? null,
+      [name],
+    ),
+  );
+
+  if (!content) {
+    return (
+      <span
+        data-testid="custom-prompt-mention"
+        data-prompt-name={name}
+        title={`Custom prompt: ${name}`}
+        className={PROMPT_MENTION_CHIP_CLASS}
+      >
+        {value}
+      </span>
+    );
+  }
+
+  return (
+    <HoverCard openDelay={300} closeDelay={0}>
+      <HoverCardTrigger asChild>
+        <span
+          data-testid="custom-prompt-mention"
+          data-prompt-name={name}
+          tabIndex={0}
+          className={cn(PROMPT_MENTION_CHIP_CLASS, "cursor-default")}
+        >
+          {value}
+        </span>
+      </HoverCardTrigger>
+      <HoverCardContent side="top" align="start" className="w-80 max-h-80 overflow-y-auto">
+        <PromptPreview content={content} />
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
 
 function parseUserMessageMetadata(comment: Message) {
   const metadata = comment.metadata as UserMessageMetadata | undefined;
@@ -215,6 +390,8 @@ function UserMessageContent({
   onScrollToMessage,
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
+  const promptNames = usePromptMentionNames();
+  const promptMentionComponents = usePromptMentionMarkdownComponents(promptNames);
   const {
     imageAttachments,
     fileAttachments,
@@ -266,6 +443,7 @@ function UserMessageContent({
             hasAttachments,
             content: comment.content,
             rawContent: comment.raw_content,
+            promptMentionComponents,
             worktreePath,
             onOpenFile,
           })}
@@ -319,7 +497,7 @@ function AgentMessageContent({
       <div className="flex-1 min-w-0">
         {showRaw ? (
           <pre className="whitespace-pre-wrap font-mono text-xs bg-muted/20 p-3 rounded-md">
-            {comment.content || "(empty)"}
+            {comment.raw_content || comment.content || "(empty)"}
           </pre>
         ) : (
           <div className="markdown-body max-w-none">

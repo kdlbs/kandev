@@ -7,6 +7,10 @@ import { createUISlice } from "./ui-slice";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import type { SidebarViewDraft } from "./sidebar-view-types";
 import type { UISlice } from "./types";
+import {
+  getStoredAcknowledgedAgentErrors,
+  setStoredAcknowledgedAgentErrors,
+} from "@/lib/session-last-agent-error";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   updateUserSettings: vi.fn(() => Promise.resolve({ settings: {} })),
@@ -28,6 +32,8 @@ const SIDEBAR_VIEWS_KEY = "kandev.sidebar.views";
 const SIDEBAR_ACTIVE_VIEW_KEY = "kandev.sidebar.activeViewId";
 const SIDEBAR_DRAFT_KEY = "kandev.sidebar.draft";
 const BACKEND_DOWN = "backend down";
+const PINNED_KEY = "kandev.sidebar.pinnedTaskIds";
+const ORDER_KEY = "kandev.sidebar.orderedTaskIds";
 
 function makeSidebarView(id: string, name: string) {
   return {
@@ -81,9 +87,6 @@ describe("toggleSubtaskCollapsed", () => {
 });
 
 describe("sidebar task prefs (pin + manual order)", () => {
-  const PINNED_KEY = "kandev.sidebar.pinnedTaskIds";
-  const ORDER_KEY = "kandev.sidebar.orderedTaskIds";
-
   beforeEach(() => {
     window.localStorage.clear();
     vi.mocked(updateUserSettings).mockResolvedValue({
@@ -109,6 +112,30 @@ describe("sidebar task prefs (pin + manual order)", () => {
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1", "t2"]);
 
     store.getState().togglePinnedTask("t1");
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t2"]);
+    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t2"]);
+  });
+
+  it("pinTasks pins all given ids without unpinning existing ones", () => {
+    const store = makeStore();
+    store.getState().togglePinnedTask("t1");
+
+    store.getState().pinTasks(["t1", "t2", "t3"]);
+    // t1 already pinned stays pinned; t2/t3 added.
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1", "t2", "t3"]);
+    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual([
+      "t1",
+      "t2",
+      "t3",
+    ]);
+  });
+
+  it("unpinTasks removes all given ids and leaves other pinned tasks alone", () => {
+    const store = makeStore();
+    store.getState().pinTasks(["t1", "t2", "t3"]);
+
+    store.getState().unpinTasks(["t1", "t3"]);
+
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t2"]);
     expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t2"]);
   });
@@ -150,6 +177,15 @@ describe("sidebar task prefs (pin + manual order)", () => {
     store.getState().removeTaskFromSidebarPrefs("ghost");
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1"]);
     expect(window.localStorage.getItem(PINNED_KEY)).toBe(before);
+  });
+});
+
+describe("sidebar task prefs sync", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.mocked(updateUserSettings).mockResolvedValue({
+      settings: {},
+    } as Awaited<ReturnType<typeof updateUserSettings>>);
   });
 
   it("records sync errors and clears them after a later successful sync", async () => {
@@ -400,6 +436,40 @@ describe("appSidebar actions", () => {
     store.getState().toggleAppSidebarSettingsMode(); // off
     expect(store.getState().appSidebar.settingsMode).toBe(false);
     expect(store.getState().appSidebar.collapsed).toBe(false);
+  });
+});
+
+describe("agent error sidebar acknowledgements", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("hydrates acknowledged errors from localStorage", () => {
+    setStoredAcknowledgedAgentErrors({ "session-1": "stamp-1" });
+
+    const store = makeStore();
+
+    expect(store.getState().acknowledgedAgentErrors).toEqual({ "session-1": "stamp-1" });
+  });
+
+  it("records and persists acknowledged sidebar error stamps in one batch", () => {
+    const store = makeStore();
+
+    store.getState().acknowledgeAgentErrors({
+      "session-1": "stamp-1",
+      "session-2": "stamp-2",
+      "": "ignored",
+      "session-3": "",
+    });
+
+    expect(store.getState().acknowledgedAgentErrors).toEqual({
+      "session-1": "stamp-1",
+      "session-2": "stamp-2",
+    });
+    expect(getStoredAcknowledgedAgentErrors()).toEqual({
+      "session-1": "stamp-1",
+      "session-2": "stamp-2",
+    });
   });
 });
 

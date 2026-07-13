@@ -15,7 +15,10 @@ export type FileEditorContentProps = {
   vcsDiff?: string;
   isSaving: boolean;
   sessionId?: string;
+  taskId?: string | null;
+  repositoryId?: string | null;
   worktreePath?: string;
+  repo?: string;
   enableComments?: boolean;
   markdownPreview?: boolean;
   onToggleMarkdownPreview?: () => void;
@@ -34,6 +37,10 @@ export const FileEditorContent = memo(function FileEditorContent(props: FileEdit
         path={props.path}
         content={props.content}
         worktreePath={props.worktreePath}
+        sessionId={props.sessionId}
+        taskId={props.taskId}
+        repositoryId={props.repositoryId}
+        enableComments={props.enableComments}
         onTogglePreview={props.onToggleMarkdownPreview}
       />
     );

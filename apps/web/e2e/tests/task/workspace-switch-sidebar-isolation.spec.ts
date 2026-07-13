@@ -27,7 +27,7 @@ async function gotoTaskList(page: Page): Promise<void> {
 }
 
 function taskInList(page: Page, title: string): Locator {
-  return page.getByRole("table").getByText(title);
+  return page.getByTestId("tasks-list").getByText(title);
 }
 
 // Office off: the picker routes a workspace switch to `/office` only when the

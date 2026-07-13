@@ -10,7 +10,13 @@ test.describe("System Database page", () => {
     await expect(testPage.getByTestId("system-database-card")).toBeVisible();
 
     // Each stat row must render a non-empty value.
-    const rows = ["system-db-path", "system-db-size", "system-db-wal", "system-db-schema-version"];
+    const rows = [
+      "system-db-driver",
+      "system-db-path",
+      "system-db-size",
+      "system-db-wal",
+      "system-db-schema-version",
+    ];
     for (const id of rows) {
       const value = await testPage.getByTestId(id).innerText();
       expect(value.trim().length).toBeGreaterThan(0);

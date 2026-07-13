@@ -120,6 +120,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		AssumeMcpHttp:          req.AssumeMcpHttp,
 		McpMode:                req.McpMode,
 		RequiresProcessKill:    req.RequiresProcessKill,
+		StripEnv:               req.StripEnv,
 		BaseBranches:           req.BaseBranches,
 	}
 

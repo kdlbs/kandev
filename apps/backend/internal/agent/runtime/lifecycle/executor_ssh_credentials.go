@@ -29,10 +29,11 @@ func (r *SSHExecutor) uploadCredentials(
 	ctx context.Context,
 	client *ssh.Client,
 	req *ExecutorCreateRequest,
+	platform SSHRemotePlatform,
 ) error {
 	catalog := r.buildRemoteAuthCatalog()
 	r.resolveAuthSecrets(ctx, req, catalog)
-	r.runAuthSetupScripts(ctx, client, req, catalog)
+	r.runAuthSetupScripts(ctx, client, req, catalog, platform)
 
 	credsJSON := getMetadataString(req.Metadata, "remote_credentials")
 	if credsJSON == "" {
@@ -52,7 +53,7 @@ func (r *SSHExecutor) uploadCredentials(
 	}
 
 	uploader := &sshFileUploader{client: client}
-	homeDir, err := r.resolveRemoteAuthHomeDir(ctx, client, req)
+	homeDir, err := r.resolveRemoteAuthHomeDir(ctx, client, req, platform)
 	if err != nil {
 		return err
 	}
@@ -67,6 +68,7 @@ func (r *SSHExecutor) runAuthSetupScripts(
 	client *ssh.Client,
 	req *ExecutorCreateRequest,
 	catalog remoteauth.Catalog,
+	platform SSHRemotePlatform,
 ) {
 	for _, spec := range catalog.Specs {
 		for _, method := range spec.Methods {
@@ -76,7 +78,7 @@ func (r *SSHExecutor) runAuthSetupScripts(
 			if req.Env[method.EnvVar] == "" {
 				continue
 			}
-			r.runOneAuthSetupScript(ctx, client, req, spec.DisplayName, method)
+			r.runOneAuthSetupScript(ctx, client, req, spec.DisplayName, method, platform)
 		}
 	}
 }
@@ -94,8 +96,9 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 	req *ExecutorCreateRequest,
 	displayName string,
 	method remoteauth.Method,
+	platform SSHRemotePlatform,
 ) {
-	shell := sshShellFromMetadata(req.Metadata)
+	shell := sshShellForRemote(req.Metadata, platform)
 	envScript := buildSSHEnvInitScript(req.Env)
 	// `. /dev/stdin` sources the env lines fed via session.Stdin; `set -a`
 	// makes those assignments automatically exported so the user's setup
@@ -198,12 +201,13 @@ func (r *SSHExecutor) resolveRemoteAuthHomeDir(
 	ctx context.Context,
 	client *ssh.Client,
 	req *ExecutorCreateRequest,
+	platform SSHRemotePlatform,
 ) (string, error) {
 	if override := strings.TrimSpace(getMetadataString(req.Metadata, MetadataKeyRemoteAuthHome)); override != "" {
 		r.logger.Debug("using remote auth home override", zap.String("home_dir", override))
 		return override, nil
 	}
-	shell := sshShellFromMetadata(req.Metadata)
+	shell := sshShellForRemote(req.Metadata, platform)
 	out, _, err := runSSHCommand(ctx, client, WrapLoginShell(shell, `printf %s "$HOME"`))
 	if err != nil {
 		return "", fmt.Errorf("ssh: resolve remote $HOME for credentials: %w", err)

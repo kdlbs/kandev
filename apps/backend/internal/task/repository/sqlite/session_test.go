@@ -176,6 +176,53 @@ func TestListTaskSessionWorktreesFiltersInactiveRows(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskSessionWorktreeBranchByRepositoryScopesUpdate(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-worktrees", "session-worktrees", "turn-worktrees")
+
+	worktrees := []*models.TaskSessionWorktree{
+		{
+			ID:             "wt-repo-1",
+			SessionID:      "session-worktrees",
+			WorktreeID:     "worktree-repo-1",
+			RepositoryID:   "repo-1",
+			WorktreeBranch: "feature/old-one",
+		},
+		{
+			ID:             "wt-repo-2",
+			SessionID:      "session-worktrees",
+			WorktreeID:     "worktree-repo-2",
+			RepositoryID:   "repo-2",
+			WorktreeBranch: "feature/old-two",
+		},
+	}
+	for _, wt := range worktrees {
+		if err := repo.CreateTaskSessionWorktree(ctx, wt); err != nil {
+			t.Fatalf("CreateTaskSessionWorktree(%s): %v", wt.ID, err)
+		}
+	}
+
+	if err := repo.UpdateTaskSessionWorktreeBranchByRepository(ctx, "session-worktrees", "repo-1", "feature/new-one"); err != nil {
+		t.Fatalf("UpdateTaskSessionWorktreeBranchByRepository: %v", err)
+	}
+
+	listed, err := repo.ListTaskSessionWorktrees(ctx, "session-worktrees")
+	if err != nil {
+		t.Fatalf("ListTaskSessionWorktrees: %v", err)
+	}
+	branches := map[string]string{}
+	for _, wt := range listed {
+		branches[wt.RepositoryID] = wt.WorktreeBranch
+	}
+	if branches["repo-1"] != "feature/new-one" {
+		t.Fatalf("repo-1 branch = %q, want feature/new-one", branches["repo-1"])
+	}
+	if branches["repo-2"] != "feature/old-two" {
+		t.Fatalf("repo-2 branch = %q, want feature/old-two", branches["repo-2"])
+	}
+}
+
 // TestGetLastAgentMessage_NoMessages verifies that a session with no messages
 // returns an empty string and sql.ErrNoRows.
 func TestGetLastAgentMessage_NoMessages(t *testing.T) {

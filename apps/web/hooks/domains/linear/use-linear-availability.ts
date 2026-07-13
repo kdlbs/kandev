@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback } from "react";
 import { getLinearConfig } from "@/lib/api/domains/linear-api";
 import {
   useIntegrationAuthed,
@@ -7,15 +8,21 @@ import {
 } from "../integrations/use-integration-availability";
 import { useLinearEnabled } from "./use-linear-enabled";
 
-const fetchLinearConfig = () => getLinearConfig();
-
-export function useLinearAuthed(): boolean {
-  return useIntegrationAuthed(fetchLinearConfig);
+export function useLinearAuthed(workspaceId?: string | null): boolean {
+  const fetchConfig = useCallback(
+    () => getLinearConfig(workspaceId ? { workspaceId } : undefined),
+    [workspaceId],
+  );
+  return useIntegrationAuthed(fetchConfig);
 }
 
-export function useLinearAvailable(): boolean {
+export function useLinearAvailable(workspaceId?: string | null): boolean {
+  const fetchConfig = useCallback(
+    () => getLinearConfig(workspaceId ? { workspaceId } : undefined),
+    [workspaceId],
+  );
   return useIntegrationAvailable({
     useEnabled: useLinearEnabled,
-    fetchConfig: fetchLinearConfig,
+    fetchConfig,
   });
 }

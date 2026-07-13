@@ -19,6 +19,9 @@ Release builds prepare `src-tauri/resources/kandev/` with:
 bin/kandev[.exe]
 bin/agentctl[.exe]
 bin/agentctl-linux-amd64
+bin/agentctl-linux-arm64
+bin/agentctl-darwin-arm64
+bin/agentctl-darwin-amd64
 ```
 
 Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-desktop-runtime.sh`; do not commit runtime binaries. The tracked `.gitignore` files only keep the resource directory present for Tauri config validation.
@@ -32,4 +35,4 @@ Use `scripts/release/prepare-desktop-runtime.sh` and `scripts/release/verify-des
 
 ## Release
 
-Desktop artifacts are built in `.github/workflows/release.yml` after the platform runtime bundles. Public recommended macOS and Windows artifacts require signing unless `allow_unsigned_desktop=true` is explicitly selected. Use `desktop_validation_only=true` for artifact-only validation runs that skip the release PR, tag, publish jobs, and public container tags.
+Desktop artifacts are built in `.github/workflows/release.yml` after the platform runtime bundles. macOS and Windows signing is automatic: complete signing/notarization secrets produce signed artifacts; missing or incomplete inputs produce unsigned desktop artifacts with a release-notes warning. Use `desktop_validation_only=true` for artifact-only validation runs that skip the release PR, tag, publish jobs, and public container tags.

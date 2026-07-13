@@ -96,14 +96,14 @@ export function useIssueState(
     setLoading(true);
     setError(null);
     try {
-      const i = await getLinearIssue(identifier);
+      const i = await getLinearIssue(identifier, { workspaceId });
       setIssue(i);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, [identifier]);
+  }, [workspaceId, identifier]);
 
   useEffect(() => {
     if (!enabled || !workspaceId || !identifier) return;
@@ -113,7 +113,7 @@ export function useIssueState(
       setLoading(true);
       setError(null);
       try {
-        const i = await getLinearIssue(identifier);
+        const i = await getLinearIssue(identifier, { workspaceId });
         if (!cancelled) setIssue(i);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : String(err));
@@ -133,7 +133,7 @@ export function useIssueState(
       setPendingState(stateId);
       setError(null);
       try {
-        await setLinearIssueState(issue.id, stateId);
+        await setLinearIssueState(issue.id, stateId, { workspaceId });
         await load();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -141,7 +141,7 @@ export function useIssueState(
         setPendingState(null);
       }
     },
-    [issue, load],
+    [workspaceId, issue, load],
   );
 
   return { issue, loading, error, pendingState, load, handleStateChange };

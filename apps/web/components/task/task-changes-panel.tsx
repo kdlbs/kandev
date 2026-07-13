@@ -18,6 +18,7 @@ import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
 import type { ReviewFile } from "@/components/review/types";
 import { hashDiff, reviewFileKey, splitReviewFileKey } from "@/components/review/types";
 import { usePanelActions } from "@/hooks/use-panel-actions";
+import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import { ChangesTopBar } from "./changes-top-bar";
 import type { SelectedDiff } from "./task-layout";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
@@ -30,7 +31,7 @@ type TaskChangesPanelProps = {
   onClearSelected: () => void;
   onBecameEmpty?: () => void;
   /** Callback to open file in editor */
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   /**
    * Restrict the diff list to a single source. Defaults to `"all"` (no
    * filter). Mobile uses this for source tabs; desktop omits it.
@@ -166,6 +167,15 @@ function persistAutoMarkSetting(checked: boolean) {
     return;
   }
   updateUserSettings(payload, { cache: "no-store" }).catch(() => {});
+}
+
+function useWalkthroughRequest(activeSessionId: string | null | undefined, allFiles: ReviewFile[]) {
+  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
+  return useRequestChangesWalkthrough({
+    taskId: activeTaskId,
+    sessionId: activeSessionId,
+    ready: allFiles.length > 0,
+  });
 }
 
 function useChangesActions(
@@ -472,6 +482,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
     handleToggleAutoMark,
     handleFixComments,
   } = useChangesActions(activeSessionId, allFiles, wordWrapProp);
+  const handleRequestWalkthrough = useWalkthroughRequest(activeSessionId, allFiles);
   const { visibleFiles, visibleFileRefs, reviewedCount, totalCount, progressPercent } =
     useVisibleDiffState({
       allFiles,
@@ -510,6 +521,8 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
         handleToggleSplitView={handleToggleSplitView}
         handleToggleAutoMark={handleToggleAutoMark}
         handleFixComments={handleFixComments}
+        handleRequestWalkthrough={handleRequestWalkthrough}
+        requestWalkthroughDisabled={allFiles.length === 0}
       />
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
         <TruncatedFilesBanner count={truncatedFilesCount} />
@@ -558,7 +571,7 @@ function ChangesPanelContent({
   selectedFile?: string | null;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => Promise<void>;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, repo?: string) => void;
   onPreviewMarkdown?: (path: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 }) {

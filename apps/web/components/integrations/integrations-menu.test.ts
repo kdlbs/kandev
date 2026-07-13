@@ -14,6 +14,10 @@ const useGitHubStatusMock = vi.hoisted(() => vi.fn());
 const useGitLabAvailableMock = vi.hoisted(() => vi.fn());
 const useJiraAvailableMock = vi.hoisted(() => vi.fn());
 const useLinearAvailableMock = vi.hoisted(() => vi.fn());
+const activeWorkspaceRef = vi.hoisted(() => ({
+  id: null as string | null,
+  items: [] as Array<{ id: string }>,
+}));
 
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
   useGitHubStatus: useGitHubStatusMock,
@@ -29,6 +33,17 @@ vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
 
 vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
   useLinearAvailable: useLinearAvailableMock,
+}));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (
+    selector: (state: {
+      workspaces: { activeId: string | null; items: Array<{ id: string }> };
+    }) => unknown,
+  ) =>
+    selector({
+      workspaces: { activeId: activeWorkspaceRef.id, items: activeWorkspaceRef.items },
+    }),
 }));
 
 function status(overrides: Partial<GitHubStatus>): GitHubStatus {
@@ -65,6 +80,8 @@ function mockAvailability({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  activeWorkspaceRef.id = null;
+  activeWorkspaceRef.items = [];
 });
 
 describe("getGitHubIntegrationStatus", () => {
@@ -146,6 +163,33 @@ describe("IntegrationsMenu", () => {
     render(createElement(IntegrationsMenu, {}));
 
     expect(screen.queryByRole("button", { name: "Integrations" })).toBeNull();
+  });
+
+  it("passes the active workspace id to the per-workspace availability hooks", () => {
+    activeWorkspaceRef.id = "ws-active";
+    activeWorkspaceRef.items = [{ id: "ws-active" }];
+    mockAvailability({ githubReady: true, jiraAvailable: true, linearAvailable: true });
+
+    render(createElement(IntegrationsMenu, {}));
+
+    // Jira and Linear are per-workspace: they must be scoped to the active
+    // workspace so the sidebar reflects the workspace the user is viewing.
+    expect(useJiraAvailableMock).toHaveBeenCalledWith("ws-active");
+    expect(useLinearAvailableMock).toHaveBeenCalledWith("ws-active");
+  });
+
+  it("falls back to null scope when the active workspace id is stale", () => {
+    // The active workspace was removed but activeId was not reconciled. Scoping
+    // to the deleted id would hide the links; fall back to null instead so the
+    // backend's default-workspace resolution applies.
+    activeWorkspaceRef.id = "ws-deleted";
+    activeWorkspaceRef.items = [{ id: "ws-remaining" }];
+    mockAvailability({ githubReady: false, jiraAvailable: true, linearAvailable: true });
+
+    render(createElement(IntegrationsMenu, {}));
+
+    expect(useJiraAvailableMock).toHaveBeenCalledWith(null);
+    expect(useLinearAvailableMock).toHaveBeenCalledWith(null);
   });
 });
 

@@ -75,6 +75,9 @@ func TestNewRegistry(t *testing.T) {
 	} else if len(reg.agents) != 0 {
 		t.Errorf("expected empty agents map, got %d", len(reg.agents))
 	}
+	if reg.IsLoaded() {
+		t.Error("new registry should not be marked loaded")
+	}
 }
 
 func TestRegistry_Register(t *testing.T) {
@@ -93,6 +96,9 @@ func TestRegistry_Register(t *testing.T) {
 	err = reg.Register(ag)
 	if err == nil {
 		t.Error("expected error for duplicate registration")
+	}
+	if reg.IsLoaded() {
+		t.Error("manual registration should not mark initial registry load complete")
 	}
 }
 
@@ -233,6 +239,9 @@ func TestRegistry_LoadDefaults(t *testing.T) {
 	reg := NewRegistry(log)
 
 	reg.LoadDefaults()
+	if !reg.IsLoaded() {
+		t.Fatal("LoadDefaults should mark registry loaded")
+	}
 
 	// Verify at least some default agents are loaded
 	list := reg.List()

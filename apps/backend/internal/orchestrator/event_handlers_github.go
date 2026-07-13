@@ -50,6 +50,7 @@ type GitHubService interface {
 	RefreshTaskCIFixCheckpoint(ctx context.Context, taskID, repositoryID string, prNumber int, signature, checkpointJSON string) error
 	RecordTaskCIMergeAttempt(ctx context.Context, attempt github.TaskCIMergeAttempt) error
 	RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
+	MarkTaskCIAutoFixExhausted(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error
 	ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error
 	GetPRFeedback(ctx context.Context, owner, repo string, number int) (*github.PRFeedback, error)
 	MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error
@@ -188,7 +189,7 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 
 func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Event) error {
 	options, ok := event.Data.(*github.TaskCIOptionsResponse)
-	if !ok || options == nil || (!options.AutoFixEnabled && !options.AutoMergeEnabled) || s.githubService == nil {
+	if !ok || options == nil || event.Source == ciAutomationStateEventSource || (!options.AutoFixEnabled && !options.AutoMergeEnabled) || s.githubService == nil {
 		return nil
 	}
 	detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)

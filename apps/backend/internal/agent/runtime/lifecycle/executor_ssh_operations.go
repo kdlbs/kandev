@@ -33,13 +33,35 @@ const (
 	sshRemoteAgentctlSha256 = "~/.kandev/bin/agentctl.sha256"
 	sshAgentctlReadyTimeout = 30 * time.Second
 	sshAgentctlReadyPoll    = 500 * time.Millisecond
-	sshSupportedArch        = "x86_64"
+
+	sshRemoteGOOSLinux   = "linux"
+	sshRemoteGOOSDarwin  = "darwin"
+	sshRemoteGOARCHAMD64 = "amd64"
+	sshRemoteGOARCHARM64 = "arm64"
 )
+
+// SSHRemotePlatform is the normalized remote OS/arch tuple used to choose the
+// agentctl helper uploaded to SSH hosts.
+type SSHRemotePlatform struct {
+	GOOS      string
+	GOARCH    string
+	UnameOS   string
+	UnameArch string
+}
+
+func (p SSHRemotePlatform) String() string {
+	if p.GOOS == "" || p.GOARCH == "" {
+		return "unknown"
+	}
+	return p.GOOS + "/" + p.GOARCH
+}
 
 // SSHRemoteInfo describes the remote host detected during connection.
 type SSHRemoteInfo struct {
 	UnameAll   string // `uname -a`
+	OS         string // `uname -s`
 	Arch       string // `uname -m`
+	Platform   SSHRemotePlatform
 	GitVer     string // `git --version`
 	AgentctlOK bool   // true if the cached agentctl matches the local sha256
 }
@@ -50,10 +72,9 @@ func SSHProbeRemote(ctx context.Context, client *ssh.Client) (*SSHRemoteInfo, er
 	return detectRemoteInfo(ctx, client)
 }
 
-// SSHRequireSupportedArch is the exported arm64-not-yet-supported gate.
-// Returns nil for the supported arch (x86_64) and a user-facing error otherwise.
-func SSHRequireSupportedArch(arch string) error {
-	return requireSupportedArch(arch)
+// SSHRequireSupportedRemotePlatform is the exported platform support gate.
+func SSHRequireSupportedRemotePlatform(platform SSHRemotePlatform) error {
+	return requireSupportedRemotePlatform(platform)
 }
 
 // SSHCheckAgentctlCached reports whether the remote already has an agentctl
@@ -63,8 +84,8 @@ func SSHRequireSupportedArch(arch string) error {
 // Errors here are non-fatal at test time — the actual upload happens on
 // CreateInstance — but they still bubble up so the UI can surface "agentctl
 // not yet on remote" as a status row.
-func SSHCheckAgentctlCached(ctx context.Context, client *ssh.Client, resolver *AgentctlResolver) (bool, error) {
-	localSha, _, _, err := localAgentctlSha256(resolver)
+func SSHCheckAgentctlCached(ctx context.Context, client *ssh.Client, resolver *AgentctlResolver, platform SSHRemotePlatform) (bool, error) {
+	localSha, _, _, err := localAgentctlSha256(resolver, platform)
 	if err != nil {
 		return false, err
 	}
@@ -84,7 +105,7 @@ func SSHCheckAgentctlCached(ctx context.Context, client *ssh.Client, resolver *A
 }
 
 // runSSHCommand executes a single command on the remote and returns its
-// stdout, stderr, and any error. It is the workhorse for arch detection,
+// stdout, stderr, and any error. It is the workhorse for platform detection,
 // remote mkdir, git clone, sha256 checks, and the like.
 func runSSHCommand(ctx context.Context, client *ssh.Client, cmd string) (stdout, stderr string, err error) {
 	return runSSHCommandStdin(ctx, client, cmd, nil)
@@ -122,7 +143,7 @@ func runSSHCommandStdin(ctx context.Context, client *ssh.Client, cmd string, std
 	}
 }
 
-// detectRemoteInfo runs a tiny probe to learn about the host. amd64-only gate
+// detectRemoteInfo runs a tiny probe to learn about the host. The support gate
 // happens at the caller — this function only reports.
 func detectRemoteInfo(ctx context.Context, client *ssh.Client) (*SSHRemoteInfo, error) {
 	info := &SSHRemoteInfo{}
@@ -134,6 +155,13 @@ func detectRemoteInfo(ctx context.Context, client *ssh.Client) (*SSHRemoteInfo, 
 		return nil, fmt.Errorf("ssh: uname -m: %w", err)
 	}
 	info.Arch = strings.TrimSpace(out)
+	out, _, err = runSSHCommand(ctx, client, "uname -s")
+	if err != nil {
+		return nil, fmt.Errorf("ssh: uname -s: %w", err)
+	}
+	info.OS = strings.TrimSpace(out)
+	platform, _ := normalizeSSHRemotePlatform(info.OS, info.Arch)
+	info.Platform = platform
 
 	if out, _, err := runSSHCommand(ctx, client, "git --version"); err == nil {
 		info.GitVer = strings.TrimSpace(out)
@@ -141,16 +169,55 @@ func detectRemoteInfo(ctx context.Context, client *ssh.Client) (*SSHRemoteInfo, 
 	return info, nil
 }
 
-// requireSupportedArch returns nil when the remote arch is supported, or a
-// user-facing error otherwise. v1 = linux/amd64 only (mirrors Docker today).
-func requireSupportedArch(arch string) error {
-	if arch == sshSupportedArch {
-		return nil
+func normalizeSSHRemotePlatform(osName, arch string) (SSHRemotePlatform, bool) {
+	goos := normalizeSSHRemoteOS(osName)
+	goarch := normalizeSSHRemoteArch(arch)
+	platform := SSHRemotePlatform{GOOS: goos, GOARCH: goarch, UnameOS: osName, UnameArch: arch}
+	if err := requireSupportedRemotePlatform(platform); err != nil {
+		return platform, false
 	}
-	return fmt.Errorf(
-		"unsupported remote architecture %q — SSH executor v1 supports linux/amd64 only (arm64 lands when agentctl-linux-arm64 is added to the build)",
-		arch,
-	)
+	return platform, true
+}
+
+func normalizeSSHRemoteOS(osName string) string {
+	switch strings.ToLower(strings.TrimSpace(osName)) {
+	case "linux":
+		return sshRemoteGOOSLinux
+	case "darwin":
+		return sshRemoteGOOSDarwin
+	default:
+		return ""
+	}
+}
+
+func normalizeSSHRemoteArch(arch string) string {
+	switch strings.ToLower(strings.TrimSpace(arch)) {
+	case "x86_64", "amd64":
+		return sshRemoteGOARCHAMD64
+	case "arm64", "aarch64":
+		return sshRemoteGOARCHARM64
+	default:
+		return ""
+	}
+}
+
+func requireSupportedRemotePlatform(platform SSHRemotePlatform) error {
+	switch platform.String() {
+	case sshRemoteGOOSLinux + "/" + sshRemoteGOARCHAMD64,
+		sshRemoteGOOSLinux + "/" + sshRemoteGOARCHARM64,
+		sshRemoteGOOSDarwin + "/" + sshRemoteGOARCHARM64,
+		sshRemoteGOOSDarwin + "/" + sshRemoteGOARCHAMD64:
+		return nil
+	default:
+		reported := platform.String()
+		if reported == "unknown" && (platform.UnameOS != "" || platform.UnameArch != "") {
+			reported = fmt.Sprintf("%s/%s", platform.UnameOS, platform.UnameArch)
+		}
+		return fmt.Errorf(
+			"unsupported remote platform %q — SSH executor supports linux/{amd64,arm64} and darwin/{amd64,arm64}",
+			reported,
+		)
+	}
 }
 
 // expandRemoteHome rewrites a leading ~/ to the home directory reported by the
@@ -176,8 +243,8 @@ func expandRemoteHome(ctx context.Context, client *ssh.Client, path string) (str
 
 // localAgentctlSha256 returns the hex sha256 of the local agentctl binary
 // resolved via AgentctlResolver. Used to decide whether to re-upload.
-func localAgentctlSha256(resolver *AgentctlResolver) (string, []byte, string, error) {
-	path, err := resolver.ResolveLinuxBinary()
+func localAgentctlSha256(resolver *AgentctlResolver, platform SSHRemotePlatform) (string, []byte, string, error) {
+	path, err := resolver.ResolveRemoteBinary(platform)
 	if err != nil {
 		return "", nil, "", err
 	}
@@ -191,8 +258,8 @@ func localAgentctlSha256(resolver *AgentctlResolver) (string, []byte, string, er
 
 // ensureAgentctlOnHost uploads the agentctl binary if the remote's cached sha256
 // differs from the local binary's sha256. Returns the absolute remote path.
-func ensureAgentctlOnHost(ctx context.Context, client *ssh.Client, resolver *AgentctlResolver, log *logger.Logger) (string, error) {
-	localSha, localData, localPath, err := localAgentctlSha256(resolver)
+func ensureAgentctlOnHost(ctx context.Context, client *ssh.Client, resolver *AgentctlResolver, platform SSHRemotePlatform, log *logger.Logger) (string, error) {
+	localSha, localData, localPath, err := localAgentctlSha256(resolver, platform)
 	if err != nil {
 		return "", err
 	}
@@ -298,6 +365,15 @@ func shellQuote(s string) string {
 // and is what nvm/asdf/brew assume — so it's the right default for the
 // "agent isn't on PATH" diagnosis.
 const defaultLoginShell = "bash"
+
+// SSHDefaultShellForPlatform returns the login shell Kandev should prefer
+// when an SSH profile has no explicit shell saved.
+func SSHDefaultShellForPlatform(platform SSHRemotePlatform) string {
+	if platform.GOOS == sshRemoteGOOSDarwin {
+		return "zsh"
+	}
+	return defaultLoginShell
+}
 
 // WrapLoginShell wraps cmd in `${shell} -lc '<cmd>'` so commands run under
 // a login shell that has sourced the user's profile (~/.profile,
@@ -484,7 +560,9 @@ func createRemoteAgentInstance(
 		McpServers:          req.McpServers,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKillFromReq(req),
+		StripEnv:            stripEnvFromReq(req),
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		Env:                 sshRemoteAgentEnv(req),
 	})
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
@@ -536,6 +614,61 @@ func createRemoteAgentInstance(
 		zap.Int("instance_port", resp.Port),
 		zap.String("instance_id", resp.ID))
 	return resp.Port, nil
+}
+
+// sshRemoteAgentCredentialEnvKeys are the agent-authentication environment
+// variables forwarded to the remote agent instance. Unlike containerized
+// executors (Docker/Sprites) the SSH executor's CreateInstanceRequest never
+// carried Env, so env-authenticated agents — notably claude-acp, which reads
+// CLAUDE_CODE_OAUTH_TOKEN, not a credentials file — failed with "Authentication
+// required" on every SSH remote. We forward ONLY this credential allowlist (not
+// the control plane's HOME/PATH/etc., which would break a different remote).
+// Credential env var names. Named constants keep each string single-sourced
+// (several also appear in the Docker/Sprites credential paths) so goconst stays
+// satisfied and the allowlist reads as intent rather than magic strings.
+const (
+	envKeyClaudeCodeOAuthToken = "CLAUDE_CODE_OAUTH_TOKEN"
+	envKeyAnthropicAPIKey      = "ANTHROPIC_API_KEY"
+	envKeyOpenAIAPIKey         = "OPENAI_API_KEY"
+	envKeyGeminiAPIKey         = "GEMINI_API_KEY"
+	envKeyGoogleAPIKey         = "GOOGLE_API_KEY"
+	envKeyGitHubToken          = "GITHUB_TOKEN"
+	envKeyGHToken              = "GH_TOKEN"
+)
+
+var sshRemoteAgentCredentialEnvKeys = []string{
+	envKeyClaudeCodeOAuthToken,
+	envKeyAnthropicAPIKey,
+	envKeyOpenAIAPIKey,
+	envKeyGeminiAPIKey,
+	envKeyGoogleAPIKey,
+	envKeyGitHubToken,
+	envKeyGHToken,
+}
+
+// sshRemoteAgentEnv builds the env map sent to the remote agent instance. Each
+// credential key is taken ONLY from the resolved request env — credentials the
+// orchestrator explicitly resolved for this executor/session (profile env vars,
+// profile remote_auth_secrets, or the GITHUB_TOKEN resolution chain, see the
+// orchestrator's applyContainerCredentials). It deliberately does NOT fall back
+// to the control plane's own process environment: that would forward whatever the kandev host
+// happens to have exported (OPENAI_API_KEY, GITHUB_TOKEN, …) to any SSH host the
+// executor connects to, bypassing per-executor credential scoping. Empty values
+// are skipped so we never clobber a remote-side value with a blank.
+func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
+	if req == nil || req.Env == nil {
+		return nil
+	}
+	env := make(map[string]string)
+	for _, key := range sshRemoteAgentCredentialEnvKeys {
+		if val := req.Env[key]; val != "" {
+			env[key] = val
+		}
+	}
+	if len(env) == 0 {
+		return nil
+	}
+	return env
 }
 
 // sshAgentTypeFromReq returns the agent type ID for the create-instance call,

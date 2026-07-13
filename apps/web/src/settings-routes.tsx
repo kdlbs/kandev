@@ -66,7 +66,12 @@ import {
 import { listWorkflowTemplates } from "@/lib/api/domains/workflow-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { useRouter } from "@/lib/routing/client-router";
-import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
+import { safeDecodePathSegment } from "@/lib/routing/path";
+import {
+  mapWorkspaceItem,
+  readActiveWorkspaceCookie,
+  resolveSettingsActiveWorkspaceId,
+} from "@/lib/routing/route-bootstrap";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { AppState } from "@/lib/state/store";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
@@ -93,7 +98,6 @@ type WorkspaceWorkflowsRouteState = {
   workflowTemplates: WorkflowTemplate[];
 };
 type SettingsInitialStateData = {
-  pathname: string;
   workspaces: ListWorkspacesResponse["workspaces"];
   executors: Awaited<ReturnType<typeof listExecutors>>["executors"];
   agents: Awaited<ReturnType<typeof listAgents>>["agents"];
@@ -132,13 +136,13 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/external-mcp": () => <ExternalMcpPage />,
   "/settings/prompts": () => <PromptsSettings />,
   "/settings/voice-mode": () => <VoiceModeSettings />,
-  "/settings/integrations": () => <IntegrationsIndexPage />,
-  "/settings/integrations/github": () => <GitHubIntegrationPage />,
-  "/settings/integrations/gitlab": () => <IntegrationsGitLabPage />,
-  "/settings/integrations/jira": () => <IntegrationsJiraPage />,
-  "/settings/integrations/linear": () => <IntegrationsLinearPage />,
-  "/settings/integrations/sentry": () => <IntegrationsSentryPage />,
-  "/settings/integrations/slack": () => <IntegrationsSlackPage />,
+  "/settings/integrations": () => renderIntegrationSettingsRoute(null),
+  "/settings/integrations/github": () => renderIntegrationSettingsRoute("github"),
+  "/settings/integrations/gitlab": () => renderIntegrationSettingsRoute("gitlab"),
+  "/settings/integrations/jira": () => renderIntegrationSettingsRoute("jira"),
+  "/settings/integrations/linear": () => renderIntegrationSettingsRoute("linear"),
+  "/settings/integrations/sentry": () => renderIntegrationSettingsRoute("sentry"),
+  "/settings/integrations/slack": () => renderIntegrationSettingsRoute("slack"),
   "/settings/system": () => <SettingsRedirect to="/settings/system/status" />,
   "/settings/system/about": () => (
     <SystemPageShell title="About" description="Version, build metadata, and links.">
@@ -156,7 +160,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/system/database": () => (
     <SystemPageShell
       title="Database"
-      description="SQLite path and size, plus VACUUM, optimize, and factory reset."
+      description="Database driver, size, and available maintenance controls."
     >
       <DatabaseStatsCard />
     </SystemPageShell>
@@ -214,44 +218,15 @@ export function settingsRouteKey(pathname: string): string {
   return normalizeSettingsPath(pathname);
 }
 
-function renderSettingsRoute(pathname: string) {
+export function renderSettingsRoute(pathname: string) {
   const dynamicRoute = renderDynamicSettingsRoute(pathname);
   if (dynamicRoute) return dynamicRoute;
   return SETTINGS_ROUTES[pathname]?.() ?? <SettingsRouteFallback pathname={pathname} />;
 }
 
 function renderDynamicSettingsRoute(pathname: string) {
-  const workspaceAutomation = matchDouble(
-    pathname,
-    /^\/settings\/workspace\/([^/]+)\/automations\/([^/]+)$/,
-  );
-  if (workspaceAutomation) {
-    const [id, automationId] = workspaceAutomation;
-    if (automationId === "new") {
-      return <NewAutomationPage params={Promise.resolve({ id })} />;
-    }
-    return <AutomationEditorPage params={Promise.resolve({ id, automationId })} />;
-  }
-
-  const workspaceSubpage = matchDouble(
-    pathname,
-    /^\/settings\/workspace\/([^/]+)\/(repositories|workflows|automations)$/,
-  );
-  if (workspaceSubpage) {
-    const [id, section] = workspaceSubpage;
-    if (section === "repositories") {
-      return <WorkspaceRepositoriesRoute workspaceId={id} />;
-    }
-    if (section === "workflows") {
-      return <WorkspaceWorkflowsRoute workspaceId={id} />;
-    }
-    return <AutomationsPage params={Promise.resolve({ id })} />;
-  }
-
-  const workspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)$/);
-  if (workspaceId) {
-    return <WorkspaceEditPage params={Promise.resolve({ id: workspaceId })} />;
-  }
+  const workspaceRoute = renderWorkspaceSettingsRoute(pathname);
+  if (workspaceRoute) return workspaceRoute;
 
   const agentProfile = matchDouble(pathname, /^\/settings\/agents\/([^/]+)\/profiles\/([^/]+)$/);
   if (agentProfile) {
@@ -295,6 +270,73 @@ function renderDynamicSettingsRoute(pathname: string) {
   return null;
 }
 
+function renderWorkspaceSettingsRoute(pathname: string) {
+  const workspaceIntegration = pathname.match(
+    /^\/settings\/workspace\/([^/]+)\/integrations(?:\/([^/]+))?$/,
+  );
+  if (workspaceIntegration?.[1]) {
+    const workspaceId = safeDecodePathSegment(workspaceIntegration[1]);
+    const section = workspaceIntegration[2] ? safeDecodePathSegment(workspaceIntegration[2]) : null;
+    if (!workspaceId || (workspaceIntegration[2] && !section)) return null;
+    return renderIntegrationSettingsRoute(section, workspaceId);
+  }
+
+  const workspaceAutomation = matchDouble(
+    pathname,
+    /^\/settings\/workspace\/([^/]+)\/automations\/([^/]+)$/,
+  );
+  if (workspaceAutomation) {
+    const [id, automationId] = workspaceAutomation;
+    if (automationId === "new") {
+      return <NewAutomationPage params={Promise.resolve({ id })} />;
+    }
+    return <AutomationEditorPage params={Promise.resolve({ id, automationId })} />;
+  }
+
+  const workspaceSubpage = matchDouble(
+    pathname,
+    /^\/settings\/workspace\/([^/]+)\/(repositories|workflows|automations)$/,
+  );
+  if (workspaceSubpage) {
+    const [id, section] = workspaceSubpage;
+    if (section === "repositories") {
+      return <WorkspaceRepositoriesRoute workspaceId={id} />;
+    }
+    if (section === "workflows") {
+      return <WorkspaceWorkflowsRoute workspaceId={id} />;
+    }
+    return <AutomationsPage params={Promise.resolve({ id })} />;
+  }
+
+  const workspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)$/);
+  if (workspaceId) {
+    return <WorkspaceEditPage params={Promise.resolve({ id: workspaceId })} />;
+  }
+
+  return null;
+}
+
+function renderIntegrationSettingsRoute(section: string | null, workspaceId?: string) {
+  switch (section) {
+    case null:
+      return <IntegrationsIndexPage workspaceId={workspaceId} />;
+    case "github":
+      return <GitHubIntegrationPage workspaceId={workspaceId} />;
+    case "gitlab":
+      return <IntegrationsGitLabPage workspaceId={workspaceId} />;
+    case "jira":
+      return <IntegrationsJiraPage workspaceId={workspaceId} />;
+    case "linear":
+      return <IntegrationsLinearPage workspaceId={workspaceId} />;
+    case "sentry":
+      return <IntegrationsSentryPage workspaceId={workspaceId} />;
+    case "slack":
+      return <IntegrationsSlackPage workspaceId={workspaceId} />;
+    default:
+      return null;
+  }
+}
+
 function renderUpdatesRoute() {
   return (
     <SystemPageShell
@@ -326,7 +368,7 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
     let cancelled = false;
 
     async function bootstrap() {
-      const initialState = await loadSettingsInitialState(pathname);
+      const initialState = await loadSettingsInitialState();
       if (!cancelled && Object.keys(initialState).length > 0) {
         store.getState().hydrate(initialState);
       }
@@ -342,7 +384,7 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
   return null;
 }
 
-async function loadSettingsInitialState(pathname: string): Promise<Partial<AppState>> {
+async function loadSettingsInitialState(): Promise<Partial<AppState>> {
   const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
     await Promise.all([
       listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
@@ -354,7 +396,6 @@ async function loadSettingsInitialState(pathname: string): Promise<Partial<AppSt
     ]);
 
   return buildSettingsInitialStateForRoute({
-    pathname,
     workspaces: workspaces.workspaces,
     executors: executors.executors,
     agents: agents.agents,
@@ -366,7 +407,6 @@ async function loadSettingsInitialState(pathname: string): Promise<Partial<AppSt
 }
 
 export function buildSettingsInitialStateForRoute({
-  pathname,
   workspaces,
   executors,
   agents,
@@ -378,7 +418,7 @@ export function buildSettingsInitialStateForRoute({
   const workspaceItems = workspaces.map(mapWorkspaceItem);
   const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
     workspaceItems,
-    matchSingle(pathname, /^\/settings\/workspace\/([^/]+)/),
+    readActiveWorkspaceCookie(),
     userSettingsResponse?.settings?.workspace_id ?? null,
   );
   const mappedUserSettings = mapUserSettingsResponse(userSettingsResponse);
@@ -410,19 +450,6 @@ export function buildSettingsInitialStateForRoute({
         }
       : {}),
   };
-}
-
-function resolveSettingsActiveWorkspaceId(
-  workspaceItems: Array<{ id: string }>,
-  requestedWorkspaceId: string | null,
-  settingsWorkspaceId: string | null,
-) {
-  return (
-    workspaceItems.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
-    workspaceItems.find((workspace) => workspace.id === settingsWorkspaceId)?.id ??
-    workspaceItems[0]?.id ??
-    null
-  );
 }
 
 function WorkspaceRepositoriesRoute({ workspaceId }: { workspaceId: string }) {
@@ -521,13 +548,15 @@ function SettingsRouteFallback({ pathname }: { pathname: string }) {
 
 function matchSingle(pathname: string, pattern: RegExp): string | null {
   const match = pathname.match(pattern);
-  return match?.[1] ? decodeURIComponent(match[1]) : null;
+  return safeDecodePathSegment(match?.[1]);
 }
 
 function matchDouble(pathname: string, pattern: RegExp): [string, string] | null {
   const match = pathname.match(pattern);
   if (!match?.[1] || !match[2]) return null;
-  return [decodeURIComponent(match[1]), decodeURIComponent(match[2])];
+  const first = safeDecodePathSegment(match[1]);
+  const second = safeDecodePathSegment(match[2]);
+  return first && second ? [first, second] : null;
 }
 
 function normalizeSettingsPath(pathname: string): string {

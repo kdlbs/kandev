@@ -299,16 +299,18 @@ type LaunchAgentRequest struct {
 	CopyFiles string
 
 	// Worktree configuration for concurrent agent execution
-	UseWorktree          bool   // Whether to use a Git worktree for isolation
-	WorktreeID           string // Existing worktree ID to reuse (skip creation if set)
-	RepositoryID         string // Repository ID for worktree tracking
-	RepositoryPath       string // Path to the main repository (for worktree creation)
-	BaseBranch           string // Base branch for the worktree (e.g., "main")
-	DefaultBranch        string // Repository's default_branch, used as a fallback when BaseBranch is missing
-	CheckoutBranch       string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
-	PRNumber             int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	WorktreeBranchPrefix string // Branch prefix for worktree branches
-	PullBeforeWorktree   bool   // Whether to pull from remote before creating the worktree
+	UseWorktree            bool   // Whether to use a Git worktree for isolation
+	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
+	RepositoryID           string // Repository ID for worktree tracking
+	RepositoryPath         string // Path to the main repository (for worktree creation)
+	BaseBranch             string // Base branch for the worktree (e.g., "main")
+	DefaultBranch          string // Repository's default_branch, used as a fallback when BaseBranch is missing
+	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
+	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	WorktreeBranchPrefix   string // Branch prefix for worktree branches
+	WorktreeBranchTemplate string // Branch name template for worktree branches
+	WorktreeBranchTicket   string // External ticket value for branch templates
+	PullBeforeWorktree     bool   // Whether to pull from remote before creating the worktree
 
 	// Task directory mode: place worktree at ~/.kandev/tasks/{TaskDirName}/{RepoName}/
 	TaskDirName string // Semantic task directory name (e.g. "fix-bug_ab12")
@@ -336,20 +338,22 @@ type LaunchAgentRequest struct {
 // the orchestrator package does not need to import lifecycle types into its
 // public API.
 type RepoSpec struct {
-	RepositoryID         string
-	RepositoryPath       string
-	RepositoryURL        string
-	RepoName             string
-	BaseBranch           string
-	DefaultBranch        string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch       string
-	PRNumber             int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	WorktreeID           string
-	WorktreeBranchPrefix string
-	PullBeforeWorktree   bool
-	RepoSetupScript      string
-	RepoCleanupScript    string
-	CopyFiles            string
+	RepositoryID           string
+	RepositoryPath         string
+	RepositoryURL          string
+	RepoName               string
+	BaseBranch             string
+	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch         string
+	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	WorktreeID             string
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	WorktreeBranchTicket   string
+	PullBeforeWorktree     bool
+	RepoSetupScript        string
+	RepoCleanupScript      string
+	CopyFiles              string
 	// BranchSlug, when non-empty, suffixes the repo dir so the same repo can
 	// host multiple branch worktrees as siblings within one task. Set by the
 	// orchestrator when buildRepoSpecs detects multiple rows sharing a
@@ -494,6 +498,16 @@ type TaskStateChangeFunc func(ctx context.Context, taskID string, state v1.TaskS
 // publish events (e.g. WebSocket notifications) alongside the DB update.
 type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error
 
+// SessionStartingFunc is called when the executor has prepared/resumed an
+// execution and needs to mark the session STARTING while preserving other
+// session-row updates such as metadata. promoteTask controls whether the
+// callback should also move the parent task to IN_PROGRESS immediately.
+type SessionStartingFunc func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error
+
+// TaskReviewStateReconcileFunc is called when runtime work stopped and the
+// parent task should move to REVIEW only if no session is still STARTING/RUNNING.
+type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSessionID string)
+
 // AgentStartFailedFunc is called when the agent process fails to start.
 // It receives the task/session/execution IDs and the error. fromResume is true
 // when the failure occurred during a background session resume (rather than a
@@ -540,6 +554,16 @@ type Executor struct {
 	// Set by the orchestrator to route through updateTaskSessionState which
 	// updates the DB and publishes WebSocket events.
 	onSessionStateChange SessionStateChangeFunc
+
+	// Callback for STARTING writes that carry full session-row changes. Set by
+	// the orchestrator so launch/resume/model-switch transitions serialize with
+	// runtime task-state reconciliation.
+	onSessionStarting SessionStartingFunc
+
+	// Callback for REVIEW reconciliation after runtime start failures. Set by the
+	// orchestrator so failed-start writes share the same serialized guard as
+	// normal turn completion.
+	onTaskReviewStateReconcile TaskReviewStateReconcileFunc
 
 	// Callback for agent process start failures. When set, the executor
 	// delegates failure handling to this callback, allowing the orchestrator
@@ -631,6 +655,17 @@ func (e *Executor) SetOnTaskStateChange(fn TaskStateChangeFunc) {
 // which updates the DB and publishes WebSocket events to the frontend.
 func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 	e.onSessionStateChange = fn
+}
+
+// SetOnSessionStarting sets a callback for full session-row STARTING updates.
+func (e *Executor) SetOnSessionStarting(fn SessionStartingFunc) {
+	e.onSessionStarting = fn
+}
+
+// SetOnTaskReviewStateReconcile sets the guarded task REVIEW reconciliation
+// callback used after resume/start failures.
+func (e *Executor) SetOnTaskReviewStateReconcile(fn TaskReviewStateReconcileFunc) {
+	e.onTaskReviewStateReconcile = fn
 }
 
 // SetRepoCloner sets the cloner used to clone provider-backed repositories on launch.

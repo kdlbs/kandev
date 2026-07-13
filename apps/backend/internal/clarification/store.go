@@ -42,6 +42,14 @@ func NewStore(timeout time.Duration) *Store {
 	}
 }
 
+// SetOnWaitEntered installs a test hook invoked when WaitForResponse starts
+// waiting on a pending clarification.
+func (s *Store) SetOnWaitEntered(fn func(pendingID string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onWaitEntered = fn
+}
+
 // CreateRequest creates a new clarification request and returns its pending ID
 // plus a boolean indicating whether a new entry was created (true) or an
 // existing one was reused (false). If a pending entry for the same session

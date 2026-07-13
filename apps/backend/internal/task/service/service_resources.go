@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,10 +13,25 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-const spritesTokenEnvKey = "SPRITES_API_TOKEN"
+const (
+	spritesTokenEnvKey                = "SPRITES_API_TOKEN"
+	workspaceDeletePageSize           = 500
+	workspaceDeleteCleanupConcurrency = 8
+)
+
+var ErrWorkspaceConfirmNameMismatch = errors.New("confirm_name does not match workspace name")
+
+type workspaceDeleteTaskCleanup struct {
+	task        *models.Task
+	sessions    []*models.TaskSession
+	worktrees   []*worktree.Worktree
+	stopTargets []taskStopTarget
+	taskEnv     *models.TaskEnvironment
+}
 
 // Workspace operations
 
@@ -90,13 +106,229 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.workspaces.DeleteWorkspace(ctx, id); err != nil {
-		s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
+	return s.deleteWorkspace(ctx, workspace, nil)
+}
+
+// DeleteWorkspaceWithConfirmName deletes a workspace only when confirmName
+// matches the workspace name read for the cascade and final row delete.
+func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confirmName string) error {
+	workspace, err := s.workspaces.GetWorkspace(ctx, id)
+	if err != nil {
 		return err
 	}
+	if confirmName != workspace.Name {
+		return ErrWorkspaceConfirmNameMismatch
+	}
+	return s.deleteWorkspace(ctx, workspace, &confirmName)
+}
+
+func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace, confirmedName *string) error {
+	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, workspace.ID)
+	if err != nil {
+		return err
+	}
+	// Runtime cleanup needs task rows before the cascade removes them.
+	cleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
+	if err != nil {
+		return err
+	}
+
+	var deletedTasks []*models.Task
+	var deletedWorkflows []*models.Workflow
+	if confirmedName == nil {
+		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascade(ctx, workspace.ID)
+	} else {
+		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
+	}
+	if err != nil {
+		return s.mapWorkspaceDeleteError(workspace.ID, err)
+	}
+	cleanups = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
+	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
+	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
-	s.logger.Info("workspace deleted", zap.String("workspace_id", id))
+	s.logger.Info("workspace deleted", zap.String("workspace_id", workspace.ID))
 	return nil
+}
+
+func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks []*models.Task) ([]workspaceDeleteTaskCleanup, error) {
+	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil || task.ID == "" {
+			continue
+		}
+		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
+		if err != nil {
+			return nil, err
+		}
+		cleanups = append(cleanups, cleanup)
+	}
+	return cleanups, nil
+}
+
+func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
+	ctx context.Context,
+	cleanups []workspaceDeleteTaskCleanup,
+	deletedTasks []*models.Task,
+) []workspaceDeleteTaskCleanup {
+	prepared := make(map[string]struct{}, len(cleanups))
+	for _, cleanup := range cleanups {
+		if cleanup.task != nil && cleanup.task.ID != "" {
+			prepared[cleanup.task.ID] = struct{}{}
+		}
+	}
+	for _, task := range deletedTasks {
+		if task == nil || task.ID == "" {
+			continue
+		}
+		if _, ok := prepared[task.ID]; ok {
+			continue
+		}
+		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
+		if err != nil {
+			s.logger.Error("failed to prepare late workspace task cleanup",
+				zap.String("task_id", task.ID),
+				zap.Error(err))
+			continue
+		}
+		cleanups = append(cleanups, cleanup)
+		prepared[task.ID] = struct{}{}
+	}
+	return cleanups
+}
+
+func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *models.Task) (workspaceDeleteTaskCleanup, error) {
+	cleanup := workspaceDeleteTaskCleanup{
+		task:      task,
+		worktrees: s.gatherWorktreesForDelete(ctx, task.ID),
+		taskEnv:   s.gatherTaskEnvironmentForCleanup(ctx, task.ID),
+	}
+	var err error
+	cleanup.sessions, err = s.sessions.ListTaskSessions(ctx, task.ID)
+	if err != nil {
+		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list task sessions for workspace delete task %q: %w", task.ID, err)
+	}
+	if s.executionStopper == nil {
+		return cleanup, nil
+	}
+	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, task.ID)
+	if err != nil {
+		s.logger.Warn("failed to list active task sessions for workspace delete",
+			zap.String("task_id", task.ID),
+			zap.Error(err))
+	}
+	cleanup.stopTargets, err = s.buildStopTargets(ctx, task.ID, activeSessions)
+	if err != nil {
+		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list runtime cleanup inventory: %w", err)
+	}
+	return cleanup, nil
+}
+
+func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks []*models.Task, workflows []*models.Workflow) {
+	for _, task := range tasks {
+		if task == nil || task.ID == "" {
+			continue
+		}
+		s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
+	}
+	for _, workflow := range workflows {
+		if workflow == nil || workflow.ID == "" {
+			continue
+		}
+		s.publishWorkflowEvent(ctx, events.WorkflowDeleted, workflow)
+	}
+}
+
+func (s *Service) runWorkspaceDeleteTaskCleanups(cleanups []workspaceDeleteTaskCleanup, deletedTasks []*models.Task) {
+	jobs := s.workspaceDeleteTaskCleanupJobs(cleanups, deletedTasks)
+	if len(jobs) == 0 {
+		return
+	}
+	go s.runWorkspaceDeleteTaskCleanupJobs(jobs)
+}
+
+func (s *Service) workspaceDeleteTaskCleanupJobs(
+	cleanups []workspaceDeleteTaskCleanup,
+	deletedTasks []*models.Task,
+) []workspaceDeleteTaskCleanup {
+	deletedTaskIDs := make(map[string]struct{}, len(deletedTasks))
+	for _, task := range deletedTasks {
+		if task != nil && task.ID != "" {
+			deletedTaskIDs[task.ID] = struct{}{}
+		}
+	}
+	jobs := make([]workspaceDeleteTaskCleanup, 0, len(cleanups))
+	for _, cleanup := range cleanups {
+		if cleanup.task == nil {
+			continue
+		}
+		if _, ok := deletedTaskIDs[cleanup.task.ID]; !ok {
+			continue
+		}
+		hasCleanup := len(cleanup.stopTargets) > 0 || s.worktreeCleanup != nil ||
+			len(cleanup.sessions) > 0 || cleanup.task.IsEphemeral || cleanup.taskEnv != nil
+		if !hasCleanup {
+			continue
+		}
+		jobs = append(jobs, cleanup)
+	}
+	return jobs
+}
+
+func (s *Service) runWorkspaceDeleteTaskCleanupJobs(jobs []workspaceDeleteTaskCleanup) {
+	workers := workspaceDeleteCleanupConcurrency
+	if len(jobs) < workers {
+		workers = len(jobs)
+	}
+	jobCh := make(chan workspaceDeleteTaskCleanup)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			for cleanup := range jobCh {
+				s.runWorkspaceDeleteTaskCleanup(cleanup)
+			}
+		}()
+	}
+	for _, job := range jobs {
+		jobCh <- job
+	}
+	close(jobCh)
+	wg.Wait()
+}
+
+func (s *Service) runWorkspaceDeleteTaskCleanup(cleanup workspaceDeleteTaskCleanup) {
+	envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}
+	s.runTaskCleanup(cleanup.task.ID, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, envCleanup,
+		"task deleted", "failed to stop session on task delete", "task cleanup completed")
+}
+
+func (s *Service) mapWorkspaceDeleteError(id string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, taskrepo.ErrWorkspaceNameMismatch) {
+		return ErrWorkspaceConfirmNameMismatch
+	}
+	s.logger.Error("failed to delete workspace", zap.String("workspace_id", id), zap.Error(err))
+	return err
+}
+
+func (s *Service) listAllTasksForWorkspaceDelete(ctx context.Context, workspaceID string) ([]*models.Task, error) {
+	var all []*models.Task
+	for page := 1; ; page++ {
+		tasks, total, err := s.tasks.ListTasksByWorkspace(
+			ctx, workspaceID, "", "", "", page, workspaceDeletePageSize, "", true, true, false, false,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("list workspace tasks: %w", err)
+		}
+		all = append(all, tasks...)
+		if len(all) >= total || len(tasks) == 0 {
+			return all, nil
+		}
+	}
 }
 
 func normalizeOptionalID(value *string) *string {
@@ -285,7 +517,7 @@ func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, work
 func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryRequest) (*models.Repository, error) {
 	sourceType := req.SourceType
 	if sourceType == "" {
-		sourceType = "local"
+		sourceType = sourceTypeLocal
 	}
 	prefix := strings.TrimSpace(req.WorktreeBranchPrefix)
 	if err := worktree.ValidateBranchPrefix(prefix); err != nil {
@@ -294,27 +526,32 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 	if prefix == "" {
 		prefix = worktree.DefaultBranchPrefix
 	}
+	template := worktree.NormalizeBranchNameTemplate(req.WorktreeBranchTemplate)
+	if err := worktree.ValidateBranchNameTemplate(template); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
+	}
 	pullBeforeWorktree := true
 	if req.PullBeforeWorktree != nil {
 		pullBeforeWorktree = *req.PullBeforeWorktree
 	}
 	repository := &models.Repository{
-		ID:                   uuid.New().String(),
-		WorkspaceID:          req.WorkspaceID,
-		Name:                 req.Name,
-		SourceType:           sourceType,
-		LocalPath:            req.LocalPath,
-		Provider:             req.Provider,
-		ProviderRepoID:       req.ProviderRepoID,
-		ProviderOwner:        req.ProviderOwner,
-		ProviderName:         req.ProviderName,
-		DefaultBranch:        req.DefaultBranch,
-		WorktreeBranchPrefix: prefix,
-		PullBeforeWorktree:   pullBeforeWorktree,
-		SetupScript:          req.SetupScript,
-		CleanupScript:        req.CleanupScript,
-		DevScript:            req.DevScript,
-		CopyFiles:            req.CopyFiles,
+		ID:                     uuid.New().String(),
+		WorkspaceID:            req.WorkspaceID,
+		Name:                   req.Name,
+		SourceType:             sourceType,
+		LocalPath:              req.LocalPath,
+		Provider:               req.Provider,
+		ProviderRepoID:         req.ProviderRepoID,
+		ProviderOwner:          req.ProviderOwner,
+		ProviderName:           req.ProviderName,
+		DefaultBranch:          req.DefaultBranch,
+		WorktreeBranchPrefix:   prefix,
+		WorktreeBranchTemplate: template,
+		PullBeforeWorktree:     pullBeforeWorktree,
+		SetupScript:            req.SetupScript,
+		CleanupScript:          req.CleanupScript,
+		DevScript:              req.DevScript,
+		CopyFiles:              req.CopyFiles,
 	}
 
 	// Auto-detect GitHub provider info from git remote if not provided
@@ -361,6 +598,11 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 		return nil, false, fmt.Errorf("lookup repository: %w", err)
 	}
 	if existing != nil {
+		replacement, replacementCreated, replacementErr := s.replaceTaskWorktreeRepositoryMatch(ctx, req.WorkspaceID, existing)
+		if replacementErr != nil {
+			return nil, false, replacementErr
+		}
+		existing = replacement
 		dirty := false
 		if existing.LocalPath == "" && req.LocalPath != "" {
 			existing.LocalPath = req.LocalPath
@@ -380,14 +622,14 @@ func (s *Service) FindOrCreateRepository(ctx context.Context, req *FindOrCreateR
 					zap.String("repository_id", existing.ID), zap.Error(updateErr))
 			}
 		}
-		return existing, false, nil
+		return existing, replacementCreated, nil
 	}
 
 	name := fmt.Sprintf("%s/%s", req.ProviderOwner, req.ProviderName)
 	created, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
 		WorkspaceID:   req.WorkspaceID,
 		Name:          name,
-		SourceType:    "provider",
+		SourceType:    sourceTypeProvider,
 		LocalPath:     req.LocalPath,
 		Provider:      req.Provider,
 		ProviderOwner: req.ProviderOwner,
@@ -453,6 +695,13 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 			return fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
 		}
 		repository.WorktreeBranchPrefix = prefix
+	}
+	if req.WorktreeBranchTemplate != nil {
+		template := worktree.NormalizeBranchNameTemplate(*req.WorktreeBranchTemplate)
+		if err := worktree.ValidateBranchNameTemplate(template); err != nil {
+			return fmt.Errorf("%w: %s", ErrInvalidRepositorySettings, err)
+		}
+		repository.WorktreeBranchTemplate = template
 	}
 	if req.PullBeforeWorktree != nil {
 		repository.PullBeforeWorktree = *req.PullBeforeWorktree

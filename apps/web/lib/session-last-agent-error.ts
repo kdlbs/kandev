@@ -7,18 +7,24 @@ export type LastAgentError = {
   dismissedAt?: string;
 };
 
-// --- Dismissed agent errors (localStorage, global) ---
+// --- Agent error visibility state (localStorage, global) ---
 //
-// Tracks the most recent dismissed `last_agent_error` stamp per session so the
-// red error icon in the sidebar and the chat banner can share dismissal state
-// across components and reloads. Bounded growth: one entry per session that
-// ever had an error.
+// `dismissedAgentErrors` tracks explicit chat-banner dismissals and hides both
+// the banner and task-row badge. `acknowledgedAgentErrors` tracks sidebar-only
+// stale-error acknowledgements and hides task-row badges without hiding chat.
+// Bounded growth: one entry per session that ever had an error.
 
 const DISMISSED_AGENT_ERRORS_KEY = "kandev.dismissedAgentErrors";
+const ACKNOWLEDGED_AGENT_ERRORS_KEY = "kandev.acknowledgedAgentErrors";
 
 export function getStoredDismissedAgentErrors(): Record<string, string> {
   return getLocalStorage<Record<string, string>>(DISMISSED_AGENT_ERRORS_KEY, {});
 }
+
+export function getStoredAcknowledgedAgentErrors(): Record<string, string> {
+  return getLocalStorage<Record<string, string>>(ACKNOWLEDGED_AGENT_ERRORS_KEY, {});
+}
+
 /**
  * Merge `map` into whatever is currently in localStorage so concurrent writes
  * from other tabs (or older versions of this tab's state) are not clobbered.
@@ -27,6 +33,11 @@ export function getStoredDismissedAgentErrors(): Record<string, string> {
 export function setStoredDismissedAgentErrors(map: Record<string, string>): void {
   const current = getStoredDismissedAgentErrors();
   setLocalStorage(DISMISSED_AGENT_ERRORS_KEY, { ...current, ...map });
+}
+
+export function setStoredAcknowledgedAgentErrors(map: Record<string, string>): void {
+  const current = getStoredAcknowledgedAgentErrors();
+  setLocalStorage(ACKNOWLEDGED_AGENT_ERRORS_KEY, { ...current, ...map });
 }
 
 export function readLastAgentError(metadata: Record<string, unknown> | null | undefined) {

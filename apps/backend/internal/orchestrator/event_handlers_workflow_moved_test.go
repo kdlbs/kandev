@@ -179,7 +179,7 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 
 		stepGetter := newMockStepGetter()
 		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
-			ID: "step2", WorkflowID: "wf1", Name: "Auto Start Step", Position: 1,
+			ID: "step2", WorkflowID: "wf1", Name: "Auto Start Step", Position: 1, AgentProfileID: "profile-step",
 			Events: wfmodels.StepEvents{
 				OnEnter: []wfmodels.OnEnterAction{
 					{Type: wfmodels.OnEnterAutoStartAgent},
@@ -199,6 +199,12 @@ func TestHandleTaskMovedNoSession(t *testing.T) {
 		launched := make(chan string, 1)
 		agentMgr := &mockAgentManager{
 			launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				session, err := repo.GetTaskSession(ctx, req.SessionID)
+				if err != nil {
+					t.Errorf("GetTaskSession(%q): %v", req.SessionID, err)
+				} else if session.Metadata == nil || session.Metadata[models.SessionMetaKeyCreatedBy] != models.SessionCreatedByWorkflowSwitch {
+					t.Errorf("created_by metadata before launch = %v, want %q", session.Metadata[models.SessionMetaKeyCreatedBy], models.SessionCreatedByWorkflowSwitch)
+				}
 				executorID, _ := req.Metadata[models.MetaKeyExecutorID].(string)
 				launched <- executorID
 				return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil

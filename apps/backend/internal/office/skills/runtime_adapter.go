@@ -7,6 +7,7 @@ package skills
 
 import (
 	"context"
+	"encoding/json"
 
 	runtimeskill "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill"
 	"github.com/kandev/kandev/internal/office/models"
@@ -52,8 +53,32 @@ func (a *SkillReaderAdapter) GetSkillFromConfig(ctx context.Context, idOrSlug st
 	return &runtimeskill.Skill{
 		Slug:       sk.Slug,
 		Content:    sk.Content,
+		Files:      runtimeSkillFiles(sk.FileInventory),
 		SourceType: string(sk.SourceType),
 	}, nil
+}
+
+type skillInventoryFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content,omitempty"`
+}
+
+func runtimeSkillFiles(raw string) []runtimeskill.SkillFile {
+	var files []skillInventoryFile
+	if err := json.Unmarshal([]byte(raw), &files); err != nil {
+		return nil
+	}
+	out := make([]runtimeskill.SkillFile, 0, len(files))
+	for _, file := range files {
+		if file.Path == "" || file.Content == "" {
+			continue
+		}
+		out = append(out, runtimeskill.SkillFile{
+			Path:    file.Path,
+			Content: file.Content,
+		})
+	}
+	return out
 }
 
 // InstructionListerAdapter bridges an office repo to the runtime-tier

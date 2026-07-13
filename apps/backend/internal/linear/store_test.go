@@ -85,6 +85,87 @@ func TestStore_GetConfig_Missing(t *testing.T) {
 	}
 }
 
+func TestStore_ConfigSchemaUsesWorkspaceID(t *testing.T) {
+	store := newTestStore(t)
+	cols, err := store.tableColumns("linear_configs")
+	if err != nil {
+		t.Fatalf("table columns: %v", err)
+	}
+	if _, ok := cols["workspace_id"]; !ok {
+		t.Fatal("linear_configs must be keyed by workspace_id")
+	}
+	if _, ok := cols["id"]; ok {
+		t.Fatal("linear_configs must not keep singleton id column")
+	}
+}
+
+func TestStore_MigrateSingletonConfigToActiveWorkspace(t *testing.T) {
+	raw, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	raw.SetMaxIdleConns(1)
+	db := sqlx.NewDb(raw, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+
+	now := time.Now().UTC()
+	if _, err := db.Exec(`
+		CREATE TABLE workspaces (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE users (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL,
+			settings TEXT NOT NULL DEFAULT '{}',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE linear_configs (
+			id TEXT PRIMARY KEY CHECK(id = 'singleton'),
+			auth_method TEXT NOT NULL,
+			default_team_key TEXT NOT NULL DEFAULT '',
+			org_slug TEXT NOT NULL DEFAULT '',
+			last_checked_at DATETIME,
+			last_ok INTEGER NOT NULL DEFAULT 0,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL
+		);
+		INSERT INTO workspaces (id, name, created_at, updated_at)
+			VALUES ('ws-first', 'First', ?, ?), ('ws-active', 'Active', ?, ?);
+		INSERT INTO users (id, email, settings, created_at, updated_at)
+			VALUES ('default-user', 'default@kandev.local', '{"workspace_id":"ws-active"}', ?, ?);
+		INSERT INTO linear_configs
+			(id, auth_method, default_team_key, org_slug, last_ok, created_at, updated_at)
+			VALUES ('singleton', ?, 'ENG', 'acme', 1, ?, ?);
+	`, now.Add(-time.Hour), now.Add(-time.Hour), now, now, now, now, AuthMethodAPIKey, now, now); err != nil {
+		t.Fatalf("seed singleton schema: %v", err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	cfg, err := store.GetConfig(context.Background())
+	if err != nil {
+		t.Fatalf("get migrated config: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected migrated config")
+	}
+	var workspaceID string
+	if err := db.Get(&workspaceID, `SELECT workspace_id FROM linear_configs`); err != nil {
+		t.Fatalf("read migrated workspace_id: %v", err)
+	}
+	if workspaceID != "ws-active" {
+		t.Fatalf("expected singleton config migrated to active workspace, got %q", workspaceID)
+	}
+}
+
 func TestStore_HasConfig(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -155,7 +236,7 @@ func TestStore_UpdateAuthHealth(t *testing.T) {
 	}
 }
 
-func TestStore_MigrateLegacyPerWorkspaceTable(t *testing.T) {
+func TestStore_PreservesPerWorkspaceConfigTable(t *testing.T) {
 	raw, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -198,18 +279,18 @@ func TestStore_MigrateLegacyPerWorkspaceTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new store: %v", err)
 	}
-	if got := store.MigratedFromWorkspace(); got != "ws-new" {
-		t.Errorf("expected migration source ws-new, got %q", got)
+	if got := store.MigratedFromWorkspace(); got != "" {
+		t.Errorf("expected no singleton migration, got %q", got)
 	}
-	cfg, err := store.GetConfig(context.Background())
+	cfg, err := store.GetConfigForWorkspace(context.Background(), "ws-new")
 	if err != nil {
-		t.Fatalf("get singleton: %v", err)
+		t.Fatalf("get workspace config: %v", err)
 	}
 	if cfg == nil {
-		t.Fatal("expected singleton row after migration")
+		t.Fatal("expected workspace row after schema init")
 	}
 	if cfg.DefaultTeamKey != "NEW" || cfg.OrgSlug != "new-slug" {
-		t.Errorf("expected newest row promoted, got %+v", cfg)
+		t.Errorf("expected workspace row preserved, got %+v", cfg)
 	}
 }
 
@@ -218,7 +299,7 @@ func TestStore_MigrateLegacyPerWorkspaceTable(t *testing.T) {
 // later releases. The migration must select only guaranteed-present columns
 // and fall back to defaults for the missing ones, otherwise startup crashes
 // with "no such column". Mirrors the Jira test.
-func TestStore_MigrateLegacyPerWorkspaceTable_PreHealthColumns(t *testing.T) {
+func TestStore_PreservesPerWorkspaceConfigTable_PreHealthColumns(t *testing.T) {
 	raw, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -251,15 +332,15 @@ func TestStore_MigrateLegacyPerWorkspaceTable_PreHealthColumns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore on pre-health-columns schema: %v", err)
 	}
-	if got := store.MigratedFromWorkspace(); got != "ws-1" {
-		t.Errorf("expected migration source ws-1, got %q", got)
+	if got := store.MigratedFromWorkspace(); got != "" {
+		t.Errorf("expected no singleton migration, got %q", got)
 	}
-	cfg, err := store.GetConfig(context.Background())
+	cfg, err := store.GetConfigForWorkspace(context.Background(), "ws-1")
 	if err != nil {
-		t.Fatalf("get singleton: %v", err)
+		t.Fatalf("get workspace config: %v", err)
 	}
 	if cfg == nil {
-		t.Fatal("expected singleton row after migration")
+		t.Fatal("expected workspace row after schema init")
 	}
 	if cfg.DefaultTeamKey != "ENG" {
 		t.Errorf("expected DefaultTeamKey preserved, got %q", cfg.DefaultTeamKey)
@@ -277,7 +358,7 @@ func TestStore_MigrateLegacyPerWorkspaceTable_PreHealthColumns(t *testing.T) {
 
 // Covers the sql.ErrNoRows branch: a user who installed a previous version,
 // never configured Linear, and then upgrades hits this path.
-func TestStore_MigrateLegacyPerWorkspaceTable_EmptyTable(t *testing.T) {
+func TestStore_PreservesPerWorkspaceConfigTable_EmptyTable(t *testing.T) {
 	raw, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -311,7 +392,7 @@ func TestStore_MigrateLegacyPerWorkspaceTable_EmptyTable(t *testing.T) {
 	}
 	cfg, err := store.GetConfig(context.Background())
 	if err != nil {
-		t.Fatalf("get singleton: %v", err)
+		t.Fatalf("get config: %v", err)
 	}
 	if cfg != nil {
 		t.Errorf("expected nil cfg on empty legacy table, got %+v", cfg)

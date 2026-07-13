@@ -15,6 +15,8 @@ import (
 	"github.com/kandev/kandev/internal/office/costs"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/runs/commentkeys"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -36,7 +38,7 @@ func (s *Service) dispatchEngineTrigger(
 		return nil
 	}
 	if err := s.engineDispatcher.HandleTrigger(ctx, taskID, trigger, payload, opID); err != nil {
-		if errors.Is(err, ErrEngineNoSession) {
+		if errors.Is(err, shared.ErrEngineNoSession) {
 			s.logger.Debug("engine trigger skipped: no active session",
 				zap.String("task_id", taskID),
 				zap.String("trigger", string(trigger)))
@@ -75,6 +77,7 @@ type CommentPostedData struct {
 	AuthorID               string `json:"author_id"`
 	AuthorType             string `json:"author_type"`
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id"`
+	EngineDispatched       string `json:"engine_dispatched"`
 }
 
 // ApprovalResolvedData represents an approval resolved event payload.
@@ -160,6 +163,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 		subject string
 		handler bus.EventHandler
 	}{
+		{events.TaskCreated, s.handleTaskCreated},
 		{events.TaskUpdated, s.handleTaskUpdated},
 		{events.TaskMoved, s.handleTaskMoved},
 		{events.OfficeApprovalResolved, s.handleApprovalResolved},
@@ -190,6 +194,7 @@ func (s *Service) RegisterEventSubscribers(eb bus.EventBus) error {
 type AgentTurnMessageData struct {
 	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
+	TurnID    string `json:"turn_id"`
 	AgentText string `json:"agent_text"`
 	AgentID   string `json:"agent_id"`
 }
@@ -214,7 +219,12 @@ func (s *Service) handleAgentTurnMessageSaved(ctx context.Context, event *bus.Ev
 	// For streaming agents, Data.Text is empty because chunks were already
 	// drained. Fall back to the last agent message saved in session messages.
 	agentText := data.AgentText
-	if agentText == "" && data.SessionID != "" && s.taskWorkspace != nil {
+	if agentText == "" && data.TurnID != "" && s.taskWorkspace != nil {
+		if lastMsg, msgErr := s.taskWorkspace.GetLastAgentMessageForTurn(ctx, data.TurnID); msgErr == nil && lastMsg != "" {
+			agentText = lastMsg
+		}
+	}
+	if agentText == "" && data.TurnID == "" && data.SessionID != "" && s.taskWorkspace != nil {
 		if lastMsg, msgErr := s.taskWorkspace.GetLastAgentMessage(ctx, data.SessionID); msgErr == nil && lastMsg != "" {
 			agentText = lastMsg
 		}
@@ -635,15 +645,48 @@ func (s *Service) projectIDForTask(ctx context.Context, taskID string) string {
 	return projectID
 }
 
+// handleTaskCreated fires a task_assigned run when a newly-created task
+// already has a runner. The task.created payload may not carry the
+// projected assignee, so this falls back to the stored runner row.
+func (s *Service) handleTaskCreated(ctx context.Context, event *bus.Event) error {
+	data, err := decodeEventData[TaskUpdatedData](event)
+	if err != nil {
+		return nil
+	}
+	return s.queueTaskAssignedRun(ctx, data.TaskID, data.AssigneeAgentProfileID, true)
+}
+
 // handleTaskUpdated fires a task_assigned run when an agent is assigned.
 func (s *Service) handleTaskUpdated(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[TaskUpdatedData](event)
-	if err != nil || data.AssigneeAgentProfileID == "" {
+	if err != nil {
 		return nil
 	}
-	payload := mustJSON(map[string]string{"task_id": data.TaskID})
-	key := fmt.Sprintf("task_assigned:%s", data.TaskID)
-	return s.QueueRun(ctx, data.AssigneeAgentProfileID, RunReasonTaskAssigned, payload, key)
+	return s.queueTaskAssignedRun(ctx, data.TaskID, data.AssigneeAgentProfileID, false)
+}
+
+func (s *Service) queueTaskAssignedRun(
+	ctx context.Context,
+	taskID string,
+	agentProfileID string,
+	fallbackToStoredRunner bool,
+) error {
+	if taskID == "" {
+		return nil
+	}
+	if agentProfileID == "" && fallbackToStoredRunner {
+		fields, err := s.repo.GetTaskExecutionFields(ctx, taskID)
+		if err != nil || fields == nil {
+			return nil
+		}
+		agentProfileID = fields.AssigneeAgentProfileID
+	}
+	if agentProfileID == "" {
+		return nil
+	}
+	payload := mustJSON(map[string]string{"task_id": taskID})
+	key := fmt.Sprintf("task_assigned:%s:%s", taskID, agentProfileID)
+	return s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
 }
 
 // handleTaskMoved logs the step change to the activity log and queues
@@ -854,6 +897,9 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 	if data.TaskID == "" || data.CommentID == "" {
 		return nil
 	}
+	if data.EngineDispatched == commentkeys.EngineDispatchedValue {
+		return nil
+	}
 	// Self-comment short-circuit: if the agent that wrote the comment is
 	// also the task's primary participant we don't want to queue a run.
 	// The engine's queue_run resolver enforces the same rule, but
@@ -864,7 +910,7 @@ func (s *Service) queueCommentRun(ctx context.Context, data CommentPostedData) e
 		data.AuthorType == participantTypeAgent && fields.AssigneeAgentProfileID == data.AuthorID {
 		return nil
 	}
-	key := fmt.Sprintf("task_comment:%s", data.CommentID)
+	key := commentkeys.TaskComment(data.CommentID)
 	return s.dispatchEngineTrigger(ctx, data.TaskID, engine.TriggerOnComment,
 		engine.OnCommentPayload{
 			CommentID: data.CommentID,

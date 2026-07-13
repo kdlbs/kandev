@@ -92,7 +92,7 @@ export type ChangesPanelBodyProps = {
   loadingOperation: string | null;
   dialogs: DialogsType;
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onOpenReview?: () => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
@@ -209,6 +209,10 @@ function useChangesPanelPRData() {
   return { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles };
 }
 
+function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): boolean {
+  return Object.keys(files ?? {}).length > 0;
+}
+
 export function useChangesPanelData() {
   const { activeTaskId, activeSessionId, baseBranch, existingPrUrl } = useChangesPanelStoreData();
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
@@ -242,8 +246,14 @@ export function useChangesPanelData() {
     () => buildPrByRepoMap(taskPRsForMap, repoNameById, pendingByRepo),
     [taskPRsForMap, repoNameById, pendingByRepo],
   );
+  const walkthroughRequestReady =
+    unstagedFiles.length > 0 ||
+    stagedFiles.length > 0 ||
+    (git.statusLoaded && hasCumulativeFiles(git.cumulativeDiff?.files)) ||
+    prData.prFiles.length > 0;
   return {
     activeTaskId,
+    activeSessionId,
     git,
     baseBranchDisplay,
     baseBranchByRepo,
@@ -259,13 +269,14 @@ export function useChangesPanelData() {
     repoDisplayName,
     prByRepo,
     existingPrUrl,
+    walkthroughRequestReady,
     ...prData,
   };
 }
 
 type ChangesPanelCallbacks = {
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onOpenReview?: () => void;
 };

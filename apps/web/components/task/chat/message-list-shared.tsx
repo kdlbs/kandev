@@ -55,6 +55,36 @@ export function getLastTurnGroupId(items: RenderItem[]) {
   return null;
 }
 
+export function getConversationLoadingState(params: {
+  messagesLoading: boolean;
+  messagesCount: number;
+  isWorking: boolean;
+  sessionState?: TaskSessionState | null;
+}) {
+  const isInitialLoading = params.messagesLoading && params.messagesCount === 0;
+  const isNonLoadableSession =
+    !params.sessionState ||
+    params.sessionState === "CREATED" ||
+    params.sessionState === "FAILED" ||
+    params.sessionState === "COMPLETED" ||
+    params.sessionState === "CANCELLED";
+  // CREATED sessions are prepare-only: the agent hasn't been started yet, so
+  // there is no conversation to load and the "Start agent" button is the
+  // primary CTA. Suppress the spinner unconditionally to avoid a misleading
+  // overlay racing with that button (synthetic task-description counts as a
+  // message and would otherwise trip the messagesCount > 0 branch).
+  if (params.sessionState === "CREATED") {
+    return { isInitialLoading, showLoadingState: false };
+  }
+  return {
+    isInitialLoading,
+    showLoadingState:
+      params.messagesLoading &&
+      !params.isWorking &&
+      (params.messagesCount > 0 || !isNonLoadableSession),
+  };
+}
+
 // The chat banner stays visible until the user explicitly dismisses it, even
 // after the agent resumes — so the user can read the full error message at
 // their own pace. The sidebar icon, by contrast, also auto-hides once the
@@ -163,9 +193,12 @@ export function MessageListStatus({
         </div>
       )}
       {showLoadingState && (
-        <div className="flex items-center justify-center py-8 text-muted-foreground">
+        <div
+          className="flex items-center justify-center py-8 text-muted-foreground"
+          data-testid="conversation-loading-state"
+        >
           <GridSpinner className="text-primary mr-2" />
-          <span>Loading messages...</span>
+          <span>Loading conversation...</span>
         </div>
       )}
       {!messagesLoading && !isInitialLoading && messagesCount === 0 && (

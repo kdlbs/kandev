@@ -1,0 +1,81 @@
+name: Lint Harness Files
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/lint-harness-files.yml"
+      - ".github/scripts/lint-harness-files.py"
+      - "scripts/lint-harness-files.test.py"
+      - ".pre-commit-config.yaml"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "**/AGENTS.md"
+      - "**/CLAUDE.md"
+      - "**/.cursorrules"
+      - ".agents/skills/**/*.md"
+      - ".augment/skills/**/*.md"
+      - ".claude/skills/**/*.md"
+      - ".cursor/skills/**/*.md"
+      - ".opencode/skills/**/*.md"
+      - "apps/backend/internal/office/configloader/skills/**/*.md"
+      - ".agents/agents/**/*.md"
+      - ".opencode/agents/**/*.md"
+      - ".claude/agents/**/*.md"
+      - ".codex/agents/**/*.toml"
+      - ".codex/config.toml"
+      - ".claude/settings.json"
+      - ".claude/rules/**/*.md"
+      - ".cursor/rules/**/*.mdc"
+      - ".claude/commands/**/*.md"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/lint-harness-files.yml"
+      - ".github/scripts/lint-harness-files.py"
+      - "scripts/lint-harness-files.test.py"
+      - ".pre-commit-config.yaml"
+      - "AGENTS.md"
+      - "CLAUDE.md"
+      - "**/AGENTS.md"
+      - "**/CLAUDE.md"
+      - "**/.cursorrules"
+      - ".agents/skills/**/*.md"
+      - ".augment/skills/**/*.md"
+      - ".claude/skills/**/*.md"
+      - ".cursor/skills/**/*.md"
+      - ".opencode/skills/**/*.md"
+      - "apps/backend/internal/office/configloader/skills/**/*.md"
+      - ".agents/agents/**/*.md"
+      - ".opencode/agents/**/*.md"
+      - ".claude/agents/**/*.md"
+      - ".codex/agents/**/*.toml"
+      - ".codex/config.toml"
+      - ".claude/settings.json"
+      - ".claude/rules/**/*.md"
+      - ".cursor/rules/**/*.mdc"
+      - ".claude/commands/**/*.md"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Harness files pass lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Run linter tests
+        run: python3 scripts/lint-harness-files.test.py
+
+      - name: Lint harness files
+        run: python3 .github/scripts/lint-harness-files.py --all

@@ -14,9 +14,9 @@ Supported desktop platforms:
 - `linux-arm64`
 - `windows-x64`
 
-Public recommended macOS artifacts must be Developer ID signed and notarized. Public recommended Windows artifacts must be code signed. Linux artifacts are checksum-gated; package-manager signatures can be added later.
+When signing inputs are configured, macOS artifacts are Developer ID signed and notarized and Windows artifacts are code signed. When those inputs are missing, the release still publishes unsigned desktop development builds with a release-notes warning. Linux artifacts are checksum-gated; package-manager signatures can be added later.
 
-Unsigned macOS or Windows desktop artifacts may be produced only through an explicit release workflow override. They may require manual OS security bypasses and should not be presented as trusted downloads.
+Unsigned macOS or Windows desktop artifacts may require manual OS security bypasses and should not be presented as trusted downloads.
 
 ## Runtime Requirements
 
@@ -64,4 +64,4 @@ Existing explicit command paths in Kandev settings remain authoritative over `PA
 
 ## Release Trust
 
-See [desktop-tauri-signing.md](desktop-tauri-signing.md) for the CI secrets and signing expectations used for trusted desktop releases.
+See [desktop-tauri-signing.md](desktop-tauri-signing.md) for the CI secrets and automatic signing behavior used for desktop releases.

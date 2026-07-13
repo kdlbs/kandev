@@ -450,6 +450,98 @@ func TestResolveCurrentRunner_PrefersRunnerParticipant(t *testing.T) {
 	}
 }
 
+func TestResolveCurrentRunner_FallsBackToTaskRunnerOnOtherStep(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	work := newPhase2TestStep(t, repo, "Work")
+	done := newPhase2TestStep(t, repo, "Done")
+
+	if err := repo.SetTaskRunner(ctx, work.ID, "task-done", "runner-agent"); err != nil {
+		t.Fatalf("set runner: %v", err)
+	}
+	got, err := repo.ResolveCurrentRunner(ctx, done.ID, "task-done")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "runner-agent" {
+		t.Fatalf("expected runner-agent, got %q", got)
+	}
+}
+
+func TestResolveCurrentRunner_FallsBackToLatestTaskRunner(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	work := newPhase2TestStep(t, repo, "Work")
+	review := newPhase2TestStep(t, repo, "Review")
+	done := newPhase2TestStep(t, repo, "Done")
+
+	if err := repo.SetTaskRunner(ctx, work.ID, "task-done", "runner-on-work"); err != nil {
+		t.Fatalf("set work runner: %v", err)
+	}
+	if err := repo.SetTaskRunner(ctx, review.ID, "task-done", "runner-on-review"); err != nil {
+		t.Fatalf("set review runner: %v", err)
+	}
+	got, err := repo.ResolveCurrentRunner(ctx, done.ID, "task-done")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "runner-on-review" {
+		t.Fatalf("expected runner-on-review, got %q", got)
+	}
+}
+
+func TestResolveCurrentRunner_TreatsEmptyTaskRunnerAsMissing(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	work := newPhase2TestStep(t, repo, "Work")
+	done := newPhase2TestStep(t, repo, "Done")
+
+	_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position)
+		VALUES (?, ?, ?, 'runner', '', 0, 0)
+	`), "empty-runner", work.ID, "task-done")
+	if err != nil {
+		t.Fatalf("insert empty runner: %v", err)
+	}
+	got, err := repo.ResolveCurrentRunner(ctx, done.ID, "task-done")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("expected no runner, got %q", got)
+	}
+}
+
+func TestResolveCurrentRunner_PrefersStepPrimaryOverOtherStepRunner(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	work := &models.WorkflowStep{
+		WorkflowID: "wf-test", Name: "Work", Position: 0,
+		AgentProfileID: "primary-on-work",
+	}
+	done := &models.WorkflowStep{
+		WorkflowID: "wf-test", Name: "Done", Position: 1,
+		AgentProfileID: "primary-on-done",
+	}
+	if err := repo.CreateStep(ctx, work); err != nil {
+		t.Fatalf("create work step: %v", err)
+	}
+	if err := repo.CreateStep(ctx, done); err != nil {
+		t.Fatalf("create done step: %v", err)
+	}
+	if err := repo.SetTaskRunner(ctx, work.ID, "task-done", "runner-on-work"); err != nil {
+		t.Fatalf("set runner: %v", err)
+	}
+	got, err := repo.ResolveCurrentRunner(ctx, done.ID, "task-done")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got != "primary-on-done" {
+		t.Fatalf("expected primary-on-done, got %q", got)
+	}
+}
+
 // TestSetTaskRunner_Idempotent verifies SetTaskRunner replaces an
 // existing runner participant rather than creating a second row.
 func TestSetTaskRunner_Idempotent(t *testing.T) {

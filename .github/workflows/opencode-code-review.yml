@@ -24,17 +24,19 @@ env:
 jobs:
   opencode-review-same-repo:
     if: >
+      vars.OPENCODE_REVIEW_ENABLED == 'true' &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
 
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
@@ -215,7 +217,7 @@ jobs:
 
       - name: Upload OpenCode review artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: opencode-review-same-repo-${{ github.event.pull_request.number }}
           path: .opencode-review/
@@ -234,7 +236,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             try {
@@ -258,19 +260,21 @@ jobs:
     #     blocked on `synchronize` so a contributor push cannot re-use a stale
     #     label — the maintainer must re-apply it after each push.
     if: >
+      vars.OPENCODE_REVIEW_ENABLED == 'true' &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name != github.repository &&
       ((github.event.action != 'synchronize' && contains(github.event.pull_request.labels.*.name, 'safe-to-review')) ||
        (vars.OPENCODE_REVIEW_ALLOWLIST != '' && contains(fromJSON(vars.OPENCODE_REVIEW_ALLOWLIST), github.event.pull_request.user.login)))
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
 
     steps:
       - name: Checkout PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # pull_request_target checks out the base branch by default; explicitly
           # check out the contributor's head via the base repository PR ref.
@@ -454,7 +458,7 @@ jobs:
 
       - name: Upload OpenCode review artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: opencode-review-fork-${{ github.event.pull_request.number }}
           path: .opencode-review/

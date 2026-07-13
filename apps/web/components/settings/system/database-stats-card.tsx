@@ -14,6 +14,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useDatabaseStats } from "@/hooks/domains/system/use-database-stats";
 import { optimizeDatabase, vacuumDatabase } from "@/lib/api/domains/system-api";
+import type { DatabaseStats } from "@/lib/types/system";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { useActionFeedback, type ActionFeedbackState } from "@/hooks/use-action-feedback";
 import { ActionButtonContent } from "./action-button-content";
@@ -60,35 +61,49 @@ function StatRow({ label, value, testid, info }: Row) {
   );
 }
 
-type DBStats = {
-  path: string;
-  size_bytes: number;
-  wal_size_bytes: number;
-  schema_version: string;
-  last_backup_at: string | null;
-};
+function databaseDriver(database: DatabaseStats): string {
+  return database.driver || "sqlite";
+}
 
-function StatsTable({ database }: { database: DBStats }) {
+function formatDriver(driver: string): string {
+  if (driver === "postgres") return "PostgreSQL";
+  if (driver === "sqlite") return "SQLite";
+  return driver;
+}
+
+function StatsTable({ database }: { database: DatabaseStats }) {
+  const driver = databaseDriver(database);
+  const isSQLite = driver === "sqlite";
+
   return (
     <div className="rounded-md border px-3 py-2">
-      <StatRow label="Path" value={database.path} testid="system-db-path" />
-      <StatRow label="Size" value={formatBytes(database.size_bytes)} testid="system-db-size" />
+      <StatRow label="Driver" value={formatDriver(driver)} testid="system-db-driver" />
+      {isSQLite && <StatRow label="Path" value={database.path} testid="system-db-path" />}
       <StatRow
-        label="WAL"
-        value={formatBytes(database.wal_size_bytes)}
-        testid="system-db-wal"
-        info={WAL_HELP}
+        label={isSQLite ? "Size" : "Database size"}
+        value={formatBytes(database.size_bytes)}
+        testid="system-db-size"
       />
+      {isSQLite && (
+        <StatRow
+          label="WAL"
+          value={formatBytes(database.wal_size_bytes)}
+          testid="system-db-wal"
+          info={WAL_HELP}
+        />
+      )}
       <StatRow
         label="Schema version"
         value={database.schema_version || "-"}
         testid="system-db-schema-version"
       />
-      <StatRow
-        label="Last backup"
-        value={formatTimestamp(database.last_backup_at)}
-        testid="system-db-last-backup"
-      />
+      {isSQLite && (
+        <StatRow
+          label="Last backup"
+          value={formatTimestamp(database.last_backup_at)}
+          testid="system-db-last-backup"
+        />
+      )}
     </div>
   );
 }
@@ -116,31 +131,44 @@ function OperationRow({
 }) {
   return (
     <div
-      className="flex items-start justify-between gap-3 rounded-md border p-3"
+      className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
       data-testid={testid}
     >
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium">{label}</p>
         <p className="text-xs text-muted-foreground mt-1">{description}</p>
       </div>
-      <div className="shrink-0">{button}</div>
+      <div className="shrink-0 self-start sm:self-auto">{button}</div>
     </div>
   );
 }
 
-function MaintenanceButtons({
-  vacuumState,
-  optimizeState,
-  onVacuum,
-  onOptimize,
-  onResetOpen,
-}: {
+function UnsupportedMaintenance({ driver }: { driver: string }) {
+  return (
+    <p
+      className="text-xs text-muted-foreground"
+      data-testid="system-database-maintenance-unavailable"
+    >
+      SQLite maintenance actions are unavailable for {formatDriver(driver)}.
+    </p>
+  );
+}
+
+type SQLiteMaintenanceButtonsProps = {
   vacuumState: ActionFeedbackState;
   optimizeState: ActionFeedbackState;
   onVacuum: () => void;
   onOptimize: () => void;
   onResetOpen: () => void;
-}) {
+};
+
+function SQLiteMaintenanceButtons({
+  vacuumState,
+  optimizeState,
+  onVacuum,
+  onOptimize,
+  onResetOpen,
+}: SQLiteMaintenanceButtonsProps) {
   return (
     <div className="space-y-2">
       <OperationRow
@@ -222,11 +250,27 @@ function MaintenanceButtons({
   );
 }
 
+function MaintenanceButtons({
+  driver,
+  ...props
+}: SQLiteMaintenanceButtonsProps & { driver: string | null }) {
+  if (driver === null) {
+    return null;
+  }
+
+  if (driver !== "sqlite") {
+    return <UnsupportedMaintenance driver={driver} />;
+  }
+
+  return <SQLiteMaintenanceButtons {...props} />;
+}
+
 export function DatabaseStatsCard() {
   const { database, isLoading, error, reload } = useDatabaseStats();
   const vacuum = useActionFeedback();
   const optimize = useActionFeedback();
   const [resetOpen, setResetOpen] = useState(false);
+  const driver = database ? databaseDriver(database) : null;
 
   const onVacuum = () =>
     void vacuum.run(async () => {
@@ -259,6 +303,7 @@ export function DatabaseStatsCard() {
         )}
         {database && <StatsTable database={database} />}
         <MaintenanceButtons
+          driver={driver}
           vacuumState={vacuum.state}
           optimizeState={optimize.state}
           onVacuum={onVacuum}

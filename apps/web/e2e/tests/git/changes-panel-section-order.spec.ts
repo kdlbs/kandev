@@ -640,7 +640,6 @@ test.describe("PR diff regression", () => {
     // Assert PR diff content appears (not "No changes")
     await assertPRDiffContains(testPage, "DESKTOP_PR_OVERLAP_MARKER_A");
 
-    git.exec("git checkout -- .");
     git.exec("git clean -fd");
   });
 });

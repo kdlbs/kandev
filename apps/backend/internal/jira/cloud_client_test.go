@@ -228,6 +228,74 @@ func TestCloudClient_ListProjects(t *testing.T) {
 	}
 }
 
+func TestCloudClient_ListProjectStatuses_FlattensAndDedupes(t *testing.T) {
+	var gotPath string
+	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		// Two issue types share the "In Development" status (id 10001); the
+		// flattened result must contain it exactly once.
+		_, _ = w.Write([]byte(`[
+			{"name":"Bug","statuses":[
+				{"id":"10001","name":"In Development","statusCategory":{"key":"indeterminate"}},
+				{"id":"3","name":"Done","statusCategory":{"key":"done"}}
+			]},
+			{"name":"Story","statuses":[
+				{"id":"10001","name":"In Development","statusCategory":{"key":"indeterminate"}},
+				{"id":"1","name":"To Do","statusCategory":{"key":"new"}}
+			]}
+		]`))
+	})
+	c := clientTo(ts, AuthMethodAPIToken, "t")
+	statuses, err := c.ListProjectStatuses(context.Background(), "PROJ")
+	if err != nil {
+		t.Fatalf("list statuses: %v", err)
+	}
+	if gotPath != "/rest/api/3/project/PROJ/statuses" {
+		t.Errorf("path: got %q", gotPath)
+	}
+	if len(statuses) != 3 {
+		t.Fatalf("expected 3 de-duped statuses, got %d: %+v", len(statuses), statuses)
+	}
+	if statuses[0].ID != "10001" || statuses[0].Name != "In Development" || statuses[0].StatusCategory != "indeterminate" {
+		t.Errorf("first status unexpected: %+v", statuses[0])
+	}
+}
+
+func TestCloudClient_ListProjectStatuses_ServerMode_UsesV2(t *testing.T) {
+	var gotPath string
+	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`[{"name":"Task","statuses":[{"id":"1","name":"Open","statusCategory":{"key":"new"}}]}]`))
+	})
+	c := serverClient(ts, AuthMethodPAT, "tok")
+	statuses, err := c.ListProjectStatuses(context.Background(), "P")
+	if err != nil {
+		t.Fatalf("list statuses: %v", err)
+	}
+	if gotPath != "/rest/api/2/project/P/statuses" {
+		t.Errorf("path: got %q, want v2", gotPath)
+	}
+	if len(statuses) != 1 || statuses[0].Name != "Open" {
+		t.Errorf("unexpected statuses: %+v", statuses)
+	}
+}
+
+func TestCloudClient_ListProjectStatuses_NonOK_ReturnsAPIError(t *testing.T) {
+	ts := newMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"errorMessages":["No project"]}`))
+	})
+	c := clientTo(ts, AuthMethodAPIToken, "t")
+	_, err := c.ListProjectStatuses(context.Background(), "NONE")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusNotFound {
+		t.Errorf("status: got %d", apiErr.StatusCode)
+	}
+}
+
 func TestCloudClient_SiteURLTrailingSlash_Stripped(t *testing.T) {
 	ts := newMockServer(t, func(w http.ResponseWriter, r *http.Request) {
 		// If trailing slash wasn't stripped, we'd see "//rest/..."

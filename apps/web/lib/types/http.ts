@@ -51,6 +51,9 @@ export type TaskState =
 // Workflow Review Status
 export type WorkflowReviewStatus = "pending" | "approved" | "changes_requested" | "rejected";
 
+// Reasons the backend tags on an auto-deleted task.deleted event.
+export type TaskDeletionReason = "pr_approved_by_user" | "pr_merged_or_closed" | "issue_closed";
+
 // Workflow Template - pre-defined workflow configurations
 export type WorkflowTemplate = {
   id: string;
@@ -144,6 +147,8 @@ export type TaskSessionState =
   | "FAILED"
   | "CANCELLED";
 
+export type TaskPendingAction = "clarification" | "permission";
+
 export type Workflow = {
   id: WorkflowId;
   workspace_id: WorkspaceId;
@@ -189,6 +194,7 @@ export type Repository = {
   default_branch: string;
   scripts?: RepositoryScript[];
   worktree_branch_prefix: string;
+  worktree_branch_template?: string;
   pull_before_worktree: boolean;
   setup_script: string;
   cleanup_script: string;
@@ -274,6 +280,7 @@ export type Task = {
   repositories?: TaskRepository[];
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
+  primary_session_pending_action?: TaskPendingAction | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;

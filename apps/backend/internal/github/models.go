@@ -2,7 +2,13 @@
 // review queue management, and CI/check status tracking.
 package github
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
+
+// TaskCIAutoFixMaxRounds is the server-enforced CI auto-fix loop guard.
+const TaskCIAutoFixMaxRounds = 10
 
 // PR represents a GitHub Pull Request.
 type PR struct {
@@ -219,6 +225,7 @@ type TaskCIOptionsResponse struct {
 	AutoFixEnabled         bool                       `json:"auto_fix_enabled"`
 	AutoMergeEnabled       bool                       `json:"auto_merge_enabled"`
 	AutoFixPromptOverride  *string                    `json:"auto_fix_prompt_override"`
+	AutoFixMaxRounds       int                        `json:"auto_fix_max_rounds"`
 	EffectiveAutoFixPrompt string                     `json:"effective_auto_fix_prompt"`
 	UsingDefaultPrompt     bool                       `json:"using_default_prompt"`
 	UpdatedAt              time.Time                  `json:"updated_at"`
@@ -234,6 +241,8 @@ type TaskCIPRAutomationState struct {
 	LastFixCheckpointJSON string     `json:"last_fix_checkpoint_json" db:"last_fix_checkpoint_json"`
 	LastFixEnqueuedAt     *time.Time `json:"last_fix_enqueued_at,omitempty" db:"last_fix_enqueued_at"`
 	LastFixSessionID      *string    `json:"last_fix_session_id,omitempty" db:"last_fix_session_id"`
+	AutoFixRoundCount     int        `json:"auto_fix_round_count" db:"auto_fix_round_count"`
+	AutoFixExhaustedAt    *time.Time `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
 	LastMergeSignature    string     `json:"last_merge_signature" db:"last_merge_signature"`
 	LastMergeAttemptAt    *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
 	LastError             *string    `json:"last_error,omitempty" db:"last_error"`
@@ -250,6 +259,7 @@ type TaskCIFixAttempt struct {
 	CheckpointJSON string
 	SessionID      string
 	EnqueuedAt     time.Time
+	IncrementRound bool
 }
 
 // TaskCIMergeAttempt records an auto-merge attempt for a task PR.
@@ -619,6 +629,76 @@ type UpdateIssueWatchRequest struct {
 	Enabled             *bool         `json:"enabled,omitempty"`
 	PollIntervalSeconds *int          `json:"poll_interval_seconds,omitempty"`
 	CleanupPolicy       *string       `json:"cleanup_policy,omitempty"`
+}
+
+// --- Workspace GitHub scope/settings ---
+
+const (
+	RepoScopeModeAll   = "all"
+	RepoScopeModeOrgs  = "orgs"
+	RepoScopeModeRepos = "repos"
+)
+
+// WorkspaceSettings stores per-workspace GitHub operational settings.
+// Authentication remains install-wide; these settings scope GitHub UI/search
+// surfaces to the workspace's intended repositories.
+type WorkspaceSettings struct {
+	WorkspaceID         string          `json:"workspace_id" db:"workspace_id"`
+	RepoScopeMode       string          `json:"repo_scope_mode" db:"repo_scope_mode"`
+	RepoScopeOrgs       []string        `json:"repo_scope_orgs" db:"-"`
+	RepoScopeRepos      []RepoFilter    `json:"repo_scope_repos" db:"-"`
+	RepoScopeOrgsJSON   string          `json:"-" db:"repo_scope_orgs"`
+	RepoScopeReposJSON  string          `json:"-" db:"repo_scope_repos"`
+	SavedPresets        json.RawMessage `json:"saved_presets,omitempty" db:"saved_presets"`
+	DefaultQueryPresets json.RawMessage `json:"default_query_presets,omitempty" db:"default_query_presets"`
+	CreatedAt           time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time       `json:"updated_at" db:"updated_at"`
+}
+
+// UpdateWorkspaceSettingsRequest replaces the workspace GitHub scope and/or
+// preference blobs. Nil blobs leave values unchanged; explicit JSON null clears
+// default query presets back to built-ins.
+type UpdateWorkspaceSettingsRequest struct {
+	WorkspaceID         string           `json:"workspace_id"`
+	RepoScopeMode       *string          `json:"repo_scope_mode,omitempty"`
+	RepoScopeOrgs       *[]string        `json:"repo_scope_orgs,omitempty"`
+	RepoScopeRepos      *[]RepoFilter    `json:"repo_scope_repos,omitempty"`
+	SavedPresets        *json.RawMessage `json:"saved_presets,omitempty"`
+	DefaultQueryPresets *json.RawMessage `json:"default_query_presets,omitempty"`
+	SavedPresetsSet     bool             `json:"-"`
+	DefaultQueriesSet   bool             `json:"-"`
+}
+
+func (r *UpdateWorkspaceSettingsRequest) UnmarshalJSON(data []byte) error {
+	type alias UpdateWorkspaceSettingsRequest
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	var decoded alias
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*r = UpdateWorkspaceSettingsRequest(decoded)
+	if value, ok := raw["saved_presets"]; ok {
+		r.SavedPresetsSet = true
+		if string(value) == jsonNullLiteral {
+			r.SavedPresets = nil
+		} else {
+			next := cloneRawMessage(value)
+			r.SavedPresets = &next
+		}
+	}
+	if value, ok := raw["default_query_presets"]; ok {
+		r.DefaultQueriesSet = true
+		if string(value) == jsonNullLiteral {
+			r.DefaultQueryPresets = nil
+		} else {
+			next := cloneRawMessage(value)
+			r.DefaultQueryPresets = &next
+		}
+	}
+	return nil
 }
 
 // --- Action presets (quick-launch prompts on the /github page) ---

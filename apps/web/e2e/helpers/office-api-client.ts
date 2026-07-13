@@ -49,6 +49,10 @@ export class OfficeApiClient {
     return this.request("POST", "/onboarding/import-fs", undefined);
   }
 
+  async deleteWorkspace(wsId: string, confirmName: string): Promise<void> {
+    await this.request("DELETE", `/workspaces/${wsId}`, { confirm_name: confirmName });
+  }
+
   // --- Agents ---
 
   async listAgents(wsId: string): Promise<Record<string, unknown>> {

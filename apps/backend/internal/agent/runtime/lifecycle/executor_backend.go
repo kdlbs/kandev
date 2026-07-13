@@ -206,6 +206,51 @@ func IsSessionScopedMetadataKey(key string) bool {
 	return sessionScopedMetadataKeys[key]
 }
 
+// sshWorkspaceFallbackKeys are the STABLE SSH executor-config keys projected
+// into workspace metadata as a fallback for terminal / workspace-restore when
+// no live ExecutorRunning record exists. This is deliberately a connection +
+// per-profile allowlist and MUST NOT include the session-scoped runtime keys
+// (remote session dir, agentctl port/PID/URL, local forward port) — projecting
+// a stale one would make the lifecycle manager try to reattach to a dead remote
+// agentctl instance instead of creating a fresh one. It mirrors
+// trustedExecutorConfigKeys (the connection-routing set targetFromMetadata
+// reads) plus the two per-profile keys the terminal path needs (workdir root,
+// login shell). Notably it includes ssh_host_alias so alias-only executors
+// (host read from ~/.ssh/config) survive restore.
+var sshWorkspaceFallbackKeys = map[string]bool{
+	MetadataKeySSHHost:            true,
+	MetadataKeySSHHostAlias:       true,
+	MetadataKeySSHPort:            true,
+	MetadataKeySSHUser:            true,
+	MetadataKeySSHHostFingerprint: true,
+	MetadataKeySSHIdentitySource:  true,
+	MetadataKeySSHIdentityFile:    true,
+	MetadataKeySSHProxyJump:       true,
+	MetadataKeySSHWorkdirRoot:     true,
+	MetadataKeySSHShell:           true,
+}
+
+// FilterSSHWorkspaceFallbackConfig returns the subset of a stored SSH executor
+// config that is safe to project into workspace metadata as a fallback for the
+// terminal / workspace-restore path. Only stable connection + per-profile keys
+// are copied (see sshWorkspaceFallbackKeys); session-scoped runtime keys are
+// intentionally dropped. Returns nil when nothing matches.
+func FilterSSHWorkspaceFallbackConfig(config map[string]string) map[string]interface{} {
+	if len(config) == 0 {
+		return nil
+	}
+	filtered := make(map[string]interface{})
+	for k, v := range config {
+		if sshWorkspaceFallbackKeys[k] {
+			filtered[k] = v
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
+}
+
 // FilterPersistentMetadata returns a copy of src containing only keys that
 // should be carried forward across session resumes. Returns nil if no keys match.
 func FilterPersistentMetadata(src map[string]interface{}) map[string]interface{} {

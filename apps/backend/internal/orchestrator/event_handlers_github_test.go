@@ -76,12 +76,14 @@ type mockGitHubService struct {
 	ciPRState            *github.TaskCIPRAutomationState
 	ciPRStateErr         error
 	prFeedback           *github.PRFeedback
+	prFeedbackCalls      int
 	fixAttempts          []github.TaskCIFixAttempt
 	fixCheckpointRefresh []github.TaskCIFixAttempt
 	mergeAttempts        []github.TaskCIMergeAttempt
 	mergeCalls           int
 	mergeErr             error
 	ciErrors             []github.TaskCIPRAutomationState
+	ciExhausted          []github.TaskCIPRAutomationState
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
@@ -181,10 +183,22 @@ func (m *mockGitHubService) RecordTaskCIError(_ context.Context, taskID, reposit
 	})
 	return nil
 }
+func (m *mockGitHubService) MarkTaskCIAutoFixExhausted(_ context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	now := time.Now().UTC()
+	m.ciExhausted = append(m.ciExhausted, github.TaskCIPRAutomationState{
+		TaskID:             taskID,
+		RepositoryID:       repositoryID,
+		PRNumber:           prNumber,
+		AutoFixExhaustedAt: &now,
+		LastError:          &message,
+	})
+	return nil
+}
 func (m *mockGitHubService) ClearTaskCIError(context.Context, string, string, int) error {
 	return nil
 }
 func (m *mockGitHubService) GetPRFeedback(context.Context, string, string, int) (*github.PRFeedback, error) {
+	m.prFeedbackCalls++
 	if m.prFeedback != nil {
 		return m.prFeedback, nil
 	}

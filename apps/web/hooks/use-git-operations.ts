@@ -42,7 +42,7 @@ interface UseGitOperationsReturn {
   unstage: (paths?: string[], repo?: string) => Promise<GitOperationResult>;
   discard: (paths?: string[], repo?: string) => Promise<GitOperationResult>;
   revertCommit: (commitSHA: string, repo?: string) => Promise<GitOperationResult>;
-  renameBranch: (newName: string) => Promise<GitOperationResult>;
+  renameBranch: (newName: string, repo?: string) => Promise<GitOperationResult>;
   reset: (commitSHA: string, mode: "soft" | "hard", repo?: string) => Promise<GitOperationResult>;
   createPR: (
     title: string,
@@ -128,8 +128,11 @@ function buildGitOperationCallbacks(executeOperation: ExecuteOperation) {
       ...(repo ? { repo } : {}),
     });
 
-  const renameBranch = async (newName: string) =>
-    executeOperation<GitOperationResult>("worktree.rename_branch", { new_name: newName });
+  const renameBranch = async (newName: string, repo?: string) =>
+    executeOperation<GitOperationResult>("worktree.rename_branch", {
+      new_name: newName,
+      ...(repo ? { repo } : {}),
+    });
 
   const reset = async (commitSHA: string, mode: "soft" | "hard", repo?: string) =>
     executeOperation<GitOperationResult>("worktree.reset", {

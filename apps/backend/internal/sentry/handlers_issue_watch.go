@@ -35,7 +35,7 @@ func (c *Controller) httpListIssueWatches(ctx *gin.Context) {
 		watches, err = c.service.ListIssueWatches(ctx.Request.Context(), workspaceID)
 	}
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeErr(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"watches": watches})
@@ -44,7 +44,11 @@ func (c *Controller) httpListIssueWatches(ctx *gin.Context) {
 func (c *Controller) httpCreateIssueWatch(ctx *gin.Context) {
 	var req CreateIssueWatchRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
+		return
+	}
+	if !workspaceMatches(ctx, req.WorkspaceID) {
+		writeErr(ctx, http.StatusBadRequest, "workspace_id query must match body workspaceId")
 		return
 	}
 	w, err := c.service.CreateIssueWatch(ctx.Request.Context(), &req)
@@ -63,7 +67,7 @@ func (c *Controller) httpGetIssueWatch(ctx *gin.Context) {
 		return
 	}
 	if !workspaceMatches(ctx, w.WorkspaceID) {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": ErrIssueWatchNotFound.Error()})
+		writeErr(ctx, http.StatusNotFound, ErrIssueWatchNotFound.Error())
 		return
 	}
 	ctx.JSON(http.StatusOK, w)
@@ -76,7 +80,7 @@ func (c *Controller) httpUpdateIssueWatch(ctx *gin.Context) {
 	}
 	var req UpdateIssueWatchRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		writeBadPayload(ctx)
 		return
 	}
 	w, err := c.service.UpdateIssueWatch(ctx.Request.Context(), id, &req)
@@ -93,7 +97,7 @@ func (c *Controller) httpDeleteIssueWatch(ctx *gin.Context) {
 		return
 	}
 	if err := c.service.DeleteIssueWatch(ctx.Request.Context(), id); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		writeErr(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
@@ -111,16 +115,16 @@ func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 		return
 	}
 	if !workspaceMatches(ctx, w.WorkspaceID) {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": ErrIssueWatchNotFound.Error()})
+		writeErr(ctx, http.StatusNotFound, ErrIssueWatchNotFound.Error())
 		return
 	}
-	issues, err := c.service.CheckIssueWatch(ctx.Request.Context(), w)
+	instanceID, issues, err := c.service.CheckIssueWatch(ctx.Request.Context(), w)
 	if err != nil {
-		c.writeClientError(ctx, err)
+		c.writeIssueWatchError(ctx, err)
 		return
 	}
 	for _, issue := range issues {
-		c.service.publishNewSentryIssueEvent(ctx.Request.Context(), w, issue)
+		c.service.publishNewSentryIssueEvent(ctx.Request.Context(), w, instanceID, issue)
 	}
 	ctx.JSON(http.StatusOK, gin.H{"published": len(issues)})
 }
@@ -168,7 +172,7 @@ func (c *Controller) assertWatchInWorkspace(ctx *gin.Context, id string) bool {
 		return false
 	}
 	if !workspaceMatches(ctx, w.WorkspaceID) {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": ErrIssueWatchNotFound.Error()})
+		writeErr(ctx, http.StatusNotFound, ErrIssueWatchNotFound.Error())
 		return false
 	}
 	return true
@@ -184,11 +188,19 @@ func workspaceMatches(ctx *gin.Context, resourceWorkspace string) bool {
 
 func (c *Controller) writeIssueWatchError(ctx *gin.Context, err error) {
 	if errors.Is(err, ErrIssueWatchNotFound) {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		writeErr(ctx, http.StatusNotFound, err.Error())
+		return
+	}
+	if errors.Is(err, ErrInstanceNotFound) {
+		writeCoded(ctx, http.StatusNotFound, err.Error(), errCodeSentryInstanceNotFound)
+		return
+	}
+	if errors.Is(err, ErrInstanceRequired) {
+		writeCoded(ctx, http.StatusBadRequest, err.Error(), errCodeSentryInstanceRequired)
 		return
 	}
 	if errors.Is(err, ErrInvalidConfig) {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeErr(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
 	c.writeClientError(ctx, err)

@@ -17,40 +17,10 @@ func TestCodexACPRuntimeNoLongerBindMountsHostHome(t *testing.T) {
 	}
 }
 
-func TestCodexACP_PermissionSettings_CuratedConfigOverrides(t *testing.T) {
+func TestCodexACP_PermissionSettings_NoBridgeCLIFlags(t *testing.T) {
 	settings := NewCodexACP().PermissionSettings()
-	want := map[string]struct {
-		flagText  string
-		defaultOn bool
-	}{
-		"config_approval_policy_never": {
-			flagText: "-c approval_policy=never", defaultOn: false,
-		},
-		"config_sandbox_disk_full_read": {
-			flagText: CodexACPSandboxDiskFullReadCLIFlag, defaultOn: false,
-		},
-	}
-	if len(settings) != len(want) {
-		t.Fatalf("PermissionSettings() len = %d, want %d: %#v", len(settings), len(want), settings)
-	}
-	for key, spec := range want {
-		s, ok := settings[key]
-		if !ok {
-			t.Fatalf("missing %q in PermissionSettings()", key)
-		}
-		if !s.Supported || s.ApplyMethod != PermissionApplyMethodCLIFlag {
-			t.Fatalf("%q: unsupported or wrong apply method: %+v", key, s)
-		}
-		if s.Default != spec.defaultOn {
-			t.Fatalf("%q: Default=%v, want %v", key, s.Default, spec.defaultOn)
-		}
-		gotFlag := s.CLIFlag
-		if s.CLIFlagValue != "" {
-			gotFlag = s.CLIFlag + " " + s.CLIFlagValue
-		}
-		if gotFlag != spec.flagText {
-			t.Fatalf("%q: flag text %q, want %q", key, gotFlag, spec.flagText)
-		}
+	if len(settings) != 0 {
+		t.Fatalf("PermissionSettings() = %#v, want no Codex ACP bridge CLI flags", settings)
 	}
 }
 
@@ -61,6 +31,24 @@ func TestCodexACP_BuildCommand_NoCodexCLIFlags(t *testing.T) {
 	})
 	if !slices.Equal(cmd.Args(), want) {
 		t.Fatalf("BuildCommand = %#v, want %#v", cmd.Args(), want)
+	}
+}
+
+func TestCodexACP_UsesAgentClientProtocolBridge(t *testing.T) {
+	a := NewCodexACP()
+	want := []string{"npx", "-y", "@agentclientprotocol/codex-acp"}
+
+	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
+		t.Fatalf("BuildCommand = %#v, want %#v", got, want)
+	}
+	if got := a.Runtime().Cmd.Args(); !slices.Equal(got, want) {
+		t.Fatalf("Runtime Cmd = %#v, want %#v", got, want)
+	}
+	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
+		t.Fatalf("Inference Command = %#v, want %#v", got, want)
+	}
+	if got := a.InstallScript(); !strings.Contains(got, "@agentclientprotocol/codex-acp") {
+		t.Fatalf("InstallScript = %q, want agentclientprotocol bridge package", got)
 	}
 }
 

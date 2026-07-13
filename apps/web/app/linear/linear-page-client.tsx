@@ -69,13 +69,13 @@ function useLinearPageData(workspaceId?: string) {
         return;
       }
       try {
-        const cfg = await getLinearConfig();
+        const cfg = await getLinearConfig({ workspaceId });
         if (cancelled) return;
         const ok = !!cfg && cfg.hasSecret;
         setConfigured(ok);
         if (ok) {
           try {
-            const list = await listLinearTeams();
+            const list = await listLinearTeams({ workspaceId });
             if (!cancelled) setTeams(list.teams ?? []);
           } catch {
             // Non-fatal: team filter just stays empty.
@@ -125,14 +125,17 @@ function useIssueSearch(
 
   const fetchPage = useCallback(
     (p: number) =>
-      searchLinearIssues({
-        query: query || undefined,
-        teamKey: teamKey || undefined,
-        assigned: assigned || undefined,
-        pageToken: tokensRef.current[p - 1] || undefined,
-        maxResults: PAGE_SIZE,
-      }),
-    [query, teamKey, assigned],
+      searchLinearIssues(
+        {
+          query: query || undefined,
+          teamKey: teamKey || undefined,
+          assigned: assigned || undefined,
+          pageToken: tokensRef.current[p - 1] || undefined,
+          maxResults: PAGE_SIZE,
+        },
+        { workspaceId },
+      ),
+    [workspaceId, query, teamKey, assigned],
   );
 
   const run = useCallback(
@@ -439,7 +442,7 @@ function ResultsArea({
 }
 
 export function LinearPageClient({ workspaceId, workflows, steps }: LinearPageClientProps) {
-  const available = useLinearAvailable();
+  const available = useLinearAvailable(workspaceId);
   const { loaded, configured, teams } = useLinearPageData(workspaceId);
 
   const [query, setQuery] = useState("");

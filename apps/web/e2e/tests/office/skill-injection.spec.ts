@@ -4,7 +4,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { OfficeApiClient } from "../../helpers/office-api-client";
 
-// Verifies the spec-aligned skill injection (docs/specs/office-skills/spec.md):
+// Verifies the spec-aligned skill injection (docs/specs/office/agents.md):
 // when a skill is assigned to an agent profile, launching a session writes
 // it to <worktree>/<projectSkillDir>/kandev-<slug>/SKILL.md and appends
 // the kandev-* glob to .git/info/exclude.
@@ -69,7 +69,9 @@ test("skill injection writes assigned skill to session worktree on launch", asyn
     await expect
       .poll(() => fs.existsSync(skillFile), { timeout: 15_000, message: skillFile })
       .toBe(true);
-    expect(fs.readFileSync(skillFile, "utf8")).toContain(`Marker: ${slug}-content`);
+    const skillFileContent = fs.readFileSync(skillFile, "utf8");
+    expect(skillFileContent).toContain(`---\nname: ${slug}\ndescription: ${slug}\n---\n`);
+    expect(skillFileContent).toContain(`Marker: ${slug}-content`);
 
     // 6. .git/info/exclude (resolved through .git file for linked worktrees)
     //    contains the kandev-* glob so injected skills never get committed.

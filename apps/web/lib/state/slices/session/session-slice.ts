@@ -11,6 +11,10 @@ import type { SessionRuntimeSliceState } from "@/lib/state/slices/session-runtim
 import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { getPlanLastSeen, setPlanLastSeen } from "@/lib/local-storage";
+import {
+  getWalkthroughLastSeen,
+  setWalkthroughLastSeen,
+} from "@/lib/walkthrough-notification-storage";
 
 const debugEnv = createDebugLogger("session:env-mapping");
 
@@ -47,6 +51,10 @@ function mergeMessageFields(target: Record<string, unknown>, source: Record<stri
       target[key] = source[key];
     }
   }
+}
+
+function removeMessageByID(messages: Message[], messageId: string) {
+  return messages.filter((message) => message.id !== messageId);
 }
 
 /** Eagerly populate session→environment mapping and migrate any data stored under the fallback key.
@@ -133,6 +141,11 @@ export const defaultSessionState: SessionSliceState = {
     comparePairByTaskId: {},
     lastSeenUpdatedAtByTaskId: {},
   },
+  walkthroughs: {
+    byTaskId: {},
+    activeStepByTaskId: {},
+    lastSeenUpdatedAtByTaskId: {},
+  },
   queue: { bySessionId: {}, metaBySessionId: {}, isLoading: {} },
 };
 
@@ -182,6 +195,15 @@ function buildMessageActions(set: ImmerSet) {
           message as unknown as Record<string, unknown>,
         );
         messages[index] = merged;
+      }),
+    removeMessage: (
+      sessionId: Parameters<SessionSlice["removeMessage"]>[0],
+      messageId: Parameters<SessionSlice["removeMessage"]>[1],
+    ) =>
+      set((draft) => {
+        const messages = draft.messages.bySession[sessionId];
+        if (!messages) return;
+        draft.messages.bySession[sessionId] = removeMessageByID(messages, messageId);
       }),
     mergeMessages: (
       sessionId: string,
@@ -324,6 +346,47 @@ function buildTaskPlanActions(set: ImmerSet, get: ImmerGet) {
         draft.taskPlans.revisionContentCache[revisionId] = content;
       }),
     ...buildPreviewCompareActions(set),
+  };
+}
+
+function buildWalkthroughActions(set: ImmerSet, get: ImmerGet) {
+  return {
+    setWalkthrough: (
+      taskId: string,
+      walkthrough: Parameters<SessionSlice["setWalkthrough"]>[1],
+    ) => {
+      const shouldHydrateLastSeen =
+        get().walkthroughs.lastSeenUpdatedAtByTaskId[taskId] === undefined;
+      const storedLastSeen = shouldHydrateLastSeen ? getWalkthroughLastSeen(taskId) : null;
+      set((draft) => {
+        const previous = draft.walkthroughs.byTaskId[taskId];
+        draft.walkthroughs.byTaskId[taskId] = walkthrough;
+        // Clamp the active step into the new step range (defaults to 0). A
+        // replaced/shorter tour must not leave the pointer past the last step.
+        const steps = walkthrough?.steps.length ?? 0;
+        const isReplacement = previous?.id !== walkthrough?.id;
+        const current = isReplacement ? 0 : (draft.walkthroughs.activeStepByTaskId[taskId] ?? 0);
+        draft.walkthroughs.activeStepByTaskId[taskId] =
+          steps === 0 ? 0 : Math.min(current, steps - 1);
+        if (shouldHydrateLastSeen && storedLastSeen !== null) {
+          draft.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] = storedLastSeen;
+        }
+      });
+    },
+    setWalkthroughActiveStep: (taskId: string, stepIndex: number) =>
+      set((draft) => {
+        const steps = draft.walkthroughs.byTaskId[taskId]?.steps.length ?? 0;
+        const clamped = steps === 0 ? 0 : Math.max(0, Math.min(stepIndex, steps - 1));
+        draft.walkthroughs.activeStepByTaskId[taskId] = clamped;
+      }),
+    markWalkthroughSeen: (taskId: string) => {
+      const wt = get().walkthroughs.byTaskId[taskId];
+      const lastSeen = wt?.updated_at ?? "";
+      setWalkthroughLastSeen(taskId, lastSeen);
+      set((draft) => {
+        draft.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] = lastSeen;
+      });
+    },
   };
 }
 
@@ -499,6 +562,7 @@ export const createSessionSlice: StateCreator<
       draft.activeModel.bySessionId[sessionId] = modelId;
     }),
   ...buildTaskPlanActions(set, get),
+  ...buildWalkthroughActions(set, get),
   setQueueEntries: (sessionId, entries, meta) =>
     set((draft) => {
       draft.queue.bySessionId[sessionId] = entries;

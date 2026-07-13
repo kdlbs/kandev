@@ -1,12 +1,24 @@
 package sqlite
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+)
 
 // ErrTaskNotFound is returned by Repository methods (GetTask, UpdateTask,
 // DeleteTask, UpdateTaskState, …) when no row matches the supplied id.
 // Callers should classify via errors.Is rather than substring-matching the
 // formatted message, which includes the task id and is therefore brittle.
-var ErrTaskNotFound = errors.New("task not found")
+var ErrTaskNotFound = repoerrors.ErrTaskNotFound
+
+// ErrWorkspaceNotFound is returned by Repository workspace methods when no row
+// matches the supplied id.
+var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
+
+// ErrTaskPlanNotFound is returned by Repository task-plan methods when no row
+// matches the supplied task id.
+var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 
 // ErrNoPrimarySession is returned by GetPrimarySessionByTaskID when the task
 // has no primary session row. Callers should use errors.Is to distinguish this

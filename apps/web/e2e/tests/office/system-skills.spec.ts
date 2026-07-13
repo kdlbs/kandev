@@ -25,7 +25,7 @@ test.describe("Office system skills", () => {
 
     // Spot-check several v1 slugs across the role-default tiers so a
     // bulk rename (e.g. kandev-* prefix drop) trips the assertion.
-    const expectSlugs = ["kandev-protocol", "memory", "kandev-team", "kandev-hiring"];
+    const expectSlugs = ["kandev-protocol", "memory", "kandev-team-admin", "kandev-task-ops"];
     for (const slug of expectSlugs) {
       const row = skills.find((s) => s.slug === slug);
       expect(row, `expected bundled skill ${slug} in workspace skill list`).toBeTruthy();
@@ -65,7 +65,7 @@ test.describe("Office system skills", () => {
     expect(desiredSlugs.length, "desired_skills").toBeGreaterThan(0);
     expect(desiredIds.length, "skill_ids").toBeGreaterThan(0);
 
-    for (const slug of ["kandev-protocol", "memory", "kandev-team", "kandev-hiring"]) {
+    for (const slug of ["kandev-protocol", "memory", "kandev-team-admin", "kandev-task-ops"]) {
       expect(desiredSlugs, `${slug} must be auto-attached to the CEO`).toContain(slug);
     }
   });
@@ -84,12 +84,12 @@ test.describe("Office system skills", () => {
     );
     expect(priming.ok).toBe(true);
     const primed = (await priming.json()) as { skills?: Array<{ slug: string }> };
-    expect((primed.skills ?? []).map((s) => s.slug)).toContain("kandev-hiring");
+    expect((primed.skills ?? []).map((s) => s.slug)).toContain("kandev-team-admin");
 
     await testPage.goto("/office/workspace/skills");
 
     // The count badge shows N≥3 available (3 pre-existing v1 bundled
-    // slugs at minimum). Wait specifically for ≥13 — anything lower
+    // slugs at minimum). Wait specifically for ≥8 — anything lower
     // means the SSR didn't see the synced set.
     await expect
       .poll(
@@ -103,7 +103,7 @@ test.describe("Office system skills", () => {
         },
         { timeout: 10_000 },
       )
-      .toBeGreaterThanOrEqual(10);
+      .toBeGreaterThanOrEqual(8);
 
     // Expand the System group. With the heading rendered inside a
     // button containing "System" + a count badge as separate spans,
@@ -114,7 +114,9 @@ test.describe("Office system skills", () => {
     await expect(systemToggle).toBeVisible({ timeout: 5_000 });
     await systemToggle.click();
 
-    await expect(testPage.getByText("kandev-hiring").first()).toBeVisible({ timeout: 5_000 });
-    await expect(testPage.getByText("kandev-team").first()).toBeVisible();
+    await expect(testPage.getByText("kandev-team-admin").first()).toBeVisible({
+      timeout: 5_000,
+    });
+    await expect(testPage.getByText("kandev-task-ops").first()).toBeVisible();
   });
 });

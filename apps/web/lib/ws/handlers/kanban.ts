@@ -58,6 +58,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               ...repoFields,
               primarySessionId: existing?.primarySessionId,
               primarySessionState: existing?.primarySessionState,
+              primarySessionPendingAction: existing?.primarySessionPendingAction,
             };
           });
 
@@ -86,6 +87,10 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
                 t.primarySessionState === undefined
                   ? fallback?.primarySessionState
                   : t.primarySessionState,
+              primarySessionPendingAction:
+                t.primarySessionPendingAction === undefined
+                  ? fallback?.primarySessionPendingAction
+                  : t.primarySessionPendingAction,
             };
           });
           return {

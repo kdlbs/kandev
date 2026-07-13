@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { IconEdit, IconInfoCircle, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -12,12 +12,15 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { Label } from "@kandev/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
-import type { TaskCIAutomationPatch, TaskPR } from "@/lib/types/github";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { autoFixRoundForState, findCIAutomationStateForPR } from "@/lib/github/ci-automation";
+import type { TaskCIAutomationPatch, TaskCIPRAutomationState, TaskPR } from "@/lib/types/github";
 
 const PR_FEEDBACK_PLACEHOLDER = "{{pr.feedback}}";
 
@@ -157,18 +160,23 @@ function CIAutomationRow({
   checked,
   disabled,
   onCheckedChange,
+  help,
 }: {
   id: string;
   label: string;
   checked: boolean;
   disabled: boolean;
   onCheckedChange: (checked: boolean) => void;
+  help?: ReactNode;
 }) {
   return (
     <div className="flex min-h-7 items-center justify-between gap-3 px-1">
-      <Label htmlFor={id} className="min-w-0 flex-1 cursor-pointer truncate text-xs">
-        {label}
-      </Label>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <Label htmlFor={id} className="min-w-0 cursor-pointer truncate text-xs">
+          {label}
+        </Label>
+        {help}
+      </div>
       <Switch
         id={id}
         aria-label={label}
@@ -207,12 +215,71 @@ function CIAutomationErrorRow({
   );
 }
 
+function CIAutoFixRoundHelpButton({
+  state,
+  maxRounds,
+}: {
+  state: TaskCIPRAutomationState | undefined;
+  maxRounds: number | null | undefined;
+}) {
+  const round = autoFixRoundForState(state, maxRounds);
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const [open, setOpen] = useState(false);
+  const trigger = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      data-testid="ci-auto-fix-round-help"
+      className="h-5 w-5 cursor-help text-muted-foreground hover:text-foreground"
+      aria-label="Explain auto-fix rounds"
+    >
+      <IconInfoCircle className="h-3.5 w-3.5" />
+    </Button>
+  );
+  const explanation = (
+    <span data-testid="ci-auto-fix-round-explanation">
+      Auto-fix has used {round.current} of {round.max} rounds for this PR. A round is counted when
+      Kandev sends or queues a CI auto-fix message. Kandev waits for all PR checks to finish before
+      starting a new CI auto-fix turn, so the agent gets the final failed checks and current
+      comments together. Updating an already queued auto-fix message does not use another round.
+      When this is at {round.max}/{round.max} and there is no pending auto-fix message left to
+      update, Kandev pauses auto-fix for this PR so it cannot loop forever. Disable and re-enable
+      auto-fix after manual review to start over.
+    </span>
+  );
+  if (!isFinePointer) {
+    return (
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        <PopoverContent
+          side="top"
+          align="start"
+          portal={false}
+          className="max-w-[280px] text-xs leading-relaxed"
+        >
+          {explanation}
+        </PopoverContent>
+      </Popover>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipContent side="top" align="start" className="max-w-[280px] text-xs leading-relaxed">
+        {explanation}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
   const { options, loading, saving, error, refresh, update, resetPrompt } =
     useTaskCIAutomationOptions(pr.task_id);
   const { toast } = useToast();
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState("");
+  const automationState = findCIAutomationStateForPR(options?.pr_states, pr);
 
   const openPromptEditor = useCallback(() => {
     setPromptDraft(options?.auto_fix_prompt_override ?? options?.effective_auto_fix_prompt ?? "");
@@ -280,6 +347,14 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
         checked={Boolean(options?.auto_fix_enabled)}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_fix_enabled: checked })}
+        help={
+          options?.auto_fix_enabled ? (
+            <CIAutoFixRoundHelpButton
+              state={automationState}
+              maxRounds={options.auto_fix_max_rounds}
+            />
+          ) : null
+        }
       />
       <CIAutomationRow
         id={`task-ci-auto-merge-${pr.task_id}`}

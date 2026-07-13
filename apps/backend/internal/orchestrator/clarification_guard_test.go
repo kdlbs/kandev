@@ -39,3 +39,33 @@ func TestSessionHasPendingClarification(t *testing.T) {
 		t.Fatal("expected pending clarification")
 	}
 }
+
+func seedPendingClarificationMessage(t *testing.T, repo interface {
+	CreateTurn(ctx context.Context, turn *models.Turn) error
+	CreateMessage(ctx context.Context, message *models.Message) error
+}, taskID, sessionID string) {
+	t.Helper()
+	now := time.Now().UTC()
+	turnID := "turn-clarification-" + sessionID
+	requireNoError(t, repo.CreateTurn(context.Background(), &models.Turn{
+		ID:            turnID,
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		StartedAt:     now,
+	}))
+	requireNoError(t, repo.CreateMessage(context.Background(), &models.Message{
+		ID:            "clarification-" + sessionID,
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		AuthorType:    models.MessageAuthorAgent,
+		Type:          "clarification_request",
+		Content:       "Which approach?",
+		CreatedAt:     now,
+		Metadata: map[string]interface{}{
+			"pending_id":  "pending-" + sessionID,
+			"question_id": "q1",
+			"status":      "pending",
+		},
+	}))
+}

@@ -1,5 +1,9 @@
 import { GitLabIntegrationPage } from "@/components/gitlab/gitlab-settings";
 
-export default function IntegrationsGitLabPage() {
-  return <GitLabIntegrationPage />;
+type IntegrationsGitLabPageProps = {
+  workspaceId?: string;
+};
+
+export default function IntegrationsGitLabPage({ workspaceId }: IntegrationsGitLabPageProps = {}) {
+  return <GitLabIntegrationPage workspaceId={workspaceId} />;
 }

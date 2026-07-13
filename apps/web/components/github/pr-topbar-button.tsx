@@ -27,11 +27,14 @@ import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import {
   aggregatePRStatusColor,
   getPRStatusColor,
+  hasPRChecksInProgressForDisplay,
+  hasPRChecksPassedWithoutReviewWaitForDisplay,
   isPRAwaitingReview,
   isPRReadyToMerge,
   isPRWaitingOnBranchProtection,
 } from "@/components/github/pr-task-icon";
 import { prTaskKey } from "@/components/github/pr-detail-panel";
+import { prIdentitySlug } from "@/components/github/pr-utils";
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
@@ -80,10 +83,10 @@ function PRStatusIcon({ pr }: { pr: TaskPR }) {
   if (isPRWaitingOnBranchProtection(pr)) {
     return <IconClock className="h-3 w-3 text-muted-foreground" />;
   }
-  if (pr.checks_state === "success" && pr.review_state === "approved") {
+  if (hasPRChecksPassedWithoutReviewWaitForDisplay(pr)) {
     return <IconCheck className="h-3 w-3 text-green-500" />;
   }
-  if (pr.checks_state === "pending" || pr.review_state === "pending") {
+  if (hasPRChecksInProgressForDisplay(pr) || pr.review_state === "pending") {
     return <IconClock className="h-3 w-3 text-yellow-500" />;
   }
   return null;
@@ -305,7 +308,7 @@ function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
           key={pr.id}
           onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
           className="cursor-pointer gap-2"
-          data-testid={`pr-topbar-menu-item-${pr.pr_number}`}
+          data-testid={`pr-topbar-menu-item-${prIdentitySlug(pr)}`}
         >
           <IconGitPullRequest className={`h-4 w-4 shrink-0 ${getPRStatusColor(pr)}`} />
           <div className="flex flex-col min-w-0 flex-1">

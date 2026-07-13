@@ -1,6 +1,7 @@
 export type LinearAuthMethod = "api_key";
 
 export interface LinearConfig {
+  workspaceId?: string;
   authMethod: LinearAuthMethod;
   defaultTeamKey: string;
   hasSecret: boolean;
@@ -107,6 +108,15 @@ export interface LinearSearchFilter {
   estimateMax?: number;
 }
 
+export type LinearIssueSortBy =
+  | ""
+  | "priority"
+  | "priority_asc"
+  | "created_desc"
+  | "created_asc"
+  | "updated_desc"
+  | "updated_asc";
+
 export interface LinearSearchResult {
   issues: LinearIssue[];
   maxResults: number;
@@ -144,6 +154,8 @@ export interface LinearIssueWatch {
    * rejects values ≤ 0.
    */
   maxInflightTasks?: number | null;
+  /** Dispatch order for matched issues under the in-flight cap; empty = Linear default order. */
+  sortBy?: LinearIssueSortBy;
   /** Last poll timestamp, or null when the watch has never run. */
   lastPolledAt?: string | null;
   createdAt: string;
@@ -165,6 +177,8 @@ export interface CreateLinearIssueWatchInput {
   pollIntervalSeconds?: number;
   /** Per-watch throttle cap; null = uncapped, positive int = cap. */
   maxInflightTasks?: number | null;
+  /** Dispatch order for matched issues under the in-flight cap; empty = Linear default order. */
+  sortBy?: LinearIssueSortBy;
   enabled?: boolean;
 }
 
@@ -182,4 +196,6 @@ export interface UpdateLinearIssueWatchInput {
   pollIntervalSeconds?: number;
   /** Per-watch throttle cap; null = uncapped, positive int = cap. */
   maxInflightTasks?: number | null;
+  /** Dispatch order for matched issues under the in-flight cap; empty = Linear default order. */
+  sortBy?: LinearIssueSortBy;
 }

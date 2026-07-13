@@ -652,6 +652,10 @@ func (p *commandProcess) snapshot(includeOutput bool) ProcessInfo {
 // This allows processes to inherit the agentctl server's environment (including PATH,
 // HOME, etc.) while also supporting custom variables per process.
 func mergeEnv(env map[string]string) []string {
+	return mergeEnvWithStrip(env, nil)
+}
+
+func mergeEnvWithStrip(env map[string]string, stripEnv []string) []string {
 	base := make(map[string]string, len(os.Environ())+len(env))
 
 	// Parse parent environment into map, filtering out npm config variables
@@ -676,6 +680,10 @@ func mergeEnv(env map[string]string) []string {
 	// Override with custom variables
 	for k, v := range env {
 		base[k] = v
+	}
+
+	for _, key := range stripEnv {
+		delete(base, key)
 	}
 
 	// Convert back to []string format

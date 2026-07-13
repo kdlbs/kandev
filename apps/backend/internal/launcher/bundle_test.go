@@ -1,9 +1,10 @@
 package launcher
 
 import (
+	"encoding/binary"
 	"os"
 	"path/filepath"
-	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -11,9 +12,7 @@ func TestValidateRuntimeBundleAcceptsSingleBinaryLayout(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "bin", "kandev"))
 	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
-	if requiresAgentctlLinuxAMD64(runtime.GOOS, runtime.GOARCH) {
-		writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
-	}
+	writeRemoteAgentctlHelpers(t, dir)
 
 	bundle, err := validateRuntimeBundle(dir, "test")
 	if err != nil {
@@ -33,15 +32,155 @@ func TestValidateRuntimeBundleRejectsMissingLauncher(t *testing.T) {
 	}
 }
 
-func TestRequiresAgentctlLinuxAMD64(t *testing.T) {
-	if requiresAgentctlLinuxAMD64("linux", "amd64") {
-		t.Fatal("linux/amd64 should use the native agentctl binary")
+func TestValidateRuntimeBundleRejectsMissingRemoteHelper(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-arm64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-amd64"))
+
+	_, err := validateRuntimeBundle(dir, "test")
+	if err == nil {
+		t.Fatal("expected error")
 	}
-	if !requiresAgentctlLinuxAMD64("linux", "arm64") {
-		t.Fatal("linux/arm64 should require the linux/amd64 helper")
+	if got, want := err.Error(), "agentctl darwin/arm64 helper not found"; !strings.Contains(got, want) {
+		t.Fatalf("error = %q, want substring %q", got, want)
 	}
-	if !requiresAgentctlLinuxAMD64("darwin", "arm64") {
-		t.Fatal("non-linux hosts should require the linux/amd64 helper")
+}
+
+func TestValidateRuntimeBundleRejectsUnsignedDarwinArm64(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-arm64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-amd64"))
+	// A real-shaped but unsigned Mach-O must be rejected for darwin/arm64.
+	writeMachO(t, filepath.Join(dir, "bin", "agentctl-darwin-arm64"), false)
+
+	_, err := validateRuntimeBundle(dir, "test")
+	if err == nil {
+		t.Fatal("expected error for unsigned darwin/arm64 helper")
+	}
+	if got, want := err.Error(), "not code-signed"; !strings.Contains(got, want) {
+		t.Fatalf("error = %q, want substring %q", got, want)
+	}
+}
+
+func TestValidateRuntimeBundleRejectsUnparsableDarwinArm64(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-arm64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-amd64"))
+	// A non-Mach-O stub (e.g. a truncated/corrupt upload) can't be verified as
+	// signed and must fail closed rather than silently pass.
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-arm64"))
+
+	_, err := validateRuntimeBundle(dir, "test")
+	if err == nil {
+		t.Fatal("expected error for unparsable darwin/arm64 helper")
+	}
+	if got, want := err.Error(), "not a parsable"; !strings.Contains(got, want) {
+		t.Fatalf("error = %q, want substring %q", got, want)
+	}
+}
+
+func TestValidateRuntimeBundleAcceptsSignedDarwinArm64(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", "kandev"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-amd64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-linux-arm64"))
+	writeFile(t, filepath.Join(dir, "bin", "agentctl-darwin-amd64"))
+	writeMachO(t, filepath.Join(dir, "bin", "agentctl-darwin-arm64"), true)
+
+	if _, err := validateRuntimeBundle(dir, "test"); err != nil {
+		t.Fatalf("unexpected error for signed darwin/arm64 helper: %v", err)
+	}
+}
+
+func TestMachoHasCodeSignature(t *testing.T) {
+	dir := t.TempDir()
+	signed := filepath.Join(dir, "signed")
+	unsigned := filepath.Join(dir, "unsigned")
+	writeMachO(t, signed, true)
+	writeMachO(t, unsigned, false)
+
+	if got, ok := machoHasCodeSignature(signed); !ok || !got {
+		t.Fatalf("signed: got=%v ok=%v, want signed=true ok=true", got, ok)
+	}
+	if got, ok := machoHasCodeSignature(unsigned); !ok || got {
+		t.Fatalf("unsigned: got=%v ok=%v, want false true", got, ok)
+	}
+	// A non-Mach-O (e.g. an ELF or stub) must be reported as undeterminable.
+	if _, ok := machoHasCodeSignature(filepath.Join(dir, "missing")); ok {
+		t.Fatal("missing file: ok=true, want false")
+	}
+}
+
+// writeMachO writes a minimal thin LE 64-bit Mach-O with a single load command
+// that is either LC_CODE_SIGNATURE (signed) or LC_UUID (unsigned).
+func writeMachO(t *testing.T, path string, signed bool) {
+	t.Helper()
+	const (
+		magic64LE       = 0xfeedfacf
+		lcCodeSignature = 0x1d
+		lcUUID          = 0x1b
+		hdrSize         = 32
+		lcSize          = 16
+	)
+	buf := make([]byte, hdrSize+lcSize)
+	binary.LittleEndian.PutUint32(buf[0:4], magic64LE)
+	binary.LittleEndian.PutUint32(buf[16:20], 1) // ncmds = 1
+	cmd := uint32(lcUUID)
+	if signed {
+		cmd = lcCodeSignature
+	}
+	binary.LittleEndian.PutUint32(buf[hdrSize:hdrSize+4], cmd)
+	binary.LittleEndian.PutUint32(buf[hdrSize+4:hdrSize+8], lcSize)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, buf, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRequiredAgentctlRemoteHelpers(t *testing.T) {
+	got := make([]string, 0, len(requiredAgentctlRemoteHelpers))
+	for _, helper := range requiredAgentctlRemoteHelpers {
+		got = append(got, helper.Name)
+	}
+	want := []string{
+		"agentctl-linux-amd64",
+		"agentctl-linux-arm64",
+		"agentctl-darwin-arm64",
+		"agentctl-darwin-amd64",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("helpers = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("helpers = %v, want %v", got, want)
+		}
+	}
+}
+
+func writeRemoteAgentctlHelpers(t *testing.T, dir string) {
+	t.Helper()
+	for _, helper := range requiredAgentctlRemoteHelpers {
+		path := filepath.Join(dir, "bin", helper.Name)
+		// MustBeSigned helpers now fail closed on an unparsable artifact, so a
+		// plain stub no longer passes validation — write a signed Mach-O.
+		if helper.MustBeSigned {
+			writeMachO(t, path, true)
+			continue
+		}
+		writeFile(t, path)
 	}
 }
 

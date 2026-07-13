@@ -251,6 +251,7 @@ func (s *AgentService) CreateAgentInstanceWithCaller(
 	if err := s.validateAgentCreate(ctx, agent); err != nil {
 		return err
 	}
+	inheritCallerExecutorPreference(agent, callerAgent)
 	s.prepareAgentDefaults(agent)
 	s.seedDefaultSkills(ctx, agent)
 
@@ -262,6 +263,31 @@ func (s *AgentService) CreateAgentInstanceWithCaller(
 		return s.createHireApproval(ctx, agent, callerAgent, reason)
 	}
 	return s.persistAgent(ctx, agent)
+}
+
+func inheritCallerExecutorPreference(
+	agent *models.AgentInstance,
+	callerAgent *models.AgentInstance,
+) {
+	if agent == nil || callerAgent == nil {
+		return
+	}
+	if !executorPreferenceEmpty(agent.ExecutorPreference) {
+		return
+	}
+	if executorPreferenceEmpty(callerAgent.ExecutorPreference) {
+		return
+	}
+	agent.ExecutorPreference = callerAgent.ExecutorPreference
+}
+
+func executorPreferenceEmpty(raw string) bool {
+	switch strings.TrimSpace(raw) {
+	case "", "{}", "null":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *AgentService) prepareAgentDefaults(agent *models.AgentInstance) {

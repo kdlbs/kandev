@@ -36,21 +36,32 @@ func newPollerFixture(t *testing.T) *pollerFixture {
 	return f
 }
 
-// saveConfig persists the singleton config directly via the store + secret
+// saveConfig persists the default workspace config directly via the store + secret
 // fakes. We deliberately avoid Service.SetConfig here because it fires an
 // async auth probe in a goroutine — fine for production but it would race
 // against the deterministic RecordAuthHealth calls these tests make.
 func (f *pollerFixture) saveConfig(t *testing.T, secret string) {
 	t.Helper()
+	f.saveConfigForWorkspace(t, "", secret)
+}
+
+// saveConfigForWorkspace persists a workspace config directly via the store +
+// secret fakes.
+func (f *pollerFixture) saveConfigForWorkspace(t *testing.T, workspaceID, secret string) {
+	t.Helper()
 	ctx := context.Background()
-	if err := f.store.UpsertConfig(ctx, &JiraConfig{
+	if err := f.store.UpsertConfigForWorkspace(ctx, workspaceID, &JiraConfig{
 		SiteURL:    "https://acme.atlassian.net",
 		Email:      "user@example.com",
 		AuthMethod: AuthMethodAPIToken,
 	}); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
-	if err := f.secrets.Set(ctx, SecretKey, "jira", secret); err != nil {
+	key := SecretKey
+	if workspaceID != "" {
+		key = SecretKeyForWorkspace(workspaceID)
+	}
+	if err := f.secrets.Set(ctx, key, "jira", secret); err != nil {
 		t.Fatalf("save secret: %v", err)
 	}
 }

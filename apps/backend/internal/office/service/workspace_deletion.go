@@ -33,7 +33,7 @@ func (s *Service) GetWorkspaceDeletionSummary(ctx context.Context, workspaceID s
 	if err != nil {
 		return nil, err
 	}
-	_, total, err := s.taskWorkspace.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, 1, true, true, false, false)
+	_, total, err := s.taskWorkspace.ListTasksByWorkspace(ctx, workspaceID, "", "", "", 1, 1, "", true, true, false, false)
 	if err != nil {
 		return nil, fmt.Errorf("count tasks: %w", err)
 	}
@@ -113,7 +113,7 @@ func (s *Service) listAllWorkspaceTasks(ctx context.Context, workspaceID string)
 	var all []*taskmodels.Task
 	for page := 1; ; page++ {
 		tasks, total, err := s.taskWorkspace.ListTasksByWorkspace(
-			ctx, workspaceID, "", "", "", page, workspaceDeletionPageSize, true, true, false, false,
+			ctx, workspaceID, "", "", "", page, workspaceDeletionPageSize, "", true, true, false, false,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("list workspace tasks: %w", err)

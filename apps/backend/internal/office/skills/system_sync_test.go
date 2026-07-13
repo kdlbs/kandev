@@ -311,6 +311,66 @@ func TestSyncSystemSkills_UpdatesContentWhenBundledHashDiffers(t *testing.T) {
 	}
 }
 
+// TestSyncSystemSkills_UpdatesBodyOnlyRowsWithMatchingHash pins the
+// migration from the old parser, which stored only the markdown body
+// while already recording the hash of the full SKILL.md. The sync
+// must refresh content even when content_hash already matches.
+func TestSyncSystemSkills_UpdatesBodyOnlyRowsWithMatchingHash(t *testing.T) {
+	repo := newStubSyncRepo()
+	log := logger.Default()
+
+	const slug = "frontmatter-skill"
+	const fullContent = "---\nname: Frontmatter Skill\ndescription: Use for frontmatter preservation.\n---\n# Guidance\n"
+	const existingHash = "hash-full-content"
+
+	repo.rows["ws-1"] = map[string]*models.Skill{
+		slug: {
+			ID:            "skill-frontmatter-1",
+			WorkspaceID:   "ws-1",
+			Slug:          slug,
+			Name:          "Frontmatter Skill",
+			Description:   "Use for frontmatter preservation.",
+			SourceType:    skills.SourceTypeSystem,
+			SourceLocator: "bundled:" + slug,
+			Content:       "# Guidance\n",
+			ContentHash:   existingHash,
+			Version:       "1.0.0",
+			IsSystem:      true,
+			SystemVersion: "1.0.0",
+			ApprovalState: "approved",
+		},
+	}
+
+	bundled := []skills.SystemSkillSpec{{
+		Slug:        slug,
+		Name:        "Frontmatter Skill",
+		Description: "Use for frontmatter preservation.",
+		Version:     "1.0.0",
+		Content:     fullContent,
+		ContentHash: existingHash,
+	}}
+
+	report, err := skills.SyncSystemSkills(
+		context.Background(), repo, []string{"ws-1"}, bundled, log,
+	)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(report.Updated) != 1 || !strings.HasSuffix(report.Updated[0], slug) {
+		t.Fatalf("expected one update for %s, got %v", slug, report.Updated)
+	}
+	got, err := repo.GetSkillBySlug(context.Background(), "ws-1", slug)
+	if err != nil {
+		t.Fatalf("get after sync: %v", err)
+	}
+	if got.Content != fullContent {
+		t.Errorf("content = %q, want full SKILL.md %q", got.Content, fullContent)
+	}
+	if got.ContentHash != existingHash {
+		t.Errorf("content_hash = %q, want %q", got.ContentHash, existingHash)
+	}
+}
+
 // TestSyncSystemSkills_RemovesOrphanedSlugAndDetachesFromAgents pins
 // the "kandev release retired a bundled skill" scenario: a system
 // row whose slug is missing from the injected `bundled` slice must be
@@ -400,6 +460,98 @@ func TestSyncSystemSkills_RemovesOrphanedSlugAndDetachesFromAgents(t *testing.T)
 	gotOther := decodeIDs(t, other.SkillIDs)
 	if len(gotOther) != 1 || gotOther[0] != orphanID {
 		t.Errorf("ws-2 agent must not be scrubbed: %v", gotOther)
+	}
+}
+
+func TestSyncSystemSkills_ReplacesRetiredDefaultSkillReferences(t *testing.T) {
+	repo := newStubSyncRepo()
+	log := logger.Default()
+
+	const oldTasksID = "skill-old-tasks"
+	const oldCommentID = "skill-old-comment"
+	const newTaskOpsID = "skill-new-task-ops"
+
+	repo.rows["ws-1"] = map[string]*models.Skill{
+		"kandev-tasks": {
+			ID:          oldTasksID,
+			WorkspaceID: "ws-1",
+			Slug:        "kandev-tasks",
+			Name:        "Tasks",
+			IsSystem:    true,
+			SourceType:  skills.SourceTypeSystem,
+		},
+		"kandev-task-comment": {
+			ID:          oldCommentID,
+			WorkspaceID: "ws-1",
+			Slug:        "kandev-task-comment",
+			Name:        "Task Comment",
+			IsSystem:    true,
+			SourceType:  skills.SourceTypeSystem,
+		},
+		"kandev-task-ops": {
+			ID:          newTaskOpsID,
+			WorkspaceID: "ws-1",
+			Slug:        "kandev-task-ops",
+			Name:        "Task Ops",
+			IsSystem:    true,
+			SourceType:  skills.SourceTypeSystem,
+			ContentHash: "old-task-ops-hash",
+		},
+	}
+	repo.agents["ws-1"] = map[string]*settingsmodels.AgentProfile{
+		"agent-1": {
+			ID:            "agent-1",
+			WorkspaceID:   "ws-1",
+			SkillIDs:      mustJSONArray(t, []string{oldTasksID, oldCommentID}),
+			DesiredSkills: mustJSONArray(t, []string{"kandev-tasks", "kandev-task-comment"}),
+		},
+		"agent-2": {
+			ID:            "agent-2",
+			WorkspaceID:   "ws-1",
+			SkillIDs:      mustJSONArray(t, []string{oldTasksID, newTaskOpsID}),
+			DesiredSkills: mustJSONArray(t, []string{"kandev-tasks", "kandev-task-ops"}),
+		},
+	}
+
+	bundled := []skills.SystemSkillSpec{{
+		Slug:        "kandev-task-ops",
+		Name:        "Task Ops",
+		Description: "Task operations",
+		Version:     "1.0.0",
+		Content:     "---\nname: kandev-task-ops\ndescription: Task operations\n---\n# Task Ops\n",
+		ContentHash: "hash-task-ops",
+	}}
+
+	report, err := skills.SyncSystemSkills(context.Background(), repo, []string{"ws-1"}, bundled, log)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(report.Removed) != 2 {
+		t.Fatalf("expected two retired removals, got %v", report.Removed)
+	}
+
+	gotTaskOps, err := repo.GetSkillBySlug(context.Background(), "ws-1", "kandev-task-ops")
+	if err != nil {
+		t.Fatalf("replacement skill missing: %v", err)
+	}
+	if gotTaskOps.ID == "" {
+		t.Fatal("replacement skill should have an ID")
+	}
+
+	agent1 := repo.agents["ws-1"]["agent-1"]
+	if got := decodeIDs(t, agent1.SkillIDs); len(got) != 1 || got[0] != gotTaskOps.ID {
+		t.Fatalf("agent-1.skill_ids = %v, want replacement %s", got, gotTaskOps.ID)
+	}
+	if got := decodeIDs(t, agent1.DesiredSkills); len(got) != 1 || got[0] != "kandev-task-ops" {
+		t.Fatalf("agent-1.desired_skills = %v, want kandev-task-ops", got)
+	}
+
+	agent2 := repo.agents["ws-1"]["agent-2"]
+	if got := decodeIDs(t, agent2.SkillIDs); len(got) != 1 || got[0] != newTaskOpsID {
+		t.Fatalf("agent-2.skill_ids should dedupe existing replacement, got %v", got)
+	}
+	if got := decodeIDs(t, agent2.DesiredSkills); len(got) != 1 || got[0] != "kandev-task-ops" {
+		t.Fatalf("agent-2.desired_skills should dedupe existing replacement, got %v", got)
 	}
 }
 

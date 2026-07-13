@@ -2,7 +2,13 @@
 
 export type TriggerType = "scheduled" | "github_pr" | "github_push" | "github_ci" | "webhook";
 
-export type RunStatus = "triggered" | "task_created" | "succeeded" | "failed" | "skipped";
+export type RunStatus =
+  | "triggered"
+  | "task_created"
+  | "succeeded"
+  | "failed"
+  | "skipped"
+  | "cancelled";
 
 // ExecutionMode controls whether an automation firing creates a visible
 // kanban task ("task", the default) or an ephemeral run hidden from the

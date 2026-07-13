@@ -15,24 +15,25 @@ import (
 // the way SQLite holds it. The store marshals/unmarshals at this boundary so
 // service callers see a typed SearchFilter and never have to think about JSON.
 type issueWatchRow struct {
-	ID                  string        `db:"id"`
-	WorkspaceID         string        `db:"workspace_id"`
-	WorkflowID          string        `db:"workflow_id"`
-	WorkflowStepID      string        `db:"workflow_step_id"`
-	RepositoryID        string        `db:"repository_id"`
-	BaseBranch          string        `db:"base_branch"`
-	FilterJSON          string        `db:"filter_json"`
-	AgentProfileID      string        `db:"agent_profile_id"`
-	ExecutorProfileID   string        `db:"executor_profile_id"`
-	Prompt              string        `db:"prompt"`
-	Enabled             bool          `db:"enabled"`
-	PollIntervalSeconds int           `db:"poll_interval_seconds"`
-	MaxInflightTasks    sql.NullInt64 `db:"max_inflight_tasks"`
-	LastPolledAt        *time.Time    `db:"last_polled_at"`
-	LastError           string        `db:"last_error"`
-	LastErrorAt         *time.Time    `db:"last_error_at"`
-	CreatedAt           time.Time     `db:"created_at"`
-	UpdatedAt           time.Time     `db:"updated_at"`
+	ID                  string         `db:"id"`
+	WorkspaceID         string         `db:"workspace_id"`
+	SentryInstanceID    sql.NullString `db:"sentry_instance_id"`
+	WorkflowID          string         `db:"workflow_id"`
+	WorkflowStepID      string         `db:"workflow_step_id"`
+	RepositoryID        string         `db:"repository_id"`
+	BaseBranch          string         `db:"base_branch"`
+	FilterJSON          string         `db:"filter_json"`
+	AgentProfileID      string         `db:"agent_profile_id"`
+	ExecutorProfileID   string         `db:"executor_profile_id"`
+	Prompt              string         `db:"prompt"`
+	Enabled             bool           `db:"enabled"`
+	PollIntervalSeconds int            `db:"poll_interval_seconds"`
+	MaxInflightTasks    sql.NullInt64  `db:"max_inflight_tasks"`
+	LastPolledAt        *time.Time     `db:"last_polled_at"`
+	LastError           string         `db:"last_error"`
+	LastErrorAt         *time.Time     `db:"last_error_at"`
+	CreatedAt           time.Time      `db:"created_at"`
+	UpdatedAt           time.Time      `db:"updated_at"`
 }
 
 func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
@@ -50,6 +51,7 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 	return &IssueWatch{
 		ID:                  r.ID,
 		WorkspaceID:         r.WorkspaceID,
+		SentryInstanceID:    r.SentryInstanceID.String,
 		WorkflowID:          r.WorkflowID,
 		WorkflowStepID:      r.WorkflowStepID,
 		RepositoryID:        r.RepositoryID,
@@ -79,6 +81,16 @@ func nullableInt(v *int) interface{} {
 	return *v
 }
 
+// nullableString converts a string into a value suitable for a nullable SQL
+// column: "" becomes SQL NULL, any other value is passed through. Used for
+// sentry_instance_id where NULL means a legacy unbound watch.
+func nullableString(v string) interface{} {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
 func encodeFilter(f SearchFilter) (string, error) {
 	b, err := json.Marshal(f)
 	if err != nil {
@@ -91,14 +103,14 @@ func encodeFilter(f SearchFilter) (string, error) {
 // SELECTs use issueWatchSelectColumns which wraps the nullable last_error in
 // COALESCE so older databases (pre-self-heal migration) read back as empty
 // strings rather than NULL.
-const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id,
+const issueWatchInsertColumns = `id, workspace_id, sentry_instance_id, workflow_id, workflow_step_id,
 	repository_id, base_branch, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
 	last_error, last_error_at,
 	created_at, updated_at`
 
-const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id,
+const issueWatchSelectColumns = `id, workspace_id, sentry_instance_id, workflow_id, workflow_step_id,
 	COALESCE(repository_id, '') AS repository_id, COALESCE(base_branch, '') AS base_branch, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, last_polled_at,
@@ -123,8 +135,8 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO sentry_issue_watches (`+issueWatchInsertColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.WorkspaceID, nullableString(w.SentryInstanceID), w.WorkflowID, w.WorkflowStepID,
 		w.RepositoryID, w.BaseBranch, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
 		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.LastPolledAt,
@@ -242,6 +254,31 @@ func (s *Store) DisableIssueWatchWithError(ctx context.Context, id, cause string
 		   SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ?
 		 WHERE id = ?`,
 		cause, now, now, id)
+	return err
+}
+
+// StampIssueWatchError records a non-fatal cause on a watch (last_error /
+// last_error_at) without changing its enabled state, so the settings UI can
+// surface why the most recent poll could not run while the watch keeps
+// retrying. Used when an unbound watch cannot resolve a Sentry instance.
+func (s *Store) StampIssueWatchError(ctx context.Context, id, cause string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sentry_issue_watches
+		   SET last_error = ?, last_error_at = ?, updated_at = ?
+		 WHERE id = ?`,
+		cause, now, now, id)
+	return err
+}
+
+// ClearIssueWatchError removes the non-fatal poll error state after a
+// successful watch check so the settings UI reflects current health.
+func (s *Store) ClearIssueWatchError(ctx context.Context, id string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE sentry_issue_watches
+		   SET last_error = '', last_error_at = NULL, updated_at = ?
+		 WHERE id = ? AND (last_error <> '' OR last_error_at IS NOT NULL)`,
+		time.Now().UTC(), id)
 	return err
 }
 

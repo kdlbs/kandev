@@ -15,66 +15,101 @@ import type {
   UpdateLinearIssueWatchInput,
 } from "@/lib/types/linear";
 
+type WorkspaceApiOptions = ApiRequestOptions & { workspaceId?: string };
+
+function withWorkspace(path: string, options?: WorkspaceApiOptions): string {
+  if (!options?.workspaceId) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}workspace_id=${encodeURIComponent(options.workspaceId)}`;
+}
+
+function requestOptions(options?: WorkspaceApiOptions): ApiRequestOptions | undefined {
+  if (!options) return undefined;
+  const { workspaceId: _workspaceId, ...rest } = options;
+  return rest;
+}
+
 // getLinearConfig returns null when the backend responds 204 (no config yet).
-export async function getLinearConfig(options?: ApiRequestOptions): Promise<LinearConfig | null> {
-  const res = await fetchJson<LinearConfig | undefined>(`/api/v1/linear/config`, options);
+export async function getLinearConfig(options?: WorkspaceApiOptions): Promise<LinearConfig | null> {
+  const res = await fetchJson<LinearConfig | undefined>(
+    withWorkspace(`/api/v1/linear/config`, options),
+    requestOptions(options),
+  );
   return res ?? null;
 }
 
 export async function setLinearConfig(
   payload: SetLinearConfigRequest,
-  options?: ApiRequestOptions,
+  options?: WorkspaceApiOptions,
 ) {
-  return fetchJson<LinearConfig>(`/api/v1/linear/config`, {
-    ...options,
+  return fetchJson<LinearConfig>(withWorkspace(`/api/v1/linear/config`, options), {
+    ...requestOptions(options),
     init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
   });
 }
 
-export async function deleteLinearConfig(options?: ApiRequestOptions) {
-  return fetchJson<{ deleted: boolean }>(`/api/v1/linear/config`, {
-    ...options,
+export async function deleteLinearConfig(options?: WorkspaceApiOptions) {
+  return fetchJson<{ deleted: boolean }>(withWorkspace(`/api/v1/linear/config`, options), {
+    ...requestOptions(options),
     init: { ...(options?.init ?? {}), method: "DELETE" },
   });
 }
 
 export async function testLinearConnection(
   payload: SetLinearConfigRequest,
-  options?: ApiRequestOptions,
+  options?: WorkspaceApiOptions,
 ) {
-  return fetchJson<TestLinearConnectionResult>(`/api/v1/linear/config/test`, {
-    ...options,
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+  return fetchJson<TestLinearConnectionResult>(
+    withWorkspace(`/api/v1/linear/config/test`, options),
+    {
+      ...requestOptions(options),
+      init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(payload) },
+    },
+  );
+}
+
+// copyLinearConfig copies the Linear config + credential from the workspace in
+// options (source) to targetWorkspaceId.
+export async function copyLinearConfig(targetWorkspaceId: string, options?: WorkspaceApiOptions) {
+  return fetchJson<LinearConfig>(withWorkspace(`/api/v1/linear/config/copy`, options), {
+    ...requestOptions(options),
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ targetWorkspaceId }) },
   });
 }
 
-export async function listLinearTeams(options?: ApiRequestOptions) {
-  return fetchJson<{ teams: LinearTeam[] }>(`/api/v1/linear/teams`, options);
+export async function listLinearTeams(options?: WorkspaceApiOptions) {
+  return fetchJson<{ teams: LinearTeam[] }>(
+    withWorkspace(`/api/v1/linear/teams`, options),
+    requestOptions(options),
+  );
 }
 
-export async function listLinearStates(teamKey: string, options?: ApiRequestOptions) {
+export async function listLinearStates(teamKey: string, options?: WorkspaceApiOptions) {
   return fetchJson<{ states: LinearWorkflowState[] }>(
-    `/api/v1/linear/states?team_key=${encodeURIComponent(teamKey)}`,
-    options,
+    withWorkspace(`/api/v1/linear/states?team_key=${encodeURIComponent(teamKey)}`, options),
+    requestOptions(options),
   );
 }
 
-export async function listLinearLabels(teamKey: string, options?: ApiRequestOptions) {
+export async function listLinearLabels(teamKey: string, options?: WorkspaceApiOptions) {
   return fetchJson<{ labels: LinearLabel[] }>(
-    `/api/v1/linear/labels?team_key=${encodeURIComponent(teamKey)}`,
-    options,
+    withWorkspace(`/api/v1/linear/labels?team_key=${encodeURIComponent(teamKey)}`, options),
+    requestOptions(options),
   );
 }
 
-export async function listLinearUsers(teamKey: string, options?: ApiRequestOptions) {
+export async function listLinearUsers(teamKey: string, options?: WorkspaceApiOptions) {
   return fetchJson<{ users: LinearUser[] }>(
-    `/api/v1/linear/users?team_key=${encodeURIComponent(teamKey)}`,
-    options,
+    withWorkspace(`/api/v1/linear/users?team_key=${encodeURIComponent(teamKey)}`, options),
+    requestOptions(options),
   );
 }
 
-export async function getLinearIssue(identifier: string, options?: ApiRequestOptions) {
-  return fetchJson<LinearIssue>(`/api/v1/linear/issues/${encodeURIComponent(identifier)}`, options);
+export async function getLinearIssue(identifier: string, options?: WorkspaceApiOptions) {
+  return fetchJson<LinearIssue>(
+    withWorkspace(`/api/v1/linear/issues/${encodeURIComponent(identifier)}`, options),
+    requestOptions(options),
+  );
 }
 
 function buildSearchIssuesQuery(
@@ -105,21 +140,24 @@ function buildSearchIssuesQuery(
 
 export async function searchLinearIssues(
   params: LinearSearchFilter & { pageToken?: string; maxResults?: number },
-  options?: ApiRequestOptions,
+  options?: WorkspaceApiOptions,
 ) {
   const qs = buildSearchIssuesQuery(params);
-  return fetchJson<LinearSearchResult>(`/api/v1/linear/issues${qs ? `?${qs}` : ""}`, options);
+  return fetchJson<LinearSearchResult>(
+    withWorkspace(`/api/v1/linear/issues${qs ? `?${qs}` : ""}`, options),
+    requestOptions(options),
+  );
 }
 
 export async function setLinearIssueState(
   issueID: string,
   stateID: string,
-  options?: ApiRequestOptions,
+  options?: WorkspaceApiOptions,
 ) {
   return fetchJson<{ transitioned: boolean }>(
-    `/api/v1/linear/issues/${encodeURIComponent(issueID)}/state`,
+    withWorkspace(`/api/v1/linear/issues/${encodeURIComponent(issueID)}/state`, options),
     {
-      ...options,
+      ...requestOptions(options),
       init: {
         ...(options?.init ?? {}),
         method: "POST",

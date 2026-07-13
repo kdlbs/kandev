@@ -14,6 +14,7 @@ export type JiraAuthMethod = "api_token" | "pat" | "session_cookie";
 export type JiraInstanceType = "cloud" | "server";
 
 export interface JiraConfig {
+  workspaceId?: string;
   siteUrl: string;
   email: string;
   authMethod: JiraAuthMethod;
@@ -84,6 +85,18 @@ export interface JiraProject {
   key: string;
   name: string;
   id: string;
+}
+
+/**
+ * A workflow status defined for a project. Unlike the coarse three-bucket
+ * `JiraStatusCategory`, `name` is the project-specific status the user sees on
+ * a ticket (e.g. "In Development", "Ready for review"). The ticket-list status
+ * filter is populated from these.
+ */
+export interface JiraStatus {
+  id: string;
+  name: string;
+  statusCategory: JiraStatusCategory;
 }
 
 export interface JiraSearchResult {

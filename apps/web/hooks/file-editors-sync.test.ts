@@ -4,6 +4,7 @@ import { useRef } from "react";
 import type { FileEditorState } from "@/lib/state/dockview-store";
 import type { FileInfo } from "@/lib/state/store";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
 
 const mockRequestFileContent = vi.fn();
 const mockGetWebSocketClient = vi.fn();
@@ -41,10 +42,15 @@ const FAKE_CLIENT = {} as ReturnType<typeof import("@/lib/ws/connection").getWeb
 const SESSION_ID = "sess-1";
 const PATH = "src/foo.ts";
 
+function fileKey(repo?: string) {
+  return buildRepoScopedItemId(PATH, repo);
+}
+
 function seedOpenFile(state: Partial<FileEditorState> = {}) {
+  const key = fileKey(state.repo);
   openFilesMap = new Map<string, FileEditorState>([
     [
-      PATH,
+      key,
       {
         path: PATH,
         name: "foo.ts",
@@ -56,6 +62,7 @@ function seedOpenFile(state: Partial<FileEditorState> = {}) {
       },
     ],
   ]);
+  return key;
 }
 
 describe("buildGitFileSignature", () => {
@@ -106,6 +113,7 @@ describe("syncOpenFileFromWorkspace", () => {
     await syncOpenFileFromWorkspace({
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
+      fileKey: PATH,
       path: PATH,
       updateFileState,
     });
@@ -142,6 +150,7 @@ describe("syncOpenFileFromWorkspace", () => {
     await syncOpenFileFromWorkspace({
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
+      fileKey: PATH,
       path: PATH,
       updateFileState,
     });
@@ -167,6 +176,7 @@ describe("syncOpenFileFromWorkspace", () => {
     await syncOpenFileFromWorkspace({
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
+      fileKey: PATH,
       path: PATH,
       updateFileState,
     });
@@ -188,7 +198,7 @@ describe("syncOpenFileFromWorkspace repo scoping", () => {
     // open editor buffer carries that repo. Re-syncing must pass `repo` to the
     // backend, otherwise it stats <workDir>/src/foo.ts (bare task root) and
     // fails with "file not found" — the reported "Failed to edit" bug.
-    seedOpenFile({
+    const key = seedOpenFile({
       content: "v1",
       originalContent: "v1",
       originalHash: "h:2:v1",
@@ -203,7 +213,9 @@ describe("syncOpenFileFromWorkspace repo scoping", () => {
     await syncOpenFileFromWorkspace({
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
+      fileKey: key,
       path: PATH,
+      repo: "enrichment-commons",
       updateFileState,
     });
 
@@ -219,16 +231,31 @@ describe("syncOpenFileFromWorkspace repo scoping", () => {
     // The fetch is issued for repo "repoA". While it is in flight the same path
     // key is reused for a file from "repoB". Writing repoA's content into the
     // repoB buffer would be wrong, so the stale response must be discarded.
-    seedOpenFile({ content: "v1", originalContent: "v1", repo: "repoA" });
+    const key = seedOpenFile({ content: "v1", originalContent: "v1", repo: "repoA" });
     mockRequestFileContent.mockImplementationOnce(async () => {
-      seedOpenFile({ content: "other", originalContent: "other", repo: "repoB" });
+      openFilesMap = new Map<string, FileEditorState>([
+        [
+          key,
+          {
+            path: PATH,
+            name: "foo.ts",
+            content: "other",
+            originalContent: "other",
+            originalHash: "h:5:other",
+            isDirty: false,
+            repo: "repoB",
+          },
+        ],
+      ]);
       return { content: "repoA-content", is_binary: false, resolved_path: PATH };
     });
 
     await syncOpenFileFromWorkspace({
       client: FAKE_CLIENT,
       sessionId: SESSION_ID,
+      fileKey: key,
       path: PATH,
+      repo: "repoA",
       updateFileState,
     });
 
@@ -236,7 +263,11 @@ describe("syncOpenFileFromWorkspace repo scoping", () => {
   });
 });
 
-function makeStatus(files: Record<string, FileInfo>, timestamp: string): GitStatusEntry {
+function makeStatus(
+  files: Record<string, FileInfo>,
+  timestamp: string,
+  repo?: string,
+): GitStatusEntry {
   return {
     branch: "main",
     remote_branch: null,
@@ -249,6 +280,7 @@ function makeStatus(files: Record<string, FileInfo>, timestamp: string): GitStat
     behind: 0,
     files,
     timestamp,
+    repository_name: repo,
   } as GitStatusEntry;
 }
 
@@ -328,6 +360,42 @@ describe("useOpenFileWorkspaceSync", () => {
         expect.objectContaining({ content: "v2", originalContent: "v2" }),
       ),
     );
+
+    cleanup();
+  });
+
+  it("ignores sibling-repo git statuses for an open file at the same path", async () => {
+    seedOpenFile({
+      content: "user edits",
+      originalContent: "v1",
+      originalHash: "h:2:v1",
+      isDirty: true,
+      repo: "frontend",
+    });
+    const updateFileState = vi.fn();
+    mockRequestFileContent.mockResolvedValue({
+      content: "backend changed",
+      is_binary: false,
+      resolved_path: PATH,
+    });
+
+    const initialStatus = makeStatus({}, "2026-05-08T11:00:00.000Z", "frontend");
+    const { rerender } = renderSyncHook({
+      gitStatus: initialStatus,
+      openFiles: openFilesMap,
+      updateFileState,
+    });
+
+    const siblingRepoStatus = makeStatus(
+      { [PATH]: modifiedFile("@@ -1 +1 @@\n-v1\n+backend") },
+      "2026-05-08T11:00:02.000Z",
+      "backend",
+    );
+    rerender({ gitStatus: siblingRepoStatus, openFiles: openFilesMap, updateFileState });
+
+    await Promise.resolve();
+    expect(mockRequestFileContent).not.toHaveBeenCalled();
+    expect(updateFileState).not.toHaveBeenCalled();
 
     cleanup();
   });

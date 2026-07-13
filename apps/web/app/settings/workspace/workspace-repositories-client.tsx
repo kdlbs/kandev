@@ -40,6 +40,7 @@ import {
   isRepositoryDirty,
   type RepositoryWithScripts,
 } from "@/app/settings/workspace/workspace-repositories-dirty";
+import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 
 type RepositoryItem = RepositoryWithScripts & { __autoOpen?: boolean };
 type WorkspaceRepositoriesClientProps = {
@@ -68,6 +69,7 @@ function buildDraftRepo(
     provider_name: "",
     default_branch: selectedRepo?.default_branch ?? "",
     worktree_branch_prefix: "feature/",
+    worktree_branch_template: defaultWorktreeBranchTemplate,
     pull_before_worktree: true,
     setup_script: "",
     cleanup_script: "",
@@ -107,6 +109,7 @@ async function saveNewRepository(
     provider_name: repo.provider_name,
     default_branch: repo.default_branch,
     worktree_branch_prefix: repo.worktree_branch_prefix,
+    worktree_branch_template: repo.worktree_branch_template ?? defaultWorktreeBranchTemplate,
     pull_before_worktree: repo.pull_before_worktree,
     setup_script: repo.setup_script,
     cleanup_script: repo.cleanup_script,
@@ -155,6 +158,7 @@ async function saveExistingRepository({
     provider_name: repo.provider_name,
     default_branch: repo.default_branch,
     worktree_branch_prefix: repo.worktree_branch_prefix,
+    worktree_branch_template: repo.worktree_branch_template ?? defaultWorktreeBranchTemplate,
     pull_before_worktree: repo.pull_before_worktree,
     setup_script: repo.setup_script,
     cleanup_script: repo.cleanup_script,

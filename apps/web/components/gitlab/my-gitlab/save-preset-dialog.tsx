@@ -67,9 +67,6 @@ function SavePresetForm({
             autoFocus
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") handleSubmit();
-            }}
             onFocus={(e) => e.target.select()}
             placeholder="e.g. Needs my review"
           />

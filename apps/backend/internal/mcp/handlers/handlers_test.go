@@ -35,6 +35,11 @@ import (
 // newTestTaskService creates a real task service with a temporary file-backed SQLite DB for integration tests.
 // Returns the service and the raw repo (for seeding data).
 func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository) {
+	svc, repo, _ := newTestTaskServiceWithEventBus(t)
+	return svc, repo
+}
+
+func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo.Repository, *bus.MemoryEventBus) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
 	require.NoError(t, err)
@@ -65,7 +70,7 @@ func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository)
 		Environments: repo,
 		Reviews:      repo,
 	}, eventBus, log, service.RepositoryDiscoveryConfig{})
-	return svc, repo
+	return svc, repo, eventBus
 }
 
 func newTestTaskServiceWithWorkflow(t *testing.T) (*service.Service, *sqliterepo.Repository, *workflowcontroller.Controller, *workflowrepo.Repository) {
@@ -531,6 +536,275 @@ func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
 	assert.Equal(t, "metadata-executor", task.Metadata[models.MetaKeyExecutorID])
 }
 
+func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	workspaceDefaultProfileID := "workspace-default-profile"
+	_, err = svc.UpdateWorkspace(ctx, workspaces[0].ID, &service.UpdateWorkspaceRequest{
+		DefaultAgentProfileID: &workspaceDefaultProfileID,
+	})
+	require.NoError(t, err)
+	workflowProfileID := "workflow-default-profile"
+	_, err = svc.UpdateWorkflow(ctx, workflows[0].ID, &service.UpdateWorkflowRequest{
+		AgentProfileID: &workflowProfileID,
+	})
+	require.NoError(t, err)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Current task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID:    "source-metadata-profile",
+			models.MetaKeyExecutorProfileID: "source-metadata-executor",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "source-primary-session",
+		TaskID:            source.ID,
+		AgentProfileID:    workspaceDefaultProfileID,
+		ExecutorProfileID: "session-executor-profile",
+		State:             models.TaskSessionStateWaitingForInput,
+		IsPrimary:         true,
+	}))
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          "Follow-up from current task",
+		"description":    "This should inherit the current task's configured profile.",
+		"start_agent":    false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata)
+	assert.Equal(t, "source-metadata-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "source-metadata-executor", task.Metadata[models.MetaKeyExecutorProfileID])
+}
+
+func TestHandleCreateTask_InheritsSourceTaskProfileAndSessionExecutor(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Current task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID: "source-metadata-profile",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "source-session-executor",
+		TaskID:            source.ID,
+		AgentProfileID:    "session-profile",
+		ExecutorProfileID: "session-executor-profile",
+		State:             models.TaskSessionStateWaitingForInput,
+		IsPrimary:         true,
+	}))
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          "Follow-up from mixed launch config",
+		"description":    "This should inherit profile from metadata and executor from session.",
+		"start_agent":    false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata)
+	assert.Equal(t, "source-metadata-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "session-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
+}
+
+func TestHandleCreateTask_WorkflowSwitchedSessionProfileWinsOverStaleMetadata(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Workflow-routed task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID:    "stale-task-profile",
+			models.MetaKeyExecutorProfileID: "stale-executor-profile",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "workflow-switched-session",
+		TaskID:            source.ID,
+		AgentProfileID:    "effective-step-profile",
+		ExecutorProfileID: "effective-executor-profile",
+		State:             models.TaskSessionStateWaitingForInput,
+		IsPrimary:         true,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyCreatedBy: models.SessionCreatedByWorkflowSwitch,
+		},
+	}))
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          "Follow-up from workflow-routed task",
+		"description":    "This should inherit the effective step profile.",
+		"start_agent":    false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata)
+	assert.Equal(t, "effective-step-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "effective-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
+}
+
+func TestHandleCreateTask_ExplicitAgentStillInheritsRoutedSessionExecutor(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Workflow-routed task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID:    "stale-task-profile",
+			models.MetaKeyExecutorProfileID: "stale-executor-profile",
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "workflow-switched-session-explicit-agent",
+		TaskID:            source.ID,
+		AgentProfileID:    "effective-step-profile",
+		ExecutorProfileID: "effective-executor-profile",
+		State:             models.TaskSessionStateWaitingForInput,
+		IsPrimary:         true,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyCreatedBy: models.SessionCreatedByWorkflowSwitch,
+		},
+	}))
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id":   source.ID,
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"agent_profile_id": "explicit-agent-profile",
+		"title":            "Follow-up with explicit agent",
+		"description":      "This should keep the explicit agent and inherit the routed executor.",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	require.NotEmpty(t, created.ID)
+
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	require.NotNil(t, task.Metadata)
+	assert.Equal(t, "explicit-agent-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "effective-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
+}
+
+func TestInheritFromTask_PrimarySessionLookupErrorFailsClosed(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	require.NoError(t, repo.DB().Close())
+
+	agentProfileID := ""
+	executorProfileID := ""
+	_, err := h.inheritFromTask(ctx, "source-task", &agentProfileID, &executorProfileID)
+	require.Error(t, err)
+}
+
 func TestHandleCreateTask_InheritsDeferredParentTaskMetadata(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()
@@ -637,7 +911,7 @@ func TestHandleCreateTask_MetadataExecutorProfileClearsSessionExecutorID(t *test
 	assert.Empty(t, task.Metadata[models.MetaKeyExecutorID])
 }
 
-func TestHandleCreateTask_InvalidWorkflowProfileLookupReturnsInternalError(t *testing.T) {
+func TestHandleCreateTask_InvalidWorkflowReturnsValidationError(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
@@ -657,11 +931,12 @@ func TestHandleCreateTask_InvalidWorkflowProfileLookupReturnsInternalError(t *te
 
 	resp, err := h.handleCreateTask(ctx, msg)
 	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 
 	var ep ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
-	assert.Contains(t, ep.Message, "failed to resolve launch profile")
+	assert.Contains(t, ep.Message, "workflow_id")
+	assert.Contains(t, ep.Message, "was not found")
 }
 
 func TestHandleCreateTask_StartAgentUsesWorkspaceDefaultAgentProfile(t *testing.T) {
@@ -820,6 +1095,35 @@ func TestResolveMCPAutoStartConfig_FallsBackToWorkflowAgentProfile(t *testing.T)
 	assert.Equal(t, workflowProfileID, config.AgentProfileID)
 }
 
+func TestResolveMCPAutoStartConfig_ExplicitAgentProfileWinsOverSourceTask(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Current task",
+		Metadata: map[string]interface{}{
+			models.MetaKeyAgentProfileID: "source-profile",
+		},
+	})
+	require.NoError(t, err)
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+
+	config := h.resolveMCPAutoStartConfig(ctx, &models.Task{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+	}, "explicit-profile", "", source.ID)
+
+	assert.Equal(t, "explicit-profile", config.AgentProfileID)
+}
+
 func defaultWorkspaceAndWorkflow(t *testing.T, ctx context.Context, svc *service.Service) (*models.Workspace, *models.Workflow) {
 	t.Helper()
 	workspaces, err := svc.ListWorkspaces(ctx)
@@ -883,6 +1187,9 @@ func (m *mockSessionLauncher) StartCreatedSession(context.Context, string, strin
 }
 func (m *mockSessionLauncher) ResumeTaskSession(context.Context, string, string) (*executor.TaskExecution, error) {
 	return nil, nil
+}
+func (m *mockSessionLauncher) ProcessOnTurnStart(context.Context, string, string) error {
+	return nil
 }
 func (m *mockSessionLauncher) GetMessageQueue() *messagequeue.Service { return nil }
 
@@ -1230,6 +1537,191 @@ func TestHandleCreateTask_SubtaskBaseBranchOverride_ExplicitReposWin(t *testing.
 		"explicit per-repo base_branch must win over the top-level override")
 }
 
+func TestHandleCreateTask_SubtaskDefaultsToParentWorkspaceAndWorkflow(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Wrong"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Wrong Board"}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"workflow_step_id": "step-wrong-board",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "ws-1", subtask.WorkspaceID, "subtask workspace must come from parent")
+	assert.Equal(t, "wf-1", subtask.WorkflowID, "subtask workflow must come from parent")
+	assert.Empty(t, subtask.WorkflowStepID, "subtask workflow step must not come from caller-supplied step without an explicit workflow")
+
+	workspaceMeta, ok := subtask.Metadata["workspace"].(map[string]interface{})
+	require.True(t, ok, "MCP subtasks should persist a workspace policy by default")
+	assert.Equal(t, "inherit_parent", workspaceMeta["mode"], "MCP subtasks should reuse the parent's materialized workspace by default")
+}
+
+func TestHandleCreateTask_SubtaskCanRequestNewWorkspaceMode(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"workspace_mode":   "new_workspace",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	workspaceMeta, ok := subtask.Metadata["workspace"].(map[string]interface{})
+	require.True(t, ok, "explicit MCP workspace_mode should be persisted")
+	assert.Equal(t, "new_workspace", workspaceMeta["mode"])
+}
+
+func TestHandleCreateTask_SubtaskHonorsExplicitWorkspaceAndWorkflow(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Other Board"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-other", WorkspaceID: "ws-2", Name: "Other Repo", DefaultBranch: "main",
+	}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Cross-workspace child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"workspace_id":     "ws-2",
+		"workflow_id":      "wf-2",
+		"workflow_step_id": "step-other",
+		"repositories": []map[string]interface{}{
+			{"repository_id": "repo-other"},
+		},
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "ws-2", subtask.WorkspaceID, "explicit workspace should win over parent default")
+	assert.Equal(t, "wf-2", subtask.WorkflowID, "explicit workflow should win over parent default")
+	assert.Equal(t, "step-other", subtask.WorkflowStepID, "explicit step should be preserved with explicit workflow")
+	require.Len(t, subtask.Repositories, 1)
+	assert.Equal(t, "repo-other", subtask.Repositories[0].RepositoryID)
+}
+
+func TestHandleCreateTask_SubtaskExplicitWorkspaceAutoResolvesWorkflow(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Other Board"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-other", WorkspaceID: "ws-2", Name: "Other Repo", DefaultBranch: "main",
+	}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":        "Cross-workspace child",
+		"description":  "do the thing",
+		"parent_id":    parentID,
+		"workspace_id": "ws-2",
+		"repositories": []map[string]interface{}{
+			{"repository_id": "repo-other"},
+		},
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+
+	subtask, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "ws-2", subtask.WorkspaceID)
+	assert.Equal(t, "wf-2", subtask.WorkflowID, "workflow should auto-resolve inside the explicitly chosen workspace")
+}
+
+func TestHandleCreateTask_SubtaskRejectsWorkflowFromDifferentWorkspace(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	parentID := seedParentWithRepo(t, svc, repo)
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Other Board"}))
+
+	log := testLogger(t)
+	h := &Handlers{taskSvc: svc, logger: log.WithFields()}
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":            "Cross-workspace child",
+		"description":      "do the thing",
+		"parent_id":        parentID,
+		"workflow_id":      "wf-2",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+
+	var ep ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
+	assert.Contains(t, ep.Message, "belongs to workspace_id \"ws-2\", not \"ws-1\"")
+}
+
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parentID := seedParentWithRepo(t, svc, repo)
@@ -1575,7 +2067,7 @@ func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {
 	// Drain the in-memory store so the handler must fall back to DB-driven cleanup
 	store.CancelSession(sess.ID)
 
-	h := NewHandlers(svc, nil, store, canceller, nil, repo, repo, eventBus, nil, nil, nil, testLogger(t))
+	h := NewHandlers(svc, nil, store, canceller, nil, repo, repo, eventBus, nil, nil, nil, nil, testLogger(t))
 	msg := makeWSMessage(t, ws.ActionMCPClarificationTimeout, map[string]interface{}{"session_id": sess.ID})
 	resp, err := h.handleClarificationTimeout(ctx, msg)
 	require.NoError(t, err)
@@ -1618,7 +2110,7 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 
 	store := clarification.NewStore(time.Minute)
 	log := testLogger(t)
-	h := NewHandlers(svc, nil, store, nil, nil, repo, repo, nil, nil, nil, nil, log)
+	h := NewHandlers(svc, nil, store, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
 
 	payload := map[string]interface{}{
 		"session_id": sess.ID,

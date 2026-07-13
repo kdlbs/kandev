@@ -1,5 +1,7 @@
 import {
+  getStoredAcknowledgedAgentErrors,
   getStoredDismissedAgentErrors,
+  setStoredAcknowledgedAgentErrors,
   setStoredDismissedAgentErrors,
 } from "@/lib/session-last-agent-error";
 import type { UISlice } from "./types";
@@ -8,7 +10,11 @@ type ImmerSet = (recipe: (draft: UISlice) => void) => void;
 
 export function buildDismissedAgentErrors(set: ImmerSet) {
   return {
+    acknowledgedAgentErrors: getStoredAcknowledgedAgentErrors(),
     dismissedAgentErrors: getStoredDismissedAgentErrors(),
+    acknowledgeAgentErrors: (stamps: Record<string, string>) => {
+      setAcknowledgedAgentErrors(set, stamps);
+    },
     dismissAgentError: (sessionId: string, stamp: string) => {
       if (!sessionId || !stamp) return;
       set((draft) => {
@@ -21,4 +27,16 @@ export function buildDismissedAgentErrors(set: ImmerSet) {
       setStoredDismissedAgentErrors({ [sessionId]: stamp });
     },
   };
+}
+
+function setAcknowledgedAgentErrors(set: ImmerSet, stamps: Record<string, string>) {
+  const entries = Object.entries(stamps).filter(([sessionId, stamp]) => sessionId && stamp);
+  if (entries.length === 0) return;
+  const next = Object.fromEntries(entries);
+  set((draft) => {
+    for (const [sessionId, stamp] of entries) {
+      draft.acknowledgedAgentErrors[sessionId] = stamp;
+    }
+  });
+  setStoredAcknowledgedAgentErrors(next);
 }

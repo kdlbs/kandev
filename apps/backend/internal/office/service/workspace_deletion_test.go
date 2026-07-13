@@ -128,6 +128,7 @@ func (f *fakeWorkspaceTaskService) ListTasksByWorkspace(
 	string,
 	int,
 	int,
+	string,
 	bool,
 	bool,
 	bool,
@@ -145,6 +146,10 @@ func (f *fakeWorkspaceTaskService) DeleteTask(ctx context.Context, id string) er
 }
 
 func (f *fakeWorkspaceTaskService) GetLastAgentMessage(context.Context, string) (string, error) {
+	return "", nil
+}
+
+func (f *fakeWorkspaceTaskService) GetLastAgentMessageForTurn(context.Context, string) (string, error) {
 	return "", nil
 }
 

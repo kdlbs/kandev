@@ -21,6 +21,12 @@ func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
 }
 
+// PublishTaskStateChanged publishes a task.state_changed event for callers
+// that mutate task state outside the normal task service update path.
+func (s *Service) PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {
+	s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+}
+
 // PublishTaskDeleted publishes a task.deleted event for the given task.
 // Used by cascade-delete callers (HandoffService.DeleteTaskTree) that
 // bypass Service.DeleteTask and therefore would otherwise leave WS
@@ -31,6 +37,14 @@ func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
 
 // publishTaskEvent publishes task events to the event bus
 func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, oldWorkflowIDs ...string) {
+	s.publishTaskEventWithExtra(ctx, eventType, task, oldState, nil, oldWorkflowIDs...)
+}
+
+// publishTaskEventWithExtra is publishTaskEvent with caller-supplied extra
+// fields merged into the payload (e.g. a deletion reason on task.deleted).
+// Caller-supplied keys must not shadow the standard task fields written below
+// (task_id, title, workflow_id, etc.); colliding keys silently overwrite them.
+func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, extra map[string]interface{}, oldWorkflowIDs ...string) {
 	if s.eventBus == nil {
 		return
 	}
@@ -79,6 +93,9 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 	if len(oldWorkflowIDs) > 0 && oldWorkflowIDs[0] != "" && oldWorkflowIDs[0] != task.WorkflowID {
 		data["old_workflow_id"] = oldWorkflowIDs[0]
 	}
+	for k, v := range extra {
+		data[k] = v
+	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
 	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
@@ -86,7 +103,28 @@ func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *
 			zap.String("event_type", eventType),
 			zap.String("task_id", task.ID),
 			zap.Error(err))
+		return
 	}
+	s.logTaskLifecycleEventPublished(eventType, task, data)
+}
+
+func (s *Service) logTaskLifecycleEventPublished(eventType string, task *models.Task, data map[string]interface{}) {
+	switch eventType {
+	case events.TaskCreated, events.TaskUpdated, events.TaskStateChanged, events.TaskDeleted:
+	default:
+		return
+	}
+	s.logger.Debug("task lifecycle event published",
+		zap.String("event_type", eventType),
+		zap.String("task_id", task.ID),
+		zap.Any("state", data["state"]),
+		zap.Any("workflow_step_id", data["workflow_step_id"]),
+		zap.Any("primary_session_id", data["primary_session_id"]),
+		zap.Any("primary_session_state", data["primary_session_state"]),
+		zap.Any("session_count", data["session_count"]),
+		zap.Any("old_state", data["old_state"]),
+		zap.Any("new_state", data["new_state"]),
+	)
 }
 
 // addTaskSessionEventFields merges session count, primary session info, and
@@ -105,6 +143,9 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	}
 	sessionInfo, ok := primarySessionInfoMap[taskID]
 	if !ok || sessionInfo == nil {
+		data["primary_session_id"] = nil
+		data["primary_session_state"] = nil
+		data["primary_session_pending_action"] = nil
 		return
 	}
 	data["primary_session_id"] = sessionInfo.ID
@@ -113,7 +154,10 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	}
 	if sessionInfo.State != "" {
 		data["primary_session_state"] = string(sessionInfo.State)
+	} else {
+		data["primary_session_state"] = nil
 	}
+	s.addPrimarySessionPendingActionEventField(ctx, taskID, sessionInfo, data)
 	if sessionInfo.ExecutorID != "" {
 		data["primary_executor_id"] = sessionInfo.ExecutorID
 	}
@@ -130,6 +174,27 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	if execType != "" {
 		data["is_remote_executor"] = models.IsRemoteExecutorType(models.ExecutorType(execType))
 	}
+}
+
+func (s *Service) addPrimarySessionPendingActionEventField(ctx context.Context, taskID string, sessionInfo *models.TaskSession, data map[string]interface{}) {
+	if sessionInfo.State != models.TaskSessionStateWaitingForInput {
+		data["primary_session_pending_action"] = nil
+		return
+	}
+	actions, err := s.GetPendingActionsForSessions(ctx, []string{sessionInfo.ID})
+	if err != nil {
+		s.logger.Warn("failed to load pending action for task event",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionInfo.ID),
+			zap.Error(err))
+		return
+	}
+	action, ok := actions[sessionInfo.ID]
+	if !ok {
+		data["primary_session_pending_action"] = nil
+		return
+	}
+	data["primary_session_pending_action"] = string(action)
 }
 
 // taskRepositoriesForEvent returns the task's full repository list, ordered by

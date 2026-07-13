@@ -44,6 +44,12 @@ func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.
 func (m *mockRepository) DeleteWorkspace(ctx context.Context, id string) error {
 	return nil
 }
+func (m *mockRepository) DeleteWorkspaceCascade(ctx context.Context, id string) ([]*models.Task, []*models.Workflow, error) {
+	return nil, nil, m.DeleteWorkspace(ctx, id)
+}
+func (m *mockRepository) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error) {
+	return nil, nil, m.DeleteWorkspace(ctx, id)
+}
 func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	return nil, nil
 }
@@ -65,7 +71,7 @@ func (m *mockRepository) DeleteTask(ctx context.Context, id string) error {
 func (m *mockRepository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
 	return nil, 0, nil
 }
 func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {
@@ -76,6 +82,12 @@ func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error {
 }
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	return nil, nil
+}
+func (m *mockRepository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
+	return nil, nil
+}
+func (m *mockRepository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	return false, nil
 }
 func (m *mockRepository) CountOpenWatcherCreatedTasks(_ context.Context, _, _ string) (int, error) {
 	return 0, nil
@@ -190,6 +202,9 @@ func (m *mockRepository) FindMessageByPendingIDAndQuestion(ctx context.Context, 
 }
 func (m *mockRepository) FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error) {
 	return nil, nil
+}
+func (m *mockRepository) GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error) {
+	return make(map[string]models.TaskPendingAction), nil
 }
 func (m *mockRepository) UpdateMessage(ctx context.Context, message *models.Message) error {
 	return nil
@@ -391,6 +406,9 @@ func (m *mockRepository) UpdateResumeToken(ctx context.Context, sessionID, expec
 	return nil
 }
 func (m *mockRepository) UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error {
+	return nil
+}
+func (m *mockRepository) RepairExecutorRunningDead(ctx context.Context, sessionID string) error {
 	return nil
 }
 func (m *mockRepository) CreateEnvironment(ctx context.Context, environment *models.Environment) error {

@@ -490,6 +490,9 @@ func startAgentInfrastructure(
 		github: services.GitHub,
 		log:    log,
 	})
+	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
+		repo: repos.Office,
+	})
 
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {
@@ -697,6 +700,7 @@ func startGatewayAndServe(
 	}
 
 	services.Task.StartAutoArchiveLoop(ctx)
+	services.Task.StartQuickChatExpirationLoop(ctx)
 
 	// ============================================
 	// SYSTEM PAGES
@@ -1111,6 +1115,9 @@ func startOfficeSchedulersAndGC(
 	engineDispatcher := wireWorkflowEngineForOffice(
 		orchestratorSvc, services.Office, services.Task, services.Workflow, repos, runsSvc, log,
 	)
+	if services.OfficeSvcs != nil {
+		services.OfficeSvcs.Dashboard.SetWorkflowEngineDispatcher(engineDispatcher)
+	}
 	// Start the runs scheduler (tick + signal listener). It drives
 	// orchScheduler.Tick on both periodic ticks and event-driven signals.
 	runScheduler := runsscheduler.New(
@@ -1149,7 +1156,7 @@ func startOfficeSchedulersAndGC(
 //   - RunQueueAdapter        — runs service (Phase 3.1)
 //   - ParticipantStore       — workflow_step_participants
 //   - DecisionStore          — workflow_step_decisions
-//   - PrimaryAgentResolver   — workflow_steps.agent_profile_id
+//   - PrimaryAgentResolver   — current task runner / workflow_steps.agent_profile_id
 //   - CEOAgentResolver       — agent_profiles WHERE role='ceo' AND workspace_id != ”
 //
 // The orchestrator's engine is rebuilt with these options applied, then

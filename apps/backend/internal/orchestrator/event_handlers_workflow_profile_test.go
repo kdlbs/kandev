@@ -194,6 +194,7 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 		ExecutorProfileID: "ep1",
 		State:             models.TaskSessionStateCompleted,
 		IsPrimary:         false,
+		Metadata:          map[string]interface{}{"existing": "preserved"},
 		CompletedAt:       &completedAt,
 		StartedAt:         now.Add(-3 * time.Minute),
 		UpdatedAt:         completedAt,
@@ -270,6 +271,12 @@ func TestSwitchSessionForStep_ReusesExistingProfileSession(t *testing.T) {
 	}
 	if !reused.IsPrimary {
 		t.Error("reused session must be primary")
+	}
+	if got := reused.Metadata[models.SessionMetaKeyCreatedBy]; got != models.SessionCreatedByWorkflowSwitch {
+		t.Errorf("reused session created_by metadata = %v, want %q", got, models.SessionCreatedByWorkflowSwitch)
+	}
+	if got := reused.Metadata["existing"]; got != "preserved" {
+		t.Errorf("reused session existing metadata = %v, want preserved", got)
 	}
 
 	// The previous current session-b must now be COMPLETED, not primary.
@@ -375,6 +382,9 @@ func TestSwitchSessionForStep_ReusesPreviouslyLaunchedSession(t *testing.T) {
 	reused, _ := repo.GetTaskSession(ctx, "session-a")
 	if reused.State != models.TaskSessionStateWaitingForInput {
 		t.Errorf("previously-launched reused session must be WAITING_FOR_INPUT (so PromptTask lazy-resumes via ResumeSession), got %s", reused.State)
+	}
+	if got := reused.Metadata[models.SessionMetaKeyCreatedBy]; got != models.SessionCreatedByWorkflowSwitch {
+		t.Errorf("reused session created_by metadata = %v, want %q", got, models.SessionCreatedByWorkflowSwitch)
 	}
 }
 
@@ -599,6 +609,7 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 			AgentProfileID: "profile-a",
 			State:          models.TaskSessionStateRunning,
 			IsPrimary:      true,
+			Metadata:       map[string]interface{}{"existing": "preserved"},
 			StartedAt:      now,
 			UpdatedAt:      now,
 		}
@@ -623,6 +634,12 @@ func TestProcessOnEnter_ProfileSwitch(t *testing.T) {
 		}
 		if updatedSession.State == models.TaskSessionStateCompleted {
 			t.Error("session should not be completed when profile matches")
+		}
+		if got := updatedSession.Metadata[models.SessionMetaKeyCreatedBy]; got != models.SessionCreatedByWorkflowSwitch {
+			t.Errorf("matching workflow session created_by metadata = %v, want %q", got, models.SessionCreatedByWorkflowSwitch)
+		}
+		if got := updatedSession.Metadata["existing"]; got != "preserved" {
+			t.Errorf("matching workflow session existing metadata = %v, want preserved", got)
 		}
 
 		// No new sessions should be created

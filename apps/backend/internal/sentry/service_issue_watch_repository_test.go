@@ -19,19 +19,20 @@ func (f fakeRepoLookup) GetRepository(_ context.Context, _ string) (string, stri
 
 func TestService_CreateIssueWatch_RepositoryBinding(t *testing.T) {
 	ctx := context.Background()
-	baseReq := func() *CreateIssueWatchRequest {
+	baseReq := func(instID string) *CreateIssueWatchRequest {
 		return &CreateIssueWatchRequest{
-			WorkspaceID:    "ws-1",
-			WorkflowID:     "wf",
-			WorkflowStepID: "step",
-			Filter:         SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"},
+			WorkspaceID:      "ws-1",
+			SentryInstanceID: instID,
+			WorkflowID:       "wf",
+			WorkflowStepID:   "step",
+			Filter:           SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"},
 		}
 	}
 
 	t.Run("default branch filled from repo", func(t *testing.T) {
 		f := newSvcFixture(t)
 		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
-		req := baseReq()
+		req := baseReq(f.ensureInstance(t, "ws-1"))
 		req.RepositoryID = "repo-1"
 		w, err := f.svc.CreateIssueWatch(ctx, req)
 		if err != nil {
@@ -45,7 +46,7 @@ func TestService_CreateIssueWatch_RepositoryBinding(t *testing.T) {
 	t.Run("explicit branch preserved", func(t *testing.T) {
 		f := newSvcFixture(t)
 		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
-		req := baseReq()
+		req := baseReq(f.ensureInstance(t, "ws-1"))
 		req.RepositoryID = "repo-1"
 		req.BaseBranch = "release/v2"
 		w, err := f.svc.CreateIssueWatch(ctx, req)
@@ -60,7 +61,7 @@ func TestService_CreateIssueWatch_RepositoryBinding(t *testing.T) {
 	t.Run("cross-workspace repo rejected", func(t *testing.T) {
 		f := newSvcFixture(t)
 		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-other", defaultBranch: "main", ok: true})
-		req := baseReq()
+		req := baseReq(f.ensureInstance(t, "ws-1"))
 		req.RepositoryID = "repo-1"
 		if _, err := f.svc.CreateIssueWatch(ctx, req); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("expected ErrInvalidConfig for cross-workspace repo, got %v", err)
@@ -70,7 +71,7 @@ func TestService_CreateIssueWatch_RepositoryBinding(t *testing.T) {
 	t.Run("missing repo rejected", func(t *testing.T) {
 		f := newSvcFixture(t)
 		f.svc.SetRepositoryLookup(fakeRepoLookup{ok: false})
-		req := baseReq()
+		req := baseReq(f.ensureInstance(t, "ws-1"))
 		req.RepositoryID = "ghost"
 		if _, err := f.svc.CreateIssueWatch(ctx, req); !errors.Is(err, ErrInvalidConfig) {
 			t.Fatalf("expected ErrInvalidConfig for missing repo, got %v", err)
@@ -79,7 +80,7 @@ func TestService_CreateIssueWatch_RepositoryBinding(t *testing.T) {
 
 	t.Run("unbound skips lookup and clears branch", func(t *testing.T) {
 		f := newSvcFixture(t) // no RepositoryLookup wired
-		req := baseReq()
+		req := baseReq(f.ensureInstance(t, "ws-1"))
 		req.BaseBranch = "ignored-without-repo"
 		w, err := f.svc.CreateIssueWatch(ctx, req)
 		if err != nil {
@@ -97,10 +98,11 @@ func TestService_UpdateIssueWatch_RepositoryBinding(t *testing.T) {
 	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
 
 	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
-		WorkspaceID:    "ws-1",
-		WorkflowID:     "wf",
-		WorkflowStepID: "step",
-		Filter:         SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"},
+		WorkspaceID:      "ws-1",
+		SentryInstanceID: f.ensureInstance(t, "ws-1"),
+		WorkflowID:       "wf",
+		WorkflowStepID:   "step",
+		Filter:           SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -134,7 +136,8 @@ func TestService_UpdateIssueWatch_RebindAndDeletedRepo(t *testing.T) {
 	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
 
 	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
-		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		WorkspaceID: "ws-1", SentryInstanceID: f.ensureInstance(t, "ws-1"),
+		WorkflowID: "wf", WorkflowStepID: "step",
 		Filter: SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"},
 	})
 	if err != nil {
@@ -170,9 +173,11 @@ func TestService_IssueWatch_RejectsInvalidBaseBranch(t *testing.T) {
 	ctx := context.Background()
 	f := newSvcFixture(t)
 	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+	instID := f.ensureInstance(t, "ws-1")
 	base := func() *CreateIssueWatchRequest {
 		return &CreateIssueWatchRequest{
-			WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+			WorkspaceID: "ws-1", SentryInstanceID: instID,
+			WorkflowID: "wf", WorkflowStepID: "step",
 			Filter: SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"}, RepositoryID: "repo-1",
 		}
 	}

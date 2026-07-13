@@ -54,6 +54,7 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 // is propagated to the resulting Message row when the queued message is
 // drained (e.g. sender_task_id for messages sent via message_task_kandev).
 func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
+	metadataCopy := copyMessageMetadata(metadata, 0)
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
 		TaskID:      taskID,
@@ -61,7 +62,7 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 		Model:       model,
 		PlanMode:    planMode,
 		Attachments: attachments,
-		Metadata:    metadata,
+		Metadata:    metadataCopy,
 		QueuedBy:    userID,
 	}
 	if err := s.repo.Insert(ctx, msg, s.maxPerSession); err != nil {
@@ -79,6 +80,54 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 		zap.Int64("position", msg.Position),
 		zap.Int("content_length", len(content)))
 	return msg, nil
+}
+
+// QueueMessageWithCoalesceKey replaces an existing pending entry with the same
+// coalesce key, session, and queued_by value. When no matching entry exists it
+// inserts a new tail entry if allowInsert is true; otherwise ErrEntryNotFound is
+// returned. The returned bool is true when an existing entry was replaced.
+func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, error) {
+	metadataCopy := copyMessageMetadata(metadata, 1)
+	metadataCopy[MetadataCoalesceKey] = coalesceKey
+	msg := &QueuedMessage{
+		SessionID:   sessionID,
+		TaskID:      taskID,
+		Content:     content,
+		Model:       model,
+		PlanMode:    planMode,
+		Attachments: attachments,
+		Metadata:    metadataCopy,
+		QueuedBy:    userID,
+	}
+	queued, replaced, err := s.repo.InsertOrReplaceByCoalesceKey(ctx, msg, coalesceKey, s.maxPerSession, allowInsert)
+	if err != nil {
+		if errors.Is(err, ErrQueueFull) {
+			s.logger.Info("queue full",
+				zap.String("session_id", sessionID),
+				zap.Int("max", s.maxPerSession))
+		}
+		return nil, false, err
+	}
+	s.logger.Info("message queued with coalesce key",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", taskID),
+		zap.String("entry_id", queued.ID),
+		zap.String("coalesce_key", coalesceKey),
+		zap.Bool("replaced", replaced),
+		zap.Int64("position", queued.Position),
+		zap.Int("content_length", len(content)))
+	return queued, replaced, nil
+}
+
+func copyMessageMetadata(metadata map[string]interface{}, extraCapacity int) map[string]interface{} {
+	if len(metadata) == 0 && extraCapacity == 0 {
+		return nil
+	}
+	out := make(map[string]interface{}, len(metadata)+extraCapacity)
+	for key, value := range metadata {
+		out[key] = value
+	}
+	return out
 }
 
 // AppendContent appends content onto the session's tail entry when the tail's
@@ -194,6 +243,22 @@ func (s *Service) TransferSession(ctx context.Context, oldSessionID, newSessionI
 	return nil
 }
 
+// RestoreSession replaces a session's queue and pending move from a snapshot,
+// preserving queued-message identity fields.
+func (s *Service) RestoreSession(ctx context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
+	if err := s.repo.ReplaceSession(ctx, sessionID, entries, pendingMove); err != nil {
+		s.logger.Error("restore session queue failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return err
+	}
+	s.logger.Info("restored session queue",
+		zap.String("session_id", sessionID),
+		zap.Int("entries", len(entries)),
+		zap.Bool("pending_move", pendingMove != nil))
+	return nil
+}
+
 // SetPendingMove records a pending move for a session (replaces any existing one).
 // The move is applied by handleAgentReady when the agent's current turn completes.
 func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) {
@@ -207,6 +272,21 @@ func (s *Service) SetPendingMove(ctx context.Context, sessionID string, move *Pe
 		zap.String("session_id", sessionID),
 		zap.String("task_id", move.TaskID),
 		zap.String("workflow_step_id", move.WorkflowStepID))
+}
+
+// GetPendingMove retrieves the pending move for a session without removing it.
+func (s *Service) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, bool) {
+	move, err := s.repo.GetPendingMove(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("get pending move failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, false
+	}
+	if move == nil {
+		return nil, false
+	}
+	return move, true
 }
 
 // TakePendingMove retrieves and removes the pending move for a session.

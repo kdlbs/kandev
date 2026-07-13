@@ -4,6 +4,7 @@ import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 
 import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
 import {
   listLinearLabels,
@@ -14,6 +15,7 @@ import {
 import {
   PRIORITY_OPTIONS,
   parseMaxInflightTasks,
+  SORT_BY_OPTIONS,
   type FormState,
   type LinearPriority,
 } from "./linear-issue-watch-form";
@@ -24,7 +26,7 @@ import type { LinearLabel, LinearTeam, LinearUser, LinearWorkflowState } from "@
 // dataset is cached so switching teams renders an empty list (or the cached
 // list) without us having to setState in an effect — only the lookup
 // expression changes.
-export function useTeamsAndStates(teamKey: string) {
+export function useTeamsAndStates(workspaceId: string, teamKey: string) {
   const [teams, setTeams] = useState<LinearTeam[]>([]);
   const [statesByTeam, setStatesByTeam] = useState<Record<string, LinearWorkflowState[]>>({});
   const [labelsByTeam, setLabelsByTeam] = useState<Record<string, LinearLabel[]>>({});
@@ -33,7 +35,7 @@ export function useTeamsAndStates(teamKey: string) {
 
   useEffect(() => {
     let cancelled = false;
-    listLinearTeams()
+    listLinearTeams({ workspaceId })
       .then((res) => {
         if (!cancelled) setTeams(res.teams ?? []);
       })
@@ -43,7 +45,7 @@ export function useTeamsAndStates(teamKey: string) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     // Capture the Set once so cleanup uses the exact instance the effect
@@ -62,7 +64,7 @@ export function useTeamsAndStates(teamKey: string) {
       anyFailed = true;
     };
     Promise.allSettled([
-      listLinearStates(teamKey)
+      listLinearStates(teamKey, { workspaceId })
         .then((res) => {
           if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: res.states ?? [] }));
         })
@@ -70,7 +72,7 @@ export function useTeamsAndStates(teamKey: string) {
           markFailed();
           if (!cancelled) setStatesByTeam((prev) => ({ ...prev, [teamKey]: [] }));
         }),
-      listLinearLabels(teamKey)
+      listLinearLabels(teamKey, { workspaceId })
         .then((res) => {
           if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [teamKey]: res.labels ?? [] }));
         })
@@ -78,7 +80,7 @@ export function useTeamsAndStates(teamKey: string) {
           markFailed();
           if (!cancelled) setLabelsByTeam((prev) => ({ ...prev, [teamKey]: [] }));
         }),
-      listLinearUsers(teamKey)
+      listLinearUsers(teamKey, { workspaceId })
         .then((res) => {
           if (!cancelled) setUsersByTeam((prev) => ({ ...prev, [teamKey]: res.users ?? [] }));
         })
@@ -102,7 +104,7 @@ export function useTeamsAndStates(teamKey: string) {
       // also evicting a healthy cache after a normal team change.
       if (!loaded) fetched.delete(teamKey);
     };
-  }, [teamKey]);
+  }, [workspaceId, teamKey]);
 
   const states = teamKey ? (statesByTeam[teamKey] ?? []) : [];
   const labels = teamKey ? (labelsByTeam[teamKey] ?? []) : [];
@@ -230,6 +232,46 @@ export function LabelMultiSelect({
 
 type FormSetter = Dispatch<SetStateAction<FormState>>;
 
+// Radix SelectItem rejects an empty-string value, so the "Default (Linear
+// order)" option uses a sentinel in the dropdown that we translate back to ""
+// (FormState's empty default) at the Select boundary.
+const SORT_BY_DEFAULT_SENTINEL = "__default__";
+
+export function SortByField({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+  return (
+    <div className="space-y-1.5">
+      <Label>Dispatch order</Label>
+      <p className="text-xs text-muted-foreground">
+        When the in-flight cap is reached, issues are dispatched in this order so the most important
+        ones run first.
+      </p>
+      <Select
+        value={form.sortBy || SORT_BY_DEFAULT_SENTINEL}
+        onValueChange={(v) =>
+          setForm((p) => ({
+            ...p,
+            sortBy: (v === SORT_BY_DEFAULT_SENTINEL ? "" : v) as FormState["sortBy"],
+          }))
+        }
+      >
+        <SelectTrigger className="cursor-pointer">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {SORT_BY_OPTIONS.map((o) => (
+            <SelectItem
+              key={o.value || SORT_BY_DEFAULT_SENTINEL}
+              value={o.value || SORT_BY_DEFAULT_SENTINEL}
+            >
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 // MaxInflightTasksField renders the per-watcher throttle-cap input with inline
 // validation. Lives here (rather than the dialog) to keep the dialog file under
 // its line ceiling.
@@ -278,6 +320,7 @@ export function SettingsFields({ form, setForm }: { form: FormState; setForm: Fo
         />
       </div>
       <MaxInflightTasksField form={form} setForm={setForm} />
+      <SortByField form={form} setForm={setForm} />
       <div className="flex items-center justify-between">
         <div>
           <Label>Enabled</Label>

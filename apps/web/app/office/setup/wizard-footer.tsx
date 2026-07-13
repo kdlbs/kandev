@@ -2,8 +2,7 @@
 
 import { Button } from "@kandev/ui/button";
 import { IconArrowLeft, IconArrowRight, IconRocket } from "@tabler/icons-react";
-
-const STEP_COUNT = 4;
+import { SETUP_WIZARD_STEP_COUNT, SETUP_WIZARD_STEPS } from "./setup-wizard-steps";
 
 type WizardFooterProps = {
   step: number;
@@ -24,8 +23,8 @@ export function WizardFooter({
   onSkip,
   onSubmit,
 }: WizardFooterProps) {
-  const isLast = step === STEP_COUNT - 1;
-  const isTaskStep = step === 2;
+  const isLast = step === SETUP_WIZARD_STEP_COUNT - 1;
+  const isTaskStep = step === SETUP_WIZARD_STEPS.TASK;
 
   return (
     <div className="flex items-center justify-between mt-8">

@@ -25,6 +25,12 @@ const DESKTOP_HEALTH_TOKEN_ENV: &str = "KANDEV_DESKTOP_HEALTH_TOKEN";
 const DESKTOP_HEALTH_TOKEN_HEADER: &str = "x-kandev-desktop-health-token";
 const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
 const HEALTH_READY_SETTLE: Duration = Duration::from_millis(100);
+const REMOTE_AGENTCTL_HELPERS: [(&str, &str); 4] = [
+    ("agentctl-linux-amd64", "agentctl linux/amd64 helper"),
+    ("agentctl-linux-arm64", "agentctl linux/arm64 helper"),
+    ("agentctl-darwin-arm64", "agentctl darwin/arm64 helper"),
+    ("agentctl-darwin-amd64", "agentctl darwin/amd64 helper"),
+];
 
 #[derive(Clone)]
 pub struct BackendState {
@@ -240,7 +246,9 @@ pub fn validate_runtime_dir(runtime_dir: &Path) -> Result<(), String> {
     let bin_dir = runtime_dir.join("bin");
     require_runtime_file(&bin_dir.join(executable_name("kandev")), "Kandev launcher binary")?;
     require_runtime_file(&bin_dir.join(executable_name("agentctl")), "agentctl binary")?;
-    require_runtime_file(&bin_dir.join("agentctl-linux-amd64"), "agentctl linux/amd64 helper")?;
+    for &(name, label) in REMOTE_AGENTCTL_HELPERS.iter() {
+        require_runtime_file(&bin_dir.join(name), label)?;
+    }
     Ok(())
 }
 
@@ -714,6 +722,23 @@ mod tests {
     }
 
     #[test]
+    fn missing_darwin_helper_returns_readable_error() {
+        let dir = temp_root("missing-darwin-helper");
+        let bin = dir.join("bin");
+        fs::create_dir_all(&bin).expect("create bin");
+        fs::write(bin.join(executable_name("kandev")), b"stub").expect("write launcher");
+        fs::write(bin.join(executable_name("agentctl")), b"stub").expect("write agentctl");
+        fs::write(bin.join("agentctl-linux-amd64"), b"stub").expect("write linux helper");
+        fs::write(bin.join("agentctl-linux-arm64"), b"stub").expect("write linux arm64 helper");
+        fs::write(bin.join("agentctl-darwin-amd64"), b"stub").expect("write darwin amd64 helper");
+
+        let err =
+            build_backend_command(&dir, 48123, BTreeMap::new(), None).expect_err("missing helper");
+
+        assert!(err.contains("agentctl darwin/arm64 helper is missing"), "{err}");
+    }
+
+    #[test]
     fn pick_loopback_port_returns_valid_port() {
         let port = pick_loopback_port().expect("loopback port");
         assert_ne!(port, 0);
@@ -905,7 +930,9 @@ mod tests {
         fs::create_dir_all(&bin).expect("create bin");
         fs::write(bin.join(executable_name("kandev")), b"stub").expect("write launcher");
         fs::write(bin.join(executable_name("agentctl")), b"stub").expect("write agentctl");
-        fs::write(bin.join("agentctl-linux-amd64"), b"stub").expect("write linux helper");
+        for &(name, label) in REMOTE_AGENTCTL_HELPERS.iter() {
+            fs::write(bin.join(name), b"stub").unwrap_or_else(|err| panic!("write {label}: {err}"));
+        }
         dir
     }
 

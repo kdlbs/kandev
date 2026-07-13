@@ -39,6 +39,8 @@ type UpdateUserSettingsRequest struct {
 	KanbanViewMode              *string
 	WorkflowFilterID            *string
 	RepositoryIDs               *[]string
+	TasksListSort               *string
+	TasksListGroup              *string
 	InitialSetupComplete        *bool
 	PreferredShell              *string
 	DefaultEditorID             *string
@@ -144,11 +146,39 @@ func (s *Service) UpdateUserSettings(ctx context.Context, req *UpdateUserSetting
 		return nil, fmt.Errorf("%w: %s", ErrValidation, err.Error())
 	}
 	settings.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
+	var taskCreatePatch *models.TaskCreateLastUsed
+	if req.TaskCreateLastUsed != nil && !taskCreateLastUsedPatchEmpty(*req.TaskCreateLastUsed) {
+		taskCreatePatch = req.TaskCreateLastUsed
+	}
+	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, taskCreatePatch)
+	if err != nil {
 		return nil, err
 	}
 	s.publishUserSettingsEvent(ctx, settings)
 	return settings, nil
+}
+
+func (s *Service) RecordTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) error {
+	if taskCreateLastUsedPatchEmpty(patch) {
+		return nil
+	}
+	settings, err := s.updateTaskCreateLastUsed(ctx, patch)
+	if err != nil {
+		return err
+	}
+	s.publishUserSettingsEvent(ctx, settings)
+	return nil
+}
+
+func (s *Service) updateTaskCreateLastUsed(ctx context.Context, patch models.TaskCreateLastUsed) (*models.UserSettings, error) {
+	return s.repo.UpdateTaskCreateLastUsed(ctx, s.defaultUser, patch)
+}
+
+func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
+	return patch.RepositoryID == "" &&
+		patch.Branch == "" &&
+		patch.AgentProfileID == "" &&
+		patch.ExecutorProfileID == ""
 }
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
@@ -164,6 +194,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	}
 	if req.RepositoryIDs != nil {
 		settings.RepositoryIDs = *req.RepositoryIDs
+	}
+	if err := applyTasksListPreferences(settings, req.TasksListSort, req.TasksListGroup); err != nil {
+		return err
 	}
 	if req.InitialSetupComplete != nil {
 		settings.InitialSetupComplete = *req.InitialSetupComplete
@@ -216,6 +249,30 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 			return errors.New("terminal_font_size must be 0 (default) or between 8 and 24")
 		}
 		settings.TerminalFontSize = v
+	}
+	return nil
+}
+
+func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupValue *string) error {
+	if sortValue != nil {
+		v := strings.TrimSpace(*sortValue)
+		if v == "" {
+			v = models.TasksListSortDefault
+		}
+		if !models.IsValidTasksListSort(v) {
+			return fmt.Errorf("tasks_list_sort must be one of %s", strings.Join(models.TasksListSortValues(), ", "))
+		}
+		settings.TasksListSort = v
+	}
+	if groupValue != nil {
+		v := strings.TrimSpace(*groupValue)
+		if v == "" {
+			v = models.TasksListGroupDefault
+		}
+		if !models.IsValidTasksListGroup(v) {
+			return fmt.Errorf("tasks_list_group must be one of %s", strings.Join(models.TasksListGroupValues(), ", "))
+		}
+		settings.TasksListGroup = v
 	}
 	return nil
 }
@@ -418,9 +475,6 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 	if req.SidebarTaskPrefs != nil {
 		settings.SidebarTaskPrefs = *req.SidebarTaskPrefs
 	}
-	if req.TaskCreateLastUsed != nil {
-		mergeTaskCreateLastUsed(&settings.TaskCreateLastUsed, *req.TaskCreateLastUsed)
-	}
 	if err := applyUserPreferenceBlob("jira_saved_views", req.JiraSavedViews, &settings.JiraSavedViews); err != nil {
 		return err
 	}
@@ -470,21 +524,6 @@ func validateUserPreferenceBlob(field string, value json.RawMessage) error {
 	}
 }
 
-func mergeTaskCreateLastUsed(current *models.TaskCreateLastUsed, patch models.TaskCreateLastUsed) {
-	if patch.RepositoryID != "" {
-		current.RepositoryID = patch.RepositoryID
-	}
-	if patch.Branch != "" {
-		current.Branch = patch.Branch
-	}
-	if patch.AgentProfileID != "" {
-		current.AgentProfileID = patch.AgentProfileID
-	}
-	if patch.ExecutorProfileID != "" {
-		current.ExecutorProfileID = patch.ExecutorProfileID
-	}
-}
-
 func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models.UserSettings) {
 	if s.eventBus == nil || settings == nil {
 		return
@@ -495,6 +534,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"kanban_view_mode":                settings.KanbanViewMode,
 		"workflow_filter_id":              settings.WorkflowFilterID,
 		"repository_ids":                  settings.RepositoryIDs,
+		"tasks_list_sort":                 settings.TasksListSort,
+		"tasks_list_group":                settings.TasksListGroup,
 		"initial_setup_complete":          settings.InitialSetupComplete,
 		"preferred_shell":                 settings.PreferredShell,
 		"default_editor_id":               settings.DefaultEditorID,
@@ -581,7 +622,8 @@ func (s *Service) ClearDefaultEditorID(ctx context.Context, editorID string) err
 	}
 	settings.DefaultEditorID = ""
 	settings.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpsertUserSettings(ctx, settings); err != nil {
+	settings, err = s.repo.UpsertUserSettingsPreservingTaskCreateLastUsed(ctx, settings, nil)
+	if err != nil {
 		return err
 	}
 	s.publishUserSettingsEvent(ctx, settings)

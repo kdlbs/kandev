@@ -5,76 +5,128 @@ import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
-import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { createDebugLogger } from "@/lib/debug/log";
+import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
 
 type TaskCreateLastUsedPatch = {
-  repository_id?: string;
-  branch?: string;
+  repository_id?: string | null;
+  branch?: string | null;
+  agent_profile_id?: string | null;
+  executor_profile_id?: string | null;
+};
+
+type TaskCreateLastUsedPayload = {
+  repositories?: Array<{
+    repository_id?: string;
+    base_branch?: string;
+    checkout_branch?: string;
+    fresh_branch?: boolean;
+  }>;
   agent_profile_id?: string;
   executor_profile_id?: string;
 };
 
-let pendingLastUsed: TaskCreateLastUsedPatch = {};
-let lastUsedSync = Promise.resolve();
-const PENDING_LAST_USED_SYNC_KEY = "kandev.taskCreateLastUsed.pendingSync";
+let lastQueuedLastUsed: Partial<TaskCreateLastUsedState> = {};
 const LOCAL_STORAGE_WRITE_EVENT = "localStorage-write";
 const lastUsedDebug = createDebugLogger("task-create:last-used");
 
-export function resetTaskCreateLastUsedSync() {
-  pendingLastUsed = {};
-  lastUsedDebug("pending-reset");
-}
-
-function readPendingLastUsedSync(): TaskCreateLastUsedPatch {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(PENDING_LAST_USED_SYNC_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return {};
-    const record = parsed as Record<string, unknown>;
-    return {
-      repository_id: typeof record.repository_id === "string" ? record.repository_id : undefined,
-      branch: typeof record.branch === "string" ? record.branch : undefined,
-      agent_profile_id:
-        typeof record.agent_profile_id === "string" ? record.agent_profile_id : undefined,
-      executor_profile_id:
-        typeof record.executor_profile_id === "string" ? record.executor_profile_id : undefined,
-    };
-  } catch {
-    lastUsedDebug("pending-read-failed");
-    return {};
+/**
+ * Clears task-create last-used overlay state.
+ * Pass `clearQueued` when test setup or teardown should also wipe the queued
+ * overlay that protects settings fetches from stale server values.
+ */
+export function resetTaskCreateLastUsedSync(
+  options: {
+    clearQueued?: boolean;
+    syncedSettings?: TaskCreateLastUsedState | null | undefined;
+  } = {},
+) {
+  if (options.clearQueued) {
+    lastQueuedLastUsed = {};
+  } else if (taskCreateLastUsedSettingsMatchQueue(options.syncedSettings)) {
+    lastQueuedLastUsed = {};
   }
+  lastUsedDebug("overlay-reset");
 }
 
-function persistPendingLastUsedSync(patch: TaskCreateLastUsedPatch) {
-  setLocalStorage(PENDING_LAST_USED_SYNC_KEY, patch as Record<string, string>);
+export function readQueuedTaskCreateLastUsedState(): Partial<TaskCreateLastUsedState> {
+  return lastQueuedLastUsed;
+}
+
+export function clearQueuedTaskCreateLastUsedIfSynced(
+  settings: TaskCreateLastUsedState | null | undefined,
+) {
+  if (!hasQueuedTaskCreateLastUsed()) return;
+  if (!taskCreateLastUsedSettingsMatchQueue(settings)) return;
+  lastQueuedLastUsed = {};
+  lastUsedDebug("overlay-cleared-after-settings-sync");
+}
+
+function hasQueuedTaskCreateLastUsed() {
+  return Object.values(lastQueuedLastUsed).some((value) => value !== undefined);
+}
+
+function taskCreateLastUsedSettingsMatchQueue(
+  settings: TaskCreateLastUsedState | null | undefined,
+) {
+  return Object.entries(lastQueuedLastUsed).every(([key, value]) => {
+    if (value === undefined) return true;
+    return settings?.[key as keyof TaskCreateLastUsedState] === value;
+  });
+}
+
+function mapTaskCreateLastUsedPatch(
+  pending: TaskCreateLastUsedPatch,
+): Partial<TaskCreateLastUsedState> {
+  return {
+    repositoryId: pending.repository_id,
+    branch: pending.branch,
+    agentProfileId: pending.agent_profile_id,
+    executorProfileId: pending.executor_profile_id,
+  };
+}
+
+function compactTaskCreateLastUsedState(state: Partial<TaskCreateLastUsedState>) {
+  return Object.fromEntries(
+    Object.entries(state).filter(([, value]) => value !== undefined),
+  ) as Partial<TaskCreateLastUsedState>;
 }
 
 export function syncTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
-  pendingLastUsed = { ...readPendingLastUsedSync(), ...pendingLastUsed, ...patch };
-  const payload = { ...pendingLastUsed };
-  lastUsedDebug("sync-queued", { patch, payload });
-  persistPendingLastUsedSync(payload);
-  lastUsedSync = lastUsedSync
-    .catch(() => undefined)
-    .then(() =>
-      updateUserSettings({ task_create_last_used: payload })
-        .then(() => {
-          lastUsedDebug("sync-success", { payload });
-          if (JSON.stringify(pendingLastUsed) === JSON.stringify(payload)) {
-            pendingLastUsed = {};
-            removeLocalStorage(PENDING_LAST_USED_SYNC_KEY);
-          }
-        })
-        .catch((error) => {
-          lastUsedDebug("sync-failed", {
-            payload,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }),
-    );
+  lastQueuedLastUsed = {
+    ...lastQueuedLastUsed,
+    ...compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch)),
+  };
+  lastUsedDebug("overlay-updated", { patch, queued: lastQueuedLastUsed });
+}
+
+export function replaceQueuedTaskCreateLastUsed(patch: TaskCreateLastUsedPatch) {
+  lastQueuedLastUsed = compactTaskCreateLastUsedState(mapTaskCreateLastUsedPatch(patch));
+  lastUsedDebug("overlay-replaced", { patch, queued: lastQueuedLastUsed });
+}
+
+export function queueTaskCreateLastUsedFromPayload(
+  payload: TaskCreateLastUsedPayload | null | undefined,
+) {
+  if (!payload) return;
+  const firstWorkspaceRepo = payload.repositories?.find((repo) => repo.repository_id);
+  replaceQueuedTaskCreateLastUsed({
+    repository_id: firstWorkspaceRepo?.repository_id,
+    branch: firstWorkspaceRepo ? taskCreateLastUsedPayloadBranch(firstWorkspaceRepo) : undefined,
+    agent_profile_id: payload.agent_profile_id,
+    executor_profile_id: payload.executor_profile_id,
+  });
+}
+
+function taskCreateLastUsedPayloadBranch(
+  repo: NonNullable<TaskCreateLastUsedPayload["repositories"]>[number],
+) {
+  if (repo.fresh_branch) return firstNonEmpty(repo.base_branch, repo.checkout_branch);
+  return firstNonEmpty(repo.checkout_branch, repo.base_branch);
+}
+
+function firstNonEmpty(...values: Array<string | undefined>) {
+  return values.find((value) => value) ?? undefined;
 }
 
 /**
@@ -115,12 +167,17 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
       fs.updateRepository(key, patch);
       if (isWorkspaceRepo) {
         setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, value);
-        syncTaskCreateLastUsed({ repository_id: value });
+        removeLocalStorage(STORAGE_KEYS.LAST_BRANCH);
+        syncTaskCreateLastUsed({ repository_id: value, branch: null });
         lastUsedDebug(LOCAL_STORAGE_WRITE_EVENT, {
           key: "lastRepositoryId",
           value,
           row_key: key,
         });
+      } else {
+        removeLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID);
+        removeLocalStorage(STORAGE_KEYS.LAST_BRANCH);
+        syncTaskCreateLastUsed({ repository_id: null, branch: null });
       }
       // Switching the repo invalidates whatever local-status the fresh-branch
       // panel had cached.
@@ -197,7 +254,12 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
     // toggle Remote on) and the submit gate's mode-aware checks would produce
     // confusing results. Mirror the no-repo handler which already clears
     // useRemote when flipping the other way.
-    if (next) fs.setNoRepository(false);
+    if (next) {
+      fs.setNoRepository(false);
+      removeLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID);
+      removeLocalStorage(STORAGE_KEYS.LAST_BRANCH);
+      syncTaskCreateLastUsed({ repository_id: null, branch: null });
+    }
     clearFreshBranch(fs);
   }, [fs]);
 
@@ -225,6 +287,12 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
       // non-worktree default (worktree is unworkable in no-repo mode).
       fs.setExecutorId("");
       fs.setExecutorProfileId("");
+      removeLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
+      syncTaskCreateLastUsed({
+        repository_id: null,
+        branch: null,
+        executor_profile_id: null,
+      });
     } else {
       fs.setWorkspacePath("");
     }

@@ -90,6 +90,41 @@ func insertTask(t *testing.T, repo *sqlite.Repository, ctx context.Context, id, 
 	}
 }
 
+func TestGetTaskExecutionFields_FallsBackToLatestTaskRunner(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_steps (id, agent_profile_id)
+		VALUES ('step-work', ''), ('step-review', ''), ('step-done', '')
+	`); err != nil {
+		t.Fatalf("insert steps: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks (id, workspace_id, workflow_step_id, state, title, created_at, updated_at)
+		VALUES ('task-done', 'ws-1', 'step-done', 'DONE', 'Done task', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position)
+		VALUES
+			('p-work', 'step-work', 'task-done', 'runner', 'runner-on-work', 0, 0),
+			('p-review', 'step-review', 'task-done', 'runner', 'runner-on-review', 0, 0)
+	`); err != nil {
+		t.Fatalf("insert runners: %v", err)
+	}
+
+	fields, err := repo.GetTaskExecutionFields(ctx, "task-done")
+	if err != nil {
+		t.Fatalf("execution fields: %v", err)
+	}
+	if fields.AssigneeAgentProfileID != "runner-on-review" {
+		t.Fatalf("expected runner-on-review, got %q", fields.AssigneeAgentProfileID)
+	}
+}
+
 func TestSearchTasks_MatchesTitle(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()

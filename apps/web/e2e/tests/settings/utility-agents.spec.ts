@@ -167,9 +167,7 @@ test.describe("Utility Agents settings page", () => {
     ).toBeVisible();
 
     // Default-model section.
-    await expect(
-      testPage.getByRole("heading", { name: "Default utility agent model", exact: true }),
-    ).toBeVisible();
+    await expect(testPage.getByText("Default utility agent model", { exact: true })).toBeVisible();
 
     // Built-in actions (seeded on first boot — see builtins.go).
     // Assert a representative subset; the full list lives server-side.
@@ -178,14 +176,91 @@ test.describe("Utility Agents settings page", () => {
     await expect(testPage.getByText("enhance-prompt", { exact: true })).toBeVisible();
 
     // Custom agents section + empty state.
-    await expect(
-      testPage.getByRole("heading", { name: "Custom utility agents", exact: true }),
-    ).toBeVisible();
+    await expect(testPage.getByText("Custom utility agents", { exact: true })).toBeVisible();
     await expect(testPage.getByText("No custom utility agents.")).toBeVisible();
 
     expect(pageErrors, `uncaught errors: ${pageErrors.map((e) => e.message).join("; ")}`).toEqual(
       [],
     );
+  });
+
+  test("wraps each settings sub-section in a bounded card, matching Voice Mode", async ({
+    testPage,
+  }) => {
+    // Regression guard: these sub-sections used to be bare divs with no
+    // visible border, unlike every other settings page (e.g. Voice Mode's
+    // Card-wrapped Enable/Engine/Behavior sections).
+    //
+    // Mock the inference-agent + builtin-agent APIs so the Actions card
+    // (which renders null when there are no builtins — see
+    // PerActionOverridesSection) is deterministically present, instead of
+    // depending on the backend's boot-time seed state.
+    await testPage.route("**/api/v1/utility/inference-agents", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          agents: [
+            {
+              id: "claude",
+              name: "claude",
+              display_name: "Claude",
+              status: "ok",
+              models: [
+                { id: "claude-fast", name: "Claude Fast", description: "", is_default: true },
+              ],
+            },
+          ],
+        }),
+      }),
+    );
+    await testPage.route("**/api/v1/utility/agents", (route) => {
+      if (route.request().method() !== "GET") {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          agents: [
+            {
+              id: "builtin-commit-message",
+              name: "commit-message",
+              description: "Generate a commit message.",
+              builtin: true,
+              enabled: true,
+              agent_id: "",
+              model: "",
+            },
+          ],
+        }),
+      });
+    });
+
+    await testPage.goto("/settings/utility-agents");
+    await expect(
+      testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
+    ).toBeVisible({ timeout: 15_000 });
+
+    for (const { testId, heading } of [
+      { testId: "utility-default-model-card", heading: "Default utility agent model" },
+      { testId: "utility-actions-card", heading: "Actions" },
+      { testId: "utility-custom-agents-card", heading: "Custom utility agents" },
+      { testId: "config-chat-agent-card", heading: "Configuration Chat Agent" },
+    ]) {
+      const card = testPage.getByTestId(testId);
+      await expect(card).toBeVisible();
+      await expect(card).toHaveAttribute("data-slot", "card");
+      // Card titles must stay real headings (level 3), not just styled div
+      // text, so screen-reader heading navigation keeps working.
+      await expect(
+        card.getByRole("heading", { name: heading, level: 3, exact: true }),
+      ).toBeVisible();
+    }
   });
 
   test("opens the create-agent dialog from the Add button", async ({ testPage }) => {
@@ -288,9 +363,8 @@ test.describe("Utility Agents settings page", () => {
     await expect(suggestions.getByText("Mock Fast", { exact: true })).toBeVisible();
     await expect(suggestions.getByText("Mock Smart", { exact: true })).toBeVisible();
 
-    // Search input is part of the shared selector — filtering narrows the list.
-    await testPage.getByPlaceholder("Filter models...").fill("smart");
-    await expect(suggestions.getByText("Mock Fast", { exact: true })).toHaveCount(0);
+    // Short model lists hide the shared selector's filter input.
+    await expect(testPage.getByPlaceholder("Filter models...")).toHaveCount(0);
 
     // Pick Mock Smart and verify the trigger reflects the selection.
     await suggestions.getByText("Mock Smart", { exact: true }).click();
@@ -390,9 +464,7 @@ test.describe("Utility Agents settings page", () => {
     await expect(
       testPage.getByRole("heading", { name: "Utility Agents", exact: true }),
     ).toBeVisible({ timeout: 15_000 });
-    await expect(
-      testPage.getByRole("heading", { name: "Configuration Chat Agent", exact: true }),
-    ).toBeVisible();
+    await expect(testPage.getByText("Configuration Chat Agent", { exact: true })).toBeVisible();
     await expect(
       testPage.getByText(
         "Choose which agent profile to use for the Configuration Chat. This agent can manage your workflows, agent profiles, and MCP configuration.",
@@ -403,8 +475,6 @@ test.describe("Utility Agents settings page", () => {
     await expect(testPage.getByRole("heading", { name: "Agents", exact: true })).toBeVisible({
       timeout: 15_000,
     });
-    await expect(
-      testPage.getByRole("heading", { name: "Configuration Chat Agent", exact: true }),
-    ).toHaveCount(0);
+    await expect(testPage.getByText("Configuration Chat Agent", { exact: true })).toHaveCount(0);
   });
 });

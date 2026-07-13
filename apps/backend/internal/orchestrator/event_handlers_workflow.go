@@ -56,6 +56,10 @@ func (s *Service) processOnTurnComplete(ctx context.Context, task *models.Task, 
 		return false
 	}
 
+	if s.turnCompleteBlockedByUserInput(ctx, taskID, sessionID, session) {
+		return false
+	}
+
 	// ADR 0015 — explicit completion signal gating (legacy path mirror of
 	// processOnTurnCompleteViaEngine). Steps marked
 	// `auto_advance_requires_signal=true` wait for a step_complete_kandev
@@ -266,6 +270,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Publish task updated event via the task service so the payload carries
 	// the full context (session counts, primary session, repositories).
 	s.publishTaskUpdated(ctx, task)
+	s.processParentChildrenCompletedForTerminalStepMove(ctx, taskID, toStepID)
 
 	s.logger.Info("workflow transition completed",
 		zap.String("task_id", taskID),
@@ -323,6 +328,8 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 		return
 	}
 
+	s.processParentChildrenCompletedForTerminalStepMove(ctx, data.TaskID, data.ToStepID)
+
 	// No session yet — check if we need to create one via auto-start
 	if data.SessionID == "" {
 		s.handleTaskMovedNoSession(ctx, data)
@@ -360,7 +367,8 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		return
 	}
 
-	agentProfileID := s.resolveStepAgentProfile(ctx, step)
+	workflowAgentProfileID := s.resolveStepAgentProfile(ctx, step)
+	agentProfileID := workflowAgentProfileID
 	if agentProfileID == "" {
 		agentProfileID, _ = task.Metadata[models.MetaKeyAgentProfileID].(string)
 	}
@@ -379,7 +387,11 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
 	go func() {
 		asyncCtx := context.WithoutCancel(ctx)
-		_, err := s.StartTask(asyncCtx, task.ID, agentProfileID, executorID, executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
+		startAgentProfileID := agentProfileID
+		if workflowAgentProfileID != "" {
+			startAgentProfileID = ""
+		}
+		_, err := s.StartTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
 		if err != nil {
 			s.logger.Error("task.moved: failed to auto-start task",
 				zap.String("task_id", data.TaskID),
@@ -598,8 +610,7 @@ func (s *Service) reuseSessionForStep(ctx context.Context, taskID string, curren
 		s.reviveReusedSession(ctx, existing)
 	}
 
-	// Note: do not stamp created_by here. Reused sessions keep whatever
-	// provenance tag they had when first created.
+	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
 
 	if err := s.SetPrimarySession(ctx, existing.ID); err != nil {
 		s.logger.Warn("failed to set reused session as primary",
@@ -779,6 +790,9 @@ func (s *Service) maybySwitchSessionForProfile(
 	}
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	if effectiveProfile == "" || effectiveProfile == session.AgentProfileID {
+		if effectiveProfile != "" {
+			s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+		}
 		if !session.IsPrimary {
 			if err := s.SetPrimarySession(ctx, session.ID); err != nil {
 				s.logger.Warn("failed to preserve session as primary for workflow step",
@@ -1044,6 +1058,8 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		zap.String("from_step_id", fromStepID),
 		zap.String("to_step_id", move.WorkflowStepID))
 
+	s.syncTaskStateForPendingMove(ctx, taskID, fromStepID, move.WorkflowStepID)
+
 	// Run on_exit + on_enter asynchronously. This call originated from
 	// handleAgentReady on the WS event reader goroutine; processStepExitAndEnter
 	// can take many seconds (resume + agentctl bootstrap) and would otherwise
@@ -1053,6 +1069,44 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 	// it's safe to defer the rest.
 	taskDescription := task.Description
 	go s.processStepExitAndEnter(context.WithoutCancel(ctx), taskID, session, fromStepID, move.WorkflowStepID, taskDescription)
+}
+
+func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromStepID, toStepID string) {
+	if s.workflowStepIsTerminal(ctx, toStepID) {
+		s.markTaskCompletedForTerminalStep(ctx, taskID, toStepID)
+		return
+	}
+	if fromStepID == toStepID || !s.workflowStepIsTerminal(ctx, fromStepID) {
+		return
+	}
+
+	s.taskRuntimeStateMu.Lock()
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.taskRuntimeStateMu.Unlock()
+		s.logger.Warn("pending move state sync: failed to load task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	if task.WorkflowStepID != toStepID || task.State != v1.TaskStateCompleted {
+		s.taskRuntimeStateMu.Unlock()
+		return
+	}
+
+	oldState := task.State
+	task.State = v1.TaskStateTODO
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.repo.UpdateTask(ctx, task); err != nil {
+		s.taskRuntimeStateMu.Unlock()
+		s.logger.Warn("pending move state sync: failed to reopen completed task",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	s.taskRuntimeStateMu.Unlock()
+	s.publishTaskUpdated(ctx, task)
+	s.publishTaskStateChanged(ctx, task, oldState)
 }
 
 // drainQueuedMessageForPromptableSession takes the next queued message and dispatches
@@ -2008,6 +2062,9 @@ func (s *Service) processOnTurnCompleteViaEngine(ctx context.Context, taskID str
 		s.setSessionWaitingForInput(ctx, taskID, session.ID, session)
 		return false
 	}
+	if s.turnCompleteBlockedByUserInput(ctx, taskID, session.ID, session) {
+		return false
+	}
 	if currentStep.AutoAdvanceRequiresSignal {
 		signal, has := models.LoadPendingStepSignal(session.Metadata)
 		if !has || signal.StepID != task.WorkflowStepID {
@@ -2093,6 +2150,8 @@ func (s *Service) applyEngineTransition(
 		}
 	}
 
+	terminalTarget := s.workflowStepIsTerminal(ctx, targetStep.ID)
+
 	fromStep, err := s.workflowStepGetter.GetStep(ctx, result.FromStepID)
 	if err != nil {
 		s.logger.Warn("failed to load from-step for on_exit",
@@ -2126,6 +2185,10 @@ func (s *Service) applyEngineTransition(
 		}
 	}
 
+	if terminalTarget {
+		s.markTaskCompletedForTerminalStep(ctx, taskID, targetStep.ID)
+	}
+
 	if !triggerOnEnter {
 		// on_turn_start transitions: user is about to send a message, no on_enter needed.
 		// However, we still need to switch the agent profile if the target step requires
@@ -2152,12 +2215,15 @@ func (s *Service) applyEngineTransition(
 	// IN_PROGRESS, leaving the spinner spinning in the new column even though
 	// the agent has paused. If the target step's on_enter starts another agent,
 	// setSessionRunning will flip tasks.state back to IN_PROGRESS — the
-	// REVIEW write is a safe intermediate that any active-running follow-up
-	// will overwrite.
+	// REVIEW write is a safe intermediate when no sibling session is already
+	// working; otherwise the task should remain IN_PROGRESS until all active
+	// agent work has paused.
 	if session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateStarting {
 		s.updateTaskSessionState(ctx, taskID, session.ID, models.TaskSessionStateWaitingForInput, "", false, session)
 		session.State = models.TaskSessionStateWaitingForInput
-		s.writeTaskReviewState(ctx, taskID)
+		if !terminalTarget {
+			s.writeTaskReviewState(ctx, taskID, session.ID)
+		}
 	}
 
 	// Launch processOnEnter asynchronously to avoid blocking the stream reader goroutine.

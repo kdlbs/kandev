@@ -32,7 +32,11 @@ export function ProviderTierMapping({
   disabled,
 }: Props) {
   const setTier = (key: keyof TierMap, value: string) =>
-    onChange({ ...profile, tier_map: { ...profile.tier_map, [key]: value } });
+    onChange({
+      ...profile,
+      tier_map: { ...profile.tier_map, [key]: value },
+      tier_profile_ids: { ...(profile.tier_profile_ids ?? {}), [key]: undefined },
+    });
 
   return (
     <div className="rounded-lg border border-border p-4 space-y-3">

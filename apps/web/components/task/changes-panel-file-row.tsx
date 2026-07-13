@@ -42,7 +42,7 @@ type FileRowProps = {
   onStage: (path: string, repo?: string) => void;
   onUnstage: (path: string, repo?: string) => void;
   onDiscard: (path: string, repo?: string) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   /**
    * Tree mode: skip the folder prefix, swap the left-side stage button for a
    * filetype icon, and surface the stage action only on row hover (VS Code-
@@ -76,7 +76,7 @@ export function FileRow({
     const consumed = onSelect?.(file.path, e);
     if (!consumed) {
       if (getFileCategory(file.path) === "image") {
-        onEditFile(file.path);
+        onEditFile(file.path, file.repositoryName);
         return;
       }
       onOpenDiff(file.path, {
@@ -254,7 +254,7 @@ function FileRowActions({
   path: string;
   repo?: string;
   onDiscard: (path: string, repo?: string) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
 }) {
   return (
     <div
@@ -283,7 +283,7 @@ function FileRowActions({
             className="text-muted-foreground hover:text-foreground cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
-              onEditFile(path);
+              onEditFile(path, repo);
             }}
           >
             <IconPencil className="h-3.5 w-3.5" />

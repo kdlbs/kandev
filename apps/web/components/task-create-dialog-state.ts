@@ -11,6 +11,7 @@ import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
 import { getTaskCreateDraft, setTaskCreateDraft, removeTaskCreateDraft } from "@/lib/local-storage";
 import type {
   StepType,
@@ -197,7 +198,15 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   if (ghUrl) {
     const seededBranch = iv?.checkoutBranch ?? iv?.branch ?? "";
     resetters.setRemoteRepos([
-      { key: "remote-0", url: ghUrl, branch: seededBranch, source: "paste" },
+      {
+        key: "remote-0",
+        url: ghUrl,
+        branch: seededBranch,
+        source: "paste",
+        prNumber: iv?.prNumber,
+        prBaseBranch: iv?.prBaseBranch,
+        prHeadBranch: iv?.checkoutBranch,
+      },
     ]);
   } else {
     resetters.setRemoteRepos([]);
@@ -565,9 +574,9 @@ export function useTaskCreateDialogData(
   const agentProfiles = useAppStore((state) => state.agentProfiles.items);
   const executors = useAppStore((state) => state.executors.items);
   const settingsData = useAppStore((state) => state.settingsData);
-  const taskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
   const availableAgentsLoaded = useAppStore((state) => state.availableAgents.loaded);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const taskCreateUserSettings = useEnsureUserSettings(open);
 
   useSettingsData(open);
   const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
@@ -602,7 +611,8 @@ export function useTaskCreateDialogData(
     repositories,
     repositoriesLoading,
     branchesLoading,
-    taskCreateLastUsed,
+    taskCreateLastUsed: taskCreateUserSettings.userSettings.taskCreateLastUsed,
+    userSettingsLoaded: taskCreateUserSettings.loaded,
     computed,
   };
 }

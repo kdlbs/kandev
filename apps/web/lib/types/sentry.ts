@@ -8,6 +8,12 @@ export const SENTRY_AUTH_METHOD: SentryAuthMethod = "auth_token";
 export const SENTRY_DEFAULT_URL = "https://sentry.io";
 
 export interface SentryConfig {
+  // ID is the instance UUID: stable for the life of the instance, used as the
+  // secret key, client-cache key, and issue-watch foreign key.
+  id: string;
+  workspaceId: string;
+  // Name is the user-facing label, required and unique within a workspace.
+  name: string;
   authMethod: SentryAuthMethod;
   url: string;
   hasSecret: boolean;
@@ -18,10 +24,31 @@ export interface SentryConfig {
   updatedAt: string;
 }
 
-export interface SetSentryConfigRequest {
+// CreateSentryConfigRequest creates a new named Sentry instance in a workspace.
+export interface CreateSentryConfigRequest {
+  workspaceId: string;
+  name: string;
   authMethod: SentryAuthMethod;
   url: string;
   secret: string;
+}
+
+// UpdateSentryConfigRequest updates an existing instance by ID. A blank secret
+// keeps the stored value; a non-empty secret replaces it. Name/URL/AuthMethod
+// always replace the stored values.
+export interface UpdateSentryConfigRequest {
+  name: string;
+  authMethod: SentryAuthMethod;
+  url: string;
+  secret: string;
+}
+
+// CopySentryConfigRequest copies every instance from the source workspace into
+// the target workspace: fresh IDs, secrets copied under new keys, names deduped,
+// no watches carried over.
+export interface CopySentryConfigRequest {
+  sourceWorkspaceId: string;
+  targetWorkspaceId: string;
 }
 
 export interface TestSentryConnectionResult {
@@ -85,6 +112,12 @@ export interface SentrySearchResult {
 export interface SentryIssueWatch {
   id: string;
   workspaceId: string;
+  /**
+   * The Sentry instance this watch polls. Immutable after create — changing it
+   * means creating a new watch. Empty string = legacy unbound watch (resolved
+   * to the workspace's sole instance at poll time).
+   */
+  sentryInstanceId: string;
   workflowId: string;
   workflowStepId: string;
   /**
@@ -109,6 +142,11 @@ export interface SentryIssueWatch {
 
 export interface CreateSentryIssueWatchRequest {
   workspaceId: string;
+  /**
+   * The Sentry instance to poll. Required and must belong to `workspaceId`.
+   * Immutable after creation.
+   */
+  sentryInstanceId: string;
   workflowId: string;
   workflowStepId: string;
   /** Optional repository binding; empty/omitted = unbound (repo-less task). */

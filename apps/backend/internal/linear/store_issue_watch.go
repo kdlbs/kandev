@@ -28,6 +28,7 @@ type issueWatchRow struct {
 	Enabled             bool          `db:"enabled"`
 	PollIntervalSeconds int           `db:"poll_interval_seconds"`
 	MaxInflightTasks    sql.NullInt64 `db:"max_inflight_tasks"`
+	SortBy              string        `db:"sort_by"`
 	LastPolledAt        *time.Time    `db:"last_polled_at"`
 	LastError           string        `db:"last_error"`
 	LastErrorAt         *time.Time    `db:"last_error_at"`
@@ -61,6 +62,7 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 		Enabled:             r.Enabled,
 		PollIntervalSeconds: r.PollIntervalSeconds,
 		MaxInflightTasks:    maxInflight,
+		SortBy:              IssueSortBy(r.SortBy),
 		LastPolledAt:        r.LastPolledAt,
 		LastError:           r.LastError,
 		LastErrorAt:         r.LastErrorAt,
@@ -84,14 +86,14 @@ func encodeFilter(f SearchFilter) (string, error) {
 const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id,
 	repository_id, base_branch, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
-	poll_interval_seconds, max_inflight_tasks, last_polled_at,
+	poll_interval_seconds, max_inflight_tasks, sort_by, last_polled_at,
 	last_error, last_error_at,
 	created_at, updated_at`
 
 const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id,
 	COALESCE(repository_id, '') AS repository_id, COALESCE(base_branch, '') AS base_branch, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
-	poll_interval_seconds, max_inflight_tasks, last_polled_at,
+	poll_interval_seconds, max_inflight_tasks, sort_by, last_polled_at,
 	COALESCE(last_error, '') AS last_error, last_error_at,
 	created_at, updated_at`
 
@@ -113,11 +115,11 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO linear_issue_watches (`+issueWatchInsertColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID,
 		w.RepositoryID, w.BaseBranch, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
-		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), w.LastPolledAt,
+		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), string(w.SortBy), w.LastPolledAt,
 		w.LastError, w.LastErrorAt,
 		w.CreatedAt, w.UpdatedAt)
 	return err
@@ -212,13 +214,13 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 			repository_id = ?, base_branch = ?, filter_json = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?,
 			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?,
-			last_polled_at = ?, updated_at = ?
+			sort_by = ?, last_polled_at = ?, updated_at = ?
 		WHERE id = ?`,
 		w.WorkflowID, w.WorkflowStepID,
 		w.RepositoryID, w.BaseBranch, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt,
 		w.Enabled, w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks),
-		w.LastPolledAt, w.UpdatedAt, w.ID)
+		string(w.SortBy), w.LastPolledAt, w.UpdatedAt, w.ID)
 	return err
 }
 

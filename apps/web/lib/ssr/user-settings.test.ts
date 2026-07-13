@@ -59,6 +59,35 @@ describe("buildCoreFields", () => {
     const result = buildCoreFields(settings);
     expect(result.terminalFontFamily).toBeNull();
   });
+
+  it("does not mark an empty task-create last-used object as synced", () => {
+    const settings = {
+      task_create_last_used: {},
+    } as unknown as Parameters<typeof buildCoreFields>[0];
+
+    const result = buildCoreFields(settings);
+    expect(result.taskCreateLastUsed).toEqual({
+      repositoryId: null,
+      branch: null,
+      agentProfileId: null,
+      executorProfileId: null,
+      synced: false,
+    });
+  });
+
+  it("marks task-create last-used as synced when a field is present", () => {
+    const settings = {
+      task_create_last_used: {
+        repository_id: "repo-1",
+      },
+    } as unknown as Parameters<typeof buildCoreFields>[0];
+
+    const result = buildCoreFields(settings);
+    expect(result.taskCreateLastUsed).toMatchObject({
+      repositoryId: "repo-1",
+      synced: true,
+    });
+  });
 });
 
 describe("buildTerminalFields via buildCoreFields", () => {

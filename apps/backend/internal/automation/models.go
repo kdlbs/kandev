@@ -45,6 +45,14 @@ const (
 	RunStatusSucceeded   RunStatus = "succeeded"
 	RunStatusFailed      RunStatus = "failed"
 	RunStatusSkipped     RunStatus = "skipped"
+	// RunStatusCancelled is a read-time-derived terminal status: it is never
+	// written by a trigger-firing code path, only computed by ListRuns (and
+	// implied by CountActiveRuns' filter) when a task_created run's
+	// generated task has been archived or no longer exists. The task's
+	// outcome is unknown at that point — the user closed it out some other
+	// way — so this is deliberately distinct from succeeded/failed rather
+	// than guessing one.
+	RunStatusCancelled RunStatus = "cancelled"
 )
 
 // ExecutionMode controls whether an automation firing creates a visible

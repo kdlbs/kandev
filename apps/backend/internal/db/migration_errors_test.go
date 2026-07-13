@@ -143,3 +143,55 @@ func TestIsAlreadyExistsError(t *testing.T) {
 		})
 	}
 }
+
+func TestIsMissingTableError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "sqlite no such table",
+			err:  errors.New("no such table: tasks"),
+			want: true,
+		},
+		{
+			name: "wrapped sqlite no such table",
+			err:  fmt.Errorf("count active runs: %w", errors.New("no such table: tasks")),
+			want: true,
+		},
+		{
+			name: "postgres undefined table",
+			err:  &pgconn.PgError{Code: postgresUndefinedTable},
+			want: true,
+		},
+		{
+			name: "wrapped postgres undefined table",
+			err:  fmt.Errorf("count active runs: %w", &pgconn.PgError{Code: postgresUndefinedTable}),
+			want: true,
+		},
+		{
+			name: "postgres undefined column is not a missing table",
+			err:  &pgconn.PgError{Code: "42703"},
+			want: false,
+		},
+		{
+			name: "unrelated",
+			err:  errors.New("duplicate column name: branch_slug"),
+			want: false,
+		},
+		{
+			name: "nil",
+			err:  nil,
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsMissingTableError(tt.err); got != tt.want {
+				t.Fatalf("IsMissingTableError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

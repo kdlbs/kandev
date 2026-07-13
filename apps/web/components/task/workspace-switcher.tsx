@@ -43,15 +43,15 @@ export function WorkspaceSwitcher({
           type="button"
           title="Switch Workspace"
           className={cn(
-            "group flex items-center gap-1 text-sm font-medium cursor-pointer",
+            "group flex h-8 min-w-0 items-center gap-1.5 rounded-md border bg-background px-2.5 text-sm font-medium cursor-pointer",
             "text-muted-foreground hover:text-foreground transition-colors duration-150",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded",
+            "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           )}
         >
           <span className="truncate">{selectedWorkspace?.name || "Workspace"}</span>
           <IconChevronDown
             className={cn(
-              "h-3.5 w-3.5 shrink-0 opacity-0 group-hover:opacity-50 transition-opacity duration-150",
+              "h-3.5 w-3.5 shrink-0 opacity-60 group-hover:opacity-80 transition-opacity duration-150",
             )}
           />
         </button>

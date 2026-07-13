@@ -2,10 +2,17 @@ package shared
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/workflow/engine"
 )
+
+// ErrEngineNoSession is returned by WorkflowEngineDispatcher when a task has
+// no active or reusable session, so the workflow engine cannot evaluate a
+// trigger for it.
+var ErrEngineNoSession = errors.New("workflow engine: no active session for task")
 
 // AgentReader provides read access to agent instances.
 // Implemented by the agents feature (and transitionally by office/service.Service).
@@ -34,6 +41,19 @@ type RunQueuer interface {
 	// QueueRun enqueues a run for agentInstanceID with the given reason, payload,
 	// and optional idempotency key (empty string disables deduplication).
 	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) error
+}
+
+// WorkflowEngineDispatcher routes typed office task events through the
+// workflow engine. Implementations resolve the task's session and translate
+// typed trigger payloads into engine.HandleInput.
+type WorkflowEngineDispatcher interface {
+	HandleTrigger(
+		ctx context.Context,
+		taskID string,
+		trigger engine.Trigger,
+		payload any,
+		operationID string,
+	) error
 }
 
 // ActivityLogger logs activity entries across office features.

@@ -247,6 +247,14 @@ type Adapter struct {
 	// blocking on a stuck turn).
 	promptGate chan struct{}
 
+	// asyncTurnFinalizers synthesize a turn completion for ACP updates that
+	// arrive while no session/prompt RPC is active. Claude's Monitor tool can
+	// produce assistant chunks from a background callback without returning a
+	// prompt response, so sendPrompt's normal complete emission never runs.
+	asyncTurnMu         sync.Mutex
+	asyncTurnFinalizers map[string]*asyncTurnFinalizer
+	asyncTurnEpochs     map[string]uint64
+
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
 	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
 	// context from this one so it aborts when the adapter shuts down rather
@@ -262,6 +270,12 @@ type promptTurnState struct {
 	abortCh chan struct{}
 }
 
+type asyncTurnFinalizer struct {
+	timer       *time.Timer
+	seq         uint64
+	promptEpoch uint64
+}
+
 // promptCancelJoinTimeout bounds how long Cancel and sendPrompt wait for a stuck
 // session/prompt RPC to end after a user cancel. Exposed as a var for tests.
 var promptCancelJoinTimeout = 3 * time.Second
@@ -273,20 +287,22 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Adapter{
-		cfg:             cfg,
-		logger:          l,
-		agentID:         cfg.AgentID,
-		normalizer:      NewNormalizer(cfg.AgentID),
-		updatesCh:       make(chan AgentEvent, 100),
-		notifQueue:      make(chan notifWork, notifQueueCapacity),
-		activeToolCalls: make(map[string]*streams.NormalizedPayload),
-		activeMonitors:  make(map[string]map[string]string),
-		pendingWakeups:  make(map[string]*pendingWakeup),
-		usageBySession:  make(map[string]*usageTracker),
-		attachMgr:       shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
-		promptGate:      make(chan struct{}, 1),
-		lifetimeCtx:     ctx,
-		lifetimeCancel:  cancel,
+		cfg:                 cfg,
+		logger:              l,
+		agentID:             cfg.AgentID,
+		normalizer:          NewNormalizer(cfg.AgentID),
+		updatesCh:           make(chan AgentEvent, 100),
+		notifQueue:          make(chan notifWork, notifQueueCapacity),
+		activeToolCalls:     make(map[string]*streams.NormalizedPayload),
+		activeMonitors:      make(map[string]map[string]string),
+		pendingWakeups:      make(map[string]*pendingWakeup),
+		usageBySession:      make(map[string]*usageTracker),
+		attachMgr:           shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		promptGate:          make(chan struct{}, 1),
+		asyncTurnFinalizers: make(map[string]*asyncTurnFinalizer),
+		asyncTurnEpochs:     make(map[string]uint64),
+		lifetimeCtx:         ctx,
+		lifetimeCancel:      cancel,
 	}
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
 	// Start the update worker before returning so any caller that connects
@@ -481,6 +497,7 @@ func (a *Adapter) Close() error {
 	if a.wakeup != nil {
 		a.wakeup.cancel()
 	}
+	a.cancelAllAsyncTurnCompletes()
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
 	}

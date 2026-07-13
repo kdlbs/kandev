@@ -6,8 +6,14 @@ import (
 
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
+var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
+var ErrTaskNotFound = repoerrors.ErrTaskNotFound
+var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -15,6 +21,8 @@ type WorkspaceRepository interface {
 	GetWorkspace(ctx context.Context, id string) (*models.Workspace, error)
 	UpdateWorkspace(ctx context.Context, workspace *models.Workspace) error
 	DeleteWorkspace(ctx context.Context, id string) error
+	DeleteWorkspaceCascade(ctx context.Context, id string) ([]*models.Task, []*models.Workflow, error)
+	DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error)
 	ListWorkspaces(ctx context.Context) ([]*models.Workspace, error)
 }
 
@@ -27,7 +35,7 @@ type TaskRepository interface {
 	UpdateTask(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
-	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
+	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
 	ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error)
 	ArchiveTask(ctx context.Context, id string) error
 	// ArchiveTaskIfActive is the CAS variant used by office task-handoffs
@@ -37,6 +45,8 @@ type TaskRepository interface {
 	// archived by the named cascade. Returns whether the row was updated.
 	UnarchiveTaskByCascade(ctx context.Context, id, cascadeID string) (bool, error)
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
+	ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error)
+	DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error)
 	// CountOpenWatcherCreatedTasks returns the number of open watcher-created
 	// tasks for a single watch, identified by the integration's task-metadata
 	// key (e.g. "sentry_issue_watch_id") and the watch id. Open = non-archived
@@ -112,6 +122,7 @@ type MessageRepository interface {
 	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*models.Message, error)
 	FindMessageByPendingIDAndQuestion(ctx context.Context, sessionID, pendingID, questionID string) (*models.Message, error)
 	FindPendingClarificationMessagesBySessionID(ctx context.Context, sessionID string) ([]*models.Message, error)
+	GetPendingActionsBySessionIDs(ctx context.Context, sessionIDs []string) (map[string]models.TaskPendingAction, error)
 	UpdateMessage(ctx context.Context, message *models.Message) error
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
 	ListMessagesByTurnID(ctx context.Context, turnID string) ([]*models.Message, error)
@@ -174,6 +185,7 @@ type SessionRepository interface {
 type SessionWorktreeRepository interface {
 	CreateTaskSessionWorktree(ctx context.Context, sessionWorktree *models.TaskSessionWorktree) error
 	UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error
+	UpdateTaskSessionWorktreeBranchByRepository(ctx context.Context, sessionID, repositoryID, branch string) error
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
 	ListWorktreesBySessionIDs(ctx context.Context, sessionIDs []string) (map[string][]*models.TaskSessionWorktree, error)
 	DeleteTaskSessionWorktree(ctx context.Context, id string) error
@@ -242,6 +254,12 @@ type ExecutorRepository interface {
 	// launch) so the row doesn't sit on the misleading default "starting" forever.
 	// Returns models.ErrExecutorRunningNotFound if no row exists for the session.
 	UpdateExecutorRunningStatus(ctx context.Context, sessionID, status string) error
+	// RepairExecutorRunningDead repairs a row in place to reflect a dead backing
+	// process (status=stopped, local_pid cleared, last_seen re-stamped) while
+	// preserving resume_token/worktree/endpoint. Used by cleanup paths to honor
+	// the resume-safety invariant instead of deleting a resumable row.
+	// Returns models.ErrExecutorRunningNotFound if no row exists for the session.
+	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
 }
 
 // EnvironmentRepository handles environment CRUD.
@@ -302,6 +320,7 @@ type PlanRepository interface {
 	CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
+	MarkTaskPlanImplementationStarted(ctx context.Context, taskID, sessionID, actor string) (*models.TaskPlan, error)
 	DeleteTaskPlan(ctx context.Context, taskID string) error
 
 	// Revision history

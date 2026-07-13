@@ -338,16 +338,23 @@ func (s *DashboardService) buildReviewRequestItem(
 	}
 }
 
-// viewerRoles returns the participant roles the viewer holds on the
-// task. For the singleton human user (viewerAgentID == "") every role
-// listed on the task is returned (the human is implicitly all-roles).
-// For an agent, only roles where the agent appears in participants.
+// viewerRoles returns pending decision roles for the viewer. Only
+// decision-required reviewer/approver participants are eligible. For
+// the singleton human user (viewerAgentID == ""), every eligible role
+// is returned; for an agent, only eligible roles where that agent
+// appears in participants are returned.
 func (s *DashboardService) viewerRoles(
 	parts []sqlite.Participant, viewerAgentID string,
 ) []string {
 	seen := map[string]struct{}{}
 	out := []string{}
 	for _, p := range parts {
+		if !p.DecisionRequired {
+			continue
+		}
+		if p.Role != models.ParticipantRoleReviewer && p.Role != models.ParticipantRoleApprover {
+			continue
+		}
 		if viewerAgentID != "" && p.AgentProfileID != viewerAgentID {
 			continue
 		}

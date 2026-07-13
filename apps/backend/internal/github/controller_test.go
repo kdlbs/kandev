@@ -674,6 +674,9 @@ func TestHttpTaskCIOptions_DefaultAndPatch(t *testing.T) {
 	if !got.UsingDefaultPrompt || got.EffectiveAutoFixPrompt != "resolved default prompt" {
 		t.Fatalf("unexpected prompt fields: %+v", got)
 	}
+	if got.AutoFixMaxRounds != TaskCIAutoFixMaxRounds {
+		t.Fatalf("auto-fix max rounds = %d, want %d", got.AutoFixMaxRounds, TaskCIAutoFixMaxRounds)
+	}
 	if len(got.PRStates) != 1 || got.PRStates[0].PRNumber != 42 {
 		t.Fatalf("expected synthesized PR state for PR #42, got %+v", got.PRStates)
 	}

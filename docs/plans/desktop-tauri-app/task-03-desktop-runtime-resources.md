@@ -13,7 +13,7 @@ spec: "../../specs/desktop-tauri-app/spec.md"
 ## Acceptance
 
 - A release helper extracts the existing platform runtime bundle into the deterministic Tauri resource layout.
-- The helper validates `kandev`, `agentctl`, and `agentctl-linux-amd64` requirements consistently with the native launcher.
+- The helper validates `kandev`, `agentctl`, and the remote agentctl helpers consistently with the native launcher.
 - The Tauri app resolves packaged resources without relying on `KANDEV_BUNDLE_DIR` or Node.js at runtime.
 
 ## Verification

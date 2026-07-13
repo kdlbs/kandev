@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { SessionMobileTopBar } from "./session-mobile-top-bar";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
@@ -9,6 +9,7 @@ import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
 import { ReviewDialog } from "@/components/review/review-dialog";
+import { WalkthroughOverlay } from "@/components/review/walkthrough-overlay";
 import { useReviewDialog } from "../use-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughToolbar } from "../passthrough-toolbar";
@@ -51,7 +52,7 @@ function MobileChatPanelContent({
   activeTaskId: string | null;
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
-  onOpenFile: (path: string) => void;
+  onOpenFile: (path: string, repo?: string) => void;
 }) {
   if (!activeTaskId) {
     return (
@@ -233,23 +234,34 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
 function MobileReviewDialogMount({
   sessionId,
   review,
+  activeTaskId,
+  onSelectWalkthroughFile,
 }: {
   sessionId: string | null;
   review: ReturnType<typeof useReviewDialog>;
+  activeTaskId: string | null;
+  onSelectWalkthroughFile: (path: string, repo?: string) => void;
 }) {
   if (!sessionId) return null;
   return (
-    <ReviewDialog
-      open={review.reviewDialogOpen}
-      onOpenChange={review.setReviewDialogOpen}
-      sessionId={sessionId}
-      baseBranch={review.baseBranch}
-      onSendComments={review.handleReviewSendComments}
-      onOpenFile={review.reviewOpenFile}
-      gitStatusFiles={review.reviewGitStatusFiles}
-      cumulativeDiff={review.reviewCumulativeDiff}
-      prDiffFiles={review.reviewPRDiffFiles}
-    />
+    <>
+      <ReviewDialog
+        open={review.reviewDialogOpen}
+        onOpenChange={review.setReviewDialogOpen}
+        sessionId={sessionId}
+        baseBranch={review.baseBranch}
+        onSendComments={review.handleReviewSendComments}
+        onOpenFile={review.reviewOpenFile}
+        gitStatusFiles={review.reviewGitStatusFiles}
+        cumulativeDiff={review.reviewCumulativeDiff}
+        prDiffFiles={review.reviewPRDiffFiles}
+      />
+      <WalkthroughOverlay
+        taskId={activeTaskId}
+        sessionId={sessionId}
+        onSelectFile={onSelectWalkthroughFile}
+      />
+    </>
   );
 }
 
@@ -264,6 +276,7 @@ export function useMobilePanelHandlers({
   const [selectedFile, setSelectedFile] = useState<OpenFileTab | null>(null);
   const [trackedSessionId, setTrackedSessionId] = useState<string | null>(effectiveSessionId);
   const latestRequestIdRef = useRef(0);
+  const openFileAbortRef = useRef<AbortController | null>(null);
 
   // Reset viewer when switching sessions — adjust state during render per
   // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
@@ -272,24 +285,44 @@ export function useMobilePanelHandlers({
     setSelectedFile(null);
   }
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     latestRequestIdRef.current += 1;
+    openFileAbortRef.current?.abort();
+    openFileAbortRef.current = null;
   }, [effectiveSessionId]);
 
+  useEffect(
+    () => () => {
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
+    },
+    [],
+  );
+
   const handleOpenFileFromChat = useCallback(
-    (path: string) => {
+    (path: string, repo?: string) => {
       if (!effectiveSessionId) return;
       const requestId = (latestRequestIdRef.current += 1);
-      void fetchAndOpenFile(
-        effectiveSessionId,
-        path,
-        (file) => {
-          if (requestId !== latestRequestIdRef.current) return;
-          setSelectedFile(file);
-          handlePanelChange("files");
-        },
-        toast,
-      );
+      openFileAbortRef.current?.abort();
+      const controller = new AbortController();
+      openFileAbortRef.current = controller;
+      void Promise.resolve(
+        fetchAndOpenFile(
+          effectiveSessionId,
+          path,
+          (file) => {
+            if (requestId !== latestRequestIdRef.current || controller.signal.aborted) return;
+            setSelectedFile(file);
+            handlePanelChange("files");
+          },
+          toast,
+          { repo, signal: controller.signal },
+        ),
+      ).finally(() => {
+        if (openFileAbortRef.current === controller) {
+          openFileAbortRef.current = null;
+        }
+      });
     },
     [effectiveSessionId, handlePanelChange, toast],
   );
@@ -297,6 +330,8 @@ export function useMobilePanelHandlers({
   const handleOpenFile = useCallback(
     (file: OpenFileTab) => {
       latestRequestIdRef.current += 1;
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
       setSelectedFile(file);
       handlePanelChange("files");
     },
@@ -306,6 +341,8 @@ export function useMobilePanelHandlers({
   const handlePanelChangeAndClearSheet = useCallback(
     (panel: MobileSessionPanel) => {
       latestRequestIdRef.current += 1;
+      openFileAbortRef.current?.abort();
+      openFileAbortRef.current = null;
       setSelectedFile(null);
       handlePanelChange(panel);
     },
@@ -415,7 +452,12 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         workflowId={workflowId}
       />
 
-      <MobileReviewDialogMount sessionId={effectiveSessionId} review={review} />
+      <MobileReviewDialogMount
+        sessionId={effectiveSessionId}
+        review={review}
+        activeTaskId={activeTaskId}
+        onSelectWalkthroughFile={handleOpenFileFromChat}
+      />
     </div>
   );
 });

@@ -8,12 +8,13 @@ import { filterUnpushedCommits, mergeCommits } from "./changes-panel-helpers";
 import { useChangesPanelData, buildChangesPanelBodyProps } from "./changes-panel-data";
 import { ChangesPanelBody } from "./changes-panel-body";
 import type { OpenDiffOptions } from "./changes-diff-target";
+import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 
 export { filterUnpushedCommits, mergeCommits };
 
 type ChangesPanelProps = {
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
-  onEditFile: (path: string) => void;
+  onEditFile: (path: string, repo?: string) => void;
   onOpenCommitDetail?: (sha: string, repo?: string) => void;
   onOpenDiffAll?: () => void;
   onOpenReview?: () => void;
@@ -22,6 +23,11 @@ type ChangesPanelProps = {
 const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
   const isArchived = useIsTaskArchived();
   const data = useChangesPanelData();
+  const requestWalkthrough = useRequestChangesWalkthrough({
+    taskId: data.activeTaskId,
+    sessionId: data.activeSessionId,
+    ready: data.walkthroughRequestReady,
+  });
   if (isArchived) return <ArchivedPanelPlaceholder />;
   return (
     <PanelRoot data-testid="changes-panel">
@@ -37,11 +43,14 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
         loadingOperation={data.git.loadingOperation}
         onOpenDiffAll={props.onOpenDiffAll}
         onOpenReview={props.onOpenReview}
+        onRequestWalkthrough={requestWalkthrough}
+        requestWalkthroughDisabled={!data.walkthroughRequestReady}
         repoNames={data.git.repoNames}
         perRepoStatus={data.git.perRepoStatus}
         onRepoPull={data.repoCallbacks.onRepoPull}
         onRepoRebase={data.repoCallbacks.onRepoRebase}
         onRepoMerge={data.repoCallbacks.onRepoMerge}
+        onRenameBranch={data.git.renameBranch}
         repoDisplayName={data.repoDisplayName}
         taskId={data.activeTaskId}
       />

@@ -27,6 +27,13 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 - A cleanup path MUST NOT delete the last durable runtime handle for a task until
   either the matching runtime execution has stopped successfully or the failure is
   preserved for retry/diagnosis.
+- Worktree and task-environment cleanup is ownership-aware. A task cleanup may
+  destroy only resources owned by that task's `TaskEnvironment`; borrowed or
+  inherited worktrees remain owned by the source task.
+- A `TaskEnvironment` referenced by another active task session is shared for the
+  duration of that session. Cleanup can stop the current task's runtime rows, but
+  must defer destructive worktree/container/sandbox teardown until no other
+  active task session references the environment.
 - Agent subprocess shutdown kills the whole agent process group when graceful
   shutdown does not finish within the configured stop timeout.
 - Agent subprocess shutdown does not treat the command leader exiting as
@@ -133,6 +140,8 @@ Allowed transitions:
   confirmed, the runtime tracking row can still be removed because it no longer
   identifies a live process. The resource cleanup error is logged and handled by
   the resource-specific retry path.
+- If cleanup cannot prove that a session worktree belongs to the task being
+  cleaned, destructive worktree deletion fails closed and skips that worktree.
 - If an agentctl process exits unexpectedly, its owned agent subprocess group is
   killed before agentctl shutdown completes.
 - If the user sends Ctrl+C to a standalone Kandev process tree, agentctl does
@@ -191,6 +200,13 @@ Allowed transitions:
 - **GIVEN** the `executors_running` query fails during archive cleanup, **WHEN**
   cleanup evaluates destructive actions, **THEN** it logs the failure and does not
   delete runtime tracking rows based on incomplete information.
+- **GIVEN** a child task reuses its parent's `TaskEnvironment`, **WHEN** the child
+  is archived or deleted, **THEN** cleanup stops the child's runtime rows without
+  deleting the inherited parent worktree.
+- **GIVEN** a parent task owns a `TaskEnvironment` that an active child session
+  still references, **WHEN** parent cleanup runs, **THEN** destructive
+  environment and worktree teardown is deferred until the child no longer holds
+  the environment.
 
 ## Out of Scope
 

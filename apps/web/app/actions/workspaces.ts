@@ -115,19 +115,21 @@ type ListTasksOptions = {
   query?: string;
   workflowId?: string | null;
   repositoryId?: string | null;
+  sort?: string;
 };
 
 export async function listTasksByWorkspaceAction(
   workspaceId: string,
   options: ListTasksOptions = {},
 ): Promise<ListTasksResponse> {
-  const { page = 1, pageSize = 50, query, workflowId, repositoryId } = options;
+  const { page = 1, pageSize = 50, query, workflowId, repositoryId, sort } = options;
   const url = new URL(`${apiBaseUrl}/api/v1/workspaces/${workspaceId}/tasks`);
   url.searchParams.set("page", String(page));
   url.searchParams.set("page_size", String(pageSize));
   if (query) url.searchParams.set("query", query);
   if (workflowId) url.searchParams.set("workflow_id", workflowId);
   if (repositoryId) url.searchParams.set("repository_id", repositoryId);
+  if (sort) url.searchParams.set("sort", sort);
   return fetchJson<ListTasksResponse>(url.toString());
 }
 
@@ -221,6 +223,7 @@ export async function createRepositoryAction(payload: {
   provider_name: string;
   default_branch: string;
   worktree_branch_prefix: string;
+  worktree_branch_template: string;
   pull_before_worktree: boolean;
   setup_script: string;
   cleanup_script: string;
@@ -241,6 +244,7 @@ export async function createRepositoryAction(payload: {
         provider_name: payload.provider_name,
         default_branch: payload.default_branch,
         worktree_branch_prefix: payload.worktree_branch_prefix,
+        worktree_branch_template: payload.worktree_branch_template,
         pull_before_worktree: payload.pull_before_worktree,
         setup_script: payload.setup_script,
         cleanup_script: payload.cleanup_script,

@@ -21,6 +21,14 @@ describe("classifyTask", () => {
   it("buckets STARTING with REVIEW task state as review", () => {
     expect(classifyTask("STARTING", "REVIEW")).toBe("review");
   });
+
+  it("uses task state while a CREATED session is booting", () => {
+    expect(classifyTask("CREATED", "IN_PROGRESS")).toBe("in_progress");
+    expect(classifyTask("CREATED", "SCHEDULING")).toBe("in_progress");
+    expect(classifyTask("CREATED", "REVIEW")).toBe("review");
+    expect(classifyTask("CREATED", "CREATED")).toBe("backlog");
+    expect(classifyTask("CREATED", "TODO")).toBe("backlog");
+  });
 });
 
 describe("applySort state (regression: silent resume reorder)", () => {

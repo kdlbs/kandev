@@ -68,39 +68,41 @@ type GetRepositoryRequest struct {
 }
 
 type CreateRepositoryRequest struct {
-	WorkspaceID          string
-	Name                 string
-	SourceType           string
-	LocalPath            string
-	Provider             string
-	ProviderRepoID       string
-	ProviderOwner        string
-	ProviderName         string
-	DefaultBranch        string
-	WorktreeBranchPrefix string
-	PullBeforeWorktree   *bool
-	SetupScript          string
-	CleanupScript        string
-	DevScript            string
-	CopyFiles            string
+	WorkspaceID            string
+	Name                   string
+	SourceType             string
+	LocalPath              string
+	Provider               string
+	ProviderRepoID         string
+	ProviderOwner          string
+	ProviderName           string
+	DefaultBranch          string
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	PullBeforeWorktree     *bool
+	SetupScript            string
+	CleanupScript          string
+	DevScript              string
+	CopyFiles              string
 }
 
 type UpdateRepositoryRequest struct {
-	ID                   string
-	Name                 *string
-	SourceType           *string
-	LocalPath            *string
-	Provider             *string
-	ProviderRepoID       *string
-	ProviderOwner        *string
-	ProviderName         *string
-	DefaultBranch        *string
-	WorktreeBranchPrefix *string
-	PullBeforeWorktree   *bool
-	SetupScript          *string
-	CleanupScript        *string
-	DevScript            *string
-	CopyFiles            *string
+	ID                     string
+	Name                   *string
+	SourceType             *string
+	LocalPath              *string
+	Provider               *string
+	ProviderRepoID         *string
+	ProviderOwner          *string
+	ProviderName           *string
+	DefaultBranch          *string
+	WorktreeBranchPrefix   *string
+	WorktreeBranchTemplate *string
+	PullBeforeWorktree     *bool
+	SetupScript            *string
+	CleanupScript          *string
+	DevScript              *string
+	CopyFiles              *string
 }
 
 type DeleteRepositoryRequest struct {

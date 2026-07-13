@@ -46,6 +46,11 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 func (r *Repository) runMigrations() error {
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
 	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
+	// local_pid holds a host-local liveness handle (the standalone agentctl
+	// control-server PID Kandev spawns) for local/standalone rows. It is kept
+	// deliberately separate from the SSH-only `pid` column, which holds an
+	// agentctl PID on the *remote* host. See ADR 0025 / issue #1597.
+	r.migrate.Apply("executors_running.local_pid", `ALTER TABLE executors_running ADD COLUMN local_pid INTEGER DEFAULT 0`)
 	r.migrate.Apply("tasks.is_ephemeral", `ALTER TABLE tasks ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_repositories.checkout_branch", `ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
 	// Multi-branch support: drop the old UNIQUE(task_id, repository_id) and
@@ -91,6 +96,11 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_sessions.workspace_path", `ALTER TABLE task_sessions ADD COLUMN workspace_path TEXT DEFAULT ''`)
 	r.migrate.Apply("repositories.copy_files", `ALTER TABLE repositories ADD COLUMN copy_files TEXT DEFAULT ''`)
+	r.migrate.Apply("repositories.worktree_branch_template", `ALTER TABLE repositories ADD COLUMN worktree_branch_template TEXT DEFAULT 'feature/{title}-{suffix}'`)
+	r.migrate.Apply("repositories.worktree_branch_template.backfill", `UPDATE repositories SET worktree_branch_template = COALESCE(NULLIF(TRIM(worktree_branch_prefix), ''), 'feature/') || '{title}-{suffix}'`)
+	r.migrate.Apply("task_plans.implementation_started_at", `ALTER TABLE task_plans ADD COLUMN implementation_started_at TIMESTAMP`)
+	r.migrate.Apply("task_plans.implementation_started_session_id", `ALTER TABLE task_plans ADD COLUMN implementation_started_session_id TEXT`)
+	r.migrate.Apply("task_plans.implementation_started_by", `ALTER TABLE task_plans ADD COLUMN implementation_started_by TEXT`)
 
 	// Authoritative per-message change signal (chat render-perf). SQLite forbids a
 	// non-constant default on ADD COLUMN, so the column is added nullable and
@@ -452,7 +462,7 @@ BEGIN
 		AND nsp.nspname = current_schema()
 		AND con.contype = 'u'
 		AND (
-			SELECT array_agg(attr.attname ORDER BY cols.ordinality)
+			SELECT array_agg(attr.attname::text ORDER BY cols.ordinality)
 			FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
 			JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
 		) = ARRAY['task_environment_id', 'repository_id'];
@@ -470,7 +480,7 @@ BEGIN
 			AND nsp.nspname = current_schema()
 			AND con.contype = 'u'
 			AND (
-				SELECT array_agg(attr.attname ORDER BY cols.ordinality)
+				SELECT array_agg(attr.attname::text ORDER BY cols.ordinality)
 				FROM unnest(con.conkey) WITH ORDINALITY AS cols(attnum, ordinality)
 				JOIN pg_attribute attr ON attr.attrelid = con.conrelid AND attr.attnum = cols.attnum
 			) = ARRAY['task_environment_id', 'repository_id', 'branch_slug']

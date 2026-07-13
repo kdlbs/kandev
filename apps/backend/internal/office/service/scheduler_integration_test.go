@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -51,6 +52,73 @@ func TestSchedulerIntegration_TickProcessesRun(t *testing.T) {
 	if next != nil {
 		t.Error("expected no more runs after processing")
 	}
+}
+
+func TestSchedulerIntegration_ResolvesExecutorFromTaskProject(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := makeAgent("worker-project-exec", models.AgentRoleWorker)
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	project := &models.Project{
+		WorkspaceID:    "ws-1",
+		Name:           "Project Executor",
+		ExecutorConfig: `{"type":"local_pc"}`,
+	}
+	if err := svc.CreateProject(ctx, project); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks
+		(id, workspace_id, project_id, title, description, created_at, updated_at)
+		VALUES ('task-project-exec', 'ws-1', ?, 'Project executor task', 'desc',
+		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, project.ID)
+
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-project-exec"}`, ""); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	if mock.callCount() != 1 {
+		t.Fatalf("StartTask calls = %d, want 1", mock.callCount())
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var runID string
+	for _, run := range runs {
+		if run.AgentProfileID == agent.ID && run.Reason == service.RunReasonTaskAssigned {
+			runID = run.ID
+			break
+		}
+	}
+	if runID == "" {
+		t.Fatalf("missing task_assigned run for %s: %#v", agent.ID, runs)
+	}
+	events, err := svc.ListRunEventsForTest(ctx, runID)
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	for _, event := range events {
+		if event.EventType != "adapter.invoke" {
+			continue
+		}
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+			t.Fatalf("unmarshal adapter event payload: %v", err)
+		}
+		if payload["executor_type"] != "local_pc" {
+			t.Fatalf("executor_type = %v, want local_pc", payload["executor_type"])
+		}
+		return
+	}
+	t.Fatalf("missing adapter.invoke event for run %s: %#v", runID, events)
 }
 
 func TestSchedulerIntegration_PausedAgentSkipped(t *testing.T) {

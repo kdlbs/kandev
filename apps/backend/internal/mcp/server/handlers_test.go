@@ -36,6 +36,37 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, props, "title")
 	assert.Contains(t, props, "workspace_id")
 	assert.Contains(t, props, "workflow_id")
+	assert.Contains(t, props, "workflow_step_id")
+	assert.Contains(t, props, "workspace_mode")
+	assert.Contains(t, tool.Tool.Description, "explicit agent_profile_id > current/source task or parent task > workflow defaults > workspace default")
+	assert.Contains(t, tool.Tool.Description, "Do not rely on workspace defaults for follow-up work from an active task")
+	assert.Contains(t, tool.Tool.Description, "workspace_mode='new_workspace'")
+
+	agentProfileProp, ok := props["agent_profile_id"].(map[string]interface{})
+	require.True(t, ok, "agent_profile_id schema should be an object")
+	agentProfileDesc, ok := agentProfileProp["description"].(string)
+	require.True(t, ok, "agent_profile_id should have a description")
+	assert.Contains(t, agentProfileDesc, "explicit value > current/source task or parent task > workflow defaults > workspace default")
+
+	workflowProp, ok := props["workflow_id"].(map[string]interface{})
+	require.True(t, ok, "workflow_id schema should be an object")
+	workflowDesc, ok := workflowProp["description"].(string)
+	require.True(t, ok, "workflow_id should have a description")
+	assert.Contains(t, workflowDesc, "workspace_id is also omitted")
+	assert.Contains(t, workflowDesc, "must belong to the effective workspace_id")
+
+	workflowStepProp, ok := props["workflow_step_id"].(map[string]interface{})
+	require.True(t, ok, "workflow_step_id schema should be an object")
+	workflowStepDesc, ok := workflowStepProp["description"].(string)
+	require.True(t, ok, "workflow_step_id should have a description")
+	assert.Contains(t, workflowStepDesc, "pass only with an explicit workflow_id")
+
+	workspaceModeProp, ok := props["workspace_mode"].(map[string]interface{})
+	require.True(t, ok, "workspace_mode schema should be an object")
+	workspaceModeDesc, ok := workspaceModeProp["description"].(string)
+	require.True(t, ok, "workspace_mode should have a description")
+	assert.Contains(t, workspaceModeDesc, "inherit_parent")
+	assert.Contains(t, workspaceModeDesc, "new_workspace")
 
 	// parent_id, workspace_id, workflow_id, workflow_step_id should NOT be required
 	required, _ := parsed["required"].([]interface{})
@@ -99,6 +130,26 @@ func TestCreateTask_ExplicitParentID(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "task-abc", payload["parent_id"])
+}
+
+func TestCreateTask_ForwardsWorkspaceMode(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":          "Own workspace",
+		"parent_id":      "self",
+		"workspace_mode": "new_workspace",
+	})
+
+	assert.False(t, result.IsError)
+
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["parent_id"])
+	assert.Equal(t, "new_workspace", payload["workspace_mode"])
 }
 
 func TestCreateTask_NoParentID_WithIDs_CreatesTopLevelTask(t *testing.T) {

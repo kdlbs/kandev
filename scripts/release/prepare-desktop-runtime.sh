@@ -12,6 +12,9 @@ runtime bundle. The input bundle must contain:
   bin/kandev[.exe]
   bin/agentctl[.exe]
   bin/agentctl-linux-amd64
+  bin/agentctl-linux-arm64
+  bin/agentctl-darwin-arm64
+  bin/agentctl-darwin-amd64
 
 Options:
   --bundle-dir DIR  Source runtime bundle. Defaults to dist/kandev.
@@ -27,6 +30,12 @@ BUNDLE_DIR="${ROOT_DIR}/dist/kandev"
 OUTPUT_DIR="${ROOT_DIR}/apps/desktop/src-tauri/resources/kandev"
 VERIFY_SCRIPT="${ROOT_DIR}/scripts/release/verify-desktop-runtime.sh"
 PLATFORM=""
+REMOTE_AGENTCTL_HELPERS=(
+  agentctl-linux-amd64
+  agentctl-linux-arm64
+  agentctl-darwin-arm64
+  agentctl-darwin-amd64
+)
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -74,7 +83,10 @@ refuse_dangerous_output_dir() {
 }
 
 refuse_dangerous_output_dir
-chmod +x "$BUNDLE_DIR/bin/kandev" "$BUNDLE_DIR/bin/agentctl" "$BUNDLE_DIR/bin/agentctl-linux-amd64" 2>/dev/null || true
+chmod +x "$BUNDLE_DIR/bin/kandev" "$BUNDLE_DIR/bin/agentctl" 2>/dev/null || true
+for helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+  chmod +x "$BUNDLE_DIR/bin/$helper" 2>/dev/null || true
+done
 chmod +x "$BUNDLE_DIR/bin/kandev.exe" "$BUNDLE_DIR/bin/agentctl.exe" 2>/dev/null || true
 VERIFY_ARGS=()
 if [ -n "$PLATFORM" ]; then
@@ -103,8 +115,9 @@ copy_one() {
 
 copy_one "Kandev launcher binary" "$BUNDLE_DIR/bin/kandev" "$BUNDLE_DIR/bin/kandev.exe"
 copy_one "agentctl binary" "$BUNDLE_DIR/bin/agentctl" "$BUNDLE_DIR/bin/agentctl.exe"
-cp "$BUNDLE_DIR/bin/agentctl-linux-amd64" "$OUTPUT_DIR/bin/agentctl-linux-amd64"
-chmod +x "$OUTPUT_DIR/bin/agentctl-linux-amd64" 2>/dev/null || true
+for helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+  copy_one "remote agentctl helper $helper" "$BUNDLE_DIR/bin/$helper"
+done
 
 "$VERIFY_SCRIPT" "${VERIFY_ARGS[@]}" "$OUTPUT_DIR" >/dev/null
 if [ -n "$PLATFORM" ]; then

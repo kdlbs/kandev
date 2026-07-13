@@ -393,6 +393,9 @@ func (m *mockRepository) UpdateWorkspace(ctx context.Context, workspace *models.
 	return nil
 }
 func (m *mockRepository) DeleteWorkspace(ctx context.Context, id string) error { return nil }
+func (m *mockRepository) DeleteWorkspaceCascadeWithName(ctx context.Context, id, name string) ([]*models.Task, []*models.Workflow, error) {
+	return nil, nil, m.DeleteWorkspace(ctx, id)
+}
 func (m *mockRepository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	return nil, nil
 }
@@ -419,7 +422,7 @@ func (m *mockRepository) DeleteTask(ctx context.Context, id string) error       
 func (m *mockRepository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
 	return nil, nil
 }
-func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+func (m *mockRepository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
 	return nil, 0, nil
 }
 func (m *mockRepository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error) {

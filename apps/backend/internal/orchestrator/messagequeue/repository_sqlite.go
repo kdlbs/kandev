@@ -184,6 +184,131 @@ func (r *sqliteRepository) AppendOrInsertTail(ctx context.Context, sessionID, ta
 	return msg, false, nil
 }
 
+func (r *sqliteRepository) InsertOrReplaceByCoalesceKey(ctx context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin coalesce tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	existing, err := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing != nil {
+		updated, err := r.replaceCoalesced(ctx, tx, existing, msg)
+		if err != nil {
+			return nil, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, false, err
+		}
+		return updated, true, nil
+	}
+	if !allowInsert {
+		return nil, false, ErrEntryNotFound
+	}
+	if err := r.insertCoalesced(ctx, tx, msg, maxPerSession); err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return msg, false, nil
+}
+
+func (r *sqliteRepository) replaceCoalesced(ctx context.Context, tx *sqlx.Tx, existing, msg *QueuedMessage) (*QueuedMessage, error) {
+	if msg.QueuedAt.IsZero() {
+		msg.QueuedAt = time.Now().UTC()
+	}
+	attachmentsJSON, err := marshalAttachments(msg.Attachments)
+	if err != nil {
+		return nil, err
+	}
+	metadataJSON, err := marshalMetadata(msg.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queued_messages
+		SET task_id = ?, content = ?, model = ?, plan_mode = ?,
+		    attachments_json = ?, metadata_json = ?, queued_at = ?
+		WHERE id = ? AND session_id = ? AND queued_by = ?
+	`),
+		msg.TaskID, msg.Content, msg.Model, boolToInt(msg.PlanMode),
+		attachmentsJSON, metadataJSON, msg.QueuedAt,
+		existing.ID, msg.SessionID, msg.QueuedBy,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("replace coalesced queued: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("replace coalesced rows affected: %w", err)
+	}
+	if rows == 0 {
+		return nil, ErrEntryNotFound
+	}
+	existing.TaskID = msg.TaskID
+	existing.Content = msg.Content
+	existing.Model = msg.Model
+	existing.PlanMode = msg.PlanMode
+	existing.Attachments = msg.Attachments
+	existing.Metadata = msg.Metadata
+	existing.QueuedAt = msg.QueuedAt
+	return existing, nil
+}
+
+func (r *sqliteRepository) insertCoalesced(ctx context.Context, tx *sqlx.Tx, msg *QueuedMessage, maxPerSession int) error {
+	if err := r.ensureQueueCapacity(ctx, tx, msg.SessionID, maxPerSession); err != nil {
+		return err
+	}
+	var maxPos sql.NullInt64
+	if err := tx.GetContext(ctx, &maxPos, r.db.Rebind(`SELECT MAX(position) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
+		return fmt.Errorf("max position: %w", err)
+	}
+	msg.Position = maxPos.Int64 + 1
+	if msg.ID == "" {
+		msg.ID = uuid.New().String()
+	}
+	if msg.QueuedAt.IsZero() {
+		msg.QueuedAt = time.Now().UTC()
+	}
+	attachmentsJSON, err := marshalAttachments(msg.Attachments)
+	if err != nil {
+		return err
+	}
+	metadataJSON, err := marshalMetadata(msg.Metadata)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO queued_messages
+			(id, session_id, task_id, position, content, model, plan_mode, attachments_json, metadata_json, queued_at, queued_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`),
+		msg.ID, msg.SessionID, msg.TaskID, msg.Position, msg.Content, msg.Model,
+		boolToInt(msg.PlanMode), attachmentsJSON, metadataJSON, msg.QueuedAt, msg.QueuedBy,
+	); err != nil {
+		return fmt.Errorf("insert coalesced queued: %w", err)
+	}
+	return nil
+}
+
+func (r *sqliteRepository) ensureQueueCapacity(ctx context.Context, tx *sqlx.Tx, sessionID string, maxPerSession int) error {
+	if maxPerSession <= 0 {
+		return nil
+	}
+	var count int
+	if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
+		return fmt.Errorf("count: %w", err)
+	}
+	if count >= maxPerSession {
+		return ErrQueueFull
+	}
+	return nil
+}
+
 func (r *sqliteRepository) ListBySession(ctx context.Context, sessionID string) ([]QueuedMessage, error) {
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
 		SELECT id, session_id, task_id, position, content, model, plan_mode,
@@ -349,6 +474,62 @@ func (r *sqliteRepository) TransferSession(ctx context.Context, oldSessionID, ne
 	return tx.Commit()
 }
 
+func (r *sqliteRepository) ReplaceSession(ctx context.Context, sessionID string, entries []QueuedMessage, pendingMove *PendingMove) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace session tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
+		return fmt.Errorf("clear queued messages: %w", err)
+	}
+	for _, entry := range entries {
+		attachmentsJSON, err := marshalAttachments(entry.Attachments)
+		if err != nil {
+			return err
+		}
+		metadataJSON, err := marshalMetadata(entry.Metadata)
+		if err != nil {
+			return err
+		}
+		queuedAt := entry.QueuedAt
+		if queuedAt.IsZero() {
+			queuedAt = time.Now().UTC()
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO queued_messages
+				(id, session_id, task_id, position, content, model, plan_mode, attachments_json, metadata_json, queued_at, queued_by)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`),
+			entry.ID, sessionID, entry.TaskID, entry.Position, entry.Content, entry.Model,
+			boolToInt(entry.PlanMode), attachmentsJSON, metadataJSON, queuedAt, entry.QueuedBy,
+		); err != nil {
+			return fmt.Errorf("restore queued message: %w", err)
+		}
+	}
+
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM pending_moves WHERE session_id = ?`), sessionID); err != nil {
+		return fmt.Errorf("clear pending move: %w", err)
+	}
+	if pendingMove != nil {
+		queuedAt := pendingMove.QueuedAt
+		if queuedAt.IsZero() {
+			queuedAt = time.Now().UTC()
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO pending_moves (id, session_id, task_id, workflow_id, workflow_step_id, step_position, queued_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`),
+			uuid.New().String(), sessionID, pendingMove.TaskID, pendingMove.WorkflowID,
+			pendingMove.WorkflowStepID, pendingMove.Position, queuedAt,
+		); err != nil {
+			return fmt.Errorf("restore pending move: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
 func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string, move *PendingMove) error {
 	if move.QueuedAt.IsZero() {
 		move.QueuedAt = time.Now().UTC()
@@ -369,6 +550,30 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 		return fmt.Errorf("upsert pending move: %w", err)
 	}
 	return nil
+}
+
+func (r *sqliteRepository) GetPendingMove(ctx context.Context, sessionID string) (*PendingMove, error) {
+	var (
+		taskID, workflowID, workflowStepID string
+		position                           int
+		queuedAt                           time.Time
+	)
+	if err := r.ro.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT task_id, workflow_id, workflow_step_id, step_position, queued_at
+		FROM pending_moves WHERE session_id = ?
+	`), sessionID).Scan(&taskID, &workflowID, &workflowStepID, &position, &queuedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read pending move: %w", err)
+	}
+	return &PendingMove{
+		TaskID:         taskID,
+		WorkflowID:     workflowID,
+		WorkflowStepID: workflowStepID,
+		Position:       position,
+		QueuedAt:       queuedAt,
+	}, nil
 }
 
 func (r *sqliteRepository) TakePendingMove(ctx context.Context, sessionID string) (*PendingMove, error) {
@@ -428,6 +633,33 @@ func (r *sqliteRepository) scanTail(ctx context.Context, tx *sqlx.Tx, sessionID 
 	return msg, nil
 }
 
+func (r *sqliteRepository) findCoalesced(ctx context.Context, tx *sqlx.Tx, sessionID, queuedBy, coalesceKey string) (*QueuedMessage, error) {
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE session_id = ? AND queued_by = ?
+		ORDER BY position ASC
+	`), sessionID, queuedBy)
+	if err != nil {
+		return nil, fmt.Errorf("scan coalesced queued: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		msg, err := scanQueuedRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		if metadataString(msg.Metadata, MetadataCoalesceKey) == coalesceKey {
+			return msg, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return nil, nil
+}
+
 // scanQueuedRow scans a single queued_messages row from any sqlx-compatible row source.
 func scanQueuedRow(scanner interface{ Scan(dest ...any) error }) (*QueuedMessage, error) {
 	var (
@@ -482,4 +714,12 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func metadataString(meta map[string]interface{}, key string) string {
+	if meta == nil {
+		return ""
+	}
+	value, _ := meta[key].(string)
+	return value
 }

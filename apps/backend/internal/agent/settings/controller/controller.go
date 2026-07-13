@@ -46,17 +46,18 @@ var (
 )
 
 type Controller struct {
-	repo           store.Repository
-	discovery      *discovery.Registry
-	agentRegistry  *registry.Registry
-	sessionChecker SessionChecker
-	watcherDeps    WatcherDependencyChecker
-	mcpService     *mcpconfig.Service
-	modelCache     *modelfetcher.Cache
-	hostUtility    *hostutility.Manager
-	jobStore       *JobStore
-	hub            JobBroadcaster
-	logger         *logger.Logger
+	repo            store.Repository
+	discovery       *discovery.Registry
+	agentRegistry   *registry.Registry
+	sessionChecker  SessionChecker
+	watcherDeps     WatcherDependencyChecker
+	routingTierDeps RoutingTierDependencyChecker
+	mcpService      *mcpconfig.Service
+	modelCache      *modelfetcher.Cache
+	hostUtility     *hostutility.Manager
+	jobStore        *JobStore
+	hub             JobBroadcaster
+	logger          *logger.Logger
 }
 
 // SetWatcherDependencyChecker wires in the watcher dependency enumerator so
@@ -66,6 +67,12 @@ func (c *Controller) SetWatcherDependencyChecker(w WatcherDependencyChecker) {
 	c.watcherDeps = w
 }
 
+// SetRoutingTierDependencyChecker wires in workspace routing tier lookups so
+// DeleteProfile can reject profiles selected as a workspace tier source.
+func (c *Controller) SetRoutingTierDependencyChecker(r RoutingTierDependencyChecker) {
+	c.routingTierDeps = r
+}
+
 // ErrProfileInUseDetail is returned when a profile cannot be deleted because
 // active sessions or external integration watchers reference it. The UI uses
 // the breakdown to render a "this will also disable N watchers — continue?"
@@ -73,11 +80,12 @@ func (c *Controller) SetWatcherDependencyChecker(w WatcherDependencyChecker) {
 type ErrProfileInUseDetail struct {
 	ActiveSessions []agentdto.ActiveTaskInfo
 	Watchers       []WatcherReference
+	RoutingTiers   []RoutingTierReference
 }
 
 func (e *ErrProfileInUseDetail) Error() string {
-	return fmt.Sprintf("agent profile is used by %d active session(s) and %d watcher(s)",
-		len(e.ActiveSessions), len(e.Watchers))
+	return fmt.Sprintf("agent profile is used by %d active session(s), %d watcher(s), and %d routing tier(s)",
+		len(e.ActiveSessions), len(e.Watchers), len(e.RoutingTiers))
 }
 
 // WatcherReference points at one issue/PR watcher row that uses the profile
@@ -88,6 +96,14 @@ type WatcherReference struct {
 	ID    string `json:"id"`
 	Kind  string `json:"kind"`
 	Label string `json:"label"`
+}
+
+// RoutingTierReference points at a workspace provider-routing tier that was
+// seeded from the profile being deleted.
+type RoutingTierReference struct {
+	WorkspaceID string `json:"workspace_id"`
+	ProviderID  string `json:"provider_id"`
+	Tier        string `json:"tier"`
 }
 
 // WatcherDependencyChecker enumerates watcher rows that reference an agent
@@ -110,6 +126,10 @@ type SessionChecker interface {
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 	DeleteEphemeralTasksByAgentProfile(ctx context.Context, agentProfileID string) (int64, error)
 	GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error)
+}
+
+type RoutingTierDependencyChecker interface {
+	ListRoutingTierReferencesByAgentProfile(ctx context.Context, profileID string) ([]RoutingTierReference, error)
 }
 
 func NewController(repo store.Repository, discoveryRegistry *discovery.Registry, agentRegistry *registry.Registry, sessionChecker SessionChecker, log *logger.Logger,

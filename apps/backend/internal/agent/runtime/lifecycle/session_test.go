@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -47,6 +48,7 @@ type mockAgentServer struct {
 	mu                   sync.Mutex
 	actionLog            []string // ordered log of actions received
 	rejectStreamAttempts int
+	agentStatus          string
 	upgrader             websocket.Upgrader
 	handler              func(msg ws.Message) *ws.Message
 	wsConnected          chan struct{} // closed when WS stream connects
@@ -62,6 +64,16 @@ func newMockAgentServer(t *testing.T) *mockAgentServer {
 	}
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/status", func(w http.ResponseWriter, _ *http.Request) {
+		m.mu.Lock()
+		status := m.agentStatus
+		m.mu.Unlock()
+		if status == "" {
+			status = "running"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"agent_status":%q}`, status)
+	})
 
 	// Agent stream WebSocket endpoint
 	mux.HandleFunc("/api/v1/agent/stream", func(w http.ResponseWriter, r *http.Request) {
@@ -921,6 +933,65 @@ func TestSendPrompt_DrainsStaleSignalFromPriorDispatchOnly(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), context.DeadlineExceeded.Error()) {
 		t.Fatalf("expected deadline exceeded error, got: %v", err)
+	}
+}
+
+func TestWaitForPromptDone_TreatsPromptAbandonedAfterCancelAsCancelEscalated(t *testing.T) {
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		IsError: true,
+		Error:   "prompt abandoned after cancel",
+	}
+
+	_, err := sm.waitForPromptDone(context.Background(), execution)
+	if !errors.Is(err, ErrCancelEscalated) {
+		t.Fatalf("expected ErrCancelEscalated, got: %v", err)
+	}
+	if !errors.Is(err, ErrAgentReported) {
+		t.Fatalf("expected ErrAgentReported wrapper, got: %v", err)
+	}
+}
+
+func TestSendPrompt_TriggerTimeCancelReleaseReturnsErrCancelEscalated(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "prompt abandoned after cancel", nil)
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:            "test-exec",
+		TaskID:        "test-task",
+		SessionID:     "test-session",
+		WorkspacePath: "/workspace",
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+
+	_, err := sm.SendPrompt(ctx, execution, "hello", false, nil, true)
+	if !errors.Is(err, ErrCancelEscalated) {
+		t.Fatalf("expected ErrCancelEscalated, got: %v", err)
 	}
 }
 

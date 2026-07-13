@@ -46,6 +46,9 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskPlanDeleted, ws.ActionTaskPlanDeleted)
 	b.subscribe(eventBus, events.TaskPlanRevisionCreated, ws.ActionTaskPlanRevisionCreated)
 	b.subscribe(eventBus, events.TaskPlanReverted, ws.ActionTaskPlanReverted)
+	b.subscribe(eventBus, events.TaskWalkthroughCreated, ws.ActionTaskWalkthroughCreated)
+	b.subscribe(eventBus, events.TaskWalkthroughUpdated, ws.ActionTaskWalkthroughUpdated)
+	b.subscribe(eventBus, events.TaskWalkthroughDeleted, ws.ActionTaskWalkthroughDeleted)
 	b.subscribe(eventBus, events.RepositoryCreated, ws.ActionRepositoryCreated)
 	b.subscribe(eventBus, events.RepositoryUpdated, ws.ActionRepositoryUpdated)
 	b.subscribe(eventBus, events.RepositoryDeleted, ws.ActionRepositoryDeleted)
@@ -66,6 +69,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskSessionStateChanged, ws.ActionSessionStateChanged)
 	b.subscribe(eventBus, events.MessageAdded, ws.ActionSessionMessageAdded)
 	b.subscribe(eventBus, events.MessageUpdated, ws.ActionSessionMessageUpdated)
+	b.subscribe(eventBus, events.MessageDeleted, ws.ActionSessionMessageDeleted)
 	b.subscribe(eventBus, events.AgentctlStarting, ws.ActionSessionAgentctlStarting)
 	b.subscribe(eventBus, events.AgentctlReady, ws.ActionSessionAgentctlReady)
 	b.subscribe(eventBus, events.AgentctlError, ws.ActionSessionAgentctlError)
@@ -119,6 +123,9 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 				}
 			}
 		}
+		if data, ok := event.Data.(map[string]interface{}); ok {
+			b.logLifecycleBroadcast(action, data, sessionID)
+		}
 
 		switch action {
 		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
@@ -131,7 +138,7 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 			// session state changes for all tasks, not just the active one.
 			b.hub.Broadcast(msg)
 			return nil
-		case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated:
+		case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted:
 			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)
 				return nil
@@ -155,4 +162,25 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 		return
 	}
 	b.subscriptions = append(b.subscriptions, sub)
+}
+
+func (b *TaskEventBroadcaster) logLifecycleBroadcast(action string, data map[string]interface{}, sessionID string) {
+	switch action {
+	case ws.ActionTaskCreated, ws.ActionTaskUpdated, ws.ActionTaskStateChanged,
+		ws.ActionTaskDeleted, ws.ActionSessionStateChanged:
+	default:
+		return
+	}
+	b.logger.Debug("ws lifecycle broadcast",
+		zap.String("action", action),
+		zap.Any("task_id", data["task_id"]),
+		zap.String("session_id", sessionID),
+		zap.Any("state", data["state"]),
+		zap.Any("old_state", data["old_state"]),
+		zap.Any("new_state", data["new_state"]),
+		zap.Any("primary_session_id", data["primary_session_id"]),
+		zap.Any("primary_session_state", data["primary_session_state"]),
+		zap.Any("updated_at", data["updated_at"]),
+		zap.Int("connected_clients", b.hub.GetClientCount()),
+	)
 }

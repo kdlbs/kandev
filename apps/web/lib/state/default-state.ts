@@ -14,6 +14,7 @@ import {
   defaultAutomationsState,
   defaultSystemState,
 } from "./slices";
+import { getStoredQuickChatNames } from "@/lib/local-storage";
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
@@ -45,6 +46,7 @@ export const defaultState = {
   pendingModel: defaultSessionState.pendingModel,
   activeModel: defaultSessionState.activeModel,
   taskPlans: defaultSessionState.taskPlans,
+  walkthroughs: defaultSessionState.walkthroughs,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -130,6 +132,20 @@ function mergeGitLabFields(
   };
 }
 
+function mergeQuickChatState(initialState: Partial<DefaultState>): DefaultState["quickChat"] {
+  const quickChat = { ...defaultState.quickChat, ...initialState.quickChat };
+  if (!initialState.quickChat?.sessions) return quickChat;
+
+  const storedNames = getStoredQuickChatNames();
+  return {
+    ...quickChat,
+    sessions: initialState.quickChat.sessions.map((session) => {
+      const localName = storedNames[session.sessionId];
+      return localName ? { ...session, name: localName } : session;
+    }),
+  };
+}
+
 export function mergeInitialState(initialState?: Partial<DefaultState>): DefaultState {
   if (!initialState) return defaultState;
 
@@ -172,6 +188,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     pendingModel: { ...defaultState.pendingModel, ...initialState.pendingModel },
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
+    walkthroughs: { ...defaultState.walkthroughs, ...initialState.walkthroughs },
     queue: { ...defaultState.queue, ...initialState.queue },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },
@@ -220,7 +237,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     chatInput: { ...defaultState.chatInput, ...initialState.chatInput },
     documentPanel: { ...defaultState.documentPanel, ...initialState.documentPanel },
     systemHealth: { ...defaultState.systemHealth, ...initialState.systemHealth },
-    quickChat: { ...defaultState.quickChat, ...initialState.quickChat },
+    quickChat: mergeQuickChatState(initialState),
     sessionFailureNotification:
       initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },

@@ -90,6 +90,9 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/action-presets", c.httpGetActionPresets)
 	api.PUT("/action-presets", c.httpUpdateActionPresets)
 	api.POST("/action-presets/reset", c.httpResetActionPresets)
+	api.GET("/workspace-settings", c.httpGetWorkspaceSettings)
+	api.PUT("/workspace-settings", c.httpUpdateWorkspaceSettings)
+	api.POST("/workspace-settings/copy", c.httpCopyWorkspaceSettings)
 
 	api.GET("/stats", c.httpGetStats)
 }
@@ -616,6 +619,9 @@ func (c *Controller) httpCreateReviewWatch(ctx *gin.Context) {
 
 func (c *Controller) httpUpdateReviewWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
+	if !c.requireReviewWatchInWorkspace(ctx, id) {
+		return
+	}
 	var req UpdateReviewWatchRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
@@ -630,6 +636,9 @@ func (c *Controller) httpUpdateReviewWatch(ctx *gin.Context) {
 
 func (c *Controller) httpDeleteReviewWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
+	if !c.requireReviewWatchInWorkspace(ctx, id) {
+		return
+	}
 	if err := c.service.DeleteReviewWatch(ctx.Request.Context(), id); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -812,8 +821,17 @@ func (c *Controller) httpGetRepoMergeMethods(ctx *gin.Context) {
 func (c *Controller) httpSearchUserPRs(ctx *gin.Context) {
 	query := ctx.Query("query")
 	filter := ctx.Query("filter")
+	workspaceID := ctx.Query("workspace_id")
 	page, perPage := parsePaginationQuery(ctx)
-	result, err := c.service.SearchUserPRsPaged(ctx.Request.Context(), filter, query, page, perPage)
+	var (
+		result *PRSearchPage
+		err    error
+	)
+	if workspaceID == "" {
+		result, err = c.service.SearchUserPRsPaged(ctx.Request.Context(), filter, query, page, perPage)
+	} else {
+		result, err = c.service.SearchUserPRsPagedForWorkspace(ctx.Request.Context(), workspaceID, filter, query, page, perPage)
+	}
 	if err != nil {
 		c.handleSearchError(ctx, err)
 		return
@@ -828,8 +846,17 @@ func (c *Controller) httpSearchUserPRs(ctx *gin.Context) {
 func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 	query := ctx.Query("query")
 	filter := ctx.Query("filter")
+	workspaceID := ctx.Query("workspace_id")
 	page, perPage := parsePaginationQuery(ctx)
-	result, err := c.service.SearchUserIssuesPaged(ctx.Request.Context(), filter, query, page, perPage)
+	var (
+		result *IssueSearchPage
+		err    error
+	)
+	if workspaceID == "" {
+		result, err = c.service.SearchUserIssuesPaged(ctx.Request.Context(), filter, query, page, perPage)
+	} else {
+		result, err = c.service.SearchUserIssuesPagedForWorkspace(ctx.Request.Context(), workspaceID, filter, query, page, perPage)
+	}
 	if err != nil {
 		c.handleSearchError(ctx, err)
 		return
@@ -838,6 +865,73 @@ func (c *Controller) httpSearchUserIssues(ctx *gin.Context) {
 		result.Issues = []*Issue{}
 	}
 	ctx.JSON(http.StatusOK, result)
+}
+
+func (c *Controller) httpGetWorkspaceSettings(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if strings.TrimSpace(workspaceID) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	settings, err := c.service.GetWorkspaceSettings(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, settings)
+}
+
+func (c *Controller) httpUpdateWorkspaceSettings(ctx *gin.Context) {
+	var req UpdateWorkspaceSettingsRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	settings, err := c.service.UpdateWorkspaceSettings(ctx.Request.Context(), &req)
+	if err != nil {
+		if errors.Is(err, ErrWorkspaceSettingsValidation) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		} else {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		return
+	}
+	ctx.JSON(http.StatusOK, settings)
+}
+
+// copyWorkspaceSettingsRequest carries the target workspace for a copy. The
+// source workspace comes from the workspace_id query param, matching the other
+// integration copy endpoints.
+type copyWorkspaceSettingsRequest struct {
+	TargetWorkspaceID string `json:"targetWorkspaceId"`
+}
+
+func (c *Controller) httpCopyWorkspaceSettings(ctx *gin.Context) {
+	source := strings.TrimSpace(ctx.Query("workspace_id"))
+	if source == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	var req copyWorkspaceSettingsRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if strings.TrimSpace(req.TargetWorkspaceID) == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "targetWorkspaceId required"})
+		return
+	}
+	settings, err := c.service.CopyWorkspaceSettingsToWorkspace(ctx.Request.Context(), source, req.TargetWorkspaceID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrWorkspaceSettingsValidation):
+			status = http.StatusBadRequest
+		}
+		ctx.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, settings)
 }
 
 // parsePaginationQuery reads `page` and `per_page` query params. Missing or
@@ -945,6 +1039,9 @@ func (c *Controller) httpCreateIssueWatch(ctx *gin.Context) {
 
 func (c *Controller) httpUpdateIssueWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
+	if !c.requireIssueWatchInWorkspace(ctx, id) {
+		return
+	}
 	var req UpdateIssueWatchRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
@@ -964,6 +1061,9 @@ func (c *Controller) httpUpdateIssueWatch(ctx *gin.Context) {
 
 func (c *Controller) httpDeleteIssueWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
+	if !c.requireIssueWatchInWorkspace(ctx, id) {
+		return
+	}
 	if err := c.service.DeleteIssueWatch(ctx.Request.Context(), id); err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -973,12 +1073,17 @@ func (c *Controller) httpDeleteIssueWatch(ctx *gin.Context) {
 
 func (c *Controller) httpTriggerIssueWatch(ctx *gin.Context) {
 	id := ctx.Param("id")
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
 	watch, err := c.service.GetIssueWatch(ctx.Request.Context(), id)
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	if watch == nil {
+	if watch == nil || watch.WorkspaceID != workspaceID {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "issue watch not found"})
 		return
 	}
@@ -1072,7 +1177,16 @@ func (c *Controller) httpResetActionPresets(ctx *gin.Context) {
 // watch lived in a workspace they no longer have open. A future
 // multi-tenant rollout would add an optional workspace_id query param.
 func (c *Controller) httpCleanupReviewTasks(ctx *gin.Context) {
-	deleted, err := c.service.CleanupAllReviewTasks(ctx.Request.Context())
+	workspaceID := ctx.Query("workspace_id")
+	var (
+		deleted int
+		err     error
+	)
+	if workspaceID == "" {
+		deleted, err = c.service.CleanupAllReviewTasks(ctx.Request.Context())
+	} else {
+		deleted, err = c.service.CleanupReviewTasksForWorkspace(ctx.Request.Context(), workspaceID)
+	}
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -1082,7 +1196,16 @@ func (c *Controller) httpCleanupReviewTasks(ctx *gin.Context) {
 
 // httpCleanupIssueTasks mirrors httpCleanupReviewTasks for issue watches.
 func (c *Controller) httpCleanupIssueTasks(ctx *gin.Context) {
-	deleted, err := c.service.CleanupAllIssueTasks(ctx.Request.Context())
+	workspaceID := ctx.Query("workspace_id")
+	var (
+		deleted int
+		err     error
+	)
+	if workspaceID == "" {
+		deleted, err = c.service.CleanupAllIssueTasks(ctx.Request.Context())
+	} else {
+		deleted, err = c.service.CleanupIssueTasksForWorkspace(ctx.Request.Context(), workspaceID)
+	}
 	if err != nil {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

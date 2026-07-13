@@ -387,6 +387,44 @@ func (c *CloudClient) ListProjects(ctx context.Context) ([]JiraProject, error) {
 	return out, nil
 }
 
+// ListProjectStatuses returns the workflow statuses defined for a project.
+// Jira's GET /project/{key}/statuses returns one entry per issue type, each
+// carrying that issue type's status list; the same status often appears under
+// several issue types. We flatten them all and de-dupe by status id so the UI
+// gets the union of statuses reachable anywhere in the project. Works against
+// both Cloud (v3) and Server/DC (v2) since the payload shape is identical.
+func (c *CloudClient) ListProjectStatuses(ctx context.Context, projectKey string) ([]JiraStatus, error) {
+	var body []struct {
+		Statuses []struct {
+			ID             string `json:"id"`
+			Name           string `json:"name"`
+			StatusCategory struct {
+				Key string `json:"key"` // "new" | "indeterminate" | "done"
+			} `json:"statusCategory"`
+		} `json:"statuses"`
+	}
+	path := c.apiBase + "/project/" + url.PathEscape(projectKey) + "/statuses"
+	if err := c.do(ctx, http.MethodGet, path, nil, &body); err != nil {
+		return nil, err
+	}
+	out := make([]JiraStatus, 0)
+	seen := make(map[string]struct{})
+	for _, it := range body {
+		for _, s := range it.Statuses {
+			if _, dup := seen[s.ID]; dup {
+				continue
+			}
+			seen[s.ID] = struct{}{}
+			out = append(out, JiraStatus{
+				ID:             s.ID,
+				Name:           s.Name,
+				StatusCategory: s.StatusCategory.Key,
+			})
+		}
+	}
+	return out, nil
+}
+
 // cloudSearchResponse mirrors the subset of /rest/api/3/search/jql we consume.
 // The token-paginated endpoint exposes no total count; pagination is driven by
 // `nextPageToken`. Transitions are intentionally omitted from search results

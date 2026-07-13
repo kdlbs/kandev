@@ -223,7 +223,6 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     if (showRequestChangesTooltip && inputRef.current) inputRef.current.focus();
   }, [showRequestChangesTooltip, inputRef]);
 
-  const handleAgentCommand = useCallback((cmd: string) => onSubmit(`/${cmd}`), [onSubmit]);
   const handleSubmitWithReset = useCallback(
     () => handleSubmit(resetHeight),
     [handleSubmit, resetHeight],
@@ -264,7 +263,6 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     fileInputRef,
     handleChange: handleChangeWithAutoExpand,
     handleSubmitWithReset,
-    handleAgentCommand,
     allItems,
     ...derived,
   };

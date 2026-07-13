@@ -159,3 +159,91 @@ func TestCountToolCallMessagesBySession_Multi(t *testing.T) {
 		t.Errorf("s3 should be omitted (zero tool_call rows), got %d", got["s3"])
 	}
 }
+
+func createPendingActionMessage(
+	t *testing.T,
+	repo *Repository,
+	id string,
+	taskID string,
+	sessionID string,
+	turnID string,
+	msgType models.MessageType,
+	status string,
+	createdAt time.Time,
+) {
+	t.Helper()
+	metadata := map[string]interface{}{}
+	if status != "<missing>" {
+		metadata["status"] = status
+	}
+	if err := repo.CreateMessage(context.Background(), &models.Message{
+		ID:            id,
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		AuthorType:    models.MessageAuthorAgent,
+		Content:       id,
+		Type:          msgType,
+		Metadata:      metadata,
+		CreatedAt:     createdAt,
+	}); err != nil {
+		t.Fatalf("CreateMessage(%s): %v", id, err)
+	}
+}
+
+func TestGetPendingActionsBySessionIDs(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	seedForMsgTest(t, repo, "task-clar", "sess-clar", "turn-clar")
+	createPendingActionMessage(t, repo, "perm-clar", "task-clar", "sess-clar", "turn-clar", models.MessageTypePermissionRequest, "<missing>", now)
+	createPendingActionMessage(t, repo, "clar-clar", "task-clar", "sess-clar", "turn-clar", models.MessageTypeClarificationRequest, "pending", now.Add(time.Second))
+
+	seedForMsgTest(t, repo, "task-resolved", "sess-resolved", "turn-resolved")
+	createPendingActionMessage(t, repo, "perm-old", "task-resolved", "sess-resolved", "turn-resolved", models.MessageTypePermissionRequest, "pending", now)
+	createPendingActionMessage(t, repo, "perm-new", "task-resolved", "sess-resolved", "turn-resolved", models.MessageTypePermissionRequest, "approved", now.Add(time.Second))
+
+	seedForMsgTest(t, repo, "task-perm", "sess-perm", "turn-perm")
+	createPendingActionMessage(t, repo, "perm-pending", "task-perm", "sess-perm", "turn-perm", models.MessageTypePermissionRequest, "pending", now)
+
+	seedForMsgTest(t, repo, "task-perm-tie", "sess-perm-tie", "turn-perm-tie")
+	createPendingActionMessage(t, repo, "z-approved", "task-perm-tie", "sess-perm-tie", "turn-perm-tie", models.MessageTypePermissionRequest, "approved", now)
+	createPendingActionMessage(t, repo, "a-pending", "task-perm-tie", "sess-perm-tie", "turn-perm-tie", models.MessageTypePermissionRequest, "pending", now)
+
+	seedForMsgTest(t, repo, "task-stale", "sess-stale", "turn-stale")
+	createPendingActionMessage(t, repo, "perm-stale", "task-stale", "sess-stale", "turn-stale", models.MessageTypePermissionRequest, "pending", now)
+	createPendingActionMessage(t, repo, "clar-stale", "task-stale", "sess-stale", "turn-stale", models.MessageTypeClarificationRequest, "pending", now)
+	seedForMsgTest(t, repo, "task-stale", "sess-stale", "turn-current")
+	createPendingActionMessage(t, repo, "message-current", "task-stale", "sess-stale", "turn-current", models.MessageTypeMessage, "<missing>", now.Add(time.Second))
+
+	got, err := repo.GetPendingActionsBySessionIDs(ctx, []string{
+		"sess-clar",
+		"sess-resolved",
+		"sess-perm",
+		"sess-perm-tie",
+		"sess-stale",
+		"sess-missing",
+	})
+	if err != nil {
+		t.Fatalf("GetPendingActionsBySessionIDs: %v", err)
+	}
+	if got["sess-clar"] != models.TaskPendingActionClarification {
+		t.Fatalf("sess-clar action = %q, want clarification", got["sess-clar"])
+	}
+	if _, ok := got["sess-resolved"]; ok {
+		t.Fatalf("sess-resolved should not have a pending action: %#v", got["sess-resolved"])
+	}
+	if got["sess-perm"] != models.TaskPendingActionPermission {
+		t.Fatalf("sess-perm action = %q, want permission", got["sess-perm"])
+	}
+	if got["sess-perm-tie"] != models.TaskPendingActionPermission {
+		t.Fatalf("sess-perm-tie action = %q, want permission from last inserted row", got["sess-perm-tie"])
+	}
+	if _, ok := got["sess-stale"]; ok {
+		t.Fatalf("sess-stale should not inherit previous turn actions: %#v", got["sess-stale"])
+	}
+	if _, ok := got["sess-missing"]; ok {
+		t.Fatalf("sess-missing should not have a pending action: %#v", got["sess-missing"])
+	}
+}

@@ -20,6 +20,12 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
  * single active `kanban` slice for tasks that arrived via WS before their
  * snapshot resolved). Snapshots from other workspaces are filtered out so a
  * stale hydration doesn't leak across workspace switches.
+ *
+ * Assumes `state.workflows.items` is kept in sync with the active workspace by
+ * an always-mounted caller (`useEnsureWorkspaceWorkflows` from `AppSidebar`).
+ * Do not add the fetch back here — this hook only runs when the Tasks section
+ * accordion is expanded, so co-locating the fetch would recreate the original
+ * "sidebar stale after workspace switch" bug for collapsed-section users.
  */
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
   useAllWorkflowSnapshots(workspaceId);

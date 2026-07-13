@@ -25,10 +25,11 @@ export function classifyTask(
     if (TASK_STATE_IN_PROGRESS.has(taskState)) return "in_progress";
     return "backlog";
   }
-  // STARTING is a transient session state (e.g. during auto-resume after a
-  // backend restart). Defer to the workflow task state so a task in REVIEW
-  // does not flicker out of the review bucket while the agent reattaches.
-  if (sessionState === "STARTING" && taskState) {
+  // CREATED/STARTING are transient session states while the agent process is
+  // booting or reattaching. Defer to the workflow task state so an
+  // IN_PROGRESS task keeps showing activity, while a REVIEW task does not
+  // flicker out of the review bucket during auto-resume.
+  if ((sessionState === "CREATED" || sessionState === "STARTING") && taskState) {
     if (TASK_STATE_REVIEW.has(taskState)) return "review";
     if (TASK_STATE_IN_PROGRESS.has(taskState)) return "in_progress";
     return "backlog";

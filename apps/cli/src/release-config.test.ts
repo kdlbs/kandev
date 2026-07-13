@@ -94,7 +94,21 @@ function findPnpmSetupVersion(
 }
 
 function matchPnpmSetupUsesLine(line: string): RegExpMatchArray | null {
-  return line.match(/^(\s*)(?:-\s*)?uses:\s*["']?pnpm\/action-setup@v\d+["']?\s*(?:#.*)?$/);
+  const match = line.match(
+    /^(\s*)(?:-\s*)?uses:\s*["']?pnpm\/action-setup@([^"'\s#]+)["']?\s*(#.*)?$/,
+  );
+  if (match === null) return null;
+  const ref = match[2];
+  const comment = match[3] ?? "";
+  const versionTagPattern = /^v[0-9]+(?:\.[0-9]+\.[0-9]+)?$/;
+  const versionTag = versionTagPattern.test(ref);
+  const shaPinned =
+    /^[0-9a-f]{40}$/.test(ref) && /^#\s*v[0-9]+(?:\.[0-9]+\.[0-9]+)?$/.test(comment);
+  expect(
+    versionTag || shaPinned,
+    "pnpm/action-setup must use a version tag or a 40-character SHA with the version tag in a comment",
+  ).toBe(true);
+  return match;
 }
 
 function findStepIndent(lines: string[], usesLineIndex: number, usesIndent: number): number {
@@ -150,6 +164,14 @@ function assertWorkflowPnpmVersions(file: string, expectedVersion: string): numb
 }
 
 describe("release runtime tooling configuration", () => {
+  it("rejects malformed SHA version comments for pnpm/action-setup", () => {
+    expect(() =>
+      matchPnpmSetupUsesLine(
+        "uses: pnpm/action-setup@0123456789abcdef0123456789abcdef01234567 # v4-old",
+      ),
+    ).toThrow(/40-character SHA with the version tag/);
+  });
+
   it("pins runtime tooling consistently across Docker and GitHub Actions", () => {
     const packagePnpmVersion = extractPackageManagerPnpmVersion(readRepoFile("apps/package.json"));
     const dockerfile = readRepoFile("Dockerfile");
@@ -233,7 +255,7 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain(
       'rustup toolchain install stable --profile minimal --target "${{ matrix.rust_target }}"',
     );
-    expect(workflow).toContain("Swatinem/rust-cache@v2");
+    expect(workflow).toMatch(/Swatinem\/rust-cache@[0-9a-f]{40}\s+# v2/);
 
     for (const platform of desktopPlatforms) {
       expect(workflow, `release.yml must include desktop platform ${platform}`).toContain(
@@ -293,13 +315,14 @@ describe("release desktop artifacts", () => {
             tauri_bundles: deb,rpm`);
   });
 
-  it("supports unsigned desktop releases separately from validation-only builds", () => {
+  it("builds unsigned desktop releases when signing inputs are incomplete", () => {
     const workflow = releaseWorkflow();
     const signingDocs = readRepoFile("docs/desktop-tauri-signing.md");
     const tauriConfig = readRepoFile("apps/desktop/src-tauri/tauri.conf.json");
     const windowsSignScript = readRepoFile("apps/desktop/src-tauri/windows-sign.ps1");
 
-    expect(workflow).toContain("allow_unsigned_desktop");
+    expect(workflow).not.toContain("allow_unsigned_desktop");
+    expect(workflow).not.toContain("ALLOW_UNSIGNED_DESKTOP");
     expect(workflow).toContain("desktop_validation_only");
     expect(workflow).toContain("ref: ${{ needs.prepare.outputs.ref }}");
     expect(workflow).toContain("persist-credentials: false");
@@ -307,19 +330,24 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("No release PR, tag, GitHub release, public container tags");
     expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}");
     expect(workflow).toContain('if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then');
+    expect(workflow).toContain("scripts/release/desktop-signing-ready.sh macos");
+    expect(workflow).toContain("scripts/release/desktop-signing-ready.sh windows");
+    expect(workflow).toContain("MACOS_SIGNING_ENABLED=false");
+    expect(workflow).toContain("MACOS_SIGNING_ENABLED=true");
+    expect(workflow).toContain("WINDOWS_SIGNING_ENABLED=false");
+    expect(workflow).toContain("WINDOWS_SIGNING_ENABLED=true");
     expect(workflow).toContain(
-      "Allow unsigned macOS/Windows desktop artifacts; still publishes unless validation-only is checked",
+      "macOS signing/notarization inputs are incomplete; building unsigned desktop artifact.",
+    );
+    expect(workflow).toContain(
+      "Windows signing inputs are incomplete; building unsigned desktop artifact.",
     );
     expect(workflow).toContain("Add unsigned desktop warning to release notes");
     expect(workflow).toContain(
-      "macOS and Windows desktop installers in this release are unsigned.",
-    );
-    expect(workflow).not.toMatch(
-      /if \[ "\$ALLOW_UNSIGNED_DESKTOP" = "true" \]; then\r?\n\s*echo "ref=\$CURRENT_REF"/,
+      "desktop installers in this release are unsigned development builds.",
     );
     expect(workflow).toContain("docker-amd64:");
     expect(workflow).toContain("docker-universal-manifest:");
-    expect(workflow).toContain('if [ "$ALLOW_UNSIGNED_DESKTOP" = "true" ]; then');
     expect(workflow).toContain("unset APPLE_CERTIFICATE");
     expect(workflow).toContain("unset APPLE_ID");
     expect(workflow).toContain("unset WINDOWS_CERTIFICATE");
@@ -346,7 +374,9 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("$LASTEXITCODE -ne 0");
     expect(workflow).toContain("Sign macOS desktop runtime binaries");
     expect(workflow).toContain("resources/kandev/bin");
-    expect(workflow).toContain("for binary in kandev agentctl; do");
+    expect(workflow).toContain(
+      "for binary in kandev agentctl agentctl-darwin-arm64 agentctl-darwin-amd64; do",
+    );
     expect(workflow).toContain(
       'codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY"',
     );
@@ -362,12 +392,14 @@ describe("release desktop artifacts", () => {
     expect(tauriConfig).toContain("windows-sign.ps1");
     expect(tauriConfig).not.toContain('"csp": null');
     expect(windowsSignScript).toContain('"https://timestamp.digicert.com"');
+    expect(windowsSignScript).toContain('WINDOWS_SIGNING_ENABLED -eq "false"');
+    expect(windowsSignScript).not.toContain("ALLOW_UNSIGNED_DESKTOP");
     expect(windowsSignScript).toContain("Skipping Windows signing for unsigned desktop artifact");
     expect(windowsSignScript).toContain("Remove-Item -LiteralPath $certificatePath");
-    expect(signingDocs).toContain("Public recommended desktop releases require signing");
-    expect(signingDocs).toContain("allow_unsigned_desktop");
+    expect(signingDocs).toContain("signs desktop artifacts opportunistically");
+    expect(signingDocs).toContain("Missing or incomplete inputs do not block the release");
+    expect(signingDocs).not.toContain("allow_unsigned_desktop");
     expect(signingDocs).toContain("desktop_validation_only");
-    expect(signingDocs).toContain("publishes the normal release outputs");
     expect(signingDocs).toContain("does not publish a GitHub release");
     expect(signingDocs).toContain("public container tags");
     expect(signingDocs).toContain("Ubuntu 22.04");

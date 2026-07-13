@@ -165,7 +165,7 @@ fi
 
 extract_checks_json() {
   local status_json=$1
-  jq -cn --argjson checks_in "$status_json" '
+  jq -cn --slurpfile checks_in <(printf '%s\n' "$status_json") '
     def lower_or_null:
       if . == null or . == "" then null else ascii_downcase end;
     def extract($re; $field):
@@ -191,7 +191,7 @@ extract_checks_json() {
       elif .conclusion == "cancelled" then 5
       else 6
       end;
-    $checks_in
+    $checks_in[0]
     | to_entries
     | map(.value + {_index: .key} | {
       type: (.["__typename"] // null),
@@ -220,8 +220,8 @@ extract_checks_json() {
 extract_issue_comments_json() {
   local comments_json=$1
   local since=$2
-  jq -cn --argjson comments "$comments_json" --arg since "$since" '
-    $comments
+  jq -cn --slurpfile comments <(printf '%s\n' "$comments_json") --arg since "$since" '
+    $comments[0]
     | map(select($since == "" or ((.createdAt // .created_at // "") > $since)))
     | map({
       author: (.author.login // "unknown"),
@@ -235,8 +235,8 @@ extract_issue_comments_json() {
 extract_reviews_json() {
   local reviews_api_json=$1
   local since=$2
-  jq -cn --argjson reviews "$reviews_api_json" --arg since "$since" '
-    $reviews
+  jq -cn --slurpfile reviews <(printf '%s\n' "$reviews_api_json") --arg since "$since" '
+    $reviews[0]
     | map(select($since == "" or ((.submitted_at // "") > $since)))
     | map({
       author: (.user.login // "unknown"),
@@ -250,14 +250,14 @@ extract_reviews_json() {
 extract_review_threads_json() {
   local threads_nodes_json=$1
   local since=$2
-  jq -cn --argjson threads "$threads_nodes_json" --arg since "$since" '
+  jq -cn --slurpfile threads <(printf '%s\n' "$threads_nodes_json") --arg since "$since" '
     def relevant_comments:
       if $since == "" then
         (.comments.nodes // [])
       else
         [(.comments.nodes // [])[] | select((.createdAt // "") > $since)]
       end;
-    $threads
+    $threads[0]
     | map(. as $thread | (relevant_comments) as $comments | select($comments | length > 0) | {
       thread_id: .id,
       is_resolved: (.isResolved // false),
@@ -373,7 +373,9 @@ fetch_review_threads_nodes_json() {
   local repo=$2
   local pr_number=$3
   local cursor=''
-  local nodes='[]'
+  local nodes_file
+  nodes_file="$(mktemp)"
+  printf '[]\n' >"$nodes_file"
 
   while :; do
     local cursor_args=()
@@ -410,12 +412,23 @@ fetch_review_threads_nodes_json() {
           }
         }' \
       -f owner="$owner" -f repo="$repo" -F pr="$pr_number" "${cursor_args[@]}")"; then
+      rm -f "$nodes_file"
       return 1
     fi
 
     local page_nodes
     page_nodes="$(jq -c '.data.repository.pullRequest.reviewThreads.nodes // []' <<<"$page_json")"
-    nodes="$(jq -cn --argjson prev "$nodes" --argjson page "$page_nodes" '$prev + $page')"
+    local next_nodes_file
+    next_nodes_file="$(mktemp)"
+    if ! jq -cn \
+      --slurpfile prev "$nodes_file" \
+      --slurpfile page <(printf '%s\n' "$page_nodes") \
+      '$prev[0] + $page[0]' >"$next_nodes_file"; then
+      add_error "review_threads" "failed to merge paginated review threads"
+      rm -f "$next_nodes_file" "$nodes_file"
+      return 1
+    fi
+    mv "$next_nodes_file" "$nodes_file"
 
     local has_next
     has_next="$(jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage // false' <<<"$page_json")"
@@ -430,7 +443,8 @@ fetch_review_threads_nodes_json() {
     fi
   done
 
-  printf '%s\n' "$nodes"
+  cat "$nodes_file"
+  rm -f "$nodes_file"
 }
 
 repo_owner=''

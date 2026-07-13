@@ -50,6 +50,20 @@ func setEnvVars(t *testing.T, srv *httptest.Server) {
 	t.Setenv("KANDEV_WORKSPACE_ID", "ws-def")
 }
 
+func TestNewKandevClient_NormalizesVersionedAPIURL(t *testing.T) {
+	srv, captured := setupMockServer(t, 200, `{"task":{"id":"task-abc"}}`)
+	setEnvVars(t, srv)
+	t.Setenv("KANDEV_API_URL", srv.URL+"/api/v1")
+
+	code := runKandevCLI([]string{"task", "get"})
+	if code != 0 {
+		t.Fatalf("expected exit 0, got %d", code)
+	}
+	if captured.Path != "/api/v1/office/tasks/task-abc" {
+		t.Errorf("unexpected path: %s", captured.Path)
+	}
+}
+
 // --- Task Tests ---
 
 func TestTaskGet_CallsCorrectEndpoint(t *testing.T) {

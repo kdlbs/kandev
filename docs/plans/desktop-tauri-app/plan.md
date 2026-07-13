@@ -92,7 +92,9 @@ apps/desktop/src-tauri/resources/kandev/
 └── bin/
     ├── kandev[.exe]
     ├── agentctl[.exe]
-    └── agentctl-linux-amd64
+    ├── agentctl-linux-amd64
+    ├── agentctl-darwin-arm64
+    └── agentctl-darwin-amd64
 ```
 
 The helper validates the exact binaries required by `internal/launcher/bundle.go` so the desktop app and existing runtime tarballs cannot drift.
@@ -166,7 +168,7 @@ Add signing inputs/secrets behind conditional release steps:
 - Windows: certificate/key-vault or custom signing command wiring.
 - Linux: checksum required; GPG/AppImage signing optional.
 
-Unsigned desktop builds remain allowed only through explicit workflow overrides, but public recommended artifacts should require signing success on macOS and Windows.
+Desktop signing should be automatic when secrets are configured. If signing inputs are missing or incomplete, the workflow should still publish unsigned desktop artifacts with a release-notes warning.
 
 ---
 

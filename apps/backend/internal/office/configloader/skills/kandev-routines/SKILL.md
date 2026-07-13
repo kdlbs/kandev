@@ -1,6 +1,6 @@
 ---
 name: kandev-routines
-description: Schedule recurring work via cron and webhook triggers
+description: Create, inspect, pause, resume, or delete recurring Office routines when work should run on a cron schedule or webhook trigger.
 kandev:
   system: true
   version: "0.42.0"

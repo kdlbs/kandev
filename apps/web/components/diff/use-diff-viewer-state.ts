@@ -6,13 +6,19 @@ import type {
   AnnotationSide,
   ChangeContent,
 } from "@pierre/diffs";
-import type { FileDiffData, DiffComment } from "@/lib/diff/types";
+import type { FileDiffData, DiffComment, DiffCommentUpdate } from "@/lib/diff/types";
 import { buildDiffComment, useCommentActions } from "@/lib/diff/comment-utils";
 import { useDiffComments } from "./use-diff-comments";
 import { useDiffMetadata } from "./use-diff-metadata";
 import { useExpandableDiff } from "./use-expandable-diff";
 import type { RevertBlockInfo } from "./diff-viewer";
 import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
+import { useOptionalAppStore } from "@/components/state-provider";
+import {
+  walkthroughStepMatchesFile,
+  type WalkthroughTargetFile,
+} from "@/lib/diff/walkthrough-match";
+import type { WalkthroughStep } from "@/lib/types/http";
 
 type BuildAnnotationsOpts = {
   comments: DiffComment[];
@@ -137,6 +143,7 @@ type UseDiffViewerStateOpts = {
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
   onCommentRun?: (comment: DiffComment) => void;
   externalComments?: DiffComment[];
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => Promise<void> | void;
@@ -148,6 +155,57 @@ type UseDiffViewerStateOpts = {
   repo?: string;
 };
 
+/**
+ * Returns a `walkthrough-step` annotation anchored to the active walkthrough
+ * step's line when that step targets this file, else null. Additive and gated:
+ * with no active walkthrough it returns null and the diff is unaffected.
+ */
+export function buildWalkthroughSelectedLines(
+  file: WalkthroughTargetFile,
+  step: WalkthroughStep | null | undefined,
+): SelectedLineRange | null {
+  if (!step || !walkthroughStepMatchesFile(file, step)) return null;
+  return {
+    side: "additions",
+    start: step.line,
+    end: step.line_end ?? step.line,
+  };
+}
+
+function useWalkthroughSelection(
+  filePath: string,
+  repo: string | undefined,
+): {
+  annotation: DiffLineAnnotation<AnnotationMetadata> | null;
+  selectedLines: SelectedLineRange | null;
+} {
+  const activeTaskId = useOptionalAppStore((s) => s.tasks.activeTaskId, null);
+  const walkthrough = useOptionalAppStore(
+    (s) => (activeTaskId ? s.walkthroughs.byTaskId[activeTaskId] : null),
+    null,
+  );
+  const activeStep = useOptionalAppStore(
+    (s) => (activeTaskId ? (s.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0),
+    0,
+  );
+  return useMemo(() => {
+    const step = walkthrough?.steps[activeStep];
+    const selectedLines = buildWalkthroughSelectedLines(
+      { path: filePath, repository_name: repo },
+      step,
+    );
+    if (!selectedLines) return { annotation: null, selectedLines: null };
+    return {
+      annotation: {
+        side: "additions" as AnnotationSide,
+        lineNumber: Math.max(selectedLines.start, selectedLines.end),
+        metadata: { type: "walkthrough-step" as const },
+      },
+      selectedLines,
+    };
+  }, [walkthrough, activeStep, filePath, repo]);
+}
+
 function useDiffViewerAnnotations({
   comments,
   editingCommentId,
@@ -155,9 +213,13 @@ function useDiffViewerAnnotations({
   selectedLines,
   enableAcceptReject,
   fileDiffMetadata,
+  filePath,
+  repo,
   changeLineMapRef,
   revertInfoRef,
 }: BuildAnnotationsOpts & {
+  filePath: string;
+  repo?: string;
   changeLineMapRef: RefObject<Map<string, string>>;
   revertInfoRef: RefObject<Map<string, RevertBlockInfo>>;
 }) {
@@ -181,12 +243,18 @@ function useDiffViewerAnnotations({
     ],
   );
 
+  const walkthrough = useWalkthroughSelection(filePath, repo);
+  const withWalkthrough = useMemo(
+    () => (walkthrough.annotation ? [...annotations, walkthrough.annotation] : annotations),
+    [annotations, walkthrough.annotation],
+  );
+
   useEffect(() => {
     changeLineMapRef.current = lineMap;
     revertInfoRef.current = revertMap;
   }, [lineMap, revertMap, changeLineMapRef, revertInfoRef]);
 
-  return annotations;
+  return { annotations: withWalkthrough, walkthroughSelectedLines: walkthrough.selectedLines };
 }
 
 type CommentHandlerOpts = {
@@ -201,9 +269,10 @@ type CommentHandlerOpts = {
   sessionId?: string;
   addComment: (range: SelectedLineRange, content: string) => DiffComment;
   removeComment: (commentId: string) => void;
-  updateComment: (commentId: string, updates: Partial<DiffComment>) => void;
+  updateComment: (commentId: string, updates: DiffCommentUpdate) => void;
   setEditingComment: (commentId: string | null) => void;
   onCommentDelete?: (commentId: string) => void;
+  onCommentUpdate?: (commentId: string, updates: DiffCommentUpdate) => void;
 };
 
 function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
@@ -222,6 +291,7 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
     updateComment,
     setEditingComment,
     onCommentDelete,
+    onCommentUpdate,
   } = opts;
   const handleLineSelectionEnd = useCallback(
     (range: SelectedLineRange | null) => {
@@ -289,6 +359,7 @@ function useDiffViewerCommentHandlers(opts: CommentHandlerOpts) {
     updateComment,
     setEditingComment,
     onCommentDelete,
+    onCommentUpdate,
     externalComments,
   });
 
@@ -325,6 +396,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     sessionId,
     onCommentAdd,
     onCommentDelete,
+    onCommentUpdate,
     onCommentRun,
     externalComments,
     onRevertBlock,
@@ -367,13 +439,15 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
   const changeLineMapRef = useRef<Map<string, string>>(new Map());
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const annotations = useDiffViewerAnnotations({
+  const { annotations, walkthroughSelectedLines } = useDiffViewerAnnotations({
     comments,
     editingCommentId,
     showCommentForm,
     selectedLines,
     enableAcceptReject,
     fileDiffMetadata: expansion.metadata,
+    filePath: data.filePath,
+    repo,
     changeLineMapRef,
     revertInfoRef,
   });
@@ -393,12 +467,14 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     updateComment,
     setEditingComment,
     onCommentDelete,
+    onCommentUpdate,
   });
 
   return {
     comments,
     fileDiffMetadata: expansion.metadata,
     annotations,
+    walkthroughSelectedLines,
     selectedLines,
     showCommentForm,
     setShowCommentForm,

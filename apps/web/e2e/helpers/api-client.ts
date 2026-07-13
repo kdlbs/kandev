@@ -209,6 +209,21 @@ export class ApiClient {
     return res.json() as Promise<T>;
   }
 
+  private async activeWorkspaceId(): Promise<string | undefined> {
+    const { settings } = await this.getUserSettings();
+    const workspaceId = settings.workspace_id;
+    return typeof workspaceId === "string" && workspaceId.trim() !== ""
+      ? workspaceId.trim()
+      : undefined;
+  }
+
+  private async withActiveWorkspace(path: string, workspaceId?: string): Promise<string> {
+    const resolved = workspaceId?.trim() || (await this.activeWorkspaceId());
+    if (!resolved) return path;
+    const separator = path.includes("?") ? "&" : "?";
+    return `${path}${separator}workspace_id=${encodeURIComponent(resolved)}`;
+  }
+
   async healthCheck(): Promise<void> {
     await this.request("GET", "/health");
   }
@@ -421,6 +436,13 @@ export class ApiClient {
     content: string,
   ): Promise<{ id: string; name: string; content: string; builtin: boolean }> {
     return this.request("POST", "/api/v1/prompts", { name, content });
+  }
+
+  async updatePrompt(
+    promptId: string,
+    patch: { name?: string; content?: string },
+  ): Promise<{ id: string; name: string; content: string; builtin: boolean }> {
+    return this.request("PATCH", `/api/v1/prompts/${promptId}`, patch);
   }
 
   async deletePrompt(promptId: string): Promise<void> {
@@ -645,7 +667,10 @@ export class ApiClient {
     default_utility_agent_id?: string;
     default_utility_model?: string;
     sidebar_views?: unknown[];
+    saved_layouts?: unknown[];
     kanban_view_mode?: string;
+    tasks_list_sort?: string;
+    tasks_list_group?: string;
     voice_mode?: VoiceModeSettings;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
@@ -1207,6 +1232,9 @@ export class ApiClient {
     title?: string;
     created_by: string;
     updated_at: string;
+    implementation_started_at?: string | null;
+    implementation_started_session_id?: string | null;
+    implementation_started_by?: string | null;
   } | null> {
     try {
       return await this.wsRequest("task.plan.get", { task_id: taskId });
@@ -1341,6 +1369,7 @@ export class ApiClient {
 
   async updateReviewWatch(
     watchId: string,
+    workspaceId: string,
     patch: {
       enabled?: boolean;
       cleanup_policy?: "auto" | "always" | "never";
@@ -1348,11 +1377,18 @@ export class ApiClient {
       repos?: Array<{ owner: string; name: string }>;
     },
   ): Promise<void> {
-    await this.request("PUT", `/api/v1/github/watches/review/${watchId}`, patch);
+    await this.request(
+      "PUT",
+      `/api/v1/github/watches/review/${watchId}?workspace_id=${encodeURIComponent(workspaceId)}`,
+      patch,
+    );
   }
 
-  async deleteReviewWatch(watchId: string): Promise<void> {
-    await this.request("DELETE", `/api/v1/github/watches/review/${watchId}`);
+  async deleteReviewWatch(watchId: string, workspaceId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/github/watches/review/${watchId}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
   }
 
   async triggerReviewWatch(
@@ -1423,19 +1459,43 @@ export class ApiClient {
     instanceType?: "cloud" | "server";
     defaultProjectKey?: string;
     secret: string;
+    workspaceId?: string;
   }): Promise<unknown> {
-    return this.request("POST", "/api/v1/jira/config", {
-      ...payload,
+    const { workspaceId, ...config } = payload;
+    const path = await this.withActiveWorkspace("/api/v1/jira/config", workspaceId);
+    return this.request("POST", path, {
+      ...config,
       authMethod: payload.authMethod ?? "api_token",
       instanceType: payload.instanceType ?? "cloud",
     });
   }
 
-  async setLinearConfig(payload: { secret: string; defaultTeamKey?: string }): Promise<unknown> {
-    return this.request("POST", "/api/v1/linear/config", {
+  async setLinearConfig(payload: {
+    secret: string;
+    defaultTeamKey?: string;
+    workspaceId?: string;
+  }): Promise<unknown> {
+    const { workspaceId, ...config } = payload;
+    const path = await this.withActiveWorkspace("/api/v1/linear/config", workspaceId);
+    return this.request("POST", path, {
       defaultTeamKey: "",
-      ...payload,
+      ...config,
       authMethod: "api_key",
+    });
+  }
+
+  async createSentryInstance(payload: {
+    name: string;
+    secret: string;
+    url?: string;
+    workspaceId?: string;
+  }): Promise<{ id: string }> {
+    const { workspaceId, ...config } = payload;
+    const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
+    return this.request("POST", path, {
+      authMethod: "auth_token",
+      url: "https://sentry.io",
+      ...config,
     });
   }
 
@@ -1448,18 +1508,39 @@ export class ApiClient {
    */
   async waitForIntegrationAuthHealthy(
     integration: "jira" | "linear" | "sentry",
-    timeoutMs = 5_000,
+    options: number | { timeoutMs?: number; workspaceId?: string } = 5_000,
   ): Promise<void> {
+    const timeoutMs = typeof options === "number" ? options : (options.timeoutMs ?? 5_000);
+    const workspaceId = typeof options === "number" ? undefined : options.workspaceId;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      const res = await this.rawRequest("GET", `/api/v1/${integration}/config`);
-      if (res.ok && res.status === 200) {
-        const cfg = (await res.json()) as { hasSecret?: boolean; lastOk?: boolean };
-        if (cfg.hasSecret && cfg.lastOk) return;
-      }
-      await new Promise((r) => setTimeout(r, 100));
+      if (await this.integrationReportsHealthy(integration, workspaceId)) return;
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
     }
     throw new Error(`${integration} config never reported lastOk: true within ${timeoutMs}ms`);
+  }
+
+  // integrationReportsHealthy probes an integration's current auth-health.
+  // Sentry is multi-instance (checks whether ANY instance is healthy); the
+  // others expose a single workspace config.
+  private async integrationReportsHealthy(
+    integration: "jira" | "linear" | "sentry",
+    workspaceId?: string,
+  ): Promise<boolean> {
+    if (integration === "sentry") {
+      const path = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
+      const res = await this.rawRequest("GET", path);
+      if (!res.ok || res.status !== 200) return false;
+      const body = (await res.json()) as {
+        instances?: Array<{ hasSecret?: boolean; lastOk?: boolean }>;
+      };
+      return (body.instances ?? []).some((i) => Boolean(i.hasSecret) && Boolean(i.lastOk));
+    }
+    const path = await this.withActiveWorkspace(`/api/v1/${integration}/config`, workspaceId);
+    const res = await this.rawRequest("GET", path);
+    if (!res.ok || res.status !== 200) return false;
+    const cfg = (await res.json()) as { hasSecret?: boolean; lastOk?: boolean };
+    return Boolean(cfg.hasSecret) && Boolean(cfg.lastOk);
   }
 
   // --- Jira Mock Control ---
@@ -1478,12 +1559,25 @@ export class ApiClient {
     await this.request("PUT", "/api/v1/jira/mock/auth-result", result);
   }
 
-  async mockJiraSetAuthHealth(args: { ok: boolean; error?: string }): Promise<void> {
-    await this.request("PUT", "/api/v1/jira/mock/auth-health", args);
+  async mockJiraSetAuthHealth(args: {
+    ok: boolean;
+    error?: string;
+    workspaceId?: string;
+  }): Promise<void> {
+    const { workspaceId, ...payload } = args;
+    const path = await this.withActiveWorkspace("/api/v1/jira/mock/auth-health", workspaceId);
+    await this.request("PUT", path, payload);
   }
 
   async mockJiraSetProjects(projects: MockJiraProject[]): Promise<void> {
     await this.request("POST", "/api/v1/jira/mock/projects", { projects });
+  }
+
+  async mockJiraSetProjectStatuses(projectKey: string, statuses: MockJiraStatus[]): Promise<void> {
+    await this.request("POST", "/api/v1/jira/mock/project-statuses", {
+      projectKey,
+      statuses,
+    });
   }
 
   async mockJiraAddTickets(tickets: MockJiraTicket[]): Promise<void> {
@@ -1530,8 +1624,11 @@ export class ApiClient {
     ok: boolean;
     error?: string;
     orgSlug?: string;
+    workspaceId?: string;
   }): Promise<void> {
-    await this.request("PUT", "/api/v1/linear/mock/auth-health", args);
+    const { workspaceId, ...payload } = args;
+    const path = await this.withActiveWorkspace("/api/v1/linear/mock/auth-health", workspaceId);
+    await this.request("PUT", path, payload);
   }
 
   async mockLinearSetTeams(teams: MockLinearTeam[]): Promise<void> {
@@ -1556,26 +1653,148 @@ export class ApiClient {
     await this.request("DELETE", "/api/v1/sentry/mock/reset");
   }
 
-  async mockSentrySetAuthResult(result: {
+  // mockSentrySetAuthResult seeds the auth-check result for one instance's mock
+  // dataset. Omit instanceId to target the pre-save ("") dataset used by
+  // test-connection before an instance exists.
+  async mockSentrySetAuthResult(
+    result: { ok: boolean; userId?: string; displayName?: string; email?: string; error?: string },
+    instanceId?: string,
+  ): Promise<void> {
+    const query = instanceId ? `?instanceId=${encodeURIComponent(instanceId)}` : "";
+    await this.request("PUT", `/api/v1/sentry/mock/auth-result${query}`, result);
+  }
+
+  // mockSentrySetAuthHealth synchronously stamps last_ok/last_error on one
+  // instance row, bypassing the async probe.
+  async mockSentrySetAuthHealth(args: {
+    instanceId: string;
     ok: boolean;
-    userId?: string;
-    displayName?: string;
-    email?: string;
     error?: string;
   }): Promise<void> {
-    await this.request("PUT", "/api/v1/sentry/mock/auth-result", result);
+    const { instanceId, ...payload } = args;
+    await this.request(
+      "PUT",
+      `/api/v1/sentry/mock/auth-health?instanceId=${encodeURIComponent(instanceId)}`,
+      payload,
+    );
   }
 
-  async mockSentrySetAuthHealth(args: { ok: boolean; error?: string }): Promise<void> {
-    await this.request("PUT", "/api/v1/sentry/mock/auth-health", args);
+  async mockSentrySetOrganizations(
+    instanceId: string,
+    organizations: MockSentryOrganization[],
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/v1/sentry/mock/organizations?instanceId=${encodeURIComponent(instanceId)}`,
+      { organizations },
+    );
   }
 
-  async mockSentrySetOrganizations(organizations: MockSentryOrganization[]): Promise<void> {
-    await this.request("POST", "/api/v1/sentry/mock/organizations", { organizations });
+  async mockSentrySetProjects(instanceId: string, projects: MockSentryProject[]): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/v1/sentry/mock/projects?instanceId=${encodeURIComponent(instanceId)}`,
+      { projects },
+    );
   }
 
-  async mockSentrySetProjects(projects: MockSentryProject[]): Promise<void> {
-    await this.request("POST", "/api/v1/sentry/mock/projects", { projects });
+  // --- Sentry instance + watch CRUD ---
+
+  async createSentryInstance(opts: {
+    workspaceId: string;
+    name: string;
+    url?: string;
+    secret: string;
+    authMethod?: string;
+  }): Promise<MockSentryInstance> {
+    return this.request<MockSentryInstance>(
+      "POST",
+      `/api/v1/sentry/instances?workspace_id=${encodeURIComponent(opts.workspaceId)}`,
+      {
+        workspaceId: opts.workspaceId,
+        name: opts.name,
+        authMethod: opts.authMethod ?? "auth_token",
+        url: opts.url ?? "https://sentry.io",
+        secret: opts.secret,
+      },
+    );
+  }
+
+  async listSentryInstances(workspaceId: string): Promise<MockSentryInstance[]> {
+    const { instances } = await this.request<{ instances: MockSentryInstance[] }>(
+      "GET",
+      `/api/v1/sentry/instances?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+    return instances ?? [];
+  }
+
+  // deleteSentryInstanceRaw returns the raw Response so callers can assert the
+  // 409 SENTRY_INSTANCE_IN_USE (with watchCount) when a watch still binds.
+  async deleteSentryInstanceRaw(workspaceId: string, instanceId: string): Promise<Response> {
+    return this.rawRequest(
+      "DELETE",
+      `/api/v1/sentry/instances/${encodeURIComponent(instanceId)}?workspace_id=${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  // deleteAllSentryInstances removes every watch (FK-protected) then every
+  // instance in a workspace — the per-test cleanup replacement for the removed
+  // /config DELETE.
+  async deleteAllSentryInstances(workspaceId?: string): Promise<void> {
+    const watchesPath = await this.withActiveWorkspace("/api/v1/sentry/watches/issue", workspaceId);
+    const watchesRes = await this.rawRequest("GET", watchesPath);
+    if (watchesRes.ok) {
+      const body = (await watchesRes.json()) as { watches?: Array<{ id: string }> };
+      for (const w of body.watches ?? []) {
+        const p = await this.withActiveWorkspace(
+          `/api/v1/sentry/watches/issue/${encodeURIComponent(w.id)}`,
+          workspaceId,
+        );
+        await this.rawRequest("DELETE", p).catch(() => undefined);
+      }
+    }
+    const listPath = await this.withActiveWorkspace("/api/v1/sentry/instances", workspaceId);
+    const res = await this.rawRequest("GET", listPath);
+    if (!res.ok) return;
+    const body = (await res.json()) as { instances?: Array<{ id: string }> };
+    for (const instance of body.instances ?? []) {
+      const p = await this.withActiveWorkspace(
+        `/api/v1/sentry/instances/${encodeURIComponent(instance.id)}`,
+        workspaceId,
+      );
+      await this.rawRequest("DELETE", p).catch(() => undefined);
+    }
+  }
+
+  async createSentryIssueWatch(opts: {
+    workspaceId: string;
+    sentryInstanceId: string;
+    workflowId: string;
+    workflowStepId: string;
+    agentProfileId: string;
+    executorProfileId?: string;
+    orgSlug: string;
+    projectSlug?: string;
+    prompt?: string;
+    pollIntervalSeconds?: number;
+  }): Promise<{ id: string; sentryInstanceId: string; enabled: boolean }> {
+    return this.request(
+      "POST",
+      `/api/v1/sentry/watches/issue?workspace_id=${encodeURIComponent(opts.workspaceId)}`,
+      {
+        workspaceId: opts.workspaceId,
+        sentryInstanceId: opts.sentryInstanceId,
+        workflowId: opts.workflowId,
+        workflowStepId: opts.workflowStepId,
+        repositoryId: "",
+        baseBranch: "",
+        filter: { orgSlug: opts.orgSlug, projectSlug: opts.projectSlug },
+        agentProfileId: opts.agentProfileId,
+        executorProfileId: opts.executorProfileId ?? "",
+        prompt: opts.prompt ?? "Investigate {{issue.title}}",
+        pollIntervalSeconds: opts.pollIntervalSeconds ?? 300,
+      },
+    );
   }
 
   // --- Linear issue watch CRUD ---
@@ -1876,11 +2095,47 @@ export class ApiClient {
   async probeSSHShells(executorId: string): Promise<SSHProbeShellsResponse> {
     return this.request("POST", `/api/v1/ssh/executors/${executorId}/probe-shells`);
   }
+
+  /**
+   * Seed an automation via the E2E HTTP endpoint (avoids WS / Node 24 requirement).
+   * Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async seedAutomation(opts: {
+    workspaceId: string;
+    name: string;
+    workflowId?: string;
+    workflowStepId?: string;
+  }): Promise<{ id: string; workspace_id: string; name: string }> {
+    return this.request("POST", "/api/v1/e2e/automations", {
+      workspace_id: opts.workspaceId,
+      name: opts.name,
+      workflow_id: opts.workflowId ?? "",
+      workflow_step_id: opts.workflowStepId ?? "",
+    });
+  }
+
+  /**
+   * Seed an automation run row via the E2E HTTP endpoint.
+   * Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async seedAutomationRun(
+    automationId: string,
+    status = "skipped",
+    taskId?: string,
+  ): Promise<{ id: string; automation_id: string; status: string; task_id: string }> {
+    return this.request("POST", "/api/v1/e2e/automation-runs", {
+      automation_id: automationId,
+      status,
+      task_id: taskId ?? "",
+    });
+  }
 }
 
 // --- Jira / Linear mock payload types ---
 
 export type MockJiraProject = { id: string; key: string; name: string };
+
+export type MockJiraStatus = { id: string; name: string; statusCategory?: string };
 
 export type MockJiraTransition = {
   id: string;
@@ -1932,3 +2187,13 @@ export type MockLinearIssue = {
 export type MockSentryOrganization = { id: string; slug: string; name: string };
 
 export type MockSentryProject = { id: string; slug: string; name: string; orgSlug: string };
+
+// MockSentryInstance is the subset of a created instance the e2e helpers read.
+export type MockSentryInstance = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  url: string;
+  hasSecret: boolean;
+  lastOk: boolean;
+};

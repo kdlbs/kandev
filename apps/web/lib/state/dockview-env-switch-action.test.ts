@@ -40,6 +40,90 @@ function makeMockApi(): DockviewApi {
   } as unknown as DockviewApi;
 }
 
+function testNormalizesStaleSessionPanelsOnSavedMaximize(): void {
+  const savedMaximizedJson = {
+    grid: {
+      root: {
+        type: "branch",
+        size: 600,
+        data: [{ type: "leaf", size: 600, data: { id: "g-center", views: ["chat"] } }],
+      },
+      height: 600,
+      width: 800,
+      orientation: "HORIZONTAL",
+    },
+    panels: {
+      chat: { id: "chat", contentComponent: "chat" },
+    },
+    activeGroup: "g-center",
+  };
+  vi.mocked(getEnvMaximizeState).mockImplementation((envId) =>
+    envId === "env-a"
+      ? { preMaximizeLayout: { columns: [] }, maximizedDockviewJson: savedMaximizedJson }
+      : null,
+  );
+
+  type TestPanel = {
+    id: string;
+    api: { component: string; close: () => void };
+    group: { id: string; panels: TestPanel[] };
+  };
+
+  const group = { id: "g-center", panels: [] as TestPanel[] };
+  const panels: TestPanel[] = [];
+  const removePanel = (id: string) => {
+    const panelIndex = panels.findIndex((p) => p.id === id);
+    if (panelIndex >= 0) panels.splice(panelIndex, 1);
+    const groupIndex = group.panels.findIndex((p) => p.id === id);
+    if (groupIndex >= 0) group.panels.splice(groupIndex, 1);
+  };
+  const closeStale = vi.fn(() => removePanel("session:stale"));
+  const stalePanel: TestPanel = {
+    id: "session:stale",
+    api: { component: "chat", close: closeStale },
+    group,
+  };
+  panels.push(stalePanel);
+  group.panels.push(stalePanel);
+
+  const api = {
+    ...makeMockApi(),
+    panels,
+    groups: [group],
+    getPanel: vi.fn((id: string) => panels.find((p) => p.id === id) ?? null),
+    addPanel: vi.fn((opts: { id: string; component: string }) => {
+      const panel: TestPanel = {
+        id: opts.id,
+        api: { component: opts.component, close: () => removePanel(opts.id) },
+        group,
+      };
+      panels.push(panel);
+      group.panels.push(panel);
+    }),
+  } as unknown as DockviewApi;
+
+  useDockviewStore.setState({ api, currentLayoutEnvId: "env-b" });
+  useDockviewStore
+    .getState()
+    .switchEnvLayout("env-b", "env-a", "session-a", ["session-a", "session-sibling"]);
+
+  expect(api.addPanel).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: "session:session-a",
+      position: { referenceGroup: group.id, index: 0 },
+    }),
+  );
+  expect(api.addPanel).toHaveBeenCalledWith(
+    expect.objectContaining({
+      id: "session:session-sibling",
+      params: { sessionId: "session-sibling" },
+      position: { referenceGroup: group.id, index: 1 },
+      inactive: true,
+    }),
+  );
+  expect(closeStale).toHaveBeenCalledOnce();
+}
+
 describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -189,5 +273,9 @@ describe("switchEnvLayout — maximize+sidebar-switch regression", () => {
     const state = useDockviewStore.getState();
     expect(state.preMaximizeLayout).not.toBeNull();
     expect(state.maximizedGroupId).toBeTruthy();
+  });
+
+  it("normalizes stale session panels when restoring a saved maximize layout", () => {
+    testNormalizesStaleSessionPanelsOnSavedMaximize();
   });
 });

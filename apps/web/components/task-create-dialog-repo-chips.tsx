@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { IconPlus, IconX, IconCode, IconGitBranch, IconGitFork } from "@tabler/icons-react";
 import { cn, formatUserHomePath } from "@/lib/utils";
 import { Badge } from "@kandev/ui/badge";
@@ -8,7 +8,6 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-repository-branches";
 import type { LocalRepository, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
-import { autoSelectBranch } from "@/components/task-create-dialog-helpers";
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import { scoreRepo } from "@/lib/utils/repo-filter";
 import {
@@ -26,45 +25,8 @@ import {
   computeBranchTooltip,
   computeBranchDisabledReason,
 } from "@/components/task-create-dialog-branch-utils";
+import { useRepoBranchAutoselect } from "@/components/task-create-dialog-repo-branch-autoselect";
 
-function runAutoselect({
-  branches,
-  preferredDefaultBranch,
-  preferredDefaultBranchLoading,
-  onBranchChange,
-}: {
-  branches: Array<{ name: string; type: "local" | "remote"; remote?: string }>;
-  preferredDefaultBranch: string | undefined;
-  preferredDefaultBranchLoading: boolean;
-  onBranchChange: (value: string) => void;
-}) {
-  if (preferredDefaultBranchLoading) return;
-  // Local-executor flow: preferredDefaultBranch is the workspace's current
-  // ref (branch name OR detached-HEAD short SHA). Seed row.branch with it
-  // unconditionally so the chip displays "current: <ref>". When the ref is a
-  // SHA (detached HEAD) it won't appear in the branches list, but falling
-  // through to autoSelectBranch would pick main/master and surface "will
-  // switch to: master", which contradicts what the user actually has checked
-  // out. Sending the SHA back on submit is a no-op because the backend's
-  // skip-when-equal check compares against the same SHA.
-  if (preferredDefaultBranch) {
-    onBranchChange(preferredDefaultBranch);
-    return;
-  }
-  autoSelectBranch(branches, onBranchChange);
-}
-
-/**
- * Chip row for the task-create dialog. Renders one chip per row in
- * `fs.repositories`, plus a trailing "+" to add another. Each chip is two
- * pills (repo, branch) and a remove (×). All chips are equivalent — there
- * is no "primary" — and any row can hold either a workspace repo or a
- * discovered on-machine path.
- *
- * In Remote mode the chips are replaced by `RemoteRepoChipsRow`, which
- * renders its own chip row backed by `fs.remoteRepos`; the trailing toggle
- * flips between the two modes.
- */
 type RepoChipsRowProps = {
   fs: DialogFormState;
   repositories: Repository[];
@@ -102,6 +64,8 @@ type RepoChipsRowProps = {
   /** "No repository" mode: replace the chip row with a folder picker. */
   onToggleNoRepository?: () => void;
   onWorkspacePathChange?: (value: string) => void;
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
 };
 
 export function RepoChipsRow({
@@ -118,6 +82,8 @@ export function RepoChipsRow({
   isLocalExecutor,
   onToggleNoRepository,
   onWorkspacePathChange,
+  lastUsedBranch,
+  userSettingsLoaded,
 }: RepoChipsRowProps) {
   // Local executor branch behavior:
   //   - chip is clickable (user can switch to any existing branch on disk)
@@ -163,6 +129,8 @@ export function RepoChipsRow({
         onRowBranchChange={onRowBranchChange}
         onToggleFreshBranch={onToggleFreshBranch}
         onWorkspacePathChange={onWorkspacePathChange}
+        lastUsedBranch={lastUsedBranch}
+        userSettingsLoaded={userSettingsLoaded}
       />
       <SourceModeSwitch
         useRemote={fs.useRemote}
@@ -188,6 +156,8 @@ function ModeBody({
   onRowBranchChange,
   onToggleFreshBranch,
   onWorkspacePathChange,
+  lastUsedBranch,
+  userSettingsLoaded,
 }: {
   fs: DialogFormState;
   repositories: Repository[];
@@ -202,6 +172,8 @@ function ModeBody({
   onRowBranchChange: (key: string, value: string) => void;
   onToggleFreshBranch?: (enabled: boolean) => void;
   onWorkspacePathChange?: (value: string) => void;
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
 }) {
   if (fs.noRepository) {
     return (
@@ -233,6 +205,8 @@ function ModeBody({
       addHint={addHint}
       onRowRepositoryChange={onRowRepositoryChange}
       onRowBranchChange={onRowBranchChange}
+      lastUsedBranch={lastUsedBranch}
+      userSettingsLoaded={userSettingsLoaded}
       freshBranchToggle={
         // Multi-repo runs use worktrees, so the existing-vs-fork choice
         // is irrelevant — only surface the toggle for single-repo flows.
@@ -260,6 +234,8 @@ function ChipsList({
   freshBranchToggle,
   onRowRepositoryChange,
   onRowBranchChange,
+  lastUsedBranch,
+  userSettingsLoaded,
 }: {
   fs: DialogFormState;
   repositories: Repository[];
@@ -271,6 +247,8 @@ function ChipsList({
   freshBranchToggle?: React.ReactNode;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
 }) {
   return (
     <>
@@ -293,6 +271,8 @@ function ChipsList({
           // autoselect path.
           preferredDefaultBranch={isLocalExecutor ? fs.currentLocalBranch : undefined}
           preferredDefaultBranchLoading={isLocalExecutor ? fs.currentLocalBranchLoading : false}
+          lastUsedBranch={lastUsedBranch}
+          userSettingsLoaded={userSettingsLoaded}
           branchPrefix={computeBranchPrefix({
             isLocalExecutor,
             rowBranch: row.branch,
@@ -427,6 +407,8 @@ type RepoChipProps = {
    * default autoselect (main / master / develop, etc.).
    */
   preferredDefaultBranch?: string;
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
   /**
    * True while preferredDefaultBranch is being resolved. Renders a
    * "Loading branch…" placeholder so the chip doesn't briefly show an empty
@@ -456,6 +438,8 @@ function useRepoChipData({
   onBranchChange,
   preferredDefaultBranch,
   preferredDefaultBranchLoading,
+  lastUsedBranch,
+  userSettingsLoaded,
 }: Pick<
   RepoChipProps,
   | "row"
@@ -466,14 +450,13 @@ function useRepoChipData({
   | "onBranchChange"
   | "preferredDefaultBranch"
   | "preferredDefaultBranchLoading"
+  | "lastUsedBranch"
+  | "userSettingsLoaded"
 >) {
   const filteredRepos = useMemo(
     () => repositories.filter((r) => !excludedRepoIds.has(r.id) || r.id === row.repositoryId),
     [repositories, excludedRepoIds, row.repositoryId],
   );
-  // Discovered (on-machine) repos not yet imported into the workspace. Drop
-  // ones whose path is already a workspace repo so the dropdown doesn't show
-  // the same folder twice.
   const filteredDiscovered = useMemo(() => {
     const workspaceRepoPaths = new Set(
       filteredRepos
@@ -488,10 +471,6 @@ function useRepoChipData({
     );
   }, [filteredRepos, discoveredRepositories, excludedRepoIds, row.localPath]);
 
-  // One hook for both row sources (workspace repo by id OR on-machine path).
-  // Backend resolves either to an absolute path; the Zustand cache keys
-  // path-based entries with a synthetic key so workspace + discovered share
-  // one slice (and the same fetch dedupe).
   const branchSource = useMemo<BranchSource | null>(() => {
     if (!workspaceId) return null;
     if (row.repositoryId) {
@@ -507,38 +486,17 @@ function useRepoChipData({
     isLoading: branchesLoading,
     refresh: refreshBranches,
   } = useBranches(branchSource, !!branchSource);
-
-  // Once branches load for this row, pre-fill the branch pill. For
-  // local-executor rows we prefer the workspace's actual current branch
-  // (preferredDefaultBranch) so the chip shows what's on disk and the
-  // submit always carries an explicit branch. Otherwise fall back to the
-  // user's last-used branch / main / master / develop. Skipped if the user
-  // already picked a branch on this row.
-  //
-  // The `preferredDefaultBranchLoading` gate closes a race: without it,
-  // autoSelectBranch's last-used localStorage pick (e.g. "origin/master")
-  // would land in row.branch before currentLocalBranch resolved, then the
-  // row.branch guard above would short-circuit forever and the chip would
-  // render "will switch to: origin/master" even though the user just opened
-  // the dialog. With the gate, autoselect waits until local-status finishes
-  // so the current-branch preference gets first crack at row.branch.
-  useEffect(() => {
-    if (!branchSource || branchesLoading || branches.length === 0 || row.branch) return;
-    runAutoselect({
-      branches,
-      preferredDefaultBranch,
-      preferredDefaultBranchLoading: !!preferredDefaultBranchLoading,
-      onBranchChange,
-    });
-  }, [
+  useRepoBranchAutoselect({
     branchSource,
     branchesLoading,
     branches,
-    row.branch,
+    rowBranch: row.branch,
     onBranchChange,
     preferredDefaultBranch,
     preferredDefaultBranchLoading,
-  ]);
+    lastUsedBranch,
+    userSettingsLoaded,
+  });
 
   const repoOptions: PillOption[] = useMemo(
     () => [
@@ -588,6 +546,8 @@ function RepoChip({
   branchLocked,
   preferredDefaultBranch,
   preferredDefaultBranchLoading,
+  lastUsedBranch,
+  userSettingsLoaded,
   branchPrefix,
   onRepositoryChange,
   onBranchChange,
@@ -602,15 +562,14 @@ function RepoChip({
     onBranchChange,
     preferredDefaultBranch,
     preferredDefaultBranchLoading,
+    lastUsedBranch,
+    userSettingsLoaded,
   });
   const { repoLabel, repoTooltip } = computeRepoChipDisplay(
     row,
     repositories,
     discoveredRepositories,
   );
-  // Hide the value while the preferred-default-branch fetch is in flight to
-  // avoid the chip briefly rendering an empty placeholder before autoselect
-  // seeds row.branch with the workspace's current branch.
   const branchValue = preferredDefaultBranchLoading ? "" : row.branch;
   const hasRepo = !!(row.repositoryId || row.localPath);
   const branchPlaceholder = computeBranchPlaceholder(

@@ -1,5 +1,6 @@
 import { createRepositoryAction } from "@/app/actions/workspaces";
 import type { ExecutionMode, TriggerType } from "@/lib/types/automation";
+import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 import type { RepositorySelection } from "./config-section";
 
 // Shared form state + pending trigger types used by the editor and its
@@ -53,6 +54,7 @@ export async function resolveRepositoryId(
     provider_name: "",
     default_branch: selection.defaultBranch,
     worktree_branch_prefix: "feature/",
+    worktree_branch_template: defaultWorktreeBranchTemplate,
     pull_before_worktree: true,
     setup_script: "",
     cleanup_script: "",

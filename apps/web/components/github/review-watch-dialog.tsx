@@ -349,6 +349,7 @@ function WatchFormFields({
         selectedRepos={form.selectedRepos}
         onAllReposChange={onAllReposChange}
         onSelectedReposChange={onSelectedReposChange}
+        workspaceId={form.workspaceId}
       />
       <QueryField form={form} setForm={setForm} />
       <SectionHeader>Automation</SectionHeader>

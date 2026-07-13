@@ -13,6 +13,9 @@ Validate a desktop runtime directory with this layout:
       kandev[.exe]
       agentctl[.exe]
       agentctl-linux-amd64
+      agentctl-linux-arm64
+      agentctl-darwin-arm64
+      agentctl-darwin-amd64
 
 If runtime-dir is omitted, apps/desktop/src-tauri/resources/kandev is checked.
 EOF
@@ -22,6 +25,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUNTIME_DIR="${ROOT_DIR}/apps/desktop/src-tauri/resources/kandev"
 RUNTIME_DIR_SET=false
 PLATFORM=""
+REMOTE_AGENTCTL_HELPERS=(
+  "agentctl-linux-amd64:agentctl linux/amd64 helper"
+  "agentctl-linux-arm64:agentctl linux/arm64 helper"
+  "agentctl-darwin-arm64:agentctl darwin/arm64 helper"
+  "agentctl-darwin-amd64:agentctl darwin/amd64 helper"
+)
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -61,7 +70,7 @@ is_executable_file() {
   # MSYS/Git Bash can report Windows executables differently from Unix mode bits.
   if [ "${OS:-}" = "Windows_NT" ]; then
     case "$(basename "$path")" in
-      *.exe|agentctl-linux-amd64) return 0 ;;
+      *.exe|agentctl-linux-amd64|agentctl-linux-arm64|agentctl-darwin-arm64|agentctl-darwin-amd64) return 0 ;;
     esac
   fi
   return 1
@@ -108,7 +117,11 @@ fi
 
 require_one "Kandev launcher binary" "$BIN_DIR/kandev" "$BIN_DIR/kandev.exe"
 require_one "agentctl binary" "$BIN_DIR/agentctl" "$BIN_DIR/agentctl.exe"
-require_executable "agentctl linux/amd64 helper" "$BIN_DIR/agentctl-linux-amd64"
+for helper_spec in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+  helper="${helper_spec%%:*}"
+  label="${helper_spec#*:}"
+  require_executable "$label" "$BIN_DIR/$helper"
+done
 
 if [ -n "$PLATFORM" ]; then
   printf 'Desktop runtime verified for %s at %s\n' "$PLATFORM" "$RUNTIME_DIR"

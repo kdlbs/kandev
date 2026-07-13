@@ -57,6 +57,7 @@ func (d *Deployer) deliverLocal(manifest *Manifest, worktreePath string) DeployR
 func (d *Deployer) deliverSprites(manifest *Manifest) DeployResult {
 	dir := spritesInstructionsDir(manifest.WorkspaceSlug, manifest.AgentID)
 	rewriteManifestRefs(manifest, dir)
+	normalizeManifestSkills(manifest)
 	data, err := json.Marshal(manifest)
 	if err != nil {
 		d.logger.Warn("failed to marshal skill manifest for sprites", zap.Error(err))
@@ -67,6 +68,15 @@ func (d *Deployer) deliverSprites(manifest *Manifest) DeployResult {
 		Metadata: map[string]any{
 			MetadataKeySkillManifestJSON: string(data),
 		},
+	}
+}
+
+func normalizeManifestSkills(manifest *Manifest) {
+	if manifest == nil {
+		return
+	}
+	for i := range manifest.Skills {
+		manifest.Skills[i].Content = renderSkillMarkdown(manifest.Skills[i])
 	}
 }
 

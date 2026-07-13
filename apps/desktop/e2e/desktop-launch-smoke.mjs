@@ -11,10 +11,22 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(__dirname, "..");
 const repoRoot = resolve(desktopRoot, "../..");
 
-if (process.argv[2] === "--fake-runtime") {
-  await runFakeRuntime(process.argv[3], process.argv.slice(4));
-} else {
-  await runSmoke();
+// Keep above HEALTH_TIMEOUT in apps/desktop/src-tauri/src/backend.rs (60s): the Rust side
+// retries GET /health every 250ms until that deadline, so this must give it enough room to
+// finish, or a launcher Rust would still consider "starting" gets killed here first.
+// desktop-launch-smoke.test.mjs asserts the relationship so the two stay in sync.
+export const HEALTH_REQUESTED_TIMEOUT_MS = 90_000;
+export const ROOT_REQUESTED_TIMEOUT_MS = 60_000;
+
+// Only run the CLI behavior when this file is executed directly (`node desktop-launch-smoke.mjs`
+// or the fake-runtime re-exec below) — not when desktop-launch-smoke.test.mjs imports it.
+const isEntryPoint = resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url);
+if (isEntryPoint) {
+  if (process.argv[2] === "--fake-runtime") {
+    await runFakeRuntime(process.argv[3], process.argv.slice(4));
+  } else {
+    await runSmoke();
+  }
 }
 
 async function runSmoke() {
@@ -60,10 +72,21 @@ async function runSmoke() {
       throw new Error(`desktop app exited early with code ${child.exitCode}\n${stdout}\n${stderr}`);
     }
   };
+  const describeChild = () => `[stdout]\n${stdout}\n[stderr]\n${stderr}`;
 
   try {
-    await waitForFile(join(stateDir, "health-requested"), 45_000, failIfExited);
-    await waitForFile(join(stateDir, "root-requested"), 45_000, failIfExited);
+    await waitForFile(
+      join(stateDir, "health-requested"),
+      HEALTH_REQUESTED_TIMEOUT_MS,
+      failIfExited,
+      describeChild,
+    );
+    await waitForFile(
+      join(stateDir, "root-requested"),
+      ROOT_REQUESTED_TIMEOUT_MS,
+      failIfExited,
+      describeChild,
+    );
   } finally {
     await stopProcess(child);
   }
@@ -74,7 +97,12 @@ async function runSmoke() {
 async function writeFakeRuntime(runtimeDir, stateDir) {
   const fakeRuntime = join(runtimeDir, "bin", process.platform === "win32" ? "kandev.cmd" : "kandev");
   const agentctl = join(runtimeDir, "bin", process.platform === "win32" ? "agentctl.cmd" : "agentctl");
-  const linuxHelper = join(runtimeDir, "bin", "agentctl-linux-amd64");
+  const remoteHelpers = [
+    ["agentctl-linux-amd64", "linux/amd64"],
+    ["agentctl-linux-arm64", "linux/arm64"],
+    ["agentctl-darwin-arm64", "darwin/arm64"],
+    ["agentctl-darwin-amd64", "darwin/amd64"],
+  ];
 
   if (process.platform === "win32") {
     await writeFile(
@@ -92,9 +120,12 @@ async function writeFakeRuntime(runtimeDir, stateDir) {
     await chmod(agentctl, 0o755);
   }
 
-  await writeFile(linuxHelper, "#!/usr/bin/env bash\necho fake agentctl linux helper\n");
-  if (process.platform !== "win32") {
-    await chmod(linuxHelper, 0o755);
+  for (const [name, platform] of remoteHelpers) {
+    const helper = join(runtimeDir, "bin", name);
+    await writeFile(helper, `#!/usr/bin/env bash\necho fake agentctl ${platform} helper\n`);
+    if (process.platform !== "win32") {
+      await chmod(helper, 0o755);
+    }
   }
 }
 
@@ -143,7 +174,7 @@ async function runFakeRuntime(stateDir, args) {
   process.on("SIGINT", stop);
 }
 
-async function waitForFile(path, timeoutMs, tick) {
+export async function waitForFile(path, timeoutMs, tick, describeDetail) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     tick?.();
@@ -152,7 +183,8 @@ async function waitForFile(path, timeoutMs, tick) {
     }
     await new Promise((resolveWait) => setTimeout(resolveWait, 250));
   }
-  throw new Error(`Timed out waiting for ${path}`);
+  const detail = describeDetail?.();
+  throw new Error(`Timed out waiting for ${path}${detail ? `\n\n${detail}` : ""}`);
 }
 
 async function stopProcess(child) {

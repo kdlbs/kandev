@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -46,6 +47,21 @@ func TestWaitForPromptRPCAfterUserCancel_AbortReleasesWhenRPCStuck(t *testing.T)
 	err := a.waitForPromptRPCAfterUserCancel(turn)
 	if !errors.Is(err, errPromptAbandonedAfterCancel) {
 		t.Fatalf("expected errPromptAbandonedAfterCancel, got %v", err)
+	}
+}
+
+func TestIsPromptAbandonedAfterCancel(t *testing.T) {
+	if !IsPromptAbandonedAfterCancel(errPromptAbandonedAfterCancel) {
+		t.Fatal("expected direct sentinel to match")
+	}
+	if !IsPromptAbandonedAfterCancel(fmt.Errorf("wrapped: %w", errPromptAbandonedAfterCancel)) {
+		t.Fatal("expected wrapped sentinel to match")
+	}
+	if !IsPromptAbandonedAfterCancel(errors.New("prompt failed: prompt abandoned after cancel")) {
+		t.Fatal("expected string-wrapped sentinel to match")
+	}
+	if IsPromptAbandonedAfterCancel(errors.New("different prompt failure")) {
+		t.Fatal("unexpected match for unrelated error")
 	}
 }
 
@@ -160,5 +176,15 @@ func TestWaitForPromptRPCAfterCancel_CancelsPromptCtxOnTimeout(t *testing.T) {
 	if !errors.Is(context.Cause(ctx), ErrTurnCancelNotAcknowledged) {
 		t.Fatalf("expected promptCtx cancelled with ErrTurnCancelNotAcknowledged on timeout, got %v",
 			context.Cause(ctx))
+	}
+}
+
+func TestNormalizePromptErrorAfterCancel_MapsTimeoutCanceledRPCToAbandonedPrompt(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ErrTurnCancelNotAcknowledged)
+
+	err := normalizePromptErrorAfterCancel(ctx, context.Canceled)
+	if !errors.Is(err, errPromptAbandonedAfterCancel) {
+		t.Fatalf("expected errPromptAbandonedAfterCancel, got %v", err)
 	}
 }

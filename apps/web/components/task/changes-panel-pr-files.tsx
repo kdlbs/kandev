@@ -128,7 +128,7 @@ function PRFileRow({
       onClick={() =>
         onOpenDiff(file.path, {
           source: "pr",
-          repositoryName: file.repository_name,
+          repositoryName: file.repository_name || undefined,
         })
       }
     >

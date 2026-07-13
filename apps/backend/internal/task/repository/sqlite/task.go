@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -22,6 +23,39 @@ import (
 // the `tasks` table directly rather than through a join alias.
 const defaultTaskAlias = "tasks"
 
+type taskScanColumn struct {
+	name       string
+	selectExpr func(alias string) string
+}
+
+var taskScanColumns = []taskScanColumn{
+	{name: "id"},
+	{name: "workspace_id"},
+	{name: "workflow_id"},
+	{name: "workflow_step_id"},
+	{name: "title"},
+	{name: "description"},
+	{name: "state"},
+	{name: "priority"},
+	{name: "position"},
+	{name: "metadata"},
+	{name: "is_ephemeral"},
+	{name: "parent_id"},
+	{name: "archived_at"},
+	{name: "created_at"},
+	{name: "updated_at"},
+	{name: "assignee_agent_profile_id", selectExpr: func(alias string) string {
+		return runnerProjection(alias) + ` AS assignee_agent_profile_id`
+	}},
+	{name: "origin"},
+	{name: "project_id"},
+	{name: "labels"},
+	{name: "identifier"},
+	{name: "is_from_office", selectExpr: func(alias string) string {
+		return isFromOfficeProjection(alias) + ` AS is_from_office`
+	}},
+}
+
 // taskSelectColumns returns the column projection (with runner subquery)
 // for a SELECT against tasks aliased as `alias`. The output column order
 // matches scanSingleTask / scanTasks.
@@ -29,14 +63,27 @@ func taskSelectColumns(alias string) string {
 	if alias == "" {
 		alias = defaultTaskAlias
 	}
+	return taskScanColumnSQL(alias, true)
+}
+
+func taskProjectedColumns(alias string) string {
+	if alias == "" {
+		alias = defaultTaskAlias
+	}
+	return taskScanColumnSQL(alias, false)
+}
+
+func taskScanColumnSQL(alias string, useExpressions bool) string {
 	prefix := alias + "."
-	return prefix + "id, " + prefix + "workspace_id, " + prefix + "workflow_id, " + prefix + "workflow_step_id, " +
-		prefix + "title, " + prefix + "description, " + prefix + "state, " + prefix + "priority, " + prefix + "position, " +
-		prefix + "metadata, " + prefix + "is_ephemeral, " + prefix + "parent_id, " + prefix + "archived_at, " +
-		prefix + "created_at, " + prefix + "updated_at, " +
-		runnerProjection(alias) + ` AS assignee_agent_profile_id, ` +
-		prefix + "origin, " + prefix + "project_id, " + prefix + "labels, " + prefix + "identifier, " +
-		isFromOfficeProjection(alias) + ` AS is_from_office`
+	cols := make([]string, 0, len(taskScanColumns))
+	for _, col := range taskScanColumns {
+		if useExpressions && col.selectExpr != nil {
+			cols = append(cols, col.selectExpr(alias))
+			continue
+		}
+		cols = append(cols, prefix+col.name)
+	}
+	return strings.Join(cols, ", ")
 }
 
 // isFromOfficeProjection returns a SQL boolean expression that is true
@@ -318,7 +365,7 @@ func (r *Repository) ListChildCompletionRows(ctx context.Context, parentID strin
 	}
 	var rows []models.ChildCompletionRow
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
-		SELECT id, state, title, updated_at
+		SELECT id, state, title, workflow_step_id, updated_at
 		FROM tasks
 		WHERE parent_id = ? AND archived_at IS NULL AND is_ephemeral = 0
 		ORDER BY created_at ASC, id ASC
@@ -414,7 +461,7 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 // If includeArchived is false, archived tasks are excluded
 // If includeEphemeral is false, ephemeral tasks are excluded
 // If onlyEphemeral is true, only ephemeral tasks are returned
-func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
 	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksByWorkspace")
 	defer span.End()
 	// Calculate offset
@@ -422,6 +469,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 	if offset < 0 {
 		offset = 0
 	}
+	sort = usermodels.NormalizeTasksListSort(sort)
 
 	// Build filter conditions
 	filter := ""
@@ -447,9 +495,9 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 	var err error
 
 	if query == "" {
-		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset)
+		rows, total, err = r.queryAllTasks(ctx, workspaceID, filter, workflowID, repositoryID, pageSize, offset, sort)
 	} else {
-		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
+		rows, total, err = r.searchTasks(ctx, workspaceID, query, filter, workflowID, repositoryID, pageSize, offset, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
 	}
 
 	if err != nil {
@@ -466,7 +514,7 @@ func (r *Repository) ListTasksByWorkspace(ctx context.Context, workspaceID, work
 }
 
 // queryAllTasks fetches all tasks (no search) for a workspace with pagination.
-func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int) (*sql.Rows, int, error) {
+func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter, workflowID, repositoryID string, pageSize, offset int, sort string) (*sql.Rows, int, error) {
 	args := []interface{}{workspaceID}
 	if workflowID != "" {
 		taskFilter += " AND workflow_id = ?"
@@ -484,10 +532,37 @@ func (r *Repository) queryAllTasks(ctx context.Context, workspaceID, taskFilter,
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
 		WHERE t.workspace_id = ?`+rewriteFilterForAlias(taskFilter, "t")+`
-		ORDER BY t.updated_at DESC
+		ORDER BY `+taskListOrderBy(r.ro.DriverName(), "t", sort)+`
 		LIMIT ? OFFSET ?
 	`), append(append([]interface{}{}, args...), pageSize, offset)...)
 	return rows, total, err
+}
+
+func taskListOrderBy(driver, alias, sort string) string {
+	prefix := alias + "."
+	switch sort {
+	case usermodels.TasksListSortUpdatedAsc:
+		return prefix + "updated_at ASC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
+	case usermodels.TasksListSortCreatedDesc:
+		return prefix + "created_at DESC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
+	case usermodels.TasksListSortCreatedAsc:
+		return prefix + "created_at ASC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
+	case usermodels.TasksListSortTitleAsc:
+		return taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "updated_at DESC, " + prefix + "id ASC"
+	case usermodels.TasksListSortTitleDesc:
+		return taskTitleOrder(driver, prefix, "DESC") + ", " + prefix + "updated_at DESC, " + prefix + "id ASC"
+	case usermodels.TasksListSortUpdatedDesc:
+		fallthrough
+	default:
+		return prefix + "updated_at DESC, " + taskTitleOrder(driver, prefix, "ASC") + ", " + prefix + "id ASC"
+	}
+}
+
+func taskTitleOrder(driver, prefix, direction string) string {
+	if dialect.IsPostgres(driver) {
+		return "LOWER(" + prefix + "title) " + direction + ", " + prefix + "title " + direction
+	}
+	return prefix + "title COLLATE NOCASE " + direction
 }
 
 // rewriteFilterForAlias prefixes bare column references in `filter` with
@@ -557,7 +632,7 @@ func isWordByte(b byte) bool {
 }
 
 // searchTasks fetches tasks matching a search query for a workspace with pagination.
-func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) (*sql.Rows, int, error) {
+func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter, workflowID, repositoryID string, pageSize, offset int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) (*sql.Rows, int, error) {
 	searchPattern := "%" + query + "%"
 	like := dialect.Like(r.ro.DriverName())
 
@@ -604,24 +679,31 @@ func (r *Repository) searchTasks(ctx context.Context, workspaceID, query, filter
 		return nil, 0, err
 	}
 
-	selectQuery := fmt.Sprintf(`
-		SELECT DISTINCT %s
-		FROM tasks t
-		LEFT JOIN task_repositories tr ON t.id = tr.task_id
-		LEFT JOIN repositories r ON tr.repository_id = r.id
-		WHERE t.workspace_id = ?%s
-		AND (
-			t.title %s ? OR
-			t.description %s ? OR
-			r.name %s ? OR
-			r.local_path %s ?
-		)
-		ORDER BY t.updated_at DESC
-		LIMIT ? OFFSET ?
-	`, taskSelectColumns("t"), tFilter, like, like, like, like)
+	selectQuery := taskSearchSelectQuery(r.ro.DriverName(), tFilter, like, sort)
 	selectArgs := append(append([]interface{}{}, countArgs...), pageSize, offset)
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(selectQuery), selectArgs...)
 	return rows, total, err
+}
+
+func taskSearchSelectQuery(driver, tFilter, like, sort string) string {
+	return fmt.Sprintf(`
+		SELECT %s
+		FROM (
+			SELECT DISTINCT %s
+			FROM tasks t
+			LEFT JOIN task_repositories tr ON t.id = tr.task_id
+			LEFT JOIN repositories r ON tr.repository_id = r.id
+			WHERE t.workspace_id = ?%s
+			AND (
+				t.title %s ? OR
+				t.description %s ? OR
+				r.name %s ? OR
+				r.local_path %s ?
+			)
+		) task_search
+		ORDER BY %s
+		LIMIT ? OFFSET ?
+	`, taskProjectedColumns("task_search"), taskSelectColumns("t"), tFilter, like, like, like, like, taskListOrderBy(driver, "task_search", sort))
 }
 
 // scanSingleTask scans a single row into a Task.
@@ -781,6 +863,102 @@ func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Tas
 	}
 	defer func() { _ = rows.Close() }()
 	return r.scanTasks(rows)
+}
+
+// ListExpiredQuickChatTasks returns quick-chat tasks whose last task/session
+// activity is older than cutoff. Active sessions are excluded so in-use chats
+// are never deleted by the idle sweeper.
+func (r *Repository) ListExpiredQuickChatTasks(ctx context.Context, cutoff time.Time) ([]*models.Task, error) {
+	drv := r.ro.DriverName()
+	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
+	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
+	query := fmt.Sprintf(`
+		WITH candidates AS (
+			SELECT t.id, %s AS last_activity
+			FROM tasks t
+			LEFT JOIN task_sessions ts ON ts.task_id = t.id
+			WHERE t.is_ephemeral = 1
+				AND COALESCE(t.workflow_id, '') = ''
+				AND COALESCE(t.origin, '') != ?
+				AND %s
+				AND t.archived_at IS NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM task_sessions active
+					WHERE active.task_id = t.id
+						AND active.state IN (?, ?)
+				)
+			GROUP BY t.id, t.updated_at
+			HAVING %s < ?
+		)
+		SELECT %s
+		FROM tasks t
+		JOIN candidates c ON c.id = t.id
+		ORDER BY c.last_activity ASC
+	`,
+		lastActivity,
+		excludeConfigModePredicate(drv, "t.metadata"),
+		lastActivity,
+		taskSelectColumns("t"),
+	)
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query),
+		models.TaskOriginAutomationRun,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateIdle,
+		cutoff,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
+// DeleteExpiredQuickChatTask deletes id only when it still matches the expired
+// quick-chat predicate at delete time.
+func (r *Repository) DeleteExpiredQuickChatTask(ctx context.Context, id string, cutoff time.Time) (bool, error) {
+	drv := r.db.DriverName()
+	sessionActivity := "COALESCE(MAX(ts.updated_at), t.updated_at)"
+	lastActivity := dialect.GreatestTimestamp(drv, "t.updated_at", sessionActivity)
+	query := fmt.Sprintf(`
+		WITH candidate AS (
+			SELECT t.id, %s AS last_activity
+			FROM tasks t
+			LEFT JOIN task_sessions ts ON ts.task_id = t.id
+			WHERE t.id = ?
+				AND t.is_ephemeral = 1
+				AND COALESCE(t.workflow_id, '') = ''
+				AND COALESCE(t.origin, '') != ?
+				AND %s
+				AND t.archived_at IS NULL
+				AND NOT EXISTS (
+					SELECT 1 FROM task_sessions active
+					WHERE active.task_id = t.id
+						AND active.state IN (?, ?)
+				)
+			GROUP BY t.id, t.updated_at
+			HAVING %s < ?
+		)
+		DELETE FROM tasks
+		WHERE id = ?
+			AND EXISTS (SELECT 1 FROM candidate)
+	`,
+		lastActivity,
+		excludeConfigModePredicate(drv, "t.metadata"),
+		lastActivity,
+	)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query),
+		id,
+		models.TaskOriginAutomationRun,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateIdle,
+		cutoff,
+		id,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
 }
 
 // isSafeMetadataKey reports whether s is a safe JSON metadata key to splice

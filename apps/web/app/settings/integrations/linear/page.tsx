@@ -1,5 +1,9 @@
 import { LinearIntegrationPage } from "@/components/linear/linear-settings";
 
-export default function IntegrationsLinearPage() {
-  return <LinearIntegrationPage />;
+type IntegrationsLinearPageProps = {
+  workspaceId?: string;
+};
+
+export default function IntegrationsLinearPage({ workspaceId }: IntegrationsLinearPageProps = {}) {
+  return <LinearIntegrationPage workspaceId={workspaceId} />;
 }

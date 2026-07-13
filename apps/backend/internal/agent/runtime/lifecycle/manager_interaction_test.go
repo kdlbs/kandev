@@ -800,6 +800,126 @@ func TestIsAgentReadyForPrompt(t *testing.T) {
 	})
 }
 
+func TestRecoverAgentPromptStream(t *testing.T) {
+	t.Run("missing execution returns not found", func(t *testing.T) {
+		mgr := newTestManager(t)
+		err := mgr.RecoverAgentPromptStream(context.Background(), "missing")
+		require.ErrorIs(t, err, ErrExecutionNotFound)
+	})
+
+	t.Run("passthrough execution is a no-op", func(t *testing.T) {
+		mgr := newTestManager(t)
+		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+			ID:                   "exec-passthrough",
+			SessionID:            "session-passthrough",
+			Status:               v1.AgentStatusFailed,
+			PassthroughProcessID: "pty-1",
+		}))
+
+		require.NoError(t, mgr.RecoverAgentPromptStream(context.Background(), "session-passthrough"))
+	})
+
+	t.Run("missing stream manager errors when stream is absent", func(t *testing.T) {
+		mgr := &Manager{
+			executionStore: NewExecutionStore(),
+			logger:         newTestLogger().WithFields(),
+		}
+		client := createTestClient(t, "http://127.0.0.1:1")
+		t.Cleanup(client.Close)
+		require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+			ID:           "exec-no-stream-manager",
+			SessionID:    "session-no-stream-manager",
+			ACPSessionID: "acp-session-1",
+			Status:       v1.AgentStatusFailed,
+			agentctl:     client,
+		}))
+
+		err := mgr.RecoverAgentPromptStream(context.Background(), "session-no-stream-manager")
+		require.ErrorContains(t, err, "stream manager is not configured")
+	})
+
+	t.Run("reconnects stream and restores stale failed status", func(t *testing.T) {
+		mock := newMockAgentServer(t)
+		t.Cleanup(mock.Close)
+
+		client := createTestClient(t, mock.server.URL)
+		t.Cleanup(client.Close)
+
+		mgr := newTestManager(t)
+		exec := &AgentExecution{
+			ID:                 "exec-recover",
+			SessionID:          "session-recover",
+			ACPSessionID:       "acp-session-1",
+			Status:             v1.AgentStatusFailed,
+			agentctl:           client,
+			promptDoneCh:       make(chan PromptCompletionSignal, 1),
+			sessionInitialized: true,
+		}
+		require.NoError(t, mgr.executionStore.Add(exec))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		t.Cleanup(cancel)
+		require.NoError(t, mgr.RecoverAgentPromptStream(ctx, "session-recover"))
+
+		select {
+		case <-mock.wsConnected:
+		case <-time.After(2 * time.Second):
+			t.Fatal("mock server did not see WS connection")
+		}
+		require.True(t, client.HasAgentStream())
+		updated, ok := mgr.executionStore.Get(exec.ID)
+		require.True(t, ok)
+		require.Equal(t, v1.AgentStatusReady, updated.Status)
+
+		mockBus, ok := mgr.eventBus.(*MockEventBus)
+		require.True(t, ok)
+		var sawBootReady bool
+		for _, ev := range mockBus.PublishedEvents {
+			if ev.Type == events.AgentBootReady {
+				sawBootReady = true
+				break
+			}
+		}
+		require.True(t, sawBootReady, "expected AgentBootReady event after stream recovery")
+	})
+
+	t.Run("does not restore failed status when agent process is stopped", func(t *testing.T) {
+		mock := newMockAgentServer(t)
+		t.Cleanup(mock.Close)
+		mock.agentStatus = "stopped"
+
+		client := createTestClient(t, mock.server.URL)
+		t.Cleanup(client.Close)
+
+		mgr := newTestManager(t)
+		exec := &AgentExecution{
+			ID:                 "exec-recover-stopped",
+			SessionID:          "session-recover-stopped",
+			ACPSessionID:       "acp-session-1",
+			Status:             v1.AgentStatusFailed,
+			agentctl:           client,
+			promptDoneCh:       make(chan PromptCompletionSignal, 1),
+			sessionInitialized: true,
+		}
+		require.NoError(t, mgr.executionStore.Add(exec))
+
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		t.Cleanup(cancel)
+		err := mgr.RecoverAgentPromptStream(ctx, "session-recover-stopped")
+		require.ErrorContains(t, err, "agent process is not running")
+
+		updated, ok := mgr.executionStore.Get(exec.ID)
+		require.True(t, ok)
+		require.Equal(t, v1.AgentStatusFailed, updated.Status)
+
+		mockBus, ok := mgr.eventBus.(*MockEventBus)
+		require.True(t, ok)
+		for _, ev := range mockBus.PublishedEvents {
+			require.NotEqual(t, events.AgentBootReady, ev.Type)
+		}
+	})
+}
+
 // TestEffectiveSessionMode covers the fresh-launch mode propagation for issue
 // #1183: a persisted session_mode (e.g. from a set_session_mode workflow step)
 // must override the profile default at ACP session init, while a missing

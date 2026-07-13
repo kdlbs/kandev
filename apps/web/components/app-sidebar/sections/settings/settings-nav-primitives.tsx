@@ -3,7 +3,7 @@
 import Link from "@/components/routing/app-link";
 import { IconChevronRight } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { SIDEBAR_ITEM_ACTIVE, SIDEBAR_ITEM_INACTIVE } from "../../app-sidebar-constants";
@@ -22,8 +22,8 @@ type SettingsLeafProps = {
   depth?: number;
 };
 
-const LEAF_DEPTH_PADDING = ["px-2.5", "pl-7 pr-2.5", "pl-10 pr-2.5"] as const;
-const GROUP_DEPTH_PADDING = ["pl-2.5 pr-1", "pl-7 pr-1", "pl-10 pr-1"] as const;
+const LEAF_DEPTH_PADDING = ["px-2.5", "pl-7 pr-2.5", "pl-10 pr-2.5", "pl-[52px] pr-2.5"] as const;
+const GROUP_DEPTH_PADDING = ["pl-2.5 pr-1", "pl-7 pr-1", "pl-10 pr-1", "pl-[52px] pr-1"] as const;
 const NAV_FOCUS_CLASS =
   "outline-none focus-visible:ring-1 focus-visible:ring-primary/50 focus-visible:ring-offset-1";
 
@@ -59,6 +59,7 @@ export function SettingsLeaf({
 
 type SettingsGroupProps = {
   label: string;
+  labelSuffix?: ReactNode;
   icon?: TablerIcon;
   /** When the group itself has a destination, the label area is also a link. */
   href?: string;
@@ -78,6 +79,7 @@ type SettingsGroupProps = {
 
 export function SettingsGroup({
   label,
+  labelSuffix,
   icon: Icon,
   href,
   isActive,
@@ -91,6 +93,11 @@ export function SettingsGroup({
   const isControlled = controlledExpanded !== undefined;
   const expanded = isControlled ? controlledExpanded : internalExpanded;
   const paddingClass = GROUP_DEPTH_PADDING[clampDepth(depth, GROUP_DEPTH_PADDING.length - 1)];
+
+  useEffect(() => {
+    if (!isControlled) setInternalExpanded(defaultExpanded);
+  }, [defaultExpanded, isControlled]);
+
   const toggle = () => {
     if (isControlled) onToggle?.();
     else setInternalExpanded((v) => !v);
@@ -100,6 +107,7 @@ export function SettingsGroup({
     <>
       {Icon && <Icon className="h-3.5 w-3.5 shrink-0" />}
       <span className="flex-1 truncate">{label}</span>
+      {labelSuffix}
     </>
   );
 

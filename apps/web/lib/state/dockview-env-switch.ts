@@ -133,43 +133,17 @@ export type EnvSwitchParams = {
   newEnvId: string;
   /** Active session for the incoming env — used to keep the right session chat tab. */
   activeSessionId: string | null;
+  /** All sessions for the active task, so slow-path restores keep sibling chat tabs. */
+  currentSessionIds?: string[];
   safeWidth: number;
   safeHeight: number;
   buildDefault: (api: DockviewApi) => void;
   getDefaultLayout: () => LayoutState;
 };
 
-/**
- * Predicate matching panels that `removeEphemeralPanels` will close.
- *
- * Ephemeral panels (file-editors, diffs, commit-details, etc.) are env-scoped
- * and never carry across switches. When `keepSessionId` is provided, chat
- * panels for any other session are also removed so the old env's session tab
- * doesn't bleed into the new env.
- */
-function shouldRemoveDuringSwitch(
-  panel: { id: string; api: { component: string } },
-  keepSessionId: string | null,
-): boolean {
-  const comp = panel.api.component;
-  if (EPHEMERAL_COMPONENTS.has(comp)) return true;
-  if (
-    keepSessionId !== null &&
-    comp === "chat" &&
-    panel.id.startsWith("session:") &&
-    panel.id !== `session:${keepSessionId}`
-  ) {
-    return true;
-  }
-  return false;
-}
-
-/**
- * Close every panel that matches `shouldRemoveDuringSwitch`. Used to clear
- * env-scoped ephemerals before the new env's panels are restored.
- */
-function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): void {
-  const toRemove = api.panels.filter((p) => shouldRemoveDuringSwitch(p, keepSessionId));
+/** Close non-session env-scoped panels before the new env's panels are restored. */
+function removeEphemeralPanels(api: DockviewApi): void {
+  const toRemove = api.panels.filter((p) => EPHEMERAL_COMPONENTS.has(p.api.component));
   for (const p of toRemove) {
     try {
       p.api.close();
@@ -196,12 +170,15 @@ function removeEphemeralPanels(api: DockviewApi, keepSessionId: string | null): 
  * File-editors/diffs/browser/etc. are NEVER touched here — they
  * legitimately belong to this env's saved state.
  */
-function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | null): void {
+export function replaceStaleSessionPanels(
+  api: DockviewApi,
+  keepSessionId: string | null,
+  currentSessionIds: string[] = [],
+): void {
   const keepId = keepSessionId ? `session:${keepSessionId}` : null;
-  // keepId=null (sessionless task) → strips all session panels, unlike the
-  // fast path's shouldRemoveDuringSwitch which keeps them. In practice
-  // sessionless tasks should have no session panels; useAutoSessionTab
-  // re-adds the panel when a session arrives.
+  // keepId=null (sessionless task) → strips all session panels. In practice
+  // sessionless tasks should have no session panels; useAutoSessionTab re-adds
+  // the panel when a session arrives.
   const stale = api.panels.filter(
     (p) => p.api.component === "chat" && p.id.startsWith("session:") && p.id !== keepId,
   );
@@ -240,6 +217,73 @@ function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | nul
       /* panel may already be gone */
     }
   }
+
+  addCurrentSessionSiblings(api, keepSessionId, currentSessionIds);
+}
+
+function addCurrentSessionSiblings(
+  api: DockviewApi,
+  keepSessionId: string | null,
+  currentSessionIds: string[],
+): void {
+  if (!keepSessionId) return;
+  const activePanel = api.getPanel(`session:${keepSessionId}`);
+  if (!activePanel) return;
+
+  const uniqueSessionIds = currentSessionIds.filter(
+    (sessionId, index, sessionIds) =>
+      sessionId && sessionId !== keepSessionId && sessionIds.indexOf(sessionId) === index,
+  );
+  for (const sessionId of uniqueSessionIds) {
+    if (api.getPanel(`session:${sessionId}`)) continue;
+    addIncomingSessionPanel(api, sessionId, activePanel.group.id, activePanel.group.panels.length, {
+      inactive: true,
+    });
+  }
+}
+
+function fastSwitchStructuresMatch(
+  params: EnvSwitchParams,
+  currentLayout: LayoutState,
+  saved: object | null,
+): boolean {
+  if (saved) {
+    return savedLayoutMatchesLive(currentLayout, saved as SerializedDockview);
+  }
+  return layoutStructuresMatch(currentLayout, params.getDefaultLayout());
+}
+
+function canUseFastEnvSwitch(
+  params: EnvSwitchParams,
+  currentLayout: LayoutState,
+  saved: object | null,
+): boolean {
+  if (!fastSwitchStructuresMatch(params, currentLayout, saved)) {
+    if (isDebug()) {
+      debug("tryFastEnvSwitch: structures do not match, falling back to slow path", {
+        newEnvId: params.newEnvId,
+        hasSaved: !!saved,
+        currentPanelIds: params.api.panels.map((p) => p.id),
+      });
+    }
+    return false;
+  }
+  if (!saved || !savedLayoutHasEphemeralPanels(saved as SerializedDockview)) return true;
+
+  debug("tryFastEnvSwitch: saved layout has ephemeral panels, falling back to slow path", {
+    newEnvId: params.newEnvId,
+  });
+  return false;
+}
+
+function isSessionPanel(p: DockviewApi["panels"][number]): boolean {
+  return p.id.startsWith("session:") || p.api.component === "chat";
+}
+
+function findOutgoingSessionPanel(api: DockviewApi): DockviewApi["panels"][number] | undefined {
+  return (
+    api.panels.find((p) => isSessionPanel(p) && p.api.isActive) ?? api.panels.find(isSessionPanel)
+  );
 }
 
 /**
@@ -248,33 +292,11 @@ function replaceStaleSessionPanels(api: DockviewApi, keepSessionId: string | nul
  * or null if a full rebuild is needed.
  */
 function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
-  const { api, newEnvId, activeSessionId, getDefaultLayout } = params;
+  const { api, newEnvId, activeSessionId, currentSessionIds = [] } = params;
   const currentLayout = fromDockviewApi(api);
   const saved = getHealthyEnvLayout(newEnvId);
 
-  let structuresMatch = false;
-  if (saved) {
-    structuresMatch = savedLayoutMatchesLive(currentLayout, saved as SerializedDockview);
-  } else {
-    structuresMatch = layoutStructuresMatch(currentLayout, getDefaultLayout());
-  }
-
-  if (!structuresMatch) {
-    if (isDebug()) {
-      debug("tryFastEnvSwitch: structures do not match, falling back to slow path", {
-        newEnvId,
-        hasSaved: !!saved,
-        currentPanelIds: api.panels.map((p) => p.id),
-      });
-    }
-    return null;
-  }
-  if (saved && savedLayoutHasEphemeralPanels(saved as SerializedDockview)) {
-    debug("tryFastEnvSwitch: saved layout has ephemeral panels, falling back to slow path", {
-      newEnvId,
-    });
-    return null;
-  }
+  if (!canUseFastEnvSwitch(params, currentLayout, saved)) return null;
   if (isDebug()) {
     debug("tryFastEnvSwitch: taking fast path", {
       newEnvId,
@@ -287,21 +309,13 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   // Prefer the active session panel so multi-session tasks anchor the
   // incoming panel to the group the user was looking at, not whichever
   // session tab happens to come first in `api.panels` iteration order.
-  const isSessionPanel = (p: (typeof api.panels)[number]) =>
-    p.id.startsWith("session:") || p.api.component === "chat";
-  const outgoingSessionPanel =
-    api.panels.find((p) => isSessionPanel(p) && p.api.isActive) ?? api.panels.find(isSessionPanel);
+  const outgoingSessionPanel = findOutgoingSessionPanel(api);
   const outgoingGroup = outgoingSessionPanel?.group;
   const outgoingGroupId = outgoingGroup?.id;
   // The outgoing session panel's current index in its group. We insert the
-  // incoming session at this same slot *before* removing the outgoing one, so
-  // removing the panels ahead of it shifts the new panel into the right final
-  // position (equivalent to the old "survivor index" math, minus the group
-  // death described below). This equivalence relies on every panel that
-  // `removeEphemeralPanels` removes *ahead of* the insert position being
-  // ephemeral/stale (they'd have been excluded by the old survivor count too).
-  // If `shouldRemoveDuringSwitch` ever retains a non-stale panel before the
-  // outgoing slot, this raw index would land the new panel off by one.
+  // incoming session at this same slot *before* removing stale session panels,
+  // so removing the stale panel shifts the new panel into the right final
+  // position.
   const outgoingIndex =
     outgoingGroup && outgoingSessionPanel
       ? outgoingGroup.panels.findIndex((p) => p.id === outgoingSessionPanel.id)
@@ -314,10 +328,11 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   // undefined position and dockview drops the incoming chat into whatever group
   // is active (e.g. the terminal) — collapsing the grid root to a vertical
   // stack. Adding first keeps the group alive throughout the swap.
-  if (activeSessionId && !api.getPanel(`session:${activeSessionId}`)) {
+  if (activeSessionId && !outgoingSessionPanel && !api.getPanel(`session:${activeSessionId}`)) {
     addIncomingSessionPanel(api, activeSessionId, outgoingGroupId, outgoingIndex);
   }
-  removeEphemeralPanels(api, activeSessionId);
+  removeEphemeralPanels(api);
+  replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
 
   // The fast path skips `fromJSON`, so per-group active tabs from the
   // outgoing env would otherwise persist into the incoming env. Reapply
@@ -459,6 +474,7 @@ function addIncomingSessionPanel(
   sessionId: string,
   outgoingGroupId: string | undefined,
   outgoingIndex: number,
+  options: { inactive?: boolean } = {},
 ): void {
   let position: import("dockview-react").AddPanelOptions["position"];
   if (outgoingGroupId && api.groups.some((g) => g.id === outgoingGroupId)) {
@@ -476,6 +492,7 @@ function addIncomingSessionPanel(
     title: "Agent",
     params: { sessionId },
     position,
+    inactive: options.inactive,
   });
 }
 
@@ -489,7 +506,16 @@ function addIncomingSessionPanel(
  * env-scoped portals before calling this function.
  */
 export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
-  const { api, oldEnvId, newEnvId, activeSessionId, safeWidth, safeHeight, buildDefault } = params;
+  const {
+    api,
+    oldEnvId,
+    newEnvId,
+    activeSessionId,
+    currentSessionIds = [],
+    safeWidth,
+    safeHeight,
+    buildDefault,
+  } = params;
   if (isDebug()) {
     debug("performEnvSwitch: entry", {
       oldEnvId,
@@ -536,7 +562,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       // editors, etc.). File editors/diffs/etc. on their own are legitimately
       // part of this env's saved state and must NOT be touched.
       // useAutoSessionTab will still no-op if the panel was just added here.
-      replaceStaleSessionPanels(api, activeSessionId);
+      replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
       api.layout(safeWidth, safeHeight);
       if (isDebug()) {
         debug("performEnvSwitch: completed via slow path (fromJSON)", {

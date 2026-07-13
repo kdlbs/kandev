@@ -17,6 +17,10 @@ If the new feedback is not actionable, do not modify files, do not commit, and d
 Non-actionable feedback includes summaries, status updates, no-finding reports, duplicated or
 previously addressed comments, rate-limit notices, and review diagnostics that do not request a
 concrete code or test change. In that case, reply only with a short summary that there is nothing actionable to address.
+Pending-only PR snapshots are also non-actionable: when `failed_checks: []` and there are zero
+unresolved review threads, but checks are still queued or running, do not modify files, do not run
+local verification, do not commit, and do not poll indefinitely. Reply that CI is still in progress
+and include the pending check names if they were provided.
 
 Only make code changes when there is a concrete failing check, actionable review request, or
 reproducible issue that needs a fix. Do not push a commit merely to acknowledge feedback.

@@ -5,12 +5,14 @@ import { useAppStore } from "@/components/state-provider";
 import { useEditors } from "@/hooks/domains/settings/use-editors";
 import { createEditor, deleteEditor, updateEditor, updateUserSettings } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
+import { parseTasksListGroup, parseTasksListSort } from "@/lib/tasks/tasks-list-options";
 import type { EditorOption } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
 import {
   parseChangesPanelLayout,
   parseSystemMetricsDisplay,
   parseTerminalLinkBehavior,
+  taskCreateLastUsedHasValue,
   parseVoiceMode,
 } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
@@ -217,11 +219,21 @@ function mapEditorSettingsFields(
   s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
 ) {
   return {
+    ...mapTasksListSettingsFields(s),
     ...mapEditorBehaviorFields(s),
     ...mapEditorLspFields(s),
     ...mapEditorSidebarFields(s),
     ...mapEditorSyncedLocalFields(s),
     loaded: true as const,
+  };
+}
+
+function mapTasksListSettingsFields(
+  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
+) {
+  return {
+    tasksListSort: parseTasksListSort(s.tasks_list_sort),
+    tasksListGroup: parseTasksListGroup(s.tasks_list_group),
   };
 }
 
@@ -269,6 +281,7 @@ function mapEditorSyncedLocalFields(
       branch: s.task_create_last_used?.branch || null,
       agentProfileId: s.task_create_last_used?.agent_profile_id || null,
       executorProfileId: s.task_create_last_used?.executor_profile_id || null,
+      synced: taskCreateLastUsedHasValue(s.task_create_last_used),
     },
     jiraSavedViews: s.jira_saved_views,
     jiraTaskPresets: s.jira_task_presets,

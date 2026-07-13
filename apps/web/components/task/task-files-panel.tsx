@@ -12,6 +12,7 @@ function FilesTabContent({
   handleCreateFile,
   hookDeleteFile,
   hookRenameFile,
+  hookDownloadFile,
   activeFilePath,
 }: {
   sessionId: string | null;
@@ -19,6 +20,7 @@ function FilesTabContent({
   handleCreateFile: (path: string) => Promise<boolean>;
   hookDeleteFile: (path: string) => Promise<boolean>;
   hookRenameFile: (oldPath: string, newPath: string) => Promise<boolean>;
+  hookDownloadFile: (path: string) => Promise<boolean>;
   activeFilePath?: string | null;
 }) {
   if (!sessionId) {
@@ -35,6 +37,7 @@ function FilesTabContent({
       onCreateFile={handleCreateFile}
       onDeleteFile={hookDeleteFile}
       onRenameFile={hookRenameFile}
+      onDownloadFile={hookDownloadFile}
       activeFilePath={activeFilePath}
     />
   );
@@ -49,7 +52,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
   onOpenFile,
   activeFilePath,
 }: TaskFilesPanelProps) {
-  const { activeSessionId, hookDeleteFile, hookRenameFile, handleCreateFile } =
+  const { activeSessionId, hookDeleteFile, hookRenameFile, hookDownloadFile, handleCreateFile } =
     useFilesPanelData(onOpenFile);
 
   return (
@@ -61,6 +64,7 @@ const TaskFilesPanel = memo(function TaskFilesPanel({
           handleCreateFile={handleCreateFile}
           hookDeleteFile={hookDeleteFile}
           hookRenameFile={hookRenameFile}
+          hookDownloadFile={hookDownloadFile}
           activeFilePath={activeFilePath}
         />
       </SessionPanelContent>

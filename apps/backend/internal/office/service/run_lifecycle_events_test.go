@@ -342,6 +342,58 @@ func TestFinishRun_PublishesOfficeRunProcessed(t *testing.T) {
 	}
 }
 
+func TestFinishRun_PublishesOfficeRunProcessedForSourceCommentTask(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-1")
+	targetTaskID := createOfficeTask(t, svc, "ws-1", "worker-1")
+	sourceTaskID := "source-task"
+	insertTestTask(t, svc, sourceTaskID, "ws-1")
+
+	if err := svc.QueueRun(
+		ctx, "worker-1", service.RunReasonTaskComment,
+		`{"task_id":"`+targetTaskID+`","source_task_id":"`+sourceTaskID+`","comment_id":"cm-source"}`,
+		"task_comment:cm-source:target",
+	); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v (run=%v)", err, run)
+	}
+
+	got := make(chan *bus.Event, 1)
+	sub, err := eb.Subscribe(events.OfficeRunProcessed, func(_ context.Context, e *bus.Event) error {
+		got <- e
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	if err := svc.FinishRun(ctx, run.ID); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+
+	select {
+	case e := <-got:
+		data, ok := e.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("event data not a map: %T", e.Data)
+		}
+		if data["task_id"] != sourceTaskID {
+			t.Errorf("task_id = %v, want source task %s", data["task_id"], sourceTaskID)
+		}
+		if data["comment_id"] != "cm-source" {
+			t.Errorf("comment_id = %v, want cm-source", data["comment_id"])
+		}
+	default:
+		t.Fatalf("expected OfficeRunProcessed event; got none")
+	}
+}
+
 // TestFailRun_PublishesOfficeRunProcessedFailed pins the failed-run
 // path: FailRun publishes status="failed" so the comment badge can
 // flip to its error state.

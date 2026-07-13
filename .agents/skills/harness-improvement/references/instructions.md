@@ -44,6 +44,10 @@ Use rules for always-on or path-scoped behavior, not long workflows. Dynamic rul
 
 OpenCode uses `AGENTS.md` for project rules. It also supports Claude-compatible fallbacks such as `CLAUDE.md` when no `AGENTS.md` exists.
 
+## Automation Coverage
+
+When creating or updating automation that classifies harness artifacts, derive the allowlist from the platform references and include platform-native instruction/config roots, not only the repo's current source-of-truth roots. Include the existing `.agents`, `.augment`, `.claude`, `.codex`, and `.opencode` agent/skill roots plus platform-native surfaces such as `.claude/settings.json`, `.claude/rules/**/*.md`, `.claude/commands/**/*.md`, `.cursor/rules/**/*.mdc`, `.cursor/skills/**/SKILL.md`, and `.opencode/skills/**/SKILL.md`.
+
 ## Validation
 
 After instruction edits:

@@ -25,6 +25,18 @@ func CatalogPermissionSettings(ag Agent) map[string]PermissionSetting {
 	return mergeAgentctlAutoApprove(ag.PermissionSettings())
 }
 
+// StripEnvFor returns the runtime-declared environment keys that should be
+// removed before spawning an agent subprocess. Inference-only paths derive
+// this from RuntimeConfig instead of carrying a second declaration.
+func StripEnvFor(ia InferenceAgent) []string {
+	if a, ok := ia.(Agent); ok {
+		if rt := a.Runtime(); rt != nil {
+			return rt.StripEnv
+		}
+	}
+	return nil
+}
+
 func mergeAgentctlAutoApprove(settings map[string]PermissionSetting) map[string]PermissionSetting {
 	merged := make(map[string]PermissionSetting, len(settings)+1)
 	for k, v := range settings {

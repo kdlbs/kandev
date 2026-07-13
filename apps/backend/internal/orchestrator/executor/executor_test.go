@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"sync"
@@ -262,6 +263,71 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	}
 }
 
+func TestLaunchPreparedSession_AbortsWhenStartingPersistenceFails(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID:             "session-abort",
+		TaskID:         "task-abort",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	repo.sessions[session.ID] = session
+
+	startCalled := make(chan struct{}, 1)
+	stopCalled := make(chan string, 1)
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-abort",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			startCalled <- struct{}{}
+			return nil
+		},
+		stopAgentFunc: func(ctx context.Context, agentExecutionID string, force bool) error {
+			if !force {
+				t.Error("expected cleanup stop to be forced")
+			}
+			stopCalled <- agentExecutionID
+			return nil
+		},
+	}
+
+	persistErr := errors.New("session is terminal")
+	executor := newTestExecutor(t, agentManager, repo)
+	executor.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+		return persistErr
+	})
+
+	task := &v1.Task{ID: "task-abort", WorkspaceID: "workspace-123", Title: "Test Task"}
+
+	execution, err := executor.LaunchPreparedSession(context.Background(), task, "session-abort", LaunchOptions{
+		AgentProfileID: "profile-123",
+		StartAgent:     true,
+	})
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("expected persistence error, got execution=%v err=%v", execution, err)
+	}
+
+	select {
+	case got := <-stopCalled:
+		if got != "exec-abort" {
+			t.Fatalf("stopped execution %q, want exec-abort", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected unstarted execution to be stopped")
+	}
+	select {
+	case <-startCalled:
+		t.Fatal("agent process must not start after STARTING persistence fails")
+	default:
+	}
+}
+
 // TestLaunchPreparedSession_PropagatesIsPassthrough mirrors
 // TestResumeSession_PropagatesIsPassthrough for the initial-launch path: the
 // session's IsPassthrough snapshot must reach the LaunchAgentRequest so the
@@ -515,8 +581,8 @@ func TestLaunchPreparedSession_WorkspaceOnly(t *testing.T) {
 
 // TestLaunchPreparedSession_WorkspaceOnly_FlipsExecutorRunningStatus asserts
 // the prepare-only branch in finalizeLaunch updates executors_running.status
-// from the lifecycle-manager default "starting" to "prepared", so the row
-// doesn't look stuck mid-launch on a session that's actually ready by design.
+// from an active launch status to "prepared", so the row doesn't look like an
+// agent process is running on a session that's actually ready by design.
 func TestLaunchPreparedSession_WorkspaceOnly_FlipsExecutorRunningStatus(t *testing.T) {
 	repo := newMockRepository()
 
@@ -531,11 +597,11 @@ func TestLaunchPreparedSession_WorkspaceOnly_FlipsExecutorRunningStatus(t *testi
 	repo.sessions[session.ID] = session
 
 	// Seed the executors_running row the way production's lifecycle manager
-	// would after LaunchAgent — status="starting" until something flips it.
+	// would after LaunchAgent — active until the prepare-only branch flips it.
 	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
 		SessionID: session.ID,
 		TaskID:    session.TaskID,
-		Status:    models.ExecutorRunningStatusStarting,
+		Status:    models.ExecutorRunningStatusRunning,
 	}
 
 	agentManager := &mockAgentManager{
@@ -1050,6 +1116,7 @@ verified:
 // other recorded fields, removing the need for atomicity or polling.
 type runAgentProcessAsyncFailureFixture struct {
 	exec              *Executor
+	repo              *mockRepository
 	taskStateUpdates  []string
 	sessionFailedSeen bool
 	startFailedCalls  int
@@ -1063,7 +1130,7 @@ func newRunAgentProcessAsyncFailureFixture(t *testing.T) *runAgentProcessAsyncFa
 	repo.sessions["session-123"] = &models.TaskSession{
 		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
 	}
-	f := &runAgentProcessAsyncFailureFixture{stopCh: make(chan struct{})}
+	f := &runAgentProcessAsyncFailureFixture{repo: repo, stopCh: make(chan struct{})}
 	agentManager := &mockAgentManager{
 		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
 			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
@@ -1113,14 +1180,252 @@ func TestRunAgentProcessAsync_ResumeDoesNotEscalateTaskState(t *testing.T) {
 	if !f.sessionFailedSeen {
 		t.Error("expected session state FAILED")
 	}
-	if len(f.taskStateUpdates) != 0 {
-		t.Errorf("expected no task state updates on resume failure, got %v", f.taskStateUpdates)
+	if len(f.taskStateUpdates) != 1 || f.taskStateUpdates[0] != string(v1.TaskStateReview) {
+		t.Errorf("expected resume failure to reconcile task state to REVIEW, got %v", f.taskStateUpdates)
 	}
 	if f.startFailedCalls != 1 {
 		t.Errorf("expected onAgentStartFailed called once, got %d", f.startFailedCalls)
 	}
 	if !f.lastFromResume {
 		t.Error("expected fromResume=true to be propagated to onAgentStartFailed")
+	}
+}
+
+func TestRunAgentProcessAsync_ResumeFailureDoesNotReviewWhileSiblingWorks(t *testing.T) {
+	f := newRunAgentProcessAsyncFailureFixture(t)
+	f.repo.sessions["session-456"] = &models.TaskSession{
+		ID: "session-456", TaskID: "task-123", State: models.TaskSessionStateRunning,
+	}
+
+	f.exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		false, true)
+	f.awaitStop(t)
+
+	if !f.sessionFailedSeen {
+		t.Error("expected session state FAILED")
+	}
+	if len(f.taskStateUpdates) != 0 {
+		t.Errorf("expected working sibling to block REVIEW reconcile, got %v", f.taskStateUpdates)
+	}
+}
+
+func TestRunAgentProcessAsync_ResumeFailureUsesReviewReconcileCallback(t *testing.T) {
+	f := newRunAgentProcessAsyncFailureFixture(t)
+	var reviewCalls []string
+	f.exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
+		reviewCalls = append(reviewCalls, taskID+"/"+completedSessionID)
+	})
+
+	f.exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		false, true)
+	f.awaitStop(t)
+
+	if len(reviewCalls) != 1 || reviewCalls[0] != "task-123/session-123" {
+		t.Fatalf("expected guarded review reconcile callback once, got %v", reviewCalls)
+	}
+	if len(f.taskStateUpdates) != 0 {
+		t.Fatalf("expected callback to replace direct task REVIEW writes, got %v", f.taskStateUpdates)
+	}
+}
+
+func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsSameSessionActiveAgain(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateRunning,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	var taskStateUpdates []v1.TaskState
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateUpdates = append(taskStateUpdates, state)
+		return nil
+	})
+
+	exec.writeTaskReviewStateIfNoWorkingSessions(context.Background(), "task-123", "session-123")
+
+	if len(taskStateUpdates) != 0 {
+		t.Errorf("expected same active session to block REVIEW reconcile, got %v", taskStateUpdates)
+	}
+}
+
+func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsOnFailedSessionReadError(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123"}
+	repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {
+		return nil, errors.New("temporary session read failure")
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	var taskStateUpdates []v1.TaskState
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateUpdates = append(taskStateUpdates, state)
+		return nil
+	})
+
+	exec.writeTaskReviewStateIfNoWorkingSessions(context.Background(), "task-123", "session-123")
+
+	if len(taskStateUpdates) != 0 {
+		t.Errorf("expected failed session read to block REVIEW reconcile, got %v", taskStateUpdates)
+	}
+}
+
+func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsOfficeTask(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["task-123"] = &models.Task{
+		ID:                     "task-123",
+		AssigneeAgentProfileID: "agent-profile-123",
+	}
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateFailed,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	var taskStateUpdates []v1.TaskState
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateUpdates = append(taskStateUpdates, state)
+		return nil
+	})
+
+	exec.writeTaskReviewStateIfNoWorkingSessions(context.Background(), "task-123", "session-123")
+
+	if len(taskStateUpdates) != 0 {
+		t.Errorf("expected office task to keep workflow state, got %v", taskStateUpdates)
+	}
+}
+
+func TestStartAgentProcessOnResumePromotesTaskAfterSuccess(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.sessions[session.ID] = session
+
+	taskStateCh := make(chan v1.TaskState, 1)
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateCh <- state
+		return nil
+	})
+
+	exec.startAgentProcessOnResume(context.Background(), "task-123", session, "exec-456")
+
+	select {
+	case state := <-taskStateCh:
+		if state != v1.TaskStateInProgress {
+			t.Fatalf("task state = %q, want %q", state, v1.TaskStateInProgress)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected resume process success to promote task to IN_PROGRESS")
+	}
+}
+
+func TestStartAgentProcessOnResumeSkipsOfficeTaskPromotion(t *testing.T) {
+	repo := newMockRepository()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", AssigneeAgentProfileID: "agent-profile-123"}
+	session := &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.sessions[session.ID] = session
+
+	startedCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			close(startedCh)
+			return nil
+		},
+	}
+	taskStateCh := make(chan v1.TaskState, 1)
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateCh <- state
+		return nil
+	})
+
+	exec.startAgentProcessOnResume(context.Background(), "task-123", session, "exec-456")
+
+	select {
+	case <-startedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected resume process start")
+	}
+	select {
+	case state := <-taskStateCh:
+		t.Fatalf("office resume promoted task state to %q", state)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestStartAgentProcessOnResumeSkipsCancelledSessionPromotion(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.sessions[session.ID] = session
+
+	startedCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			if err := repo.UpdateTaskSessionState(ctx, session.ID, models.TaskSessionStateCancelled, "stopped"); err != nil {
+				return err
+			}
+			close(startedCh)
+			return nil
+		},
+	}
+	taskStateCh := make(chan v1.TaskState, 1)
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateCh <- state
+		return nil
+	})
+
+	exec.startAgentProcessOnResume(context.Background(), "task-123", session, "exec-456")
+
+	select {
+	case <-startedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected resume process start")
+	}
+	select {
+	case state := <-taskStateCh:
+		t.Fatalf("cancelled resume promoted task state to %q", state)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestStartAgentProcessOnResumeSkipsArchivedTaskPromotion(t *testing.T) {
+	repo := newMockRepository()
+	archivedAt := time.Now()
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", ArchivedAt: &archivedAt}
+	session := &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.sessions[session.ID] = session
+
+	startedCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			close(startedCh)
+			return nil
+		},
+	}
+	taskStateCh := make(chan v1.TaskState, 1)
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateCh <- state
+		return nil
+	})
+
+	exec.startAgentProcessOnResume(context.Background(), "task-123", session, "exec-456")
+
+	select {
+	case <-startedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected resume process start")
+	}
+	select {
+	case state := <-taskStateCh:
+		t.Fatalf("archived resume promoted task state to %q", state)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
 
@@ -1268,13 +1573,44 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		}
 		repo.sessions[session.ID] = session
 
-		executor.persistResumeState(context.Background(), "task-1", session, true)
+		if err := executor.persistResumeState(context.Background(), "task-1", session, true); err != nil {
+			t.Fatalf("persistResumeState: %v", err)
+		}
 
 		if session.State != models.TaskSessionStateStarting {
 			t.Errorf("expected state STARTING, got %s", session.State)
 		}
 		if session.CompletedAt != nil {
 			t.Error("expected CompletedAt to be nil")
+		}
+	})
+
+	t.Run("defers task promotion when startAgent is true", func(t *testing.T) {
+		session := &models.TaskSession{
+			ID:        "session-promote",
+			TaskID:    "task-1",
+			State:     models.TaskSessionStateWaitingForInput,
+			UpdatedAt: now,
+		}
+		repo.sessions[session.ID] = session
+		var gotPromoteTask *bool
+		executor.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+			gotPromoteTask = &promoteTask
+			return repo.UpdateTaskSession(ctx, session)
+		})
+		t.Cleanup(func() {
+			executor.SetOnSessionStarting(nil)
+		})
+
+		if err := executor.persistResumeState(context.Background(), "task-1", session, true); err != nil {
+			t.Fatalf("persistResumeState: %v", err)
+		}
+
+		if gotPromoteTask == nil {
+			t.Fatal("expected onSessionStarting callback")
+		}
+		if *gotPromoteTask {
+			t.Fatal("resume STARTING persistence must defer task promotion until process start succeeds")
 		}
 	})
 
@@ -1287,7 +1623,9 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		}
 		repo.sessions[session.ID] = session
 
-		executor.persistResumeState(context.Background(), "task-1", session, false)
+		if err := executor.persistResumeState(context.Background(), "task-1", session, false); err != nil {
+			t.Fatalf("persistResumeState: %v", err)
+		}
 
 		if session.State != models.TaskSessionStateWaitingForInput {
 			t.Errorf("expected state WAITING_FOR_INPUT, got %s", session.State)

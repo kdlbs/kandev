@@ -11,44 +11,52 @@ import { Card, CardContent } from "@kandev/ui/card";
 
 const INTEGRATIONS = [
   {
-    href: "/settings/integrations/github",
+    slug: "github",
     label: "GitHub",
     description: "PR review queues, issue watchers, and OAuth credentials.",
     Icon: IconBrandGithub,
   },
   {
-    href: "/settings/integrations/gitlab",
+    slug: "gitlab",
     label: "GitLab",
     description: "Merge request creation, discussion replies, and self-managed hosts.",
     Icon: IconBrandGitlab,
   },
   {
-    href: "/settings/integrations/jira",
+    slug: "jira",
     label: "Jira",
     description: "Atlassian Cloud credentials and JQL issue watchers.",
     Icon: IconTicket,
   },
   {
-    href: "/settings/integrations/linear",
+    slug: "linear",
     label: "Linear",
     description: "Personal API key and team defaults.",
     Icon: IconHexagon,
   },
   {
-    href: "/settings/integrations/sentry",
+    slug: "sentry",
     label: "Sentry",
     description: "Auth token, org/project defaults, and issue browsing.",
     Icon: IconBrandSentry,
   },
   {
-    href: "/settings/integrations/slack",
+    slug: "slack",
     label: "Slack",
     description: "Browser-session credentials and !kandev triage agent.",
     Icon: IconBrandSlack,
   },
 ];
 
-export default function IntegrationsIndexPage() {
+type IntegrationsIndexPageProps = {
+  workspaceId?: string;
+};
+
+export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProps = {}) {
+  const rootHref = workspaceId
+    ? `/settings/workspace/${encodeURIComponent(workspaceId)}/integrations`
+    : "/settings/integrations";
+
   return (
     <div className="space-y-6">
       <div>
@@ -58,20 +66,23 @@ export default function IntegrationsIndexPage() {
           watchers and presets live inside each integration page.
         </p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {INTEGRATIONS.map(({ href, label, description, Icon }) => (
-          <Link key={href} href={href} className="cursor-pointer">
-            <Card className="transition-colors hover:border-primary/40">
-              <CardContent className="space-y-2 pt-6">
-                <div className="flex items-center gap-2 text-base font-semibold">
-                  <Icon className="h-5 w-5" />
-                  {label}
-                </div>
-                <p className="text-sm text-muted-foreground">{description}</p>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
+      <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {INTEGRATIONS.map(({ slug, label, description, Icon }) => {
+          const href = `${rootHref}/${slug}`;
+          return (
+            <Link key={href} href={href} className="flex h-full cursor-pointer">
+              <Card className="h-full w-full transition-colors hover:border-primary/40">
+                <CardContent className="space-y-2">
+                  <div className="flex items-center gap-2 text-base font-semibold">
+                    <Icon className="h-5 w-5" />
+                    {label}
+                  </div>
+                  <p className="text-sm text-muted-foreground">{description}</p>
+                </CardContent>
+              </Card>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

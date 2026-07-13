@@ -4,7 +4,7 @@ import {
   issueFieldsFromMetadata,
 } from "@/lib/metadata-utils";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
-import type { TaskState, TaskSessionState } from "@/lib/types/http";
+import type { TaskPendingAction, TaskState, TaskSessionState } from "@/lib/types/http";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -35,6 +35,7 @@ export type TaskLike = {
   repository_id?: string;
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
+  primary_session_pending_action?: TaskPendingAction | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -53,6 +54,13 @@ function pickRepositoryId(source: TaskLike): string | undefined {
 
 function pickId(source: TaskLike): string {
   return (source.id ?? source.task_id ?? "") as string;
+}
+
+export function pickPendingAction(action: unknown): TaskPendingAction | undefined {
+  if (action === "clarification" || action === "permission") {
+    return action;
+  }
+  return undefined;
 }
 
 type KanbanTaskRepository = NonNullable<KanbanTask["repositories"]>[number];
@@ -86,6 +94,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     repositories: pickRepositories(source),
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
+    primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
     primaryExecutorId: source.primary_executor_id ?? undefined,

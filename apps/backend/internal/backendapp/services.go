@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"go.uber.org/zap"
 
@@ -70,8 +71,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		eventBus,
 		log,
 		taskservice.RepositoryDiscoveryConfig{
-			Roots:    cfg.RepositoryDiscovery.Roots,
-			MaxDepth: cfg.RepositoryDiscovery.MaxDepth,
+			Roots:             cfg.RepositoryDiscovery.Roots,
+			MaxDepth:          cfg.RepositoryDiscovery.MaxDepth,
+			TaskWorktreeRoots: []string{filepath.Join(cfg.ResolvedHomeDir(), "tasks")},
 		},
 	)
 
@@ -117,6 +119,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	automationComponents, automationErr := automation.Provide(dbPool.Writer(), dbPool.Reader(), eventBus, githubSvc, log)
 	if automationErr != nil {
 		log.Warn("Automation service initialization failed (non-fatal)", zap.Error(automationErr))
+	}
+	if automationComponents != nil {
+		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
 	}
 
 	return &Services{

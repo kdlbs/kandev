@@ -38,6 +38,10 @@ type PRCreatedCallback func(ctx context.Context, sessionID, taskID, prURL, branc
 // Parameters: ctx, sessionID, taskID, operation name, error output.
 type GitOperationFailedCallback func(ctx context.Context, sessionID, taskID, operation, errorOutput string)
 
+// BranchRenamedCallback is called after a branch is successfully renamed.
+// Parameters: ctx, sessionID, new branch name, repo subpath.
+type BranchRenamedCallback func(ctx context.Context, sessionID, newName, repo string)
+
 // ExecutionLookup provides access to running agent executions by session ID.
 type ExecutionLookup interface {
 	GetExecutionBySessionID(sessionID string) (*lifecycle.AgentExecution, bool)
@@ -74,6 +78,7 @@ type GitHandlers struct {
 	logger               *logger.Logger
 	onPRCreated          PRCreatedCallback
 	onGitOperationFailed GitOperationFailedCallback
+	onBranchRenamed      BranchRenamedCallback
 	commitsGroup         singleflight.Group
 	diffGroup            singleflight.Group
 }
@@ -103,6 +108,11 @@ func isGitHubPRURL(prURL string) bool {
 // SetOnGitOperationFailed sets a callback invoked when a git operation fails.
 func (h *GitHandlers) SetOnGitOperationFailed(cb GitOperationFailedCallback) {
 	h.onGitOperationFailed = cb
+}
+
+// SetOnBranchRenamed sets a callback invoked after a branch is successfully renamed.
+func (h *GitHandlers) SetOnBranchRenamed(cb BranchRenamedCallback) {
+	h.onBranchRenamed = cb
 }
 
 // notifyGitOperationFailed fires the failure callback asynchronously if the result indicates failure.
@@ -446,6 +456,9 @@ func (h *GitHandlers) wsRenameBranch(ctx context.Context, msg *ws.Message) (*ws.
 	result, err := client.GitRenameBranch(ctx, req.NewName, req.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("rename branch failed: %w", err)
+	}
+	if result.Success && h.onBranchRenamed != nil {
+		h.onBranchRenamed(ctx, req.SessionID, req.NewName, req.Repo)
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, result)

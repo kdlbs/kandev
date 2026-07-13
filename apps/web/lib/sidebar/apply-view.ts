@@ -458,6 +458,74 @@ export function countGroupTasks(
   return total;
 }
 
+/**
+ * Flatten the grouped sidebar tree into the exact top-to-bottom order of the
+ * task rows the user currently sees, honoring collapsed groups and collapsed
+ * subtask parents. This is the ordered list shift-click range selection walks.
+ */
+export function flattenVisibleTaskIds(
+  grouped: GroupedSidebarList,
+  collapsedGroupKeys: string[],
+  collapsedSubtaskParentIds: string[],
+): string[] {
+  const collapsedGroups = new Set(collapsedGroupKeys);
+  const collapsedSubs = new Set(collapsedSubtaskParentIds);
+  const out: string[] = [];
+  const visit = (task: TaskSwitcherItem) => {
+    out.push(task.id);
+    if (collapsedSubs.has(task.id)) return;
+    const subs = grouped.subTasksByParentId.get(task.id);
+    if (subs) for (const sub of subs) visit(sub);
+  };
+  for (const group of grouped.groups) {
+    if (collapsedGroups.has(group.key)) continue;
+    for (const task of group.tasks) visit(task);
+  }
+  return out;
+}
+
+/**
+ * Order `ids` by their position in the rendered `visibleTaskIds` list. Used
+ * before bulk moves so a backward range selection (anchor after target, which
+ * leaves the selection Set in insertion rather than visible order) still lands
+ * top-to-bottom at the destination. Ids absent from the visible list sort last
+ * so they never displace the visible-ordered ones.
+ */
+export function sortIdsByVisibleOrder(ids: string[], visibleTaskIds: string[]): string[] {
+  const order = new Map(visibleTaskIds.map((id, i) => [id, i]));
+  return [...ids].sort(
+    (a, b) =>
+      (order.get(a) ?? Number.POSITIVE_INFINITY) - (order.get(b) ?? Number.POSITIVE_INFINITY),
+  );
+}
+
+/**
+ * Decide whether a selection can be bulk-moved to a single step. A selected row
+ * with no workflow (e.g. the archived placeholder) can't move, so flag the
+ * selection as "mixed" (disables "Move to step") and report the movable subset.
+ */
+export function computeMixedWorkflowSelection(
+  displayTasks: Array<{ id: string; workflowId?: string }>,
+  selectedIds: Set<string>,
+): { isMixedWorkflowSelection: boolean; movableSelectedIds: Set<string> } {
+  const wfIds = new Set<string>();
+  const movable = new Set<string>();
+  let hasWorkflowless = false;
+  for (const t of displayTasks) {
+    if (!selectedIds.has(t.id)) continue;
+    if (t.workflowId) {
+      wfIds.add(t.workflowId);
+      movable.add(t.id);
+    } else {
+      hasWorkflowless = true;
+    }
+  }
+  return {
+    isMixedWorkflowSelection: hasWorkflowless || wfIds.size > 1,
+    movableSelectedIds: movable,
+  };
+}
+
 export function applyView(
   tasks: TaskSwitcherItem[],
   view: SidebarView,

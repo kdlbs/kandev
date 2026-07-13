@@ -60,6 +60,8 @@ Every UI feature should end with one of these:
 - existing mobile Playwright test explicitly identified as covering the changed behavior
 - written justification for no mobile test, limited to impossible-to-test infrastructure gaps
 
+For frontend changes that are purely state/data normalization inside an existing component and do not alter rendered layout, touch behavior, scrolling, navigation, or viewport-dependent interaction, targeted unit/component tests plus an explicit note can satisfy mobile parity. New mobile Playwright coverage is not required for that narrow case.
+
 Good mobile tests assert real user outcomes, not only visibility. Prefer:
 
 - open feature from mobile navigation and complete primary action

@@ -98,11 +98,13 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	assumeMcpSse := false
 	assumeMcpHttp := false
 	requiresProcessKill := false
+	var stripEnv []string
 	if req.AgentConfig != nil {
 		if rt := req.AgentConfig.Runtime(); rt != nil {
 			assumeMcpSse = rt.AssumeMcpSse
 			assumeMcpHttp = rt.AssumeMcpHttp
 			requiresProcessKill = rt.RequiresProcessKill
+			stripEnv = rt.StripEnv
 		}
 	}
 
@@ -126,6 +128,7 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 		AssumeMcpHttp:       assumeMcpHttp,
 		McpMode:             req.McpMode,
 		RequiresProcessKill: requiresProcessKill,
+		StripEnv:            stripEnv,
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
 	}
 

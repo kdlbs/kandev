@@ -1,15 +1,26 @@
-import { redirect } from "@/lib/routing/server-navigation";
+"use client";
+
+import { useEffect } from "react";
+
 import Link from "@/components/routing/app-link";
-import { listWorkspaces } from "@/lib/api";
+import { useAppStore } from "@/components/state-provider";
+import { useRouter } from "@/lib/routing/client-router";
 
-export default async function AutomationsTopLevelPage() {
-  const res = await listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] }));
-  const workspaces = res.workspaces ?? [];
+export default function AutomationsTopLevelPage() {
+  const router = useRouter();
+  const workspaces = useAppStore((s) => s.workspaces.items);
 
-  if (workspaces.length === 1) {
-    redirect(`/settings/workspace/${workspaces[0].id}/automations`);
-  }
+  const soleWorkspaceId = workspaces.length === 1 ? workspaces[0].id : null;
 
+  useEffect(() => {
+    if (soleWorkspaceId) {
+      router.replace(`/settings/workspace/${soleWorkspaceId}/automations`);
+    }
+  }, [soleWorkspaceId, router]);
+
+  // Render the picker even while a single-workspace redirect is pending: the
+  // effect navigates away on the next tick, but if navigation is delayed or
+  // blocked the page degrades to the workspace list instead of a blank panel.
   if (workspaces.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center">

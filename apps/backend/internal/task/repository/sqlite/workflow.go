@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -53,7 +54,7 @@ func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workfl
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflows (id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, hidden, style, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, workflow.Hidden, normalizeWorkflowStyle(workflow.Style), workflow.CreatedAt, workflow.UpdatedAt)
+	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), workflow.CreatedAt, workflow.UpdatedAt)
 
 	return err
 }
@@ -69,23 +70,35 @@ func normalizeWorkflowStyle(style string) string {
 	return models.WorkflowStyleKanban
 }
 
-// GetWorkflow retrieves a workflow by ID
-func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
+const workflowSelectColumns = `
+	id, workspace_id, name, description, agent_profile_id,
+	workflow_template_id, sort_order, hidden, style, created_at, updated_at
+`
+
+type workflowScanner interface {
+	Scan(dest ...interface{}) error
+}
+
+func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 	workflow := &models.Workflow{}
 	var workflowTemplateID, agentProfileID, style sql.NullString
-
-	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
-		SELECT id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, hidden, style, created_at, updated_at
-		FROM workflows WHERE id = ?
-	`), id).Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &agentProfileID, &workflowTemplateID, &workflow.SortOrder, &workflow.Hidden, &style, &workflow.CreatedAt, &workflow.UpdatedAt)
-
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("workflow not found: %s", id)
-	}
-	if err != nil {
+	var hidden int
+	if err := scanner.Scan(
+		&workflow.ID,
+		&workflow.WorkspaceID,
+		&workflow.Name,
+		&workflow.Description,
+		&agentProfileID,
+		&workflowTemplateID,
+		&workflow.SortOrder,
+		&hidden,
+		&style,
+		&workflow.CreatedAt,
+		&workflow.UpdatedAt,
+	); err != nil {
 		return nil, err
 	}
-
+	workflow.Hidden = hidden != 0
 	if agentProfileID.Valid {
 		workflow.AgentProfileID = agentProfileID.String
 	}
@@ -100,13 +113,40 @@ func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workfl
 	return workflow, nil
 }
 
+func scanWorkflowRows(rows *sql.Rows) ([]*models.Workflow, error) {
+	var result []*models.Workflow
+	for rows.Next() {
+		workflow, err := scanWorkflowRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, workflow)
+	}
+	return result, rows.Err()
+}
+
+// GetWorkflow retrieves a workflow by ID
+func (r *Repository) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
+	workflow, err := scanWorkflowRow(r.ro.QueryRowContext(ctx, r.ro.Rebind(fmt.Sprintf(`
+		SELECT %s
+		FROM workflows WHERE id = ?
+	`, workflowSelectColumns)), id))
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("workflow not found: %s", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return workflow, nil
+}
+
 // UpdateWorkflow updates an existing workflow
 func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
 	workflow.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE workflows SET name = ?, description = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, updated_at = ? WHERE id = ?
-	`), workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.Hidden, normalizeWorkflowStyle(workflow.Style), workflow.UpdatedAt, workflow.ID)
+	`), workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), workflow.UpdatedAt, workflow.ID)
 	if err != nil {
 		return err
 	}
@@ -159,9 +199,10 @@ func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
 // ListWorkflows returns workflows for the given workspace, excluding hidden by default.
 // Pass includeHidden=true to also return system-only workflows like Improve Kandev.
 func (r *Repository) ListWorkflows(ctx context.Context, workspaceID string, includeHidden bool) ([]*models.Workflow, error) {
-	query := `
-		SELECT id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, hidden, style, created_at, updated_at FROM workflows
-	`
+	query := fmt.Sprintf(`
+		SELECT %s
+		FROM workflows
+	`, workflowSelectColumns)
 	var args []interface{}
 	var conditions []string
 	if workspaceID != "" {
@@ -186,28 +227,7 @@ func (r *Repository) ListWorkflows(ctx context.Context, workspaceID string, incl
 	}
 	defer func() { _ = rows.Close() }()
 
-	var result []*models.Workflow
-	for rows.Next() {
-		workflow := &models.Workflow{}
-		var agentProfileID, workflowTemplateID, style sql.NullString
-		err := rows.Scan(&workflow.ID, &workflow.WorkspaceID, &workflow.Name, &workflow.Description, &agentProfileID, &workflowTemplateID, &workflow.SortOrder, &workflow.Hidden, &style, &workflow.CreatedAt, &workflow.UpdatedAt)
-		if err != nil {
-			return nil, err
-		}
-		if agentProfileID.Valid {
-			workflow.AgentProfileID = agentProfileID.String
-		}
-		if workflowTemplateID.Valid {
-			workflow.WorkflowTemplateID = &workflowTemplateID.String
-		}
-		if style.Valid && style.String != "" {
-			workflow.Style = style.String
-		} else {
-			workflow.Style = models.WorkflowStyleKanban
-		}
-		result = append(result, workflow)
-	}
-	return result, rows.Err()
+	return scanWorkflowRows(rows)
 }
 
 // ReorderWorkflows updates sort_order for workflows within a workspace using a transaction.

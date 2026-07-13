@@ -26,7 +26,21 @@ const overloaded529Message = "Internal error: API Error: 529 Overloaded. This is
 // before recovering (default 1, so the turn self-heals on the first retry).
 // Use a large N (e.g. `/overloaded:9`) to exhaust the retry budget and fall
 // through to the red recovery banner.
-var overloadedCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?overloaded(?::(\d+))?$`)
+var (
+	overloadedCmdRe               = regexp.MustCompile(`(?i)^/(?:e2e:)?overloaded(?::(\d+))?$`)
+	changesWalkthroughPromptRefRe = regexp.MustCompile(`^@changes-walkthrough(?:\s|$)`)
+)
+
+const changesWalkthroughPromptMarker = "Please create an agent-authored walkthrough of the current changes"
+
+func isChangesWalkthroughRequest(prompt string) bool {
+	cmd := stripKandevSystem(strings.TrimSpace(prompt))
+	legacyPrompt := strings.Contains(cmd, changesWalkthroughPromptMarker) &&
+		strings.Contains(cmd, "show_walkthrough_kandev") &&
+		strings.Contains(cmd, "Available changed files:")
+	promptReference := changesWalkthroughPromptRefRe.MatchString(cmd)
+	return legacyPrompt || promptReference
+}
 
 // parseOverloadedCmd reports whether the prompt is the /overloaded command and,
 // if so, how many consecutive prompts it should fail before recovering
@@ -213,6 +227,10 @@ func handlePrompt(e *emitter, prompt, model string) {
 	// `/e2e:<scenario>` branch.
 	if count, ok := parseBulkCmd(prompt); ok {
 		emitBulk(e, count)
+		return
+	}
+	if isChangesWalkthroughRequest(cmd) {
+		scenarioWalkthroughRequested(e)
 		return
 	}
 
