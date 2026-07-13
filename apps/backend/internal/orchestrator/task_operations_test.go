@@ -1745,6 +1745,113 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 	require.Equal(t, 1, status.Count, "the parent's message stays queued for the recovered turn's own natural drain")
 }
 
+// TestCancelAgent_RacesHandleAgentReady_QueuedMessageStillDelivered covers a
+// real cross-goroutine race at the orchestrator level: a user's Cancel-button
+// click (Service.CancelAgent) racing the same agent's own asynchronous
+// ready/complete event (handleAgentReady) for the same session, with a
+// message already queued while the turn was running. CancelAgent's own doc
+// comment claims its synchronous drainQueuedMessageForPromptableSessionLocked
+// call — made while still holding the per-session cancelInFlight guard —
+// delivers the queued message even when no agent.ready fires; this pins that
+// the queued message is *actually* delivered exactly once even when a real
+// handleAgentReady call for this exact cancellation *does* arrive
+// concurrently, mid-cancel, rather than being stranded because neither side
+// ends up taking it.
+//
+// This does NOT reproduce the #1653 E2E CI regression (a same-goroutine
+// reentrant deadlock inside the real agent lifecycle manager's escalation
+// path — see lifecycle.TestManager_CancelAgent_EscalationDoesNotDeadlockOnReentrantReadySubscriber
+// for that). mockAgentManager's CancelAgent is a simple synchronous mock
+// that never triggers a reentrant handleAgentReady call on this same
+// goroutine the way the real lifecycle.Manager's escalateStuckCancel does;
+// handleAgentReady here always runs on its own, genuinely separate goroutine.
+func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStillDelivered(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             make(chan struct{}, 4),
+		cancelAgentBlock:       make(chan struct{}),
+		cancelAgentEntered:     make(chan struct{}, 1),
+	}
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	turnSync := &turnSnapshotSyncTurnService{
+		repoTurnService: &repoTurnService{repo: repo},
+		sessionID:       "session1",
+		snapshotTaken:   make(chan struct{}),
+	}
+	svc.turnService = turnSync
+	_, err := turnSync.StartTurn(ctx, "session1")
+	require.NoError(t, err)
+
+	_, err = svc.messageQueue.QueueMessage(ctx, "session1", "task1", "queued while busy", "", messagequeue.QueuedByAgent, false, nil)
+	require.NoError(t, err)
+
+	// The Cancel button click claims the guard first and blocks mid-cancel
+	// inside the agent manager's own CancelAgent call.
+	cancelDone := make(chan struct{})
+	var cancelErr error
+	go func() {
+		cancelErr = svc.CancelAgent(ctx, "session1")
+		close(cancelDone)
+	}()
+	select {
+	case <-agentMgr.cancelAgentEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for CancelAgent to enter cancel")
+	}
+
+	// The same agent's own asynchronous ready event for this exact turn
+	// races in concurrently, snapshotting the still-original active turn
+	// before blocking on the same guard.
+	readyDone := make(chan struct{})
+	go func() {
+		svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "task1", SessionID: "session1"})
+		close(readyDone)
+	}()
+	select {
+	case <-turnSync.snapshotTaken:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for handleAgentReady to snapshot the active turn")
+	}
+	select {
+	case <-readyDone:
+		t.Fatal("handleAgentReady returned before CancelAgent released the guard — it must block, not work around it")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(agentMgr.cancelAgentBlock)
+
+	select {
+	case <-cancelDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for CancelAgent to finish")
+	}
+	require.NoError(t, cancelErr)
+
+	select {
+	case <-readyDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for handleAgentReady to finish once the guard was released")
+	}
+
+	require.Eventually(t, func() bool {
+		agentMgr.mu.Lock()
+		defer agentMgr.mu.Unlock()
+		return len(agentMgr.capturedPrompts) == 1
+	}, 2*time.Second, 10*time.Millisecond, "expected the queued message to be dispatched exactly once")
+
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	require.Equal(t, 0, status.Count, "the queued message must not be stranded when a concurrent agent.ready races the cancel button's own drain")
+}
+
 // TestAcquireCancelInFlightGuard_PrunesEntryWhenNoLongerReferenced pins the
 // cubic-dev-ai / coderabbitai leak report: getCancelInFlightLock's original
 // LoadOrStore left one permanent *sync.Mutex behind per session ever

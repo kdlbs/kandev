@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	agentctlClient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -55,6 +57,9 @@ func TestManager_CancelAgent_EscalatesWhenAgentHangs(t *testing.T) {
 	}
 
 	mgr := newTestManager(t)
+	mockBus, ok := mgr.eventBus.(*MockEventBus)
+	require.True(t, ok)
+	mockBus.Notify = make(chan struct{}, 4)
 
 	promptFinished := make(chan struct{})
 	exec := &AgentExecution{
@@ -103,8 +108,16 @@ func TestManager_CancelAgent_EscalatesWhenAgentHangs(t *testing.T) {
 	require.Equal(t, v1.AgentStatusReady, updated.Status,
 		"execution must be marked ready after cancel escalation so the workflow can proceed")
 
-	mockBus, ok := mgr.eventBus.(*MockEventBus)
-	require.True(t, ok)
+	// The AgentReady publish is dispatched asynchronously (escalateStuckCancel's
+	// asyncPublish=true — see markReadyEventWithContext's doc comment for why).
+	// Wait on Notify rather than reading PublishedEvents immediately: the
+	// channel receive establishes happens-before with the publishing
+	// goroutine's append, so the read below is race-free.
+	select {
+	case <-mockBus.Notify:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the async AgentReady publish")
+	}
 	var sawReady bool
 	for _, ev := range mockBus.PublishedEvents {
 		if ev.Type == events.AgentReady {
@@ -191,5 +204,142 @@ func TestManager_CancelAgent_EscalationCleanupSurvivesCtxCancel(t *testing.T) {
 	case sig := <-exec.promptDoneCh:
 		t.Fatalf("stale signal must be drained after escalation; got: %+v", sig)
 	default:
+	}
+}
+
+// TestManager_CancelAgent_EscalationDoesNotDeadlockOnReentrantReadySubscriber
+// pins the #1653 E2E CI regression: escalateStuckCancel calls MarkReady,
+// which publishes events.AgentReady. In production the orchestrator's
+// handleAgentReady is registered as a *queue* subscriber for this event, and
+// (per the centralized cancelInFlightGuard work on PR #1653) tries to
+// re-acquire the very same per-session guard Service.CancelAgent still holds
+// at this exact point in the call chain — on the *same goroutine*, since the
+// in-memory event bus delivers to queue subscriptions synchronously (see
+// bus.MemoryEventBus.publishToQueue's "deliver synchronously to preserve
+// ordering" comment). A synchronous inline publish here would have that
+// reentrant Lock() call block forever on the non-reentrant mutex, and
+// CancelAgent would never return — exactly what the E2E "a message queued
+// during a running turn is delivered when the turn is paused" test caught.
+//
+// This test cannot reproduce the real cross-package reentrancy (it would
+// need the real bus.MemoryEventBus plus a real orchestrator.Service), so it
+// simulates the hazard directly: OnPublish blocks on a mutex the test holds
+// for CancelAgent's entire duration, standing in for the guard a reentrant
+// handleAgentReady would try (and fail) to acquire. If escalateStuckCancel
+// published inline, CancelAgent itself would call OnPublish and deadlock on
+// its own goroutine. Dispatching asynchronously (asyncPublish=true) lets
+// CancelAgent return promptly regardless of how long the subscriber blocks.
+func TestManager_CancelAgent_EscalationDoesNotDeadlockOnReentrantReadySubscriber(t *testing.T) {
+	prevWait := cancelWaitTimeout
+	prevEsc := cancelEscalationTimeout
+	cancelWaitTimeout = 20 * time.Millisecond
+	cancelEscalationTimeout = 20 * time.Millisecond
+	t.Cleanup(func() {
+		cancelWaitTimeout = prevWait
+		cancelEscalationTimeout = prevEsc
+	})
+
+	mock := newMockAgentServer(t)
+	t.Cleanup(func() { mock.server.Close() })
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.cancel" {
+			resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+				"success": true,
+			})
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	streamCtx, streamCancel := context.WithCancel(context.Background())
+	t.Cleanup(streamCancel)
+	require.NoError(t, client.StreamUpdates(streamCtx, func(_ agentctlClient.AgentEvent) {}, nil, nil))
+	select {
+	case <-mock.wsConnected:
+	case <-time.After(2 * time.Second):
+		t.Fatal("mock server did not see WS connection")
+	}
+
+	mgr := newTestManager(t)
+	mockBus, ok := mgr.eventBus.(*MockEventBus)
+	require.True(t, ok)
+
+	// reentrantGuard stands in for the per-session cancelInFlightGuard that
+	// the real orchestrator.Service.CancelAgent holds for its own entire
+	// call — held here for this whole test, so any synchronous, same-
+	// goroutine attempt to acquire it (an inline publish reaching a
+	// reentrant handleAgentReady) would block forever.
+	var reentrantGuard sync.Mutex
+	reentrantGuard.Lock()
+	subscriberAttempted := make(chan struct{}, 1)
+	subscriberFinished := make(chan struct{})
+	mockBus.OnPublish = func(subject string, _ *bus.Event) {
+		if subject != events.AgentReady {
+			return
+		}
+		select {
+		case subscriberAttempted <- struct{}{}:
+		default:
+		}
+		reentrantGuard.Lock()
+		reentrantGuard.Unlock() //nolint:staticcheck // deliberately mirrors a reentrant acquire-then-release
+		close(subscriberFinished)
+	}
+
+	promptFinished := make(chan struct{})
+	exec := &AgentExecution{
+		ID:             "exec-cancel-reentrant",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		Status:         v1.AgentStatusRunning,
+		WorkspacePath:  "/workspace",
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+		promptFinished: promptFinished,
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	go func() {
+		<-exec.promptDoneCh
+		close(promptFinished)
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	cancelDone := make(chan error, 1)
+	go func() {
+		cancelDone <- mgr.CancelAgent(ctx, exec.ID)
+	}()
+
+	select {
+	case err := <-cancelDone:
+		require.ErrorIs(t, err, ErrCancelEscalated,
+			"CancelAgent must return promptly even though its own escalation-triggered AgentReady publish is still blocked on a reentrant acquire")
+	case <-time.After(1 * time.Second):
+		t.Fatal("CancelAgent deadlocked waiting for its own escalation-triggered ready event to be handled — asyncPublish regression")
+	}
+
+	// The simulated subscriber must have at least been reached (proving the
+	// event really was published), even though it's still blocked.
+	select {
+	case <-subscriberAttempted:
+	case <-time.After(1 * time.Second):
+		t.Fatal("expected the AgentReady publish to reach the simulated subscriber")
+	}
+
+	reentrantGuard.Unlock()
+
+	// Wait for the simulated subscriber goroutine to actually finish before
+	// returning — otherwise it's still running (blocked, then unblocking)
+	// when the test exits, making outcomes scheduler-dependent and risking
+	// a goleak false positive.
+	select {
+	case <-subscriberFinished:
+	case <-time.After(1 * time.Second):
+		t.Fatal("simulated AgentReady subscriber did not finish after the guard was released")
 	}
 }

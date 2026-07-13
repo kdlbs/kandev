@@ -138,10 +138,30 @@ func (m *MockDockerClient) ListContainers(ctx context.Context, labels map[string
 // MockEventBus implements bus.EventBus for testing
 type MockEventBus struct {
 	PublishedEvents []*bus.Event
+	// Notify, when non-nil, receives a value after each Publish call appends
+	// its event — lets a test synchronize with an async publish (e.g.
+	// escalateStuckCancel's asyncPublish=true path spawns Publish on its own
+	// goroutine) via a channel receive instead of racing on unsynchronized
+	// access to PublishedEvents. The send blocks, so set it with enough
+	// buffer for however many events the test expects, or drain it promptly.
+	Notify chan struct{}
+	// OnPublish, when non-nil, runs synchronously inside Publish itself
+	// (before appending/notifying) — lets a test simulate a slow or
+	// (deliberately, for deadlock regression tests) blocking subscriber,
+	// standing in for a real queue subscription's synchronous handler
+	// (see bus.MemoryEventBus.Publish/publishToQueue's "deliver
+	// synchronously to preserve ordering" comment).
+	OnPublish func(subject string, event *bus.Event)
 }
 
 func (m *MockEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	if m.OnPublish != nil {
+		m.OnPublish(subject, event)
+	}
 	m.PublishedEvents = append(m.PublishedEvents, event)
+	if m.Notify != nil {
+		m.Notify <- struct{}{}
+	}
 	return nil
 }
 
