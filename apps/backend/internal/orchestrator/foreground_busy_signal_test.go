@@ -357,16 +357,26 @@ func TestForegroundBusySignal_UnregisteredTerminalToolUpdateLeavesGateOpen(t *te
 // monitorGenericPayload builds the Generic payload the ACP adapter emits for a
 // Claude Monitor: kind=generic with the structured `{monitor:{...}}` view tucked
 // into Output. `ended` toggles whether the watch is still live.
+// monitorGenericPayload mirrors what the ACP adapter emits for a recognized
+// Monitor: the presentation view in Generic.Output (what the frontend card reads)
+// AND the adapter's out-of-band attestation (what the background-work classifier
+// reads). Monitor arrives with ACP kind "other", hence the generic name.
+//
+// The attestation is not decoration — IsActiveMonitor classifies on it alone,
+// because Generic.Output is agent-supplied and so can't vouch for its own origin.
+// A fixture that only set the Output map would be a forgery, and would (correctly)
+// no longer register as background work.
 func monitorGenericPayload(ended bool) *streams.NormalizedPayload {
-	p := streams.NewGeneric("Monitor", map[string]any{})
+	p := streams.NewGeneric("other", map[string]any{})
 	p.Generic().Output = map[string]any{
-		"monitor": map[string]any{
-			"kind":    streams.MonitorSubkind,
-			"ended":   ended,
-			"task_id": "task-1",
-			"command": "gh pr checks --watch",
+		streams.MonitorViewKey: map[string]any{
+			streams.MonitorViewKindKey:    streams.MonitorSubkind,
+			streams.MonitorViewEndedKey:   ended,
+			streams.MonitorViewTaskIDKey:  "task-1",
+			streams.MonitorViewCommandKey: "gh pr checks --watch",
 		},
 	}
+	p.SetMonitorIdentity("task-1", ended)
 	return p
 }
 

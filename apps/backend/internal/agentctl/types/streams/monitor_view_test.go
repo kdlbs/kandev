@@ -2,13 +2,20 @@ package streams
 
 import "testing"
 
-// monitorView builds a Generic payload shaped like the one acp/monitor.go's
-// monitorOutputWrapper produces. The producer→consumer contract itself is pinned
-// against the *real* producer functions in acp's monitor_contract_test.go; these
-// cases exercise the predicate's own branches.
-func monitorView(ended bool) *NormalizedPayload {
+// monitorPayload builds the payload the ACP adapter produces for a recognized
+// Monitor: a Generic payload (Monitor arrives with ACP kind "other") carrying both
+// the presentation view in Output *and* the adapter's out-of-band attestation.
+func monitorPayload(ended bool) *NormalizedPayload {
 	p := NewGeneric("other", map[string]any{})
-	p.Generic().Output = map[string]any{
+	p.Generic().Output = monitorViewOutput(ended)
+	p.SetMonitorIdentity("task-1", ended)
+	return p
+}
+
+// monitorViewOutput is the presentation map the frontend Monitor card renders.
+// On its own it proves nothing about provenance — see the forgery test below.
+func monitorViewOutput(ended bool) map[string]any {
+	return map[string]any{
 		MonitorViewKey: map[string]any{
 			MonitorViewKindKey:    MonitorSubkind,
 			MonitorViewEndedKey:   ended,
@@ -16,16 +23,6 @@ func monitorView(ended bool) *NormalizedPayload {
 			MonitorViewCommandKey: "gh pr checks --watch",
 		},
 	}
-	return p
-}
-
-// genericWithOutput builds the payload an *arbitrary* agent tool produces:
-// NormalizeToolResult assigns the agent's raw result straight to Generic.Output,
-// so these are the shapes the predicate has to refuse.
-func genericWithOutput(output any) *NormalizedPayload {
-	p := NewGeneric("other", map[string]any{})
-	p.Generic().Output = output
-	return p
 }
 
 func TestIsActiveMonitor(t *testing.T) {
@@ -34,44 +31,11 @@ func TestIsActiveMonitor(t *testing.T) {
 		payload *NormalizedPayload
 		want    bool
 	}{
-		{"active monitor", monitorView(false), true},
-		{"ended monitor", monitorView(true), false},
+		{"active monitor", monitorPayload(false), true},
+		{"ended monitor", monitorPayload(true), false},
 		{"nil payload", nil, false},
 		{"non-generic payload", NewShellExec("ls", "", "", 0, false), false},
-		{"generic without monitor view", NewGeneric("SomeTool", map[string]any{"a": 1}), false},
-		{
-			"generic with wrong subkind",
-			genericWithOutput(map[string]any{
-				MonitorViewKey: map[string]any{MonitorViewKindKey: "Something", MonitorViewEndedKey: false},
-			}),
-			false,
-		},
-		{
-			// Provenance: the adapter only ever publishes an active view once the
-			// registration banner handed it a real task ID. A monitor-shaped blob
-			// without one did not come off the Monitor path — an unrelated agent's
-			// tool result must not relax the busy gate.
-			"monitor-shaped output with no task_id",
-			genericWithOutput(map[string]any{
-				MonitorViewKey: map[string]any{
-					MonitorViewKindKey:  MonitorSubkind,
-					MonitorViewEndedKey: false,
-				},
-			}),
-			false,
-		},
-		{
-			"monitor-shaped output with empty task_id",
-			genericWithOutput(map[string]any{
-				MonitorViewKey: map[string]any{
-					MonitorViewKindKey:   MonitorSubkind,
-					MonitorViewEndedKey:  false,
-					MonitorViewTaskIDKey: "",
-				},
-			}),
-			false,
-		},
-		{"generic with string output", genericWithOutput("monitor"), false},
+		{"generic with no monitor identity", NewGeneric("SomeTool", map[string]any{"a": 1}), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,12 +46,40 @@ func TestIsActiveMonitor(t *testing.T) {
 	}
 }
 
-// TestIsActiveMonitor_SurvivesJSONRoundTrip proves the predicate still works
-// after the payload crosses the agentctl→orchestrator serialization boundary,
-// where Generic.Output decodes back into a map[string]any.
-func TestIsActiveMonitor_SurvivesJSONRoundTrip(t *testing.T) {
-	orig := monitorView(false)
-	data, err := orig.MarshalJSON()
+// The provenance test that matters. Generic.Output is the agent's own raw tool
+// result (NormalizeToolResult assigns it verbatim), so an unrelated tool can emit a
+// *byte-for-byte perfect* Monitor view there. Without the adapter's attestation it
+// must still not be classified as background work — otherwise an agent could relax
+// its own busy gate and slip a second prompt into a live foreground turn, breaking
+// ADR-0035's "unrecognized agents keep reject-while-RUNNING" contract.
+func TestIsActiveMonitor_ForgedOutputWithoutAdapterAttestationIsRejected(t *testing.T) {
+	forged := NewGeneric("other", map[string]any{})
+	forged.Generic().Output = monitorViewOutput(false) // identical to the real thing
+	// …but no SetMonitorIdentity: the adapter never recognized this as a Monitor.
+
+	if forged.IsActiveMonitor() {
+		t.Fatal("a monitor-shaped tool result with no adapter attestation must not be classified as background work")
+	}
+
+	// And it stays rejected across the wire, where a naive shape-matcher would be
+	// fooled by the decoded map.
+	data, err := forged.MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded NormalizedPayload
+	if err := decoded.UnmarshalJSON(data); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if decoded.IsActiveMonitor() {
+		t.Fatal("forged monitor output must stay unrecognized after serialization")
+	}
+}
+
+// The attestation is what has to survive the agentctl→orchestrator boundary — the
+// classifier runs on the far side of it.
+func TestIsActiveMonitor_AttestationSurvivesJSONRoundTrip(t *testing.T) {
+	data, err := monitorPayload(false).MarshalJSON()
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -96,6 +88,9 @@ func TestIsActiveMonitor_SurvivesJSONRoundTrip(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if !got.IsActiveMonitor() {
-		t.Fatal("active Monitor must remain recognized after a JSON round-trip")
+		t.Fatal("an attested active Monitor must remain recognized after a JSON round-trip")
+	}
+	if got.Monitor() == nil || got.Monitor().TaskID != "task-1" {
+		t.Fatalf("attested task ID must survive the round-trip, got %+v", got.Monitor())
 	}
 }

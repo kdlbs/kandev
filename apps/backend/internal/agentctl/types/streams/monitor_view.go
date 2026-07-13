@@ -2,22 +2,21 @@ package streams
 
 // MonitorSubkind is the `kind` value the ACP adapter stamps on the structured
 // Monitor view it tucks into a Generic tool payload's Output (see
-// server/adapter/transport/acp/monitor.go). It is the shared contract between
-// the adapter (the producer) and consumers such as the orchestrator's
-// background-work classifier, so neither side has to string-match a tool name.
+// server/adapter/transport/acp/monitor.go).
 const MonitorSubkind = "Monitor"
 
 // Monitor view map keys — the shape acp/monitor.go writes as
 //
 //	Generic.Output = {"monitor": {"kind": …, "task_id": …, "ended": …, …}}
 //
-// Exported so the producer (acp/monitor.go's monitorOutputWrapper and
-// readMonitorView) builds and reads the map from these very constants rather
-// than re-typing the literals on its side of the package boundary. That is the
-// point: while the two sides each spelled the strings out, renaming a key in the
-// producer still compiled and silently reverted Monitor sessions to the coarse
-// busy signal. acp's monitor_contract_test.go pins the producer→consumer round
-// trip so the contract can't drift unnoticed again.
+// This map is the *presentation* contract: it is what the frontend Monitor card
+// renders from. It is NOT what the background-work classifier reads — see
+// MonitorPayload and IsActiveMonitor below for why.
+//
+// Exported so acp/monitor.go builds and reads the map from these very constants
+// instead of re-typing the literals on its side of the package boundary; while
+// each side spelled the strings out independently, renaming a key on one side
+// still compiled and silently broke the other.
 const (
 	MonitorViewKey             = "monitor"
 	MonitorViewKindKey         = "kind"
@@ -29,45 +28,73 @@ const (
 	MonitorViewEndReasonKey    = "end_reason"
 )
 
-// IsActiveMonitor reports whether this payload is a live Claude Monitor watch:
-// a Generic payload carrying the structured Monitor view whose `ended` flag is
-// not set. claude-agent-acp tags Monitor with `_meta.claudeCode.toolName:
-// "Monitor"` and `kind:"other"`, so it normalizes to a Generic payload rather
-// than a dedicated kind (see acp/monitor.go). A Monitor is long-running
-// background work the foreground turn is not actively generating against, so an
-// active one is treated like any other spawned background task by the busy
-// signal.
+// MonitorPayload is adapter-attested Monitor identity: proof that the ACP adapter
+// itself recognized this tool call as a Claude Monitor watch, carried as a typed
+// sibling of GenericPayload rather than as a key inside GenericPayload.Output.
 //
-// Provenance: a Generic payload's Output is otherwise the agent's *own* raw tool
-// result — normalize.go's NormalizeToolResult assigns it verbatim — so this
-// predicate must not fire for an unrelated tool that merely happens to serialize
-// a `monitor` key. It therefore demands the full shape the adapter writes,
-// including a non-empty `task_id`: that field is only ever populated once the
-// Monitor registration banner yields a real task ID (seedMonitorView), so a view
-// without one did not come off the Monitor path. Note the Generic payload's
-// `Name` is NOT a usable discriminator here — it carries the ACP tool *kind*,
-// which is "other" for Monitor, not "Monitor".
+// The distinction is the whole point. `Generic.Output` is assigned the agent's
+// raw tool result verbatim (NormalizeToolResult), so any structure *inside* it is
+// agent-shaped data — an unrelated tool whose result happened to serialize a
+// monitor-looking map would be indistinguishable from a real Monitor, no matter
+// how many fields the classifier demanded. This slot, by contrast, is only ever
+// written by the adapter's Monitor recognizer (via SetMonitorIdentity), which
+// gates on ACP `_meta.claudeCode.toolName` — metadata the claude-agent-acp
+// wrapper sets, which model tool output cannot reach. Nothing in the normalize
+// path ever copies agent data here, so a payload carrying it provably came off
+// the Monitor path.
 //
-// Returns false for a nil payload, a non-Generic payload, a Generic payload with
-// no Monitor view, a view carrying no task ID, or a Monitor that has ended.
+// It survives the agentctl→orchestrator boundary as its own `monitor` key on the
+// serialized payload, so the classifier on the far side reads the same attestation.
+type MonitorPayload struct {
+	TaskID string `json:"task_id"`
+	Ended  bool   `json:"ended,omitempty"`
+}
+
+// Monitor returns the adapter-attested Monitor identity, or nil when this payload
+// was not recognized as a Monitor.
+func (p *NormalizedPayload) Monitor() *MonitorPayload {
+	if p == nil {
+		return nil
+	}
+	return p.monitor
+}
+
+// SetMonitorIdentity records that the ACP adapter recognized this tool call as a
+// Monitor watch, and its current terminal state. Only the adapter's Monitor
+// recognizer may call this — it is the attestation IsActiveMonitor trusts.
+func (p *NormalizedPayload) SetMonitorIdentity(taskID string, ended bool) {
+	if p == nil {
+		return
+	}
+	if p.monitor == nil {
+		p.monitor = &MonitorPayload{}
+	}
+	if taskID != "" {
+		p.monitor.TaskID = taskID
+	}
+	p.monitor.Ended = ended
+}
+
+// IsActiveMonitor reports whether this payload is a live Claude Monitor watch.
+// claude-agent-acp tags Monitor with `_meta.claudeCode.toolName: "Monitor"` and
+// `kind:"other"`, so it normalizes to a Generic payload rather than a dedicated
+// kind (see acp/monitor.go). A Monitor is long-running background work the
+// foreground turn is not actively generating against, so an active one is treated
+// like any other spawned background task by the busy signal (ADR-0035).
+//
+// It classifies on the adapter's attestation (MonitorPayload), never on the shape
+// of Generic.Output — that field is the agent's own raw tool result and so can
+// neither prove nor disprove provenance. This is what keeps the ADR-0035 contract
+// honest: an agent we don't recognize cannot relax its own busy gate by emitting a
+// monitor-shaped tool result, and keeps the historical reject-while-RUNNING
+// behavior. (The payload's `Name` is likewise unusable as a discriminator: it
+// carries the ACP tool kind, which is "other" for Monitor, not "Monitor".)
+//
+// Returns false for a nil payload, a payload the adapter never recognized as a
+// Monitor, or a Monitor that has already ended.
 func (p *NormalizedPayload) IsActiveMonitor() bool {
-	if p == nil || p.kind != ToolKindGeneric || p.generic == nil {
+	if p == nil || p.monitor == nil {
 		return false
 	}
-	wrapper, ok := p.generic.Output.(map[string]any)
-	if !ok {
-		return false
-	}
-	view, ok := wrapper[MonitorViewKey].(map[string]any)
-	if !ok {
-		return false
-	}
-	if kind, _ := view[MonitorViewKindKey].(string); kind != MonitorSubkind {
-		return false
-	}
-	if taskID, _ := view[MonitorViewTaskIDKey].(string); taskID == "" {
-		return false
-	}
-	ended, _ := view[MonitorViewEndedKey].(bool)
-	return !ended
+	return !p.monitor.Ended
 }

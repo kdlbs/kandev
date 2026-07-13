@@ -291,6 +291,9 @@ func seedMonitorView(payload *streams.NormalizedPayload, taskID, command string)
 		view.Command = command
 	}
 	g.Output = monitorOutputWrapper(view)
+	// Attest, out of band of the agent-shaped Output map, that WE recognized this
+	// as a Monitor — this is what the background-work classifier trusts.
+	payload.SetMonitorIdentity(view.TaskID, view.Ended)
 }
 
 // updateMonitorPayloadView mutates the Monitor tool's NormalizedPayload to
@@ -320,6 +323,7 @@ func appendMonitorEvent(payload *streams.NormalizedPayload, taskID, command, bod
 	view.EventCount++
 	view.RecentEvents = appendCapped(view.RecentEvents, body, monitorPayloadCap)
 	g.Output = monitorOutputWrapper(view)
+	payload.SetMonitorIdentity(view.TaskID, view.Ended)
 	return payload
 }
 
@@ -337,6 +341,9 @@ func markMonitorEnded(payload *streams.NormalizedPayload, reason string) *stream
 	view.Ended = true
 	view.EndReason = reason
 	g.Output = monitorOutputWrapper(view)
+	// Keep the attestation in step with the view: an ended Monitor no longer holds
+	// the busy signal open.
+	payload.SetMonitorIdentity(view.TaskID, true)
 	return payload
 }
 
