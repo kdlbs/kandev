@@ -1,6 +1,6 @@
 "use client";
 
-import { IconInfoCircle } from "@tabler/icons-react";
+import { IconChevronDown, IconInfoCircle } from "@tabler/icons-react";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import type { Repository } from "@/lib/types/http";
@@ -44,9 +44,13 @@ export function CopyFilesField({ repositoryId, copyFiles, onUpdate }: CopyFilesF
 function CopyFilesDetails() {
   return (
     <details className="text-xs text-muted-foreground">
-      <summary className="flex min-h-11 w-fit cursor-pointer list-none items-center gap-1.5 py-2 font-medium text-foreground">
+      <summary className="group flex min-h-11 w-fit cursor-pointer list-none items-center gap-1.5 py-2 font-medium text-foreground">
         <IconInfoCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
         Pattern syntax
+        <IconChevronDown
+          className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180"
+          aria-hidden="true"
+        />
       </summary>
       <div className="max-w-sm space-y-2 pb-1">
         <p>

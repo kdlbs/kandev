@@ -24,8 +24,21 @@ test("configures symlink mode and creates a task on mobile", async ({
       title: "Mobile Copy Files Symlink Flow",
     });
     await expect
-      .poll(async () => (await apiClient.getTask(taskId)).title)
-      .toBe("Mobile Copy Files Symlink Flow");
+      .poll(
+        async () => {
+          const environment = await apiClient.getTaskEnvironment(taskId);
+          const worktreePath = environment?.worktree_path;
+          if (!worktreePath) return false;
+          const linkPath = path.join(worktreePath, ".env");
+          if (!fs.existsSync(linkPath)) return false;
+          const target = fs.readlinkSync(linkPath);
+          return (
+            !path.isAbsolute(target) && path.resolve(path.dirname(linkPath), target) === sourcePath
+          );
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
   } finally {
     fs.rmSync(sourcePath, { force: true });
     await apiClient.updateRepository(seedData.repositoryId, { copy_files: "" }).catch(() => {});
