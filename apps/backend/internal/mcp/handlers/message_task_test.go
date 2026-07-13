@@ -391,13 +391,17 @@ func TestHandleMessageTask_RunningSession_Queues(t *testing.T) {
 }
 
 // TestHandleMessageTask_ParentToChildRunningSession_Interrupts pins the
-// steering contract: when the sender is the target's parent task, a
-// running/starting target is interrupted right after the message is queued,
-// so the message is delivered without waiting for the child's current turn
-// to finish naturally. The reported status is "sent" (not "queued") because
-// the interrupt actually dispatched it immediately — see
-// queueThenInterruptTaskMessage's doc comment. See InterruptForPeerMessage's
-// doc comment for why this matters for long-running children.
+// steering contract: when the sender is the target's parent task AND
+// explicitly requests delivery_mode="interrupt", a running/starting target
+// is interrupted right after the message is queued, so the message is
+// delivered without waiting for the child's current turn to finish
+// naturally. Being the parent is necessary but not sufficient - the caller
+// must opt in; see TestHandleMessageTask_ParentToChildRunningSession_OmittedDeliveryMode_DoesNotInterrupt
+// for the (default) queued-and-wait behavior parents get otherwise. The
+// reported status is "sent" (not "queued") because the interrupt actually
+// dispatched it immediately - see queueThenInterruptTaskMessage's doc
+// comment. See InterruptForPeerMessage's doc comment for why this matters
+// for long-running children.
 func TestHandleMessageTask_ParentToChildRunningSession_Interrupts(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
