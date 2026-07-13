@@ -81,11 +81,10 @@ describe("PRRowTaskIndicator", () => {
     expect(container.textContent).toContain("2");
   });
 
-  it("truncates long task titles (>40 chars)", () => {
+  it("keeps long task titles in the DOM while visually truncating them", () => {
     const longTitle = "This is an extremely long pull request title that should be truncated";
     renderWithStore(<PRRowTaskIndicator tasks={[makeTaskPR({ pr_title: longTitle })]} />);
     const btn = screen.getByRole("button");
-    expect(btn.textContent).toContain("…");
-    expect(btn.textContent!.length).toBeLessThan(longTitle.length + 5);
+    expect(btn.textContent).toContain(longTitle);
   });
 });

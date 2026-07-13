@@ -953,7 +953,7 @@ func (s *Store) ListTaskIssueMetadataByWorkspaceID(ctx context.Context, workspac
 	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
 		`SELECT id AS task_id, title AS task_title, COALESCE(metadata, '{}') AS metadata
 		 FROM tasks
-		 WHERE workspace_id = ?
+		 WHERE workspace_id = ? AND archived_at IS NULL
 		 ORDER BY created_at ASC, id ASC`,
 	), workspaceID)
 	return rows, err

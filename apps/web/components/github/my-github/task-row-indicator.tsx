@@ -44,10 +44,6 @@ function useTaskStepTitle(workflowStepId: string | undefined): string | null {
   });
 }
 
-function truncateTitle(title: string): string {
-  return title.length > 40 ? `${title.slice(0, 40)}…` : title;
-}
-
 function TaskTitle({ task }: { task: TaskRowLink }) {
   const taskData = useTaskById(task.taskId);
   const title = taskData?.title ?? task.fallbackTitle;
@@ -86,7 +82,7 @@ function SingleTaskButton({
           className={buttonClass}
         >
           <IconChecklist className={iconClass} />
-          <span className="truncate text-foreground/80">{truncateTitle(title)}</span>
+          <span className="truncate text-foreground/80">{title}</span>
         </button>
       </TooltipTrigger>
       <TooltipContent>

@@ -227,6 +227,15 @@ func TestHttpListTaskIssues_WorkspaceScopedMetadataLinks(t *testing.T) {
 			t.Fatalf("insert task %s: %v", row.id, err)
 		}
 	}
+	if _, err := store.db.Exec(
+		`INSERT INTO tasks (id, workspace_id, title, metadata, archived_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		"archived-task",
+		"ws-1",
+		"Archived issue task",
+		`{"issue_url":"https://github.com/kdlbs/kandev/issues/1672","issue_number":1672}`,
+	); err != nil {
+		t.Fatalf("insert archived task: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/task-issues?workspace_id=ws-1", nil)
 	w := httptest.NewRecorder()
@@ -248,6 +257,9 @@ func TestHttpListTaskIssues_WorkspaceScopedMetadataLinks(t *testing.T) {
 	}
 	if len(got.TaskIssues) != 2 {
 		t.Fatalf("task issue count = %d, want 2: %+v", len(got.TaskIssues), got.TaskIssues)
+	}
+	if _, ok := got.TaskIssues["archived-task"]; ok {
+		t.Fatalf("archived task should not be listed: %+v", got.TaskIssues)
 	}
 	manual := got.TaskIssues["manual-task"]
 	if manual.TaskTitle != "Manual issue task" || manual.Owner != "kdlbs" ||
