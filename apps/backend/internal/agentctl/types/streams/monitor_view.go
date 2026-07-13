@@ -8,12 +8,25 @@ package streams
 const MonitorSubkind = "Monitor"
 
 // Monitor view map keys — the shape acp/monitor.go writes as
-// Generic.Output = {"monitor": {"kind": ..., "ended": ...}}. Kept here next to
-// the predicate that reads them so producer and consumer stay in lockstep.
+//
+//	Generic.Output = {"monitor": {"kind": …, "task_id": …, "ended": …, …}}
+//
+// Exported so the producer (acp/monitor.go's monitorOutputWrapper and
+// readMonitorView) builds and reads the map from these very constants rather
+// than re-typing the literals on its side of the package boundary. That is the
+// point: while the two sides each spelled the strings out, renaming a key in the
+// producer still compiled and silently reverted Monitor sessions to the coarse
+// busy signal. acp's monitor_contract_test.go pins the producer→consumer round
+// trip so the contract can't drift unnoticed again.
 const (
-	monitorViewKey      = "monitor"
-	monitorViewKindKey  = "kind"
-	monitorViewEndedKey = "ended"
+	MonitorViewKey             = "monitor"
+	MonitorViewKindKey         = "kind"
+	MonitorViewTaskIDKey       = "task_id"
+	MonitorViewCommandKey      = "command"
+	MonitorViewEventCountKey   = "event_count"
+	MonitorViewRecentEventsKey = "recent_events"
+	MonitorViewEndedKey        = "ended"
+	MonitorViewEndReasonKey    = "end_reason"
 )
 
 // IsActiveMonitor reports whether this payload is a live Claude Monitor watch:
@@ -23,8 +36,20 @@ const (
 // than a dedicated kind (see acp/monitor.go). A Monitor is long-running
 // background work the foreground turn is not actively generating against, so an
 // active one is treated like any other spawned background task by the busy
-// signal. Returns false for a nil payload, a non-Generic payload, a Generic
-// payload with no Monitor view, or a Monitor that has already ended.
+// signal.
+//
+// Provenance: a Generic payload's Output is otherwise the agent's *own* raw tool
+// result — normalize.go's NormalizeToolResult assigns it verbatim — so this
+// predicate must not fire for an unrelated tool that merely happens to serialize
+// a `monitor` key. It therefore demands the full shape the adapter writes,
+// including a non-empty `task_id`: that field is only ever populated once the
+// Monitor registration banner yields a real task ID (seedMonitorView), so a view
+// without one did not come off the Monitor path. Note the Generic payload's
+// `Name` is NOT a usable discriminator here — it carries the ACP tool *kind*,
+// which is "other" for Monitor, not "Monitor".
+//
+// Returns false for a nil payload, a non-Generic payload, a Generic payload with
+// no Monitor view, a view carrying no task ID, or a Monitor that has ended.
 func (p *NormalizedPayload) IsActiveMonitor() bool {
 	if p == nil || p.kind != ToolKindGeneric || p.generic == nil {
 		return false
@@ -33,13 +58,16 @@ func (p *NormalizedPayload) IsActiveMonitor() bool {
 	if !ok {
 		return false
 	}
-	view, ok := wrapper[monitorViewKey].(map[string]any)
+	view, ok := wrapper[MonitorViewKey].(map[string]any)
 	if !ok {
 		return false
 	}
-	if kind, _ := view[monitorViewKindKey].(string); kind != MonitorSubkind {
+	if kind, _ := view[MonitorViewKindKey].(string); kind != MonitorSubkind {
 		return false
 	}
-	ended, _ := view[monitorViewEndedKey].(bool)
+	if taskID, _ := view[MonitorViewTaskIDKey].(string); taskID == "" {
+		return false
+	}
+	ended, _ := view[MonitorViewEndedKey].(bool)
 	return !ended
 }

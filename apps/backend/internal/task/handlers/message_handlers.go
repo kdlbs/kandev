@@ -35,6 +35,17 @@ type OrchestratorService interface {
 	// ForegroundActivity reports the fine-grained busy substate of a RUNNING
 	// session (ADR-0035): "background" when the foreground turn has yielded to
 	// spawned background work and can accept a new message.
+	//
+	// Deliberately a hard dependency here, unlike TaskHandlers — which reaches the
+	// same method through an optional type-assertion on OrchestratorStarter and
+	// simply omits the field when it isn't there. The asymmetry is the difference
+	// in blast radius, not an oversight: this is the admission gate, so an
+	// orchestrator that silently lacked the method would fall back to rejecting
+	// every RUNNING session and quietly un-ship the feature. Requiring it makes
+	// that a compile error. TaskHandlers only enriches a DTO with the substate; if
+	// it's absent the client just falls back to the safe "generating" default, so
+	// there a soft dependency costs nothing. Resist "fixing" the inconsistency by
+	// making this one optional.
 	ForegroundActivity(sessionID string) v1.ForegroundActivity
 }
 

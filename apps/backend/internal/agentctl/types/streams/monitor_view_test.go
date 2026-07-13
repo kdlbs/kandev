@@ -2,19 +2,29 @@ package streams
 
 import "testing"
 
-// monitorView builds a Generic payload shaped exactly like the one
-// acp/monitor.go's monitorOutputWrapper produces, so the predicate is tested
-// against the real wire shape rather than a hand-tuned proxy.
+// monitorView builds a Generic payload shaped like the one acp/monitor.go's
+// monitorOutputWrapper produces. The producer→consumer contract itself is pinned
+// against the *real* producer functions in acp's monitor_contract_test.go; these
+// cases exercise the predicate's own branches.
 func monitorView(ended bool) *NormalizedPayload {
-	p := NewGeneric("Monitor", map[string]any{})
+	p := NewGeneric("other", map[string]any{})
 	p.Generic().Output = map[string]any{
-		monitorViewKey: map[string]any{
-			monitorViewKindKey:  MonitorSubkind,
-			monitorViewEndedKey: ended,
-			"task_id":           "task-1",
-			"command":           "gh pr checks --watch",
+		MonitorViewKey: map[string]any{
+			MonitorViewKindKey:    MonitorSubkind,
+			MonitorViewEndedKey:   ended,
+			MonitorViewTaskIDKey:  "task-1",
+			MonitorViewCommandKey: "gh pr checks --watch",
 		},
 	}
+	return p
+}
+
+// genericWithOutput builds the payload an *arbitrary* agent tool produces:
+// NormalizeToolResult assigns the agent's raw result straight to Generic.Output,
+// so these are the shapes the predicate has to refuse.
+func genericWithOutput(output any) *NormalizedPayload {
+	p := NewGeneric("other", map[string]any{})
+	p.Generic().Output = output
 	return p
 }
 
@@ -31,15 +41,37 @@ func TestIsActiveMonitor(t *testing.T) {
 		{"generic without monitor view", NewGeneric("SomeTool", map[string]any{"a": 1}), false},
 		{
 			"generic with wrong subkind",
-			func() *NormalizedPayload {
-				p := NewGeneric("Other", map[string]any{})
-				p.Generic().Output = map[string]any{
-					monitorViewKey: map[string]any{monitorViewKindKey: "Something", monitorViewEndedKey: false},
-				}
-				return p
-			}(),
+			genericWithOutput(map[string]any{
+				MonitorViewKey: map[string]any{MonitorViewKindKey: "Something", MonitorViewEndedKey: false},
+			}),
 			false,
 		},
+		{
+			// Provenance: the adapter only ever publishes an active view once the
+			// registration banner handed it a real task ID. A monitor-shaped blob
+			// without one did not come off the Monitor path — an unrelated agent's
+			// tool result must not relax the busy gate.
+			"monitor-shaped output with no task_id",
+			genericWithOutput(map[string]any{
+				MonitorViewKey: map[string]any{
+					MonitorViewKindKey:  MonitorSubkind,
+					MonitorViewEndedKey: false,
+				},
+			}),
+			false,
+		},
+		{
+			"monitor-shaped output with empty task_id",
+			genericWithOutput(map[string]any{
+				MonitorViewKey: map[string]any{
+					MonitorViewKindKey:   MonitorSubkind,
+					MonitorViewEndedKey:  false,
+					MonitorViewTaskIDKey: "",
+				},
+			}),
+			false,
+		},
+		{"generic with string output", genericWithOutput("monitor"), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

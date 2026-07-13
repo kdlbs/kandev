@@ -139,6 +139,11 @@ func (s *Service) clearTurnActivity(sessionID string) {
 // is actively generating. It returns true (generating) unless the turn has
 // yielded to an outstanding background task. An untracked session defaults to
 // true, preserving the historical "reject a new prompt while RUNNING" contract.
+//
+// This is a pure predicate: checkSessionPromptable and the DTO/WS serializers
+// call it to *report* promptability. A caller that is about to actually drive a
+// turn on the strength of the answer must use claimForegroundTurn instead, or it
+// races every other prompt reading the same window.
 func (s *Service) isForegroundTurnGenerating(sessionID string) bool {
 	ta := s.turnActivityFor(sessionID, false)
 	if ta == nil {
@@ -147,6 +152,66 @@ func (s *Service) isForegroundTurnGenerating(sessionID string) bool {
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
 	return !ta.yielded
+}
+
+// claimForegroundTurn is the check-and-claim half of the background-idle gate.
+// It atomically verifies the session's foreground turn has yielded to background
+// work and, if so, takes it for the caller by flipping it back to generating —
+// under the same lock, so exactly one caller can win.
+//
+// checkSessionPromptable only *reads* the substate, which leaves a wide
+// check-then-act window in PromptTask: between the gate and the point the turn is
+// finally marked generating sit a session reload, ensureSessionRunning, and an
+// optional (network-bound) model switch. Two prompts arriving in that window —
+// a double-send, or two browser tabs onto the same background-idle session —
+// would both pass the read-only gate and both reach executor.Prompt, starting
+// overlapping turns on one ACP session. Claiming closes that window: the first
+// prompt in wins, and every prompt behind it sees a generating foreground and is
+// rejected with ErrAgentPromptInProgress exactly as it would have been before
+// ADR-0035.
+//
+// Returns false for an untracked session — no background work is outstanding, so
+// there is nothing to claim and the historical reject-while-RUNNING default
+// stands.
+func (s *Service) claimForegroundTurn(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil {
+		return false
+	}
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	if !ta.yielded {
+		return false
+	}
+	ta.yielded = false
+	return true
+}
+
+// releaseForegroundClaim hands a claimForegroundTurn claim back when the prompt
+// it was taken for never made it to the agent (ensureSessionRunning failed, the
+// model switch failed). Without it the session would sit in RUNNING advertising a
+// generating foreground it does not have, locking the operator out for the rest
+// of the turn — the exact lockout ADR-0035 exists to remove.
+//
+// Only re-yields while background work is genuinely still outstanding: if the
+// last background task completed while the failing prompt was in flight, the turn
+// is no longer waiting on anything and the generating default is correct.
+func (s *Service) releaseForegroundClaim(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil {
+		return
+	}
+	ta.mu.Lock()
+	if len(ta.background) > 0 {
+		ta.yielded = true
+	}
+	ta.mu.Unlock()
 }
 
 // foregroundActivityValue reports the fine-grained busy substate of a session

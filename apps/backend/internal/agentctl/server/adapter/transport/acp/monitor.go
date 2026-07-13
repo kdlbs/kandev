@@ -352,52 +352,54 @@ func readMonitorView(g *streams.GenericPayload) monitorPayloadView {
 	if !ok {
 		return monitorPayloadView{Kind: monitorToolName}
 	}
-	raw, ok := wrapper["monitor"].(map[string]any)
+	raw, ok := wrapper[streams.MonitorViewKey].(map[string]any)
 	if !ok {
 		return monitorPayloadView{Kind: monitorToolName}
 	}
 	view := monitorPayloadView{Kind: monitorToolName}
-	if s, ok := raw["task_id"].(string); ok {
+	if s, ok := raw[streams.MonitorViewTaskIDKey].(string); ok {
 		view.TaskID = s
 	}
-	if s, ok := raw["command"].(string); ok {
+	if s, ok := raw[streams.MonitorViewCommandKey].(string); ok {
 		view.Command = s
 	}
-	if n, ok := raw["event_count"].(float64); ok {
+	if n, ok := raw[streams.MonitorViewEventCountKey].(float64); ok {
 		view.EventCount = int(n)
-	} else if n, ok := raw["event_count"].(int); ok {
+	} else if n, ok := raw[streams.MonitorViewEventCountKey].(int); ok {
 		view.EventCount = n
 	}
-	if list, ok := raw["recent_events"].([]any); ok {
+	if list, ok := raw[streams.MonitorViewRecentEventsKey].([]any); ok {
 		view.RecentEvents = make([]string, 0, len(list))
 		for _, item := range list {
 			if s, ok := item.(string); ok {
 				view.RecentEvents = append(view.RecentEvents, s)
 			}
 		}
-	} else if list, ok := raw["recent_events"].([]string); ok {
+	} else if list, ok := raw[streams.MonitorViewRecentEventsKey].([]string); ok {
 		view.RecentEvents = append([]string{}, list...)
 	}
-	if b, ok := raw["ended"].(bool); ok {
+	if b, ok := raw[streams.MonitorViewEndedKey].(bool); ok {
 		view.Ended = b
 	}
-	if s, ok := raw["end_reason"].(string); ok {
+	if s, ok := raw[streams.MonitorViewEndReasonKey].(string); ok {
 		view.EndReason = s
 	}
 	return view
 }
 
-// monitorOutputWrapper boxes the typed view in the `{monitor: {...}}` shape
-// the frontend monitor card reads.
+// monitorOutputWrapper boxes the typed view in the `{monitor: {...}}` shape the
+// frontend monitor card reads and streams.IsActiveMonitor classifies on. The map
+// keys come from `streams` rather than being spelled out here so producer and
+// consumer cannot drift apart across the package boundary.
 func monitorOutputWrapper(view monitorPayloadView) map[string]any {
-	return map[string]any{"monitor": map[string]any{
-		"kind":          view.Kind,
-		"task_id":       view.TaskID,
-		"command":       view.Command,
-		"event_count":   view.EventCount,
-		"recent_events": view.RecentEvents,
-		"ended":         view.Ended,
-		"end_reason":    view.EndReason,
+	return map[string]any{streams.MonitorViewKey: map[string]any{
+		streams.MonitorViewKindKey:         view.Kind,
+		streams.MonitorViewTaskIDKey:       view.TaskID,
+		streams.MonitorViewCommandKey:      view.Command,
+		streams.MonitorViewEventCountKey:   view.EventCount,
+		streams.MonitorViewRecentEventsKey: view.RecentEvents,
+		streams.MonitorViewEndedKey:        view.Ended,
+		streams.MonitorViewEndReasonKey:    view.EndReason,
 	}}
 }
 
