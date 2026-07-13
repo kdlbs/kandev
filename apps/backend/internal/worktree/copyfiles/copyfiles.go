@@ -586,10 +586,18 @@ func (s *copyState) symlinkMatch(src, rel string) error {
 		s.debug("skip existing", zap.String("rel", rel))
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("copyfiles: mkdir %s: %w", filepath.Dir(dst), err)
+	parent := filepath.Dir(dst)
+	// Reject a symlinked destination ancestor before MkdirAll/os.Symlink follow
+	// it out of the worktree (e.g. base branch ships `config -> /tmp` and the
+	// entry is `config/.env:symlink`). Mirrors the remote WriteEntries guard.
+	if warn, ok := validateParentChain(s.targetDir, parent); !ok {
+		s.warn("symlink %q rejected: %s", rel, warn)
+		return nil
 	}
-	target, err := filepath.Rel(filepath.Dir(dst), src)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("copyfiles: mkdir %s: %w", parent, err)
+	}
+	target, err := filepath.Rel(parent, src)
 	if err != nil {
 		target = src
 	}

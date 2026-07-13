@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"testing"
 )
 
@@ -36,6 +37,9 @@ func TestValidateSpec(t *testing.T) {
 }
 
 func TestCopy_SymlinkMode_File(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation often requires privilege on Windows")
+	}
 	src := t.TempDir()
 	dst := t.TempDir()
 	writeFile(t, filepath.Join(src, ".env.local"), "SECRET=1", 0o644)
@@ -83,5 +87,34 @@ func TestCopy_SymlinkMode_IgnoredInPlanMode(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].RelPath != ".env.local" || string(entries[0].Content) != "SECRET=1" {
 		t.Fatalf("expected a copied entry with content, got %#v", entries)
+	}
+}
+
+// A symlink entry whose destination parent is itself a symlink pointing outside
+// the worktree must be rejected before MkdirAll/os.Symlink follow it out.
+func TestCopy_SymlinkMode_RejectsSymlinkedParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation often requires privilege on Windows")
+	}
+	src := t.TempDir()
+	dst := t.TempDir()
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(src, "config", ".env"), "SECRET=1", 0o644)
+	// The worktree already has a symlinked `config` ancestor pointing outside.
+	if err := os.Symlink(outside, filepath.Join(dst, "config")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	_, warnings, err := Copy(context.Background(), src, dst,
+		[]PatternSpec{{Pattern: "config/.env", Symlink: true}}, nil)
+	if err != nil {
+		t.Fatalf("Copy err: %v", err)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 rejection warning, got %v", warnings)
+	}
+	// Nothing was written through the symlinked parent into the outside dir.
+	if _, statErr := os.Lstat(filepath.Join(outside, ".env")); !os.IsNotExist(statErr) {
+		t.Fatalf("symlink escaped through symlinked parent: %v", statErr)
 	}
 }
