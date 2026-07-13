@@ -233,6 +233,8 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 // — see promptPassthrough below.
 const stopReasonPassthrough = "passthrough_dispatched"
 
+var ErrPromptDispatchCallbackUnsupported = errors.New("agent manager does not support prompt dispatch callback")
+
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
 // Attachments (images) are passed to the agent if provided
@@ -292,13 +294,14 @@ func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt 
 	}
 
 	var result *PromptResult
-	if notifier, ok := e.agentManager.(promptAgentWithDispatchCallback); ok {
+	if onDispatched != nil {
+		notifier, ok := e.agentManager.(promptAgentWithDispatchCallback)
+		if !ok {
+			return nil, ErrPromptDispatchCallbackUnsupported
+		}
 		result, err = notifier.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
 	} else {
 		result, err = e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
-		if err == nil && onDispatched != nil {
-			onDispatched()
-		}
 	}
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
