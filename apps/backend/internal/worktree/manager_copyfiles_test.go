@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -91,6 +92,37 @@ func TestManagerCreate_CopiesFiles_HappyPath(t *testing.T) {
 	}
 	if string(cfgBytes) != "debug: true\n" {
 		t.Fatalf("config/local.yml content = %q, want %q", string(cfgBytes), "debug: true\n")
+	}
+}
+
+func TestManagerCreate_SymlinksConfiguredFileToSource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation often requires privilege on Windows")
+	}
+
+	repoPath := initGitRepoForWorktreeTest(t)
+	sourcePath := writeSourceFile(t, repoPath, ".env", "SECRET=source\n")
+	provider := &fakeRepoProvider{
+		repo: &Repository{ID: "repo-symlink", CopyFiles: ".env:symlink"},
+	}
+	mgr := newManagerForCopyTest(t, provider)
+
+	wt, err := mgr.Create(context.Background(), createReqForCopyTest(repoPath, "symlink"))
+	if err != nil {
+		t.Fatalf("Create() unexpected error: %v", err)
+	}
+
+	linkPath := filepath.Join(wt.Path, ".env")
+	target, err := os.Readlink(linkPath)
+	if err != nil {
+		t.Fatalf("Readlink(%q): %v", linkPath, err)
+	}
+	if filepath.IsAbs(target) {
+		t.Fatalf("symlink target = %q, want relative path", target)
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(linkPath), target))
+	if resolved != sourcePath {
+		t.Fatalf("resolved symlink = %q, want %q", resolved, sourcePath)
 	}
 }
 

@@ -206,7 +206,8 @@ export type Repository = {
   /**
    * Comma-separated gitignored files/globs seeded into each new worktree.
    * Append `:symlink` to an entry (e.g. `.env.local:symlink`) to link it back
-   * to the main repo instead of copying it; the default is copy.
+   * to the main repo instead of copying it; `::symlink` escapes a literal
+   * suffix. Remote executors always copy the bytes.
    */
   copy_files: string;
   created_at: string;

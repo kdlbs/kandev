@@ -1,45 +1,65 @@
-# 0010: Worktree copy-files — per-repo, idempotent, host-local
+# 0010: Worktree copy-files with per-entry materialization modes
 
-**Status:** accepted
+**Status:** accepted (amended 2026-07-13)
 **Date:** 2026-05-19
 **Area:** backend, frontend
 
 ## Context
 
-Git worktrees don't carry gitignored files. The most painful case for kandev users is `.env` and friends — every new task creates a fresh worktree, and the agent's first step is usually `pnpm dev` or `make run`, which fails immediately because there's no `.env`. Users were copying files manually after each task creation. Issue #946 asked for a built-in solution, citing vibe-kanban's `copy_files` setting as prior art.
+Git worktrees do not contain gitignored files. Users commonly need `.env`, local configuration, or certificates before a task's setup script can run. Issue #946 introduced a per-repository `copy_files` setting, following vibe-kanban's comma-separated format.
 
-The feature has several axes of choice that aren't obvious from the issue text alone, and a couple are surprising enough that future maintainers will reasonably question them.
+Copying isolates each task but does not propagate later source changes. Some files instead need one centrally managed source whose changes are immediately visible in every host worktree. PR #1650 added a symlink mode, but its first parser treated every final colon segment as a keyword. That broke previously valid POSIX paths such as `config:dev` and `.env:` and required an explicit compatibility rule.
 
 ## Decision
 
-**A per-repository, comma-separated list of paths/globs (`repositories.copy_files`). Copied from the source repo dir into each new worktree at task creation, in the Go process on the host. Target-exists check makes the copy idempotent.**
+`repositories.copy_files` remains a per-repository, comma-separated list of repository-relative paths or doublestar patterns. Entries are materialized during worktree creation, before the setup script, and existing destinations are never overwritten.
 
-Concretely:
+Each entry has one of two modes:
 
-1. **Scope: per-repository, not per-task or per-workspace.** The set of secret files in a repo (`.env`, `.env.local`, `config/local.yml`) is a property of the repo, not of any individual task. Storing it once per repo means users configure it during workspace setup and never think about it again. A per-task field would push friction back onto every task creation, defeating the purpose. A per-workspace field would force every repo in the workspace to share the same list — wrong for polyglot workspaces.
+- **Copy**, the default: copy file contents or recursively copy a matched directory.
+- **Symlink**: an exact terminal `:symlink` suffix, for example `.env:symlink`, creates a relative symlink at `.env` pointing to the source repository's `.env`.
 
-2. **Wire format: comma-separated string of paths or `filepath.Glob` patterns.** Matches vibe-kanban exactly, which means users migrating between tools don't relearn syntax. Stdlib `filepath.Glob` supports `*`, `?`, `[...]` — enough for `.env`, `*.local`, `config/*.json`. **No `**`/doublestar in v1**: it's a single transitive dependency we don't need to take to ship the feature, and the literal-file-plus-directory-recursion path (`config/` recursively walks all files) covers the rest of the issue's examples. Adding doublestar later is additive.
+The grammar is deliberately narrow:
 
-3. **Trigger: at worktree creation, between `persistAndCacheWorktree` and `runWorktreeSetupScript`.** Setup scripts often read `.env` (e.g. `pnpm install` with `NODE_ENV`-gated postinstalls), so the copy must complete first. Placing it after `persistAndCacheWorktree` means a failed copy doesn't leave a phantom DB row — the worktree is already committed, and copy errors are recoverable.
+1. Only the exact terminal `:symlink` suffix is reserved. Other colons are literal path characters, so `config:dev`, `.env:`, and `file:hardlink` retain their pre-mode meaning.
+2. A doubled colon escapes the reserved suffix. `config::symlink` copies the literal path `config:symlink`.
+3. A reserved suffix without a path, such as `:symlink`, is malformed and repository create/update rejects it.
+4. Entries are normalized and deduplicated by path. The first entry wins for duplicate paths and for distinct patterns that overlap the same file. Ordering therefore selects the mode for an overlapping match.
+5. Commas inside brace alternation remain part of the pattern. `*`, `?`, character classes, `**`, and brace alternation are provided by `doublestar`.
 
-4. **Host-local Go copy, not an agentctl RPC.** The worktree filesystem is on the host (today). The copy is `io.Copy` between two `*os.File`s under a path-traversal guard. No subprocess, no shell, no Windows `cp` issue, no agentctl round-trip.
+This suffix-plus-escape grammar is less extensible than structured JSON, but it preserves the established string field and all legacy colon-bearing paths except the newly reserved exact `:symlink` form. That exact form must stay reserved because it shipped in PR #1650; the doubled-colon escape keeps a literal filename ending in `:symlink` representable. Future modes must not reinterpret arbitrary trailing colon segments.
 
-5. **Idempotent: skip if target exists.** Re-running the copy on the same worktree (e.g. future "re-prepare worktree" actions, or session resume that re-enters this code path) is a no-op for already-copied files. The cost is that **updating `copy_files` in settings does not propagate to existing worktrees** — only future ones. The frontend helper text says so explicitly. The alternative — overwrite-on-update — would clobber files the agent had already mutated mid-task, which is worse.
+## Host And Remote Behavior
 
-6. **Missing files = warning, not error.** Acceptance criterion in the issue. A typo in `copy_files` should not block task creation; the agent failing later with a clearer "ENOENT: .env" is better than the worktree refusing to spawn.
+Host worktrees materialize through `copyfiles.Copy`:
 
-7. **Path-traversal guard: canonicalize, then `filepath.Rel` under canonical root.** `EvalSymlinks(sourceDir)` is called once; all pattern joins and result paths use that canonical root, not the raw `sourceDir` argument. This matters because macOS resolves `/tmp` → `/private/tmp` and many users have `~/code` → `/data/code` style symlinks; without canonicalization, *every* match looks "outside source dir" via `filepath.Rel` and the feature silently no-ops. (Regression test: `TestCopy_SymlinkedSourceDir`.) Resolved matches outside the canonical root are still rejected — symlink traversal as an exfiltration vector is closed.
+- Copy mode snapshots bytes when the worktree is created. Later source changes do not propagate.
+- Symlink mode creates a relative link to the source repository. Reads and writes through the worktree link immediately affect the shared source and are visible through every link to it.
+- A symlink creation failure is warned and skipped; it does not silently change to copy mode.
+
+Remote executors cannot use a link to the host repository. `copyfiles.Parse` strips the recognized mode while preserving literal colon-bearing paths, `copyfiles.Plan` reads the source bytes, and agentctl `WriteEntries` writes those bytes remotely. Symlink entries therefore fall back to copy mode for local Docker, Sprites, SSH, and future remote executors using this path. The repository settings UI states this fallback without requiring hover. Remote payloads are capped at 5 MiB per file; oversized matches are warned and skipped.
+
+Windows copy mode is supported. Host symlink mode is best-effort because Windows symlink creation can require Developer Mode or elevated privileges; failures remain warnings so task creation continues. Relative symlink behavior is covered on Unix and macOS, while Windows tests skip when the platform cannot create links.
+
+## Security And Containment
+
+- Source roots are canonicalized with `EvalSymlinks`; matches that resolve outside the source repository are rejected.
+- Host destinations must remain under the worktree. Existing symlinked destination parents are rejected before directories or links are created, preventing writes through a parent link outside the worktree.
+- Symlink targets are relative and point only to already-contained source matches.
+- Remote `WriteEntries` canonicalizes both the workspace containment root and target repository. Every untrusted relative entry is rejected if it is absolute, traverses outside the target, or reaches a symlinked parent outside containment.
+- Existing destinations are skipped for idempotency. Missing or rejected matches produce visible warnings rather than blocking task creation.
 
 ## Consequences
 
-- **Remote executors are supported** via a parallel "ship bytes through agentctl" path (added 2026-05-24). The host reads source files into memory via `copyfiles.Plan` and POSTs them to `POST /workspace/copy-files`, which calls `copyfiles.WriteEntries` against the container workspace root. Both paths share `Plan` / `WriteEntries` so path-traversal guard, idempotency, and skip-if-exists are identical. Per-file payloads are capped at **5 MB** (`copyfiles.MaxEntryBytes`) to bound launch-time RAM + wire bytes against accidental matches like `node_modules/`; oversize files are warn-skipped rather than silently dropped. Wired into `local_docker` and `sprites`; `remote_docker` / `k8s` (planned) inherit automatically as long as their executors expose an `agentctl.Client` on the returned instance. The shipping step appears in the prepare-progress panel as `Copy N ignored files`, matching the worktree path's naming via the shared `buildCopyFilesStep` helper.
-- **Disk-fill DoS** is bounded for remote paths by the 5 MB cap above. For the host-side worktree path it remains self-inflicted but unbounded — a user adding `**` or `node_modules/` would explode disk usage across many tasks. If support tickets surface this, add a soft warning at >100 MB / >1000 files for the local case as well.
-- **UI feedback for warnings.** The prepare-progress panel now surfaces copy warnings (missing patterns, oversize files, ship failures) inline on the `Copy N ignored files` step. Backend zap logs remain for deeper debugging.
-- **The `worktree.RepositoryAdapter` indirection** stays — it maps `models.Repository` → `worktree.Repository` (a minimal struct exposing only `{ID, SetupScript, CleanupScript, CopyFiles}`). Adding more cross-cutting per-repo settings should go through this adapter, not by widening the worktree package's import surface.
+- Configuration is per repository rather than per task or workspace, so all future tasks for that repository share the policy.
+- Changing `copy_files` affects only worktrees created afterward. The exception is content reached through an existing symlink, which is live by definition.
+- Copy mode can consume unbounded host disk for broad patterns; remote memory and wire use are bounded by the per-file cap.
+- Prepare progress reports copied/materialized files and warnings. The `worktree.RepositoryAdapter` remains the boundary from task repository models to worktree configuration.
 
-## Alternatives considered
+## Alternatives Considered
 
-- **Extend `setup_script`.** Users could already write `cp /path/to/.env .` in setup. Rejected: requires every user to write shell, fights Windows (no `cp`), doesn't canonicalize source paths, and surfaces secrets in script output that gets streamed to the session UI. A dedicated field is purpose-built.
-- **Per-task override on the task creation dialog.** Reasonable for one-off needs, but adds friction to the common path. Defer until a user asks.
-- **Watch and re-copy on `copy_files` setting change.** Would make settings updates "live" for existing worktrees. Rejected: existing worktrees may have agent-modified copies, and silent re-copy risks data loss. The current design forces the user to re-create the task if they want the new files, which is the safe default.
-- **JSON or YAML for the spec.** Considered for future expressiveness (`{src, dest, mode}` tuples). Rejected for v1: vibe-kanban's flat comma-separated format is proven, trivial to migrate from, and we have no use case yet for `dest` differing from `src`.
+- **Setup scripts.** Rejected because they require platform-specific shell commands, can expose secret paths in output, and duplicate containment logic.
+- **Per-task overrides.** Rejected because repeated task configuration defeats the repository-level default.
+- **Overwrite or watch copied files.** Rejected because agents may modify worktree copies and automatic propagation would destroy task-local changes.
+- **JSON/YAML structured entries.** More extensible and unambiguous, but changing the persisted/API shape would impose migration and UI complexity on an established simple field. The exact suffix plus escape solves the current two-mode requirement while preserving legacy paths.
+- **Treat every final colon segment as a mode.** Rejected because POSIX permits colons in filenames and existing valid settings would change meaning or fail validation.

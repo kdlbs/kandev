@@ -51,10 +51,13 @@ type Entry struct {
 	Content []byte      `json:"content"`
 }
 
-// KeywordSymlink is the only per-entry keyword recognized after the `:`
-// separator. `.env.local:symlink` links the entry back to the source repo
-// instead of copying it.
+// KeywordSymlink is the only reserved per-entry mode suffix.
 const KeywordSymlink = "symlink"
+
+const (
+	symlinkSuffix        = ":" + KeywordSymlink
+	escapedSymlinkSuffix = ":" + symlinkSuffix
+)
 
 // PatternSpec is a single copy-files entry: a pattern plus its per-entry mode.
 // Symlink is true when the entry carried the `:symlink` keyword.
@@ -63,20 +66,27 @@ type PatternSpec struct {
 	Symlink bool
 }
 
-// splitKeyword splits a raw entry into its pattern and optional trailing
-// `:keyword`. The keyword is whatever follows the last `:`; entries without a
-// colon have an empty keyword. Repo-relative env/config paths don't contain
-// colons in practice, so the last-colon rule is unambiguous for real specs.
-func splitKeyword(entry string) (pattern, keyword string) {
-	idx := strings.LastIndex(entry, ":")
-	if idx < 0 {
-		return entry, ""
+// parsePatternSpec recognizes only the exact terminal :symlink suffix. Other
+// colons remain literal path characters for compatibility with existing specs.
+// A doubled colon escapes a literal filename ending in :symlink.
+func parsePatternSpec(entry string) (PatternSpec, error) {
+	entry = strings.TrimSpace(entry)
+	if strings.HasSuffix(entry, escapedSymlinkSuffix) {
+		pattern := strings.TrimSpace(strings.TrimSuffix(entry, escapedSymlinkSuffix)) + symlinkSuffix
+		return PatternSpec{Pattern: pattern}, nil
 	}
-	return strings.TrimSpace(entry[:idx]), strings.TrimSpace(entry[idx+1:])
+	if !strings.HasSuffix(entry, symlinkSuffix) {
+		return PatternSpec{Pattern: entry}, nil
+	}
+	pattern := strings.TrimSpace(strings.TrimSuffix(entry, symlinkSuffix))
+	if pattern == "" {
+		return PatternSpec{}, fmt.Errorf("invalid copy-files mode syntax %q: missing path before %q", entry, symlinkSuffix)
+	}
+	return PatternSpec{Pattern: pattern, Symlink: true}, nil
 }
 
 // Parse splits a comma-separated user spec into trimmed, deduplicated,
-// non-empty patterns with any `:keyword` suffix stripped. Order is preserved
+// non-empty patterns with the exact `:symlink` suffix stripped. Order is preserved
 // (first occurrence wins on dedupe). Commas inside `{...}` are treated as part
 // of the pattern (brace alternation), so `config/{local,dev}.yml` is parsed as
 // a single pattern. This is the copy-only view used by the remote-executor
@@ -94,9 +104,10 @@ func Parse(spec string) []string {
 }
 
 // ParseSpecs splits a comma-separated user spec into trimmed, deduplicated,
-// non-empty PatternSpecs, extracting the per-entry `:symlink` mode. Dedupe is
-// by pattern (first occurrence wins). An unrecognized keyword is treated as
-// copy mode here — ValidateSpec is the gate that rejects it at save time.
+// non-empty PatternSpecs, extracting the exact per-entry `:symlink` mode.
+// Dedupe is by normalized pattern and the first occurrence wins. Invalid
+// entries are skipped; ValidateSpec reports them before repository settings
+// are persisted.
 func ParseSpecs(spec string) []PatternSpec {
 	if spec == "" {
 		return nil
@@ -105,15 +116,15 @@ func ParseSpecs(spec string) []PatternSpec {
 	out := make([]PatternSpec, 0, len(parts))
 	seen := make(map[string]struct{}, len(parts))
 	for _, p := range parts {
-		pattern, keyword := splitKeyword(strings.TrimSpace(p))
-		if pattern == "" {
+		parsed, err := parsePatternSpec(p)
+		if err != nil || parsed.Pattern == "" {
 			continue
 		}
-		if _, ok := seen[pattern]; ok {
+		if _, ok := seen[parsed.Pattern]; ok {
 			continue
 		}
-		seen[pattern] = struct{}{}
-		out = append(out, PatternSpec{Pattern: pattern, Symlink: keyword == KeywordSymlink})
+		seen[parsed.Pattern] = struct{}{}
+		out = append(out, parsed)
 	}
 	if len(out) == 0 {
 		return nil
@@ -121,10 +132,8 @@ func ParseSpecs(spec string) []PatternSpec {
 	return out
 }
 
-// ValidateSpec reports the first invalid entry in a copy-files spec: a `:`
-// suffix whose keyword is not in the whitelist (currently only `symlink`).
-// Empty entries and plain patterns are always valid. Called at save time so
-// misconfigured keywords surface immediately instead of silently copying.
+// ValidateSpec reports malformed use of the reserved :symlink suffix. Unknown
+// colon suffixes remain literal paths for backward compatibility.
 func ValidateSpec(spec string) error {
 	if spec == "" {
 		return nil
@@ -134,12 +143,8 @@ func ValidateSpec(spec string) error {
 		if p == "" {
 			continue
 		}
-		if !strings.Contains(p, ":") {
-			continue
-		}
-		_, keyword := splitKeyword(p)
-		if keyword != "" && keyword != KeywordSymlink {
-			return fmt.Errorf("invalid copy-files keyword %q in %q (only %q is supported)", keyword, p, KeywordSymlink)
+		if _, err := parsePatternSpec(p); err != nil {
+			return err
 		}
 	}
 	return nil
