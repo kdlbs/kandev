@@ -87,6 +87,7 @@ func TestExecuteQueuedMessage_RequeuesCancelReleaseFailure(t *testing.T) {
 		QueuedBy:  "test",
 	}
 
+	svc.markQueuedDispatchInFlight("s1", queuedMsg.ID)
 	svc.executeQueuedMessage("s1", queuedMsg)
 
 	status := svc.messageQueue.GetStatus(ctx, "s1")
@@ -140,6 +141,7 @@ func TestExecuteQueuedMessage_SkipsUserMessageWhenAlreadyRecorded(t *testing.T) 
 		},
 	}
 
+	svc.markQueuedDispatchInFlight("s1", queuedMsg.ID)
 	svc.executeQueuedMessage("s1", queuedMsg)
 
 	if len(mc.userMessages) != 0 {
@@ -192,6 +194,7 @@ func TestExecuteQueuedMessage_RecordsCIAutomationPromptOnDrain(t *testing.T) {
 		},
 	}
 
+	svc.markQueuedDispatchInFlight("s1", queuedMsg.ID)
 	svc.executeQueuedMessage("s1", queuedMsg)
 
 	if len(mc.userMessages) != 1 {

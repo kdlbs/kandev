@@ -235,21 +235,13 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// on the queue until the user manually sends another message. After the
 	// agent has booted and the session is back to WAITING_FOR_INPUT it's safe
 	// to dispatch any pending message.
-	//
 	// Claim the shared per-session lock first (see handleAgentReady's
 	// analogous claim for the full race this closes): a concurrent
 	// QueueAndInterruptForPeerMessage racing to deliver its own just-queued
 	// message must never have this drain steal it before the interrupt's
-	// own cancel+take runs.
-	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
-	defer release()
-	if !lock.TryLock() {
-		s.logger.Debug("skipping boot-ready drain; a cancel/interrupt is in flight",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID))
-		return
-	}
-	defer lock.Unlock()
+	// own cancel+take runs. drainQueuedMessageForPromptableSession now owns
+	// that acquisition itself (blocking, plus its own promptability
+	// reload) — see its doc comment.
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
 }
 
@@ -257,8 +249,39 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 // a prompt and is waiting for the next input. This is the *only* event that
 // should evaluate workflow on_turn_complete actions — boot signals route
 // through handleAgentBootReady instead.
+//
+// Acquires the per-session cancelInFlight guard *before* any
+// turn-completion/pending-move/on_turn_complete bookkeeping runs, not just
+// before the final queue-take decision (as it did before). Without this, a
+// ready event could pass the early checks, then a concurrent parent
+// interrupt (QueueAndInterruptForPeerMessage) could acquire the guard and
+// cancel-and-redispatch on this same session — starting a *new* turn — all
+// before this event reaches its own completeTurnForSession /
+// processOnTurnCompleteViaEngine, which would then wrongly complete and
+// evaluate on_turn_complete against that new turn instead of the one this
+// event actually reports the completion of, or apply a pending move while
+// the interrupt is still targeting the "old" session.
+//
+// The acquisition is a genuine blocking Lock (mirroring
+// QueueAndInterruptForPeerMessage's own precedent), not the previous
+// TryLock-and-skip: skipping here would leave this event's own
+// turn-completion/workflow bookkeeping undone forever — nothing else
+// performs it — and cancelAndTakeForPeerMessage's own "cancel failed but
+// already promptable" recovery explicitly relies on a *future* agent.ready
+// completing that bookkeeping once the guard frees up; this event may be
+// exactly that future ready event. Blocking here adds no new deadlock
+// risk: every existing guard holder already bounds its own hold time (see
+// QueueAndInterruptForPeerMessage's doc comment), and acquiring an
+// uncontended mutex via Lock costs the same as via TryLock, so the common
+// (non-racing) case is unaffected.
+//
+// Once the guard is held, the session and its active turn are re-validated
+// against the snapshot taken before waiting (session state, plus turn
+// identity via peekActiveTurnID when a TurnService is wired): if either
+// changed, a concurrent interrupt (or another turn entirely) has already
+// superseded this event, so it backs off without touching anything —
+// whatever superseded it owns that turn's own eventual completion.
 func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventData) {
-
 	if data.SessionID == "" {
 		s.logger.Warn("missing session_id for agent ready event",
 			zap.String("task_id", data.TaskID))
@@ -267,13 +290,6 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	if s.isSessionResetInProgress(data.SessionID) {
 		s.logger.Debug("ignoring agent.ready while session reset is in progress",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.String("agent_execution_id", data.AgentExecutionID))
-		return
-	}
-	if s.isCancelInFlight(data.SessionID) {
-		s.logger.Debug("ignoring agent.ready while cancel is in progress",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.String("agent_execution_id", data.AgentExecutionID))
@@ -299,6 +315,63 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			zap.String("session_id", data.SessionID),
 			zap.String("session_state", string(session.State)))
 		return
+	}
+
+	// Snapshot which turn this event reports the completion of *before*
+	// contending for the guard — re-checked below once it's held. See the
+	// function doc comment for the race this closes.
+	turnAtEventFire, turnSnapshotErr := s.peekActiveTurnID(ctx, data.SessionID)
+
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	// Re-validate now that the guard is held: a concurrent interrupt (or
+	// clarification recovery, or another drain) may have already resolved
+	// this exact session while this event waited. isSessionResetInProgress
+	// and the session state are re-checked in case either changed in that
+	// window; the turn-identity comparison additionally catches the
+	// specific case a plain state re-check can't — a *different* turn
+	// (e.g. one the interrupt cancelled-and-redispatched) that also
+	// happens to be RUNNING/STARTING.
+	if s.isSessionResetInProgress(data.SessionID) {
+		s.logger.Debug("stale agent.ready: session reset started while waiting for the guard",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return
+	}
+	session, err = s.repo.GetTaskSession(ctx, data.SessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session for agent.ready once the guard was held",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return
+	}
+	if session.State != models.TaskSessionStateRunning && session.State != models.TaskSessionStateStarting {
+		s.logger.Debug("stale agent.ready: session no longer running/starting once the guard was held",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("session_state", string(session.State)))
+		return
+	}
+	if s.turnService != nil {
+		if turnSnapshotErr != nil {
+			s.logger.Warn("could not confirm this event's active turn before waiting for the guard; treating as stale rather than risk completing a possible successor turn",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Error(turnSnapshotErr))
+			return
+		}
+		turnNow, turnNowErr := s.peekActiveTurnID(ctx, data.SessionID)
+		if turnNowErr != nil || turnNow != turnAtEventFire {
+			s.logger.Debug("stale agent.ready: active turn changed (or could not be reconfirmed) while waiting for the guard",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Error(turnNowErr))
+			return
+		}
 	}
 
 	// A turn completed successfully — clear any transient retry budget so a
@@ -342,41 +415,6 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
-	// Claim the same per-session lock CancelAgent / QueueAndInterruptForPeer
-	// Message use, for the duration of this take+dispatch decision. This
-	// must be a genuine claim (TryLock), not the passive isCancelInFlight
-	// peek above: a concurrent QueueAndInterruptForPeerMessage racing to
-	// deliver its own just-queued message needs this drain to be mutually
-	// exclusive with its own insert+cancel+take, otherwise this drain could
-	// steal and start a new turn for the very message the interrupt is
-	// about to (or already did) claim — see QueueAndInterruptForPeerMessage's
-	// doc comment for the full race this closes. Skipping here when busy is
-	// safe in the common case: the current holder's own take-or-fallback
-	// step usually dispatches something, which fires a future agent.ready
-	// that gives this drain another chance. The one exception —
-	// cancelAndTakeForPeerMessage's cancel step genuinely fails, so nothing
-	// gets dispatched and the message stays queued — is a narrowed,
-	// pre-existing edge case (see queueThenInterruptTaskMessage in
-	// mcp/handlers): cancelAndTakeForPeerMessage already retries the take
-	// itself when the session turns out to already be promptable (this
-	// exact stale-drain scenario), so the only way the message can still
-	// be left relying on a future natural drain is a genuine cancel error
-	// arriving while the previous turn is still actually running.
-	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
-	defer release()
-	if !lock.TryLock() {
-		s.logger.Debug("skipping turn-complete drain; a cancel/interrupt is in flight",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID))
-		return
-	}
-	defer lock.Unlock()
-	// Check for queued messages when no workflow transition occurred.
-	queueStatus := s.messageQueue.GetStatus(ctx, data.SessionID)
-	s.logger.Info("checking for queued messages",
-		zap.String("session_id", data.SessionID),
-		zap.Int("count", queueStatus.Count))
-
 	// Passthrough sessions: deliver queued messages via PTY stdin instead of ACP.
 	if s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
 		queuedMsg, exists := s.messageQueue.TakeQueued(ctx, data.SessionID)
@@ -393,42 +431,26 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
-	queuedMsg, exists := s.messageQueue.TakeQueued(ctx, data.SessionID)
-	if !exists {
-		s.logger.Debug("no queued message to execute",
-			zap.String("session_id", data.SessionID))
-		return
-	}
-
-	// Skip if the queued message has empty content (might have been cleared accidentally)
-	if queuedMsg.Content == "" && len(queuedMsg.Attachments) == 0 {
-		s.logger.Warn("skipping empty queued message",
-			zap.String("session_id", data.SessionID),
-			zap.String("queue_id", queuedMsg.ID))
-
-		// Still publish status change to clear frontend state
-		s.publishQueueStatusEvent(ctx, data.SessionID)
-		return
-	}
-
-	s.logger.Info("auto-executing queued message",
-		zap.String("session_id", data.SessionID),
-		zap.String("task_id", queuedMsg.TaskID),
-		zap.String("queue_id", queuedMsg.ID))
-
-	// PromptTask rejects while session is RUNNING; queued follow-ups should be
-	// treated like fresh user input after turn completion.
-	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false, session)
-
-	// Publish queue status changed event to notify frontend
-	s.publishQueueStatusEvent(ctx, data.SessionID)
-
-	// Execute the queued message asynchronously
-	go s.executeQueuedMessage(data.SessionID, queuedMsg)
+	// Check for queued messages when no workflow transition occurred. Uses
+	// the Locked variant directly: the guard above is held for this
+	// entire function now, not just this final step.
+	s.drainQueuedMessageForPromptableSessionLocked(ctx, data.SessionID)
 }
 
 func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messagequeue.QueuedMessage) {
 	promptCtx := context.Background() // Use a fresh context for async execution
+
+	// Safety net: guarantee the in-flight marker (set by
+	// dispatchTakenQueuedMessage before spawning this goroutine — see the
+	// Service.dispatchingQueued field doc comment) is cleared on every exit
+	// path, including the early reset-in-progress return below, PROVIDED
+	// this goroutine still owns it (compare-and-delete keyed on this
+	// entry's own ID) — the primary claim-and-clear happens deterministically
+	// inside promptTask's guarded claim step, right before setSessionRunning
+	// further down; this defer only catches paths that return before
+	// reaching it, or a losing claim that must not touch a newer dispatch's
+	// marker.
+	defer s.clearQueuedDispatchInFlightIfCurrent(queuedMsg.SessionID, queuedMsg.ID)
 
 	if s.isSessionResetInProgress(queuedMsg.SessionID) {
 		s.logger.Warn("queued message execution deferred due to context reset in progress",
@@ -492,8 +514,28 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
 	}
 
-	_, err := s.PromptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
-		queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments, false)
+	// Call the internal promptTask directly (not the public PromptTask
+	// wrapper), passing this entry's own ID as the claim token — see
+	// promptTask's doc comment and the Service.dispatchingQueued field doc
+	// comment for the guarded claim-then-mark-RUNNING step this enables,
+	// and for why a bare, unguarded check-then-clear would not be enough.
+	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
+		queuedMsg.Content, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
+		queuedMsg.ID)
+	if errors.Is(err, errQueuedDispatchSuperseded) {
+		// A newer dispatch for this same session (e.g. a second parent
+		// interrupt cancelling and re-taking while this one was still
+		// settling) won the claim first. This entry's content still
+		// matters — steering messages are not silently dropped — so
+		// requeue it instead of losing it; it will be delivered once the
+		// winning turn completes naturally.
+		s.logger.Info("queued message superseded by a newer dispatch for the same session before it could be prompted; requeueing",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID))
+		s.requeueMessage(promptCtx, queuedMsg, "superseded-by-newer-dispatch")
+		return
+	}
 	if err != nil {
 		s.logger.Error("failed to execute queued message",
 			zap.String("session_id", callerSessionID),

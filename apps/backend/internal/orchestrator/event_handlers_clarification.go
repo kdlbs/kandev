@@ -257,6 +257,17 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID))
 
+	// Claim the shared per-session guard across the whole cancel-then-retry
+	// sequence, not just the cancel call — see the Service.cancelInFlight
+	// field doc comment. Releasing between the cancel and the retry prompt
+	// would let a concurrent QueueAndInterruptForPeerMessage (or another
+	// drain) take-and-dispatch a queued entry in that gap, only for this
+	// retry's own PromptTask call to then prompt over top of it.
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
 	if err := s.cancelAgentSilent(ctx, data.TaskID, data.SessionID); err != nil {
 		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
 			zap.String("session_id", data.SessionID),
@@ -323,6 +334,16 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	// same ask_user_question call. A duplicate cancel is safe: lifecycle returns
 	// ErrCancelEscalated/ErrNoExecutionForSession once the first pause wins, and
 	// completeTurnForSession is idempotent when there is no active turn left.
+	//
+	// Claim the shared per-session guard around the cancel itself — see the
+	// Service.cancelInFlight field doc comment: every cancel/take-and-dispatch
+	// decision for a session must serialize through this one guard, including
+	// this clarification-timeout cancel, or it can race a concurrent parent
+	// interrupt (or another drain) for the same session.
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
 	if err := s.cancelAgentSilent(writeCtx, session.TaskID, sessionID); err != nil {
 		return detached, err
 	}

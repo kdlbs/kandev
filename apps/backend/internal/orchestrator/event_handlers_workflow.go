@@ -1043,7 +1043,7 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 		s.logger.Info("pending move target equals current step; skipping transition",
 			zap.String("task_id", taskID),
 			zap.String("step_id", fromStepID))
-		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
+		s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
 		return
 	}
 
@@ -1139,14 +1139,67 @@ func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromS
 	s.publishTaskStateChanged(ctx, task, oldState)
 }
 
-// drainQueuedMessageForPromptableSession takes the next queued message and dispatches
-// it for execution. Callers must ensure the session is ready for input first.
+// drainQueuedMessageForPromptableSession acquires sessionID's cancelInFlight
+// guard and takes+dispatches the next queued message, blocking until any
+// concurrent cancel/interrupt/drain for the same session finishes first —
+// see the Service.cancelInFlight field doc comment for why every
+// take-and-dispatch decision must serialize through this one guard rather
+// than risk two callers racing to steal the same entry. Blocking (not
+// skipping on contention) matters here because, unlike
+// handleAgentReady/handleAgentBootReady's own take-decision (where a losing
+// side can rely on the winning side's take-and-dispatch, or a future turn's
+// own agent.ready, to eventually retry), callers of this function —
+// workflow on_enter branches, manual drain requests, CI automation — have
+// no other future trigger that would retry a skipped drain; skipping on
+// contention here could strand an already-queued message.
 //
-// Used by processOnEnter branches that don't auto-start the agent, manual
-// drain requests, and cancel recovery. Without this, the message is orphaned
-// because handleAgentReady only drains from a normal turn-end event.
+// Callers must ensure the session is ready for input *before* calling this
+// — exactly as before this was guarded — but must not have already claimed
+// the guard themselves; use drainQueuedMessageForPromptableSessionLocked
+// instead when the guard is already held (e.g. inside CancelAgent,
+// cancelAndTakeForPeerMessage, handleAgentBootReady, handleAgentReady,
+// applyPendingMove).
+//
+// Reloads the session and re-confirms promptability *after* acquiring the
+// guard rather than trusting the caller's own earlier check: callers like
+// processOnEnter typically call setSessionWaitingForInput and then this
+// function without holding the guard across both, so a concurrent
+// cancel/interrupt for the same session could land in between and this
+// call would otherwise blindly take a message for a session that turned
+// out to no longer be idle.
 func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, sessionID string) bool {
-	if s.messageQueue == nil {
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session before drain",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return false
+	}
+	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
+		s.logger.Debug("skipping drain: session is not promptable once the guard is held",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return false
+	}
+	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
+}
+
+// drainQueuedMessageForPromptableSessionLocked takes the next queued
+// message and dispatches it for execution. Callers must ensure the session
+// is ready for input first, AND must already hold sessionID's
+// cancelInFlight lock — this neither acquires nor releases it. Use the
+// public drainQueuedMessageForPromptableSession instead when the guard is
+// not already held.
+//
+// Backs off without taking anything when isQueuedDispatchInFlight reports
+// a different dispatch already handed off for this session — see the
+// Service.dispatchingQueued field doc comment for the double-dispatch
+// window this closes.
+func (s *Service) drainQueuedMessageForPromptableSessionLocked(ctx context.Context, sessionID string) bool {
+	if s.messageQueue == nil || s.isQueuedDispatchInFlight(sessionID) {
 		return false
 	}
 	queuedMsg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
@@ -1169,6 +1222,12 @@ func (s *Service) dispatchTakenQueuedMessage(ctx context.Context, sessionID stri
 			zap.String("queue_id", queuedMsg.ID))
 		return false
 	}
+	// Reserve entryID as sessionID's "dispatch in flight" token *before*
+	// handing off to the async goroutine — see the Service.dispatchingQueued
+	// field doc comment for why session.State alone isn't a reliable busy
+	// signal until executeQueuedMessage's own promptTask call reaches its
+	// guarded claim step, several DB round-trips later.
+	s.markQueuedDispatchInFlight(sessionID, queuedMsg.ID)
 	go s.executeQueuedMessage(sessionID, queuedMsg)
 	return true
 }

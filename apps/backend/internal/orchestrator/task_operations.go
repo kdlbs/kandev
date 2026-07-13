@@ -50,6 +50,15 @@ var ErrSessionResetInProgress = errors.New("session reset in progress")
 // the two misleads the UI and any caller doing errors.Is checks.
 var ErrSessionNotPromptable = errors.New("session not promptable")
 
+// errQueuedDispatchSuperseded is returned by promptTask when a queued
+// message's dispatch loses its claim (see isCurrentQueuedDispatch) to a
+// newer dispatch for the same session — e.g. a second parent interrupt
+// cancelling and re-taking while the first dispatch's own goroutine was
+// still settling. Not surfaced to callers of the public PromptTask; only
+// executeQueuedMessage's internal call passes a claim token that can
+// trigger this.
+var errQueuedDispatchSuperseded = errors.New("queued dispatch superseded by a newer one for this session")
+
 var (
 	// Backend restart recovery can restore the session state before the ACP
 	// stream is promptable again. Keep this above CI's slow-start tail so a
@@ -2235,6 +2244,37 @@ func (s *Service) saveArchiveCommits(ctx context.Context, sessionID string, comm
 // If planMode is true, a plan mode prefix is prepended to the prompt.
 // Attachments (images) are passed through to the agent if provided.
 func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
+	return s.promptTask(ctx, taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly, "")
+}
+
+// promptTask is PromptTask's implementation, taking an additional
+// claimEntryID parameter used only by executeQueuedMessage's internal
+// call. When non-empty, this acquires sessionID's cancelInFlight guard
+// around a "confirm I still own this dispatch, then mark the session
+// RUNNING" step, immediately before startTurnForSession and the
+// (potentially long-blocking) executor.Prompt call below it — see
+// isCurrentQueuedDispatch and the Service.dispatchingQueued field doc
+// comment for the race this closes.
+//
+// A bare (unguarded) "check the token, then separately call
+// setSessionRunning" would still let two settling dispatches for the same
+// session both pass their own check before either actually marks the
+// session RUNNING — the exact double-dispatch this mechanism exists to
+// prevent, just narrowed rather than closed. Serializing the check
+// *and* the mark through the same per-session guard used for every other
+// cancel/take-and-dispatch decision (see the Service.cancelInFlight field
+// doc comment) makes "exactly one dispatch wins" a property of mutual
+// exclusion instead of a racy read. The guard is held only for this
+// fast, DB-only step — released well before the long-running
+// executor.Prompt call — matching every other guard holder's
+// bounded-hold-time contract in this file.
+//
+// Every return path *before* this step (invalid session, not promptable,
+// ensureSessionRunning failure, a model switch) never claims anything —
+// those are covered by executeQueuedMessage's own deferred cleanup
+// instead (clearQueuedDispatchInFlightIfCurrent), which is safe since
+// none of them block on an agent turn.
+func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, claimEntryID string) (*PromptResult, error) {
 	s.logger.Debug("PromptTask called",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -2267,16 +2307,8 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 		session = readySession
 	}
 
-	// Inject config context for config-mode sessions (dedicated settings chat, not plan mode)
-	effectivePrompt := prompt
-	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
-		effectivePrompt = sysprompt.InjectConfigContext(sessionID, prompt)
-	}
-
-	// Inject plan mode prefix for follow-up messages in plan mode sessions.
-	if planMode {
-		effectivePrompt = sysprompt.InjectPlanMode(effectivePrompt)
-	}
+	// Apply config-mode and plan-mode prompt transforms.
+	effectivePrompt := s.effectivePromptForSession(sessionID, prompt, planMode, session)
 
 	// Ensure the agent process is actually running. After a lazy backend restart,
 	// the session may be in WAITING_FOR_INPUT but no agent process exists yet.
@@ -2296,13 +2328,7 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	if reloaded, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && reloaded != nil {
 		session = reloaded
 		// Re-apply transforms in case metadata changed during ensureSessionRunning.
-		effectivePrompt = prompt
-		if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
-			effectivePrompt = sysprompt.InjectConfigContext(sessionID, prompt)
-		}
-		if planMode {
-			effectivePrompt = sysprompt.InjectPlanMode(effectivePrompt)
-		}
+		effectivePrompt = s.effectivePromptForSession(sessionID, prompt, planMode, session)
 	}
 
 	// Check if model switching is requested
@@ -2317,7 +2343,11 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	// the pre-injection prompt; PromptTask re-applies config/plan transforms.
 	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
 
-	s.setSessionRunning(ctx, taskID, sessionID, session)
+	claimedSession, err := s.claimSessionRunningForPrompt(ctx, taskID, sessionID, claimEntryID, session)
+	if err != nil {
+		return nil, err
+	}
+	session = claimedSession
 	s.startTurnForSession(ctx, sessionID)
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
@@ -2326,22 +2356,108 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 	promptCtx := context.WithoutCancel(ctx)
 	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly, session)
 	if err != nil {
-		if resumedForPrompt && errors.Is(err, executor.ErrExecutionNotFound) {
-			s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID))
-			if freshErr := s.fallbackFreshLaunchOnMissingExecution(ctx, taskID, sessionID, prompt, planMode, nil, attachments); freshErr == nil {
-				return &PromptResult{}, nil
-			} else {
-				err = freshErr
-			}
-		}
-		return nil, s.handlePromptError(ctx, taskID, sessionID, previousSessionState, err)
+		return s.handlePromptDispatchFailure(ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments, previousSessionState, err)
 	}
 	return &PromptResult{
 		StopReason:   result.StopReason,
 		AgentMessage: result.AgentMessage,
 	}, nil
+}
+
+// handlePromptDispatchFailure handles a failed executor.Prompt call from
+// promptTask. If the failure is the specific "missing execution" error a
+// just-resumed session can hit (see promptTask's resumedForPrompt comment),
+// it falls back to a fresh launch instead of surfacing the error to the
+// caller. Otherwise — or if that fallback launch itself fails — it
+// delegates to handlePromptError for the caller-facing result.
+func (s *Service) handlePromptDispatchFailure(ctx context.Context, taskID, sessionID, prompt string, planMode, resumedForPrompt bool, attachments []v1.MessageAttachment, previousSessionState models.TaskSessionState, promptErr error) (*PromptResult, error) {
+	if resumedForPrompt && errors.Is(promptErr, executor.ErrExecutionNotFound) {
+		s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		if freshErr := s.fallbackFreshLaunchOnMissingExecution(ctx, taskID, sessionID, prompt, planMode, nil, attachments); freshErr == nil {
+			return &PromptResult{}, nil
+		} else {
+			promptErr = freshErr
+		}
+	}
+	return nil, s.handlePromptError(ctx, taskID, sessionID, previousSessionState, promptErr)
+}
+
+// effectivePromptForSession applies promptTask's config-mode and plan-mode
+// prompt transforms to the raw prompt, in that order, using session's
+// *current* Metadata. Each call always starts from the raw prompt argument
+// (never a previously-transformed result), so it is safe for promptTask to
+// call this twice — once on session load and again after a reload that
+// follows ensureSessionRunning, in case metadata changed in between —
+// without double-prepending either transform's system-prompt wrapper.
+func (s *Service) effectivePromptForSession(sessionID, prompt string, planMode bool, session *models.TaskSession) string {
+	effectivePrompt := prompt
+	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+		effectivePrompt = sysprompt.InjectConfigContext(sessionID, prompt)
+	}
+	if planMode {
+		effectivePrompt = sysprompt.InjectPlanMode(effectivePrompt)
+	}
+	return effectivePrompt
+}
+
+// claimSessionRunningForPrompt marks sessionID RUNNING immediately before
+// promptTask dispatches to the agent, and returns the session to use for
+// the rest of the call (possibly reloaded).
+//
+// When claimEntryID is empty (a direct, non-queued prompt) this is a bare,
+// unguarded transition — preserving PromptTask's pre-existing direct-call
+// behavior as-is; this branch takes no guard and makes no claim about
+// races with a concurrent queued-dispatch decision on the same session.
+//
+// When claimEntryID is set (a queued dispatch claiming its reserved token —
+// see the Service.dispatchingQueued field doc comment), the claim happens
+// under the same per-session cancelInFlightGuard every other cancel/take-
+// and-dispatch decision in this file serializes through. Re-verifying
+// ownership *and* promptability inside this same critical section,
+// immediately before writing RUNNING, closes a gap that checking the token
+// alone would leave open: nothing would otherwise stop this call from
+// blindly marking the session RUNNING over top of a state some other
+// guard-synchronized decision-maker (a cancel, another claim) already
+// changed since promptTask's much-earlier, unguarded checkSessionPromptable
+// call near its top. Reloading the session and re-running
+// checkSessionPromptable here makes "is it actually still safe to mark this
+// session RUNNING right now" an atomic fact, not a stale read.
+func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sessionID, claimEntryID string, session *models.TaskSession) (*models.TaskSession, error) {
+	if claimEntryID == "" {
+		s.setSessionRunning(ctx, taskID, sessionID, session)
+		return session, nil
+	}
+
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	if !s.isCurrentQueuedDispatch(sessionID, claimEntryID) {
+		return nil, errQueuedDispatchSuperseded
+	}
+	freshSession, sessErr := s.repo.GetTaskSession(ctx, sessionID)
+	if sessErr != nil {
+		return nil, fmt.Errorf("reload session before claiming queued dispatch: %w", sessErr)
+	}
+	if freshSession == nil {
+		return nil, errQueuedDispatchSuperseded
+	}
+	if promptErr := s.checkSessionPromptable(taskID, sessionID, freshSession.State); promptErr != nil {
+		return nil, promptErr
+	}
+	s.setSessionRunning(ctx, taskID, sessionID, freshSession)
+	// Clear the token now, inside the same lock, rather than deferring to
+	// executeQueuedMessage's cleanup after this entire (potentially
+	// long-blocking) call returns: from this point session.State is the
+	// authoritative "busy" signal for this dispatch, so holding the marker
+	// any longer would only risk the natural agent.ready firing when *this*
+	// turn completes seeing it still set and skipping the *next* queued
+	// entry — see the Service.dispatchingQueued field doc comment.
+	s.clearQueuedDispatchInFlightIfCurrent(sessionID, claimEntryID)
+	return freshSession, nil
 }
 
 // checkSessionPromptable returns nil when the session's state accepts a new
@@ -2522,6 +2638,23 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	if sessionID == "" {
 		return false, fmt.Errorf("session_id is required")
 	}
+	// Acquire the guard *before* checking promptability, not after: check-
+	// then-lock would leave a gap where a concurrent
+	// QueueAndInterruptForPeerMessage (or another drain) changes the
+	// session's state between this call's check and its take, letting a
+	// manual drain request race a parent interrupt for the same entry —
+	// see the Service.cancelInFlight field doc comment. A blocking Lock
+	// (not a TryLock skip) is deliberate: unlike handleAgentReady /
+	// handleAgentBootReady (where a losing side can rely on the winning
+	// side's own take-and-dispatch, or a future turn's own agent.ready, to
+	// retry), a manual drain request has no other future trigger —
+	// skipping here could strand an already-queued message instead of
+	// just reporting an accurate "not promptable right now".
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return false, fmt.Errorf("failed to get session: %w", err)
@@ -2529,7 +2662,7 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	if err := s.checkSessionPromptable(session.TaskID, sessionID, session.State); err != nil {
 		return false, err
 	}
-	return s.drainQueuedMessageForPromptableSession(ctx, sessionID), nil
+	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID), nil
 }
 
 // cancelInFlightGuard is a per-session mutex serializing cancel/interrupt/
@@ -2708,31 +2841,90 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// concurrent agent.complete event having already closed the turn.
 	s.completeTurnForSession(ctx, sessionID)
 
-	// Release the cancel/interrupt guard early — before, not deferred until
-	// function exit — so the drainQueuedMessageForPromptableSession call
-	// below can dispatch the queued prompt without racing its own
-	// asynchronous PromptAgent dispatch against this function's still-held
-	// lock. Both unlockGuard and release are idempotent, so the deferred
-	// calls above become safe no-op error-path safety nets once this fires.
+	// Deliver any message the operator queued while the turn was running
+	// (#1597 pause→resume recovery) *while still holding the guard* — this
+	// used to release the guard early and drain unguarded, which let a
+	// concurrent QueueAndInterruptForPeerMessage (or another drain) race
+	// this exact take-and-dispatch decision for the same session; every
+	// take-and-dispatch decision must serialize through this one guard
+	// (see the Service.cancelInFlight field doc comment). On a normal
+	// cancel the agent emits complete(cancelled) → handleAgentReady →
+	// on_turn_complete, which drains the queue. But an escalated cancel
+	// (agent hung) or a dead-process cancel fires no agent.ready event, so
+	// nothing would drain it — leaving the operator's queued message
+	// stranded until a second manual send. Draining here after the turn is
+	// completed covers those paths. It is idempotent with the event-driven
+	// drain: drainQueuedMessageForPromptableSessionLocked pops via
+	// TakeQueued atomically, so a normal cancel that also fires
+	// handleAgentReady cannot double-deliver.
+	if session != nil {
+		s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID)
+	}
+
+	// Release the cancel/interrupt guard now that this session's
+	// cancel-and-drain decision is fully resolved. Both unlockGuard and
+	// release are idempotent, so the deferred calls above become safe
+	// no-op error-path safety nets once this fires.
 	unlockGuard()
 	release()
 
-	// Deliver any message the operator queued while the turn was running
-	// (#1597 pause→resume recovery). On a normal cancel the agent emits
-	// complete(cancelled) → handleAgentReady → on_turn_complete, which drains
-	// the queue. But an escalated cancel (agent hung) or a dead-process cancel
-	// fires no agent.ready event, so nothing would drain it — leaving the
-	// operator's queued message stranded until a second manual send. Draining
-	// here after the turn is completed covers those paths. It is idempotent with
-	// the event-driven drain: drainQueuedMessageForPromptableSession pops via
-	// TakeQueued atomically, so a normal cancel that also fires handleAgentReady
-	// cannot double-deliver.
-	if session != nil {
-		s.drainQueuedMessageForPromptableSession(ctx, sessionID)
-	}
-
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
+}
+
+// takeAndDispatchEntryLocked takes entryID from sessionID's queue and
+// dispatches it, falling back to draining the FIFO head only if the
+// targeted take doesn't find it (a benign not-found, e.g. already taken by
+// a concurrent path). A genuine repository error on the targeted take is
+// propagated instead of falling back — see cancelAndTakeForPeerMessage's
+// doc comment for why. The caller must already hold sessionID's
+// cancelInFlight lock; this neither acquires nor releases it.
+//
+// Deliberately does NOT check isQueuedDispatchInFlight itself: callers
+// that reach here have either just performed a cancel
+// (cancelAndTakeForPeerMessage) — which supersedes whatever another
+// dispatch was in the middle of settling, so a stale in-flight marker from
+// that dispatch must not block taking a *different* entry here — or have
+// already confirmed the session is genuinely idle (takeIfPromptableLocked,
+// which checks the marker itself before delegating here). See
+// drainQueuedMessageForPromptableSessionLocked for the *non-cancelling*
+// FIFO-head drain path, which does check the marker directly.
+func (s *Service) takeAndDispatchEntryLocked(ctx context.Context, sessionID, entryID string) (bool, error) {
+	if s.messageQueue != nil {
+		queuedMsg, ok, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
+		if err != nil {
+			return false, fmt.Errorf("take targeted queued message: %w", err)
+		}
+		if s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok) {
+			return true, nil
+		}
+	}
+	return s.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID), nil
+}
+
+// takeIfPromptableLocked takes and dispatches entryID only if sessionID is
+// currently promptable, without ever issuing a cancel — used by
+// QueueAndInterruptForPeerMessage when cancelling would risk hitting a
+// *different*, unrelated turn instead of the one the caller meant to
+// interrupt (see its active-turn revalidation doc comment). Returns
+// (false, nil), never an error, when the session turns out not to be
+// promptable — or when a *different* dispatch is already settling for
+// this session (isQueuedDispatchInFlight; see the Service.dispatchingQueued
+// field doc comment) — mirroring cancelAndTakeForPeerMessage's own "cancel
+// failed but already promptable" recovery except without ever attempting
+// the cancel. Unlike cancelAndTakeForPeerMessage's path, this never
+// cancels anything, so it has no way to supersede a settling dispatch the
+// way a genuine cancel would — it must defer to it instead. The caller
+// must already hold sessionID's cancelInFlight lock.
+func (s *Service) takeIfPromptableLocked(ctx context.Context, taskID, sessionID, entryID string) (bool, error) {
+	if s.isQueuedDispatchInFlight(sessionID) {
+		return false, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil || s.checkSessionPromptable(taskID, sessionID, session.State) != nil {
+		return false, nil
+	}
+	return s.takeAndDispatchEntryLocked(ctx, sessionID, entryID)
 }
 
 // cancelAndTakeForPeerMessage cancels sessionID's in-flight turn and takes
@@ -2762,18 +2954,20 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 func (s *Service) cancelAndTakeForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) (bool, error) {
 	if cancelErr := s.cancelAgentSilent(ctx, taskID, sessionID); cancelErr != nil {
 		// A genuine (non-tolerated — cancelAgentSilent already swallows "no
-		// active execution") cancel failure usually means the previous turn
-		// is still actually running server-side and will complete naturally,
-		// firing a future agent.ready that drains this entry through the
-		// normal FIFO path once the lock is free — see the doc comment
-		// above. But handleAgentReady/handleAgentBootReady's own
-		// completion/workflow bookkeeping runs *before* their take-decision
-		// claims this same lock (see their guard comments), so a losing
-		// TryLock there can still have already marked the session
-		// promptable — meaning that turn already ended and no future
-		// agent.ready is coming. Recheck: if the session is promptable
-		// despite the cancel error, take-and-dispatch anyway instead of
-		// leaving the message stranded with nothing left to trigger it.
+		// active execution") cancel failure leaves session state untouched
+		// by this call: cancelAgentSilent returns before reaching its own
+		// updateTaskSessionState/completeTurnForSession reconciliation on
+		// that path. Every other decision-maker that could independently
+		// mark the session promptable — handleAgentReady,
+		// handleAgentBootReady, CancelAgent, clarification recovery — now
+		// serializes through this same cancelInFlight guard (see the
+		// Service.cancelInFlight field doc comment), so none of them can be
+		// racing this exact call while we hold it. This recheck is a
+		// defensive backstop for any not-yet-guarded completion path or a
+		// stale read further up the call chain: if the session turns out to
+		// already be promptable despite the cancel error, take-and-dispatch
+		// anyway instead of leaving the message stranded with nothing left
+		// to trigger it.
 		session, sessErr := s.repo.GetTaskSession(ctx, sessionID)
 		if sessErr != nil || session == nil || s.checkSessionPromptable(taskID, sessionID, session.State) != nil {
 			return false, fmt.Errorf("interrupt for peer message: %w", cancelErr)
@@ -2783,16 +2977,7 @@ func (s *Service) cancelAndTakeForPeerMessage(ctx context.Context, taskID, sessi
 			zap.String("session_id", sessionID),
 			zap.Error(cancelErr))
 	}
-	if s.messageQueue != nil {
-		queuedMsg, ok, err := s.messageQueue.TakeQueuedEntry(ctx, sessionID, entryID)
-		if err != nil {
-			return false, fmt.Errorf("take targeted queued message: %w", err)
-		}
-		if s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok) {
-			return true, nil
-		}
-	}
-	return s.drainQueuedMessageForPromptableSession(ctx, sessionID), nil
+	return s.takeAndDispatchEntryLocked(ctx, sessionID, entryID)
 }
 
 // QueueAndInterruptForPeerMessage atomically queues prompt for sessionID
@@ -2830,10 +3015,50 @@ func (s *Service) cancelAndTakeForPeerMessage(ctx context.Context, taskID, sessi
 // mechanism (cancelAgentSilent's underlying agent-cancel escalation
 // timeout, or a single fast DB round-trip in the natural-drain paths), so
 // blocking here adds no new deadlock risk.
+//
+// Active-turn revalidation: after acquiring the lock and queueing the
+// message, this re-checks whether the turn active for sessionID is still
+// the one that was active when the caller decided to interrupt (snapshotted
+// via peekActiveTurnID *before* contending for the lock). If a *different*
+// turn is now active — e.g. a workflow on_turn_complete transition
+// auto-started a successor for this same session while this call waited
+// for the guard — cancelling now would kill that unrelated successor turn
+// instead of the one the parent meant to interrupt. In that case this
+// falls back to takeIfPromptableLocked (dispatch directly only if the
+// session happens to already be idle *and* no other dispatch is
+// concurrently settling for it, per isQueuedDispatchInFlight — see the
+// Service.dispatchingQueued field doc comment; otherwise leave the
+// message queued for whichever turn is actually running to drain
+// naturally) instead of ever calling cancelAndTakeForPeerMessage. The
+// turn-identity comparison only trusts a positively-confirmed match — both
+// snapshots read without error, both non-empty, and equal — before it
+// will risk a cancel; any error or mismatch (including "no turn observed
+// at all") takes the safe fallback. The one exception is turnService
+// being unset entirely: with no turn identity obtainable at all, this
+// preserves the exact unconditional-interrupt behavior every existing
+// (turn-unaware) caller and test exercises.
+//
+// Note this deliberately does *not* also gate on isQueuedDispatchInFlight
+// when the turn *is* confirmed unchanged: a cancel (via
+// cancelAndTakeForPeerMessage below) supersedes whatever another dispatch
+// for this same session was in the middle of settling — e.g. a second
+// parent message arriving right behind a first one whose own dispatch
+// hasn't yet reached PromptTask — so it must still be allowed to cancel
+// and take its own entry rather than being blocked by a marker the cancel
+// itself is about to invalidate.
 func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error) {
 	if s.messageQueue == nil {
 		return nil, false, errors.New("message queue not available")
 	}
+
+	turnBeforeWait, turnPeekErr := s.peekActiveTurnID(ctx, sessionID)
+	if turnPeekErr != nil {
+		s.logger.Warn("failed to snapshot active turn before peer-message interrupt; will fall back to a promptable-only dispatch instead of risking a cancel of unrelated work",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(turnPeekErr))
+	}
+
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -2844,6 +3069,20 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, s
 		return nil, false, err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
+
+	if s.turnService != nil {
+		turnNow, turnNowErr := s.peekActiveTurnID(ctx, sessionID)
+		confirmedUnchanged := turnPeekErr == nil && turnNowErr == nil && turnBeforeWait != "" && turnNow == turnBeforeWait
+		if !confirmedUnchanged {
+			s.logger.Warn("active turn could not be confirmed unchanged while waiting to interrupt; dispatching only if already idle instead of risking a cancel of unrelated work",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("turn_before_wait", turnBeforeWait),
+				zap.Bool("turn_peek_error", turnPeekErr != nil || turnNowErr != nil))
+			dispatched, fallbackErr := s.takeIfPromptableLocked(ctx, taskID, sessionID, queued.ID)
+			return queued, dispatched, fallbackErr
+		}
+	}
 
 	dispatched, err := s.cancelAndTakeForPeerMessage(ctx, taskID, sessionID, queued.ID)
 	return queued, dispatched, err
