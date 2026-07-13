@@ -227,22 +227,38 @@ func (m *MockClient) ListReviewRequestedPRs(context.Context, string, string, str
 	return result, nil
 }
 
-func (m *MockClient) ListIssues(context.Context, string, string) ([]*Issue, error) {
+func (m *MockClient) ListIssues(_ context.Context, filter, customQuery string) ([]*Issue, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	result := make([]*Issue, 0, len(m.issues))
 	for _, issue := range m.issues {
+		if !matchesIssueRepositoryQuery(issue, filter+" "+customQuery) {
+			continue
+		}
 		result = append(result, issue)
 	}
 	return result, nil
 }
 
-func (m *MockClient) ListIssuesPaged(ctx context.Context, _, _ string, page, perPage int) (*IssueSearchPage, error) {
-	issues, err := m.ListIssues(ctx, "", "")
+func (m *MockClient) ListIssuesPaged(ctx context.Context, filter, customQuery string, page, perPage int) (*IssueSearchPage, error) {
+	issues, err := m.ListIssues(ctx, filter, customQuery)
 	if err != nil {
 		return nil, err
 	}
 	return &IssueSearchPage{Issues: issues, TotalCount: len(issues), Page: page, PerPage: perPage}, nil
+}
+
+func matchesIssueRepositoryQuery(issue *Issue, query string) bool {
+	for _, term := range strings.Fields(query) {
+		if !strings.HasPrefix(term, "repo:") {
+			continue
+		}
+		owner, repo, found := strings.Cut(strings.TrimPrefix(term, "repo:"), "/")
+		if !found || !strings.EqualFold(issue.RepoOwner, owner) || !strings.EqualFold(issue.RepoName, repo) {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *MockClient) SearchPRs(context.Context, string, string) ([]*PR, error) {

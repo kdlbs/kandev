@@ -67,6 +67,7 @@ export const defaultState = {
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   githubStatus: defaultGitHubState.githubStatus,
   taskPRs: defaultGitHubState.taskPRs,
+  taskIssues: defaultGitHubState.taskIssues,
   pendingPrUrlByTaskId: defaultGitHubState.pendingPrUrlByTaskId,
   prWatches: defaultGitHubState.prWatches,
   reviewWatches: defaultGitHubState.reviewWatches,
@@ -207,6 +208,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     sessionPollMode: { ...defaultState.sessionPollMode, ...initialState.sessionPollMode },
     githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
     taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
+    taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },
     pendingPrUrlByTaskId: {
       ...defaultState.pendingPrUrlByTaskId,
       ...initialState.pendingPrUrlByTaskId,

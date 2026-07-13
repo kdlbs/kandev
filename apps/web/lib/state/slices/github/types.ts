@@ -93,6 +93,7 @@ export type GitHubSliceActions = {
   setGitHubStatusLoading: (loading: boolean) => void;
   setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
   setTaskIssues: (workspaceId: string, issues: Record<string, TaskIssueLink>) => void;
+  upsertTaskIssue: (workspaceId: string, issue: TaskIssueLink) => void;
   setTaskPR: (taskId: string, pr: TaskPR) => void;
   setPendingPrUrlForTask: (taskId: string, repoKey: string, prUrl: string) => void;
   setPRWatches: (watches: PRWatch[]) => void;

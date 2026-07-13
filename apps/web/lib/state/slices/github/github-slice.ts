@@ -62,7 +62,10 @@ function clearPendingForTaskPR(
 
 function createTaskPRActions(
   set: ImmerSet,
-): Pick<GitHubSlice, "setTaskPRs" | "setTaskPR" | "setPendingPrUrlForTask" | "setTaskIssues"> {
+): Pick<
+  GitHubSlice,
+  "setTaskPRs" | "setTaskPR" | "setPendingPrUrlForTask" | "setTaskIssues" | "upsertTaskIssue"
+> {
   return {
     setTaskPRs: (prs) =>
       set((draft) => {
@@ -72,6 +75,11 @@ function createTaskPRActions(
       set((draft) => {
         draft.taskIssues.workspaceId = workspaceId;
         draft.taskIssues.byTaskId = issues;
+      }),
+    upsertTaskIssue: (workspaceId, issue) =>
+      set((draft) => {
+        if (draft.taskIssues.workspaceId !== workspaceId) return;
+        draft.taskIssues.byTaskId[issue.task_id] = issue;
       }),
     setTaskPR: (taskId, pr) =>
       set((draft) => {

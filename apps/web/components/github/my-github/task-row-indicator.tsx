@@ -50,9 +50,10 @@ function truncateTitle(title: string): string {
 
 function TaskTitle({ task }: { task: TaskRowLink }) {
   const taskData = useTaskById(task.taskId);
+  const title = taskData?.title ?? task.fallbackTitle;
   return (
-    <span className="truncate text-foreground/80">
-      {truncateTitle(taskData?.title ?? task.fallbackTitle)}
+    <span className="truncate text-foreground/80" title={title}>
+      {title}
     </span>
   );
 }

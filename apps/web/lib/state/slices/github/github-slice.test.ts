@@ -222,17 +222,18 @@ describe("setTaskPR", () => {
 });
 
 describe("setTaskIssues", () => {
+  const link: TaskIssueLink = {
+    task_id: "task-1",
+    task_title: "Fix issue",
+    owner: "kdlbs",
+    repo: "kandev",
+    issue_number: 1672,
+    issue_url: "https://github.com/kdlbs/kandev/issues/1672",
+    issue_title: "Issue title",
+  };
+
   it("replaces workspace issue links by task id", () => {
     const store = makeStore();
-    const link: TaskIssueLink = {
-      task_id: "task-1",
-      task_title: "Fix issue",
-      owner: "kdlbs",
-      repo: "kandev",
-      issue_number: 1672,
-      issue_url: "https://github.com/kdlbs/kandev/issues/1672",
-      issue_title: "Issue title",
-    };
 
     store.getState().setTaskIssues("ws-1", { "task-1": link });
 
@@ -240,6 +241,17 @@ describe("setTaskIssues", () => {
       workspaceId: "ws-1",
       byTaskId: { "task-1": link },
     });
+  });
+
+  it("upserts issue links only for the active workspace", () => {
+    const store = makeStore();
+    store.getState().setTaskIssues("ws-1", {});
+
+    store.getState().upsertTaskIssue("ws-2", link);
+    expect(store.getState().taskIssues.byTaskId).toEqual({});
+
+    store.getState().upsertTaskIssue("ws-1", link);
+    expect(store.getState().taskIssues.byTaskId).toEqual({ "task-1": link });
   });
 });
 

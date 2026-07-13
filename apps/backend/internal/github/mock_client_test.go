@@ -104,8 +104,9 @@ func TestMockClient_ListIssuesPaged(t *testing.T) {
 	m := NewMockClient()
 	m.AddIssue(&Issue{Number: 1, RepoOwner: "owner", RepoName: "repo"})
 	m.AddIssue(&Issue{Number: 2, RepoOwner: "owner", RepoName: "repo"})
+	m.AddIssue(&Issue{Number: 3, RepoOwner: "other", RepoName: "repo"})
 
-	page, err := m.ListIssuesPaged(context.Background(), "state:open", "", 2, 10)
+	page, err := m.ListIssuesPaged(context.Background(), "state:open repo:owner/repo", "", 2, 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

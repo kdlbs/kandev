@@ -945,7 +945,9 @@ func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string
 	return groupTaskPRsByTask(prs), nil
 }
 
-// ListTaskIssueMetadataByWorkspaceID projects task metadata for issue-link normalization.
+// ListTaskIssueMetadataByWorkspaceID projects workspace-bounded task metadata for issue-link
+// normalization. Issue links are persisted in metadata, so parsing the two supported shapes in
+// Go keeps the SQL query independent of SQLite's JSON capabilities.
 func (s *Store) ListTaskIssueMetadataByWorkspaceID(ctx context.Context, workspaceID string) ([]taskIssueMetadataRow, error) {
 	var rows []taskIssueMetadataRow
 	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(

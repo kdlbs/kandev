@@ -18,7 +18,7 @@ spec: "../../specs/tasks/link-existing-task-github-issue.md"
 
 ## Verification
 
-`cd apps && rtk pnpm --filter @kandev/web test -- --run lib/api/domains/github-api.test.ts lib/state/slices/github/github-slice.test.ts hooks/domains/github/use-issue-key-to-tasks.test.ts components/github/my-github/quick-task-launcher.test.tsx components/github/my-github/task-row-indicator.test.tsx`
+`cd apps && pnpm --filter @kandev/web test -- --run lib/api/domains/github-api.test.ts lib/state/slices/github/github-slice.test.ts hooks/domains/github/use-issue-key-to-tasks.test.ts components/github/my-github/quick-task-launcher.test.tsx components/github/my-github/pr-row-task-indicator.test.tsx`
 
 ## Files Likely Touched
 

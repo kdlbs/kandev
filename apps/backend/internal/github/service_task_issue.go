@@ -97,6 +97,9 @@ func (s *Service) LinkTaskIssue(ctx context.Context, taskID string, req LinkTask
 
 // ListWorkspaceTaskIssues returns persisted GitHub issue links for one workspace.
 func (s *Service) ListWorkspaceTaskIssues(ctx context.Context, workspaceID string) (map[string]TaskIssueLinkResponse, error) {
+	if s.store == nil {
+		return nil, errStoreUnavailable
+	}
 	rows, err := s.store.ListTaskIssueMetadataByWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, err

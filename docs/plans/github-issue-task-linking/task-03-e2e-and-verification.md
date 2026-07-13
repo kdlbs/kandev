@@ -19,9 +19,9 @@ spec: "../../specs/tasks/link-existing-task-github-issue.md"
 ## Verification
 
 ```bash
-cd apps/web && rtk pnpm e2e:run tests/github/issue-list-task-indicator.spec.ts
-cd apps/web && rtk pnpm e2e:run --no-build --project mobile-chrome tests/github/mobile-issue-list-task-indicator.spec.ts
-cd ../../ && rtk make fmt && rtk make typecheck test lint
+cd apps/web && pnpm e2e:run tests/github/issue-list-task-indicator.spec.ts
+cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/github/mobile-issue-list-task-indicator.spec.ts
+make fmt && make typecheck test lint
 ```
 
 ## Files Likely Touched
