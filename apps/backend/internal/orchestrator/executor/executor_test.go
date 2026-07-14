@@ -733,6 +733,7 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 	}
 
 	var commandConfigured atomic.Bool
+	var executionDescription string
 	startDone := make(chan error, 1)
 	agentManager := &mockAgentManager{
 		getExecutionIDForSessionFunc: func(_ context.Context, _ string) (string, error) {
@@ -741,7 +742,14 @@ func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(
 		isAgentCommandConfiguredFunc: func(_ string) bool {
 			return commandConfigured.Load()
 		},
+		setExecutionDescriptionFunc: func(_ context.Context, _ string, description string) error {
+			executionDescription = description
+			return nil
+		},
 		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			if executionDescription != "implement the approved plan" {
+				return nil, fmt.Errorf("execution description was not updated before promotion: %q", executionDescription)
+			}
 			commandConfigured.Store(true)
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-workspace-only",

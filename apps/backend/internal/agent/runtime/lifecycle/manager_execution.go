@@ -237,8 +237,11 @@ func (m *Manager) GetExecutionIDForSession(_ context.Context, sessionID string) 
 // IsAgentCommandConfigured reports whether an execution has been promoted from
 // workspace-only infrastructure to an agent execution ready to start.
 func (m *Manager) IsAgentCommandConfigured(executionID string) bool {
-	execution, exists := m.executionStore.Get(executionID)
-	return exists && execution.AgentCommand != ""
+	configured := false
+	_ = m.executionStore.WithRLock(executionID, func(execution *AgentExecution) {
+		configured = execution.AgentCommand != ""
+	})
+	return configured
 }
 
 // EnsurePassthroughExecution ensures an execution exists for a passthrough session

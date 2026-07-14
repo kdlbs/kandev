@@ -1096,14 +1096,6 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		}, nil
 	}
 
-	// Lazy workspace restoration creates an execution without an agent command.
-	// Route it through LaunchAgent so lifecycle.Launch can promote the execution
-	// with the effective profile, model, route override, and CLI flags before the
-	// subprocess is started.
-	if !e.agentManager.IsAgentCommandConfigured(executionID) {
-		return nil, ErrAgentCommandMissing
-	}
-
 	// Update the task description in the existing execution so StartAgentProcess picks it up
 	if prompt != "" {
 		if err := e.agentManager.SetExecutionDescription(ctx, executionID, prompt); err != nil {
@@ -1138,6 +1130,15 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 				zap.Error(err))
 			return nil, fmt.Errorf("set MCP mode %q: %w", effectiveMcpMode, err)
 		}
+	}
+
+	// Lazy workspace restoration creates an execution without an agent command.
+	// Preserve the request's description, environment, and MCP mode above, then
+	// route it through LaunchAgent so lifecycle.Launch can promote the execution
+	// with the effective profile, model, route override, and CLI flags before the
+	// subprocess is started.
+	if !e.agentManager.IsAgentCommandConfigured(executionID) {
+		return nil, ErrAgentCommandMissing
 	}
 
 	// Transition session to STARTING
