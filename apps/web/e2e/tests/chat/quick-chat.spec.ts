@@ -135,6 +135,9 @@ test.describe("Quick Chat", () => {
     await waitForQuickChatWidth(dialog);
 
     const finalBox = await dialog.boundingBox();
+    const finalPreferredWidth = await dialog.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).getPropertyValue("--quick-chat-width")),
+    );
     expect(finalBox!.width).toBeGreaterThan(rightResizedBox!.width + 50);
     expect(finalBox!.x + finalBox!.width / 2).toBeCloseTo(
       (await testPage.evaluate(() => window.innerWidth)) / 2,
@@ -181,7 +184,11 @@ test.describe("Quick Chat", () => {
     await expect(dialog).toBeVisible();
     await waitForQuickChatWidth(dialog);
     const restoredBox = await dialog.boundingBox();
-    expect(restoredBox!.width).toBeCloseTo(finalBox!.width, 0);
+    const restoredPreferredWidth = await dialog.evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).getPropertyValue("--quick-chat-width")),
+    );
+    expect(restoredPreferredWidth).toBe(finalPreferredWidth);
+    expect(Math.abs(restoredBox!.width - finalBox!.width)).toBeLessThan(2);
   });
 
   test("explains quick chat and starts with repository context", async ({
