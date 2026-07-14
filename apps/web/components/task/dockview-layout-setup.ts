@@ -77,7 +77,9 @@ function restoreColumnToTarget(
  * viewport can materially overstate the space available to chat + files. */
 function applyRightConstraints(api: DockviewReadyEvent["api"]): number {
   const measuredWidth = api.width > 0 ? api.width : undefined;
-  const maximumWidth = computeRightMaxPx(measuredWidth);
+  const sv = getRootSplitview(api);
+  const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
+  const maximumWidth = computeRightMaxPx(measuredWidth, sidebarWidth);
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((candidate) => candidate.id === gid);
     if (!group) continue;

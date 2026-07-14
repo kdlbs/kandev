@@ -163,7 +163,7 @@ describe("applyLayoutFixups — pinned target capture", () => {
     applyLayoutFixups(api);
 
     expect(computeSidebarMaxPx).toHaveBeenCalledWith(1470);
-    expect(computeRightMaxPx).toHaveBeenCalledWith(1470);
+    expect(computeRightMaxPx).toHaveBeenCalledWith(1470, 350);
   });
 
   it("records the side-column target for a 3-column preset without RIGHT_TOP_GROUP", () => {

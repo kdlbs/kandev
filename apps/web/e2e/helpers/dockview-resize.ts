@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { computeRightMaxPx, computeSidebarMaxPx } from "../../lib/state/layout-manager/caps";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
 import { SessionPage } from "../pages/session-page";
@@ -150,21 +151,20 @@ export async function resizeColumnViaSplitview(
   // to the same runtime cap, NOT unlimited — so cap-enforcement assertions
   // still work end-to-end. Production uses Dockview's measured width because
   // the app sidebar is outside the workbench.
-  const availableWidth = await page.evaluate(() => {
+  const { availableWidth, sidebarWidth } = await page.evaluate(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const api = (window as any).__dockviewApi__;
-    return api?.width ?? document.querySelector<HTMLElement>(".dv-dockview")?.clientWidth ?? 1440;
+    const sv = api?.component?.gridview?.root?.splitview;
+    return {
+      availableWidth:
+        api?.width ?? document.querySelector<HTMLElement>(".dv-dockview")?.clientWidth ?? 1440,
+      sidebarWidth: api?.getPanel("sidebar") && sv?.length >= 3 ? sv.getViewSize(0) : 0,
+    };
   });
-  // Mirror `caps.ts` exactly: the bound clamps the ratio-based cap to
-  // `availableWidth - reservedWidth` so the other columns retain usable room.
-  // Without this the test helper diverges from production on narrow viewports.
-  const PINNED_MIN = 180;
-  const reservedWidth = column === "sidebar" ? 300 : 480;
-  const rawCap =
+  const runtimeCap =
     column === "sidebar"
-      ? Math.max(350, Math.round(availableWidth * 0.3))
-      : Math.max(800, Math.round(availableWidth * 0.7));
-  const runtimeCap = Math.max(PINNED_MIN, Math.min(rawCap, availableWidth - reservedWidth));
+      ? computeSidebarMaxPx(availableWidth)
+      : computeRightMaxPx(availableWidth, sidebarWidth);
   await loosenPinnedConstraints(page, column, runtimeCap);
   const result = await page.evaluate(
     ({ col, target }) => {

@@ -50,6 +50,10 @@ describe("computeRightMaxPx", () => {
     expect(computeRightMaxPx(3000)).toBe(2100);
   });
 
+  it("reserves a visible sidebar so the center column retains its comfort width", () => {
+    expect(computeRightMaxPx(2000, 600)).toBe(920);
+  });
+
   it("never collapses the center column on narrow viewports", () => {
     // vw=900 → 70%=630 < floor 800; reserve 480 → viewport bound 420.
     expect(computeRightMaxPx(900)).toBe(420);

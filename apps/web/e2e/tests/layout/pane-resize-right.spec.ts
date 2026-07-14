@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { computeRightMaxPx } from "../../../lib/state/layout-manager/caps";
 import {
   WIDE_VIEWPORT,
   openWideTask,
@@ -26,10 +27,8 @@ test.describe("Right pane resize — container-proportional cap", () => {
     const dockviewBox = await testPage.locator(".dv-dockview").boundingBox();
     expect(dockviewBox).not.toBeNull();
     const availableWidth = dockviewBox?.width ?? 0;
-    const cap = Math.max(
-      180,
-      Math.min(Math.max(800, Math.round(availableWidth * 0.7)), availableWidth - 480),
-    );
+    const sidebarWidth = await getDockviewGroupWidth(testPage, "sidebar").catch(() => 0);
+    const cap = computeRightMaxPx(availableWidth, sidebarWidth);
     expect(actual).toBeLessThanOrEqual(cap + 10);
   });
 
@@ -67,12 +66,8 @@ test.describe("Right pane resize — container-proportional cap", () => {
     const dockviewBox = await testPage.locator(".dv-dockview").boundingBox();
     expect(dockviewBox).not.toBeNull();
     const narrowWidth = await getDockviewGroupWidth(testPage, "files");
-    const centerComfortWidth = 480;
-    const pinnedMinimumWidth = 180;
-    const newCap = Math.max(
-      pinnedMinimumWidth,
-      Math.round((dockviewBox?.width ?? 0) - centerComfortWidth),
-    );
+    const sidebarWidth = await getDockviewGroupWidth(testPage, "sidebar").catch(() => 0);
+    const newCap = computeRightMaxPx(dockviewBox?.width ?? 0, sidebarWidth);
     expect(narrowWidth).toBeLessThanOrEqual(newCap + 10);
   });
 });

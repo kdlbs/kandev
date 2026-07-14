@@ -48,13 +48,15 @@ export function computeSidebarMaxPx(availableWidth?: number): number {
   );
 }
 
-/** Right pane max: max(800, availableWidth * 0.7), bounded by available width. */
-export function computeRightMaxPx(availableWidth?: number): number {
+/** Right pane max: max(800, availableWidth * 0.7), bounded by available width.
+ *  When the left pinned column is visible, reserve its live width too so the
+ *  primary center column retains its preferred minimum. */
+export function computeRightMaxPx(availableWidth?: number, sidebarWidth = 0): number {
   const width = getAvailableWidth(availableWidth);
   return availableWidthBound(
     Math.max(RIGHT_FLOOR_PX, Math.round(width * RIGHT_RATIO)),
     width,
-    RIGHT_CENTER_MIN_PX,
+    RIGHT_CENTER_MIN_PX + Math.max(0, sidebarWidth),
   );
 }
 
