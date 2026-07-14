@@ -281,10 +281,8 @@ export function WorkspaceRepoChips({
           workspaceId={workspaceId}
           repositories={repositories}
           discoveredRepositories={discoveredRepositories ?? []}
-          // Multi-branch: the same repository may be reused across rows when
-          // each row picks a different branch. Only exclude rows that hold
-          // the exact (repo, branch) pair this row would clash with on the
-          // backend — empty-branch rows can't collide yet, so they pass.
+          // Task creation allows the same repository on different branches;
+          // quick chat excludes a repository as soon as another row uses it.
           excludedRepoIds={collectExcludedRepoIds(rows, row, allowDuplicateRepositories)}
           branchLocked={branchLocked}
           // For local-executor rows, seed row.branch with the workspace's
@@ -381,13 +379,13 @@ function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string
 }
 
 /**
- * Returns the set of repo ids/paths that would create a literal duplicate
- * (same repo + same branch) of an *existing* row if `currentRow` adopted
- * them — used to hide already-claimed pairings from the repo dropdown.
+ * Returns the repo ids/paths that should be hidden from `currentRow` based on
+ * the caller's repository-duplication mode.
  *
- * Multi-branch tasks are supported: the same repo can appear across multiple
- * rows as long as each row's branch differs. Rows with empty branches don't
- * collide yet, so they don't contribute to the exclusion set.
+ * When duplicates are allowed, only an exact (repo, branch) pairing is
+ * excluded, so task creation can target multiple branches from one repo.
+ * When duplicates are disabled, quick chat excludes the entire repository
+ * after another row selects it, regardless of branch.
  *
  * Same-row entries are skipped so the current row's own pick remains
  * selectable; without that, after the user pairs (repo, branch) the chip

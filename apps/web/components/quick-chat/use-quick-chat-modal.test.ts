@@ -98,17 +98,14 @@ describe("useAgentSelection — happy path", () => {
   it("opens the chat and clears pending state when the request resolves", async () => {
     const store = makeStore();
     mockStartQuickChat.mockResolvedValue({ task_id: "task-a", session_id: "sess-a" });
-    const onSuccess = vi.fn();
-
     const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
 
     await act(async () => {
-      await result.current.handleSelectAgent("agent-a", onSuccess);
+      await result.current.handleSelectAgent("agent-a");
     });
 
     expect(store.openQuickChat).toHaveBeenCalledWith("sess-a", WORKSPACE_ID, "agent-a");
     expect(store.renameQuickChatSession).toHaveBeenCalledWith("sess-a", expect.any(String));
-    expect(onSuccess).toHaveBeenCalledTimes(1);
     expect(mockDeleteTask).not.toHaveBeenCalled();
     expect(result.current.pendingAgentId).toBeNull();
   });
@@ -124,7 +121,7 @@ describe("useAgentSelection — happy path", () => {
     const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
 
     await act(async () => {
-      await result.current.handleSelectAgent("agent-a", vi.fn(), repositories);
+      await result.current.handleSelectAgent("agent-a", repositories);
     });
 
     expect(mockStartQuickChat).toHaveBeenCalledWith(
@@ -145,29 +142,25 @@ describe("useAgentSelection — supersession", () => {
       .mockImplementationOnce(() => firstPromise)
       .mockResolvedValueOnce({ task_id: "task-b", session_id: "sess-b" });
 
-    const onSuccessA = vi.fn();
-    const onSuccessB = vi.fn();
     const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
 
     // Click A — request hangs.
     act(() => {
-      void result.current.handleSelectAgent("agent-a", onSuccessA);
+      void result.current.handleSelectAgent("agent-a");
     });
     expect(result.current.pendingAgentId).toBe("agent-a");
 
     // Click B — supersedes A.
     await act(async () => {
-      await result.current.handleSelectAgent("agent-b", onSuccessB);
+      await result.current.handleSelectAgent("agent-b");
     });
-    expect(onSuccessB).toHaveBeenCalledTimes(1);
     expect(store.openQuickChat).toHaveBeenCalledWith("sess-b", WORKSPACE_ID, "agent-b");
 
-    // Now A resolves — its onSuccess must NOT fire and the orphan task is deleted.
+    // Now A resolves — its orphan task is deleted instead of opening a stale session.
     await act(async () => {
       resolveFirst({ task_id: "task-a", session_id: "sess-a" });
       await flushPromises();
     });
-    expect(onSuccessA).not.toHaveBeenCalled();
     expect(mockDeleteTask).toHaveBeenCalledWith("task-a");
     expect(store.openQuickChat).not.toHaveBeenCalledWith(
       "sess-a",
@@ -176,7 +169,7 @@ describe("useAgentSelection — supersession", () => {
     );
   });
 
-  it("reset() during in-flight request: resolved task is deleted, onSuccess not called", async () => {
+  it("reset() during in-flight request deletes the resolved task", async () => {
     const store = makeStore();
     let resolveStart!: (v: { task_id: string; session_id: string }) => void;
     mockStartQuickChat.mockImplementationOnce(
@@ -186,11 +179,10 @@ describe("useAgentSelection — supersession", () => {
         }),
     );
 
-    const onSuccess = vi.fn();
     const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
 
     act(() => {
-      void result.current.handleSelectAgent("agent-a", onSuccess);
+      void result.current.handleSelectAgent("agent-a");
     });
     expect(result.current.pendingAgentId).toBe("agent-a");
 
@@ -204,7 +196,6 @@ describe("useAgentSelection — supersession", () => {
       resolveStart({ task_id: "task-a", session_id: "sess-a" });
       await flushPromises();
     });
-    expect(onSuccess).not.toHaveBeenCalled();
     expect(store.openQuickChat).not.toHaveBeenCalled();
     expect(mockDeleteTask).toHaveBeenCalledWith("task-a");
   });
@@ -224,7 +215,7 @@ describe("useAgentSelection — error handling", () => {
     const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
 
     act(() => {
-      void result.current.handleSelectAgent("agent-a", vi.fn());
+      void result.current.handleSelectAgent("agent-a");
     });
     act(() => {
       result.current.reset();
@@ -244,7 +235,7 @@ describe("useAgentSelection — error handling", () => {
     const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
 
     await act(async () => {
-      await result.current.handleSelectAgent("agent-a", vi.fn());
+      await result.current.handleSelectAgent("agent-a");
     });
 
     expect(mockToast).toHaveBeenCalledWith(

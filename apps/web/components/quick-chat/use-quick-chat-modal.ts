@@ -71,11 +71,7 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
   }, []);
 
   const handleSelectAgent = useCallback(
-    async (
-      agentId: string,
-      onSuccess: () => void,
-      repositories: QuickChatRepositoryInput[] = [],
-    ) => {
+    async (agentId: string, repositories: QuickChatRepositoryInput[] = []) => {
       const requestId = ++latestRequestId.current;
       setPendingAgentId(agentId);
       try {
@@ -91,7 +87,6 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
         if (store.activeSessionId === "") store.closeQuickChatSession("");
         store.openQuickChat(result.sessionId, workspaceId, agentId);
         store.renameQuickChatSession(result.sessionId, result.name);
-        onSuccess();
       } catch (error) {
         if (latestRequestId.current !== requestId) return;
         toast({
@@ -145,7 +140,7 @@ export function useQuickChatModal(workspaceId: string) {
 
   const handleSelectAgent = useCallback(
     (agentId: string, repositories: QuickChatRepositoryInput[] = []) =>
-      doSelectAgent(agentId, () => {}, repositories),
+      doSelectAgent(agentId, repositories),
     [doSelectAgent],
   );
 
