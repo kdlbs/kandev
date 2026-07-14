@@ -121,6 +121,10 @@ test.describe("Quick Chat", () => {
     const leftHandle = dialog.getByTestId("quick-chat-resize-left");
     const leftBox = await leftHandle.boundingBox();
     expect(leftBox).not.toBeNull();
+    await leftHandle.hover();
+    const leftHighlightBox = await leftHandle.locator("span").boundingBox();
+    expect(leftHighlightBox).not.toBeNull();
+    expect(leftHighlightBox!.x).toBeCloseTo(rightResizedBox!.x, 0);
     await testPage.mouse.move(leftBox!.x + leftBox!.width / 2, leftBox!.y + leftBox!.height / 2);
     await testPage.mouse.down();
     await testPage.mouse.move(

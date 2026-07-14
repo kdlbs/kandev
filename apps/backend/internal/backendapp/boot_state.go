@@ -328,10 +328,6 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 		return quickChatBootState{sessions: []map[string]any{}}, nil
 	}
 	taskIDs := taskIDs(tasks)
-	sessionsByTask, err := b.p.taskSvc.BatchGetSessionsForTasks(ctx, taskIDs)
-	if err != nil {
-		return quickChatBootState{}, err
-	}
 	primaryByTask, err := b.p.taskSvc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
 	if err != nil {
 		return quickChatBootState{}, err
@@ -348,13 +344,13 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 			continue
 		}
 		items = append(items, quickChatBootSession{
-			state:        mapQuickChatSessionState(task, primary),
-			lastActivity: quickChatLastActivity(task, sessionsByTask[task.ID]),
+			state:     mapQuickChatSessionState(task, primary),
+			createdAt: task.CreatedAt,
 		})
 		taskSessions[primary.ID] = taskdto.FromTaskSession(primary)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].lastActivity.After(items[j].lastActivity)
+		return items[i].createdAt.Before(items[j].createdAt)
 	})
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -379,8 +375,8 @@ func (b bootStateBuilder) listQuickChatTasks(ctx context.Context, workspaceID st
 }
 
 type quickChatBootSession struct {
-	state        map[string]any
-	lastActivity time.Time
+	state     map[string]any
+	createdAt time.Time
 }
 
 type quickChatBootState struct {
@@ -455,19 +451,6 @@ func quickChatAgentProfileID(task *taskmodels.Task, primary *taskmodels.TaskSess
 		return primary.AgentProfileID
 	}
 	return ""
-}
-
-func quickChatLastActivity(task *taskmodels.Task, sessions []*taskmodels.TaskSession) time.Time {
-	last := time.Time{}
-	if task != nil {
-		last = task.UpdatedAt
-	}
-	for _, session := range sessions {
-		if session != nil && session.UpdatedAt.After(last) {
-			last = session.UpdatedAt
-		}
-	}
-	return last
 }
 
 func (b bootStateBuilder) addKanbanSnapshotsState(

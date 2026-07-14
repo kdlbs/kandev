@@ -776,11 +776,11 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	}
 	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
 	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
-		id: "task-old", title: "Older Chat", updatedAt: base.Add(-2 * time.Hour),
+		id: "task-old", title: "Older Chat", updatedAt: base.Add(-3 * time.Hour),
 		sessionUpdatedAt: base.Add(-90 * time.Minute), agentProfileID: "agent-old",
 	})
 	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
-		id: "task-new", title: "Newer Chat", updatedAt: base.Add(-4 * time.Hour),
+		id: "task-new", title: "Newer Chat", updatedAt: base.Add(-time.Hour),
 		sessionUpdatedAt: base.Add(-10 * time.Minute), agentProfileID: "agent-new",
 	})
 	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
@@ -833,10 +833,10 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	if len(sessions) != 2 {
 		t.Fatalf("quickChat sessions = %#v, want 2 restored sessions", sessions)
 	}
-	if got := sessions[0].SessionID; got != "task-new-session" {
-		t.Fatalf("first restored session = %q, want newest task-new-session", got)
+	if got := sessions[0].SessionID; got != "task-old-session" {
+		t.Fatalf("first restored session = %q, want first-created task-old-session", got)
 	}
-	if sessions[0].AgentProfileID != "agent-new" || sessions[1].AgentProfileID != "agent-old" {
+	if sessions[0].AgentProfileID != "agent-old" || sessions[1].AgentProfileID != "agent-new" {
 		t.Fatalf("agent profile IDs = %#v", sessions)
 	}
 	if got := decoded.InitialState.TaskSessions.Items["task-new-session"].TaskID; got != "task-new" {

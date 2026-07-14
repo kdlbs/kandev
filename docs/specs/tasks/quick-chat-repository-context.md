@@ -33,6 +33,8 @@ context without changing their checked-out branches or creating a kanban task.
 - The quick-chat message history and composer retain the dialog's popover surface color. The setup
   footer uses that same continuous surface, and the new chat action appears immediately after the
   last chat tab.
+- Quick-chat tabs remain in creation order across reloads; later activity does not reorder them.
+- Hovering either resize target highlights the dialog's outer border, not an inset line.
 - The setup flow supports desktop and mobile layouts without horizontal page scrolling or
   hover-only actions. Mobile quick chat remains full-screen and does not expose resize handles.
 

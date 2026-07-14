@@ -85,7 +85,11 @@ function QuickChatResizeHandle({
         edge === "left" ? "left-0" : "right-0"
       }`}
     >
-      <span className="h-full w-px bg-transparent transition-colors group-hover:bg-primary/60" />
+      <span
+        className={`absolute inset-y-0 w-px bg-transparent transition-colors group-hover:bg-primary/60 ${
+          edge === "left" ? "-left-px" : "-right-px"
+        }`}
+      />
     </button>
   );
 }
