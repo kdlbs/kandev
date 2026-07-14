@@ -32,6 +32,12 @@ async function enableTopbarMetrics(apiClient: ApiClient): Promise<void> {
 test.describe("Sidebar header / top bar alignment", () => {
   test.describe.configure({ retries: 1 });
 
+  test.afterEach(async ({ apiClient }) => {
+    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      system_metrics_display: { show_in_topbar: false },
+    });
+  });
+
   test("task top bar bottom edge aligns with the sidebar header", async ({
     testPage,
     apiClient,
@@ -96,6 +102,7 @@ test.describe("Sidebar header / top bar alignment", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);

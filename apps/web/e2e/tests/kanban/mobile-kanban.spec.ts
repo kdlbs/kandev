@@ -3,6 +3,12 @@ import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { missingGitHealth } from "./health-fixtures";
 
 test.describe("Mobile kanban view", () => {
+  test.afterEach(async ({ apiClient }) => {
+    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      system_metrics_display: { show_in_topbar: false },
+    });
+  });
+
   test("metrics match the height of the mobile topbar actions", async ({ testPage, apiClient }) => {
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       system_metrics_display: { show_in_topbar: true },
