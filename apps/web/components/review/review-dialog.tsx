@@ -14,6 +14,7 @@ import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
+import { normalizeFileChangeStatus } from "@/lib/utils/file-change-status";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import { ReviewTopBar } from "./review-top-bar";
 import { ReviewFileTree } from "./review-file-tree";
@@ -57,19 +58,19 @@ function addCumulativeDiffFiles(
     const key = fileMapKey(path, repoName);
     if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    if (diff) {
-      const matchingUncommitted = findUncommittedByPathAndRepo(gitStatusFiles, path, repoName);
-      fileMap.set(key, {
-        path,
-        diff,
-        status: file.status || "modified",
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        staged: matchingUncommitted?.staged ?? false,
-        source: matchingUncommitted ? "uncommitted" : "committed",
-        repository_name: repoName,
-      });
-    }
+    const matchingUncommitted = findUncommittedByPathAndRepo(gitStatusFiles, path, repoName);
+    fileMap.set(key, {
+      path,
+      diff,
+      status: normalizeFileChangeStatus(file.status),
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+      staged: matchingUncommitted?.staged ?? false,
+      source: matchingUncommitted ? "uncommitted" : "committed",
+      old_path: file.old_path,
+      diff_skip_reason: file.diff_skip_reason,
+      repository_name: repoName,
+    });
   }
 }
 
@@ -98,40 +99,39 @@ function addUncommittedFiles(
     const key = fileMapKey(file.path, file.repository_name);
     if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    if (diff)
-      fileMap.set(key, {
-        path: file.path,
-        diff,
-        status: file.status,
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        staged: file.staged,
-        source: "uncommitted",
-        repository_name: file.repository_name,
-      });
+    fileMap.set(key, {
+      path: file.path,
+      diff,
+      status: normalizeFileChangeStatus(file.status),
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+      staged: file.staged,
+      source: "uncommitted",
+      old_path: file.old_path,
+      diff_skip_reason: file.diff_skip_reason,
+      repository_name: file.repository_name,
+    });
   }
 }
 
-function prFileStatus(status: string): "added" | "deleted" | "modified" {
-  if (status === "added") return "added";
-  if (status === "removed") return "deleted";
-  return "modified";
-}
-
-function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[]) {
+function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[], repoName?: string) {
+  const repositoryName = repoName || undefined;
   for (const file of files) {
-    if (fileMap.has(file.filename)) continue;
+    const key = fileMapKey(file.filename, repositoryName);
+    const hasRepoUnawareCollision = !!repositoryName && fileMap.has(file.filename);
+    if (fileMap.has(key) || hasRepoUnawareCollision) continue;
     const diff = file.patch ? normalizeDiffContent(file.patch) : "";
-    if (diff)
-      fileMap.set(file.filename, {
-        path: file.filename,
-        diff,
-        status: prFileStatus(file.status),
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        staged: false,
-        source: "pr",
-      });
+    fileMap.set(key, {
+      path: file.filename,
+      diff,
+      status: normalizeFileChangeStatus(file.status),
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+      staged: false,
+      source: "pr",
+      old_path: file.old_path,
+      repository_name: repositoryName,
+    });
   }
 }
 
@@ -139,6 +139,7 @@ export function buildAllFiles(
   gitStatusFiles: Record<string, FileInfo> | null,
   cumulativeDiff: CumulativeDiff | null,
   prDiffFiles?: PRDiffFile[],
+  prRepoName?: string,
 ): ReviewFile[] {
   const fileMap = new Map<string, ReviewFile>();
   // Order matters and must match `buildReviewSources` (the Changes panel
@@ -150,7 +151,7 @@ export function buildAllFiles(
   // content even though the cumulative-diff hook was successfully refetching.
   if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
   if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files, gitStatusFiles);
-  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
+  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles, prRepoName);
   return Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -173,6 +174,7 @@ type ReviewDialogProps = {
   gitStatusFiles: Record<string, FileInfo> | null;
   cumulativeDiff: CumulativeDiff | null;
   prDiffFiles?: PRDiffFile[];
+  prRepoName?: string;
 };
 
 function computeReviewSets(
@@ -343,6 +345,7 @@ function useReviewDialogState(props: ReviewDialogProps) {
     gitStatusFiles,
     cumulativeDiff,
     prDiffFiles,
+    prRepoName,
   } = props;
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [splitView, setSplitView] = useState(() =>
@@ -361,8 +364,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
 
   const [filter, setFilter] = useState("");
   const allFiles = useMemo<ReviewFile[]>(
-    () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles),
-    [gitStatusFiles, cumulativeDiff, prDiffFiles],
+    () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName),
+    [gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName],
   );
   const filteredFiles = useFilteredReviewFiles(allFiles, filter);
   const { reviewedFiles, staleFiles } = useMemo(

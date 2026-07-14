@@ -13,9 +13,9 @@ import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { LineStat } from "@/components/diff-stat";
+import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { FileIcon } from "@/components/ui/file-icon";
 import { getFileCategory } from "@/lib/utils/file-types";
-import { FileStatusIcon } from "./file-status-icon";
 import type { ChangedFile } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
 
@@ -139,7 +139,7 @@ export function FileRow({
       <div className="grid items-center shrink-0 [&>*]:col-start-1 [&>*]:row-start-1">
         <div className="flex items-center gap-2 justify-end transition-opacity group-hover:opacity-0 pointer-events-none">
           <LineStat added={file.plus} removed={file.minus} />
-          <FileStatusIcon status={file.status} />
+          <FileStatusIcon status={file.status} oldPath={file.oldPath} />
         </div>
         <FileRowActions
           path={file.path}

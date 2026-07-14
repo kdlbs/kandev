@@ -1,13 +1,15 @@
 import { djb2Hash } from "@/lib/utils/hash";
+import type { FileChangeStatus } from "@/lib/utils/file-change-status";
 
 export type ReviewFile = {
   path: string;
   diff: string;
-  status: string;
+  status: FileChangeStatus;
   additions: number;
   deletions: number;
   staged: boolean;
   source: "uncommitted" | "committed" | "pr";
+  old_path?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
   /**
    * Repository this file belongs to. Set on multi-repo task changes so the
@@ -52,6 +54,41 @@ export function diffSkipReasonLabel(reason?: string): string {
       return "Diff skipped — too many changed files";
     default:
       return "Loading diff...";
+  }
+}
+
+const TEXTUAL_HUNK_HEADER = /^@@+ (.+?) @@+/;
+const HUNK_RANGE = /[+-]\d+(?:,(\d+))?/g;
+
+function hunkHeaderHasLines(line: string): boolean {
+  const header = line.match(TEXTUAL_HUNK_HEADER);
+  if (!header) return false;
+  return [...header[1].matchAll(HUNK_RANGE)].some((range) => Number(range[1] ?? "1") > 0);
+}
+
+/** True when a file has a real textual delta, excluding git's synthetic rename/empty hunks. */
+export function hasTextualDiff(
+  file: Pick<ReviewFile, "diff" | "status" | "additions" | "deletions">,
+): boolean {
+  if (file.status === "renamed" && file.additions === 0 && file.deletions === 0) return false;
+  return file.diff.split("\n").some(hunkHeaderHasLines);
+}
+
+export function reviewDiffUnavailableLabel(file: ReviewFile): string {
+  if (file.diff_skip_reason) return diffSkipReasonLabel(file.diff_skip_reason);
+  switch (file.status) {
+    case "added":
+      return "Added file has no textual diff";
+    case "untracked":
+      return "Untracked file has no textual diff";
+    case "deleted":
+      return "Deleted file has no textual diff";
+    case "renamed":
+      return file.old_path
+        ? `Moved from ${file.old_path}; no textual changes`
+        : "File moved; no textual changes";
+    case "modified":
+      return "No textual diff available";
   }
 }
 

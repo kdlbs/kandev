@@ -1003,6 +1003,7 @@ export class ApiClient {
       additions: number;
       deletions: number;
       patch?: string;
+      old_path?: string;
     }>,
   ): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/files", {

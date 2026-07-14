@@ -20,13 +20,18 @@ describe("mapPRFilesToChangedFiles", () => {
       diffFile({ filename: "b.ts", status: "removed" }),
       diffFile({ filename: "c.ts", status: "renamed", old_path: "old/c.ts" }),
       diffFile({ filename: "d.ts", status: "modified" }),
-      // Anything not in the explicit set should fall through to "modified".
-      diffFile({ filename: "e.ts", status: "weird" as PRDiffFile["status"] }),
+      diffFile({ filename: "e.ts", status: "copied" }),
+      diffFile({ filename: "f.ts", status: "changed" }),
+      diffFile({ filename: "g.ts", status: "unchanged" }),
+      diffFile({ filename: "h.ts", status: "weird" as PRDiffFile["status"] }),
     ]);
     expect(out.map((f) => f.status)).toEqual([
       "added",
       "deleted",
       "renamed",
+      "modified",
+      "modified",
+      "modified",
       "modified",
       "modified",
     ]);

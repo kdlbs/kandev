@@ -4,6 +4,7 @@ import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { IconAlertTriangle, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { FileDiffViewer, DiffErrorBoundary } from "@/components/diff";
+import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import type { RevertBlockInfo } from "@/components/diff";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
@@ -13,7 +14,12 @@ import { useToast } from "@/components/toast-provider";
 import { useRunComment } from "@/hooks/domains/comments/use-run-comment";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
 import type { DiffComment } from "@/lib/diff/types";
-import { diffSkipReasonLabel, reviewFileKey } from "./types";
+import {
+  diffSkipReasonLabel,
+  hasTextualDiff,
+  reviewDiffUnavailableLabel,
+  reviewFileKey,
+} from "./types";
 import type { ReviewFile } from "./types";
 import { RepoGroupHeader } from "./review-diff-list-groups";
 import { FileDiffToolbar } from "./review-diff-toolbar";
@@ -245,7 +251,11 @@ function FileDiffHeader({
   onToggleWordWrap,
 }: FileDiffHeaderProps) {
   return (
-    <div className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-card/95 backdrop-blur-sm border-b border-border/50">
+    <div
+      data-testid="review-file-header"
+      data-file-path={file.path}
+      className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-card/95 backdrop-blur-sm border-b border-border/50"
+    >
       <Checkbox
         checked={isReviewed}
         onCheckedChange={onCheckboxChange}
@@ -262,6 +272,7 @@ function FileDiffHeader({
         )}
         <span className="text-[13px] font-medium truncate">{file.path}</span>
       </button>
+      <FileStatusIcon status={file.status} oldPath={file.old_path} className="sm:hidden" />
       {isStale && (
         <span className="flex items-center gap-1 text-xs text-yellow-500">
           <IconAlertTriangle className="h-3.5 w-3.5" />
@@ -438,7 +449,8 @@ function renderDiffContent(opts: {
     onCommentRun,
     onToggleExpandUnchanged,
   } = opts;
-  if (shouldRender && file.diff) {
+  const hasText = hasTextualDiff(file);
+  if (shouldRender && hasText) {
     return (
       <>
         <DiffErrorBoundary filePath={file.path}>
@@ -468,9 +480,12 @@ function renderDiffContent(opts: {
       </>
     );
   }
+  const message = hasText
+    ? diffSkipReasonLabel(file.diff_skip_reason)
+    : reviewDiffUnavailableLabel(file);
   return (
     <div className="flex items-center justify-center py-12 text-muted-foreground text-sm">
-      {diffSkipReasonLabel(file.diff_skip_reason)}
+      {message}
     </div>
   );
 }

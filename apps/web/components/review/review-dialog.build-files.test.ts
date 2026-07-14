@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { buildAllFiles, filterPendingDiffCommentsForSession } from "./review-dialog";
+import { reviewFileKey } from "./types";
 import type { CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 import type { Comment } from "@/lib/state/slices/comments";
+
+const RENAMED_PATH = "src/new-name.ts";
+const PREVIOUS_PATH = "src/old-name.ts";
+const README_PATH = "README.md";
+const FRONTEND_REPO = "frontend";
+const BACKEND_REPO = "backend";
 
 function pendingDiffComment(overrides: Partial<Comment>): Comment {
   return {
@@ -136,6 +143,189 @@ describe("buildAllFiles (review dialog)", () => {
     // Exact equality (not toContain) so a future normalization change that
     // appends or rewrites diff content can't silently pass this guard.
     expect(result[0].diff).toBe("@@ -1 +1 @@\n-u\n+u");
+  });
+});
+
+describe("buildAllFiles patchless status files", () => {
+  it("keeps a patchless PR rename with its previous path", () => {
+    const result = buildAllFiles(null, null, [
+      {
+        filename: RENAMED_PATH,
+        old_path: PREVIOUS_PATH,
+        status: "renamed",
+        patch: "",
+        additions: 0,
+        deletions: 0,
+      },
+    ]);
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        path: RENAMED_PATH,
+        old_path: PREVIOUS_PATH,
+        status: "renamed",
+        diff: "",
+        source: "pr",
+      }),
+    ]);
+    expect(reviewFileKey(result[0])).toBe(RENAMED_PATH);
+    expect(result[0].repository_name).toBeUndefined();
+  });
+
+  it("keeps patchless uncommitted and cumulative files with metadata", () => {
+    const gitStatusFiles = {
+      "assets/logo.png": {
+        path: "assets/logo.png",
+        status: "modified" as const,
+        staged: false,
+        diff_skip_reason: "binary" as const,
+      },
+    };
+    const cumulativeDiff = {
+      session_id: "s1",
+      base_commit: "abc",
+      head_commit: "def",
+      total_commits: 1,
+      files: {
+        [RENAMED_PATH]: {
+          path: RENAMED_PATH,
+          old_path: PREVIOUS_PATH,
+          status: "renamed",
+          staged: false,
+          additions: 0,
+          deletions: 0,
+          diff: "",
+        },
+      },
+    } as CumulativeDiff;
+
+    const result = buildAllFiles(gitStatusFiles, cumulativeDiff);
+
+    expect(result).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "assets/logo.png",
+          diff_skip_reason: "binary",
+          diff: "",
+          source: "uncommitted",
+        }),
+        expect.objectContaining({
+          path: RENAMED_PATH,
+          old_path: PREVIOUS_PATH,
+          status: "renamed",
+          diff: "",
+          source: "committed",
+        }),
+      ]),
+    );
+    expect(result).toHaveLength(2);
+  });
+});
+
+describe("buildAllFiles patchless source identity", () => {
+  it("keeps patchless uncommitted precedence over a same-repo PR file", () => {
+    const gitStatusFiles = {
+      [`${FRONTEND_REPO}\u0000${README_PATH}`]: {
+        path: README_PATH,
+        status: "modified" as const,
+        staged: false,
+        repository_name: FRONTEND_REPO,
+      },
+    };
+
+    const result = buildAllFiles(
+      gitStatusFiles,
+      null,
+      [
+        {
+          filename: README_PATH,
+          status: "modified",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+      FRONTEND_REPO,
+    );
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        path: README_PATH,
+        source: "uncommitted",
+        repository_name: FRONTEND_REPO,
+      }),
+    ]);
+  });
+
+  it("keeps patchless cumulative precedence over a same-repo PR file", () => {
+    const cumulativeDiff = {
+      session_id: "s1",
+      base_commit: "abc",
+      head_commit: "def",
+      total_commits: 1,
+      files: {
+        [`${FRONTEND_REPO}\u0000${README_PATH}`]: {
+          path: README_PATH,
+          status: "modified",
+          staged: false,
+          repository_name: FRONTEND_REPO,
+        },
+      },
+    } as CumulativeDiff;
+
+    const result = buildAllFiles(
+      null,
+      cumulativeDiff,
+      [
+        {
+          filename: README_PATH,
+          status: "modified",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+      FRONTEND_REPO,
+    );
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        path: README_PATH,
+        source: "committed",
+        repository_name: FRONTEND_REPO,
+      }),
+    ]);
+  });
+
+  it("keeps same-path files from different repositories distinct", () => {
+    const gitStatusFiles = {
+      [`${BACKEND_REPO}\u0000${README_PATH}`]: {
+        path: README_PATH,
+        status: "modified" as const,
+        staged: false,
+        repository_name: BACKEND_REPO,
+      },
+    };
+
+    const result = buildAllFiles(
+      gitStatusFiles,
+      null,
+      [
+        {
+          filename: README_PATH,
+          status: "modified",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+      FRONTEND_REPO,
+    );
+
+    expect(result.map(reviewFileKey).sort()).toEqual([
+      "backend\u0000README.md",
+      "frontend\u0000README.md",
+    ]);
   });
 });
 

@@ -11,6 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { cn } from "@kandev/ui/lib/utils";
+import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { FileIcon } from "@/components/ui/file-icon";
 import { useTree, type VisibleRow } from "@/hooks/use-tree";
 import type { ReviewFile, FileTreeNode } from "./types";
@@ -182,6 +183,8 @@ function ReviewFileRow({
   const isSelected = selectedFile === key;
   return (
     <div
+      data-testid="review-file-row"
+      data-file-path={file.path}
       className={cn(
         "flex items-center gap-1.5 px-2 py-1 cursor-pointer transition-colors group",
         isSelected ? "bg-accent/50" : "hover:bg-muted/50",
@@ -196,14 +199,17 @@ function ReviewFileRow({
         className="h-3.5 w-3.5"
       />
       <FileIcon fileName={row.node.name} className="h-4 w-4 shrink-0" />
-      <span className="text-[13px] truncate flex-1">{row.node.name}</span>
+      <span data-review-file-name className="text-[13px] truncate flex-1 min-w-0">
+        {row.node.name}
+      </span>
       {isStale && <IconAlertTriangle className="h-3 w-3 text-yellow-500 shrink-0" />}
       {commentCount > 0 && (
-        <span className="flex items-center gap-0.5 text-[10px] text-blue-500">
+        <span className="flex items-center gap-0.5 text-[10px] text-blue-500 shrink-0">
           <IconMessage className="h-3 w-3" />
           {commentCount}
         </span>
       )}
+      <FileStatusIcon status={file.status} oldPath={file.old_path} />
     </div>
   );
 }

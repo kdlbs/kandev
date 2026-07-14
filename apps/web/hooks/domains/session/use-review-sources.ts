@@ -3,10 +3,11 @@ import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-gi
 import { useCumulativeDiff } from "./use-cumulative-diff";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
-import { normalizeDiffContent } from "@/components/review/types";
+import { normalizeDiffContent, reviewFileKey } from "@/components/review/types";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { ReviewFile } from "@/components/review/types";
 import type { PRDiffFile } from "@/lib/types/github";
+import { normalizeFileChangeStatus } from "@/lib/utils/file-change-status";
 
 const debug = createDebugLogger("review:sources");
 
@@ -18,6 +19,7 @@ type UncommittedFile = {
   diff?: string;
   diff_skip_reason?: ReviewFile["diff_skip_reason"];
   status?: string;
+  old_path?: string;
   additions?: number;
   deletions?: number;
   staged?: boolean;
@@ -25,7 +27,9 @@ type UncommittedFile = {
 
 type CumulativeFile = {
   diff?: string;
+  diff_skip_reason?: ReviewFile["diff_skip_reason"];
   status?: string;
+  old_path?: string;
   additions?: number;
   deletions?: number;
   repository_name?: string;
@@ -45,16 +49,16 @@ function addUncommittedFiles(
   for (const [path, file] of Object.entries(files)) {
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     const skipReason = file.diff_skip_reason;
-    if (!diff && !skipReason) continue;
-    const key = repositoryName ? `${repositoryName}:${path}` : path;
+    const key = reviewFileKey({ path, repository_name: repositoryName });
     fileMap.set(key, {
       path,
       diff,
-      status: file.status ?? "modified",
+      status: normalizeFileChangeStatus(file.status),
       additions: file.additions ?? 0,
       deletions: file.deletions ?? 0,
       staged: file.staged ?? false,
       source: "uncommitted",
+      old_path: file.old_path,
       diff_skip_reason: skipReason,
       repository_name: repositoryName,
     });
@@ -73,28 +77,23 @@ function addCumulativeFiles(
     // Prefer the stamped value so the composite key doesn't bleed into the
     // displayed path; fall back to the map key for single-repo.
     const path = file.path ?? mapKey;
-    const key = file.repository_name ? `${file.repository_name}:${path}` : path;
+    const key = reviewFileKey({ path, repository_name: file.repository_name });
     const hasRepoUnawareCollision = key !== path && fileMap.has(path);
     if (fileMap.has(key) || uncommittedPaths.has(key) || hasRepoUnawareCollision) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    if (!diff) continue;
     fileMap.set(key, {
       path,
       diff,
-      status: file.status || "modified",
+      status: normalizeFileChangeStatus(file.status),
       additions: file.additions ?? 0,
       deletions: file.deletions ?? 0,
       staged: false,
       source: "committed",
+      old_path: file.old_path,
+      diff_skip_reason: file.diff_skip_reason,
       repository_name: file.repository_name,
     });
   }
-}
-
-function prFileStatus(status: string): "added" | "deleted" | "modified" {
-  if (status === "added") return "added";
-  if (status === "removed") return "deleted";
-  return "modified";
 }
 
 function addPRFiles(
@@ -104,19 +103,19 @@ function addPRFiles(
   repoName?: string,
 ) {
   for (const file of files) {
-    const key = repoName ? `${repoName}:${file.filename}` : file.filename;
+    const key = reviewFileKey({ path: file.filename, repository_name: repoName });
     const hasRepoUnawareCollision = key !== file.filename && fileMap.has(file.filename);
     if (fileMap.has(key) || uncommittedPaths.has(key) || hasRepoUnawareCollision) continue;
     const diff = file.patch ? normalizeDiffContent(file.patch) : "";
-    if (!diff) continue;
     fileMap.set(key, {
       path: file.filename,
       diff,
-      status: prFileStatus(file.status),
+      status: normalizeFileChangeStatus(file.status),
       additions: file.additions ?? 0,
       deletions: file.deletions ?? 0,
       staged: false,
       source: "pr",
+      old_path: file.old_path,
       repository_name: repoName,
     });
   }
@@ -127,15 +126,12 @@ function collectPathsFromFiles(
   files: Record<string, UncommittedFile>,
   repositoryName?: string,
 ): void {
-  for (const [path, file] of Object.entries(files)) {
-    const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    if (diff || file.diff_skip_reason) {
-      // Always add bare path (for deduping repo-unaware sources like cumulative
-      // diffs that may not carry repository_name).
-      paths.add(path);
-      // Also add composite key (for repo-aware dedup when sources carry repo info).
-      if (repositoryName) paths.add(`${repositoryName}:${path}`);
-    }
+  for (const path of Object.keys(files)) {
+    // Always add bare path (for deduping repo-unaware sources like cumulative
+    // diffs that may not carry repository_name).
+    paths.add(path);
+    // Also add composite key (for repo-aware dedup when sources carry repo info).
+    if (repositoryName) paths.add(reviewFileKey({ path, repository_name: repositoryName }));
   }
 }
 
@@ -179,10 +175,10 @@ export type BuildReviewSourcesResult = {
 /**
  * Pure helper that merges the three diff sources into one sorted, deduped
  * list and computes per-source counts. Uncommitted files write first under
- * composite `repo:path` keys (multi-repo) or simple `path` keys (single-repo).
- * Committed and PR files write next under simple `path` keys but skip any
- * path that already appears in the uncommitted set — preserving dedup
- * priority (uncommitted > committed > PR) across the key-shape mismatch.
+ * shared `reviewFileKey` composite keys (multi-repo) or bare paths
+ * (single-repo). Committed and PR files write next under the same key shape
+ * but skip any path already present in the uncommitted set — preserving
+ * dedup priority (uncommitted > committed > PR).
  */
 export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewSourcesResult {
   const { gitStatus, statusByRepo, cumulativeDiff, prDiffFiles, prRepoName } = input;

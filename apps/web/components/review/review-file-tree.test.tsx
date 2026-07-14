@@ -43,6 +43,23 @@ function renderTree(files: ReviewFile[], overrides: RenderOpts = {}) {
   return { onFilterChange, onSelectFile, onToggleReviewed };
 }
 
+describe("ReviewFileTree status markers", () => {
+  it("renders each file status as the final fixed row item", () => {
+    renderTree([
+      file({ path: "src/added.ts", status: "added" }),
+      file({ path: "src/modified.ts", status: "modified" }),
+      file({ path: "src/deleted.ts", status: "deleted" }),
+      file({ path: "src/moved.ts", status: "renamed" }),
+    ]);
+
+    for (const label of ["Added", "Modified", "Deleted", "Moved"]) {
+      const marker = screen.getByRole("img", { name: label });
+      expect(marker.parentElement?.lastElementChild).toBe(marker);
+      expect(marker.className).toContain("shrink-0");
+    }
+  });
+});
+
 describe("ReviewFileTree", () => {
   it("renders one row per file", () => {
     renderTree([file({ path: "src/a.ts" }), file({ path: "src/b.ts" })]);

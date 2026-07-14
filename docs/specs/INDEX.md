@@ -98,6 +98,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
+| [review-file-status](ui/review-file-status.md) | building |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI

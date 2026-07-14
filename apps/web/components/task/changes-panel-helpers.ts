@@ -3,11 +3,12 @@
 import { hashDiff, normalizeDiffContent } from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import type { PRDiffFile } from "@/lib/types/github";
+import { normalizeFileChangeStatus, type FileChangeStatus } from "@/lib/utils/file-change-status";
 import type { PRChangedFile } from "./changes-panel-timeline";
 
 export type ChangedFile = {
   path: string;
-  status: FileInfo["status"];
+  status: FileChangeStatus;
   staged: boolean;
   plus: number | undefined;
   minus: number | undefined;
@@ -130,30 +131,14 @@ export function mapPRFilesToChangedFiles(
   files: PRDiffFile[],
   repositoryName?: string,
 ): PRChangedFile[] {
-  return files.map((file) => {
-    let status: FileInfo["status"];
-    switch (file.status) {
-      case "added":
-        status = "added";
-        break;
-      case "removed":
-        status = "deleted";
-        break;
-      case "renamed":
-        status = "renamed";
-        break;
-      default:
-        status = "modified";
-    }
-    return {
-      path: file.filename,
-      status,
-      plus: file.additions,
-      minus: file.deletions,
-      oldPath: file.old_path,
-      repository_name: repositoryName ?? "",
-    };
-  });
+  return files.map((file) => ({
+    path: file.filename,
+    status: normalizeFileChangeStatus(file.status),
+    plus: file.additions,
+    minus: file.deletions,
+    oldPath: file.old_path,
+    repository_name: repositoryName ?? "",
+  }));
 }
 
 export function filterUnpushedCommits<T extends { commit_sha: string }>(
