@@ -123,7 +123,8 @@ type CreateWorkflowDialogProps = {
   selectedTemplateId: string | null;
   onSelectedTemplateChange: (value: string | null) => void;
   workflowTemplates: WorkflowTemplate[];
-  onCreate: () => void;
+  onCreate: () => void | Promise<void>;
+  createLoading?: boolean;
 };
 
 export function CreateWorkflowDialog({
@@ -135,6 +136,7 @@ export function CreateWorkflowDialog({
   onSelectedTemplateChange,
   workflowTemplates,
   onCreate,
+  createLoading = false,
 }: CreateWorkflowDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -199,10 +201,11 @@ export function CreateWorkflowDialog({
           </Button>
           <Button
             onClick={onCreate}
+            disabled={createLoading}
             className="cursor-pointer"
             data-testid="confirm-create-workflow"
           >
-            Add Workflow
+            {createLoading ? "Adding..." : "Add Workflow"}
           </Button>
         </DialogFooter>
       </DialogContent>

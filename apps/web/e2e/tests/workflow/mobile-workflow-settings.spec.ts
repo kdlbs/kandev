@@ -28,12 +28,39 @@ test.describe("Workflow settings on mobile", () => {
     await childCompletionSelect.click();
     await testPage.getByRole("option", { name: "Move to next step" }).click();
 
-    await page.saveButton(card).click();
     await expect
       .poll(async () => {
         const { steps } = await apiClient.listWorkflowSteps(workflow.id);
         return steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed;
       })
       .toEqual([{ type: "move_to_next" }]);
+  });
+
+  test("keeps workflow controls within the mobile viewport", async ({ testPage, seedData }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("E2E Workflow");
+    await expect(page.saveButton(card)).toHaveCount(0);
+    await expect(page.saveStatus(card)).toBeVisible();
+
+    const viewportWidth = await testPage.evaluate(() => window.innerWidth);
+    const controls = [
+      page.addWorkflowButton,
+      card.locator("input").first(),
+      page.workflowAgentProfileSelect(card),
+      page.deleteWorkflowButton(card),
+    ];
+    for (const control of controls) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth);
+    }
+
+    const hasDocumentOverflow = await testPage.evaluate(
+      () => document.documentElement.scrollWidth > window.innerWidth,
+    );
+    expect(hasDocumentOverflow).toBe(false);
   });
 });

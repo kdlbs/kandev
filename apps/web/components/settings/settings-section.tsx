@@ -28,7 +28,7 @@ export function SettingsSection({
           </h3>
           {description && <p className="text-sm text-muted-foreground mt-1">{description}</p>}
         </div>
-        {action && <div className="shrink-0">{action}</div>}
+        {action && <div className="w-full shrink-0 sm:w-auto">{action}</div>}
       </div>
       {children}
     </section>

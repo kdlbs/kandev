@@ -1,22 +1,29 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkflowAction,
   createWorkflowStepAction,
   deleteWorkflowStepAction,
+  getWorkflowTaskCount,
   getStepTaskCount,
-  listWorkflowStepsAction,
   reorderWorkflowStepsAction,
+  updateWorkflowAction,
   updateWorkflowStepAction,
 } from "@/app/actions/workspaces";
-import type { OnTurnCompleteAction } from "@/lib/types/workflow-actions";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
-import { useWorkflowSaveActions, useWorkflowStepActions } from "./workflow-card-actions";
-import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
+import {
+  useWorkflowDeleteHandlers,
+  useStepDeleteHandlers,
+  createWorkflowDraftSaveProgress,
+  persistWorkflowDraft,
+  useWorkflowStepActions,
+} from "./workflow-card-actions";
 
 vi.mock("@/app/actions/workspaces", () => ({
   createWorkflowAction: vi.fn(),
   createWorkflowStepAction: vi.fn(),
+  deleteWorkflowAction: vi.fn(),
+  updateWorkflowAction: vi.fn(),
   updateWorkflowStepAction: vi.fn(),
   deleteWorkflowStepAction: vi.fn(),
   reorderWorkflowStepsAction: vi.fn(),
@@ -29,14 +36,6 @@ vi.mock("@/app/actions/workspaces", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(createWorkflowStepAction).mockImplementation(async (payload) =>
-    step(`created-${payload.position}`, payload.name, payload.position, false),
-  );
-  vi.mocked(updateWorkflowStepAction).mockImplementation(async (stepId, updates) => ({
-    ...step(stepId, stepId, updates.position ?? 0, updates.is_start_step ?? false),
-    ...updates,
-  }));
-  vi.mocked(reorderWorkflowStepsAction).mockResolvedValue({ steps: [], total: 0 });
 });
 
 const workflow = {
@@ -46,14 +45,13 @@ const workflow = {
   created_at: "",
   updated_at: "",
 } as Workflow;
+const CLIENT_WORKFLOW_ID = "temp-workflow-1";
+const CLIENT_STEP_ONE = "temp-step-1";
+const CLIENT_STEP_TWO = "temp-step-2";
+const SERVER_STEP_ONE = "server-step-1";
+const SERVER_STEP_TWO = "server-step-2";
 
-function step(
-  id: string,
-  name: string,
-  position: number,
-  isStartStep: boolean,
-  options: { autoStart?: boolean; onTurnComplete?: OnTurnCompleteAction[] } = {},
-): WorkflowStep {
+function step(id: string, name: string, position: number, isStartStep: boolean): WorkflowStep {
   return {
     id,
     workflow_id: workflow.id,
@@ -62,603 +60,438 @@ function step(
     color: "bg-slate-500",
     allow_manual_move: true,
     is_start_step: isStartStep,
-    events: {
-      on_enter: options.autoStart ? [{ type: "auto_start_agent" }] : [],
-      on_turn_complete: options.onTurnComplete,
-    },
     created_at: "",
     updated_at: "",
   };
 }
 
-function renderNewWorkflowStepActions(initialSteps: WorkflowStep[]) {
+function renderReadOnlyWorkflowStepActions(initialSteps: WorkflowStep[]) {
   let steps = initialSteps;
   const setWorkflowSteps = vi.fn(
     (updater: ((prev: WorkflowStep[]) => WorkflowStep[]) | WorkflowStep[]) => {
       steps = typeof updater === "function" ? updater(steps) : updater;
     },
   );
-  const view = renderHook(() => {
-    const mutationGuard = useWorkflowMutationGuard(steps);
-    return useWorkflowStepActions({
+  const refreshWorkflowSteps = vi.fn();
+  const view = renderHook(() =>
+    useWorkflowStepActions({
       workflow,
-      isNewWorkflow: true,
+      readOnly: true,
       workflowSteps: steps,
       setWorkflowSteps,
+      refreshWorkflowSteps,
       setStepToDelete: vi.fn(),
       setStepTaskCount: vi.fn(),
       setTargetStepForMigration: vi.fn(),
       setStepDeleteOpen: vi.fn(),
       toast: vi.fn(),
-      mutationGuard,
-    });
-  });
-  return { ...view, getSteps: () => steps };
-}
-
-function renderPersistedWorkflowStepActions(steps: WorkflowStep[]) {
-  let currentSteps = steps;
-  const setWorkflowSteps = vi.fn(
-    (updater: ((prev: WorkflowStep[]) => WorkflowStep[]) | WorkflowStep[]) => {
-      currentSteps = typeof updater === "function" ? updater(currentSteps) : updater;
-    },
+    }),
   );
-  const setStepDeleteOpen = vi.fn();
-  const view = renderHook(() => {
-    const mutationGuard = useWorkflowMutationGuard(steps);
-    const actions = useWorkflowStepActions({
-      workflow,
-      isNewWorkflow: false,
-      workflowSteps: steps,
-      setWorkflowSteps,
-      setStepToDelete: vi.fn(),
-      setStepTaskCount: vi.fn(),
-      setTargetStepForMigration: vi.fn(),
-      setStepDeleteOpen,
-      toast: vi.fn(),
-      mutationGuard,
-    });
-    return { actions, mutationGuard };
-  });
-  return {
-    ...view,
-    setWorkflowSteps,
-    setStepDeleteOpen,
-    getSteps: () => currentSteps,
-  };
+  return { ...view, getSteps: () => steps, refreshWorkflowSteps, setWorkflowSteps };
 }
 
-function deferredPromise<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
-}
+describe("useWorkflowStepActions", () => {
+  it("updates a step locally without calling persistence APIs", async () => {
+    const original = step("step-1", "Todo", 0, true);
+    const setWorkflowSteps = vi.fn();
+    const { result } = renderHook(() =>
+      useWorkflowStepActions({
+        workflow,
+        readOnly: false,
+        workflowSteps: [original],
+        setWorkflowSteps,
+        refreshWorkflowSteps: vi.fn(),
+        setStepToDelete: vi.fn(),
+        setStepTaskCount: vi.fn(),
+        setTargetStepForMigration: vi.fn(),
+        setStepDeleteOpen: vi.fn(),
+        toast: vi.fn(),
+      }),
+    );
 
-it("keeps one start step while editing a new workflow locally", async () => {
-  const { result, getSteps } = renderNewWorkflowStepActions([
-    step("step-1", "Todo", 0, true),
-    step("step-2", "Plan", 1, false),
-  ]);
-
-  await act(async () => {
-    await result.current.handleUpdateWorkflowStep("step-2", { is_start_step: true });
-  });
-
-  expect(
-    getSteps()
-      .filter((s) => s.is_start_step)
-      .map((s) => s.id),
-  ).toEqual(["step-2"]);
-});
-
-it("does not update a persisted step when the proposal introduces a blocking cycle", async () => {
-  const steps = [
-    step("build", "Build", 0, true, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_next" }],
-    }),
-    step("review", "Review", 1, false, { autoStart: true }),
-  ];
-  const { result } = renderHook(() => {
-    const mutationGuard = useWorkflowMutationGuard(steps);
-    return useWorkflowStepActions({
-      workflow,
-      isNewWorkflow: false,
-      workflowSteps: steps,
-      setWorkflowSteps: vi.fn(),
-      setStepToDelete: vi.fn(),
-      setStepTaskCount: vi.fn(),
-      setTargetStepForMigration: vi.fn(),
-      setStepDeleteOpen: vi.fn(),
-      toast: vi.fn(),
-      mutationGuard,
+    await act(async () => {
+      await result.current.handleUpdateWorkflowStep("step-1", { name: "Renamed" });
     });
+
+    const updater = setWorkflowSteps.mock.calls[0][0] as (steps: WorkflowStep[]) => WorkflowStep[];
+    expect(updater([original])[0].name).toBe("Renamed");
+    expect(updateWorkflowStepAction).not.toHaveBeenCalled();
   });
 
-  await act(async () => {
-    await result.current.handleUpdateWorkflowStep("review", {
-      events: {
-        ...steps[1].events,
-        on_turn_complete: [{ type: "move_to_previous" }],
-      },
+  it("adds a client-only step without calling persistence APIs", async () => {
+    const setWorkflowSteps = vi.fn();
+    const { result } = renderHook(() =>
+      useWorkflowStepActions({
+        workflow,
+        workflowSteps: [step("step-1", "Todo", 0, true)],
+        setWorkflowSteps,
+        refreshWorkflowSteps: vi.fn(),
+        setStepToDelete: vi.fn(),
+        setStepTaskCount: vi.fn(),
+        setTargetStepForMigration: vi.fn(),
+        setStepDeleteOpen: vi.fn(),
+        toast: vi.fn(),
+      }),
+    );
+
+    await act(() => result.current.handleAddWorkflowStep());
+
+    const updater = setWorkflowSteps.mock.calls[0][0] as (steps: WorkflowStep[]) => WorkflowStep[];
+    expect(updater([])[0]).toMatchObject({
+      id: expect.stringMatching(/^temp-step-/),
+      name: "New Step",
     });
+    expect(createWorkflowStepAction).not.toHaveBeenCalled();
   });
-
-  expect(updateWorkflowStepAction).not.toHaveBeenCalled();
 });
 
-it("does not persist a second topology edit before the first mutation completes", async () => {
-  const steps = [
-    step("work", "Work", 0, true, { autoStart: true }),
-    step("review", "Review", 1, false),
-  ];
-  const update = deferredPromise<WorkflowStep>();
-  vi.mocked(updateWorkflowStepAction).mockReturnValueOnce(update.promise);
-  const { result } = renderPersistedWorkflowStepActions(steps);
+describe("useWorkflowStepActions destructive and ordering paths", () => {
+  it("refuses to add, update, remove, or reorder steps when readOnly", async () => {
+    const initialSteps = [step("step-1", "Todo", 0, true), step("step-2", "Plan", 1, false)];
+    const { result, getSteps, refreshWorkflowSteps } =
+      renderReadOnlyWorkflowStepActions(initialSteps);
 
-  let firstEdit!: Promise<void>;
-  await act(async () => {
-    firstEdit = result.current.actions.handleUpdateWorkflowStep("work", {
-      events: { on_turn_complete: [{ type: "move_to_next" }] },
+    await act(async () => {
+      await result.current.handleAddWorkflowStep();
     });
-    await vi.waitFor(() => expect(updateWorkflowStepAction).toHaveBeenCalledTimes(1));
-    await result.current.actions.handleUpdateWorkflowStep("review", {
-      events: { on_turn_complete: [{ type: "move_to_previous" }] },
+    await act(async () => {
+      await result.current.handleUpdateWorkflowStep("step-2", { name: "Renamed" });
     });
-  });
-
-  expect(updateWorkflowStepAction).toHaveBeenCalledTimes(1);
-  expect(result.current.mutationGuard.isMutationPending).toBe(true);
-
-  update.resolve({
-    ...steps[0],
-    events: { on_turn_complete: [{ type: "move_to_next" }] },
-  });
-  await act(async () => {
-    await firstEdit;
-  });
-  expect(result.current.mutationGuard.isMutationPending).toBe(false);
-});
-
-it("does not replace a pending warning proposal with a second edit", async () => {
-  const steps = [
-    step("work", "Work", 0, true, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_next" }],
-    }),
-    step("review", "Review", 1, false),
-  ];
-  const { result } = renderPersistedWorkflowStepActions(steps);
-
-  await act(async () => {
-    await result.current.actions.handleUpdateWorkflowStep("review", {
-      events: {
-        ...steps[1].events,
-        on_turn_complete: [{ type: "move_to_previous" }],
-      },
+    await act(async () => {
+      await result.current.handleRemoveWorkflowStep("step-1");
     });
-  });
-  const proposal = result.current.mutationGuard.proposal;
-
-  await act(async () => {
-    await result.current.actions.handleUpdateWorkflowStep("work", { name: "Building" });
-  });
-
-  expect(result.current.mutationGuard.proposal).toBe(proposal);
-  expect(updateWorkflowStepAction).not.toHaveBeenCalled();
-});
-
-it("does not replace a pending blocking proposal with a second edit", async () => {
-  const steps = [
-    step("build", "Build", 0, true, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_next" }],
-    }),
-    step("review", "Review", 1, false, { autoStart: true }),
-  ];
-  const { result } = renderPersistedWorkflowStepActions(steps);
-
-  await act(async () => {
-    await result.current.actions.handleUpdateWorkflowStep("review", {
-      events: { on_turn_complete: [{ type: "move_to_previous" }] },
+    await act(async () => {
+      await result.current.handleReorderWorkflowSteps([initialSteps[1], initialSteps[0]]);
     });
+
+    expect(getSteps()).toEqual(initialSteps);
+    expect(createWorkflowStepAction).not.toHaveBeenCalled();
+    expect(updateWorkflowStepAction).not.toHaveBeenCalled();
+    expect(deleteWorkflowStepAction).not.toHaveBeenCalled();
+    expect(reorderWorkflowStepsAction).not.toHaveBeenCalled();
+    expect(refreshWorkflowSteps).not.toHaveBeenCalled();
   });
-  const proposal = result.current.mutationGuard.proposal;
 
-  await act(async () => {
-    await result.current.actions.handleUpdateWorkflowStep("build", { name: "Building" });
-  });
+  it("opens the task migration dialog without reporting a saved mutation", async () => {
+    vi.mocked(getStepTaskCount).mockResolvedValue({ task_count: 2 });
+    const setStepDeleteOpen = vi.fn();
+    const { result } = renderHook(() =>
+      useWorkflowStepActions({
+        workflow,
+        readOnly: false,
+        workflowSteps: [step("step-1", "Todo", 0, true), step("step-2", "Done", 1, false)],
+        setWorkflowSteps: vi.fn(),
+        refreshWorkflowSteps: vi.fn(),
+        setStepToDelete: vi.fn(),
+        setStepTaskCount: vi.fn(),
+        setTargetStepForMigration: vi.fn(),
+        setStepDeleteOpen,
+        toast: vi.fn(),
+      }),
+    );
 
-  expect(result.current.mutationGuard.proposal).toBe(proposal);
-  expect(updateWorkflowStepAction).not.toHaveBeenCalled();
-});
-
-it("releases a blocking proposal if confirmation is invoked defensively", async () => {
-  const steps = [
-    step("build", "Build", 0, true, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_next" }],
-    }),
-    step("review", "Review", 1, false, { autoStart: true }),
-  ];
-  const { result } = renderPersistedWorkflowStepActions(steps);
-
-  await act(async () => {
-    await result.current.actions.handleUpdateWorkflowStep("review", {
-      events: {
-        ...steps[1].events,
-        on_turn_complete: [{ type: "move_to_previous" }],
-      },
+    await act(async () => {
+      await result.current.handleRemoveWorkflowStep("step-1");
     });
-  });
-  expect(result.current.mutationGuard.proposal?.severity).toBe("blocking");
 
-  await act(async () => {
-    await result.current.mutationGuard.confirmProposal();
+    expect(setStepDeleteOpen).toHaveBeenCalledWith(true);
+    expect(result.current.status).toBe("idle");
   });
 
-  expect(result.current.mutationGuard.proposal).toBeNull();
-  expect(result.current.mutationGuard.isMutationPending).toBe(false);
-  expect(updateWorkflowStepAction).not.toHaveBeenCalled();
-});
+  it("requires confirmation before deleting a persisted step with no tasks", async () => {
+    vi.mocked(getStepTaskCount).mockResolvedValue({ task_count: 0 });
+    const setStepDeleteOpen = vi.fn();
+    const { result } = renderHook(() =>
+      useWorkflowStepActions({
+        workflow,
+        workflowSteps: [step("step-1", "Todo", 0, true)],
+        setWorkflowSteps: vi.fn(),
+        refreshWorkflowSteps: vi.fn(),
+        setStepToDelete: vi.fn(),
+        setStepTaskCount: vi.fn(),
+        setTargetStepForMigration: vi.fn(),
+        setStepDeleteOpen,
+        toast: vi.fn(),
+      }),
+    );
 
-it("holds a warning update until confirmation and executes it exactly once", async () => {
-  const steps = [
-    step("work", "Work", 0, true, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_next" }],
-    }),
-    step("review", "Review", 1, false),
-  ];
-  const { result } = renderPersistedWorkflowStepActions(steps);
+    await act(() => result.current.handleRemoveWorkflowStep("step-1"));
 
-  await act(async () => {
-    await result.current.actions.handleUpdateWorkflowStep("review", {
-      events: { on_turn_complete: [{ type: "move_to_previous" }] },
+    expect(setStepDeleteOpen).toHaveBeenCalledWith(true);
+    expect(deleteWorkflowStepAction).not.toHaveBeenCalled();
+  });
+
+  it("reorders locally without calling persistence APIs", async () => {
+    const originalSteps = [step("step-1", "Todo", 0, true), step("step-2", "Done", 1, false)];
+    const reorderedSteps = [originalSteps[1], originalSteps[0]];
+    const setWorkflowSteps = vi.fn();
+    const { result } = renderHook(() =>
+      useWorkflowStepActions({
+        workflow,
+        workflowSteps: originalSteps,
+        setWorkflowSteps,
+        refreshWorkflowSteps: vi.fn().mockResolvedValue(undefined),
+        setStepToDelete: vi.fn(),
+        setStepTaskCount: vi.fn(),
+        setTargetStepForMigration: vi.fn(),
+        setStepDeleteOpen: vi.fn(),
+        toast: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleReorderWorkflowSteps(reorderedSteps);
     });
+    expect(setWorkflowSteps).toHaveBeenCalledWith(
+      reorderedSteps.map((item, position) => ({ ...item, position })),
+    );
+    expect(reorderWorkflowStepsAction).not.toHaveBeenCalled();
   });
-
-  expect(updateWorkflowStepAction).not.toHaveBeenCalled();
-  expect(result.current.mutationGuard.proposal).toMatchObject({
-    intent: "apply",
-    severity: "warning",
-  });
-
-  await act(async () => {
-    await result.current.mutationGuard.confirmProposal();
-    await result.current.mutationGuard.confirmProposal();
-  });
-
-  expect(updateWorkflowStepAction).toHaveBeenCalledTimes(1);
 });
 
-it("discards a warning update when confirmation is cancelled", async () => {
-  const steps = [
-    step("work", "Work", 0, true, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_next" }],
-    }),
-    step("review", "Review", 1, false),
-  ];
-  const { result } = renderPersistedWorkflowStepActions(steps);
+describe("persistWorkflowDraft", () => {
+  const persistedWorkflow = { ...workflow, id: "wf-created" } as Workflow;
 
-  await act(async () => {
-    await result.current.actions.handleUpdateWorkflowStep("review", {
-      events: { on_turn_complete: [{ type: "move_to_previous" }] },
+  beforeEach(() => {
+    vi.mocked(createWorkflowAction).mockResolvedValue(persistedWorkflow);
+    vi.mocked(updateWorkflowAction).mockResolvedValue(persistedWorkflow);
+    vi.mocked(updateWorkflowStepAction).mockImplementation(async (id, updates) => ({
+      ...step(id, updates.name ?? "Step", updates.position ?? 0, updates.is_start_step ?? false),
+      ...updates,
+    }));
+    vi.mocked(reorderWorkflowStepsAction).mockResolvedValue({ steps: [], total: 0 });
+  });
+
+  it("does not duplicate a workflow or successful steps when a partial create is retried", async () => {
+    const draftWorkflow = { ...workflow, id: CLIENT_WORKFLOW_ID } as Workflow;
+    const drafts = [
+      step(CLIENT_STEP_ONE, "Todo", 0, true),
+      step(CLIENT_STEP_TWO, "Done", 1, false),
+    ].map((item) => ({ ...item, workflow_id: draftWorkflow.id }) as WorkflowStep);
+    vi.mocked(createWorkflowStepAction)
+      .mockResolvedValueOnce(step(SERVER_STEP_ONE, "Todo", 0, true))
+      .mockRejectedValueOnce(new Error("network down"))
+      .mockResolvedValueOnce(step(SERVER_STEP_TWO, "Done", 1, false));
+    const progress = createWorkflowDraftSaveProgress();
+
+    await expect(
+      persistWorkflowDraft({
+        workflow: draftWorkflow,
+        draftSteps: drafts,
+        savedSteps: [],
+        progress,
+      }),
+    ).rejects.toThrow("network down");
+    await persistWorkflowDraft({
+      workflow: draftWorkflow,
+      draftSteps: drafts,
+      savedSteps: [],
+      progress,
     });
-    result.current.mutationGuard.cancelProposal();
+
+    expect(createWorkflowAction).toHaveBeenCalledOnce();
+    expect(createWorkflowStepAction).toHaveBeenCalledTimes(3);
+    expect(progress.stepIds.get(CLIENT_STEP_ONE)).toBe(SERVER_STEP_ONE);
+    expect(progress.stepIds.get(CLIENT_STEP_TWO)).toBe(SERVER_STEP_TWO);
   });
 
-  expect(updateWorkflowStepAction).not.toHaveBeenCalled();
-  expect(result.current.mutationGuard.proposal).toBeNull();
-});
-
-it("does not gate an unchanged diagnostic identity or an edit that removes a cycle", async () => {
-  const steps = [
-    step("work", "Work", 0, true, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_next" }],
-    }),
-    step("review", "Review", 1, false, {
-      onTurnComplete: [{ type: "move_to_previous" }],
-    }),
-  ];
-  const { result } = renderPersistedWorkflowStepActions(steps);
-
-  await act(async () => {
-    await result.current.actions.handleUpdateWorkflowStep("work", { prompt: "New prompt" });
-    await result.current.actions.handleUpdateWorkflowStep("review", {
-      events: { on_turn_complete: [] },
-    });
-  });
-
-  expect(updateWorkflowStepAction).toHaveBeenCalledTimes(2);
-  expect(result.current.mutationGuard.proposal).toBeNull();
-});
-
-it("preflights a delete shape before any side effect", async () => {
-  const work = step("work", "Work", 0, true, {
-    autoStart: true,
-    onTurnComplete: [{ type: "move_to_next" }],
-  });
-  const middle = step("middle", "Middle", 1, false);
-  const review = step("review", "Review", 2, false, {
-    autoStart: true,
-    onTurnComplete: [{ type: "move_to_previous" }],
-  });
-  const { result, setWorkflowSteps } = renderPersistedWorkflowStepActions([work, middle, review]);
-
-  await act(async () => {
-    await result.current.actions.handleRemoveWorkflowStep("middle");
-  });
-
-  expect(getStepTaskCount).not.toHaveBeenCalled();
-  expect(deleteWorkflowStepAction).not.toHaveBeenCalled();
-  expect(setWorkflowSteps).not.toHaveBeenCalled();
-});
-
-it("preflights a reorder shape with an idle guard before any side effect", async () => {
-  const work = step("work", "Work", 0, true, {
-    autoStart: true,
-    onTurnComplete: [{ type: "move_to_next" }],
-  });
-  const middle = step("middle", "Middle", 1, false);
-  const review = step("review", "Review", 2, false, {
-    autoStart: true,
-    onTurnComplete: [{ type: "move_to_previous" }],
-  });
-  const { result, setWorkflowSteps } = renderPersistedWorkflowStepActions([work, middle, review]);
-
-  await act(async () => {
-    await result.current.actions.handleReorderWorkflowSteps([
-      work,
-      { ...review, position: 1 },
-      { ...middle, position: 2 },
-    ]);
-  });
-
-  expect(result.current.mutationGuard.proposal?.severity).toBe("blocking");
-  expect(reorderWorkflowStepsAction).not.toHaveBeenCalled();
-  expect(setWorkflowSteps).not.toHaveBeenCalled();
-});
-
-it("reconciles a successful update from its authoritative response", async () => {
-  const steps = [step("work", "Work", 0, true)];
-  const updated = { ...steps[0], name: "Building" };
-  vi.mocked(updateWorkflowStepAction).mockResolvedValue(updated);
-  const { result, getSteps } = renderPersistedWorkflowStepActions(steps);
-
-  await act(async () => {
-    await result.current.actions.handleUpdateWorkflowStep("work", { name: "Building" });
-  });
-
-  expect(getSteps()).toEqual([updated]);
-  expect(listWorkflowStepsAction).not.toHaveBeenCalled();
-  expect(result.current.mutationGuard.isMutationPending).toBe(false);
-});
-
-it("appends a successful add from its authoritative response", async () => {
-  const steps = [step("work", "Work", 0, true)];
-  const created = step("created", "Server Step", 1, false);
-  vi.mocked(createWorkflowStepAction).mockResolvedValue(created);
-  const { result, getSteps } = renderPersistedWorkflowStepActions(steps);
-
-  await act(async () => {
-    await result.current.actions.handleAddWorkflowStep();
-  });
-
-  expect(getSteps()).toEqual([...steps, created]);
-  expect(listWorkflowStepsAction).not.toHaveBeenCalled();
-  expect(result.current.mutationGuard.isMutationPending).toBe(false);
-});
-
-it("reconciles a successful reorder from its authoritative response", async () => {
-  const work = step("work", "Work", 0, true);
-  const review = step("review", "Review", 1, false);
-  const reordered = [
-    { ...review, position: 0 },
-    { ...work, position: 1 },
-  ];
-  vi.mocked(reorderWorkflowStepsAction).mockResolvedValue({ steps: reordered, total: 2 });
-  const { result, getSteps } = renderPersistedWorkflowStepActions([work, review]);
-
-  await act(async () => {
-    await result.current.actions.handleReorderWorkflowSteps([review, work]);
-  });
-
-  expect(getSteps()).toEqual(reordered);
-  expect(listWorkflowStepsAction).not.toHaveBeenCalled();
-  expect(result.current.mutationGuard.isMutationPending).toBe(false);
-});
-
-it("holds the task migration delete path until a warning is confirmed", async () => {
-  vi.mocked(getStepTaskCount).mockResolvedValue({ task_count: 2 });
-  const work = step("work", "Work", 0, true, {
-    autoStart: true,
-    onTurnComplete: [{ type: "move_to_next" }],
-  });
-  const middle = step("middle", "Middle", 1, false);
-  const review = step("review", "Review", 2, false, {
-    onTurnComplete: [{ type: "move_to_previous" }],
-  });
-  const { result, setStepDeleteOpen } = renderPersistedWorkflowStepActions([work, middle, review]);
-
-  await act(async () => {
-    await result.current.actions.handleRemoveWorkflowStep("middle");
-  });
-  expect(getStepTaskCount).not.toHaveBeenCalled();
-  expect(result.current.mutationGuard.proposal?.severity).toBe("warning");
-
-  await act(async () => {
-    await result.current.mutationGuard.confirmProposal();
-  });
-
-  expect(getStepTaskCount).toHaveBeenCalledTimes(1);
-  expect(setStepDeleteOpen).toHaveBeenCalledWith(true);
-  expect(deleteWorkflowStepAction).not.toHaveBeenCalled();
-});
-
-it("adds a step without reconfirming an existing diagnostic", async () => {
-  const steps = [
-    step("work", "Work", 0, true, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_step", config: { step_id: "work" } }],
-    }),
-  ];
-  const { result } = renderPersistedWorkflowStepActions(steps);
-
-  await act(async () => {
-    await result.current.actions.handleAddWorkflowStep();
-  });
-
-  expect(createWorkflowStepAction).toHaveBeenCalledTimes(1);
-  expect(result.current.mutationGuard.proposal).toBeNull();
-});
-
-it("does not create a draft workflow with a blocking cycle", async () => {
-  const draftSteps = [
-    step("build", "Build", 0, true, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_next" }],
-    }),
-    step("review", "Review", 1, false, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_previous" }],
-    }),
-  ];
-  const { result } = renderHook(() => {
-    const mutationGuard = useWorkflowMutationGuard(draftSteps);
-    return useWorkflowSaveActions({
-      workflow: { ...workflow, id: "temp-workflow" as Workflow["id"] },
-      isNewWorkflow: true,
-      workflowSteps: draftSteps,
-      templateStepCount: 0,
-      onSaveWorkflow: vi.fn(),
-      toast: vi.fn(),
-      mutationGuard,
-    });
-  });
-
-  await act(async () => {
-    await result.current.handleSaveWorkflow();
-  });
-
-  expect(createWorkflowAction).not.toHaveBeenCalled();
-  expect(result.current.mutationGuard.proposal?.severity).toBe("blocking");
-});
-
-it("cancels a warning draft with no requests and creates it once after confirmation", async () => {
-  const createdWorkflow = { ...workflow, id: "created-workflow" as Workflow["id"] };
-  vi.mocked(createWorkflowAction).mockResolvedValue(createdWorkflow);
-  vi.mocked(createWorkflowStepAction).mockImplementation(async (payload) => ({
-    ...step(`created-${payload.position}`, payload.name, payload.position, false),
-    workflow_id: createdWorkflow.id,
-  }));
-  const draftSteps = [
-    step("work", "Work", 0, true, {
-      autoStart: true,
-      onTurnComplete: [{ type: "move_to_next" }],
-    }),
-    step("review", "Review", 1, false, {
-      onTurnComplete: [{ type: "move_to_previous" }],
-    }),
-  ];
-  const { result } = renderHook(() => {
-    const mutationGuard = useWorkflowMutationGuard(draftSteps);
-    return useWorkflowSaveActions({
-      workflow: { ...workflow, id: "temp-workflow" as Workflow["id"] },
-      isNewWorkflow: true,
-      workflowSteps: draftSteps,
-      templateStepCount: 0,
-      onSaveWorkflow: vi.fn(),
-      toast: vi.fn(),
-      mutationGuard,
-    });
-  });
-
-  await act(async () => {
-    await result.current.handleSaveWorkflow();
-    result.current.mutationGuard.cancelProposal();
-  });
-  expect(createWorkflowAction).not.toHaveBeenCalled();
-  expect(createWorkflowStepAction).not.toHaveBeenCalled();
-
-  await act(async () => {
-    await result.current.handleSaveWorkflow();
-    await result.current.mutationGuard.confirmProposal();
-    await result.current.mutationGuard.confirmProposal();
-  });
-
-  expect(createWorkflowAction).toHaveBeenCalledTimes(1);
-  expect(createWorkflowStepAction).toHaveBeenCalledTimes(2);
-});
-
-it("remaps template workflow pull sources between backend-created and added steps", async () => {
-  const createdWorkflowId = "wf-created" as Workflow["id"];
-  const templateName = "Template Step";
-  const addedName = "Added Step";
-  const backendTemplateId = "backend-template";
-  const backendAddedId = "backend-added";
-  const draftTemplateId = "draft-template";
-
-  vi.mocked(createWorkflowAction).mockResolvedValue({
-    ...workflow,
-    id: createdWorkflowId,
-    workflow_template_id: "template-1",
-  });
-  vi.mocked(listWorkflowStepsAction).mockResolvedValue({
-    steps: [
+  it("remaps draft step references before updating the server", async () => {
+    const draftWorkflow = { ...workflow, id: CLIENT_WORKFLOW_ID } as Workflow;
+    const drafts = [
       {
-        ...step(backendTemplateId, templateName, 0, true),
-        id: backendTemplateId,
-        workflow_id: createdWorkflowId,
+        ...step(CLIENT_STEP_ONE, "Todo", 0, true),
+        workflow_id: draftWorkflow.id,
+        events: {
+          on_turn_complete: [{ type: "move_to_step", config: { step_id: CLIENT_STEP_TWO } }],
+        },
       },
-    ],
-    total: 1,
-  });
-  vi.mocked(createWorkflowStepAction).mockResolvedValue({
-    ...step(backendAddedId, addedName, 1, false),
-    id: backendAddedId,
-    workflow_id: createdWorkflowId,
-  });
-  vi.mocked(updateWorkflowStepAction).mockResolvedValue(step(backendAddedId, addedName, 1, false));
+      {
+        ...step(CLIENT_STEP_TWO, "Done", 1, false),
+        workflow_id: draftWorkflow.id,
+        pull_from_step_id: CLIENT_STEP_ONE,
+      },
+    ] as WorkflowStep[];
+    vi.mocked(createWorkflowStepAction)
+      .mockResolvedValueOnce(step(SERVER_STEP_ONE, "Todo", 0, true))
+      .mockResolvedValueOnce(step(SERVER_STEP_TWO, "Done", 1, false));
 
-  const templateStep = {
-    ...step(draftTemplateId, templateName, 0, true),
-    pull_from_step_id: "draft-added",
-  };
-  const addedStep = {
-    ...step("draft-added", addedName, 1, false),
-    pull_from_step_id: draftTemplateId,
-  };
-  const workflowSteps = [templateStep, addedStep];
-  const { result } = renderHook(() => {
-    const mutationGuard = useWorkflowMutationGuard(workflowSteps);
-    return useWorkflowSaveActions({
-      workflow: { ...workflow, workflow_template_id: "template-1" },
-      isNewWorkflow: true,
-      workflowSteps,
-      templateStepCount: 1,
-      onSaveWorkflow: vi.fn(),
-      onWorkflowCreated: vi.fn(),
-      toast: vi.fn(),
-      mutationGuard,
+    await persistWorkflowDraft({
+      workflow: draftWorkflow,
+      draftSteps: drafts,
+      savedSteps: [],
+      progress: createWorkflowDraftSaveProgress(),
     });
+
+    expect(updateWorkflowStepAction).toHaveBeenCalledWith(
+      SERVER_STEP_ONE,
+      expect.objectContaining({
+        events: {
+          on_turn_complete: [{ type: "move_to_step", config: { step_id: SERVER_STEP_TWO } }],
+        },
+      }),
+    );
+    expect(updateWorkflowStepAction).toHaveBeenCalledWith(
+      SERVER_STEP_TWO,
+      expect.objectContaining({ pull_from_step_id: SERVER_STEP_ONE }),
+    );
+  });
+});
+
+describe("useWorkflowDeleteHandlers", () => {
+  it("refuses to open the delete-workflow dialog when readOnly", async () => {
+    const wfDel = {
+      setDeleteOpen: vi.fn(),
+      setWorkflowTaskCount: vi.fn(),
+      setWorkflowDeleteLoading: vi.fn(),
+      setTargetWorkflowId: vi.fn(),
+      setTargetWorkflowSteps: vi.fn(),
+      setTargetStepId: vi.fn(),
+      targetWorkflowId: "",
+      targetStepId: "",
+      setMigrateLoading: vi.fn(),
+    };
+    const { result } = renderHook(() =>
+      useWorkflowDeleteHandlers({
+        workflow,
+        readOnly: true,
+        otherWorkflows: [],
+        wfDel,
+        deleteWorkflowRun: vi.fn(),
+        toast: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleDeleteWorkflowClick();
+    });
+
+    expect(getWorkflowTaskCount).not.toHaveBeenCalled();
+    expect(wfDel.setDeleteOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe("useStepDeleteHandlers", () => {
+  it("closes a failed delete and defers loading until its retry executes", async () => {
+    const setStepDeleteOpen = vi.fn();
+    const setStepToDelete = vi.fn();
+    const setStepMigrateLoading = vi.fn();
+    const setStepDeletePending = vi.fn();
+    let failedOperation: (() => Promise<void>) | undefined;
+    const { result } = renderHook(() =>
+      useStepDeleteHandlers({
+        workflow,
+        stepDel: {
+          stepToDelete: "step-1",
+          targetStepForMigration: "step-2",
+          setStepMigrateLoading,
+          setStepDeletePending,
+          setStepDeleteOpen,
+          setStepToDelete,
+        },
+        refreshWorkflowSteps: vi.fn(),
+        runMutation: vi.fn().mockImplementation(async (operation: () => Promise<void>) => {
+          failedOperation = operation;
+          return false;
+        }),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleDeleteStepAndTasks();
+    });
+
+    expect(setStepToDelete).toHaveBeenCalledWith(null);
+    expect(setStepDeleteOpen).toHaveBeenCalledWith(false);
+    expect(setStepMigrateLoading).not.toHaveBeenCalled();
+    expect(setStepDeletePending.mock.calls).toEqual([[true], [false]]);
+    setStepToDelete.mockClear();
+    setStepDeleteOpen.mockClear();
+
+    await act(async () => {
+      await failedOperation?.();
+    });
+
+    expect(setStepMigrateLoading.mock.calls).toEqual([[true], [false]]);
+    expect(setStepToDelete).toHaveBeenCalledWith(null);
+    expect(setStepDeleteOpen).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("useStepDeleteHandlers retry safety", () => {
+  it("ignores duplicate delete submissions while the first is queued", async () => {
+    let finishMutation!: (saved: boolean) => void;
+    const runMutation = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishMutation = resolve;
+        }),
+    );
+    const setStepDeleteOpen = vi.fn();
+    const { result } = renderHook(() =>
+      useStepDeleteHandlers({
+        workflow,
+        stepDel: {
+          stepToDelete: "step-1",
+          targetStepForMigration: "step-2",
+          setStepMigrateLoading: vi.fn(),
+          setStepDeletePending: vi.fn(),
+          setStepDeleteOpen,
+          setStepToDelete: vi.fn(),
+        },
+        refreshWorkflowSteps: vi.fn(),
+        runMutation,
+      }),
+    );
+
+    let firstSubmission!: Promise<void>;
+    act(() => {
+      firstSubmission = result.current.handleDeleteStepAndTasks();
+    });
+    await act(async () => {
+      await result.current.handleDeleteStepAndTasks();
+    });
+
+    expect(runMutation).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      finishMutation(false);
+      await firstSubmission;
+    });
+    expect(setStepDeleteOpen).toHaveBeenCalledWith(false);
   });
 
-  await act(async () => {
-    await result.current.handleSaveWorkflow();
-  });
+  it("retries only refresh after a completed delete", async () => {
+    const refreshWorkflowSteps = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("refresh failed"))
+      .mockResolvedValue(undefined);
+    const runMutation = vi.fn(async (operation: () => Promise<void>) => {
+      try {
+        await operation();
+      } catch {
+        await operation();
+      }
+      return true;
+    });
+    const { result } = renderHook(() =>
+      useStepDeleteHandlers({
+        workflow,
+        stepDel: {
+          stepToDelete: "step-1",
+          targetStepForMigration: "step-2",
+          setStepMigrateLoading: vi.fn(),
+          setStepDeletePending: vi.fn(),
+          setStepDeleteOpen: vi.fn(),
+          setStepToDelete: vi.fn(),
+        },
+        refreshWorkflowSteps,
+        runMutation,
+      }),
+    );
 
-  expect(createWorkflowStepAction).toHaveBeenCalledWith(
-    expect.objectContaining({ pull_from_step_id: "" }),
-  );
-  expect(updateWorkflowStepAction).toHaveBeenCalledWith(backendAddedId, {
-    pull_from_step_id: backendTemplateId,
-  });
-  expect(updateWorkflowStepAction).toHaveBeenCalledWith(backendTemplateId, {
-    pull_from_step_id: backendAddedId,
+    await act(async () => result.current.handleDeleteStepAndTasks());
+
+    expect(deleteWorkflowStepAction).toHaveBeenCalledOnce();
+    expect(refreshWorkflowSteps).toHaveBeenCalledTimes(2);
   });
 });

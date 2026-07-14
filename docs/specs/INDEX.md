@@ -112,6 +112,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
+| [workflow-settings-autosave](workflow-settings-autosave/spec.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

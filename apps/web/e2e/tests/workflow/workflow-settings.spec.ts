@@ -29,10 +29,7 @@ test.describe("Workflow settings", () => {
     }
   });
 
-  test("creates a workflow from template and persists after save", async ({
-    testPage,
-    seedData,
-  }) => {
+  test("creates a workflow from template without a second save", async ({ testPage, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
@@ -43,11 +40,7 @@ test.describe("Workflow settings", () => {
     const card = await page.findWorkflowCard("Template Test Workflow");
     await expect(card).toBeVisible();
 
-    // Save the workflow
-    await page.saveButton(card).click();
-
-    // Wait for save to complete
-    await testPage.waitForTimeout(1000);
+    await expect(page.saveButton(card)).toHaveCount(0);
 
     // Reload and verify persistence
     await page.goto(seedData.workspaceId);
@@ -70,17 +63,13 @@ test.describe("Workflow settings", () => {
     await expect(card.getByText("Review")).toBeVisible();
     await expect(card.getByText("Done")).toBeVisible();
 
-    // Save
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
-
     // Reload and verify
     await page.goto(seedData.workspaceId);
     const reloadedCard = await page.findWorkflowCard("Custom Test Workflow");
     await expect(reloadedCard).toBeVisible();
   });
 
-  test("adds a step to template workflow and persists after save", async ({
+  test("adds a step to template workflow and persists automatically", async ({
     testPage,
     seedData,
   }) => {
@@ -99,9 +88,7 @@ test.describe("Workflow settings", () => {
     // A "New Step" should appear
     await expect(card.getByText("New Step")).toBeVisible();
 
-    // Save the workflow
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
+    await expect(page.saveStatus(card)).toContainText("Saved");
 
     // Reload and verify the extra step persists
     await page.goto(seedData.workspaceId);
@@ -140,7 +127,6 @@ test.describe("Workflow settings", () => {
       "All Children Done",
     );
 
-    await page.saveButton(card).click();
     await expect
       .poll(async () => {
         const { steps } = await apiClient.listWorkflowSteps(workflow.id);
@@ -165,8 +151,6 @@ test.describe("Workflow settings", () => {
     await card.getByTestId(`${reviewStep.id}-pull-from-step-select`).click();
     await testPage.getByRole("option", { name: "Backlog" }).click();
 
-    await page.saveButton(card).click();
-
     await expect
       .poll(async () => {
         const { steps } = await apiClient.listWorkflowSteps(workflow.id);
@@ -178,7 +162,10 @@ test.describe("Workflow settings", () => {
       });
   });
 
-  test("modifies a template step name and persists after save", async ({ testPage, seedData }) => {
+  test("modifies a template step name and persists automatically", async ({
+    testPage,
+    seedData,
+  }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
@@ -204,12 +191,7 @@ test.describe("Workflow settings", () => {
     await nameInput.clear();
     await nameInput.fill("Renamed Step");
 
-    // Wait for debounced name update to propagate to state (500ms debounce)
-    await testPage.waitForTimeout(600);
-
-    // Save the workflow
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
+    await expect(page.saveStatus(card)).toContainText("Saved");
 
     // Reload and verify the renamed step persists
     await page.goto(seedData.workspaceId);
@@ -254,23 +236,14 @@ test.describe("Workflow settings", () => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
-    // Create and save a workflow first
+    // Creation persists immediately.
     await page.createWorkflow("To Delete Workflow", "Custom");
 
     const card = await page.findWorkflowCard("To Delete Workflow");
     await expect(card).toBeVisible();
 
-    // Save it first so it's persisted
-    await page.saveButton(card).click();
-    await testPage.waitForTimeout(1000);
-
-    // Reload to get the real workflow card
-    await page.goto(seedData.workspaceId);
-    const savedCard = await page.findWorkflowCard("To Delete Workflow");
-    await expect(savedCard).toBeVisible();
-
     // Click delete workflow
-    await page.deleteWorkflowButton(savedCard).click();
+    await page.deleteWorkflowButton(card).click();
 
     // The delete dialog should appear — confirm deletion
     const deleteDialog = testPage.getByRole("dialog").filter({ hasText: "Delete" });
@@ -284,6 +257,24 @@ test.describe("Workflow settings", () => {
     // Workflow card should be removed
     const deletedCard = await page.findWorkflowCard("To Delete Workflow");
     await expect(deletedCard).not.toBeVisible();
+  });
+
+  test("autosaves workflow details and exposes a single save status", async ({
+    testPage,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("E2E Workflow");
+    const nameInput = card.locator("input").first();
+    await nameInput.fill("Autosaved Workflow Name");
+
+    await expect(page.saveButton(card)).toHaveCount(0);
+    await expect(page.saveStatus(card)).toContainText("Saved");
+
+    await page.goto(seedData.workspaceId);
+    await expect(await page.findWorkflowCard("Autosaved Workflow Name")).toBeVisible();
   });
 });
 

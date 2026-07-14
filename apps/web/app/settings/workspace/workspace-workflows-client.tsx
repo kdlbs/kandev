@@ -28,7 +28,6 @@ import { WorkflowSyncSection } from "@/components/settings/workflow-sync-section
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
 import { useToast } from "@/components/toast-provider";
 import { useWorkflowSettings } from "@/hooks/domains/settings/use-workflow-settings";
-import { generateUUID } from "@/lib/utils";
 import {
   deleteWorkflowAction,
   updateWorkflowAction,
@@ -38,7 +37,6 @@ import {
 } from "@/app/actions/workspaces";
 import {
   agentProfileId as toAgentProfileId,
-  workflowId as toWorkflowId,
   type Workflow,
   type StepDefinition,
   type WorkflowStep,
@@ -49,6 +47,11 @@ import {
   CreateWorkflowDialog,
   ImportWorkflowsDialog,
 } from "@/app/settings/workspace/workspace-workflows-dialogs";
+import {
+  buildWorkflowSteps,
+  DEFAULT_CUSTOM_STEPS,
+  useWorkflowCreation,
+} from "@/app/settings/workspace/use-workflow-creation";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
 
 type WorkspaceWorkflowsClientProps = {
@@ -57,37 +60,14 @@ type WorkspaceWorkflowsClientProps = {
   workflowTemplates: WorkflowTemplate[];
 };
 
-const DEFAULT_CUSTOM_STEPS: StepDefinition[] = [
-  { name: "Todo", position: 0, color: "bg-slate-500" },
-  { name: "In Progress", position: 1, color: "bg-blue-500" },
-  { name: "Review", position: 2, color: "bg-purple-500" },
-  { name: "Done", position: 3, color: "bg-green-500" },
-];
-
 type WorkflowActionsArgs = {
   workspace: Workspace | null;
   workflowItems: Workflow[];
   workflowTemplates: WorkflowTemplate[];
   setWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
   setSavedWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
+  toast: ReturnType<typeof useToast>["toast"];
 };
-
-function buildWorkflowSteps(workflow: Workflow, definitions: StepDefinition[]): WorkflowStep[] {
-  return definitions.map((step, index) => ({
-    id: `temp-step-${workflow.id}-${index}`,
-    workflow_id: workflow.id,
-    name: step.name,
-    position: step.position ?? index,
-    color: step.color ?? "bg-slate-500",
-    prompt: step.prompt,
-    events: step.events,
-    is_start_step: step.is_start_step,
-    show_in_command_panel: step.show_in_command_panel,
-    allow_manual_move: true,
-    created_at: "",
-    updated_at: "",
-  }));
-}
 
 function useWorkflowImportExport(
   workspace: Workspace | null,
@@ -193,34 +173,15 @@ function useWorkflowActions({
   workflowTemplates,
   setWorkflowItems,
   setSavedWorkflowItems,
+  toast,
 }: WorkflowActionsArgs) {
-  const [isAddWorkflowDialogOpen, setIsAddWorkflowDialogOpen] = useState(false);
-  const [newWorkflowName, setNewWorkflowName] = useState("");
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-
-  const handleOpenAddWorkflowDialog = () => {
-    setNewWorkflowName("");
-    setSelectedTemplateId(workflowTemplates.length > 0 ? workflowTemplates[0].id : null);
-    setIsAddWorkflowDialogOpen(true);
-  };
-
-  const handleCreateWorkflow = () => {
-    if (!workspace) return;
-    const templateName = selectedTemplateId
-      ? (workflowTemplates.find((t) => t.id === selectedTemplateId)?.name ?? "New Workflow")
-      : "New Workflow";
-    const draftWorkflow: Workflow = {
-      id: toWorkflowId(`temp-${generateUUID()}`),
-      workspace_id: workspace.id,
-      name: newWorkflowName.trim() || templateName,
-      description: "",
-      workflow_template_id: selectedTemplateId,
-      created_at: "",
-      updated_at: "",
-    };
-    setWorkflowItems((prev) => [draftWorkflow, ...prev]);
-    setIsAddWorkflowDialogOpen(false);
-  };
+  const creation = useWorkflowCreation({
+    workspace,
+    workflowTemplates,
+    setWorkflowItems,
+    setSavedWorkflowItems,
+    toast,
+  });
 
   const handleUpdateWorkflow = (
     workflowId: string,
@@ -248,6 +209,7 @@ function useWorkflowActions({
       return;
     }
     await deleteWorkflowAction(workflowId);
+    creation.forgetInitialSteps(workflowId);
     setWorkflowItems((prev) => prev.filter((wf) => wf.id !== workflowId));
     setSavedWorkflowItems((prev) => prev.filter((wf) => wf.id !== workflowId));
   };
@@ -278,14 +240,7 @@ function useWorkflowActions({
   };
 
   return {
-    isAddWorkflowDialogOpen,
-    setIsAddWorkflowDialogOpen,
-    newWorkflowName,
-    setNewWorkflowName,
-    selectedTemplateId,
-    setSelectedTemplateId,
-    handleOpenAddWorkflowDialog,
-    handleCreateWorkflow,
+    ...creation,
     handleUpdateWorkflow,
     handleDeleteWorkflow,
     handleWorkflowCreated,
@@ -297,6 +252,7 @@ type WorkflowListProps = {
   workflowItems: Workflow[];
   workspaceId: string;
   templateStepsById: Map<string, StepDefinition[]>;
+  initialStepsByWorkflowId: Map<string, WorkflowStep[]>;
   isWorkflowDirty: (wf: Workflow) => boolean;
   onUpdate: (
     id: string,
@@ -326,7 +282,7 @@ function SortableWorkflowItem({
   return (
     <div ref={setNodeRef} style={style} className="relative min-w-0">
       <div
-        className="absolute left-0 top-6 -ml-8 flex items-center cursor-grab active:cursor-grabbing z-10"
+        className="absolute left-0 top-6 -ml-6 flex items-center cursor-grab active:cursor-grabbing z-10 sm:-ml-8"
         data-testid={`workflow-drag-handle-${workflow.id}`}
         {...attributes}
         {...listeners}
@@ -342,6 +298,7 @@ function WorkflowList({
   workflowItems,
   workspaceId,
   templateStepsById,
+  initialStepsByWorkflowId,
   isWorkflowDirty,
   onUpdate,
   onDelete,
@@ -372,7 +329,7 @@ function WorkflowList({
         items={workflowItems.map((wf) => wf.id)}
         strategy={verticalListSortingStrategy}
       >
-        <div className="grid min-w-0 gap-3 pl-8">
+        <div className="grid min-w-0 gap-3 pl-6 sm:pl-8">
           {workflowItems.map((workflow) => {
             const isTempWorkflow = workflow.id.startsWith("temp-");
             const templateSteps =
@@ -380,9 +337,10 @@ function WorkflowList({
                 ? (templateStepsById.get(workflow.workflow_template_id) ?? [])
                 : DEFAULT_CUSTOM_STEPS;
             const initialWorkflowSteps =
-              isTempWorkflow && templateSteps.length
+              initialStepsByWorkflowId.get(workflow.id) ??
+              (isTempWorkflow && templateSteps.length
                 ? buildWorkflowSteps(workflow, templateSteps)
-                : undefined;
+                : undefined);
             return (
               <SortableWorkflowItem key={workflow.id} workflow={workflow}>
                 <WorkflowCard
@@ -439,6 +397,7 @@ function WorkflowDialogs({ page }: { page: ReturnType<typeof useWorkspaceWorkflo
         onSelectedTemplateChange={page.setSelectedTemplateId}
         workflowTemplates={page.workflowTemplates}
         onCreate={page.handleCreateWorkflow}
+        createLoading={page.createWorkflowLoading}
       />
     </>
   );
@@ -489,6 +448,7 @@ export function WorkspaceWorkflowsClient({
           workflowItems={page.workflowItems}
           workspaceId={workspace.id}
           templateStepsById={page.templateStepsById}
+          initialStepsByWorkflowId={page.initialStepsByWorkflowId}
           isWorkflowDirty={page.isWorkflowDirty}
           onUpdate={page.handleUpdateWorkflow}
           onDelete={page.handleDeleteWorkflow}
@@ -541,6 +501,7 @@ function useWorkspaceWorkflowsPage(
     workflowTemplates,
     setWorkflowItems,
     setSavedWorkflowItems,
+    toast,
   });
   const {
     isAddWorkflowDialogOpen,
@@ -551,6 +512,8 @@ function useWorkspaceWorkflowsPage(
     setSelectedTemplateId,
     handleOpenAddWorkflowDialog,
     handleCreateWorkflow,
+    createWorkflowLoading,
+    initialStepsByWorkflowId,
     handleUpdateWorkflow,
     handleDeleteWorkflow,
     handleWorkflowCreated,
@@ -593,6 +556,8 @@ function useWorkspaceWorkflowsPage(
     setSelectedTemplateId,
     handleOpenAddWorkflowDialog,
     handleCreateWorkflow,
+    createWorkflowLoading,
+    initialStepsByWorkflowId,
     handleUpdateWorkflow,
     handleDeleteWorkflow,
     handleWorkflowCreated,

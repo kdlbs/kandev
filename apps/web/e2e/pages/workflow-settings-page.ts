@@ -115,9 +115,14 @@ export class WorkflowSettingsPage {
     return card.getByTestId("add-step-button");
   }
 
-  /** The save button within a workflow card (matches button text "Save"). */
+  /** The legacy manual save button, used to assert that autosave has replaced it. */
   saveButton(card: Locator): Locator {
     return card.getByRole("button", { name: "Save" });
+  }
+
+  /** The workflow-level autosave status within a card. */
+  saveStatus(card: Locator): Locator {
+    return card.getByTestId("workflow-save-status");
   }
 
   /** The delete workflow button within a card. */

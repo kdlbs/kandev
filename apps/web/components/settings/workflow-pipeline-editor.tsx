@@ -25,31 +25,23 @@ import {
   IconAlertTriangle,
 } from "@tabler/icons-react";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@kandev/ui/alert-dialog";
 import { ScrollArea, ScrollBar } from "@kandev/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { WorkflowStep } from "@/lib/types/http";
 import type { WorkflowReplayCycleDiagnostic } from "@/lib/workflows/replay-cycle-analysis";
 import { cn } from "@/lib/utils";
 import { StepConfigPanel } from "./workflow-pipeline-editor-panels";
+import { isWorkflowStepDirty } from "./workflow-dirty-state";
 import { WorkflowCycleDiagnostic } from "./workflow-cycle-diagnostic";
 
 type WorkflowPipelineEditorProps = {
   steps: WorkflowStep[];
+  savedSteps?: WorkflowStep[];
+  diagnostics?: WorkflowReplayCycleDiagnostic[];
   onUpdateStep: (stepId: string, updates: Partial<WorkflowStep>) => void;
   onAddStep: () => void;
   onRemoveStep: (stepId: string) => void;
   onReorderSteps: (steps: WorkflowStep[]) => void;
-  diagnostics?: WorkflowReplayCycleDiagnostic[];
   readOnly?: boolean;
 };
 
@@ -74,19 +66,21 @@ function getTransitionLabel(step: WorkflowStep): string {
 
 type PipelineNodeProps = {
   step: WorkflowStep;
+  isDirty: boolean;
+  isReplayCycleAffected: boolean;
   isSelected: boolean;
   onSelect: () => void;
   onRemove: () => void;
-  isReplayCycleAffected: boolean;
   readOnly?: boolean;
 };
 
 function PipelineNode({
   step,
+  isDirty,
+  isReplayCycleAffected,
   isSelected,
   onSelect,
   onRemove,
-  isReplayCycleAffected,
   readOnly = false,
 }: PipelineNodeProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -108,6 +102,10 @@ function PipelineNode({
         isDragging && "opacity-50 z-50",
       )}
       onClick={onSelect}
+      data-settings-dirty={isDirty}
+      data-workflow-replay-cycle={isReplayCycleAffected}
+      data-settings-dirty-level="container"
+      data-testid={`workflow-step-node-${step.id}`}
     >
       {step.is_start_step && (
         <TooltipProvider>
@@ -188,21 +186,23 @@ function PipelineConnector({ label }: { label: string }) {
 
 type PipelineAreaProps = {
   steps: WorkflowStep[];
+  savedStepsById: ReadonlyMap<string, WorkflowStep>;
+  affectedStepIds: Set<string>;
   selectedStepId: string | null;
   onSelectStep: (stepId: string) => void;
   onRemoveStep: (stepId: string) => void;
   onAddStep: () => void;
-  affectedStepIds: Set<string>;
   readOnly: boolean;
 };
 
 function PipelineArea({
   steps,
+  savedStepsById,
+  affectedStepIds,
   selectedStepId,
   onSelectStep,
   onRemoveStep,
   onAddStep,
-  affectedStepIds,
   readOnly,
 }: PipelineAreaProps) {
   return (
@@ -212,10 +212,11 @@ function PipelineArea({
           {index > 0 && <PipelineConnector label={getTransitionLabel(steps[index - 1])} />}
           <PipelineNode
             step={step}
+            isDirty={isWorkflowStepDirty(step, savedStepsById.get(step.id))}
+            isReplayCycleAffected={affectedStepIds.has(step.id)}
             isSelected={selectedStepId === step.id}
             onSelect={() => onSelectStep(step.id)}
             onRemove={() => onRemoveStep(step.id)}
-            isReplayCycleAffected={affectedStepIds.has(step.id)}
             readOnly={readOnly}
           />
         </div>
@@ -235,39 +236,6 @@ function PipelineArea({
         <IconPlus className="h-4 w-4" />
       </button>
     </div>
-  );
-}
-
-// --- Step Delete Confirmation ---
-
-function StepDeleteConfirmation({
-  stepName,
-  open,
-  onOpenChange,
-  onConfirm,
-}: {
-  stepName: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent data-testid="step-delete-confirm-dialog">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete step &ldquo;{stepName}&rdquo;?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This will permanently remove the step from this workflow. This action cannot be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={onConfirm} className="cursor-pointer">
-            Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
 
@@ -292,16 +260,16 @@ const EMPTY_DIAGNOSTICS: WorkflowReplayCycleDiagnostic[] = [];
 
 export function WorkflowPipelineEditor({
   steps,
+  savedSteps = [],
+  diagnostics = EMPTY_DIAGNOSTICS,
   onUpdateStep,
   onAddStep,
   onRemoveStep,
   onReorderSteps,
-  diagnostics = EMPTY_DIAGNOSTICS,
   readOnly = false,
 }: WorkflowPipelineEditorProps) {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [prevStepCount, setPrevStepCount] = useState(steps.length);
-  const [stepToConfirmDelete, setStepToConfirmDelete] = useState<string | null>(null);
 
   if (steps.length !== prevStepCount) {
     if (steps.length > prevStepCount && steps.length > 0)
@@ -310,6 +278,10 @@ export function WorkflowPipelineEditor({
   }
 
   const stepItems = useMemo(() => steps.map((step) => step.id), [steps]);
+  const savedStepsById = useMemo(
+    () => new Map(savedSteps.map((step) => [step.id, step])),
+    [savedSteps],
+  );
   const affectedIds = useMemo(() => affectedStepIds(diagnostics), [diagnostics]);
   const isMounted = useSyncExternalStore(
     () => () => {},
@@ -334,28 +306,21 @@ export function WorkflowPipelineEditor({
   const handleSelectStep = (stepId: string) =>
     setSelectedStepId((prev) => (prev === stepId ? null : stepId));
 
-  const requestRemoveStep = (stepId: string) => setStepToConfirmDelete(stepId);
-
-  const confirmRemoveStep = () => {
-    if (!stepToConfirmDelete) return;
-    onRemoveStep(stepToConfirmDelete);
-    if (selectedStepId === stepToConfirmDelete) setSelectedStepId(null);
-    setStepToConfirmDelete(null);
+  const handleRemoveStep = (stepId: string) => {
+    onRemoveStep(stepId);
+    if (selectedStepId === stepId) setSelectedStepId(null);
   };
-
-  const stepToDeleteName = stepToConfirmDelete
-    ? (steps.find((s) => s.id === stepToConfirmDelete)?.name ?? "this step")
-    : "";
 
   const selectedStep = steps.find((s) => s.id === selectedStepId);
   const pipelineArea = (
     <PipelineArea
       steps={steps}
+      savedStepsById={savedStepsById}
+      affectedStepIds={affectedIds}
       selectedStepId={selectedStepId}
       onSelectStep={handleSelectStep}
-      onRemoveStep={requestRemoveStep}
+      onRemoveStep={handleRemoveStep}
       onAddStep={onAddStep}
-      affectedStepIds={affectedIds}
       readOnly={readOnly}
     />
   );
@@ -363,7 +328,7 @@ export function WorkflowPipelineEditor({
   return (
     <div className="space-y-3">
       <WorkflowCycleAlerts diagnostics={diagnostics} />
-      <ScrollArea className="w-full pb-1">
+      <ScrollArea className="w-full max-w-full pb-1">
         {isMounted ? (
           <DndContext
             collisionDetection={closestCenter}
@@ -383,20 +348,13 @@ export function WorkflowPipelineEditor({
         <StepConfigPanel
           key={selectedStep.id}
           step={selectedStep}
+          savedStep={savedStepsById.get(selectedStep.id)}
           steps={steps}
           onUpdate={(updates) => onUpdateStep(selectedStep.id, updates)}
-          onRemove={() => requestRemoveStep(selectedStep.id)}
+          onRemove={() => handleRemoveStep(selectedStep.id)}
           readOnly={readOnly}
         />
       )}
-      <StepDeleteConfirmation
-        stepName={stepToDeleteName}
-        open={!!stepToConfirmDelete}
-        onOpenChange={(open) => {
-          if (!open) setStepToConfirmDelete(null);
-        }}
-        onConfirm={confirmRemoveStep}
-      />
     </div>
   );
 }

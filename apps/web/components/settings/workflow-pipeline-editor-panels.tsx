@@ -54,7 +54,7 @@ function StepAgentProfileSelect({
   const healthyProfiles = useHealthyAgentProfiles(step.agent_profile_id);
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex w-full min-w-0 items-center gap-1.5 sm:w-auto">
       <Select
         value={step.agent_profile_id || "none"}
         onValueChange={(value) => {
@@ -64,7 +64,7 @@ function StepAgentProfileSelect({
         disabled={readOnly}
       >
         <SelectTrigger
-          className="w-[220px] h-8 cursor-pointer"
+          className="h-8 w-full min-w-0 cursor-pointer sm:w-[220px]"
           data-testid="step-agent-profile-select"
         >
           <IconRobot className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -108,8 +108,8 @@ function StepConfigHeader({
   debouncedUpdateName,
 }: StepConfigHeaderProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-      <div className="flex items-center gap-3 flex-1 min-w-0">
+    <div className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
         <Input
           id={`${step.id}-name`}
           value={localName}
@@ -120,7 +120,7 @@ function StepConfigHeader({
           }}
           placeholder="Step name"
           disabled={readOnly}
-          className="max-w-[240px] h-8"
+          className="h-8 w-full sm:max-w-[240px]"
         />
         <Select
           value={step.color}
@@ -130,7 +130,7 @@ function StepConfigHeader({
           }}
           disabled={readOnly}
         >
-          <SelectTrigger className="w-[120px] h-8">
+          <SelectTrigger className="h-8 w-full sm:w-[120px]">
             <SelectValue placeholder="Color" />
           </SelectTrigger>
           <SelectContent position="popper" side="bottom" align="start">
@@ -152,7 +152,7 @@ function StepConfigHeader({
         size="sm"
         onClick={onRemove}
         disabled={readOnly}
-        className="text-destructive hover:text-destructive h-8"
+        className="h-8 self-end text-destructive hover:text-destructive sm:self-auto"
       >
         <IconTrash className="h-3.5 w-3.5 mr-1" />
         Delete
@@ -171,7 +171,7 @@ type StepAutoArchiveRowProps = {
 
 function StepAutoArchiveRow({ step, onUpdate, readOnly }: StepAutoArchiveRowProps) {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Checkbox
         id={`${step.id}-auto-archive`}
         checked={(step.auto_archive_after_hours ?? 0) > 0}
