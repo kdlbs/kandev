@@ -4,11 +4,9 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import type { GitLabStatus, TaskMR } from "@/lib/types/gitlab";
 
-const fetchGitLabStatusMock = vi.fn<[], Promise<GitLabStatus | null>>();
-const listWorkspaceTaskMRsMock = vi.fn<
-  [string],
-  Promise<{ task_mrs: Record<string, TaskMR[]> } | null>
->();
+const fetchGitLabStatusMock = vi.fn<() => Promise<GitLabStatus | null>>();
+const listWorkspaceTaskMRsMock =
+  vi.fn<(workspaceId: string) => Promise<{ task_mrs: Record<string, TaskMR[]> } | null>>();
 
 vi.mock("@/lib/api/domains/gitlab-api", () => ({
   fetchGitLabStatus: () => fetchGitLabStatusMock(),

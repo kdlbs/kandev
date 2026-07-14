@@ -16,14 +16,14 @@ const OTHER_SESSION_PANEL_ID = `session:${OTHER_SESSION_ID}`;
 
 type SessionTabSyncPanel = {
   id: string;
-  api: { setActive: ReturnType<typeof vi.fn<[], void>> };
+  api: { setActive: ReturnType<typeof vi.fn<() => void>> };
 };
 
 type SessionTabSyncApi = {
   panels: SessionTabSyncPanel[];
   getPanel: (id: string) => SessionTabSyncPanel | null;
   onDidActivePanelChange: (callback: (panel: { id: string } | null) => void) => {
-    dispose: ReturnType<typeof vi.fn<[], void>>;
+    dispose: ReturnType<typeof vi.fn<() => void>>;
   };
 };
 
@@ -34,7 +34,7 @@ type SessionTabSyncStore = {
       items: Record<string, { id: string; task_id: string }>;
     };
     environmentIdBySessionId: Record<string, string>;
-    setActiveSession: ReturnType<typeof vi.fn<[string, string], void>>;
+    setActiveSession: ReturnType<typeof vi.fn<(taskId: string, sessionId: string) => void>>;
   };
 };
 

@@ -18,10 +18,7 @@ function renderInputState(onSubmit: SubmitHandler) {
   );
 }
 
-function attachInputHandle(
-  inputRef: React.RefObject<TipTapInputHandle | null>,
-  clear: ReturnType<typeof vi.fn>,
-) {
+function attachInputHandle(inputRef: React.RefObject<TipTapInputHandle | null>, clear: () => void) {
   (inputRef as React.MutableRefObject<Partial<TipTapInputHandle> | null>).current = {
     clear,
     getMentions: () => [],
@@ -44,7 +41,7 @@ describe("useChatInputState", () => {
 
   it("keeps the draft when async submit reports failure", async () => {
     const onSubmit = vi
-      .fn<Parameters<SubmitHandler>, ReturnType<SubmitHandler>>()
+      .fn<(...args: Parameters<SubmitHandler>) => ReturnType<SubmitHandler>>()
       .mockResolvedValue(false);
     const clear = vi.fn();
     const { result } = renderInputState(onSubmit);
@@ -68,7 +65,7 @@ describe("useChatInputState", () => {
 
   it("clears the draft when async submit succeeds", async () => {
     const onSubmit = vi
-      .fn<Parameters<SubmitHandler>, ReturnType<SubmitHandler>>()
+      .fn<(...args: Parameters<SubmitHandler>) => ReturnType<SubmitHandler>>()
       .mockResolvedValue(true);
     const clear = vi.fn();
     const resetHeight = vi.fn();
@@ -92,7 +89,7 @@ describe("useChatInputState", () => {
   it("keeps newer attachments when async submit succeeds after attachments change", async () => {
     const submit = deferred<boolean>();
     const onSubmit = vi
-      .fn<Parameters<SubmitHandler>, ReturnType<SubmitHandler>>()
+      .fn<(...args: Parameters<SubmitHandler>) => ReturnType<SubmitHandler>>()
       .mockReturnValue(submit.promise);
     const clear = vi.fn();
     const resetHeight = vi.fn();

@@ -14,8 +14,8 @@ type UpdatesMockReturn = {
   updates: UpdatesResponse | null;
 };
 
-const healthMock = vi.fn<[], HealthMockReturn>();
-const updatesMock = vi.fn<[], UpdatesMockReturn>();
+const healthMock = vi.fn<() => HealthMockReturn>();
+const updatesMock = vi.fn<() => UpdatesMockReturn>();
 
 vi.mock("@/hooks/domains/settings/use-system-health", () => ({
   useSystemHealth: () => healthMock(),

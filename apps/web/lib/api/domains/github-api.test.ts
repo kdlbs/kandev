@@ -21,7 +21,7 @@ import {
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
 
-const fetchSpy = vi.fn<[FetchInput, FetchInit?], Promise<Response>>();
+const fetchSpy = vi.fn<(...args: [FetchInput, FetchInit?]) => Promise<Response>>();
 
 beforeEach(() => {
   fetchSpy.mockReset();

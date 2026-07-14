@@ -1,17 +1,18 @@
-import path from "path";
-import { defineConfig } from "vitest/config";
+import { defineConfig, mergeConfig } from "vitest/config";
 
-export default defineConfig({
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "."),
-      "@kandev/ui": path.resolve(__dirname, "../packages/ui/src"),
-      "@kandev/theme": path.resolve(__dirname, "../packages/theme/src"),
+import viteConfig from "./vite.config";
+
+const configuredMaxWorkers = process.env.VITEST_MAX_WORKERS?.trim();
+
+export default mergeConfig(
+  viteConfig,
+  defineConfig({
+    test: {
+      environment: "happy-dom",
+      setupFiles: ["./vitest.setup.ts"],
+      exclude: ["e2e/**", "node_modules/**"],
+      pool: "threads",
+      maxWorkers: configuredMaxWorkers || (process.env.CI ? undefined : "20%"),
     },
-  },
-  test: {
-    environment: "happy-dom",
-    setupFiles: ["./vitest.setup.ts"],
-    exclude: ["e2e/**", "node_modules/**"],
-  },
-});
+  }),
+);

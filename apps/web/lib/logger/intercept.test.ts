@@ -12,9 +12,9 @@ describe("console interceptor", () => {
     error: console.error,
   };
 
-  let infoSpy: ReturnType<typeof vi.fn>;
-  let warnSpy: ReturnType<typeof vi.fn>;
-  let errorSpy: ReturnType<typeof vi.fn>;
+  let infoSpy: ReturnType<typeof vi.fn<(...data: unknown[]) => void>>;
+  let warnSpy: ReturnType<typeof vi.fn<(...data: unknown[]) => void>>;
+  let errorSpy: ReturnType<typeof vi.fn<(...data: unknown[]) => void>>;
 
   beforeEach(() => {
     _resetForTesting();

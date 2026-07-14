@@ -2,10 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { JiraStatus } from "@/lib/types/jira";
 
-const listJiraProjectStatusesMock = vi.fn<
-  [string, { workspaceId?: string }?],
-  Promise<{ statuses: JiraStatus[] }>
->();
+const listJiraProjectStatusesMock =
+  vi.fn<(key: string, options?: { workspaceId?: string }) => Promise<{ statuses: JiraStatus[] }>>();
 
 vi.mock("@/lib/api/domains/jira-api", () => ({
   listJiraProjectStatuses: (key: string, options?: { workspaceId?: string }) =>

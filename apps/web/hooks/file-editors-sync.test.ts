@@ -92,7 +92,9 @@ describe("buildGitFileSignature", () => {
 });
 
 describe("syncOpenFileFromWorkspace", () => {
-  let updateFileState: ReturnType<typeof vi.fn>;
+  let updateFileState: ReturnType<
+    typeof vi.fn<(path: string, updates: Partial<FileEditorState>) => void>
+  >;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -186,7 +188,9 @@ describe("syncOpenFileFromWorkspace", () => {
 });
 
 describe("syncOpenFileFromWorkspace repo scoping", () => {
-  let updateFileState: ReturnType<typeof vi.fn>;
+  let updateFileState: ReturnType<
+    typeof vi.fn<(path: string, updates: Partial<FileEditorState>) => void>
+  >;
 
   beforeEach(() => {
     vi.clearAllMocks();

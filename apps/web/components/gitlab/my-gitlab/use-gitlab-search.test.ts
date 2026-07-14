@@ -4,8 +4,8 @@ import { IconInbox } from "@tabler/icons-react";
 import type { Issue, MR, MRSearchPage, IssueSearchPage } from "@/lib/types/gitlab";
 import type { PresetOption } from "./presets";
 
-const searchUserMRsMock = vi.fn<[unknown], Promise<MRSearchPage | null>>();
-const searchUserIssuesMock = vi.fn<[unknown], Promise<IssueSearchPage | null>>();
+const searchUserMRsMock = vi.fn<(input: unknown) => Promise<MRSearchPage | null>>();
+const searchUserIssuesMock = vi.fn<(input: unknown) => Promise<IssueSearchPage | null>>();
 
 vi.mock("@/lib/api/domains/gitlab-api", () => ({
   searchUserMRs: (args: unknown) => searchUserMRsMock(args),

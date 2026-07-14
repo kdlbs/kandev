@@ -138,7 +138,7 @@ function makeInactiveStore() {
 
 describe("task.updated primary-session focus follow", () => {
   let store: ReturnType<typeof makeStore>;
-  let setActiveSessionAuto: ReturnType<typeof vi.fn>;
+  let setActiveSessionAuto: ReturnType<typeof vi.fn<(taskId: string, sessionId: string) => void>>;
 
   beforeEach(() => {
     setActiveSessionAuto = vi.fn();
@@ -242,7 +242,7 @@ describe("task.updated primary-session focus follow", () => {
 // they deliberately clicked into.
 describe("task.updated primary-session focus follow (pinning)", () => {
   let store: ReturnType<typeof makeStore>;
-  let setActiveSessionAuto: ReturnType<typeof vi.fn>;
+  let setActiveSessionAuto: ReturnType<typeof vi.fn<(taskId: string, sessionId: string) => void>>;
 
   beforeEach(() => {
     setActiveSessionAuto = vi.fn();
@@ -302,7 +302,7 @@ describe("task.updated primary-session focus follow (pinning)", () => {
 
 describe("task.updated primary-session focus follow (stale pin cleanup)", () => {
   let store: ReturnType<typeof makeStore>;
-  let setActiveSessionAuto: ReturnType<typeof vi.fn>;
+  let setActiveSessionAuto: ReturnType<typeof vi.fn<(taskId: string, sessionId: string) => void>>;
 
   beforeEach(() => {
     setActiveSessionAuto = vi.fn();

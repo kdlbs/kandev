@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, cleanup, waitFor } from "@testing-library/react";
 
-const loadMoreMock = vi.fn<[], Promise<number>>();
+const loadMoreMock = vi.fn<() => Promise<number>>();
 
 vi.mock("@/hooks/use-lazy-load-messages", () => ({
   useLazyLoadMessages: () => ({ loadMore: loadMoreMock, hasMore: true, isLoading: false }),

@@ -47,7 +47,7 @@ function response(content = "export const value = 1;"): FileContentResponse {
 describe("fetchAndOpenFile", () => {
   it("opens the requested repo-scoped file when the request is current", async () => {
     requestFileContentMock.mockResolvedValueOnce(response());
-    const onOpenFile = vi.fn<[OpenFileTab], void>();
+    const onOpenFile = vi.fn<(tab: OpenFileTab) => void>();
     const toast = vi.fn();
 
     await fetchAndOpenFile(SESSION_ID, FILE_PATH, onOpenFile, toast, { repo: REPO });

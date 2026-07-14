@@ -31,7 +31,10 @@ describe("computeScrollLines", () => {
   });
 });
 
-type TerminalStub = { scrollLines: ReturnType<typeof vi.fn>; rows: number };
+type TerminalStub = {
+  scrollLines: ReturnType<typeof vi.fn<(amount: number) => void>>;
+  rows: number;
+};
 
 function makeContainer(): HTMLElement {
   const el = document.createElement("div");

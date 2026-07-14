@@ -16,7 +16,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 
 type FakePanel = {
   id: string;
-  api: { close: ReturnType<typeof vi.fn<[], void>> };
+  api: { close: ReturnType<typeof vi.fn<() => void>> };
 };
 
 type MoveToOptions = {

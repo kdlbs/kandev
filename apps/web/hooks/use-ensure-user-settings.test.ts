@@ -13,7 +13,7 @@ const mockFetchUserSettings = vi.fn();
 const mockSetUserSettings = vi.fn((settings: UserSettingsState) => {
   mockState.userSettings = settings;
 });
-const mockReadQueuedTaskCreateLastUsedState = vi.fn<[], PendingTaskCreateLastUsed>(() => ({
+const mockReadQueuedTaskCreateLastUsedState = vi.fn<() => PendingTaskCreateLastUsed>(() => ({
   repositoryId: undefined,
   branch: undefined,
   agentProfileId: undefined,
