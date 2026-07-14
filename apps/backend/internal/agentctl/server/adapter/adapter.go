@@ -179,7 +179,7 @@ type AgentAdapter interface {
 	// Prompt sends a prompt to the agent.
 	// The agent's responses are streamed via the Updates channel.
 	// Attachments (images) are passed to the agent if provided.
-	Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error
+	Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment, promptGeneration uint64) error
 
 	// Cancel cancels the current operation.
 	Cancel(ctx context.Context) error

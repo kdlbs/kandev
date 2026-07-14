@@ -232,7 +232,7 @@ func TestWakeupE2E_BridgeQueuedTurnDrainsViaSyntheticPrompt(t *testing.T) {
 
 	t.Logf("sending initial prompt (will trigger ScheduleWakeup, delay=%ds)…", wakeupDelaySeconds)
 	initialStart := time.Now()
-	if err := w.adapter.Prompt(ctx, prompt, nil); err != nil {
+	if err := w.adapter.Prompt(ctx, prompt, nil, 0); err != nil {
 		t.Fatalf("initial Prompt failed: %v", err)
 	}
 	initialEnd := time.Now()

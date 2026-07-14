@@ -450,13 +450,17 @@ func TestPrompt_Success(t *testing.T) {
 		}
 		// Verify payload
 		var payload struct {
-			Text string `json:"text"`
+			Text             string `json:"text"`
+			PromptGeneration uint64 `json:"prompt_generation"`
 		}
 		if err := msg.ParsePayload(&payload); err != nil {
 			t.Errorf("failed to parse payload: %v", err)
 		}
 		if payload.Text != "hello agent" {
 			t.Errorf("expected text 'hello agent', got %q", payload.Text)
+		}
+		if payload.PromptGeneration != 42 {
+			t.Errorf("expected prompt generation 42, got %d", payload.PromptGeneration)
 		}
 		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 			"success": true,
@@ -469,7 +473,7 @@ func TestPrompt_Success(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.Prompt(ctx, "hello agent", nil)
+	err := c.Prompt(ctx, "hello agent", nil, 42)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -486,7 +490,7 @@ func TestPrompt_NoActiveSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	err := c.Prompt(ctx, "hello agent", nil)
+	err := c.Prompt(ctx, "hello agent", nil, 0)
 	if err == nil {
 		t.Fatal("expected error")
 	}

@@ -26,7 +26,7 @@ func (stubAgentAdapter) NewSession(context.Context, []types.McpServer) (string, 
 func (stubAgentAdapter) LoadSession(context.Context, string, []types.McpServer) error {
 	return nil
 }
-func (stubAgentAdapter) Prompt(context.Context, string, []v1.MessageAttachment) error {
+func (stubAgentAdapter) Prompt(context.Context, string, []v1.MessageAttachment, uint64) error {
 	return nil
 }
 func (stubAgentAdapter) Cancel(context.Context) error                   { return nil }

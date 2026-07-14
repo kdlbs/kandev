@@ -247,11 +247,17 @@ func (c *Client) Authenticate(ctx context.Context, methodID string) error {
 // Prompt sends a fire-and-forget prompt to the agent via the agent WebSocket stream.
 // The server returns an accepted response immediately; completion is signaled via stream events.
 // Attachments (images) are passed to the agent if provided.
-func (c *Client) Prompt(ctx context.Context, text string, attachments []v1.MessageAttachment) error {
+func (c *Client) Prompt(
+	ctx context.Context,
+	text string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+) error {
 	payload := struct {
-		Text        string                 `json:"text"`
-		Attachments []v1.MessageAttachment `json:"attachments,omitempty"`
-	}{Text: text, Attachments: attachments}
+		Text             string                 `json:"text"`
+		Attachments      []v1.MessageAttachment `json:"attachments,omitempty"`
+		PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
+	}{Text: text, Attachments: attachments, PromptGeneration: promptGeneration}
 
 	resp, err := c.sendStreamRequest(ctx, "agent.prompt", payload)
 	if err != nil {

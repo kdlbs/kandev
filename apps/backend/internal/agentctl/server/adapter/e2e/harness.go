@@ -192,7 +192,7 @@ func collectEventsUntilPromptDone(
 	}()
 
 	// Send prompt (blocks until turn completes or context cancels)
-	if err := adpt.Prompt(ctx, prompt, nil); err != nil {
+	if err := adpt.Prompt(ctx, prompt, nil, 0); err != nil {
 		t.Fatalf("prompt failed: %v", err)
 	}
 

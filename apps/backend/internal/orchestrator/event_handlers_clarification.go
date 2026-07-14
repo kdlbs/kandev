@@ -257,32 +257,7 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID))
 
-	// Claim the shared per-session guard across the whole cancel-then-retry
-	// sequence, not just the cancel call — see the Service.cancelInFlight
-	// field doc comment. Releasing between the cancel and the retry prompt
-	// would let a concurrent QueueAndInterruptForPeerMessage (or another
-	// drain) take-and-dispatch a queued entry in that gap, only for this
-	// retry's own PromptTask call to then prompt over top of it.
-	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
-	defer release()
-	lock.Lock()
-	defer lock.Unlock()
-
-	if err := s.cancelAgentSilent(ctx, data.TaskID, data.SessionID); err != nil {
-		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
-			zap.String("session_id", data.SessionID),
-			zap.Error(err))
-		// Force-revert session state so the retry prompt can proceed
-		if revertErr := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateWaitingForInput, ""); revertErr != nil {
-			s.logger.Error("failed to force-revert session state for clarification recovery",
-				zap.String("session_id", data.SessionID),
-				zap.Error(revertErr))
-			return false
-		}
-		s.completeTurnForSession(ctx, data.SessionID)
-	}
-
-	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, false); err != nil {
+	if err := s.cancelAndDispatchClarificationRetry(ctx, data, prompt); err != nil {
 		s.logger.Error("failed to resume agent after cancel in clarification recovery",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
@@ -294,6 +269,34 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID))
 	return true
+}
+
+// cancelAndDispatchClarificationRetry owns the guard through cancellation and
+// retry acceptance, then releases it while the recovered agent turn runs.
+func (s *Service) cancelAndDispatchClarificationRetry(ctx context.Context, data clarificationAnsweredData, prompt string) error {
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
+	if err := s.cancelAgentSilent(ctx, data.TaskID, data.SessionID); err != nil {
+		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		// Force-revert session state so the retry prompt can proceed
+		if revertErr := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateWaitingForInput, ""); revertErr != nil {
+			s.logger.Warn("failed to force-revert session state for clarification recovery",
+				zap.String("session_id", data.SessionID),
+				zap.Error(revertErr))
+			return revertErr
+		}
+		s.completeTurnForSession(ctx, data.SessionID)
+	}
+
+	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, true); err != nil {
+		return err
+	}
+	return nil
 }
 
 // PauseForClarificationInput converts a no-answer ask_user_question outcome

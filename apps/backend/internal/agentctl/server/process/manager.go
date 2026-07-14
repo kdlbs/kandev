@@ -1222,11 +1222,12 @@ func (m *Manager) GetUpdates() <-chan adapter.AgentEvent {
 
 // SendErrorEvent sends an error event on the updates channel so the
 // lifecycle manager (and ultimately the UI) learns about the failure.
-func (m *Manager) SendErrorEvent(errorMessage string) {
+func (m *Manager) SendErrorEvent(errorMessage string, promptGeneration uint64) {
 	select {
 	case m.updatesCh <- adapter.AgentEvent{
-		Type:  adapter.EventTypeError,
-		Error: errorMessage,
+		Type:             adapter.EventTypeError,
+		Error:            errorMessage,
+		PromptGeneration: promptGeneration,
 	}:
 	default:
 		m.logger.Warn("updates channel full, could not send error event")

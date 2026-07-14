@@ -19,6 +19,7 @@ type AgentEventPayload struct {
 	FinishedAt       *time.Time `json:"finished_at,omitempty"`
 	ErrorMessage     string     `json:"error_message,omitempty"`
 	ExitCode         *int       `json:"exit_code,omitempty"`
+	PromptGeneration uint64     `json:"prompt_generation,omitempty"`
 }
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).

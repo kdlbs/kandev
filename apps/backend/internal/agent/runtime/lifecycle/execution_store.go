@@ -134,6 +134,20 @@ func (s *ExecutionStore) GetBySessionID(sessionID string) (*AgentExecution, bool
 	return execution, exists
 }
 
+// OwnsPromptGeneration reports whether executionID and generation still own
+// sessionID's active lifecycle prompt.
+func (s *ExecutionStore) OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	currentExecutionID, exists := s.bySession[sessionID]
+	if !exists || currentExecutionID != executionID {
+		return false
+	}
+	execution, exists := s.executions[currentExecutionID]
+	return exists && generation != 0 && execution.promptGeneration == generation
+}
+
 // GetByTaskEnvironmentID returns any execution associated with a task environment ID.
 func (s *ExecutionStore) GetByTaskEnvironmentID(taskEnvironmentID string) (*AgentExecution, bool) {
 	s.mu.RLock()
@@ -181,6 +195,31 @@ func (s *ExecutionStore) UpdateStatus(executionID string, status v1.AgentStatus)
 	if execution, exists := s.executions[executionID]; exists {
 		execution.Status = status
 	}
+}
+
+// BeginPrompt assigns a new immutable identity to the next prompt dispatch.
+func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
+	execution, exists := s.Get(executionID)
+	if !exists {
+		return 0, ErrExecutionNotFound
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, exists := s.executions[executionID]
+	if !exists || current != execution {
+		return 0, ErrExecutionNotFound
+	}
+	return beginExecutionPrompt(current), nil
+}
+
+func beginExecutionPrompt(execution *AgentExecution) uint64 {
+	execution.promptGeneration++
+	execution.Status = v1.AgentStatusRunning
+	return execution.promptGeneration
 }
 
 // UpdateError updates the error message of an agent execution and sets its status to failed.

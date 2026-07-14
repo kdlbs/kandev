@@ -254,15 +254,16 @@ func TestHandleWSPrompt_NoAdapter(t *testing.T) {
 
 func TestHandleWSPrompt_SuppressesPromptAbandonedAfterCancel(t *testing.T) {
 	s := newTestServer(t)
-	prompted := make(chan struct{}, 1)
+	prompted := make(chan uint64, 1)
 	s.procMgr.SetAdapterForTest(&promptErrorAdapter{
 		sessionID: "session-123",
 		err:       errors.New("prompt failed: prompt abandoned after cancel"),
 		prompted:  prompted,
 	})
 
-	msg, _ := ws.NewRequest("req-1", "agent.prompt", map[string]string{
-		"text": "hello",
+	msg, _ := ws.NewRequest("req-1", "agent.prompt", PromptRequest{
+		Text:             "hello",
+		PromptGeneration: 42,
 	})
 	resp := s.handleWSPrompt(context.Background(), msg)
 
@@ -278,7 +279,10 @@ func TestHandleWSPrompt_SuppressesPromptAbandonedAfterCancel(t *testing.T) {
 	}
 
 	select {
-	case <-prompted:
+	case generation := <-prompted:
+		if generation != 42 {
+			t.Fatalf("prompt generation = %d, want 42", generation)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("prompt was not called")
 	}
@@ -312,7 +316,7 @@ func TestHandleWSCancel_NoAdapter(t *testing.T) {
 type promptErrorAdapter struct {
 	sessionID string
 	err       error
-	prompted  chan<- struct{}
+	prompted  chan<- uint64
 }
 
 func (a *promptErrorAdapter) PrepareEnvironment() (map[string]string, error) {
@@ -344,8 +348,13 @@ func (a *promptErrorAdapter) LoadSession(_ context.Context, sessionID string, _ 
 	return nil
 }
 
-func (a *promptErrorAdapter) Prompt(_ context.Context, _ string, _ []v1.MessageAttachment) error {
-	a.prompted <- struct{}{}
+func (a *promptErrorAdapter) Prompt(
+	_ context.Context,
+	_ string,
+	_ []v1.MessageAttachment,
+	promptGeneration uint64,
+) error {
+	a.prompted <- promptGeneration
 	return a.err
 }
 

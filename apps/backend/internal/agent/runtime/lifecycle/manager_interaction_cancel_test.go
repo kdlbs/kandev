@@ -343,3 +343,44 @@ func TestManager_CancelAgent_EscalationDoesNotDeadlockOnReentrantReadySubscriber
 		t.Fatal("simulated AgentReady subscriber did not finish after the guard was released")
 	}
 }
+
+func TestMarkReadyAsync_PublishesImmutablePromptGenerationSnapshot(t *testing.T) {
+	mgr := newTestManager(t)
+	mockBus, ok := mgr.eventBus.(*MockEventBus)
+	require.True(t, ok)
+
+	exec := &AgentExecution{
+		ID:               "exec-generation-snapshot",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		Status:           v1.AgentStatusRunning,
+		promptGeneration: 1,
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	publishEntered := make(chan interface{}, 1)
+	releasePublish := make(chan struct{})
+	mockBus.Notify = make(chan struct{}, 1)
+	mockBus.OnPublish = func(subject string, event *bus.Event) {
+		if subject != events.AgentReady {
+			return
+		}
+		publishEntered <- event.Data
+		<-releasePublish
+	}
+
+	require.NoError(t, mgr.markReadyEventWithContext(
+		context.Background(), exec.ID, events.AgentReady, true,
+	))
+	payload, payloadOK := (<-publishEntered).(AgentEventPayload)
+	require.True(t, payloadOK)
+
+	_, err := mgr.BeginPrompt(exec.ID)
+	require.NoError(t, err)
+	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 2))
+	close(releasePublish)
+	<-mockBus.Notify
+
+	require.Equal(t, uint64(1), payload.PromptGeneration)
+	require.Equal(t, string(v1.AgentStatusReady), payload.Status)
+}

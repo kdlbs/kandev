@@ -77,8 +77,9 @@ type LoadSessionResponse struct {
 
 // PromptRequest is a request to send a prompt to the agent
 type PromptRequest struct {
-	Text        string                 `json:"text"`                  // Simple text prompt
-	Attachments []v1.MessageAttachment `json:"attachments,omitempty"` // Optional image attachments
+	Text             string                 `json:"text"`                  // Simple text prompt
+	Attachments      []v1.MessageAttachment `json:"attachments,omitempty"` // Optional image attachments
+	PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
 }
 
 // PromptResponse is the response to a prompt call
@@ -466,14 +467,14 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// The prompt completes naturally when the agent process exits (stdin/stdout close),
 	// the user cancels, or agentctl shuts down.
 	go func() {
-		if err := adapter.Prompt(context.Background(), req.Text, req.Attachments); err != nil {
+		if err := adapter.Prompt(context.Background(), req.Text, req.Attachments, req.PromptGeneration); err != nil {
 			if acptransport.IsPromptAbandonedAfterCancel(err) {
 				s.logger.Info("async prompt abandoned after cancel; suppressing stale error event",
 					zap.Error(err))
 				return
 			}
 			s.logger.Error("async prompt failed", zap.Error(err))
-			s.procMgr.SendErrorEvent(err.Error())
+			s.procMgr.SendErrorEvent(err.Error(), req.PromptGeneration)
 		}
 	}()
 
