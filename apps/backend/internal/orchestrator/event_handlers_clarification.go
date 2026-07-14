@@ -257,12 +257,23 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID))
 
-	// Claim the shared per-session guard across the whole cancel-then-retry
-	// sequence, not just the cancel call — see the Service.cancelInFlight
-	// field doc comment. Releasing between the cancel and the retry prompt
-	// would let a concurrent QueueAndInterruptForPeerMessage (or another
-	// drain) take-and-dispatch a queued entry in that gap, only for this
-	// retry's own PromptTask call to then prompt over top of it.
+	if err := s.cancelAndDispatchClarificationRetry(ctx, data, prompt); err != nil {
+		s.logger.Error("failed to resume agent after cancel in clarification recovery",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return false
+	}
+
+	s.logger.Info("successfully recovered stuck agent with clarification answer",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID))
+	return true
+}
+
+// cancelAndDispatchClarificationRetry owns the guard through cancellation and
+// retry acceptance, then releases it while the recovered agent turn runs.
+func (s *Service) cancelAndDispatchClarificationRetry(ctx context.Context, data clarificationAnsweredData, prompt string) error {
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 	defer release()
 	lock.Lock()
@@ -277,23 +288,15 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 			s.logger.Error("failed to force-revert session state for clarification recovery",
 				zap.String("session_id", data.SessionID),
 				zap.Error(revertErr))
-			return false
+			return revertErr
 		}
 		s.completeTurnForSession(ctx, data.SessionID)
 	}
 
-	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, false); err != nil {
-		s.logger.Error("failed to resume agent after cancel in clarification recovery",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.Error(err))
-		return false
+	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, true); err != nil {
+		return err
 	}
-
-	s.logger.Info("successfully recovered stuck agent with clarification answer",
-		zap.String("task_id", data.TaskID),
-		zap.String("session_id", data.SessionID))
-	return true
+	return nil
 }
 
 // PauseForClarificationInput converts a no-answer ask_user_question outcome

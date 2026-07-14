@@ -91,6 +91,8 @@ failure is still logged server-side.
 
 ### Composition with the FIFO queue and turn-safety guarantees
 
+Decision: [ADR-0035](../../decisions/0035-version-agent-ready-events-by-prompt-generation.md)
+
 `delivery_mode="interrupt"` queues the message and cancels-and-takes it in one atomic
 orchestrator call, not two separate steps: queuing followed by a separate interrupt call
 would leave a window where the target's turn could complete naturally, the ordinary FIFO
@@ -103,7 +105,9 @@ Every path that can cancel a session's active turn or take-and-dispatch its next
 message — the parent interrupt, a manual or workflow-triggered queue drain, CI-automation
 drains, and clarification-timeout recovery — serializes through one per-session guard. Two
 such operations targeting the same session never interleave: whichever acquires the guard
-first completes its cancel/take-and-dispatch before the other proceeds. This guarantees at
+first completes its cancel/take-and-dispatch through prompt acceptance before the other
+proceeds. The guard is released immediately after acceptance and is never held while waiting
+for the dispatched agent turn to complete. This guarantees at
 most one dispatch per queued entry (no double dispatch) and no entry is ever silently
 dropped — but it does *not* guarantee that one of the two racing callers itself performs an
 immediate delivery. The loser backs off once it observes the winner already changed the
@@ -116,12 +120,14 @@ clarification-timeout recovery — that the loser correctly does not cancel into
 is accounted for exactly once: dispatched, or left queued for its own future turn boundary.
 
 The guard is acquired *before* any turn-completion bookkeeping runs (not just around the
-final queue-drain decision), and — whenever the orchestrator has turn identity tracking
-wired — bookkeeping re-validates that the turn it is about to complete is still the same one
-that was active when the event fired, once the guard is actually held. A ready event that
+final queue-drain decision). Each turn-ending `agent.ready` signal carries the immutable
+`(agent_execution_id, prompt_generation)` captured when lifecycle created the ready signal.
+Once the guard is held, bookkeeping verifies that identity still owns the session and also
+re-validates the active orchestrator turn when turn tracking is wired. A ready event that
 raced a parent interrupt and lost cannot complete (or transition the workflow for) a turn the
-interrupt already cancelled and replaced; it detects the turn changed out from under it and
-backs off instead, leaving that turn's own eventual completion to whatever superseded it.
+interrupt already cancelled and replaced, even if delivery did not begin until after the
+replacement turn started. It backs off instead, leaving that turn's own eventual completion
+to whatever superseded it.
 Conversely, if the interrupt's own cancel genuinely fails while a ready event was blocked
 behind the same guard, the message is not stranded: the still-pending ready event finds the
 turn exactly as it left it (not stale) and delivers the message itself through the ordinary
@@ -204,9 +210,16 @@ causing a second, competing dispatch.
 
 **GIVEN** a parent's `delivery_mode="interrupt"` call cancels and redispatches a session
 through a brand new turn, **WHEN** a `agent.ready` event for the *original* (now-cancelled)
-turn was already in flight when the interrupt started, **THEN** that ready event detects the
-turn changed once it can proceed and backs off without completing or transitioning the
-workflow for the interrupt's new turn.
+turn is delayed until after the replacement prompt has claimed `RUNNING`, **THEN** that ready
+event retains the original prompt generation and backs off without completing the replacement
+turn, consuming its pending move, or evaluating its `on_turn_complete` transition.
+
+**GIVEN** clarification recovery has cancelled a stuck turn and its retry prompt has been
+accepted but remains incomplete, **WHEN** the direct parent requests
+`delivery_mode="interrupt"`, **THEN** the request does not wait for the recovered turn to
+complete. It either interrupts that current recovered turn and dispatches the parent message,
+or, if it began against the superseded generation, leaves the parent message queued without
+loss or duplicate dispatch.
 
 **GIVEN** a parent's `delivery_mode="interrupt"` call's own cancel step genuinely fails
 (not one of the tolerated "already idle"/"no active execution" cases) while a ready event

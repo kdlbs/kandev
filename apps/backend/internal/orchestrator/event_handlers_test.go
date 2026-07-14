@@ -19,6 +19,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
+	eventbus "github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -29,6 +31,7 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // --- Mocks ---
@@ -230,6 +233,9 @@ type mockAgentManager struct {
 	// ErrCancelEscalated sentinels handled inside cancelAgentSilent).
 	cancelAgentErr error
 
+	currentPromptGeneration  atomic.Uint64
+	currentPromptExecutionID string
+
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
 	// returned to simulate "no running agent".
@@ -347,6 +353,10 @@ func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID 
 		return m.isAgentReadyFn(ctx, sessionID)
 	}
 	return m.IsAgentRunningForSession(ctx, sessionID)
+}
+
+func (m *mockAgentManager) OwnsPromptGeneration(_ string, executionID string, generation uint64) bool {
+	return executionID == m.currentPromptExecutionID && generation == m.currentPromptGeneration.Load()
 }
 
 // RowLiveness makes the mock satisfy the orchestrator's optional
@@ -1055,6 +1065,99 @@ func TestHandleAgentReadyGuards_ConcurrentInterruptRaces(t *testing.T) {
 		if move.WorkflowStepID != "step2" {
 			t.Fatalf("expected the pending move to still target step2, got %q", move.WorkflowStepID)
 		}
+	})
+}
+
+func TestHandleAgentReady_DelayedOldGenerationDoesNotCompleteReplacementTurn(t *testing.T) {
+	ctx := context.Background()
+
+	runScenario := func(t *testing.T, withPendingMove bool) {
+		t.Helper()
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+		}
+		taskRepo := newMockTaskRepo()
+		seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+		agentMgr := &mockAgentManager{isAgentRunning: true}
+		agentMgr.currentPromptExecutionID = "exec-1"
+		agentMgr.currentPromptGeneration.Store(2)
+		svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+		svc.turnService = &repoTurnService{repo: repo}
+
+		oldTurn, err := svc.turnService.StartTurn(ctx, "s1")
+		require.NoError(t, err)
+
+		memoryBus := eventbus.NewMemoryEventBus(testLogger())
+		t.Cleanup(memoryBus.Close)
+		eventWatcher := watcher.NewWatcher(memoryBus, watcher.EventHandlers{
+			OnAgentReady: svc.handleAgentReady,
+		}, "stale-ready-regression", testLogger())
+		require.NoError(t, eventWatcher.Start(ctx))
+		t.Cleanup(func() { require.NoError(t, eventWatcher.Stop()) })
+
+		oldReady := eventbus.NewEvent(events.AgentReady, "agent-manager", map[string]interface{}{
+			"task_id":            "t1",
+			"session_id":         "s1",
+			"agent_execution_id": "exec-1",
+			"prompt_generation":  1,
+		})
+		publishWaiting := make(chan struct{})
+		releaseOldReady := make(chan struct{})
+		publishDone := make(chan error, 1)
+		go func() {
+			close(publishWaiting)
+			<-releaseOldReady
+			publishDone <- memoryBus.Publish(ctx, events.AgentReady, oldReady)
+		}()
+		<-publishWaiting
+
+		svc.completeTurnForSession(ctx, "s1")
+		replacementTurn, err := svc.turnService.StartTurn(ctx, "s1")
+		require.NoError(t, err)
+		require.NotEqual(t, oldTurn.ID, replacementTurn.ID)
+		if withPendingMove {
+			svc.messageQueue.SetPendingMove(ctx, "s1", &messagequeue.PendingMove{
+				TaskID: "t1", WorkflowID: "wf1", WorkflowStepID: "missing-step",
+			})
+		}
+
+		close(releaseOldReady)
+		select {
+		case err := <-publishDone:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out releasing the delayed old-generation ready event")
+		}
+
+		active, err := svc.turnService.GetActiveTurn(ctx, "s1")
+		require.NoError(t, err)
+		require.NotNil(t, active, "replacement turn must remain open")
+		require.Equal(t, replacementTurn.ID, active.ID)
+
+		updatedTask, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "step1", updatedTask.WorkflowStepID,
+			"old ready must not evaluate on_turn_complete for the replacement turn")
+		updatedSession, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.Equal(t, models.TaskSessionStateRunning, updatedSession.State,
+			"old ready must not run replacement-turn completion bookkeeping")
+		if withPendingMove {
+			move, exists := svc.messageQueue.GetPendingMove(ctx, "s1")
+			require.True(t, exists, "old ready must not consume the replacement turn's pending move")
+			require.Equal(t, "missing-step", move.WorkflowStepID)
+		}
+	}
+
+	t.Run("on_turn_complete remains unevaluated", func(t *testing.T) {
+		runScenario(t, false)
+	})
+	t.Run("pending move remains untouched", func(t *testing.T) {
+		runScenario(t, true)
 	})
 }
 

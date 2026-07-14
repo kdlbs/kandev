@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // testAgent implements agents.Agent for use in lifecycle tests.
@@ -385,4 +386,26 @@ func TestManager_UpdateStatus(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for non-existent execution")
 	}
+}
+
+func TestManager_UpdateStatusAdvancesPromptGenerationOnRunningTransition(t *testing.T) {
+	mgr := newTestManager(t)
+	exec := &AgentExecution{
+		ID:        "exec-prompt-generation",
+		SessionID: "session-prompt-generation",
+		Status:    v1.AgentStatusReady,
+	}
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	require.NoError(t, mgr.UpdateStatus(exec.ID, v1.AgentStatusRunning))
+	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 1))
+	require.False(t, mgr.OwnsPromptGeneration(exec.SessionID, "other-execution", 1))
+
+	require.NoError(t, mgr.UpdateStatus(exec.ID, v1.AgentStatusRunning))
+	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 1),
+		"duplicate running status must not create a second generation")
+
+	require.NoError(t, mgr.UpdateStatus(exec.ID, v1.AgentStatusReady))
+	require.NoError(t, mgr.UpdateStatus(exec.ID, v1.AgentStatusRunning))
+	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 2))
 }

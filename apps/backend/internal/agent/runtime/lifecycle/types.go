@@ -43,6 +43,7 @@ type AgentExecution struct {
 	ExitCode          *int
 	ErrorMessage      string
 	Metadata          map[string]interface{}
+	promptGeneration  uint64
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.

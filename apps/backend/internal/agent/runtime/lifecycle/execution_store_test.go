@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"errors"
 	"testing"
+
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // TestExecutionStore_AddRejectsDuplicateSession is the regression test for the
@@ -76,5 +78,26 @@ func TestExecutionStore_AddNoSessionIDAlwaysSucceeds(t *testing.T) {
 	}
 	if err := store.Add(&AgentExecution{ID: "exec-b"}); err != nil {
 		t.Errorf("Add without SessionID (second): %v", err)
+	}
+}
+
+func TestExecutionStore_UpdateStatusAdvancesPromptGeneration(t *testing.T) {
+	store := NewExecutionStore()
+	exec := &AgentExecution{
+		ID:        "exec-1",
+		SessionID: "session-1",
+		Status:    v1.AgentStatusReady,
+	}
+	if err := store.Add(exec); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+
+	store.UpdateStatus(exec.ID, v1.AgentStatusRunning)
+	if !store.OwnsPromptGeneration(exec.SessionID, exec.ID, 1) {
+		t.Fatal("first running transition must create generation 1")
+	}
+	store.UpdateStatus(exec.ID, v1.AgentStatusRunning)
+	if !store.OwnsPromptGeneration(exec.SessionID, exec.ID, 1) {
+		t.Fatal("duplicate running status must retain generation 1")
 	}
 }

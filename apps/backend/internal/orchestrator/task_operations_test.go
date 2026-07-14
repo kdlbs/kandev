@@ -1745,6 +1745,102 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 	require.Equal(t, 1, status.Count, "the parent's message stays queued for the recovered turn's own natural drain")
 }
 
+func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	retryAccepted := make(chan struct{})
+	promptAccepted := make(chan promptCall, 2)
+	turnComplete := make(chan struct{})
+	var retryAcceptedOnce sync.Once
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptAgentFunc: func(_ context.Context, executionID string, prompt string, _ []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
+			promptAccepted <- promptCall{ExecutionID: executionID, Prompt: prompt, DispatchOnly: dispatchOnly}
+			if prompt == "clarification answer" {
+				retryAcceptedOnce.Do(func() { close(retryAccepted) })
+			}
+			if !dispatchOnly {
+				<-turnComplete
+			}
+			return &executor.PromptResult{}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+	turnSync := &turnSnapshotSyncTurnService{
+		repoTurnService: &repoTurnService{repo: repo},
+		sessionID:       "session1",
+		snapshotTaken:   make(chan struct{}),
+	}
+	svc.turnService = turnSync
+	_, err := turnSync.StartTurn(ctx, "session1")
+	require.NoError(t, err)
+
+	recoveryDone := make(chan bool, 1)
+	go func() {
+		recoveryDone <- svc.retryClarificationAfterCancel(ctx, clarificationAnsweredData{
+			TaskID: "task1", SessionID: "session1",
+		}, "clarification answer", fmt.Errorf("wrap: %w", ErrAgentPromptInProgress))
+	}()
+	<-retryAccepted
+
+	interruptDone := make(chan struct{})
+	var queued *messagequeue.QueuedMessage
+	var dispatched bool
+	var interruptErr error
+	go func() {
+		queued, dispatched, interruptErr = svc.QueueAndInterruptForPeerMessage(
+			ctx, "task1", "session1", "parent steer", nil,
+		)
+		close(interruptDone)
+	}()
+	<-turnSync.snapshotTaken
+
+	select {
+	case <-interruptDone:
+	case <-time.After(2 * time.Second):
+		close(turnComplete)
+		<-interruptDone
+		t.Fatal("parent interrupt remained blocked on clarification recovery until the recovered turn completed")
+	}
+
+	select {
+	case recovered := <-recoveryDone:
+		require.True(t, recovered)
+	default:
+		close(turnComplete)
+		t.Fatal("clarification recovery must return after retry dispatch acceptance")
+	}
+	close(turnComplete)
+
+	require.NoError(t, interruptErr)
+	require.NotNil(t, queued)
+	require.True(t, dispatched, "interrupt begun after retry acceptance must interrupt the recovered turn")
+	require.Equal(t, int32(2), agentMgr.cancelAgentCalls.Load(), "recovery and parent interrupt each cancel their owned turn")
+
+	firstPrompt := <-promptAccepted
+	secondPrompt := <-promptAccepted
+	require.Equal(t, "clarification answer", firstPrompt.Prompt)
+	require.True(t, firstPrompt.DispatchOnly)
+	require.Equal(t, "parent steer", secondPrompt.Prompt)
+	require.False(t, secondPrompt.DispatchOnly, "normal queued dispatch keeps its existing completion-wait behavior")
+
+	agentMgr.mu.Lock()
+	promptCalls := append([]promptCall(nil), agentMgr.capturedPromptCalls...)
+	agentMgr.mu.Unlock()
+	require.Len(t, promptCalls, 2, "clarification retry and parent message must each dispatch exactly once")
+
+	active, err := svc.turnService.GetActiveTurn(ctx, "session1")
+	require.NoError(t, err)
+	require.NotNil(t, active, "parent interrupt replacement turn must remain active")
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	require.Equal(t, 0, status.Count, "accepted parent message must be removed from the queue exactly once")
+}
+
 // TestCancelAgent_RacesHandleAgentReady_QueuedMessageStillDelivered covers a
 // real cross-goroutine race at the orchestrator level: a user's Cancel-button
 // click (Service.CancelAgent) racing the same agent's own asynchronous

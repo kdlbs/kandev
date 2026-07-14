@@ -31,6 +31,7 @@ type AgentEventData struct {
 	AgentProfileID   string `json:"agent_profile_id"`
 	ExitCode         *int   `json:"exit_code,omitempty"`
 	ErrorMessage     string `json:"error_message,omitempty"`
+	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
 }
 
 // ACPSessionEventData contains data from ACP session events

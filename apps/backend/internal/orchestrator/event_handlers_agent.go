@@ -356,6 +356,21 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			zap.String("session_state", string(session.State)))
 		return
 	}
+	if data.PromptGeneration != 0 {
+		generationOwner, ok := s.agentManager.(interface {
+			OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+		})
+		if !ok || !generationOwner.OwnsPromptGeneration(
+			data.SessionID, data.AgentExecutionID, data.PromptGeneration,
+		) {
+			s.logger.Debug("stale agent.ready: prompt generation no longer owns the session",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.String("agent_execution_id", data.AgentExecutionID),
+				zap.Uint64("event_prompt_generation", data.PromptGeneration))
+			return
+		}
+	}
 	if s.turnService != nil {
 		if turnSnapshotErr != nil {
 			s.logger.Warn("could not confirm this event's active turn before waiting for the guard; treating as stale rather than risk completing a possible successor turn",

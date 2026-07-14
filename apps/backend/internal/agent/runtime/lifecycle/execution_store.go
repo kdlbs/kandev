@@ -134,6 +134,20 @@ func (s *ExecutionStore) GetBySessionID(sessionID string) (*AgentExecution, bool
 	return execution, exists
 }
 
+// OwnsPromptGeneration reports whether executionID and generation still own
+// sessionID's active lifecycle prompt.
+func (s *ExecutionStore) OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	currentExecutionID, exists := s.bySession[sessionID]
+	if !exists || currentExecutionID != executionID {
+		return false
+	}
+	execution, exists := s.executions[currentExecutionID]
+	return exists && generation != 0 && execution.promptGeneration == generation
+}
+
 // GetByTaskEnvironmentID returns any execution associated with a task environment ID.
 func (s *ExecutionStore) GetByTaskEnvironmentID(taskEnvironmentID string) (*AgentExecution, bool) {
 	s.mu.RLock()
@@ -179,8 +193,15 @@ func (s *ExecutionStore) UpdateStatus(executionID string, status v1.AgentStatus)
 	defer s.mu.Unlock()
 
 	if execution, exists := s.executions[executionID]; exists {
-		execution.Status = status
+		setExecutionStatus(execution, status)
 	}
+}
+
+func setExecutionStatus(execution *AgentExecution, status v1.AgentStatus) {
+	if status == v1.AgentStatusRunning && execution.Status != v1.AgentStatusRunning {
+		execution.promptGeneration++
+	}
+	execution.Status = status
 }
 
 // UpdateError updates the error message of an agent execution and sets its status to failed.
