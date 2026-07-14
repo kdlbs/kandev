@@ -28,7 +28,8 @@ vi.mock("./task-create-dialog-remote-repo-chip", () => ({
   RemoteRepoChip: () => <div data-testid="remote-repo-chip" />,
 }));
 
-import { RepoChipsRow, WorkspaceRepoChips } from "./task-create-dialog-repo-chips";
+import { RepoChipsRow } from "./task-create-dialog-repo-chips";
+import { WorkspaceRepoChips } from "./task-create-dialog-workspace-repo-chips";
 
 afterEach(cleanup);
 

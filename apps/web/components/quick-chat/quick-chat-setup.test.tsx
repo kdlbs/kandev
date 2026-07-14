@@ -41,7 +41,7 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
   ),
 }));
 
-vi.mock("@/components/task-create-dialog-repo-chips", () => ({
+vi.mock("@/components/task-create-dialog-workspace-repo-chips", () => ({
   WorkspaceRepoChips: () => null,
 }));
 

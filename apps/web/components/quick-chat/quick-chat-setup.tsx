@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import { AgentSelector } from "@/components/task-create-dialog-selectors";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
-import { WorkspaceRepoChips } from "@/components/task-create-dialog-repo-chips";
+import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
 import { useRepositoriesState } from "@/components/task-create-dialog-repositories-state";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import type { QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
