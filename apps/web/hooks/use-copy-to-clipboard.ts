@@ -32,10 +32,14 @@ function fallbackCopy(text: string): boolean {
     success = document.execCommand("copy");
   } catch {
     success = false;
+  } finally {
+    try {
+      container.removeChild(textArea);
+    } catch {
+      // Node may already be gone (e.g. dialog closed mid-copy); ignore.
+    }
+    previousActive?.focus();
   }
-
-  container.removeChild(textArea);
-  previousActive?.focus?.();
   return success;
 }
 

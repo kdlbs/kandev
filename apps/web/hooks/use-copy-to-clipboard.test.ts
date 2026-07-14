@@ -34,9 +34,26 @@ describe("useCopyToClipboard", () => {
       Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
 
       const { result } = renderHook(() => useCopyToClipboard());
-      await act(async () => { await result.current.copy(SAMPLE_TEXT); });
+      await act(async () => {
+        await result.current.copy(SAMPLE_TEXT);
+      });
 
       expect(writeText).toHaveBeenCalledWith(SAMPLE_TEXT);
+      expect(result.current.copied).toBe(true);
+    });
+
+    it("falls back to execCommand when writeText rejects", async () => {
+      const writeText = vi.fn().mockRejectedValue(new Error("permission denied"));
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+      execCommandMock.mockReturnValue(true);
+
+      const { result } = renderHook(() => useCopyToClipboard());
+      await act(async () => {
+        await result.current.copy(SAMPLE_TEXT);
+      });
+
+      expect(writeText).toHaveBeenCalledWith(SAMPLE_TEXT);
+      expect(execCommandMock).toHaveBeenCalledWith("copy");
       expect(result.current.copied).toBe(true);
     });
   });
@@ -51,7 +68,9 @@ describe("useCopyToClipboard", () => {
       const appendSpy = vi.spyOn(document.body, "appendChild");
 
       const { result } = renderHook(() => useCopyToClipboard());
-      await act(async () => { await result.current.copy(SAMPLE_TEXT); });
+      await act(async () => {
+        await result.current.copy(SAMPLE_TEXT);
+      });
 
       expect(appendSpy.mock.calls.some(([el]) => el instanceof HTMLTextAreaElement)).toBe(true);
       expect(result.current.copied).toBe(true);
@@ -65,7 +84,9 @@ describe("useCopyToClipboard", () => {
       const bodyAppendSpy = vi.spyOn(document.body, "appendChild");
 
       const { result } = renderHook(() => useCopyToClipboard());
-      await act(async () => { await result.current.copy(SAMPLE_TEXT); });
+      await act(async () => {
+        await result.current.copy(SAMPLE_TEXT);
+      });
 
       expect(dialogAppendSpy).toHaveBeenCalledWith(expect.any(HTMLTextAreaElement));
       expect(bodyAppendSpy.mock.calls.every(([el]) => !(el instanceof HTMLTextAreaElement))).toBe(
@@ -78,29 +99,33 @@ describe("useCopyToClipboard", () => {
 
     it("in modal (data-slot=dialog-content): appends temp textarea inside dialog-content", async () => {
       execCommandMock.mockReturnValue(true);
-      const { container: dlg } = makeDialogContainer("data-slot", "dialog-content");
+      const { container: dlg, trigger } = makeDialogContainer("data-slot", "dialog-content");
       const dialogAppendSpy = vi.spyOn(dlg, "appendChild");
       const bodyAppendSpy = vi.spyOn(document.body, "appendChild");
 
       const { result } = renderHook(() => useCopyToClipboard());
-      await act(async () => { await result.current.copy(SAMPLE_TEXT); });
+      await act(async () => {
+        await result.current.copy(SAMPLE_TEXT);
+      });
 
       expect(dialogAppendSpy).toHaveBeenCalledWith(expect.any(HTMLTextAreaElement));
       expect(bodyAppendSpy.mock.calls.every(([el]) => !(el instanceof HTMLTextAreaElement))).toBe(
         true,
       );
       expect(result.current.copied).toBe(true);
+      expect(document.activeElement).toBe(trigger);
     });
 
     it("failure: copied stays false and console.error is called when execCommand fails", async () => {
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       const { result } = renderHook(() => useCopyToClipboard());
-      await act(async () => { await result.current.copy(SAMPLE_TEXT); });
+      await act(async () => {
+        await result.current.copy(SAMPLE_TEXT);
+      });
 
       expect(result.current.copied).toBe(false);
       expect(errorSpy).toHaveBeenCalledWith("Failed to copy to clipboard");
     });
   });
 });
-
