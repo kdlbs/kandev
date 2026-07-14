@@ -27,5 +27,9 @@ export function fileChangeStatusLabel(status: FileChangeStatus, oldPath?: string
       return "Deleted";
     case "renamed":
       return oldPath ? `Moved from ${oldPath}` : "Moved";
+    default: {
+      const exhaustiveStatus: never = status;
+      return exhaustiveStatus;
+    }
   }
 }

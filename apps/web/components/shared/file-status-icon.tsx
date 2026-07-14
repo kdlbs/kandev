@@ -29,6 +29,10 @@ function StatusGlyph({ status }: { status: FileChangeStatus }) {
       return <IconMinus aria-hidden="true" className="h-2 w-2" />;
     case "renamed":
       return <IconArrowRight aria-hidden="true" className="h-2 w-2" />;
+    default: {
+      const exhaustiveStatus: never = status;
+      return exhaustiveStatus;
+    }
   }
 }
 
