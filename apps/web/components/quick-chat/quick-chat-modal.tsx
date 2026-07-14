@@ -16,13 +16,14 @@ import { useQuickChatWidth } from "@/hooks/use-quick-chat-width";
 import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
 import type { QuickChatSession } from "@/lib/state/slices/ui/types";
+import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 
 type QuickChatModalProps = {
   workspaceId: string;
 };
 
 function quickChatTabName(session: QuickChatSession, index: number) {
-  if (session.sessionId !== "") return session.name || `Chat ${index + 1}`;
+  if (!isQuickChatSetupSessionId(session.sessionId)) return session.name || `Chat ${index + 1}`;
   return session.kind === "config" ? "Configuration Chat" : "New Chat";
 }
 
@@ -53,7 +54,7 @@ function QuickChatTabs({
               key={s.sessionId || `new-${index}`}
               name={tabName}
               isActive={s.sessionId === activeSessionId}
-              isRenameable={s.sessionId !== ""}
+              isRenameable={!isQuickChatSetupSessionId(s.sessionId)}
               kind={s.kind}
               onActivate={() => onTabChange(s.sessionId)}
               onClose={() => onTabClose(s.sessionId)}
@@ -146,6 +147,7 @@ function QuickChatSessionView({
 }
 
 export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: QuickChatModalProps) {
+  const configChat = useConfigChat(workspaceId);
   const {
     isOpen,
     sessions,
@@ -163,11 +165,11 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
     handleCloseTab,
     handleConfirmClose,
     handleRename,
-  } = useQuickChatModal(workspaceId);
+  } = useQuickChatModal(workspaceId, configChat.reset);
   const { width, leftResizeHandleProps, rightResizeHandleProps } = useQuickChatWidth();
-  const configChat = useConfigChat(workspaceId);
-  const hasCreatedChat = sessions.some((session) => session.sessionId !== "");
-  const setupKind = activeSession?.sessionId === "" ? activeSession.kind : null;
+  const hasCreatedChat = sessions.some((session) => !isQuickChatSetupSessionId(session.sessionId));
+  const setupKind =
+    activeSession && isQuickChatSetupSessionId(activeSession.sessionId) ? activeSession.kind : null;
   const pendingConfigPrompt =
     activeSession?.kind === "config" &&
     configChat.pendingPrompt?.sessionId === activeSession.sessionId

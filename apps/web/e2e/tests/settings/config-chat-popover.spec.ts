@@ -28,7 +28,7 @@ async function startConfigChat(dialog: Locator, prompt: string) {
 }
 
 async function sendMessage(dialog: Locator, text: string) {
-  const editor = dialog.locator(".tiptap.ProseMirror");
+  const editor = dialog.getByTestId("chat-input-editor");
   const modifier = process.platform === "darwin" ? "Meta" : "Control";
   await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
   await editor.fill(text);

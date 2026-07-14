@@ -21,6 +21,8 @@ quick chats.
   accessible label wherever their tab kind is presented.
 - Settings Configuration Chat and the Command Palette Configuration Chat command open a
   configuration setup tab or an existing configuration session in the Quick Chat modal.
+- Blank setup tabs use client-local workspace-and-kind-scoped identities, so ordinary and
+  configuration setup can coexist without crossing workspace boundaries.
 - Configuration setup retains its configuration-agent selection, introductory copy, suggestion
   prompts, and `Ask anything about your configuration...` prompt. It explains that the agent can
   manage workflows, agent profiles, and MCP configuration.
@@ -38,6 +40,8 @@ quick chats.
 - Closing the modal or switching tabs preserves every real session. Closing a persisted tab asks
   for confirmation and deletes its backing ephemeral task through the existing task deletion path.
   Closing a blank setup tab only removes that client-side placeholder.
+- When a setup start is superseded before its backend response arrives, the returned ephemeral task
+  is deleted instead of reopening the abandoned tab.
 - Restorable utility sessions are reconstructed from backend task/session state for the active
   workspace after a reload. They are available as tabs while the modal itself starts closed.
 - Ordinary quick chats expire after seven days of inactivity through the existing task deletion

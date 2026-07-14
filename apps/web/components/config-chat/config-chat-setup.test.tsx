@@ -50,4 +50,24 @@ describe("ConfigChatSetup", () => {
     fireEvent.click(screen.getByRole("button", { name: /Config Agent codex/i }));
     expect(screen.getByPlaceholderText("Ask anything about your configuration...")).toBeTruthy();
   });
+
+  it("ignores repeated and composing Enter keydowns", () => {
+    const onStart = vi.fn();
+    render(
+      <ConfigChatSetup
+        defaultProfileId="profile-config"
+        isStarting={false}
+        error={null}
+        onStart={onStart}
+        onCancel={vi.fn()}
+      />,
+    );
+    const input = screen.getByRole("textbox");
+    fireEvent.change(input, { target: { value: "Update my workflow" } });
+
+    fireEvent.keyDown(input, { key: "Enter", repeat: true });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229, isComposing: true });
+
+    expect(onStart).not.toHaveBeenCalled();
+  });
 });

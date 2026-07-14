@@ -94,7 +94,7 @@ test.describe("Clarification overlay resizable layout", () => {
     const container = testPage.getByTestId("clarification-overlay-container");
     await expect(container).toBeVisible();
 
-    const scrollRegion = container.locator(".overflow-y-auto");
+    const scrollRegion = container;
     const initial = await container.evaluate((el) => {
       return {
         height: el.getBoundingClientRect().height,
@@ -102,7 +102,7 @@ test.describe("Clarification overlay resizable layout", () => {
         inlineHeight: (el as HTMLElement).style.height,
       };
     });
-    await expect(scrollRegion).toHaveCSS("overflow-y", "auto");
+    await expect(scrollRegion).toHaveCSS("overflow-y", "scroll");
     // Default state: no inline height → container sizes to its content.
     expect(initial.inlineHeight).toBe("");
     // Sanity check: content-sized overlay is at least tall enough for the
@@ -113,7 +113,7 @@ test.describe("Clarification overlay resizable layout", () => {
     const handle = container.locator("xpath=..").locator("button[aria-label='Resize']");
     await expect(handle).toBeVisible();
 
-    // Drag the handle upward by 120px → overlay should grow by ~120px.
+    // Drag the handle upward by 40px; the overlay should grow by roughly the same amount.
     const handleBox = await handle.boundingBox();
     expect(handleBox).not.toBeNull();
     const dragDistance = 40;

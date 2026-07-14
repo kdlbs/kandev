@@ -12,21 +12,25 @@ export function useQuickChatLauncher(
 ) {
   const openQuickChat = useAppStore((state) => state.openQuickChat);
   const quickChatSessions = useAppStore((state) => state.quickChat.sessions);
+  const activeSessionId = useAppStore((state) => state.quickChat.activeSessionId);
 
   const handleOpenQuickChat = useCallback(() => {
     if (!workspaceId) return;
 
     // If there's an existing session, open it. Otherwise just open the modal with agent picker
-    const existingSession = quickChatSessions.find(
+    const matchingSessions = quickChatSessions.filter(
       (session) => session.workspaceId === workspaceId && (session.kind ?? "chat") === kind,
     );
+    const existingSession =
+      matchingSessions.find((session) => session.sessionId === activeSessionId) ??
+      matchingSessions[0];
     if (existingSession) {
       openQuickChat(existingSession.sessionId, workspaceId, undefined, kind);
     } else {
       // Open modal without a session - will show agent picker
       openQuickChat("", workspaceId, undefined, kind);
     }
-  }, [workspaceId, kind, quickChatSessions, openQuickChat]);
+  }, [workspaceId, kind, quickChatSessions, activeSessionId, openQuickChat]);
 
   return handleOpenQuickChat;
 }

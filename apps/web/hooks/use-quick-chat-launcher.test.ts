@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const openQuickChat = vi.fn();
 const WORKSPACE_ID = "workspace-1";
+let activeSessionId: string | null = null;
 let sessions: Array<{
   sessionId: string;
   workspaceId: string;
@@ -11,13 +12,14 @@ let sessions: Array<{
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({ openQuickChat, quickChat: { sessions } }),
+    selector({ openQuickChat, quickChat: { sessions, activeSessionId } }),
 }));
 
 import { useQuickChatLauncher } from "./use-quick-chat-launcher";
 
 beforeEach(() => {
   sessions = [];
+  activeSessionId = null;
   openQuickChat.mockReset();
 });
 
@@ -45,5 +47,18 @@ describe("useQuickChatLauncher typed sessions", () => {
     act(() => result.current());
 
     expect(openQuickChat).toHaveBeenCalledWith("", WORKSPACE_ID, undefined, "config");
+  });
+
+  it("prefers the active matching session over the first restored session", () => {
+    sessions = [
+      { sessionId: "config-newest", workspaceId: WORKSPACE_ID, kind: "config" },
+      { sessionId: "config-active", workspaceId: WORKSPACE_ID, kind: "config" },
+    ];
+    activeSessionId = "config-active";
+    const { result } = renderHook(() => useQuickChatLauncher(WORKSPACE_ID, "config"));
+
+    act(() => result.current());
+
+    expect(openQuickChat).toHaveBeenCalledWith("config-active", WORKSPACE_ID, undefined, "config");
   });
 });

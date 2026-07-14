@@ -96,7 +96,7 @@ export function ConfigChatSetup({
   onStart,
   onCancel,
 }: ConfigChatSetupProps) {
-  const profileCount = useAppStore((state) => state.agentProfiles.items?.length ?? 0);
+  const profiles = useAppStore((state) => state.agentProfiles.items ?? []);
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId ?? "");
   const [inputValue, setInputValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -106,8 +106,9 @@ export function ConfigChatSetup({
   }, [defaultProfileId]);
 
   const effectiveProfileId = selectedProfileId || defaultProfileId || "";
-  const needsProfileSelection = !effectiveProfileId && profileCount > 0;
-  const canSubmit = inputValue.trim().length > 0 && Boolean(effectiveProfileId) && !isStarting;
+  const profileIsResolved = profiles.some((profile) => profile.id === effectiveProfileId);
+  const needsProfileSelection = profiles.length > 0 && !profileIsResolved;
+  const canSubmit = inputValue.trim().length > 0 && profileIsResolved && !isStarting;
 
   useEffect(() => {
     if (!needsProfileSelection && !isStarting) textareaRef.current?.focus();
@@ -148,13 +149,19 @@ export function ConfigChatSetup({
                     value={inputValue}
                     onChange={(event) => setInputValue(event.target.value)}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
+                      if (
+                        event.key === "Enter" &&
+                        !event.shiftKey &&
+                        !event.repeat &&
+                        !event.nativeEvent.isComposing &&
+                        event.keyCode !== 229
+                      ) {
                         event.preventDefault();
                         handleSubmit();
                       }
                     }}
                     placeholder="Ask anything about your configuration..."
-                    disabled={!effectiveProfileId || isStarting}
+                    disabled={!profileIsResolved || isStarting}
                     className="min-h-24 max-h-48 flex-1 resize-y"
                   />
                   <Button
@@ -176,7 +183,7 @@ export function ConfigChatSetup({
             </>
           )}
 
-          {profileCount === 0 && (
+          {profiles.length === 0 && (
             <p className="text-sm text-muted-foreground">
               No agent profiles are available. Create one in Agent settings first.
             </p>

@@ -6,6 +6,7 @@ const setTaskSession = vi.fn();
 const openQuickChat = vi.fn();
 const closeQuickChatSession = vi.fn();
 const renameQuickChatSession = vi.fn();
+const deleteTask = vi.fn();
 const WORKSPACE_ID = "workspace-1";
 const CONFIG_PROFILE_ID = "profile-config";
 const PASSTHROUGH_PROFILE_ID = "profile-passthrough";
@@ -47,11 +48,20 @@ vi.mock("@/lib/api/domains/workspace-api", () => ({
 vi.mock("@/app/actions/workspaces", () => ({ updateWorkspaceAction: vi.fn() }));
 
 import { useConfigChat } from "./use-config-chat";
+import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  appState.agentProfiles.items = [
+    { id: CONFIG_PROFILE_ID, cli_passthrough: false },
+    { id: PASSTHROUGH_PROFILE_ID, cli_passthrough: true },
+  ];
   startConfigChat.mockResolvedValue({ task_id: TASK_ID, session_id: SESSION_ID });
 });
+
+vi.mock("@/lib/api/domains/kanban-api", () => ({
+  deleteTask: (...args: unknown[]) => deleteTask(...args),
+}));
 
 describe("useConfigChat unified launch", () => {
   it("seeds and opens a typed Quick Chat session with one pending initial prompt", async () => {
@@ -67,7 +77,9 @@ describe("useConfigChat unified launch", () => {
     expect(setTaskSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: SESSION_ID, task_id: TASK_ID }),
     );
-    expect(closeQuickChatSession).toHaveBeenCalledWith("");
+    expect(closeQuickChatSession).toHaveBeenCalledWith(
+      getQuickChatSetupSessionId(WORKSPACE_ID, "config"),
+    );
     expect(openQuickChat).toHaveBeenCalledWith(
       SESSION_ID,
       WORKSPACE_ID,
@@ -93,5 +105,42 @@ describe("useConfigChat unified launch", () => {
       prompt: PROMPT,
     });
     expect(result.current.pendingPrompt).toBeNull();
+  });
+
+  it("waits for the selected profile before deciding how to deliver the prompt", async () => {
+    appState.agentProfiles.items = [];
+    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+
+    await act(async () => {
+      await result.current.startSession(PASSTHROUGH_PROFILE_ID, PROMPT);
+    });
+
+    expect(startConfigChat).not.toHaveBeenCalled();
+    expect(result.current.error).toMatch(/profile/i);
+  });
+
+  it("deletes a task that resolves after the config start is superseded", async () => {
+    let resolveStart!: (value: { task_id: string; session_id: string }) => void;
+    startConfigChat.mockImplementationOnce(
+      () =>
+        new Promise<{ task_id: string; session_id: string }>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    deleteTask.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+
+    act(() => {
+      void result.current.startSession(CONFIG_PROFILE_ID, PROMPT);
+    });
+    act(() => result.current.reset());
+    await act(async () => {
+      resolveStart({ task_id: TASK_ID, session_id: SESSION_ID });
+      await Promise.resolve();
+    });
+
+    expect(deleteTask).toHaveBeenCalledWith(TASK_ID);
+    expect(openQuickChat).not.toHaveBeenCalled();
+    expect(setTaskSession).not.toHaveBeenCalled();
   });
 });

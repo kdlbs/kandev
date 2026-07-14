@@ -25,8 +25,10 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
 }));
 
 import { useAgentSelection, useQuickChatModal } from "./use-quick-chat-modal";
+import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 
 const WORKSPACE_ID = "ws-1";
+const CHAT_SETUP_ID = getQuickChatSetupSessionId(WORKSPACE_ID, "chat");
 
 type MockStore = Parameters<typeof useAgentSelection>[1];
 
@@ -82,7 +84,7 @@ beforeEach(() => {
 describe("useQuickChatModal — setup lifecycle", () => {
   it("removes a blank placeholder when dismissed from an active session", () => {
     mockAppState.quickChat.sessions = [
-      { sessionId: "", workspaceId: WORKSPACE_ID, kind: "chat" },
+      { sessionId: CHAT_SETUP_ID, workspaceId: WORKSPACE_ID, kind: "chat" },
       { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat" },
     ];
     mockAppState.quickChat.activeSessionId = "session-1";
@@ -90,7 +92,7 @@ describe("useQuickChatModal — setup lifecycle", () => {
 
     act(() => result.current.handleOpenChange(false));
 
-    expect(mockAppState.closeQuickChatSession).toHaveBeenCalledWith("");
+    expect(mockAppState.closeQuickChatSession).toHaveBeenCalledWith(CHAT_SETUP_ID);
     expect(mockAppState.closeQuickChat).toHaveBeenCalledTimes(1);
   });
 
@@ -102,6 +104,20 @@ describe("useQuickChatModal — setup lifecycle", () => {
 
     expect(result.current.setupKey).toBe(1);
     expect(mockAppState.openQuickChat).toHaveBeenCalledWith("", WORKSPACE_ID, undefined, "chat");
+  });
+
+  it("supersedes an in-flight config start when the user changes tabs", () => {
+    const resetConfigStart = vi.fn();
+    mockAppState.quickChat.sessions = [
+      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat" },
+    ];
+    mockAppState.quickChat.activeSessionId = "session-1";
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID, resetConfigStart));
+
+    act(() => result.current.setActiveQuickChatSession("session-1"));
+
+    expect(resetConfigStart).toHaveBeenCalledTimes(1);
+    expect(mockAppState.setActiveQuickChatSession).toHaveBeenCalledWith("session-1", WORKSPACE_ID);
   });
 });
 

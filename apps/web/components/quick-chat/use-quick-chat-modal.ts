@@ -5,6 +5,9 @@ import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { startQuickChat, type QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
+import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
+
+const noop = () => {};
 
 async function deleteQuickChatTask(taskId: string) {
   const { deleteTask } = await import("@/lib/api/domains/kanban-api");
@@ -40,7 +43,7 @@ function useWorkspaceQuickChat(store: QuickChatStore, workspaceId: string) {
     if (store.isOpen && store.activeSessionId !== null && !activeSession) {
       store.closeQuickChat();
     }
-  }, [activeSession, store]);
+  }, [activeSession, store.isOpen, store.activeSessionId, store.closeQuickChat]);
   return { sessions, activeSession };
 }
 
@@ -52,7 +55,8 @@ async function startQuickChatForAgent(
   repositories: QuickChatRepositoryInput[],
 ) {
   const agent = store.agentProfiles.find((p) => p.id === agentId);
-  const sessionCount = store.sessions.filter((s) => s.sessionId !== "").length + 1;
+  const sessionCount =
+    store.sessions.filter((session) => !isQuickChatSetupSessionId(session.sessionId)).length + 1;
   const initialName = `${agent?.label || "Agent"} - Chat ${sessionCount}`;
   const response = await startQuickChat(workspaceId, {
     agent_profile_id: agentId,
@@ -87,6 +91,7 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
   const handleSelectAgent = useCallback(
     async (agentId: string, repositories: QuickChatRepositoryInput[] = []) => {
       const requestId = ++latestRequestId.current;
+      const setupSessionId = store.activeSessionId;
       setPendingAgentId(agentId);
       try {
         const result = await startQuickChatForAgent(workspaceId, agentId, store, repositories);
@@ -98,7 +103,9 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
           );
           return;
         }
-        if (store.activeSessionId === "") store.closeQuickChatSession("");
+        if (setupSessionId && isQuickChatSetupSessionId(setupSessionId)) {
+          store.closeQuickChatSession(setupSessionId);
+        }
         store.openQuickChat(result.sessionId, workspaceId, agentId);
         store.renameQuickChatSession(result.sessionId, result.name);
       } catch (error) {
@@ -120,7 +127,7 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
   return { pendingAgentId, reset, handleSelectAgent };
 }
 
-export function useQuickChatModal(workspaceId: string) {
+export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = noop) {
   const { toast } = useToast();
   const store = useQuickChatStore();
   const { sessions, activeSession } = useWorkspaceQuickChat(store, workspaceId);
@@ -131,27 +138,31 @@ export function useQuickChatModal(workspaceId: string) {
     reset,
     handleSelectAgent: doSelectAgent,
   } = useAgentSelection(workspaceId, store);
+  const resetPendingStarts = useCallback(() => {
+    reset();
+    onSupersedeConfigStart();
+  }, [onSupersedeConfigStart, reset]);
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (open) return;
-      reset();
-      if (sessions.some((session) => session.sessionId === "")) {
-        store.closeQuickChatSession("");
-      }
+      resetPendingStarts();
+      sessions
+        .filter((session) => isQuickChatSetupSessionId(session.sessionId))
+        .forEach((session) => store.closeQuickChatSession(session.sessionId));
       store.closeQuickChat();
     },
-    [sessions, store, reset],
+    [resetPendingStarts, sessions, store],
   );
 
   // Any picker-bypassing user action while a pick is pending should supersede
   // the in-flight start, so the resolved request cleans up its orphan task
   // instead of yanking the user back to that session.
   const handleNewChat = useCallback(() => {
-    reset();
+    resetPendingStarts();
     setSetupKey((key) => key + 1);
     store.openQuickChat("", workspaceId, undefined, "chat");
-  }, [reset, store, workspaceId]);
+  }, [resetPendingStarts, store, workspaceId]);
 
   const handleSelectAgent = useCallback(
     (agentId: string, repositories: QuickChatRepositoryInput[] = []) =>
@@ -161,22 +172,22 @@ export function useQuickChatModal(workspaceId: string) {
 
   const setActiveQuickChatSession = useCallback(
     (sessionId: string) => {
-      reset();
+      resetPendingStarts();
       store.setActiveQuickChatSession(sessionId, workspaceId);
     },
-    [reset, store],
+    [resetPendingStarts, store, workspaceId],
   );
 
   const handleCloseTab = useCallback(
     (sessionId: string) => {
-      reset();
-      if (sessionId === "") {
+      resetPendingStarts();
+      if (isQuickChatSetupSessionId(sessionId)) {
         store.closeQuickChatSession(sessionId);
         return;
       }
       setSessionToClose(sessionId);
     },
-    [reset, store],
+    [resetPendingStarts, store],
   );
 
   const handleRename = useCallback(
@@ -213,7 +224,9 @@ export function useQuickChatModal(workspaceId: string) {
     activeSession,
     sessionToClose,
     setupKey,
-    activeSessionNeedsAgent: activeSession?.sessionId === "",
+    activeSessionNeedsAgent: Boolean(
+      activeSession && isQuickChatSetupSessionId(activeSession.sessionId),
+    ),
     pendingAgentId,
     setActiveQuickChatSession,
     setSessionToClose,

@@ -25,6 +25,7 @@ import { DEFAULT_ACTIVE_VIEW_ID, DEFAULT_VIEW } from "./sidebar-view-builtins";
 import type { SidebarView, SidebarViewDraft, SortSpec } from "./sidebar-view-types";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
+import { getQuickChatSetupSessionId } from "./quick-chat-session";
 
 function loadSidebarState(): UISliceState["sidebarViews"] {
   let views = getStoredSidebarUserViews<SidebarView[]>([]).map(migrateView);
@@ -263,16 +264,13 @@ function buildQuickChatActions(set: ImmerSet) {
       kind: "chat" | "config" = "chat",
     ) =>
       set((draft) => {
-        draft.quickChat.isOpen = true;
         if (!sessionId) {
-          const emptyTab = draft.quickChat.sessions.find((session) => session.sessionId === "");
-          if (emptyTab) {
-            emptyTab.workspaceId = workspaceId;
-            emptyTab.kind = kind;
-          } else {
-            draft.quickChat.sessions.push({ sessionId: "", workspaceId, kind });
+          const setupSessionId = getQuickChatSetupSessionId(workspaceId, kind);
+          if (!draft.quickChat.sessions.some((session) => session.sessionId === setupSessionId)) {
+            draft.quickChat.sessions.push({ sessionId: setupSessionId, workspaceId, kind });
           }
-          draft.quickChat.activeSessionId = "";
+          draft.quickChat.isOpen = true;
+          draft.quickChat.activeSessionId = setupSessionId;
           return;
         }
         const existing = draft.quickChat.sessions.find(
@@ -284,6 +282,7 @@ function buildQuickChatActions(set: ImmerSet) {
         } else {
           draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind });
         }
+        draft.quickChat.isOpen = true;
         draft.quickChat.activeSessionId = sessionId;
       }),
     closeQuickChat: () =>
@@ -305,10 +304,10 @@ function buildQuickChatActions(set: ImmerSet) {
         draft.quickChat.activeSessionId = nextSession?.sessionId ?? null;
         if (!nextSession) draft.quickChat.isOpen = false;
       }),
-    setActiveQuickChatSession: (sessionId: string, workspaceId?: string) =>
+    setActiveQuickChatSession: (sessionId: string, workspaceId: string) =>
       set((draft) => {
         const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
-        if (!session || (workspaceId && session.workspaceId !== workspaceId)) return;
+        if (!session || session.workspaceId !== workspaceId) return;
         draft.quickChat.activeSessionId = sessionId;
       }),
     renameQuickChatSession: (sessionId: string, name: string) => {

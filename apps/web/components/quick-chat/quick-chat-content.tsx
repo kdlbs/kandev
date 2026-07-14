@@ -93,6 +93,7 @@ function QuickChatClarificationSection({
         </div>
         <div
           id={contentId}
+          data-testid="clarification-scroll-region"
           className={collapsed ? "hidden" : "min-h-0 flex-1 overflow-y-auto px-1"}
         >
           <ClarificationInputOverlay
@@ -172,6 +173,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         />
       </div>
       <QuickChatClarificationSection
+        key={sessionId}
         pending={Boolean(pendingClarification)}
         messages={pendingClarificationGroup}
         onResolved={handleClarificationResolved}

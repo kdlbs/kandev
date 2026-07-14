@@ -18,7 +18,9 @@ risk.
 All user-facing utility conversations use one typed Quick Chat session model with
 `kind: "chat" | "config"`, one tab store, and the existing responsive Quick Chat modal.
 `QuickChatContent` remains the single message/composer/clarification renderer. Blank setup tabs are
-typed client-only placeholders; persisted tabs map to existing task sessions.
+typed client-only placeholders with workspace-and-kind-scoped IDs; persisted tabs map to existing
+task sessions. Setup IDs never enter backend hydration and prevent blank ordinary/config tabs from
+aliasing each other while retaining client-side cleanup for abandoned setup.
 
 The backend remains authoritative for capability classification. Boot restoration derives
 `kind="config"` only from `task.metadata.config_mode == true`; it never infers privileges from a
