@@ -338,3 +338,14 @@ Post-rebase audit completed locally on 2026-07-13 after rebasing onto
 - Reviewed the remaining upstream worktree and mobile-action changes. They add
   local UI/configuration behavior only; repository updates already use the
   workspace Query bridge, so no further server-state migration was required.
+
+Post-rebase audit completed locally on 2026-07-14 after rebasing onto
+`origin/main` at `3e68fd3d`:
+
+- Moved the upstream GitHub task-issue links from the legacy GitHub Zustand
+  slice to `qk.integrations.github.issues(workspaceId)`, including the
+  create-task cache update and issue-to-task grouping read.
+- Migrated the shared GitHub task-row workflow-step lookup from legacy kanban
+  state to the workflow snapshot Query cache.
+- Preserved the upstream prompt-dispatch behavior and PR title rendering while
+  resolving conflicts. Full local format, typecheck, test, and lint passed.

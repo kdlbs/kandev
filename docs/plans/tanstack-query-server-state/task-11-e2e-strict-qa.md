@@ -78,6 +78,14 @@ Post-rebase audit (2026-07-13):
   assertions. The remaining upstream worktree/mobile changes did not add new
   server-state reads or cache ownership paths.
 
+Post-rebase audit (2026-07-14):
+
+- Rebased onto `origin/main` at `3e68fd3d` and migrated the incoming GitHub
+  task-issue links and shared task-row workflow-step lookup to Query cache
+  ownership.
+- Full local verification passed: formatting, typecheck, 632 web test files
+  (4,762 tests, 4 skipped), backend, CLI, script tests, and lint.
+
 ## Files Likely Touched
 
 - `apps/web/e2e/tests/**`
