@@ -893,7 +893,7 @@ func TestSendPrompt_DispatchOnlyReturnsWithoutWaiting(t *testing.T) {
 
 func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
 	mock := newMockAgentServer(t)
-	defer mock.Close()
+	t.Cleanup(mock.Close)
 
 	log := newSessionTestLogger()
 	sm := NewSessionManager(log, make(chan struct{}))
@@ -901,7 +901,7 @@ func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
 	sm.SetDependencies(nil, nil, store, nil)
 
 	client := createTestClient(t, mock.server.URL)
-	defer client.Close()
+	t.Cleanup(client.Close)
 
 	ctx := context.Background()
 	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
