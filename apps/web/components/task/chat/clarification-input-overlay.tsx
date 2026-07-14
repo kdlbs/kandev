@@ -123,7 +123,7 @@ function ClarificationCard(props: CardProps) {
       {showAgentDisconnected && (
         <div
           data-testid="clarification-deferred-notice"
-          className="mt-2 text-xs text-amber-500/90 flex items-center gap-1.5"
+          className="mt-2 flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400"
         >
           <IconInfoCircle className="h-3.5 w-3.5 flex-shrink-0" />
           The agent has moved on. Your response will be sent as a new message.
