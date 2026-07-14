@@ -684,11 +684,21 @@ func TestRetryClarificationAfterCancel_DoesNotStarveUserCancel(t *testing.T) {
 	}
 }
 
-// TestDispatchClarificationResumeLocked_ReturnPaths pins the three distinct
-// outcomes so the caller can tell a benign "queued for a future drain" from a
-// genuine failure and log accordingly (bot review on PR #1680: the old bool
-// return logged an alarming "failed to resume agent" error even when the answer
-// was safely queued).
+// TestDispatchClarificationResumeLocked_ReturnPaths pins the two outcomes that
+// are deterministically reachable at this seam — a genuine error (nil queue)
+// and an immediate dispatch (nil) — so the caller can tell a real failure from
+// success and log accordingly (bot review on PR #1680: the old bool return
+// logged an alarming "failed to resume agent" error even when the answer was
+// safely queued).
+//
+// The third outcome, errClarificationResumeQueuedForDrain, is not unit-testable
+// here: takeAndDispatchEntryLocked always finds and dispatches the entry this
+// function just queued, so the sentinel only arises when a concurrent take
+// removes that entry first (targeted take misses) AND a rival dispatch is
+// already settling (drainQueuedMessageForPromptableSessionLocked backs off on
+// isQueuedDispatchInFlight). That race is driven end-to-end by
+// TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery, which
+// asserts the answer stays queued for the recovered turn's own natural drain.
 func TestDispatchClarificationResumeLocked_ReturnPaths(t *testing.T) {
 	ctx := context.Background()
 	data := clarificationAnsweredData{TaskID: "t1", SessionID: "s1"}

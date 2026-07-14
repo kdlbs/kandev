@@ -374,14 +374,24 @@ func (c *Client) readUpdatesStream(
 
 	var lastErr error
 	defer func() {
+		// Clean up pending requests BEFORE draining the worker. On a
+		// connection drop mid-cancel, a worker handler
+		// (orchestrator.handleAgentReady) can block acquiring the per-session
+		// cancelInFlight guard that an in-flight Service.CancelAgent holds
+		// while it waits inside sendStreamRequest for the agent.cancel
+		// response frame. cleanupPendingRequests closes that pending response
+		// channel, unblocking CancelAgent so it releases the guard, which lets
+		// the blocked handler finish and the worker exit. Draining first
+		// (<-workerDone) would wait on that handler forever, so cleanup could
+		// never run — the exact deadlock class this stream rework fixes, but on
+		// the disconnect path.
+		c.cleanupPendingRequests()
+
 		// Stop the worker and wait for the in-flight handler to unwind before
 		// signaling disconnect, so the drain barrier semantics callers rely on
 		// (promptDoneCh signaling, status updates) still hold.
 		events.close()
 		<-workerDone
-
-		// Clean up pending requests before signaling disconnect
-		c.cleanupPendingRequests()
 
 		c.mu.Lock()
 		c.agentStreamConn = nil
@@ -512,6 +522,11 @@ func (q *agentEventQueue) dequeue() (AgentEvent, bool) {
 		q.mu.Lock()
 		if len(q.items) > 0 {
 			event := q.items[0]
+			// Zero the vacated slot before advancing so the evicted event's
+			// maps/slices/pointer fields (tool-call payloads can be large)
+			// become collectable now, not only when the whole backing array is
+			// freed at stream shutdown.
+			q.items[0] = AgentEvent{}
 			q.items = q.items[1:]
 			q.mu.Unlock()
 			return event, true
