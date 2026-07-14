@@ -1,6 +1,11 @@
 "use client";
 
-import { hashDiff, normalizeDiffContent } from "@/components/review/types";
+import {
+  hashDiff,
+  normalizeDiffContent,
+  reviewFileKey,
+  splitReviewFileKey,
+} from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import type { PRDiffFile } from "@/lib/types/github";
 import { normalizeFileChangeStatus, type FileChangeStatus } from "@/lib/utils/file-change-status";
@@ -60,43 +65,72 @@ export function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
 
 type CumulativeDiffFiles = Record<
   string,
-  { diff?: string; status?: string; additions?: number; deletions?: number }
+  {
+    path?: string;
+    repository_name?: string;
+    diff?: string;
+    status?: string;
+    additions?: number;
+    deletions?: number;
+  }
 >;
 
-function collectReviewPaths(
+function cumulativeFileKey(mapKey: string, file: CumulativeDiffFiles[string]): string {
+  return reviewFileKey({ path: file.path ?? mapKey, repository_name: file.repository_name });
+}
+
+function hasReviewPath(keys: Set<string>, path: string): boolean {
+  for (const key of keys) {
+    if (splitReviewFileKey(key).path === path) return true;
+  }
+  return false;
+}
+
+function collectReviewKeys(
   uncommittedFiles: FileInfo[],
   cumulativeDiffFiles: CumulativeDiffFiles | undefined,
   prFiles?: PRDiffFile[],
 ): Set<string> {
-  const paths = new Set<string>();
+  const keys = new Set<string>();
   for (const file of uncommittedFiles) {
-    paths.add(file.path);
+    keys.add(reviewFileKey(file));
   }
   if (cumulativeDiffFiles) {
-    for (const path of Object.keys(cumulativeDiffFiles)) {
-      if (!paths.has(path)) paths.add(path);
+    for (const [mapKey, file] of Object.entries(cumulativeDiffFiles)) {
+      const path = file.path ?? mapKey;
+      const key = cumulativeFileKey(mapKey, file);
+      const collidesWithHigherPriority = file.repository_name
+        ? keys.has(path)
+        : hasReviewPath(keys, path);
+      if (!keys.has(key) && !collidesWithHigherPriority) keys.add(key);
     }
   }
   if (prFiles) {
     for (const file of prFiles) {
-      if (!paths.has(file.filename)) paths.add(file.filename);
+      if (!hasReviewPath(keys, file.filename)) keys.add(file.filename);
     }
   }
-  return paths;
+  return keys;
 }
 
-function getDiffForPath(
-  path: string,
+function getDiffForKey(
+  key: string,
   uncommittedFiles: FileInfo[],
   cumulativeDiffFiles: CumulativeDiffFiles | undefined,
   prFiles?: PRDiffFile[],
 ): string {
-  const uncommitted = uncommittedFiles.find((f) => f.path === path);
+  const uncommitted = uncommittedFiles.find((f) => reviewFileKey(f) === key);
   if (uncommitted?.diff) return normalizeDiffContent(uncommitted.diff);
-  const cumDiff = cumulativeDiffFiles?.[path]?.diff;
+  const cumulativeFile = cumulativeDiffFiles
+    ? Object.entries(cumulativeDiffFiles).find(
+        ([mapKey, file]) => cumulativeFileKey(mapKey, file) === key,
+      )?.[1]
+    : undefined;
+  const cumDiff = cumulativeFile?.diff;
   if (cumDiff) return normalizeDiffContent(cumDiff);
   if (prFiles) {
-    const prFile = prFiles.find((f) => f.filename === path);
+    const reviewPath = splitReviewFileKey(key).path;
+    const prFile = prFiles.find((f) => f.filename === reviewPath);
     if (prFile?.patch) return normalizeDiffContent(prFile.patch);
   }
   return "";
@@ -109,16 +143,16 @@ export function computeReviewProgress(
   prFiles?: PRDiffFile[],
 ) {
   const cumulativeDiffFiles = cumulativeDiff?.files;
-  const paths = collectReviewPaths(uncommittedFiles, cumulativeDiffFiles, prFiles);
+  const keys = collectReviewKeys(uncommittedFiles, cumulativeDiffFiles, prFiles);
   let reviewed = 0;
-  for (const path of paths) {
-    const state = reviews.get(path);
+  for (const key of keys) {
+    const state = reviews.get(key);
     if (!state?.reviewed) continue;
-    const diffContent = getDiffForPath(path, uncommittedFiles, cumulativeDiffFiles, prFiles);
+    const diffContent = getDiffForKey(key, uncommittedFiles, cumulativeDiffFiles, prFiles);
     if (diffContent && state.diffHash && state.diffHash !== hashDiff(diffContent)) continue;
     reviewed++;
   }
-  return { reviewedCount: reviewed, totalFileCount: paths.size };
+  return { reviewedCount: reviewed, totalFileCount: keys.size };
 }
 
 export function computeStagedStats(stagedFiles: FileInfo[]) {

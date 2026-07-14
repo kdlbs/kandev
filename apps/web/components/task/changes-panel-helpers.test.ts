@@ -4,6 +4,7 @@ import {
   computeReviewProgress,
   mapPRFilesToChangedFiles,
 } from "./changes-panel-helpers";
+import { reviewFileKey } from "@/components/review/types";
 import type { PRDiffFile } from "@/lib/types/github";
 
 function diffFile(overrides: Partial<PRDiffFile>): PRDiffFile {
@@ -79,6 +80,81 @@ describe("mapPRFilesToChangedFiles", () => {
 });
 
 describe("computeReviewProgress", () => {
+  it("keeps bare uncommitted precedence over a stamped cumulative file at the same path", () => {
+    const path = "src/renamed.ts";
+    const progress = computeReviewProgress(
+      [
+        {
+          path,
+          status: "renamed",
+          staged: false,
+          additions: 0,
+          deletions: 0,
+          old_path: "src/old.ts",
+          diff: "",
+        },
+      ],
+      {
+        files: {
+          [`frontend\u0000${path}`]: {
+            path,
+            repository_name: "frontend",
+            diff: "@@ -1 +1 @@\n-old\n+new",
+          },
+        },
+      },
+      new Map([[path, { reviewed: true }]]),
+    );
+
+    expect(progress).toEqual({ reviewedCount: 1, totalFileCount: 1 });
+  });
+
+  it("keeps same-path composite keys from different repositories distinct", () => {
+    const path = "README.md";
+    const progress = computeReviewProgress(
+      [
+        {
+          path,
+          status: "modified",
+          staged: false,
+          diff: "",
+          repository_name: "frontend",
+        },
+      ],
+      {
+        files: {
+          [`backend\u0000${path}`]: {
+            path,
+            repository_name: "backend",
+            diff: "",
+          },
+        },
+      },
+      new Map(),
+    );
+
+    expect(progress.totalFileCount).toBe(2);
+  });
+
+  it("counts a reviewed patchless file under its repository-qualified review key", () => {
+    const file = {
+      path: "src/renamed.ts",
+      status: "renamed" as const,
+      staged: false,
+      additions: 0,
+      deletions: 0,
+      old_path: "src/old.ts",
+      diff: "",
+      repository_name: "frontend",
+    };
+    const key = reviewFileKey(file);
+
+    expect(computeReviewProgress([file], null, new Map([[key, { reviewed: true }]]))).toEqual({
+      reviewedCount: 1,
+      totalFileCount: 1,
+    });
+  });
+
   it("counts patchless-only status and PR files", () => {
     const progress = computeReviewProgress(
       [

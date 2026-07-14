@@ -40,11 +40,7 @@ function fileMapKey(path: string, repositoryName?: string): string {
   return reviewFileKey({ path, repository_name: repositoryName });
 }
 
-function addCumulativeDiffFiles(
-  fileMap: Map<string, ReviewFile>,
-  files: CumulativeDiff["files"],
-  gitStatusFiles: Record<string, FileInfo> | null,
-) {
+function addCumulativeDiffFiles(fileMap: Map<string, ReviewFile>, files: CumulativeDiff["files"]) {
   // Multi-repo: backend stamps each per-file payload with `repository_name`
   // + the repo-relative `path`, and uses a NUL-composite `<repo>\x00<path>`
   // map key. Single-repo payloads from `parseCommitDiff` carry the bare path
@@ -59,37 +55,19 @@ function addCumulativeDiffFiles(
     const hasRepoUnawareCollision = key !== path && fileMap.has(path);
     if (fileMap.has(key) || hasRepoUnawareCollision) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    const matchingUncommitted = findUncommittedByPathAndRepo(gitStatusFiles, path, repoName);
     fileMap.set(key, {
       path,
       diff,
       status: normalizeFileChangeStatus(file.status),
       additions: file.additions ?? 0,
       deletions: file.deletions ?? 0,
-      staged: matchingUncommitted?.staged ?? false,
-      source: matchingUncommitted ? "uncommitted" : "committed",
+      staged: false,
+      source: "committed",
       old_path: file.old_path,
       diff_skip_reason: file.diff_skip_reason,
       repository_name: repoName,
     });
   }
-}
-
-/** Looks up a FileInfo in the (possibly composite-keyed) gitStatus map by
- *  (path, repository_name). When repo is undefined or empty (single-repo),
- *  returns the first match by path. */
-function findUncommittedByPathAndRepo(
-  gitStatusFiles: Record<string, FileInfo> | null,
-  path: string,
-  repositoryName: string | undefined,
-): FileInfo | undefined {
-  if (!gitStatusFiles) return undefined;
-  for (const file of Object.values(gitStatusFiles)) {
-    if (file.path !== path) continue;
-    if (!repositoryName) return file;
-    if (file.repository_name === repositoryName) return file;
-  }
-  return undefined;
 }
 
 function addUncommittedFiles(
@@ -152,7 +130,7 @@ export function buildAllFiles(
   // diff snapshot from the last fetch) — the dialog appeared to show outdated
   // content even though the cumulative-diff hook was successfully refetching.
   if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
-  if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files, gitStatusFiles);
+  if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files);
   if (prDiffFiles) addPRFiles(fileMap, prDiffFiles, prRepoName);
   return Array.from(fileMap.values()).sort((a, b) => {
     const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");

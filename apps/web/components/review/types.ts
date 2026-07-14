@@ -70,6 +70,9 @@ function hunkHeaderHasLines(line: string): boolean {
 export function hasTextualDiff(
   file: Pick<ReviewFile, "diff" | "status" | "additions" | "deletions">,
 ): boolean {
+  // GitHub sends 0+0 stats for pure renames even when the diff contains a
+  // synthetic new-file hunk. Trust the stats because that hunk represents the
+  // same file at a new path with no textual change.
   if (file.status === "renamed" && file.additions === 0 && file.deletions === 0) return false;
   return file.diff.split("\n").some(hunkHeaderHasLines);
 }
