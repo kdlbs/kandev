@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -257,23 +258,25 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		zap.String("task_id", data.TaskID),
 		zap.String("session_id", data.SessionID))
 
-	if err := s.cancelAndDispatchClarificationRetry(ctx, data, prompt); err != nil {
-		s.logger.Error("failed to resume agent after cancel in clarification recovery",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.Error(err))
-		return false
-	}
-
-	s.logger.Info("successfully recovered stuck agent with clarification answer",
-		zap.String("task_id", data.TaskID),
-		zap.String("session_id", data.SessionID))
-	return true
-}
-
-// cancelAndDispatchClarificationRetry owns the guard through cancellation and
-// retry acceptance, then releases it while the recovered agent turn runs.
-func (s *Service) cancelAndDispatchClarificationRetry(ctx context.Context, data clarificationAnsweredData, prompt string) error {
+	// Claim the shared per-session guard across the cancel-then-hand-off
+	// sequence — see the Service.cancelInFlight field doc comment. Releasing
+	// between the cancel and the hand-off would let a concurrent
+	// QueueAndInterruptForPeerMessage (or another drain) take-and-dispatch a
+	// queued entry in that gap, only for this retry to then prompt over top of
+	// it.
+	//
+	// The retry prompt itself is NOT sent under the guard: dispatching it
+	// through the queue's take-and-dispatch path hands the (potentially
+	// long-blocking) executor.Prompt call to a background goroutine
+	// (executeQueuedMessage). Sending it inline here instead — the previous
+	// behavior — held the guard across executor.Prompt, which blocks for as
+	// long as a jammed agent takes to accept the prompt (observed: minutes,
+	// stuck inside an MCP call). While it blocked, the user's Cancel button —
+	// which TryLocks this same guard — was permanently starved, leaving the
+	// session unstoppable. markQueuedDispatchInFlight (inside
+	// dispatchTakenQueuedMessage) makes the session "busy" under the guard, so
+	// a concurrent interrupt/drain still backs off exactly as an inline retry
+	// would have.
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 	defer release()
 	lock.Lock()
@@ -285,18 +288,58 @@ func (s *Service) cancelAndDispatchClarificationRetry(ctx context.Context, data 
 			zap.Error(err))
 		// Force-revert session state so the retry prompt can proceed
 		if revertErr := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateWaitingForInput, ""); revertErr != nil {
-			s.logger.Warn("failed to force-revert session state for clarification recovery",
+			s.logger.Error("failed to force-revert session state for clarification recovery",
 				zap.String("session_id", data.SessionID),
 				zap.Error(revertErr))
-			return revertErr
+			return false
 		}
 		s.completeTurnForSession(ctx, data.SessionID)
 	}
 
-	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, true); err != nil {
-		return err
+	if !s.dispatchClarificationResumeLocked(ctx, data, prompt) {
+		s.logger.Error("failed to resume agent after cancel in clarification recovery",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID))
+		return false
 	}
-	return nil
+
+	s.logger.Info("recovered stuck agent; dispatching clarification answer",
+		zap.String("task_id", data.TaskID),
+		zap.String("session_id", data.SessionID))
+	return true
+}
+
+// dispatchClarificationResumeLocked enqueues the clarification resume prompt and
+// hands it to the async take-and-dispatch path so the blocking executor.Prompt
+// call runs off the cancelInFlight guard (see retryClarificationAfterCancel).
+// The entry is tagged user_message_recorded so executeQueuedMessage does not
+// insert a spurious user chat message for the system-built resume prompt. The
+// caller MUST already hold sessionID's cancelInFlight lock. Returns true when
+// the entry was dispatched (or is safely queued for a future drain).
+func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data clarificationAnsweredData, prompt string) bool {
+	if s.messageQueue == nil {
+		return false
+	}
+	queued, err := s.messageQueue.QueueMessageWithMetadata(
+		ctx, data.SessionID, data.TaskID, prompt, "", messagequeue.QueuedByAgent, false, nil,
+		map[string]interface{}{metaKeyUserMessageRecorded: true},
+	)
+	if err != nil {
+		s.logger.Error("failed to queue clarification resume prompt",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return false
+	}
+	dispatched, err := s.takeAndDispatchEntryLocked(ctx, data.SessionID, queued.ID)
+	if err != nil {
+		s.logger.Error("failed to dispatch clarification resume prompt",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return false
+	}
+	return dispatched
 }
 
 // PauseForClarificationInput converts a no-answer ask_user_question outcome
