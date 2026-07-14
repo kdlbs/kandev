@@ -24,13 +24,16 @@ vi.mock("@/components/task-create-dialog-selectors", () => ({
   AgentSelector: ({
     value,
     onValueChange,
+    triggerClassName,
   }: {
     value: string;
     onValueChange: (id: string) => void;
+    triggerClassName?: string;
   }) => (
     <button
       type="button"
       data-testid={AGENT_SELECTOR_TEST_ID}
+      className={triggerClassName}
       onClick={() => onValueChange("agent-b")}
     >
       {value || "Select agent"}
@@ -77,6 +80,12 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("QuickChatSetup default agent", () => {
+  it("renders the agent selector with a visible field border", () => {
+    render(<QuickChatSetup {...props} />);
+
+    expect(screen.getByTestId(AGENT_SELECTOR_TEST_ID).className).toContain("border-input");
+  });
+
   it("uses a default agent that arrives after the setup mounts", () => {
     const { rerender } = render(<QuickChatSetup {...props} />);
     expect(screen.getByTestId(AGENT_SELECTOR_TEST_ID).textContent).toContain("Select agent");

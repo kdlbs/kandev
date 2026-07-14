@@ -3,7 +3,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
-import { TimeoutError, type Page } from "@playwright/test";
+import { errors, type Page } from "@playwright/test";
 
 // ---------------------------------------------------------------------------
 // Helpers shared across TUI passthrough tests
@@ -113,7 +113,7 @@ test.describe("Terminal agent (TUI passthrough)", () => {
       await session.waitForPassthroughLoading();
     } catch (error) {
       // Keep tolerance for "didn't appear in time", but preserve real failures.
-      if (!(error instanceof TimeoutError)) throw error;
+      if (!(error instanceof errors.TimeoutError)) throw error;
     }
 
     // Once connected, loading overlay disappears and terminal content is visible

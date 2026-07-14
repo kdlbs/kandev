@@ -73,7 +73,7 @@ function AgentField({
         onValueChange={onChange}
         disabled={disabled}
         placeholder={profiles.length > 0 ? "Select agent" : "No agents available"}
-        triggerClassName="h-10 w-full justify-between"
+        triggerClassName="h-11 w-full justify-between border border-input bg-background px-3 shadow-xs hover:bg-accent/50 data-[state=open]:border-ring data-[state=open]:ring-[2px] data-[state=open]:ring-ring/35"
         popoverPortal
       />
     </section>
