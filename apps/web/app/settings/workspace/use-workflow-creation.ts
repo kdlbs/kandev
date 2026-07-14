@@ -23,26 +23,6 @@ export const DEFAULT_CUSTOM_STEPS: StepDefinition[] = [
   { name: "Done", position: 3, color: "bg-green-500" },
 ];
 
-export function buildWorkflowSteps(
-  workflow: Workflow,
-  definitions: StepDefinition[],
-): WorkflowStep[] {
-  return definitions.map((step, index) => ({
-    id: `temp-step-${workflow.id}-${index}`,
-    workflow_id: workflow.id,
-    name: step.name,
-    position: step.position ?? index,
-    color: step.color ?? "bg-slate-500",
-    prompt: step.prompt,
-    events: step.events,
-    is_start_step: step.is_start_step,
-    show_in_command_panel: step.show_in_command_panel,
-    allow_manual_move: true,
-    created_at: "",
-    updated_at: "",
-  }));
-}
-
 type WorkflowCreationArgs = {
   workspace: Workspace | null;
   workflowTemplates: WorkflowTemplate[];

@@ -38,7 +38,6 @@ import {
 import {
   agentProfileId as toAgentProfileId,
   type Workflow,
-  type StepDefinition,
   type WorkflowStep,
   type Workspace,
   type WorkflowTemplate,
@@ -47,11 +46,7 @@ import {
   CreateWorkflowDialog,
   ImportWorkflowsDialog,
 } from "@/app/settings/workspace/workspace-workflows-dialogs";
-import {
-  buildWorkflowSteps,
-  DEFAULT_CUSTOM_STEPS,
-  useWorkflowCreation,
-} from "@/app/settings/workspace/use-workflow-creation";
+import { useWorkflowCreation } from "@/app/settings/workspace/use-workflow-creation";
 import { WorkspaceNotFoundCard } from "@/app/settings/workspace/workspace-not-found-card";
 
 type WorkspaceWorkflowsClientProps = {
@@ -86,9 +81,9 @@ function useWorkflowImportExport(
     if (!workspace) return;
     try {
       // Export only the workflows shown in this settings view (kanban-only —
-      // office workflows are filtered out upstream) and skip unsaved drafts.
+      // office workflows are filtered out upstream).
       // Workflow import/export is kanban-only by design (ADR-0004).
-      const exportIds = workflowItems.filter((wf) => !wf.id.startsWith("temp-")).map((wf) => wf.id);
+      const exportIds = workflowItems.map((wf) => wf.id);
       const yamlText = await exportAllWorkflowsAction(workspace.id, exportIds);
       setExportYaml(yamlText);
       setIsExportDialogOpen(true);
@@ -212,21 +207,10 @@ function useWorkflowActions({
   };
 
   const handleDeleteWorkflow = async (workflowId: string) => {
-    if (workflowId.startsWith("temp-")) {
-      setWorkflowItems((prev) => prev.filter((wf) => wf.id !== workflowId));
-      return;
-    }
     await deleteWorkflowAction(workflowId);
     creation.forgetInitialSteps(workflowId);
     setWorkflowItems((prev) => prev.filter((wf) => wf.id !== workflowId));
     setSavedWorkflowItems((prev) => prev.filter((wf) => wf.id !== workflowId));
-  };
-
-  const handleWorkflowCreated = (tempId: string, created: Workflow) => {
-    setWorkflowItems((prev) => prev.map((item) => (item.id === tempId ? created : item)));
-    setSavedWorkflowItems((prev) => [{ ...created }, ...prev]);
-    // Note: No router.refresh() needed. Local state already has the correct workflow,
-    // and SSR will fetch fresh data on next navigation.
   };
 
   const handleSaveWorkflow = async (workflowId: string) => {
@@ -256,7 +240,6 @@ function useWorkflowActions({
     ...creation,
     handleUpdateWorkflow,
     handleDeleteWorkflow,
-    handleWorkflowCreated,
     handleSaveWorkflow,
   };
 }
@@ -264,7 +247,6 @@ function useWorkflowActions({
 type WorkflowListProps = {
   workflowItems: Workflow[];
   workspaceId: string;
-  templateStepsById: Map<string, StepDefinition[]>;
   initialStepsByWorkflowId: Map<string, WorkflowStep[]>;
   isWorkflowDirty: (wf: Workflow) => boolean;
   onUpdate: (
@@ -273,7 +255,6 @@ type WorkflowListProps = {
   ) => void;
   onDelete: (id: string) => void;
   onSave: (id: string) => void;
-  onCreated: (id: string, wf: Workflow) => void;
   onReorder: (items: Workflow[]) => void;
 };
 
@@ -310,13 +291,11 @@ function SortableWorkflowItem({
 function WorkflowList({
   workflowItems,
   workspaceId,
-  templateStepsById,
   initialStepsByWorkflowId,
   isWorkflowDirty,
   onUpdate,
   onDelete,
   onSave,
-  onCreated,
   onReorder,
 }: WorkflowListProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
@@ -329,10 +308,9 @@ function WorkflowList({
     if (oldIndex === -1 || newIndex === -1) return;
     const reordered = arrayMove(workflowItems, oldIndex, newIndex);
     onReorder(reordered);
-    // Persist to backend (skip temp workflows)
-    const persistedIds = reordered.filter((wf) => !wf.id.startsWith("temp-")).map((wf) => wf.id);
-    if (persistedIds.length > 0) {
-      reorderWorkflowsAction(workspaceId, persistedIds).catch(() => {});
+    const workflowIds = reordered.map((wf) => wf.id);
+    if (workflowIds.length > 0) {
+      reorderWorkflowsAction(workspaceId, workflowIds).catch(() => {});
     }
   };
 
@@ -343,39 +321,23 @@ function WorkflowList({
         strategy={verticalListSortingStrategy}
       >
         <div className="grid min-w-0 gap-3 pl-6 sm:pl-8">
-          {workflowItems.map((workflow) => {
-            const isTempWorkflow = workflow.id.startsWith("temp-");
-            const templateSteps =
-              isTempWorkflow && workflow.workflow_template_id
-                ? (templateStepsById.get(workflow.workflow_template_id) ?? [])
-                : DEFAULT_CUSTOM_STEPS;
-            const initialWorkflowSteps =
-              initialStepsByWorkflowId.get(workflow.id) ??
-              (isTempWorkflow && templateSteps.length
-                ? buildWorkflowSteps(workflow, templateSteps)
-                : undefined);
-            return (
-              <SortableWorkflowItem key={workflow.id} workflow={workflow}>
-                <WorkflowCard
-                  workflow={workflow}
-                  isWorkflowDirty={isWorkflowDirty(workflow)}
-                  initialWorkflowSteps={initialWorkflowSteps}
-                  templateStepCount={isTempWorkflow ? templateSteps.length : 0}
-                  otherWorkflows={workflowItems.filter(
-                    (w) => w.id !== workflow.id && !w.id.startsWith("temp-"),
-                  )}
-                  onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
-                  onDeleteWorkflow={async () => {
-                    await onDelete(workflow.id);
-                  }}
-                  onSaveWorkflow={async () => {
-                    await onSave(workflow.id);
-                  }}
-                  onWorkflowCreated={(created) => onCreated(workflow.id, created)}
-                />
-              </SortableWorkflowItem>
-            );
-          })}
+          {workflowItems.map((workflow) => (
+            <SortableWorkflowItem key={workflow.id} workflow={workflow}>
+              <WorkflowCard
+                workflow={workflow}
+                isWorkflowDirty={isWorkflowDirty(workflow)}
+                initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
+                otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
+                onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
+                onDeleteWorkflow={async () => {
+                  await onDelete(workflow.id);
+                }}
+                onSaveWorkflow={async () => {
+                  await onSave(workflow.id);
+                }}
+              />
+            </SortableWorkflowItem>
+          ))}
         </div>
       </SortableContext>
     </DndContext>
@@ -460,13 +422,11 @@ export function WorkspaceWorkflowsClient({
         <WorkflowList
           workflowItems={page.workflowItems}
           workspaceId={workspace.id}
-          templateStepsById={page.templateStepsById}
           initialStepsByWorkflowId={page.initialStepsByWorkflowId}
           isWorkflowDirty={page.isWorkflowDirty}
           onUpdate={page.handleUpdateWorkflow}
           onDelete={page.handleDeleteWorkflow}
           onSave={page.handleSaveWorkflow}
-          onCreated={page.handleWorkflowCreated}
           onReorder={page.handleReorderWorkflows}
         />
       </SettingsSection>
@@ -529,7 +489,6 @@ function useWorkspaceWorkflowsPage(
     initialStepsByWorkflowId,
     handleUpdateWorkflow,
     handleDeleteWorkflow,
-    handleWorkflowCreated,
     handleSaveWorkflow,
   } = actions;
 
@@ -541,10 +500,6 @@ function useWorkspaceWorkflowsPage(
     });
   };
 
-  const templateStepsById = useMemo(
-    () => new Map(workflowTemplates.map((t) => [t.id, t.default_steps ?? []])),
-    [workflowTemplates],
-  );
   return {
     router,
     workflowItems,
@@ -573,10 +528,8 @@ function useWorkspaceWorkflowsPage(
     initialStepsByWorkflowId,
     handleUpdateWorkflow,
     handleDeleteWorkflow,
-    handleWorkflowCreated,
     handleSaveWorkflow,
     handleReorderWorkflows,
     workflowTemplates,
-    templateStepsById,
   };
 }
