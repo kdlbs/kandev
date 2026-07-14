@@ -535,12 +535,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	hasRunning, _ := e.repo.HasExecutorRunningRow(ctx, sessionID)
 	if hasRunning {
 		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env)
-		if !errors.Is(err, ErrStaleExecution) {
+		if !errors.Is(err, ErrStaleExecution) && !errors.Is(err, ErrAgentCommandMissing) {
 			return result, err
 		}
-		e.logger.Info("falling through to full LaunchAgent after stale execution",
+		e.logger.Info("falling through to full LaunchAgent for existing workspace",
 			zap.String("task_id", task.ID),
-			zap.String("session_id", sessionID))
+			zap.String("session_id", sessionID),
+			zap.Error(err))
 	}
 
 	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
@@ -1129,6 +1130,15 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 				zap.Error(err))
 			return nil, fmt.Errorf("set MCP mode %q: %w", effectiveMcpMode, err)
 		}
+	}
+
+	// Lazy workspace restoration creates an execution without an agent command.
+	// Preserve the request's description, environment, and MCP mode above, then
+	// route it through LaunchAgent so lifecycle.Launch can promote the execution
+	// with the effective profile, model, route override, and CLI flags before the
+	// subprocess is started.
+	if !e.agentManager.IsAgentCommandConfigured(executionID) {
+		return nil, ErrAgentCommandMissing
 	}
 
 	// Transition session to STARTING

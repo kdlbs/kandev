@@ -76,6 +76,7 @@ var (
 	ErrNoCloneURL              = errors.New("repository has no clone URL: provider owner and name are required")
 	ErrTaskArchived            = errors.New("task is archived")
 	ErrStaleExecution          = errors.New("stale execution: no live execution in memory")
+	ErrAgentCommandMissing     = errors.New("existing execution has no agent command configured")
 )
 
 // PromptResult contains the result of a prompt operation
@@ -93,6 +94,10 @@ type AgentManagerClient interface {
 	// StartAgentProcess starts the agent subprocess for an execution.
 	// The command is built internally based on the execution's agent profile.
 	StartAgentProcess(ctx context.Context, agentExecutionID string) error
+
+	// IsAgentCommandConfigured reports whether an execution is ready for
+	// StartAgentProcess or still needs workspace-only promotion via LaunchAgent.
+	IsAgentCommandConfigured(agentExecutionID string) bool
 
 	// StopAgent stops a running agent
 	StopAgent(ctx context.Context, agentExecutionID string, force bool) error

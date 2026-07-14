@@ -147,6 +147,8 @@ func (s *SimulatedAgentManagerClient) StartAgentProcess(ctx context.Context, age
 	return nil
 }
 
+func (s *SimulatedAgentManagerClient) IsAgentCommandConfigured(_ string) bool { return true }
+
 // runAgentSimulation simulates the agent execution lifecycle
 func (s *SimulatedAgentManagerClient) runAgentSimulation(instance *simulatedInstance, req *executor.LaunchAgentRequest) {
 	// Wait for launch delay

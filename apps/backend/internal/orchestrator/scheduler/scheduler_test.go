@@ -66,6 +66,8 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecution
 	return nil
 }
 
+func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool { return true }
+
 func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
 	return nil
 }

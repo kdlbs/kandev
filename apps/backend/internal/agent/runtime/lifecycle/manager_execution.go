@@ -234,6 +234,16 @@ func (m *Manager) GetExecutionIDForSession(_ context.Context, sessionID string) 
 	return "", fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
 }
 
+// IsAgentCommandConfigured reports whether an execution has been promoted from
+// workspace-only infrastructure to an agent execution ready to start.
+func (m *Manager) IsAgentCommandConfigured(executionID string) bool {
+	configured := false
+	_ = m.executionStore.WithRLock(executionID, func(execution *AgentExecution) {
+		configured = execution.AgentCommand != ""
+	})
+	return configured
+}
+
 // EnsurePassthroughExecution ensures an execution exists for a passthrough session
 // and starts the passthrough process if needed. This is called when the terminal
 // handler receives a connection for a session that might need recovery after backend restart.

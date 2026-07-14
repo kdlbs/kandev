@@ -709,6 +709,87 @@ func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 	}
 }
 
+// Regression: a workspace-only execution can be created by lazy workspace
+// restoration before workflow auto-start reaches LaunchPreparedSession. That
+// execution has no agent command, so it must go through LaunchAgent's promotion
+// path before StartAgentProcess runs.
+func TestLaunchPreparedSession_CommandlessExistingWorkspace_PromotesBeforeStart(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID:             "session-workspace-only",
+		TaskID:         "task-123",
+		AgentProfileID: "profile-override",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID:               session.ID,
+		SessionID:        session.ID,
+		TaskID:           session.TaskID,
+		AgentExecutionID: "exec-workspace-only",
+		Status:           models.ExecutorRunningStatusPrepared,
+	}
+
+	var commandConfigured atomic.Bool
+	var executionDescription string
+	startDone := make(chan error, 1)
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(_ context.Context, _ string) (string, error) {
+			return "exec-workspace-only", nil
+		},
+		isAgentCommandConfiguredFunc: func(_ string) bool {
+			return commandConfigured.Load()
+		},
+		setExecutionDescriptionFunc: func(_ context.Context, _ string, description string) error {
+			executionDescription = description
+			return nil
+		},
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			if executionDescription != "implement the approved plan" {
+				return nil, fmt.Errorf("execution description was not updated before promotion: %q", executionDescription)
+			}
+			commandConfigured.Store(true)
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-workspace-only",
+				Status:           v1.AgentStatusStarting,
+			}, nil
+		},
+		startAgentProcessFunc: func(_ context.Context, _ string) error {
+			if !commandConfigured.Load() {
+				err := errors.New(`execution "exec-workspace-only" has no agent command configured`)
+				startDone <- err
+				return err
+			}
+			startDone <- nil
+			return nil
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+	task := &v1.Task{ID: session.TaskID, WorkspaceID: "workspace-123", Title: "Test Task"}
+
+	_, err := executor.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
+		AgentProfileID: session.AgentProfileID,
+		Prompt:         "implement the approved plan",
+		StartAgent:     true,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession: %v", err)
+	}
+	if agentManager.launchAgentCallCount != 1 {
+		t.Fatalf("LaunchAgent call count = %d, want 1 command-promotion launch", agentManager.launchAgentCallCount)
+	}
+	select {
+	case err := <-startDone:
+		if err != nil {
+			t.Fatalf("StartAgentProcess: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for StartAgentProcess")
+	}
+}
+
 // TestLaunchPreparedSession_StaleExecutionID_CorrectedFromLiveStore was removed:
 // the "DB has stale ID, in-memory has live ID, correct DB to match" code path no
 // longer exists. With executors_running as the single source of truth and lifecycle-

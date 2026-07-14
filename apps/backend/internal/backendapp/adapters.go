@@ -274,6 +274,10 @@ func (a *lifecycleAdapter) StartAgentProcess(ctx context.Context, agentInstanceI
 	return a.mgr.StartAgentProcess(ctx, agentInstanceID)
 }
 
+func (a *lifecycleAdapter) IsAgentCommandConfigured(agentInstanceID string) bool {
+	return a.mgr.IsAgentCommandConfigured(agentInstanceID)
+}
+
 // StopAgent stops a running agent
 func (a *lifecycleAdapter) StopAgent(ctx context.Context, agentInstanceID string, force bool) error {
 	return a.mgr.StopAgent(ctx, agentInstanceID, force)
