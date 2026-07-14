@@ -1161,7 +1161,7 @@ func (m *Manager) markReadyEventWithContext(ctx context.Context, executionID, ev
 			alreadyReady = true
 			return
 		}
-		execution.Status = v1.AgentStatusReady
+		setExecutionStatus(execution, v1.AgentStatusReady)
 		payload = newAgentEventPayload(execution)
 		updated = execution
 	}); err != nil {

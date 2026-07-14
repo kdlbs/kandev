@@ -360,6 +360,8 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		generationOwner, ok := s.agentManager.(interface {
 			OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
 		})
+		// Generation-bearing events fail closed: without an ownership validator,
+		// the handler cannot prove that the event still belongs to this turn.
 		if !ok || !generationOwner.OwnsPromptGeneration(
 			data.SessionID, data.AgentExecutionID, data.PromptGeneration,
 		) {
