@@ -42,8 +42,11 @@ type TaskRepository interface {
 	// UnarchiveTaskByCascade clears archived_at only when the task was
 	// archived by the named cascade. Returns whether the row was updated.
 	UnarchiveTaskByCascade(ctx context.Context, id, cascadeID string) (bool, error)
-	// UnarchiveTask clears archived_at unconditionally (manual/legacy
-	// archives with no cascade stamp). Returns whether the row was updated.
+	// UnarchiveTask clears archived_at only when the task carries no
+	// cascade stamp (archived_by_cascade_id empty/NULL) — the CAS keeps a
+	// delayed manual unarchive from erasing a newer cascade archive.
+	// Cascade-stamped rows are restored via UnarchiveTaskByCascade.
+	// Returns whether the row was updated.
 	UnarchiveTask(ctx context.Context, id string) (bool, error)
 	ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error)
 	// CountOpenWatcherCreatedTasks returns the number of open watcher-created
