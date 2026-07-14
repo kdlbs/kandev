@@ -13,7 +13,7 @@
 #
 # Pinned versions (keep in sync with apps/backend/go.mod, apps/web/package.json,
 # and the matching workflow inputs):
-#   - Playwright base : v1.58.2-noble  (matches @playwright/test ^1.58.2)
+#   - Playwright base : v1.61.1-noble  (matches @playwright/test ^1.61.1)
 #   - Go              : 1.26.0         (matches apps/backend/go.mod)
 #   - Node            : 24             (matches actions/setup-node value)
 #   - pnpm            : 9.15.9         (matches pnpm/action-setup value)
@@ -24,7 +24,7 @@
 # =============================================================================
 # Stage 1: runtime — Playwright + Node + pnpm + Docker CLI (no Go)
 # =============================================================================
-FROM mcr.microsoft.com/playwright:v1.58.2-noble AS runtime
+FROM mcr.microsoft.com/playwright:v1.61.1-noble AS runtime
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PNPM_HOME=/pnpm \
