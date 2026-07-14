@@ -56,7 +56,12 @@ async function startQuickChatForAgent(
 ) {
   const agent = store.agentProfiles.find((p) => p.id === agentId);
   const sessionCount =
-    store.sessions.filter((session) => !isQuickChatSetupSessionId(session.sessionId)).length + 1;
+    store.sessions.filter(
+      (session) =>
+        session.workspaceId === workspaceId &&
+        (session.kind ?? "chat") === "chat" &&
+        !isQuickChatSetupSessionId(session.sessionId),
+    ).length + 1;
   const initialName = `${agent?.label || "Agent"} - Chat ${sessionCount}`;
   const response = await startQuickChat(workspaceId, {
     agent_profile_id: agentId,

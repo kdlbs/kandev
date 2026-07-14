@@ -1,6 +1,7 @@
 import type { QuickChatSessionKind } from "./types";
 
 const SETUP_SESSION_PREFIX = "quick-chat-setup:";
+const SETUP_SESSION_ID_PATTERN = /^quick-chat-setup:.+:(?:chat|config)$/;
 
 export function getQuickChatSetupSessionId(
   workspaceId: string,
@@ -10,5 +11,5 @@ export function getQuickChatSetupSessionId(
 }
 
 export function isQuickChatSetupSessionId(sessionId: string): boolean {
-  return sessionId.startsWith(SETUP_SESSION_PREFIX);
+  return SETUP_SESSION_ID_PATTERN.test(sessionId);
 }

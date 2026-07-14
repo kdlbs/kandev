@@ -177,6 +177,29 @@ describe("useAgentSelection — happy path", () => {
       expect.objectContaining({ repositories }),
     );
   });
+
+  it("numbers chats using only ordinary sessions in the current workspace", async () => {
+    const store = makeStore({
+      sessions: [
+        { sessionId: "local-chat", workspaceId: WORKSPACE_ID, kind: "chat" },
+        { sessionId: "local-config", workspaceId: WORKSPACE_ID, kind: "config" },
+        { sessionId: "other-chat", workspaceId: "ws-2", kind: "chat" },
+        { sessionId: CHAT_SETUP_ID, workspaceId: WORKSPACE_ID, kind: "chat" },
+      ],
+    });
+    mockStartQuickChat.mockResolvedValue({ task_id: "task-a", session_id: "sess-a" });
+
+    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
+
+    await act(async () => {
+      await result.current.handleSelectAgent("agent-a", vi.fn());
+    });
+
+    expect(mockStartQuickChat).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      expect.objectContaining({ title: "Agent A - Chat 2" }),
+    );
+  });
 });
 
 describe("useAgentSelection — supersession", () => {
