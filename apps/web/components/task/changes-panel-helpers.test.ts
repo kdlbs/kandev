@@ -186,6 +186,41 @@ describe("computeReviewProgress", () => {
   });
 });
 
+describe("computeReviewProgress scalability", () => {
+  it("indexes cumulative file identities once for large review sets", () => {
+    const fileCount = 80;
+    let pathReads = 0;
+    const files = Object.fromEntries(
+      Array.from({ length: fileCount }, (_, index) => {
+        const path = `src/file-${index}.ts`;
+        return [
+          `frontend\u0000${path}`,
+          {
+            get path() {
+              pathReads++;
+              return path;
+            },
+            repository_name: "frontend",
+            diff: `@@ -1 +1 @@\n-old-${index}\n+new-${index}`,
+          },
+        ];
+      }),
+    );
+    const reviews = new Map(
+      Array.from({ length: fileCount }, (_, index) => [
+        `frontend\u0000src/file-${index}.ts`,
+        { reviewed: true },
+      ]),
+    );
+
+    expect(computeReviewProgress([], { files }, reviews)).toEqual({
+      reviewedCount: fileCount,
+      totalFileCount: fileCount,
+    });
+    expect(pathReads).toBeLessThanOrEqual(fileCount * 4);
+  });
+});
+
 describe("buildPrByRepoMap", () => {
   it("does not copy a multi-repo TaskPR URL into the empty-key fallback", () => {
     const map = buildPrByRepoMap(

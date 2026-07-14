@@ -79,60 +79,77 @@ function cumulativeFileKey(mapKey: string, file: CumulativeDiffFiles[string]): s
   return reviewFileKey({ path: file.path ?? mapKey, repository_name: file.repository_name });
 }
 
-function hasReviewPath(keys: Set<string>, path: string): boolean {
-  for (const key of keys) {
-    if (splitReviewFileKey(key).path === path) return true;
-  }
-  return false;
+type ReviewProgressIndex = {
+  keys: Set<string>;
+  uncommittedDiffs: Map<string, string | undefined>;
+  cumulativeDiffs: Map<string, string | undefined>;
+  prPatches: Map<string, string | undefined>;
+};
+
+function setFirst<K, V>(map: Map<K, V>, key: K, value: V): void {
+  if (!map.has(key)) map.set(key, value);
 }
 
-function collectReviewKeys(
+function addCumulativeReviewKey(
+  keys: Set<string>,
+  paths: Set<string>,
+  key: string,
+  path: string,
+  repositoryName?: string,
+): void {
+  const collidesWithHigherPriority = repositoryName ? keys.has(path) : paths.has(path);
+  if (keys.has(key) || collidesWithHigherPriority) return;
+  keys.add(key);
+  paths.add(splitReviewFileKey(key).path);
+}
+
+function addPRReviewKey(keys: Set<string>, paths: Set<string>, path: string): void {
+  if (paths.has(path)) return;
+  keys.add(path);
+  paths.add(path);
+}
+
+function buildReviewProgressIndex(
   uncommittedFiles: FileInfo[],
   cumulativeDiffFiles: CumulativeDiffFiles | undefined,
   prFiles?: PRDiffFile[],
-): Set<string> {
+): ReviewProgressIndex {
   const keys = new Set<string>();
+  const paths = new Set<string>();
+  const uncommittedDiffs = new Map<string, string | undefined>();
+  const cumulativeDiffs = new Map<string, string | undefined>();
+  const prPatches = new Map<string, string | undefined>();
   for (const file of uncommittedFiles) {
-    keys.add(reviewFileKey(file));
+    const key = reviewFileKey(file);
+    keys.add(key);
+    paths.add(file.path);
+    setFirst(uncommittedDiffs, key, file.diff);
   }
   if (cumulativeDiffFiles) {
     for (const [mapKey, file] of Object.entries(cumulativeDiffFiles)) {
       const path = file.path ?? mapKey;
       const key = cumulativeFileKey(mapKey, file);
-      const collidesWithHigherPriority = file.repository_name
-        ? keys.has(path)
-        : hasReviewPath(keys, path);
-      if (!keys.has(key) && !collidesWithHigherPriority) keys.add(key);
+      setFirst(cumulativeDiffs, key, file.diff);
+      addCumulativeReviewKey(keys, paths, key, path, file.repository_name);
     }
   }
   if (prFiles) {
     for (const file of prFiles) {
-      if (!hasReviewPath(keys, file.filename)) keys.add(file.filename);
+      setFirst(prPatches, file.filename, file.patch);
+      addPRReviewKey(keys, paths, file.filename);
     }
   }
-  return keys;
+  return { keys, uncommittedDiffs, cumulativeDiffs, prPatches };
 }
 
-function getDiffForKey(
-  key: string,
-  uncommittedFiles: FileInfo[],
-  cumulativeDiffFiles: CumulativeDiffFiles | undefined,
-  prFiles?: PRDiffFile[],
-): string {
-  const uncommitted = uncommittedFiles.find((f) => reviewFileKey(f) === key);
-  if (uncommitted?.diff) return normalizeDiffContent(uncommitted.diff);
-  const cumulativeFile = cumulativeDiffFiles
-    ? Object.entries(cumulativeDiffFiles).find(
-        ([mapKey, file]) => cumulativeFileKey(mapKey, file) === key,
-      )?.[1]
-    : undefined;
-  const cumDiff = cumulativeFile?.diff;
+function getDiffForKey(key: string, index: ReviewProgressIndex): string {
+  const uncommittedDiff = index.uncommittedDiffs.get(key);
+  if (uncommittedDiff) return normalizeDiffContent(uncommittedDiff);
+  const cumDiff = index.cumulativeDiffs.get(key);
   if (cumDiff) return normalizeDiffContent(cumDiff);
-  if (prFiles) {
-    const reviewPath = splitReviewFileKey(key).path;
-    const prFile = prFiles.find((f) => f.filename === reviewPath);
-    if (prFile?.patch) return normalizeDiffContent(prFile.patch);
-  }
+  const reviewPath = splitReviewFileKey(key).path;
+  const prPatch = index.prPatches.get(reviewPath);
+  if (prPatch) return normalizeDiffContent(prPatch);
   return "";
 }
 
@@ -143,16 +160,16 @@ export function computeReviewProgress(
   prFiles?: PRDiffFile[],
 ) {
   const cumulativeDiffFiles = cumulativeDiff?.files;
-  const keys = collectReviewKeys(uncommittedFiles, cumulativeDiffFiles, prFiles);
+  const index = buildReviewProgressIndex(uncommittedFiles, cumulativeDiffFiles, prFiles);
   let reviewed = 0;
-  for (const key of keys) {
+  for (const key of index.keys) {
     const state = reviews.get(key);
     if (!state?.reviewed) continue;
-    const diffContent = getDiffForKey(key, uncommittedFiles, cumulativeDiffFiles, prFiles);
+    const diffContent = getDiffForKey(key, index);
     if (diffContent && state.diffHash && state.diffHash !== hashDiff(diffContent)) continue;
     reviewed++;
   }
-  return { reviewedCount: reviewed, totalFileCount: keys.size };
+  return { reviewedCount: reviewed, totalFileCount: index.keys.size };
 }
 
 export function computeStagedStats(stagedFiles: FileInfo[]) {
