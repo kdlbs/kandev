@@ -24,7 +24,7 @@ describe("computeSidebarMaxPx", () => {
   it("never exceeds viewport - reserve so the center column survives", () => {
     // vw=500 → 30%=150 < floor 350; viewport reserve = 200. So 350 clamps to 200.
     // floor below LAYOUT_PINNED_MIN_PX is also enforced.
-    expect(computeSidebarMaxPx(500)).toBeLessThanOrEqual(500 - 300);
+    expect(computeSidebarMaxPx(500)).toBe(200);
     expect(computeSidebarMaxPx(500)).toBeGreaterThanOrEqual(LAYOUT_PINNED_MIN_PX);
   });
 
@@ -41,9 +41,8 @@ describe("computeRightMaxPx", () => {
   });
 
   it("hits the 800px floor on mid viewports", () => {
-    // vw=1024 → 70%=716 < floor 800; viewport reserve = 724. Clamp 800 → 724.
-    // (The viewport reserve protects narrow screens from over-allocation.)
-    expect(computeRightMaxPx(1024)).toBeLessThan(800);
+    // vw=1024 → 70%=716 < floor 800; center reserve leaves a 544px cap.
+    expect(computeRightMaxPx(1024)).toBe(544);
   });
 
   it("scales to viewport * 0.7 above the floor on roomy viewports", () => {
@@ -51,9 +50,13 @@ describe("computeRightMaxPx", () => {
     expect(computeRightMaxPx(3000)).toBe(2100);
   });
 
+  it("reserves a visible sidebar so the center column retains its comfort width", () => {
+    expect(computeRightMaxPx(2000, 600)).toBe(920);
+  });
+
   it("never collapses the center column on narrow viewports", () => {
-    // vw=900 → 70%=630 < floor 800; reserve 300 → viewport bound 600.
-    expect(computeRightMaxPx(900)).toBe(600);
+    // vw=900 → 70%=630 < floor 800; reserve 480 → viewport bound 420.
+    expect(computeRightMaxPx(900)).toBe(420);
   });
 
   it("reads window.innerWidth when no argument passed", () => {
@@ -70,6 +73,10 @@ describe("computePinnedMaxPxFor", () => {
   it("picks the right cap for any other column", () => {
     expect(computePinnedMaxPxFor("right", 2000)).toBe(1400);
     expect(computePinnedMaxPxFor("plan", 2000)).toBe(1400);
+  });
+
+  it("passes the visible sidebar width through to the right-pane cap", () => {
+    expect(computePinnedMaxPxFor("right", 2000, 600)).toBe(920);
   });
 });
 

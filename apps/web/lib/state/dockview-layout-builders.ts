@@ -29,6 +29,11 @@ function layoutWidth(api: DockviewApi): number | undefined {
   return api.width > 0 ? api.width : undefined;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function visibleSidebarWidth(sv: any): number {
+  return sv?.length >= 3 ? sv.getViewSize(0) : 0;
+}
+
 /** Best-effort caller chain for the fixups-capture debug log: pull the first
  *  few stack frames above `applyLayoutFixups` so we can see WHICH layout path
  *  (env-switch / restore / custom-layout / maximize) recorded a given target.
@@ -172,7 +177,7 @@ function captureRightTarget(api: DockviewApi, sv: any, savedRightWidth?: number)
   // Use the measured grid width, not the window.innerWidth fallback (see
   // captureSidebarTarget).
   const measuredWidth = layoutWidth(api);
-  const rightCap = computeRightMaxPx(measuredWidth);
+  const rightCap = computeRightMaxPx(measuredWidth, visibleSidebarWidth(sv));
   for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
     const group = api.groups.find((g) => g.id === gid);
     if (group) {
@@ -235,7 +240,7 @@ function logFixupsCapture(api: DockviewApi, sv: any): void {
   debugWidths(
     `fixups-capture caller=${captureCallerChain()} apiW=${api.width} innerW=${innerW} ` +
       `cols=${sv?.length ?? 0} sidebarCap=${Math.round(sidebarCap)} liveSidebar=${r(liveSidebar)} ` +
-      `rightCap=${Math.round(computeRightMaxPx(w))} liveRight=${r(liveRight)} ` +
+      `rightCap=${Math.round(computeRightMaxPx(w, visibleSidebarWidth(sv)))} liveRight=${r(liveRight)} ` +
       `sidebarOverCap=${typeof liveSidebar === "number" && liveSidebar > sidebarCap + 1}`,
   );
 }

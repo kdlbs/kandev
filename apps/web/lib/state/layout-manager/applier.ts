@@ -185,7 +185,8 @@ function configureRightPinned(
     if (col.id === "sidebar" || !col.pinned) continue;
     // Same rationale as `configureSidebarPinned`: derive the cap from the
     // measured dockview width, not `window.innerWidth`.
-    const cap = col.maxWidth ?? computePinnedMaxPxFor(col.id, viewportWidth);
+    const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
+    const cap = col.maxWidth ?? computePinnedMaxPxFor(col.id, viewportWidth, sidebarWidth);
     applyConstraintsToAllPanelGroups(api, col, cap);
     if (col.id !== "right") continue;
     const defaultWidth = getPinnedWidth(col, viewportWidth, undefined);

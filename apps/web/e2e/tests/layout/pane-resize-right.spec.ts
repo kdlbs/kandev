@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { computeRightMaxPx } from "../../../lib/state/layout-manager/caps";
 import {
   WIDE_VIEWPORT,
   openWideTask,
@@ -9,21 +10,25 @@ import {
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
-test.describe("Right pane resize — viewport-proportional cap", () => {
+test.describe("Right pane resize — container-proportional cap", () => {
   test("resizes past the old 450px hard cap", async ({ testPage, apiClient, seedData }) => {
     await openWideTask(testPage, apiClient, seedData, "Right resize past old cap");
     const actual = await resizeColumnViaSplitview(testPage, "right", 700);
     expect(actual).toBeGreaterThan(600);
   });
 
-  test("respects the viewport-proportional cap (max(800, vw*0.7))", async ({
+  test("respects the container cap and center comfort width", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     await openWideTask(testPage, apiClient, seedData, "Right cap respect");
     const actual = await resizeColumnViaSplitview(testPage, "right", 5000);
-    const cap = Math.round(WIDE_VIEWPORT.width * 0.7);
+    const dockviewBox = await testPage.locator(".dv-dockview").boundingBox();
+    expect(dockviewBox).not.toBeNull();
+    const availableWidth = dockviewBox?.width ?? 0;
+    const sidebarWidth = await getDockviewGroupWidth(testPage, "sidebar").catch(() => 0);
+    const cap = computeRightMaxPx(availableWidth, sidebarWidth);
     expect(actual).toBeLessThanOrEqual(cap + 10);
   });
 
@@ -53,12 +58,16 @@ test.describe("Right pane resize — viewport-proportional cap", () => {
     expect(wideWidth).toBeGreaterThan(700);
 
     await testPage.setViewportSize({ width: 1100, height: 800 });
-    // Allow ResizeObserver tick + applyDynamicConstraints to fire, then attempt
-    // a re-resize that would exceed the new cap.
-    await testPage.waitForTimeout(300);
-    const narrowWidth = await resizeColumnViaSplitview(testPage, "right", 1500);
+    // Allow the container ResizeObserver and pinned-target enforcement to
+    // settle. Do not call the resize helper here: it reapplies constraints and
+    // would mask a failure to update them automatically on viewport changes.
+    await testPage.waitForTimeout(500);
 
-    const newCap = Math.max(800, Math.round(1100 * 0.7));
+    const dockviewBox = await testPage.locator(".dv-dockview").boundingBox();
+    expect(dockviewBox).not.toBeNull();
+    const narrowWidth = await getDockviewGroupWidth(testPage, "files");
+    const sidebarWidth = await getDockviewGroupWidth(testPage, "sidebar").catch(() => 0);
+    const newCap = computeRightMaxPx(dockviewBox?.width ?? 0, sidebarWidth);
     expect(narrowWidth).toBeLessThanOrEqual(newCap + 10);
   });
 });

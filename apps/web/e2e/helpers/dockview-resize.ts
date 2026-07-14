@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { computeRightMaxPx, computeSidebarMaxPx } from "../../lib/state/layout-manager/caps";
 import type { SeedData } from "../fixtures/test-base";
 import type { ApiClient } from "../helpers/api-client";
 import { SessionPage } from "../pages/session-page";
@@ -146,23 +147,24 @@ export async function resizeColumnViaSplitview(
   // Production locks pinned-column maxWidth to the current width to prevent
   // dockview's proportional rebalance from growing them. Real users bypass
   // that lock via the sash-drag handler (mousedown widens the cap to the
-  // runtime viewport-proportional cap). Tests simulate the same widening —
+  // runtime container-proportional cap). Tests simulate the same widening —
   // to the same runtime cap, NOT unlimited — so cap-enforcement assertions
-  // still work end-to-end. The bound is computed in Node and passed in so
-  // the browser-side script stays simple enough to satisfy the linter.
-  const viewport = page.viewportSize();
-  const vw = viewport?.width ?? 1440;
-  // Mirror `caps.ts` exactly: `viewportBound(value, vw)` clamps the ratio-based
-  // cap to `vw - VIEWPORT_RESERVE_PX (300)` so the center column always has
-  // room. Without this the test helper diverges from production on narrow
-  // viewports (e.g. vw=900 → sidebar cap would be 350 here but 300 in app).
-  const PINNED_MIN = 180;
-  const VIEWPORT_RESERVE = 300;
-  const rawCap =
+  // still work end-to-end. Production uses Dockview's measured width because
+  // the app sidebar is outside the workbench.
+  const { availableWidth, sidebarWidth } = await page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const api = (window as any).__dockviewApi__;
+    const sv = api?.component?.gridview?.root?.splitview;
+    return {
+      availableWidth:
+        api?.width ?? document.querySelector<HTMLElement>(".dv-dockview")?.clientWidth ?? 1440,
+      sidebarWidth: api?.getPanel("sidebar") && sv?.length >= 3 ? sv.getViewSize(0) : 0,
+    };
+  });
+  const runtimeCap =
     column === "sidebar"
-      ? Math.max(350, Math.round(vw * 0.3))
-      : Math.max(800, Math.round(vw * 0.7));
-  const runtimeCap = Math.max(PINNED_MIN, Math.min(rawCap, vw - VIEWPORT_RESERVE));
+      ? computeSidebarMaxPx(availableWidth)
+      : computeRightMaxPx(availableWidth, sidebarWidth);
   await loosenPinnedConstraints(page, column, runtimeCap);
   const result = await page.evaluate(
     ({ col, target }) => {
