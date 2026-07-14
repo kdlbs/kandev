@@ -285,7 +285,7 @@ func (s *Service) cancelAndDispatchClarificationRetry(ctx context.Context, data 
 			zap.Error(err))
 		// Force-revert session state so the retry prompt can proceed
 		if revertErr := s.repo.UpdateTaskSessionState(ctx, data.SessionID, models.TaskSessionStateWaitingForInput, ""); revertErr != nil {
-			s.logger.Error("failed to force-revert session state for clarification recovery",
+			s.logger.Warn("failed to force-revert session state for clarification recovery",
 				zap.String("session_id", data.SessionID),
 				zap.Error(revertErr))
 			return revertErr
