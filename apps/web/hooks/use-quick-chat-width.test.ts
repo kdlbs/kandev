@@ -6,8 +6,14 @@ import {
   useQuickChatWidth,
 } from "./use-quick-chat-width";
 
-function mouseDown(clientX: number) {
-  return { clientX, preventDefault: () => {} } as unknown as React.MouseEvent;
+function mouseDown(clientX: number, dialog: HTMLElement) {
+  const handle = document.createElement("button");
+  dialog.appendChild(handle);
+  return {
+    clientX,
+    currentTarget: handle,
+    preventDefault: () => {},
+  } as unknown as React.MouseEvent;
 }
 
 function mouseMove(clientX: number) {
@@ -41,25 +47,34 @@ describe("quick chat dialog width", () => {
 
   it("grows symmetrically when the right edge moves right", () => {
     const { result } = renderHook(() => useQuickChatWidth());
+    const dialog = document.createElement("div");
 
-    act(() => result.current.rightResizeHandleProps.onMouseDown(mouseDown(900)));
+    act(() => result.current.rightResizeHandleProps.onMouseDown(mouseDown(900, dialog)));
     act(() => mouseMove(950));
 
+    expect(dialog.style.getPropertyValue("--quick-chat-width")).toBe("1060px");
+    expect(result.current.width).toBe(960);
+    act(() => mouseUp());
     expect(result.current.width).toBe(1060);
   });
 
   it("grows symmetrically when the left edge moves left", () => {
     const { result } = renderHook(() => useQuickChatWidth());
+    const dialog = document.createElement("div");
 
-    act(() => result.current.leftResizeHandleProps.onMouseDown(mouseDown(300)));
+    act(() => result.current.leftResizeHandleProps.onMouseDown(mouseDown(300, dialog)));
     act(() => mouseMove(250));
 
+    expect(dialog.style.getPropertyValue("--quick-chat-width")).toBe("1060px");
+    expect(result.current.width).toBe(960);
+    act(() => mouseUp());
     expect(result.current.width).toBe(1060);
   });
 
   it("persists the final width on mouseup and restores it after remount", () => {
     const first = renderHook(() => useQuickChatWidth());
-    act(() => first.result.current.rightResizeHandleProps.onMouseDown(mouseDown(900)));
+    const dialog = document.createElement("div");
+    act(() => first.result.current.rightResizeHandleProps.onMouseDown(mouseDown(900, dialog)));
     act(() => mouseMove(950));
     act(() => mouseUp());
     first.unmount();

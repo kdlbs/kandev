@@ -160,7 +160,10 @@ function SetupFooter({
   onStart: () => void;
 }) {
   return (
-    <footer className="flex shrink-0 items-center justify-end gap-2 border-t bg-background px-4 py-3 sm:px-8">
+    <footer
+      className="flex shrink-0 items-center justify-end gap-2 border-t bg-popover px-4 py-3 sm:px-8"
+      data-testid="quick-chat-setup-footer"
+    >
       <Button variant="outline" onClick={onCancel} disabled={isStarting} className="cursor-pointer">
         Cancel
       </Button>
@@ -224,7 +227,7 @@ export function QuickChatSetup({
   );
   const startDisabled = !agentProfileId || hasIncompleteRow || isStarting;
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="quick-chat-setup">
+    <div className="flex min-h-0 flex-1 flex-col bg-popover" data-testid="quick-chat-setup">
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8 sm:py-8">
         <div className="mx-auto w-full max-w-2xl space-y-7">
           <header className="space-y-1">

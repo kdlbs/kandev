@@ -45,7 +45,12 @@ type ResizeEdge = "left" | "right";
 export function useQuickChatWidth() {
   const [width, setWidth] = useState(readInitialWidth);
   const widthRef = useRef(width);
-  const dragRef = useRef<{ edge: ResizeEdge; startX: number; startWidth: number } | null>(null);
+  const dragRef = useRef<{
+    edge: ResizeEdge;
+    startX: number;
+    startWidth: number;
+    dialog: HTMLElement;
+  } | null>(null);
 
   const updateWidth = useCallback((nextWidth: number) => {
     widthRef.current = nextWidth;
@@ -54,7 +59,9 @@ export function useQuickChatWidth() {
 
   const startResize = useCallback((edge: ResizeEdge, event: React.MouseEvent) => {
     event.preventDefault();
-    dragRef.current = { edge, startX: event.clientX, startWidth: widthRef.current };
+    const dialog = event.currentTarget.parentElement;
+    if (!dialog) return;
+    dragRef.current = { edge, startX: event.clientX, startWidth: widthRef.current, dialog };
     document.body.style.cursor = "ew-resize";
     document.body.style.userSelect = "none";
   }, []);
@@ -74,12 +81,15 @@ export function useQuickChatWidth() {
       if (!drag) return;
       const pointerDelta = event.clientX - drag.startX;
       const widthDelta = (drag.edge === "right" ? pointerDelta : -pointerDelta) * 2;
-      updateWidth(clampQuickChatWidth(drag.startWidth + widthDelta));
+      const nextWidth = clampQuickChatWidth(drag.startWidth + widthDelta);
+      widthRef.current = nextWidth;
+      drag.dialog.style.setProperty("--quick-chat-width", `${nextWidth}px`);
     };
     const handleMouseUp = () => {
       if (!dragRef.current) return;
       dragRef.current = null;
       restoreBodyStyles();
+      setWidth(widthRef.current);
       setLocalStorage(STORAGE_KEY, widthRef.current);
     };
     const handleWindowResize = () => updateWidth(clampQuickChatWidth(widthRef.current));

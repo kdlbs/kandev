@@ -30,8 +30,9 @@ context without changing their checked-out branches or creating a kanban task.
 - The desktop quick-chat dialog stays horizontally centered and can be resized from either
   horizontal edge. Its last user-selected width is restored across browser sessions and clamped
   to the current viewport.
-- The quick-chat composer uses the same surface background as the message history, and the new
-  chat action appears immediately after the last chat tab.
+- The quick-chat message history and composer retain the dialog's popover surface color. The setup
+  footer uses that same continuous surface, and the new chat action appears immediately after the
+  last chat tab.
 - The setup flow supports desktop and mobile layouts without horizontal page scrolling or
   hover-only actions. Mobile quick chat remains full-screen and does not expose resize handles.
 

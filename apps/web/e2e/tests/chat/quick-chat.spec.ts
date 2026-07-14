@@ -143,15 +143,29 @@ test.describe("Quick Chat", () => {
     const newChatBox = await newChat.boundingBox();
     expect(newChatBox!.x - (tabBox!.x + tabBox!.width)).toBeLessThanOrEqual(8);
 
+    const setupSurfaces = await dialog.evaluate((element) => {
+      const setup = element.querySelector<HTMLElement>('[data-testid="quick-chat-setup"]');
+      const footer = element.querySelector<HTMLElement>('[data-testid="quick-chat-setup-footer"]');
+      return {
+        dialog: getComputedStyle(element).backgroundColor,
+        setup: setup ? getComputedStyle(setup).backgroundColor : null,
+        footer: footer ? getComputedStyle(footer).backgroundColor : null,
+      };
+    });
+    expect(setupSurfaces.setup).toBe(setupSurfaces.dialog);
+    expect(setupSurfaces.footer).toBe(setupSurfaces.setup);
+
     await startQuickChatFromSetup(dialog, testPage);
     const surfaces = await dialog.evaluate((element) => {
       const messages = element.querySelector<HTMLElement>('[data-testid="quick-chat-messages"]');
       const input = element.querySelector<HTMLElement>('[data-testid="chat-input-area"]');
       return {
+        dialog: getComputedStyle(element).backgroundColor,
         messages: messages ? getComputedStyle(messages).backgroundColor : null,
         input: input ? getComputedStyle(input).backgroundColor : null,
       };
     });
+    expect(surfaces.messages).toBe(surfaces.dialog);
     expect(surfaces.input).toBe(surfaces.messages);
 
     await testPage.keyboard.press("Escape");
