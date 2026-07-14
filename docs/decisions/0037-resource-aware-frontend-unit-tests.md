@@ -12,7 +12,7 @@ On a 10-logical-CPU development host, the old uncapped suite averaged roughly 7.
 
 ## Decision
 
-Kandev keeps Vitest as the frontend unit-test runner and aligns it with the application's current Vite major. Local full-suite runs use the worker-thread pool and at most 20 percent of the host's available parallelism. CI remains uncapped so dedicated runners can use their assigned capacity, and `VITEST_MAX_WORKERS` can override either default for an explicit execution environment. Vitest is upgraded to 4.1.10; Vite remains locked at 8.0.16 rather than the incompatible 8.1.4.
+Kandev keeps Vitest as the frontend unit-test runner and aligns it with the application's current Vite major. Local full-suite runs use the worker-thread pool and at most 20 percent of the host's available parallelism. `pool: "threads"` is explicit because Vitest 2+ defaults to `forks`; the suite's isolation trial showed that `forks` produces widespread cross-file mock and DOM failures. CI remains uncapped so dedicated runners can use their assigned capacity, and `VITEST_MAX_WORKERS` can override either default for an explicit execution environment when it is a positive integer or percentage. Vitest is upgraded to 4.1.10; Vite remains locked at 8.0.16 rather than the incompatible 8.1.4.
 
 Targeted test-file runs remain the normal development loop. Full frontend suites run during final verification and CI rather than after every edit. Per-file isolation remains enabled because the suite relies on module and DOM isolation.
 
