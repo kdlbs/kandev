@@ -684,6 +684,43 @@ func TestRetryClarificationAfterCancel_DoesNotStarveUserCancel(t *testing.T) {
 	}
 }
 
+// TestDispatchClarificationResumeLocked_ReturnPaths pins the three distinct
+// outcomes so the caller can tell a benign "queued for a future drain" from a
+// genuine failure and log accordingly (bot review on PR #1680: the old bool
+// return logged an alarming "failed to resume agent" error even when the answer
+// was safely queued).
+func TestDispatchClarificationResumeLocked_ReturnPaths(t *testing.T) {
+	ctx := context.Background()
+	data := clarificationAnsweredData{TaskID: "t1", SessionID: "s1"}
+
+	t.Run("nil message queue is a genuine error", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		svc.messageQueue = nil
+
+		err := svc.dispatchClarificationResumeLocked(ctx, data, "answer")
+		if err == nil {
+			t.Fatal("expected an error when the message queue is not configured")
+		}
+		if errors.Is(err, errClarificationResumeQueuedForDrain) {
+			t.Fatalf("nil queue must not be reported as the benign queued-for-drain case: %v", err)
+		}
+	})
+
+	t.Run("immediate dispatch returns nil", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+		seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+		seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+		if err := svc.dispatchClarificationResumeLocked(ctx, data, "answer"); err != nil {
+			t.Fatalf("expected nil on immediate dispatch, got %v", err)
+		}
+	})
+}
+
 func countClarificationWatchdogs(svc *Service) int {
 	count := 0
 	svc.clarificationWatchdogs.Range(func(_, _ interface{}) bool {

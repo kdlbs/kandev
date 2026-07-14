@@ -296,10 +296,21 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		s.completeTurnForSession(ctx, data.SessionID)
 	}
 
-	if !s.dispatchClarificationResumeLocked(ctx, data, prompt) {
+	if err := s.dispatchClarificationResumeLocked(ctx, data, prompt); err != nil {
+		if errors.Is(err, errClarificationResumeQueuedForDrain) {
+			// Not a failure: the answer is safely queued and a future drain
+			// (the next agent.ready) will dispatch it. Logging this at error
+			// level produced misleading "failed to resume agent" noise even
+			// though recovery still succeeds.
+			s.logger.Info("clarification answer queued; awaiting drain to dispatch",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID))
+			return true
+		}
 		s.logger.Error("failed to resume agent after cancel in clarification recovery",
 			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID))
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
 		return false
 	}
 
@@ -309,37 +320,48 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 	return true
 }
 
+// errClarificationResumeQueuedForDrain signals that the clarification resume
+// prompt was safely queued but not immediately dispatched (a concurrent
+// dispatch was already settling for this session, so take-and-dispatch backed
+// off). The entry stays in the queue and the next drain will pick it up, so
+// this is a success case for recovery — not an error — and must not be logged
+// as a failure.
+var errClarificationResumeQueuedForDrain = errors.New("clarification resume queued for future drain")
+
 // dispatchClarificationResumeLocked enqueues the clarification resume prompt and
 // hands it to the async take-and-dispatch path so the blocking executor.Prompt
 // call runs off the cancelInFlight guard (see retryClarificationAfterCancel).
 // The entry is tagged user_message_recorded so executeQueuedMessage does not
 // insert a spurious user chat message for the system-built resume prompt. The
-// caller MUST already hold sessionID's cancelInFlight lock. Returns true when
-// the entry was dispatched (or is safely queued for a future drain).
-func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data clarificationAnsweredData, prompt string) bool {
+// caller MUST already hold sessionID's cancelInFlight lock.
+//
+// Returns nil when the entry was dispatched immediately,
+// errClarificationResumeQueuedForDrain when it was safely queued for a future
+// drain (a non-failure the caller must not treat as an error), and any other
+// error when the resume genuinely could not be handed off.
+func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data clarificationAnsweredData, prompt string) error {
 	if s.messageQueue == nil {
-		return false
+		// The queue is the only hand-off path now that the retry prompt no
+		// longer runs inline under the guard. A nil queue is a wiring bug, not
+		// a runtime condition, so surface it with context rather than failing
+		// silently the way a bare false return did.
+		return fmt.Errorf("cannot resume clarification: message queue is not configured")
 	}
 	queued, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx, data.SessionID, data.TaskID, prompt, "", messagequeue.QueuedByAgent, false, nil,
 		map[string]interface{}{metaKeyUserMessageRecorded: true},
 	)
 	if err != nil {
-		s.logger.Error("failed to queue clarification resume prompt",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.Error(err))
-		return false
+		return fmt.Errorf("queue clarification resume prompt: %w", err)
 	}
 	dispatched, err := s.takeAndDispatchEntryLocked(ctx, data.SessionID, queued.ID)
 	if err != nil {
-		s.logger.Error("failed to dispatch clarification resume prompt",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.Error(err))
-		return false
+		return fmt.Errorf("dispatch clarification resume prompt: %w", err)
 	}
-	return dispatched
+	if !dispatched {
+		return errClarificationResumeQueuedForDrain
+	}
+	return nil
 }
 
 // PauseForClarificationInput converts a no-answer ask_user_question outcome

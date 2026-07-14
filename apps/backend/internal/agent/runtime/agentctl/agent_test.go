@@ -889,6 +889,100 @@ func TestReadUpdatesStream_BlockedHandlerDoesNotStarveResponse(t *testing.T) {
 	}
 }
 
+// TestReadUpdatesStream_EventBurstDoesNotStarveResponse pins the fix for the
+// bounded-queue regression (cubic review on task 544afdae): even if the first
+// event's handler blocks on the cancelInFlight guard and a large burst of
+// further events arrives behind it, the read loop must stay free to deliver the
+// agent.cancel response frame. A fixed buffered channel would fill and
+// backpressure the read loop on send, re-wedging the cancel; the unbounded
+// reader-side queue must not.
+func TestReadUpdatesStream_EventBurstDoesNotStarveResponse(t *testing.T) {
+	const burst = 1000 // comfortably beyond the old 256 buffer
+
+	upgrader := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	emitEvents := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.Close() }()
+
+		<-emitEvents
+		// Blast a burst of events; the first handler will block on the client
+		// side, so all of these queue up behind it.
+		for i := 0; i < burst; i++ {
+			eventData, _ := json.Marshal(AgentEvent{Type: "message_chunk"})
+			if err := conn.WriteMessage(websocket.TextMessage, eventData); err != nil {
+				return
+			}
+		}
+
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var msg ws.Message
+			if err := json.Unmarshal(message, &msg); err != nil {
+				continue
+			}
+			if msg.Type == ws.MessageTypeRequest {
+				resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+				data, _ := json.Marshal(resp)
+				_ = conn.WriteMessage(websocket.TextMessage, data)
+			}
+		}
+	}))
+	defer server.Close()
+
+	handlerEntered := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	log := newTestLogger()
+	c := &Client{
+		baseURL:         server.URL,
+		httpClient:      &http.Client{Timeout: 5 * time.Second},
+		logger:          log,
+		pendingRequests: make(map[string]chan *ws.Message),
+	}
+
+	ctx := context.Background()
+	var once sync.Once
+	if err := c.StreamUpdates(ctx, func(_ AgentEvent) {
+		// Only the first handler blocks; the rest queue up behind it.
+		once.Do(func() {
+			close(handlerEntered)
+			<-releaseHandler
+		})
+	}, nil, nil); err != nil {
+		t.Fatalf("failed to connect: %v", err)
+	}
+	defer func() {
+		close(releaseHandler)
+		c.Close()
+	}()
+
+	close(emitEvents)
+	select {
+	case <-handlerEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the blocking event handler to be entered")
+	}
+
+	// With the first handler blocked and a full burst queued behind it, a
+	// request must still get its response — the read loop is not wedged behind
+	// a full event buffer.
+	reqCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resp, err := c.sendStreamRequest(reqCtx, "agent.cancel", nil)
+	if err != nil {
+		t.Fatalf("sendStreamRequest was starved by the event burst: %v", err)
+	}
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("expected response type, got %q", resp.Type)
+	}
+}
+
 // --- Concurrent request tests ---
 
 func TestConcurrentRequests(t *testing.T) {
