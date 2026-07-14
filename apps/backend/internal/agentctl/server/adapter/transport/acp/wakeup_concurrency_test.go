@@ -10,6 +10,7 @@ import (
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
+	"github.com/stretchr/testify/require"
 )
 
 // concurrencyFakeAgent is a minimal acp.Agent whose Prompt handler blocks until
@@ -18,6 +19,7 @@ import (
 type concurrencyFakeAgent struct {
 	entered     chan struct{} // one signal per Prompt entry
 	release     chan struct{} // closed to unblock all parked Prompts
+	initialized chan acp.InitializeRequest
 	inFlight    atomic.Int32
 	maxInFlight atomic.Int32
 }
@@ -37,6 +39,9 @@ func (f *concurrencyFakeAgent) Prompt(_ context.Context, _ acp.PromptRequest) (a
 }
 
 func (f *concurrencyFakeAgent) Initialize(_ context.Context, params acp.InitializeRequest) (acp.InitializeResponse, error) {
+	if f.initialized != nil {
+		f.initialized <- params
+	}
 	return acp.InitializeResponse{ProtocolVersion: params.ProtocolVersion}, nil
 }
 
@@ -90,11 +95,21 @@ func setupConcurrencyFakeAgent(t *testing.T) (*Adapter, *concurrencyFakeAgent) {
 	}
 
 	fa := &concurrencyFakeAgent{
-		entered: make(chan struct{}, 8),
-		release: make(chan struct{}),
+		entered:     make(chan struct{}, 8),
+		release:     make(chan struct{}),
+		initialized: make(chan acp.InitializeRequest, 1),
 	}
 	_ = acp.NewAgentSideConnection(fa, a2cW, c2aR)
 	return a, fa
+}
+
+func TestInitializeAdvertisesTerminalOutputMetadata(t *testing.T) {
+	a, fakeAgent := setupConcurrencyFakeAgent(t)
+	require.NoError(t, a.Initialize(context.Background()))
+
+	request := <-fakeAgent.initialized
+	require.Equal(t, true, request.ClientCapabilities.Meta["terminal_output"])
+	require.False(t, request.ClientCapabilities.Terminal)
 }
 
 // waitForPromptComplete blocks until sendPrompt emits EventTypeComplete or times out.

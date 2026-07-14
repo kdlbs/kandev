@@ -8,7 +8,7 @@ import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconArchive, IconLoader, IconTrash } from "@tabler/icons-react";
+import { IconArchive, IconArchiveOff, IconLoader, IconTrash } from "@tabler/icons-react";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
@@ -42,6 +42,7 @@ export type TasksListViewProps = {
   handleRowClick: (task: Task) => void;
   deletingTaskId: string | null;
   handleArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  handleUnarchive: (taskId: string) => Promise<void>;
   handleDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
 };
 
@@ -63,6 +64,7 @@ export function TasksListView({
   handleRowClick,
   deletingTaskId,
   handleArchive,
+  handleUnarchive,
   handleDelete,
 }: TasksListViewProps) {
   return (
@@ -84,6 +86,7 @@ export function TasksListView({
           isLoading={isLoading}
           deletingTaskId={deletingTaskId}
           onArchive={handleArchive}
+          onUnarchive={handleUnarchive}
           onDelete={handleDelete}
           onRowClick={handleRowClick}
         />
@@ -193,6 +196,7 @@ function TaskRows({
   isLoading,
   deletingTaskId,
   onArchive,
+  onUnarchive,
   onDelete,
   onRowClick,
 }: {
@@ -203,6 +207,7 @@ function TaskRows({
   isLoading: boolean;
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
@@ -236,6 +241,7 @@ function TaskRows({
           section={section}
           deletingTaskId={deletingTaskId}
           onArchive={onArchive}
+          onUnarchive={onUnarchive}
           onDelete={onDelete}
           onRowClick={onRowClick}
         />
@@ -356,6 +362,7 @@ function TaskListRow({
   level,
   deletingTaskId,
   onArchive,
+  onUnarchive,
   onDelete,
   onRowClick,
 }: {
@@ -363,6 +370,7 @@ function TaskListRow({
   level: number;
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
@@ -418,6 +426,7 @@ function TaskListRow({
           onDeleteOpenChange={setShowDeleteConfirm}
           onArchiveOpenChange={setShowArchiveConfirm}
           onArchive={onArchive}
+          onUnarchive={onUnarchive}
           onDelete={onDelete}
         />
       </div>
@@ -429,12 +438,14 @@ function TaskListSectionView({
   section,
   deletingTaskId,
   onArchive,
+  onUnarchive,
   onDelete,
   onRowClick,
 }: {
   section: TaskListSection;
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
@@ -455,12 +466,56 @@ function TaskListSectionView({
             level={level}
             deletingTaskId={deletingTaskId}
             onArchive={onArchive}
+            onUnarchive={onUnarchive}
             onDelete={onDelete}
             onRowClick={onRowClick}
           />
         ))}
       </div>
     </section>
+  );
+}
+
+// Holds its own in-flight state so rapid clicks can't fire duplicate
+// unarchive POSTs (each producing a toast + refetch).
+function UnarchiveRowAction({
+  taskId,
+  onUnarchive,
+}: {
+  taskId: string;
+  onUnarchive: (taskId: string) => Promise<void>;
+}) {
+  const [isPending, setIsPending] = useState(false);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={isPending ? 0 : -1} className="inline-flex">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 cursor-pointer"
+            data-testid="tasks-list-unarchive"
+            disabled={isPending}
+            onClick={async () => {
+              setIsPending(true);
+              try {
+                await onUnarchive(taskId);
+              } finally {
+                setIsPending(false);
+              }
+            }}
+          >
+            {isPending ? (
+              <IconLoader className="h-4 w-4 animate-spin" />
+            ) : (
+              <IconArchiveOff className="h-4 w-4 text-muted-foreground" />
+            )}
+            <span className="sr-only">Unarchive task</span>
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>Unarchive</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -473,6 +528,7 @@ function TaskRowActions({
   onDeleteOpenChange,
   onArchiveOpenChange,
   onArchive,
+  onUnarchive,
   onDelete,
 }: {
   task: Task;
@@ -483,6 +539,7 @@ function TaskRowActions({
   onDeleteOpenChange: (open: boolean) => void;
   onArchiveOpenChange: (open: boolean) => void;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
 }) {
   return (
@@ -503,6 +560,7 @@ function TaskRowActions({
           <TooltipContent>Archive</TooltipContent>
         </Tooltip>
       )}
+      {isArchived && <UnarchiveRowAction taskId={task.id} onUnarchive={onUnarchive} />}
       <Tooltip>
         <TooltipTrigger asChild>
           <span tabIndex={isDeleting ? 0 : -1} className="inline-flex">

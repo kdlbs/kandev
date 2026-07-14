@@ -96,6 +96,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [ci-pr-automation](ui/ci-pr-automation.md) | draft |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
+| [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI

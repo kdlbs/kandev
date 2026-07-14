@@ -17,7 +17,7 @@ function kandevToolCall(opts: {
   toolName: string;
   input?: Record<string, unknown>;
   resultJson?: unknown;
-  status?: "pending" | "running" | "complete" | "error";
+  status?: "pending" | "running" | "in_progress" | "complete" | "error";
 }): Message {
   return {
     id: "msg-1",
@@ -80,6 +80,20 @@ const CHANGE_TOUR = "Change tour";
 // call visible to the user.
 
 describe("KandevToolMessage list renderers", () => {
+  it("normalizes ACP in_progress status to running", () => {
+    const html = renderToStaticMarkup(
+      <KandevToolMessage
+        comment={kandevToolCall({
+          status: "in_progress",
+          toolName: "mcp__kandev__list_workspaces_kandev",
+          resultJson: { workspaces: [{ id: "w1", name: "Live workspace" }], total: 1 },
+        })}
+      />,
+    );
+
+    expect(html).toContain("Live workspace");
+  });
+
   it("renders the workflow-steps list with structured fields, not raw JSON", () => {
     const html = renderToStaticMarkup(
       <KandevToolMessage

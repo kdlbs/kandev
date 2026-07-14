@@ -6,25 +6,9 @@ import { GridSpinner } from "@/components/grid-spinner";
 import { transformPathsInText } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { ExpandableRow } from "./expandable-row";
+import { normalizeToolCallStatus } from "./tool-status";
 import { useExpandState } from "./use-expand-state";
-
-type ShellExecOutput = {
-  exit_code?: number;
-  stdout?: string;
-  stderr?: string;
-};
-
-type ShellExecPayload = {
-  command?: string;
-  work_dir?: string;
-  output?: ShellExecOutput;
-};
-
-type ToolExecuteMetadata = {
-  tool_call_id?: string;
-  status?: "pending" | "running" | "complete" | "error";
-  normalized?: { shell_exec?: ShellExecPayload };
-};
+import type { ShellExecOutput, ToolCallMetadata } from "../types";
 
 type ToolExecuteMessageProps = {
   comment: Message;
@@ -39,14 +23,36 @@ function ExecuteStatusIcon({
   exitCode: number | undefined;
 }) {
   if (status === "complete") {
-    return exitCode === 0 ? (
-      <IconCheck className="h-3.5 w-3.5 text-green-500" />
-    ) : (
-      <IconX className="h-3.5 w-3.5 text-red-500" />
+    if (exitCode === 0) {
+      return (
+        <span className="shrink-0" aria-label="Command succeeded">
+          <IconCheck aria-hidden className="h-3.5 w-3.5 text-green-500" />
+        </span>
+      );
+    }
+    if (typeof exitCode === "number") {
+      return (
+        <span className="shrink-0" aria-label="Command failed">
+          <IconX aria-hidden className="h-3.5 w-3.5 text-red-500" />
+        </span>
+      );
+    }
+    return null;
+  }
+  if (status === "error") {
+    return (
+      <span className="shrink-0" aria-label="Command failed">
+        <IconX aria-hidden className="h-3.5 w-3.5 text-red-500" />
+      </span>
     );
   }
-  if (status === "error") return <IconX className="h-3.5 w-3.5 text-red-500" />;
-  if (status === "running") return <GridSpinner className="text-muted-foreground" />;
+  if (status === "running") {
+    return (
+      <span className="shrink-0" aria-label="Command running">
+        <GridSpinner className="text-muted-foreground" />
+      </span>
+    );
+  }
   return null;
 }
 
@@ -55,16 +61,61 @@ type ExecuteOutputProps = {
   displayWorkDir: string | null;
   workDir: string | undefined;
   output: ShellExecOutput | undefined;
+  status: ToolCallMetadata["status"];
 };
+
+function TerminalOutput({ output }: { output: ShellExecOutput | undefined }) {
+  if (!output?.stdout && !output?.stderr) return null;
+  return (
+    <div className="space-y-2" data-testid="tool-execute-output">
+      {output.stdout && (
+        <pre className="text-xs bg-muted/30 rounded p-2 overflow-x-auto whitespace-pre-wrap break-words max-h-[200px]">
+          {output.stdout}
+        </pre>
+      )}
+      {output.stderr && (
+        <pre className="text-xs bg-red-500/10 text-red-600 dark:text-red-400 rounded max-h-[200px] p-2 overflow-x-auto whitespace-pre-wrap break-words">
+          {output.stderr}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function ExecuteResultDetails({
+  output,
+  status,
+}: {
+  output: ShellExecOutput | undefined;
+  status: ToolCallMetadata["status"];
+}) {
+  const isTerminal = status === "complete" || status === "error" || status === "cancelled";
+  if (!isTerminal && !output?.truncated) return null;
+  const exitLabel =
+    typeof output?.exit_code === "number"
+      ? `Exit code ${output.exit_code}`
+      : "Exit code unavailable";
+
+  return (
+    <div
+      className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border/40 pt-2 text-xs text-muted-foreground"
+      data-testid="tool-execute-result-details"
+    >
+      {output?.truncated && <span>Output truncated</span>}
+      {isTerminal && <span className="font-mono">{exitLabel}</span>}
+    </div>
+  );
+}
 
 function ExecuteOutputContent({
   displayCommand,
   displayWorkDir,
   workDir,
   output,
+  status,
 }: ExecuteOutputProps) {
   return (
-    <div className="pl-4 border-l-2 border-border/30 space-y-2">
+    <div className="min-w-0 pl-4 border-l-2 border-border/30 space-y-2">
       <pre className="text-xs bg-muted/30 rounded p-2 whitespace-pre-wrap break-all font-mono">
         {displayCommand}
       </pre>
@@ -76,41 +127,27 @@ function ExecuteOutputContent({
           </span>
         </div>
       )}
-      {output?.stdout && (
-        <pre className="text-xs bg-muted/30 rounded p-2 overflow-x-auto whitespace-pre-wrap max-h-[200px]">
-          {output.stdout}
-        </pre>
-      )}
-      {output?.stderr && (
-        <pre className="text-xs bg-red-500/10 text-red-600 dark:text-red-400 rounded max-h-[200px] p-2 overflow-x-auto whitespace-pre-wrap">
-          {output.stderr}
-        </pre>
-      )}
+      <TerminalOutput output={output} />
+      <ExecuteResultDetails output={output} status={status} />
     </div>
   );
 }
 
-function isExecuteSuccess(
-  status: ToolExecuteMetadata["status"],
-  output: ShellExecOutput | undefined,
-): boolean {
-  if (status !== "complete") return false;
-  return output?.exit_code === 0 || output?.exit_code === undefined;
-}
-
 function parseExecuteMetadata(comment: Message) {
-  const metadata = comment.metadata as ToolExecuteMetadata | undefined;
-  const status = metadata?.status;
+  const metadata = comment.metadata as ToolCallMetadata | undefined;
+  const status = normalizeToolCallStatus(metadata?.status);
   const shellExec = metadata?.normalized?.shell_exec;
   const output = shellExec?.output;
   const workDir = shellExec?.work_dir;
-  const isSuccess = isExecuteSuccess(status, output);
-  return { status, output, workDir, isSuccess };
+  return { status, output, workDir };
 }
 
 function CommandHeader({ displayCommand }: { displayCommand: string }) {
   return (
-    <span className="font-mono text-xs text-muted-foreground truncate min-w-0 flex-1 text-left">
+    <span
+      className="font-mono text-xs text-muted-foreground truncate min-w-0 flex-1 text-left"
+      data-testid="tool-execute-command"
+    >
       {displayCommand}
     </span>
   );
@@ -120,7 +157,7 @@ export const ToolExecuteMessage = memo(function ToolExecuteMessage({
   comment,
   worktreePath,
 }: ToolExecuteMessageProps) {
-  const { status, output, workDir, isSuccess } = parseExecuteMetadata(comment);
+  const { status, output, workDir } = parseExecuteMetadata(comment);
   const autoExpanded = status === "running";
   const { isExpanded, handleToggle } = useExpandState(status, autoExpanded);
   const displayCommand = transformPathsInText(comment.content, worktreePath);
@@ -132,11 +169,7 @@ export const ToolExecuteMessage = memo(function ToolExecuteMessage({
       header={
         <div className="flex items-center gap-2 text-xs min-w-0">
           <CommandHeader displayCommand={displayCommand} />
-          {!isSuccess && (
-            <span className="shrink-0">
-              <ExecuteStatusIcon status={status} exitCode={output?.exit_code} />
-            </span>
-          )}
+          <ExecuteStatusIcon status={status} exitCode={output?.exit_code} />
         </div>
       }
       hasExpandableContent
@@ -148,6 +181,7 @@ export const ToolExecuteMessage = memo(function ToolExecuteMessage({
         displayWorkDir={displayWorkDir}
         workDir={workDir}
         output={output}
+        status={status}
       />
     </ExpandableRow>
   );

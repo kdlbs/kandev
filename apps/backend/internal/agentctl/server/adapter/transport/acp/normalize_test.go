@@ -649,9 +649,8 @@ func TestNormalizerResult(t *testing.T) {
 		if payload.ShellExec().Output == nil {
 			t.Fatal("expected Output to be set")
 		}
-		if payload.ShellExec().Output.ExitCode != 0 {
-			t.Errorf("expected ExitCode 0, got %d", payload.ShellExec().Output.ExitCode)
-		}
+		require.NotNil(t, payload.ShellExec().Output.ExitCode)
+		require.Equal(t, 0, *payload.ShellExec().Output.ExitCode)
 		if payload.ShellExec().Output.Stdout != "/Users/cfl/project" {
 			t.Errorf("expected Stdout '/Users/cfl/project', got %q", payload.ShellExec().Output.Stdout)
 		}
@@ -674,9 +673,8 @@ func TestNormalizerResult(t *testing.T) {
 		if payload.ShellExec().Output == nil {
 			t.Fatal("expected Output to be set")
 		}
-		if payload.ShellExec().Output.ExitCode != 1 {
-			t.Errorf("expected ExitCode 1, got %d", payload.ShellExec().Output.ExitCode)
-		}
+		require.NotNil(t, payload.ShellExec().Output.ExitCode)
+		require.Equal(t, 1, *payload.ShellExec().Output.ExitCode)
 		if payload.ShellExec().Output.Stderr != "cat: nonexistent: No such file or directory" {
 			t.Errorf("expected Stderr, got %q", payload.ShellExec().Output.Stderr)
 		}
@@ -749,9 +747,7 @@ func TestParseShellOutputPlainString(t *testing.T) {
 		if payload.ShellExec().Output.Stdout != "/Users/cfl/Projects/1code" {
 			t.Errorf("expected Stdout '/Users/cfl/Projects/1code', got %q", payload.ShellExec().Output.Stdout)
 		}
-		if payload.ShellExec().Output.ExitCode != 0 {
-			t.Errorf("expected ExitCode 0, got %d", payload.ShellExec().Output.ExitCode)
-		}
+		require.Nil(t, payload.ShellExec().Output.ExitCode)
 	})
 
 	t.Run("XML-wrapped output still works", func(t *testing.T) {

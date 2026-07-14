@@ -3,7 +3,13 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
-import { archiveTask, deleteTask, listTasksByWorkspace, updateUserSettings } from "@/lib/api";
+import {
+  archiveTask,
+  deleteTask,
+  listTasksByWorkspace,
+  unarchiveTask,
+  updateUserSettings,
+} from "@/lib/api";
 import { KanbanHeader } from "@/components/kanban/kanban-header";
 import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
 import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
@@ -13,6 +19,7 @@ import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { linkToTask } from "@/lib/links";
+import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
 import { TasksListView } from "./tasks-list-view";
 import {
@@ -82,7 +89,6 @@ function useTaskOperations({
 }: UseTaskOperationsParams) {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
   const { beginRequest, isCurrentRequest } = useLatestWorkspaceRequest(activeWorkspaceId);
 
   const fetchTasks = useCallback(async () => {
@@ -107,7 +113,7 @@ function useTaskOperations({
       if (!shouldCommit()) return;
       toast({
         title: "Failed to load tasks",
-        description: err instanceof Error ? err.message : "Unknown error",
+        description: errorDescription(err),
         variant: "error",
       });
     } finally {
@@ -129,6 +135,18 @@ function useTaskOperations({
     setTotal,
   ]);
 
+  const mutations = useTaskMutations(fetchTasks);
+  return { isLoading, fetchTasks, ...mutations };
+}
+
+function errorDescription(err: unknown): string {
+  return err instanceof Error ? err.message : "Unknown error";
+}
+
+function useTaskMutations(fetchTasks: () => void) {
+  const { toast } = useToast();
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+
   const handleArchive = useCallback(
     async (taskId: string, opts?: { cascade?: boolean }) => {
       try {
@@ -138,7 +156,24 @@ function useTaskOperations({
       } catch (err) {
         toast({
           title: "Failed to archive task",
-          description: err instanceof Error ? err.message : "Unknown error",
+          description: errorDescription(err),
+          variant: "error",
+        });
+      }
+    },
+    [fetchTasks, toast],
+  );
+
+  const handleUnarchive = useCallback(
+    async (taskId: string) => {
+      try {
+        const result = await unarchiveTask(taskId);
+        toast(unarchiveToastPayload(result));
+        fetchTasks();
+      } catch (err) {
+        toast({
+          title: "Failed to unarchive task",
+          description: errorDescription(err),
           variant: "error",
         });
       }
@@ -155,7 +190,7 @@ function useTaskOperations({
       } catch (err) {
         toast({
           title: "Failed to delete task",
-          description: err instanceof Error ? err.message : "Unknown error",
+          description: errorDescription(err),
           variant: "error",
         });
       } finally {
@@ -165,7 +200,7 @@ function useTaskOperations({
     [fetchTasks, toast],
   );
 
-  return { isLoading, deletingTaskId, fetchTasks, handleArchive, handleDelete };
+  return { deletingTaskId, handleArchive, handleUnarchive, handleDelete };
 }
 
 function useTasksPageViewState({
@@ -498,6 +533,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
         handleRowClick={s.handleRowClick}
         deletingTaskId={s.deletingTaskId}
         handleArchive={s.handleArchive}
+        handleUnarchive={s.handleUnarchive}
         handleDelete={s.handleDelete}
       />
     </div>

@@ -131,6 +131,9 @@ func (m *mockRepository) ArchiveTaskIfActive(_ context.Context, _, _ string) (bo
 func (m *mockRepository) UnarchiveTaskByCascade(_ context.Context, _, _ string) (bool, error) {
 	return false, nil
 }
+func (m *mockRepository) UnarchiveTask(_ context.Context, _ string) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) IncrementTaskSequence(_ context.Context, _ string) (int, error) {
 	return 0, nil
 }

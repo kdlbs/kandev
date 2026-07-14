@@ -19,6 +19,12 @@ vi.mock("@/components/task/executor-settings-button", () => ({
   ExecutorSettingsButton: () => <button data-testid="executor-settings-button">executor</button>,
 }));
 
+vi.mock("@/components/task/task-unarchive-button", () => ({
+  TaskUnarchiveButton: ({ taskId }: { taskId?: string | null }) => (
+    <button data-testid="task-unarchive-button">{taskId}</button>
+  ),
+}));
+
 vi.mock("@/components/task/port-forward-dialog", () => ({
   PortForwardButton: () => <button>ports</button>,
 }));
@@ -114,6 +120,14 @@ describe("TaskTopBar GitHub issue link", () => {
     );
     expect(screen.getByLabelText("Task status and attention").className).not.toContain("[&_a]");
     expect(issue.compareDocumentPosition(pr) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("TaskTopBar archived task controls", () => {
+  it("passes the task ID to the unarchive button", () => {
+    renderTopBar(<TaskTopBar taskId="task-1" isArchived />);
+
+    expect(screen.getByTestId("task-unarchive-button").textContent).toBe("task-1");
   });
 });
 

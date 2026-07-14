@@ -17,6 +17,7 @@ import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import { PortForwardButton } from "@/components/task/port-forward-dialog";
 import { ExecutorSettingsButton } from "@/components/task/executor-settings-button";
+import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { isDebugUI } from "@/lib/config";
@@ -94,6 +95,7 @@ const TaskTopBar = memo(function TaskTopBar({
         )}
       </div>
       <TopBarRight
+        taskId={taskId}
         activeSessionId={activeSessionId}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
@@ -335,6 +337,7 @@ function TopbarToolsGroup({
  *  The former overflow popover was removed in the UI overhaul — every cluster
  *  is always visible so users don't have to discover the dots menu. */
 function TopBarRight({
+  taskId,
   activeSessionId,
   showDebugOverlay,
   onToggleDebugOverlay,
@@ -347,6 +350,7 @@ function TopBarRight({
   issueNumber,
   officeTaskHref,
 }: {
+  taskId?: string | null;
   activeSessionId?: string | null;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;
@@ -362,6 +366,11 @@ function TopBarRight({
   return (
     <div className="flex items-center justify-self-end gap-2 [&_button]:whitespace-nowrap">
       <TopbarMetrics activeSessionId={activeSessionId} size="sm" />
+      {isArchived && (
+        <TopbarCluster label="Unarchive task" className="[&_button]:h-7 [&_button]:text-xs">
+          <TaskUnarchiveButton taskId={taskId} />
+        </TopbarCluster>
+      )}
       {officeTaskHref && (
         <TopbarCluster label="Open in office view" className="[&_a]:h-7 [&_a]:text-xs">
           <Button asChild size="sm" variant="outline" className="h-7 cursor-pointer px-2">

@@ -15,7 +15,7 @@ import { ExpandableRow } from "../expandable-row";
 import { useExpandState } from "../use-expand-state";
 import { shortId } from "./parse";
 
-export type KandevStatus = "pending" | "running" | "complete" | "error" | undefined;
+export type KandevStatus = "pending" | "running" | "complete" | "error" | "cancelled" | undefined;
 
 export function KandevStatusIcon({ status }: { status: KandevStatus }) {
   if (status === "complete") return <IconCheck className="h-3.5 w-3.5 text-green-500" />;

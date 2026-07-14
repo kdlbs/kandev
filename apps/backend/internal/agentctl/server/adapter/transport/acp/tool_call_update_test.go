@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
+	"github.com/stretchr/testify/require"
 )
 
 // seedExecuteToolCall registers a pending Bash tool_call (Claude-acp pattern: empty
@@ -180,4 +181,183 @@ func TestConvertToolCallResultUpdate_ExplicitCompletedStatusUnchanged(t *testing
 	if ev.ToolStatus != "complete" {
 		t.Errorf("ToolStatus = %q, want %q", ev.ToolStatus, "complete")
 	}
+}
+
+func TestConvertToolCallResultUpdate_AppendsTerminalOutputDeltas(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-delta")
+
+	for _, chunk := range []string{"first\n", "second\n"} {
+		event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+			ToolCallId: "tc-delta",
+			Meta: map[string]any{
+				"terminal_output_delta": map[string]any{"data": chunk},
+			},
+		})
+		require.Equal(t, toolStatusInProgress, event.ToolStatus)
+	}
+
+	payload := a.activeToolCalls["tc-delta"]
+	require.NotNil(t, payload)
+	require.Equal(t, "first\nsecond\n", payload.ShellExec().Output.Stdout)
+	require.Nil(t, payload.ShellExec().Output.ExitCode)
+}
+
+func TestConvertToolCallResultUpdate_ReplacesCumulativeContent(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-content")
+
+	for _, cumulative := range []string{"first\n", "first\nsecond\n"} {
+		event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+			ToolCallId: "tc-content",
+			Content: []acp.ToolCallContent{{
+				Content: &acp.ToolCallContentContent{
+					Content: acp.TextBlock(cumulative),
+					Type:    "content",
+				},
+			}},
+		})
+		require.Equal(t, toolStatusInProgress, event.ToolStatus)
+	}
+
+	payload := a.activeToolCalls["tc-content"]
+	require.NotNil(t, payload)
+	require.Equal(t, "first\nsecond\n", payload.ShellExec().Output.Stdout)
+}
+
+func TestConvertToolCallResultUpdate_FinalOutputReplacesLiveWithoutDuplication(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-final")
+
+	a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-final",
+		Meta: map[string]any{
+			"terminal_output_delta": map[string]any{"data": "first\n"},
+		},
+	})
+	completed := acp.ToolCallStatus("completed")
+	event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-final",
+		Status:     &completed,
+		RawOutput: map[string]any{
+			"formatted_output": "first\nsecond\n",
+			"exit_code":        float64(4),
+		},
+	})
+
+	require.Equal(t, toolStatusError, event.ToolStatus)
+	require.Equal(t, "first\nsecond\n", event.NormalizedPayload.ShellExec().Output.Stdout)
+	require.NotNil(t, event.NormalizedPayload.ShellExec().Output.ExitCode)
+	require.Equal(t, 4, *event.NormalizedPayload.ShellExec().Output.ExitCode)
+	require.NotContains(t, a.activeToolCalls, "tc-final")
+}
+
+func TestConvertToolCallResultUpdate_TerminalMetadataTakesPrecedence(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-terminal")
+	completed := acp.ToolCallStatus("completed")
+
+	event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-terminal",
+		Status:     &completed,
+		RawOutput:  "fallback output",
+		Meta: map[string]any{
+			"terminal_output": map[string]any{"data": "structured output\n"},
+			"terminal_exit":   map[string]any{"exit_code": float64(3)},
+		},
+	})
+
+	require.Equal(t, toolStatusError, event.ToolStatus)
+	require.Equal(t, "structured output\n", event.NormalizedPayload.ShellExec().Output.Stdout)
+	require.NotNil(t, event.NormalizedPayload.ShellExec().Output.ExitCode)
+	require.Equal(t, 3, *event.NormalizedPayload.ShellExec().Output.ExitCode)
+}
+
+func TestConvertToolCallResultUpdate_FinalWithoutOutputPreservesLiveText(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-preserve")
+
+	a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-preserve",
+		Meta: map[string]any{
+			"terminal_output_delta": map[string]any{"data": "retained output\n"},
+		},
+	})
+	completed := acp.ToolCallStatus("completed")
+	event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-preserve",
+		Status:     &completed,
+		RawOutput:  map[string]any{"exit_code": float64(0)},
+	})
+
+	require.Equal(t, toolStatusComplete, event.ToolStatus)
+	require.Equal(t, "retained output\n", event.NormalizedPayload.ShellExec().Output.Stdout)
+	require.NotNil(t, event.NormalizedPayload.ShellExec().Output.ExitCode)
+	require.Equal(t, 0, *event.NormalizedPayload.ShellExec().Output.ExitCode)
+}
+
+func TestConvertToolCallResultUpdate_NonzeroExitPreservesCancellation(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-cancelled")
+	cancelled := acp.ToolCallStatus("cancelled")
+
+	event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-cancelled",
+		Status:     &cancelled,
+		RawOutput: map[string]any{
+			"formatted_output": "interrupted\n",
+			"exit_code":        float64(130),
+		},
+	})
+
+	require.Equal(t, toolStatusCancelled, event.ToolStatus)
+	require.NotNil(t, event.NormalizedPayload.ShellExec().Output.ExitCode)
+	require.Equal(t, 130, *event.NormalizedPayload.ShellExec().Output.ExitCode)
+}
+
+func TestConvertToolCallResultUpdate_StatuslessExactExitCompletesTool(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-exit-only")
+
+	event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-exit-only",
+		Meta: map[string]any{
+			"terminal_exit": map[string]any{"exit_code": float64(0)},
+		},
+	})
+
+	require.Equal(t, toolStatusComplete, event.ToolStatus)
+	require.NotContains(t, a.activeToolCalls, "tc-exit-only")
+}
+
+func TestConvertToolCallResultUpdate_StatuslessTitleAndExitCompletesTool(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-title-exit")
+	title := "printf done"
+
+	event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-title-exit",
+		Title:      &title,
+		Meta: map[string]any{
+			"terminal_exit": map[string]any{"exit_code": float64(0)},
+		},
+	})
+
+	require.Equal(t, toolStatusComplete, event.ToolStatus)
+	require.NotContains(t, a.activeToolCalls, "tc-title-exit")
+}
+
+func TestConvertToolCallResultUpdate_FailedWithoutExitTerminatesTool(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-failed")
+	failed := acp.ToolCallStatus("failed")
+
+	event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-failed",
+		Status:     &failed,
+		RawOutput:  "command failed before reporting an exit code",
+	})
+
+	require.Equal(t, toolStatusError, event.ToolStatus)
+	require.NotContains(t, a.activeToolCalls, "tc-failed")
 }

@@ -964,6 +964,25 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 	return rows > 0, nil
 }
 
+// UnarchiveTask clears archived_at for a manually/legacy-archived task
+// (no cascade stamp). The CAS guard on archived_by_cascade_id keeps a
+// delayed manual unarchive from erasing a newer cascade archive that
+// landed between the caller's read and this update — cascade-stamped
+// rows are only restored via UnarchiveTaskByCascade. Returns whether a
+// row was actually updated.
+func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET archived_at = NULL, archived_by_cascade_id = '', updated_at = ?
+		WHERE id = ? AND archived_at IS NOT NULL
+			AND (archived_by_cascade_id = '' OR archived_by_cascade_id IS NULL)
+	`), time.Now().UTC(), id)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
 // ListTasksForAutoArchive returns tasks eligible for auto-archiving based on workflow step settings
 func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	drv := r.ro.DriverName()

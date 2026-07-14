@@ -1,7 +1,6 @@
 package acp
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -25,6 +24,7 @@ const (
 	toolTypeGeneric = "tool_call"
 
 	toolStatusComplete   = "complete"
+	toolStatusCompleted  = "completed"
 	toolStatusError      = "error"
 	toolStatusInProgress = "in_progress"
 	toolStatusCancelled  = "cancelled"
@@ -146,14 +146,8 @@ func (n *Normalizer) NormalizeToolResult(payload *streams.NormalizedPayload, res
 			}
 		}
 	case streams.ToolKindShellExec:
-		if payload.ShellExec() != nil && output != "" {
-			// Parse ACP's XML-like shell output format
-			exitCode, stdout, stderr := parseShellOutput(output)
-			payload.ShellExec().Output = &streams.ShellExecOutput{
-				ExitCode: exitCode,
-				Stdout:   stdout,
-				Stderr:   stderr,
-			}
+		if payload.ShellExec() != nil {
+			applyFinalShellResult(payload.ShellExec(), result)
 		}
 	case streams.ToolKindGeneric:
 		if payload.Generic() != nil {
@@ -210,51 +204,6 @@ func parseFileList(output string) []string {
 		files = append(files, line)
 	}
 	return files
-}
-
-// parseShellOutput parses ACP's XML-like shell output format.
-// Format: "...<return-code>N</return-code>...<output>...</output>..."
-// Falls back to treating the entire string as stdout when no XML tags are found
-// (e.g. Claude Code sends plain string rawOutput).
-// Returns exit code, stdout, and stderr (stderr from <stderr> tag if present).
-func parseShellOutput(output string) (exitCode int, stdout, stderr string) {
-	hasXMLTags := strings.Contains(output, "<return-code>") ||
-		strings.Contains(output, "<output>") ||
-		strings.Contains(output, "<stderr>")
-
-	if !hasXMLTags {
-		// Plain string output (e.g. Claude Code ACP) — treat entire string as stdout
-		return 0, strings.TrimSpace(output), ""
-	}
-
-	// Extract return code
-	if start := strings.Index(output, "<return-code>"); start != -1 {
-		start += len("<return-code>")
-		if end := strings.Index(output[start:], "</return-code>"); end != -1 {
-			codeStr := strings.TrimSpace(output[start : start+end])
-			if code, err := strconv.Atoi(codeStr); err == nil {
-				exitCode = code
-			}
-		}
-	}
-
-	// Extract stdout from <output> tag
-	if start := strings.Index(output, "<output>"); start != -1 {
-		start += len("<output>")
-		if end := strings.Index(output[start:], "</output>"); end != -1 {
-			stdout = strings.TrimSpace(output[start : start+end])
-		}
-	}
-
-	// Extract stderr from <stderr> tag if present
-	if start := strings.Index(output, "<stderr>"); start != -1 {
-		start += len("<stderr>")
-		if end := strings.Index(output[start:], "</stderr>"); end != -1 {
-			stderr = strings.TrimSpace(output[start : start+end])
-		}
-	}
-
-	return exitCode, stdout, stderr
 }
 
 // UpdatePayloadInput updates a stored NormalizedPayload with new rawInput data.

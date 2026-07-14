@@ -1220,12 +1220,25 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not unarchived")
 		return
 	}
+	// Probe branch recoverability for every restored task: archive deleted
+	// the local branch + worktree, so report whether the branch still
+	// exists (locally or on origin) and restore checkout_branch so the
+	// next session picks the old work back up. Best-effort — an empty
+	// list just means nothing was recoverable. Detached from the request
+	// context: the tasks are already unarchived, so a client disconnect
+	// must not skip the checkout_branch restore.
+	recoveryCtx := context.WithoutCancel(c.Request.Context())
+	recovery := make([]service.BranchRecovery, 0)
+	for _, id := range outcome.ArchivedTaskIDs {
+		recovery = append(recovery, h.service.RecoverTaskBranches(recoveryCtx, id)...)
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":            true,
 		"cascade_id":         outcome.CascadeID,
 		"unarchived_ids":     outcome.ArchivedTaskIDs,
 		"skipped_ids":        outcome.SkippedTaskIDs,
 		"affected_group_ids": outcome.ReleasedGroupIDs,
+		"recovery":           recovery,
 	})
 }
 

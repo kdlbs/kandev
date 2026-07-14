@@ -89,7 +89,7 @@ const TOOL_MESSAGE_TYPES = new Set([
 
 /**
  * Check if any tool or subagent in the group is still running.
- * A tool/subagent is considered running if it's not in a terminal state (complete or error).
+ * A tool/subagent is considered running if it's not in a terminal state.
  */
 function hasRunningTool(messages: Message[]): boolean {
   for (const msg of messages) {
@@ -98,7 +98,7 @@ function hasRunningTool(messages: Message[]): boolean {
     const isSubagent = metadata?.normalized?.kind === "subagent_task";
     if (!isToolMessage && !isSubagent) continue;
     const status = metadata?.status;
-    if (status !== "complete" && status !== "error") return true;
+    if (status !== "complete" && status !== "error" && status !== "cancelled") return true;
   }
   return false;
 }

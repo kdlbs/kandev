@@ -6,6 +6,7 @@ import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { extractKandevStem, extractMcpResult } from "./kandev/parse";
 import { getKandevRenderer } from "./kandev/registry";
 import { PermissionActionRow } from "./permission-action-row";
+import { normalizeToolCallStatus } from "./tool-status";
 import { parsePermission, usePermissionResponseHandlers } from "./use-permission-handlers";
 import { KandevPermissionUIProvider, type KandevPermissionUIState } from "./kandev/shared";
 import type { PermissionRequestMetadata } from "./use-permission-handlers";
@@ -94,6 +95,7 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   const args = argsCandidate && typeof argsCandidate === "object" ? argsCandidate : undefined;
   const rawResult = generic?.output ?? meta?.result;
   const result = extractMcpResult(rawResult);
+  const status = normalizeToolCallStatus(meta?.status);
 
   const permissionUI = derivePermissionUI(permissionStatus, isPermissionPending);
 
@@ -102,7 +104,7 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   // and avoids the lint rule against "components created during render".
   const rendered = (
     <KandevPermissionUIProvider value={permissionUI}>
-      {renderer({ args, result, status: meta?.status })}
+      {renderer({ args, result, status })}
     </KandevPermissionUIProvider>
   );
 

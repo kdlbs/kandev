@@ -47,6 +47,19 @@ func (r *fakeCascadeRepo) UnarchiveTaskByCascade(_ context.Context, id, cascadeI
 	return true, nil
 }
 
+func (r *fakeCascadeRepo) UnarchiveTask(_ context.Context, id string) (bool, error) {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	t := r.base.tasks[id]
+	// Mirror the production CAS: only rows without a cascade stamp are
+	// restorable through the manual path.
+	if t == nil || t.ArchivedAt == nil || t.ArchivedByCascadeID != "" {
+		return false, nil
+	}
+	t.ArchivedAt = nil
+	return true, nil
+}
+
 // fakeWSGroupRepoCascade extends fakeWSGroupRepo with the phase 6
 // release/restore/cleanup-status methods.
 type fakeWSGroupRepoCascade struct {

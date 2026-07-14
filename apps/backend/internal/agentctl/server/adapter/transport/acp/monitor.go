@@ -418,7 +418,7 @@ func monitorEventEvent(sessionID, toolCallID string, body string, payload *strea
 		ToolStatus:        toolStatusInProgress,
 		NormalizedPayload: payload,
 		ToolCallContents: []streams.ToolCallContentItem{
-			{Type: "content", Content: &streams.ContentBlock{Type: "text", Text: body}},
+			{Type: toolContentType, Content: &streams.ContentBlock{Type: contentTypeText, Text: body}},
 		},
 	}
 }
@@ -456,7 +456,7 @@ func (a *Adapter) captureReplayMonitor(sessionID string, u acp.SessionUpdate) {
 		// post-replay sweep doesn't double-emit a cancellation.
 		if tcu.Status != nil {
 			s := string(*tcu.Status)
-			if s == "completed" || s == "failed" || s == toolStatusCancelled {
+			if s == toolStatusCompleted || s == "failed" || s == toolStatusCancelled {
 				a.dropMonitorByToolCallID(sessionID, toolCallID)
 			}
 		}
@@ -550,7 +550,7 @@ func monitorTerminalEvent(sessionID, toolCallID, status, note string, payload *s
 	var contents []streams.ToolCallContentItem
 	if note != "" {
 		contents = []streams.ToolCallContentItem{
-			{Type: "content", Content: &streams.ContentBlock{Type: "text", Text: note}},
+			{Type: toolContentType, Content: &streams.ContentBlock{Type: contentTypeText, Text: note}},
 		}
 	}
 	return AgentEvent{
