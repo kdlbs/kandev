@@ -61,7 +61,10 @@ export function useSessionAgentUsage(sessionId: string | null): AgentSubscriptio
         if (active) setAgents(list);
       })
       .catch(() => {
-        // Keep whatever we had; the tooltip simply shows no usage rows.
+        // Don't keep presenting stale usage as live: drop the memo so the
+        // next open refetches, and hide the rows for this open.
+        lastAgents = null;
+        if (active) setAgents([]);
       });
     return () => {
       active = false;

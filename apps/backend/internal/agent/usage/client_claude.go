@@ -143,12 +143,13 @@ func (c *ClaudeUsageClient) getUsage(ctx context.Context, token string) ([]byte,
 }
 
 // claudeWindows prefers the richer limits[] array (session, weekly, per-model
-// weekly) and falls back to the legacy five_hour/seven_day pair.
+// weekly) and falls back to the legacy five_hour/seven_day pair. Always
+// returns a non-nil slice so the API serializes `windows` as an array.
 func claudeWindows(raw claudeUsageResponse, now time.Time) []UtilizationWindow {
 	if windows := claudeLimitWindows(raw.Limits); len(windows) > 0 {
 		return windows
 	}
-	var windows []UtilizationWindow
+	windows := make([]UtilizationWindow, 0, 2)
 	if raw.FiveHour != nil {
 		windows = append(windows, UtilizationWindow{
 			Label:          claudeLabel5Hour,
@@ -260,7 +261,7 @@ func (c *ClaudeUsageClient) persistRefreshedToken(tok *claudeOAuthToken) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.credentialsPath, out, 0o600)
+	return writeFileAtomic(c.credentialsPath, out, 0o600)
 }
 
 type claudeRefreshRequest struct {

@@ -49,7 +49,7 @@ func TestHostServiceList(t *testing.T) {
 	if got[0].AgentID != "codex-acp" || got[0].Usage != okUsage || got[0].Error != "" {
 		t.Errorf("entry[0] = %+v", got[0])
 	}
-	if got[1].AgentID != "other-acp" || got[1].Usage != nil || got[1].Error != "boom" {
+	if got[1].AgentID != "other-acp" || got[1].Usage != nil || got[1].Error != hostUsageFetchError {
 		t.Errorf("entry[1] = %+v", got[1])
 	}
 	if noCreds.calls != 0 {
@@ -100,7 +100,7 @@ func TestHostServiceList_FreshBypassesStaleCache(t *testing.T) {
 }
 
 func TestNewHostServiceRegistersHostAgents(t *testing.T) {
-	svc := NewHostService()
+	svc := NewHostService(nil)
 	if len(svc.entries) != 2 {
 		t.Fatalf("entries = %d, want 2", len(svc.entries))
 	}

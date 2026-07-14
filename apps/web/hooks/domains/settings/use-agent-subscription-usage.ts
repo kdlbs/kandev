@@ -20,7 +20,8 @@ export function useAgentSubscriptionUsage() {
       const response = await listAgentSubscriptionUsage({ cache: "no-store", fresh });
       setItems(response.agents ?? []);
     } catch {
-      setItems([]);
+      // Keep the previous items: clearing them would hide the whole section
+      // (including the Refresh button) on a transient refresh failure.
     } finally {
       fetchingRef.current = false;
       setLoading(false);

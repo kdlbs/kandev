@@ -47,7 +47,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		return nil, nil, err
 	}
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
-	agentSettingsController.SetHostUsageLister(agentusage.NewHostService())
+	agentSettingsController.SetHostUsageLister(agentusage.NewHostService(log))
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)

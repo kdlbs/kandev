@@ -133,7 +133,8 @@ func parseCodexUsage(body []byte, now time.Time) (*ProviderUsage, error) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("codex usage: decode: %w", err)
 	}
-	var windows []UtilizationWindow
+	// Non-nil so the API serializes `windows` as an array even when empty.
+	windows := make([]UtilizationWindow, 0, 2)
 	for _, w := range []*codexWindow{raw.RateLimit.PrimaryWindow, raw.RateLimit.SecondaryWindow} {
 		if w == nil {
 			continue
@@ -271,7 +272,7 @@ func (c *CodexUsageClient) persistTokens(tokens *codexAuthTokens) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.authPath, out, 0o600)
+	return writeFileAtomic(c.authPath, out, 0o600)
 }
 
 func valueOr(v, fallback string) string {

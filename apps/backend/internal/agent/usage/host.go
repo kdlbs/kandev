@@ -5,11 +5,20 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // freshMaxAge clamps fresh (hover-triggered) fetches: a provider is queried
 // again at most every 15 s even when callers keep requesting fresh data.
 const freshMaxAge = 15 * time.Second
+
+// hostUsageFetchError is the sanitized per-agent error surfaced through the
+// API. Raw provider errors can contain credential paths and response bodies,
+// so those are only logged server-side.
+const hostUsageFetchError = "failed to fetch usage from provider"
 
 // HostAgentUsage is one host-installed subscription agent's usage entry.
 type HostAgentUsage struct {
@@ -37,12 +46,13 @@ type hostEntry struct {
 type HostService struct {
 	cache   *UsageCache
 	entries []hostEntry
+	logger  *logger.Logger
 }
 
 // NewHostService builds a HostService reading credentials from the current
 // user's home directory. The service is empty when the home dir is unavailable.
-func NewHostService() *HostService {
-	s := &HostService{cache: NewUsageCache()}
+func NewHostService(log *logger.Logger) *HostService {
+	s := &HostService{cache: NewUsageCache(), logger: log}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return s
@@ -82,7 +92,11 @@ func (s *HostService) List(ctx context.Context, fresh bool) []HostAgentUsage {
 		u, err := s.cache.GetOrFetchWithin(ctx, e.cacheKey, maxAge, e.client.FetchUsage)
 		switch {
 		case err != nil:
-			entry.Error = err.Error()
+			if s.logger != nil {
+				s.logger.Warn("subscription usage fetch failed",
+					zap.String("agent", e.agentID), zap.Error(err))
+			}
+			entry.Error = hostUsageFetchError
 		default:
 			entry.Usage = u
 		}
