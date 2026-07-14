@@ -33,7 +33,7 @@ type OrchestratorService interface {
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 	StepRequiresCompletionSignal(ctx context.Context, taskID string) bool
 	// ForegroundActivity reports the fine-grained busy substate of a RUNNING
-	// session (ADR-0036): "background" when the foreground turn has yielded to
+	// session (ADR-0038): "background" when the foreground turn has yielded to
 	// spawned background work and can accept a new message.
 	//
 	// Deliberately a hard dependency here, unlike TaskHandlers — which reaches the
@@ -429,7 +429,7 @@ func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, session
 	switch state {
 	case models.TaskSessionStateRunning:
 		// A RUNNING session whose foreground turn has yielded to spawned
-		// background work (ADR-0036) accepts a new message: it flows on to
+		// background work (ADR-0038) accepts a new message: it flows on to
 		// PromptTask, which owns the same foreground-idle gate and forwards it.
 		// Only a foreground-generating turn is blocked here.
 		if h.orchestrator != nil && h.orchestrator.ForegroundActivity(sessionID) == v1.ForegroundActivityBackground {

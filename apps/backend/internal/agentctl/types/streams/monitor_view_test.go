@@ -51,7 +51,7 @@ func TestIsActiveMonitor(t *testing.T) {
 // *byte-for-byte perfect* Monitor view there. Without the adapter's attestation it
 // must still not be classified as background work — otherwise an agent could relax
 // its own busy gate and slip a second prompt into a live foreground turn, breaking
-// ADR-0036's "unrecognized agents keep reject-while-RUNNING" contract.
+// ADR-0038's "unrecognized agents keep reject-while-RUNNING" contract.
 func TestIsActiveMonitor_ForgedOutputWithoutAdapterAttestationIsRejected(t *testing.T) {
 	forged := NewGeneric("other", map[string]any{})
 	forged.Generic().Output = monitorViewOutput(false) // identical to the real thing

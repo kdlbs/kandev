@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
-// Mobile (Pixel 5) coverage for ADR-0036. Filename matches
+// Mobile (Pixel 5) coverage for ADR-0038. Filename matches
 // /mobile-.*\.spec\.ts/ so the `mobile-chrome` project picks it up. The composer
 // gating and the working affordance derive from the same shared hooks the
 // desktop path uses, so this asserts the operator-visible outcome holds at
@@ -84,7 +84,7 @@ test.describe("Mobile fine-grained busy signal", () => {
 
     // Reload mid-window: a fresh mobile client. The accept-input + working
     // affordance must come straight from the boot payload (no persisted value,
-    // no activity_changed WS flip due) — ADR-0036.
+    // no activity_changed WS flip due) — ADR-0038.
     await testPage.reload();
     await session.waitForLoad();
 

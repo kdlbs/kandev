@@ -203,7 +203,7 @@ func (ta *turnActivity) generatingLocked() bool {
 // overlapping turns on one ACP session. Claiming closes that window: the first
 // prompt in wins, and every prompt behind it sees a generating foreground and is
 // rejected with ErrAgentPromptInProgress exactly as it would have been before
-// ADR-0036.
+// ADR-0038.
 //
 // The claim is held until agentctl accepts the prompt (completeForegroundClaim)
 // or it is handed back (releaseForegroundClaim). The returned token binds both
@@ -258,7 +258,7 @@ func (s *Service) completeForegroundClaim(claim *foregroundClaim) bool {
 // it was taken for never made it to the agent (ensureSessionRunning failed, the
 // model switch failed). Without it the session would sit in RUNNING advertising a
 // generating foreground it does not have, locking the operator out for the rest
-// of the turn — the exact lockout ADR-0036 exists to remove.
+// of the turn — the exact lockout ADR-0038 exists to remove.
 //
 // It reports whether the turn was actually handed back to background-idle, so the
 // caller can broadcast the restored substate. Two things stop a release from
@@ -302,7 +302,7 @@ func (s *Service) foregroundActivityValue(sessionID string) v1.ForegroundActivit
 
 // ForegroundActivity exposes the in-memory fine-grained busy substate so the
 // page-load / list serialization layer can stamp it onto a RUNNING session's
-// DTO (ADR-0036). This is the same value that drives the
+// DTO (ADR-0038). This is the same value that drives the
 // live task_session.activity_changed WS event, read straight from the in-memory
 // tracker — the single source of truth. There is no persisted copy: an untracked
 // session (including every session after a backend restart, which ends the turn)

@@ -13,7 +13,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// ADR-0036 narrowed the busy gate so a RUNNING session whose foreground turn has
+// ADR-0038 narrowed the busy gate so a RUNNING session whose foreground turn has
 // yielded to background work accepts a new prompt. checkSessionPromptable only
 // *reads* that substate, though, and PromptTask does real work between the read
 // and the point the turn is marked generating (session reload, ensureSessionRunning,
@@ -286,7 +286,7 @@ func TestClaimForegroundTurn_UntrackedSessionCannotBeClaimed(t *testing.T) {
 // A prompt that claims the turn but never reaches the agent (ensureSessionRunning
 // failed, the model switch failed) has to hand the claim back. Otherwise the
 // session sits in RUNNING advertising a generating foreground it does not have,
-// locking the operator out for the rest of the turn — the exact lockout ADR-0036
+// locking the operator out for the rest of the turn — the exact lockout ADR-0038
 // exists to remove.
 func TestReleaseForegroundClaim_FailedPromptReopensTheGate(t *testing.T) {
 	repo := setupTestRepo(t)

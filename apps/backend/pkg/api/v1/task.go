@@ -44,7 +44,7 @@ const (
 )
 
 // ForegroundActivity is the fine-grained busy substate of a RUNNING session
-// (ADR-0036). It distinguishes a foreground turn that is
+// (ADR-0038). It distinguishes a foreground turn that is
 // actively generating from one that is idle, held open only by spawned
 // background work (a subagent task, a run-in-background shell, an active
 // Monitor). It is only meaningful while the session state is RUNNING; for every

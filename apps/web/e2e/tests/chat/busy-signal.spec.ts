@@ -6,7 +6,7 @@ import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 
 // ---------------------------------------------------------------------------
-// ADR-0036 — operator-visible surfacing.
+// ADR-0038 — operator-visible surfacing.
 //
 // The mock `/background <dur>` command spawns a top-level subagent Task and then
 // holds the turn open with NO foreground output, so the session sits in the

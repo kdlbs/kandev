@@ -8,7 +8,7 @@ export function deriveSessionFlags(session: TaskSession | null | undefined) {
   const errorMessage = session?.error_message;
   const isStarting = state === "STARTING";
   const isRunning = state === "RUNNING";
-  // ADR-0036. Three conditions, not two:
+  // ADR-0038. Three conditions, not two:
   //  (a) generating       — RUNNING, foreground actively producing output
   //  (b) background-idle   — RUNNING, foreground yielded to spawned background work
   //  (c) fully idle        — not RUNNING
