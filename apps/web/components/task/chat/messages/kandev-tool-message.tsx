@@ -32,7 +32,9 @@ type KandevToolMessageProps = {
 };
 
 function normalizeKandevStatus(status: ToolCallMetadata["status"]): KandevStatus {
-  return status === "in_progress" ? "running" : status;
+  if (status === "in_progress") return "running";
+  if (status === "cancelled") return undefined;
+  return status;
 }
 
 // kandevStemOf scans the several fields that may carry the raw MCP tool name

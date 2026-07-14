@@ -134,7 +134,7 @@ export type ToolCallMetadata = {
   parent_tool_call_id?: string; // For subagent nesting
   tool_name?: string;
   title?: string;
-  status?: "pending" | "running" | "in_progress" | "complete" | "error";
+  status?: "pending" | "running" | "in_progress" | "complete" | "error" | "cancelled";
   args?: Record<string, unknown>;
   result?: string;
   normalized?: NormalizedPayload;

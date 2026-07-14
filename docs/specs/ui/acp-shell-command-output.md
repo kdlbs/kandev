@@ -20,12 +20,13 @@ Agent chat shows that a shell command ran, but ACP agents encode terminal output
   - Claude: replace the displayed output with `_meta.terminal_output.data` and read `_meta.terminal_exit.exit_code`. Plain final `rawOutput` remains a fallback for agents or versions that do not emit the extension.
   - OpenCode: replace the displayed output from cumulative text `content`; on completion prefer `rawOutput.output` and read `rawOutput.metadata.exit`.
   - Auggie: parse `rawOutput.output`, including its `<output>`, `<stderr>`, and `<return-code>` fields.
-- A final authoritative output replaces the accumulated live output rather than appending it a second time. If a final update omits output, the accumulated live output remains visible.
+- A final authoritative output replaces the accumulated live output rather than appending it a second time. If a final update omits output or one explicit stream, the accumulated value for each omitted field remains visible.
 - Exit-code precedence is `_meta.terminal_exit.exit_code`, provider-native structured exit fields, then Auggie's `<return-code>`. An absent or unparseable exit status remains unknown; it MUST NOT become exit `0`.
 - Terminal text is treated as a combined stream unless an agent explicitly supplies separate stdout and stderr fields. Kandev does not infer stream separation from line ordering.
 - Each normalized output text field is bounded to 256 KiB. When a field exceeds the bound, Kandev retains its most recent valid UTF-8 content and sets `truncated: true`.
 - The existing expandable command row shows combined output in a scrollable monospace region. On terminal completion it visibly shows `Exit code N` when known, or `Exit code unavailable` when unknown. Unknown is neutral, not success or failure.
 - A known exit code of `0` is success. A known nonzero exit code is failure even when an agent reports ACP status `completed`. ACP `failed`/`error` remains failure independently of whether an exit code is available.
+- ACP cancellation is terminal and preserves the transcript while showing `Exit code unavailable` when no exit was reported.
 - Desktop and mobile chat expose the same output, truncation indication, and exit-status semantics.
 
 ## Data model
@@ -34,13 +35,13 @@ No table or migration is added. The existing persisted tool-message metadata car
 
 ```text
 metadata.normalized.shell_exec.output
-  exit_code  integer  optional/nullable; absent or null means unknown
+  exit_code  integer  optional; absent means unknown
   stdout     string   optional; combined terminal output unless streams are explicit
   stderr     string   optional; only populated from an explicit stderr field
   truncated  boolean  optional; true when either stored text field hit its bound
 ```
 
-An explicit `exit_code: 0` is distinct from an absent or null exit code.
+An explicit `exit_code: 0` is distinct from an absent exit code.
 
 ## API surface
 
@@ -65,6 +66,7 @@ The extension is additive: agents that ignore it continue through their current 
 - Repeated cumulative output replaces the previous cumulative value; delta output appends once. Final aggregate output replaces either form and cannot duplicate the visible text.
 - Output exceeding the bound is truncated deterministically and remains valid UTF-8.
 - Unknown exit status never renders a success check or a failure cross solely because the value is absent.
+- ACP `failed` and `cancelled` statuses terminate active-call tracking even when no exit code is available.
 
 ## Persistence guarantees
 
@@ -77,6 +79,7 @@ Live output updates use the existing tool-message update path and are persisted 
 - **GIVEN** OpenCode emits cumulative `content` values followed by `rawOutput.metadata.exit: 7` while ACP status is `completed`, **WHEN** the command completes, **THEN** the latest output is not duplicated and the row shows `Exit code 7` as failure.
 - **GIVEN** Auggie returns XML-like output with `<return-code>0</return-code>`, **WHEN** the command completes, **THEN** the parsed output is visible and the row shows `Exit code 0` as success.
 - **GIVEN** an agent returns plain output with no structured or embedded exit status, **WHEN** the command completes, **THEN** the output is visible and the row shows `Exit code unavailable` with neutral status.
+- **GIVEN** a command is cancelled without an exit code, **WHEN** its terminal update is persisted, **THEN** the transcript remains expandable and shows `Exit code unavailable`.
 - **GIVEN** terminal output exceeds 256 KiB, **WHEN** live and final updates are normalized, **THEN** stored output remains within the bound, keeps the newest valid UTF-8 text, and the expanded row indicates truncation.
 - **GIVEN** a persisted completed shell message, **WHEN** chat is opened on desktop or mobile and the row is expanded, **THEN** its output and exit status are readable without overlapping adjacent chat content.
 

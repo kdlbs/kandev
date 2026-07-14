@@ -58,6 +58,31 @@ func TestNormalizeShellToolResultProviderShapes(t *testing.T) {
 			wantStdout:  "claude output\n",
 			wantHasExit: false,
 		},
+		{
+			name: "explicit streams and top-level exit take precedence",
+			result: map[string]any{
+				"stdout":           "explicit stdout",
+				"stderr":           "explicit stderr",
+				"formatted_output": "formatted fallback",
+				"output":           "output fallback",
+				"exit_code":        float64(5),
+				"metadata":         map[string]any{"exit": float64(9)},
+			},
+			wantStdout:  "explicit stdout",
+			wantStderr:  "explicit stderr",
+			wantExit:    5,
+			wantHasExit: true,
+		},
+		{
+			name: "malformed exits stay unknown",
+			result: map[string]any{
+				"output":    "output with malformed exit",
+				"exit_code": "not-an-exit",
+				"metadata":  map[string]any{"exit": "still-not-an-exit"},
+			},
+			wantStdout:  "output with malformed exit",
+			wantHasExit: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -150,6 +175,74 @@ func TestNormalizeShellToolUpdateAppendsNonCumulativeLiveOutput(t *testing.T) {
 	)
 
 	require.Equal(t, "hello\nworld\n", payload.ShellExec().Output.Stdout)
+}
+
+func TestNormalizeShellToolUpdatePreservesStreamsMissingFromLaterResults(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "test-command"},
+	})
+	payload.ShellExec().Output = nil
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		nil,
+		nil,
+		map[string]any{"stdout": "first stdout", "stderr": "retained stderr"},
+	)
+	normalizer.NormalizeShellToolUpdate(payload, nil, nil, map[string]any{"stdout": "final stdout"})
+	require.Equal(t, "final stdout", payload.ShellExec().Output.Stdout)
+	require.Equal(t, "retained stderr", payload.ShellExec().Output.Stderr)
+
+	normalizer.NormalizeShellToolUpdate(payload, nil, nil, map[string]any{"stderr": "final stderr"})
+	require.Equal(t, "final stdout", payload.ShellExec().Output.Stdout)
+	require.Equal(t, "final stderr", payload.ShellExec().Output.Stderr)
+}
+
+func TestNormalizeShellToolResultReturnCodeOnlyDoesNotRenderMarkup(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "test-command"},
+	})
+
+	normalizer.NormalizeToolResult(payload, "<return-code>1</return-code>")
+
+	require.Empty(t, payload.ShellExec().Output.Stdout)
+	require.NotNil(t, payload.ShellExec().Output.ExitCode)
+	require.Equal(t, 1, *payload.ShellExec().Output.ExitCode)
+}
+
+func TestNormalizeShellToolUpdateCumulativeOutputRemainsCorrectAfterTruncation(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "test-command"},
+	})
+	initial := strings.Repeat("a", maxShellOutputBytes) + "first tail"
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output": map[string]any{"data": initial}},
+		nil,
+		nil,
+	)
+	cumulative := initial + " second tail"
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output": map[string]any{"data": cumulative}},
+		nil,
+		nil,
+	)
+
+	want, _ := boundShellOutput(cumulative)
+	require.Equal(t, want, payload.ShellExec().Output.Stdout)
 }
 
 func shellOutputJSON(t *testing.T, output any) map[string]any {

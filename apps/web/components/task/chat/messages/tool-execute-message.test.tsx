@@ -13,7 +13,7 @@ type ShellOutput = {
 };
 
 function executeMessage(
-  status: "pending" | "running" | "in_progress" | "complete" | "error",
+  status: "pending" | "running" | "in_progress" | "complete" | "error" | "cancelled",
   output?: ShellOutput,
 ): Message {
   return {
@@ -112,6 +112,16 @@ describe("ToolExecuteMessage command result", () => {
 
     expandCommand();
     expect(screen.getByText("Output truncated")).toBeTruthy();
+    expect(screen.getByText("Exit code unavailable")).toBeTruthy();
+  });
+
+  it("shows terminal details for a cancelled command", () => {
+    render(
+      <ToolExecuteMessage comment={executeMessage("cancelled", { stdout: "cancelled output" })} />,
+    );
+
+    expandCommand();
+    expect(screen.getByText("cancelled output")).toBeTruthy();
     expect(screen.getByText("Exit code unavailable")).toBeTruthy();
   });
 });

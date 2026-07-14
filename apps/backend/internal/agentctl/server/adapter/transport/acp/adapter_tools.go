@@ -147,9 +147,12 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	if tcu.Status != nil {
 		status = string(*tcu.Status)
 	}
-	// Normalize status - "completed" -> "complete" for frontend consistency
-	if status == "completed" {
+	// Normalize ACP status spellings for frontend and lifecycle consistency.
+	switch status {
+	case "completed":
 		status = toolStatusComplete
+	case "failed":
+		status = toolStatusError
 	}
 	// Claude-acp sends incremental updates (title, rawInput, content) with no
 	// Status field — e.g. the second tool_call_update for Bash carries the actual
@@ -231,12 +234,13 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	}
 	if status == "" && recognizedShellUpdate {
 		status = toolStatusInProgress
-		if shellExitCode != nil {
+	}
+	if shellExitCode != nil && status != toolStatusCancelled {
+		if *shellExitCode != 0 {
+			status = toolStatusError
+		} else if recognizedShellUpdate && status != toolStatusError {
 			status = toolStatusComplete
 		}
-	}
-	if shellExitCode != nil && *shellExitCode != 0 && status != toolStatusCancelled {
-		status = toolStatusError
 	}
 	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
 

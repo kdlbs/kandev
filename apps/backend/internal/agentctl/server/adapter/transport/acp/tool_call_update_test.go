@@ -329,3 +329,35 @@ func TestConvertToolCallResultUpdate_StatuslessExactExitCompletesTool(t *testing
 	require.Equal(t, toolStatusComplete, event.ToolStatus)
 	require.NotContains(t, a.activeToolCalls, "tc-exit-only")
 }
+
+func TestConvertToolCallResultUpdate_StatuslessTitleAndExitCompletesTool(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-title-exit")
+	title := "printf done"
+
+	event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-title-exit",
+		Title:      &title,
+		Meta: map[string]any{
+			"terminal_exit": map[string]any{"exit_code": float64(0)},
+		},
+	})
+
+	require.Equal(t, toolStatusComplete, event.ToolStatus)
+	require.NotContains(t, a.activeToolCalls, "tc-title-exit")
+}
+
+func TestConvertToolCallResultUpdate_FailedWithoutExitTerminatesTool(t *testing.T) {
+	a := newTestAdapter()
+	seedExecuteToolCall(t, a, "tc-failed")
+	failed := acp.ToolCallStatus("failed")
+
+	event := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: "tc-failed",
+		Status:     &failed,
+		RawOutput:  "command failed before reporting an exit code",
+	})
+
+	require.Equal(t, toolStatusError, event.ToolStatus)
+	require.NotContains(t, a.activeToolCalls, "tc-failed")
+}

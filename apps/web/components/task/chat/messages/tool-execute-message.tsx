@@ -88,7 +88,7 @@ function ExecuteResultDetails({
   output: ShellExecOutput | undefined;
   status: ToolCallMetadata["status"];
 }) {
-  const isTerminal = status === "complete" || status === "error";
+  const isTerminal = status === "complete" || status === "error" || status === "cancelled";
   if (!isTerminal && !output?.truncated) return null;
   const exitLabel =
     typeof output?.exit_code === "number"

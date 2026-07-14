@@ -14,14 +14,14 @@ spec: "../../specs/ui/acp-shell-command-output.md"
 
 - Initialization advertises `_meta.terminal_output: true` without claiming support for ACP terminal RPC methods.
 - Codex deltas, Claude terminal output/exit, OpenCode cumulative content, and final raw output update the tracked shell payload using Task 01's normalization API.
-- Recognized statusless terminal updates persist as `in_progress`, and terminal updates expose their final bounded output/exit before active state is removed.
+- Output-only statusless terminal updates persist as `in_progress`; updates with a final exit expose their bounded output/exit before active state is removed.
 
 ## Verification
 
 ```bash
 make -C apps/backend fmt
-cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp -run 'Test.*Initialize|TestConvertToolCall.*(Output|Terminal|Content|Exit)'
-cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp
+(cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp -run 'Test.*Initialize|TestConvertToolCall.*(Output|Terminal|Content|Exit)')
+(cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp)
 ```
 
 ## Files likely touched
@@ -45,3 +45,10 @@ Task 01.
 ## Output contract
 
 Report the capability request, event-to-normalizer mapping, cleanup behavior, tests run, files changed, blockers, and follow-up risks. Set this task to `done` and update `plan.md` only after targeted tests pass.
+
+## Completion Report
+
+- Advertised `_meta.terminal_output: true` and routed delta, cumulative content, final raw output, terminal output, and terminal exit fields through the shell normalizer.
+- Output-only statusless updates become `in_progress`; completed, failed, cancelled, and exit-bearing updates emit their final payload before active-call cleanup.
+- Changed ACP initialization/update handling and focused update/concurrency tests.
+- Targeted and full ACP adapter tests, full backend tests, formatting, and lint passed. No blockers remain; lifecycle behavior still depends on providers emitting a terminal status or exit.

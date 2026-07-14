@@ -20,11 +20,12 @@ spec: "../../specs/ui/acp-shell-command-output.md"
 
 ```bash
 make -C apps/backend fmt
-cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp
-cd apps && pnpm --filter @kandev/web test -- components/task/chat/messages/tool-execute-message.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
-cd apps/web && pnpm e2e:run tests/chat/tool-execute-output.spec.ts tests/chat/mobile-tool-execute-output.spec.ts
+(cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp)
+(cd apps && pnpm --filter @kandev/web test -- components/task/chat/messages/tool-execute-message.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
+(cd apps/web && pnpm e2e:run --project=chromium tests/chat/tool-execute-output.spec.ts)
+(cd apps/web && pnpm e2e:run --project=mobile-chrome tests/chat/mobile-tool-execute-output.spec.ts)
 make -C apps/backend test
 make -C apps/backend lint
 ```
@@ -50,3 +51,10 @@ Tasks 02 and 03.
 ## Output contract
 
 Report exact commands and pass/fail results, desktop/mobile projects exercised, failure artifact paths, files changed, blockers, and residual risks. Set this task to `done`, update `plan.md`, and change the spec to `shipped` only when all acceptance criteria pass.
+
+## Completion Report
+
+- Desktop Chromium covered success, failure, unknown exit, transcript expansion, and exact labels; mobile Chrome (Pixel 5) covered wrapping, truncation, exit readability, and horizontal overflow.
+- `make fmt`, generated web metadata, `make typecheck`, `make test`, and `make lint` passed, along with the production Vite build and both targeted Playwright projects.
+- Added the desktop/mobile chat specs and updated the plan, task reports, feature spec index, and ADR index. No failure artifacts or blockers remain.
+- Residual risk is limited to new provider wire shapes and provider-side output omitted before ACP delivery.

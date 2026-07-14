@@ -15,20 +15,25 @@ type normalizedShellResult struct {
 	exitCode  *int
 	stdout    string
 	stderr    string
-	hasOutput bool
+	hasStdout bool
+	hasStderr bool
 	truncated bool
 }
 
 func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
 	normalized := normalizeFinalShellResult(result)
-	if !normalized.hasOutput && normalized.exitCode == nil {
+	if !normalized.hasStdout && !normalized.hasStderr && normalized.exitCode == nil {
 		return
 	}
 	output := ensureShellOutput(payload)
-	if normalized.hasOutput {
+	if normalized.hasStdout {
 		output.Stdout = normalized.stdout
+	}
+	if normalized.hasStderr {
 		output.Stderr = normalized.stderr
-		output.Truncated = normalized.truncated
+	}
+	if normalized.hasStdout || normalized.hasStderr {
+		output.Truncated = output.Truncated || normalized.truncated
 	}
 	if normalized.exitCode != nil {
 		output.ExitCode = normalized.exitCode
@@ -188,9 +193,14 @@ func normalizeShellResultMap(result map[string]any) normalizedShellResult {
 	var normalized normalizedShellResult
 	switch {
 	case stdoutExplicit || stderrExplicit:
-		normalized.stdout = stdout
-		normalized.stderr = stderr
-		normalized.hasOutput = true
+		if stdoutExplicit {
+			normalized.stdout = stdout
+			normalized.hasStdout = true
+		}
+		if stderrExplicit {
+			normalized.stderr = stderr
+			normalized.hasStderr = true
+		}
 	case hasFormatted:
 		normalized = normalizeShellText(formatted)
 	case hasOutput:
@@ -215,13 +225,13 @@ func normalizeShellResultMap(result map[string]any) normalizedShellResult {
 func normalizeShellText(output string) normalizedShellResult {
 	if !hasEmbeddedShellTags(output) {
 		stdout, truncated := boundShellOutput(output)
-		return normalizedShellResult{stdout: stdout, hasOutput: true, truncated: truncated}
+		return normalizedShellResult{stdout: stdout, hasStdout: true, truncated: truncated}
 	}
 
 	stdout, hasStdout := embeddedShellField(output, "output")
 	stderr, hasStderr := embeddedShellField(output, "stderr")
 	codeText, hasExit := embeddedShellField(output, "return-code")
-	result := normalizedShellResult{hasOutput: hasStdout || hasStderr}
+	result := normalizedShellResult{hasStdout: hasStdout, hasStderr: hasStderr}
 	if hasStdout {
 		result.stdout = strings.TrimSpace(stdout)
 	}
@@ -231,9 +241,9 @@ func normalizeShellText(output string) normalizedShellResult {
 	if code, ok := parseExitCode(codeText); hasExit && ok {
 		result.exitCode = intPtr(code)
 	}
-	if !result.hasOutput {
+	if !result.hasStdout && !result.hasStderr && !hasExit {
 		result.stdout = output
-		result.hasOutput = true
+		result.hasStdout = true
 	}
 
 	result.stdout, result.truncated = boundShellOutput(result.stdout)

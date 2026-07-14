@@ -19,9 +19,9 @@ spec: "../../specs/ui/acp-shell-command-output.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- components/task/chat/messages/tool-execute-message.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
+(cd apps && pnpm --filter @kandev/web test -- components/task/chat/messages/tool-execute-message.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
 ```
 
 ## Files likely touched
@@ -32,7 +32,7 @@ cd apps && pnpm --filter @kandev/web lint
 
 ## Dependencies
 
-Task 01 defines the serialized nullable/truncation contract. This task can run in parallel with Task 02 afterward because their file ownership does not overlap.
+Task 01 defines the serialized optional-exit/truncation contract. This task can run in parallel with Task 02 afterward because their file ownership does not overlap.
 
 ## Inputs
 
@@ -43,3 +43,10 @@ Task 01 defines the serialized nullable/truncation contract. This task can run i
 ## Output contract
 
 Report rendered labels/status rules, tests run, files changed, blockers, and mobile layout risks. Set this task to `done` and update `plan.md` only after targeted tests, typecheck, and lint pass.
+
+## Completion Report
+
+- Added expandable live/final stdout and stderr, exact or unavailable exit labels, truncation state, and neutral unknown-exit semantics.
+- Normalized ACP `in_progress` to the running UI state and treated cancellation as terminal without inventing an exit code.
+- Changed the shell payload types, command-row component, and focused component tests.
+- Component tests, web typecheck, lint, production build, and desktop/mobile Playwright coverage passed. No blockers remain; very long unbroken output relies on the tested wrapping and scroll bounds.

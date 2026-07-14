@@ -20,7 +20,7 @@ spec: "../../specs/ui/acp-shell-command-output.md"
 
 ```bash
 make -C apps/backend fmt
-cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp -run 'Test.*Shell|TestNormalizerResult|TestParseShellOutput'
+(cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp -run 'Test.*Shell|TestNormalizerResult')
 ```
 
 ## Files likely touched
@@ -38,9 +38,16 @@ None.
 ## Inputs
 
 - Spec sections `What`, `Data model`, and `Failure modes`.
-- Existing `NormalizeToolResult`, `extractRawOutput`, and `parseShellOutput` patterns in `normalize.go`.
-- Captured provider shapes in `acp-debug/codex-shell-output.jsonl`, `acp-debug/codex-shell-streaming-delayed-first.jsonl`, and `acp-debug/opencode-shell-output.jsonl`; Claude and Auggie shapes are pinned in the spec from adapter inspection.
+- Existing `NormalizeToolResult` and `extractRawOutput` patterns in `normalize.go`, plus the checked-in provider cases in `shell_output_test.go`.
+- Provider mappings and captured-shape summaries pinned in the feature spec; raw ACP captures were investigation artifacts, not repository fixtures.
 
 ## Output contract
 
 Report the normalization API chosen, provider precedence, truncation behavior, tests run, files changed, blockers, and follow-up risks. Set this task to `done` and update `plan.md` only after targeted tests pass.
+
+## Completion Report
+
+- Added `NormalizeShellToolUpdate` and final-result normalization with independent stdout/stderr presence, explicit-field precedence, nullable exit codes, 256 KiB UTF-8 tail retention, and sticky combined truncation state.
+- Covered Codex, Claude, OpenCode, and Auggie final shapes, malformed/absent exits, precedence, live append/replace behavior, partial stream merges, and truncation.
+- Changed `shell_output.go`, `shell_output_test.go`, `normalize.go`, `normalize_test.go`, and the normalized stream payload type.
+- Targeted ACP adapter tests, full backend tests, formatting, and backend lint passed. No blockers remain; new provider-specific shapes require new fixtures.
