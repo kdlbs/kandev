@@ -8,6 +8,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
 import { Textarea } from "@kandev/ui/textarea";
+import { NotificationSoundSection } from "@/components/settings/notification-sound-section";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { DEFAULT_NOTIFICATION_EVENTS, EVENT_LABELS } from "@/lib/notifications/events";
@@ -496,6 +497,8 @@ export function NotificationsSettings() {
         onRefreshPermission={actions.handleRefreshPermission}
         onTestNotification={actions.handleTestNotification}
       />
+      <Separator className="my-4" />
+      <NotificationSoundSection />
       <Separator className="my-4" />
       <ExternalProvidersSection
         appriseAvailable={appriseAvailable}
