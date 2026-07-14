@@ -83,6 +83,21 @@ describe("quick chat dialog width", () => {
     expect(second.result.current.width).toBe(1060);
   });
 
+  it("clamps a drag on viewport resize without rendering until mouseup", () => {
+    const { result } = renderHook(() => useQuickChatWidth());
+    const dialog = document.createElement("div");
+
+    act(() => result.current.rightResizeHandleProps.onMouseDown(mouseDown(900, dialog)));
+    act(() => mouseMove(950));
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1000 });
+    act(() => window.dispatchEvent(new Event("resize")));
+
+    expect(dialog.style.getPropertyValue("--quick-chat-width")).toBe("968px");
+    expect(result.current.width).toBe(960);
+    act(() => mouseUp());
+    expect(result.current.width).toBe(968);
+  });
+
   it("clamps to the minimum and current viewport", () => {
     expect(clampQuickChatWidth(100, 1200)).toBe(QUICK_CHAT_WIDTH_LIMITS.minWidth);
     expect(clampQuickChatWidth(5000, 900)).toBe(900 - QUICK_CHAT_WIDTH_LIMITS.viewportMargin);

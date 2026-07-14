@@ -92,7 +92,16 @@ export function useQuickChatWidth() {
       setWidth(widthRef.current);
       setLocalStorage(STORAGE_KEY, widthRef.current);
     };
-    const handleWindowResize = () => updateWidth(clampQuickChatWidth(widthRef.current));
+    const handleWindowResize = () => {
+      const nextWidth = clampQuickChatWidth(widthRef.current);
+      const drag = dragRef.current;
+      if (drag) {
+        widthRef.current = nextWidth;
+        drag.dialog.style.setProperty("--quick-chat-width", `${nextWidth}px`);
+        return;
+      }
+      updateWidth(nextWidth);
+    };
 
     document.addEventListener("mousemove", handleMouseMove);
     document.addEventListener("mouseup", handleMouseUp);
