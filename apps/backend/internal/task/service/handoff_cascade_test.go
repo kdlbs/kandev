@@ -51,11 +51,12 @@ func (r *fakeCascadeRepo) UnarchiveTask(_ context.Context, id string) (bool, err
 	r.base.mu.Lock()
 	defer r.base.mu.Unlock()
 	t := r.base.tasks[id]
-	if t == nil || t.ArchivedAt == nil {
+	// Mirror the production CAS: only rows without a cascade stamp are
+	// restorable through the manual path.
+	if t == nil || t.ArchivedAt == nil || t.ArchivedByCascadeID != "" {
 		return false, nil
 	}
 	t.ArchivedAt = nil
-	t.ArchivedByCascadeID = ""
 	return true, nil
 }
 

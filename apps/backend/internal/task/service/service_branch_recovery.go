@@ -102,7 +102,19 @@ func (s *Service) taskRepositoriesByRepoID(ctx context.Context, taskID string) m
 			zap.String("task_id", taskID), zap.Error(err))
 		return byID
 	}
+	rowsPerRepo := map[string]int{}
 	for _, tr := range taskRepos {
+		rowsPerRepo[tr.RepositoryID]++
+	}
+	for _, tr := range taskRepos {
+		// Multi-branch tasks keep one task_repositories row per branch
+		// (add_branch flow). Restoring the newest worktree branch into an
+		// arbitrary sibling row could clobber another branch's identity, so
+		// leave multi-row repos alone — session resume still recovers those
+		// via the per-worktree records.
+		if rowsPerRepo[tr.RepositoryID] > 1 {
+			continue
+		}
 		byID[tr.RepositoryID] = tr
 	}
 	return byID

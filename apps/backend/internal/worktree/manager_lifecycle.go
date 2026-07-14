@@ -848,13 +848,26 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	// fetches origin <branch>:<branch> — or pull/<N>/head for fork PRs, whose
 	// head branch never exists on origin by name — and only errors when the
 	// branch exists neither locally nor on the remote.
-	if exists, _ := m.branchExists(ctx, req.RepositoryPath, existing.Branch); !exists {
+	exists, probeErr := m.branchExists(ctx, req.RepositoryPath, existing.Branch)
+	if probeErr != nil {
+		// "Could not tell" (timeout / fs stall) is not "missing" — reporting
+		// ErrBranchUnrecoverable here would misclassify recoverable work as
+		// gone. Propagate so the caller can retry the recreate.
+		return nil, fmt.Errorf("cannot verify worktree branch %q: %w", existing.Branch, probeErr)
+	}
+	if !exists {
 		if _, fetchErr := m.fetchBranchToLocal(ctx, req.RepositoryPath, existing.Branch, req.PRNumber); fetchErr != nil {
-			m.logger.Warn("worktree branch unrecoverable during recreate",
+			m.logger.Warn("failed to restore worktree branch during recreate",
 				zap.String("worktree_id", existing.ID),
 				zap.String("branch", existing.Branch),
 				zap.Error(fetchErr))
-			return nil, fmt.Errorf("%w: %q", ErrBranchUnrecoverable, existing.Branch)
+			// Only a confirmed-missing remote ref means the work is gone;
+			// transient fetch failures (network, auth) keep their own error
+			// so callers don't treat a reachable branch as unrecoverable.
+			if isRemoteRefMissingError(fetchErr) {
+				return nil, fmt.Errorf("%w: %q", ErrBranchUnrecoverable, existing.Branch)
+			}
+			return nil, fetchErr
 		}
 	}
 

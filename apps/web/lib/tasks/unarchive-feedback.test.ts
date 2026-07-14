@@ -39,6 +39,16 @@ describe("unarchiveToastPayload", () => {
     expect(payload.description).not.toContain("feat/ok");
   });
 
+  it("pluralizes when multiple branches are unrecoverable", () => {
+    const payload = unarchiveToastPayload(
+      response([
+        { task_id: "t1", repository_id: "r1", branch: "feat/one", status: "missing" },
+        { task_id: "t1", repository_id: "r2", branch: "feat/two", status: "missing" },
+      ]),
+    );
+    expect(payload.description).toContain("Branches feat/one, feat/two no longer exist");
+  });
+
   it("tolerates a response without a recovery field", () => {
     const payload = unarchiveToastPayload(
       response(undefined as unknown as UnarchiveTaskResponse["recovery"]),

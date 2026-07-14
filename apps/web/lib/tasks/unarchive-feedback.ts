@@ -14,9 +14,10 @@ export function unarchiveToastPayload(result: UnarchiveTaskResponse): UnarchiveT
   const missing = (result.recovery ?? []).filter((r) => r.status === "missing");
   if (missing.length > 0) {
     const branches = missing.map((r) => r.branch).join(", ");
+    const plural = missing.length > 1;
     return {
       title: "Task unarchived",
-      description: `Branch ${branches} no longer exists locally or on the remote — the next session starts fresh from the base branch.`,
+      description: `${plural ? "Branches" : "Branch"} ${branches} no longer ${plural ? "exist" : "exists"} locally or on the remote — the next session starts fresh from the base branch.`,
     };
   }
   return {

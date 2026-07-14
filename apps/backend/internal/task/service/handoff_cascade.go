@@ -168,6 +168,14 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	if s.tasks == nil {
 		return nil, errors.New("task repo not configured")
 	}
+	// Validate the root exists up front. The CAS archive below treats a
+	// zero-row update as "skipped" (idempotent re-archive), which would
+	// silently report success for a task ID that doesn't exist at all.
+	if root, err := s.tasks.GetTask(ctx, rootID); err != nil {
+		return nil, err
+	} else if root == nil {
+		return nil, fmt.Errorf("task %s not found", rootID)
+	}
 	cascadeID := uuid.New().String()
 	out := &CascadeOutcome{CascadeID: cascadeID}
 
@@ -420,9 +428,15 @@ func (s *HandoffService) unarchiveManualRoot(ctx context.Context, root *models.T
 	s.publishUpdatedTask(ctx, root.ID)
 	// Legacy archives never released group memberships, but the group may
 	// have been cleaned since (e.g. by a later cascade on another member).
-	// Restore the group's materialized workspace if it was cleaned.
+	// Restore the group's materialized workspace if it was cleaned. Best
+	// effort, like the cascade path: restoreCleanedGroups marks failures as
+	// restore_status=restore_failed so they surface via the context API.
 	if s.wsGroups != nil {
-		if g, _ := s.wsGroups.GetWorkspaceGroupForTask(ctx, root.ID); g != nil {
+		g, err := s.wsGroups.GetWorkspaceGroupForTask(ctx, root.ID)
+		if err != nil {
+			s.logf().Error("lookup workspace group for unarchived task",
+				zap.String("task_id", root.ID), zap.Error(err))
+		} else if g != nil {
 			out.ReleasedGroupIDs = []string{g.ID}
 			s.restoreCleanedGroups(ctx, []string{g.ID})
 		}

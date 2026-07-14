@@ -95,6 +95,20 @@ func isFetchRefusedCheckedOut(output string) bool {
 	return strings.Contains(strings.ToLower(output), "refusing to fetch into branch")
 }
 
+// isRemoteRefMissingError reports whether a fetch error indicates the
+// requested ref genuinely does not exist on the remote (or there is no
+// usable remote at all), as opposed to a transient network/auth failure
+// where the branch may still exist and a retry could succeed.
+func isRemoteRefMissingError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "couldn't find remote ref") ||
+		strings.Contains(msg, "does not appear to be a git repository") ||
+		strings.Contains(msg, "no such remote")
+}
+
 // ClassifyGitError wraps a raw git error with a user-friendly sentinel error
 // based on the command output.
 func ClassifyGitError(output string, _ error) error {

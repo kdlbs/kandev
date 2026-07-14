@@ -476,6 +476,49 @@ function TaskListSectionView({
   );
 }
 
+// Holds its own in-flight state so rapid clicks can't fire duplicate
+// unarchive POSTs (each producing a toast + refetch).
+function UnarchiveRowAction({
+  taskId,
+  onUnarchive,
+}: {
+  taskId: string;
+  onUnarchive: (taskId: string) => Promise<void>;
+}) {
+  const [isPending, setIsPending] = useState(false);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={isPending ? 0 : -1} className="inline-flex">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 cursor-pointer"
+            data-testid="tasks-list-unarchive"
+            disabled={isPending}
+            onClick={async () => {
+              setIsPending(true);
+              try {
+                await onUnarchive(taskId);
+              } finally {
+                setIsPending(false);
+              }
+            }}
+          >
+            {isPending ? (
+              <IconLoader className="h-4 w-4 animate-spin" />
+            ) : (
+              <IconArchiveOff className="h-4 w-4 text-muted-foreground" />
+            )}
+            <span className="sr-only">Unarchive task</span>
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>Unarchive</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function TaskRowActions({
   task,
   isArchived,
@@ -517,23 +560,7 @@ function TaskRowActions({
           <TooltipContent>Archive</TooltipContent>
         </Tooltip>
       )}
-      {isArchived && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 cursor-pointer"
-              data-testid="tasks-list-unarchive"
-              onClick={() => onUnarchive(task.id)}
-            >
-              <IconArchiveOff className="h-4 w-4 text-muted-foreground" />
-              <span className="sr-only">Unarchive task</span>
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Unarchive</TooltipContent>
-        </Tooltip>
-      )}
+      {isArchived && <UnarchiveRowAction taskId={task.id} onUnarchive={onUnarchive} />}
       <Tooltip>
         <TooltipTrigger asChild>
           <span tabIndex={isDeleting ? 0 : -1} className="inline-flex">

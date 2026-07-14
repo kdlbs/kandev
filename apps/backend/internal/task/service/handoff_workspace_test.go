@@ -372,6 +372,7 @@ func (r *phase4TaskRepo) UnarchiveTaskByCascade(context.Context, string, string)
 	return false, nil
 }
 func (r *phase4TaskRepo) UnarchiveTask(context.Context, string) (bool, error) {
+	r.panicNotUsed("UnarchiveTask")
 	return false, nil
 }
 func (r *phase4TaskRepo) ListTasksForAutoArchive(context.Context) ([]*models.Task, error) {
