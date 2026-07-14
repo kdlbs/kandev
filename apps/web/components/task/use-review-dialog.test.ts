@@ -68,6 +68,14 @@ describe("buildReviewGitStatusFiles", () => {
     ]);
   });
 
+  it("keeps legacy files while multi-repo statuses have not hydrated", () => {
+    const legacyFiles = { [README_PATH]: file() };
+
+    const result = buildReviewGitStatusFiles(status(legacyFiles), [], 2);
+
+    expect(result).toEqual({ files: legacyFiles, isMultiRepo: true });
+  });
+
   it("falls back to per-repo status count when task repositories are not hydrated", () => {
     const frontend = { "src/app.ts": file("src/app.ts") };
     const backend = { "cmd/main.go": file("cmd/main.go") };

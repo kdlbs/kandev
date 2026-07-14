@@ -35,6 +35,12 @@ export function buildReviewGitStatusFiles(
       isMultiRepo: false,
     };
   }
+  if (named.length === 0) {
+    return {
+      files: reviewGitStatus?.files ?? null,
+      isMultiRepo: true,
+    };
+  }
 
   const files: Record<string, FileInfo> = {};
   for (const { repository_name, status } of named) {
