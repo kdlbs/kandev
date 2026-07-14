@@ -893,7 +893,7 @@ func (s *Service) publishTaskSessionStateChanged(
 		"is_passthrough":         session.IsPassthrough,
 		// Carry the fine-grained busy substate on every coarse transition so
 		// the client resets any stale "background" value when a new turn starts
-		// or the turn ends (ADR-0035). Intra-RUNNING flips
+		// or the turn ends (ADR-0036). Intra-RUNNING flips
 		// ride the dedicated task_session.activity_changed event instead.
 		"foreground_activity": string(s.foregroundActivityValue(sessionID)),
 	}

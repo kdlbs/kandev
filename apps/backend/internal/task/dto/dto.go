@@ -233,7 +233,7 @@ type TaskSessionDTO struct {
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate onto a
 	// RUNNING session so a fresh page-load / second tab sees the accept-input +
 	// working-in-background affordance without waiting for a WS flip
-	// (ADR-0035). Absent for every non-RUNNING session and
+	// (ADR-0036). Absent for every non-RUNNING session and
 	// whenever no provider is wired; a client treats absent as "generating".
 	// Not persisted — populated at the serialization boundary by
 	// EnrichForegroundActivity, never by FromTaskSession.
@@ -275,7 +275,7 @@ type TaskSessionSummaryDTO struct {
 	ReviewStatus      models.ReviewStatus           `json:"review_status,omitempty"`
 	TaskEnvironmentID string                        `json:"task_environment_id,omitempty"`
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate onto a
-	// RUNNING session (ADR-0035); see TaskSessionDTO. Absent
+	// RUNNING session (ADR-0036); see TaskSessionDTO. Absent
 	// for non-RUNNING sessions; populated by EnrichForegroundActivitySummary.
 	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
@@ -731,7 +731,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 }
 
 // ForegroundActivityProvider surfaces the in-memory fine-grained busy substate
-// for a session (ADR-0035). It is satisfied by the
+// for a session (ADR-0036). It is satisfied by the
 // orchestrator; the serialization layer depends only on this narrow seam so it
 // takes no hard orchestrator dependency and can be faked in tests.
 type ForegroundActivityProvider interface {

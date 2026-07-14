@@ -209,7 +209,7 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
   // Reset the fine-grained busy substate on every coarse transition so a stale
-  // "background" value can't survive into the next turn (ADR-0035).
+  // "background" value can't survive into the next turn (ADR-0036).
   if (payload.foreground_activity !== undefined)
     update.foreground_activity = payload.foreground_activity;
   return update;
@@ -488,7 +488,7 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
 
 /** Apply an intra-RUNNING flip of the fine-grained busy substate: the
  *  foreground turn moved between generating and idle-on-background-work without
- *  any coarse state change (ADR-0035). Annotates the
+ *  any coarse state change (ADR-0036). Annotates the
  *  existing session row so the composer gate and status indicator update; does
  *  nothing until the row exists (state_changed seeds it first). */
 function applyForegroundActivity(

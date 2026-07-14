@@ -1366,6 +1366,7 @@ func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
 	if !store.OwnsPromptGeneration(execution.SessionID, execution.ID, 1) {
 		t.Fatal("initial prompt must own generation 1 even when execution starts running")
 	}
+	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "initial-complete"}
 
 	if _, err := sm.SendPrompt(ctx, execution, "replacement", true, nil, true); err != nil {
 		t.Fatalf("dispatch replacement prompt: %v", err)

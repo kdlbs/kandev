@@ -13,7 +13,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// ADR-0035 narrowed the busy gate so a RUNNING session whose foreground turn has
+// ADR-0036 narrowed the busy gate so a RUNNING session whose foreground turn has
 // yielded to background work accepts a new prompt. checkSessionPromptable only
 // *reads* that substate, though, and PromptTask does real work between the read
 // and the point the turn is marked generating (session reload, ensureSessionRunning,
@@ -162,6 +162,45 @@ func TestPromptTask_ConcurrentPromptsIntoBackgroundIdleStartOneTurn(t *testing.T
 	}
 }
 
+// A queued dispatch can lose its ownership token after the initial promptability
+// check but before it claims the session RUNNING. If that happens after the
+// background-idle foreground was claimed, the failed dispatch must reopen the
+// foreground gate so a later prompt is not locked out.
+func TestPromptTask_SupersededQueuedDispatchReleasesForegroundClaim(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	const (
+		taskID    = "task1"
+		sessionID = "session-superseded-queued-dispatch"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-1")
+	svc.registerBackgroundTask(sessionID, "background-1")
+
+	_, err := svc.promptTask(
+		context.Background(), taskID, sessionID, "queued prompt", "", false, nil, false, "stale-entry",
+	)
+	if !errors.Is(err, errQueuedDispatchSuperseded) {
+		t.Fatalf("a dispatch without the current ownership token must be superseded, got: %v", err)
+	}
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("a superseded dispatch must restore the background-idle gate, got %q", got)
+	}
+	if svc.claimForegroundTurn(sessionID) == nil {
+		t.Fatal("a later prompt must be able to claim the foreground after the superseded dispatch")
+	}
+
+	agentMgr.mu.Lock()
+	forwarded := len(agentMgr.capturedPrompts)
+	agentMgr.mu.Unlock()
+	if forwarded != 0 {
+		t.Fatalf("a superseded queued dispatch must not reach the agent, captured=%d", forwarded)
+	}
+}
+
 // The claim has to be durable against the background set moving underneath it.
 // A background tool_call landing while a prompt is mid-admission calls
 // registerBackgroundTask, which re-sets `yielded` — if promptability were derived
@@ -247,7 +286,7 @@ func TestClaimForegroundTurn_UntrackedSessionCannotBeClaimed(t *testing.T) {
 // A prompt that claims the turn but never reaches the agent (ensureSessionRunning
 // failed, the model switch failed) has to hand the claim back. Otherwise the
 // session sits in RUNNING advertising a generating foreground it does not have,
-// locking the operator out for the rest of the turn — the exact lockout ADR-0035
+// locking the operator out for the rest of the turn — the exact lockout ADR-0036
 // exists to remove.
 func TestReleaseForegroundClaim_FailedPromptReopensTheGate(t *testing.T) {
 	repo := setupTestRepo(t)

@@ -140,7 +140,7 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
   });
 });
 
-// ADR-0035 — a fresh page-load / second tab receives the
+// ADR-0036 — a fresh page-load / second tab receives the
 // fine-grained busy substate on the boot payload (and now on the REST/WS session
 // endpoints). Hydration and any subsequent list refresh must not drop it, or the
 // coarse busy affordance would persist until the next WS flip — the exact gap

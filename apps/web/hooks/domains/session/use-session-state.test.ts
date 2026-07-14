@@ -197,7 +197,7 @@ describe("useSessionState — fine-grained busy signal (foreground_activity)", (
     mockPrepareProgress = {};
   });
 
-  // ADR-0035. (a) generating gates the composer;
+  // ADR-0036. (a) generating gates the composer;
   // (b) background-idle accepts input but stays working; (c) fully idle.
   it("(a) RUNNING+generating gates the composer", () => {
     mockSession = {

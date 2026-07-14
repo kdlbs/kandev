@@ -80,11 +80,11 @@ func (p *NormalizedPayload) SetMonitorIdentity(taskID string, ended bool) {
 // `kind:"other"`, so it normalizes to a Generic payload rather than a dedicated
 // kind (see acp/monitor.go). A Monitor is long-running background work the
 // foreground turn is not actively generating against, so an active one is treated
-// like any other spawned background task by the busy signal (ADR-0035).
+// like any other spawned background task by the busy signal (ADR-0036).
 //
 // It classifies on the adapter's attestation (MonitorPayload), never on the shape
 // of Generic.Output — that field is the agent's own raw tool result and so can
-// neither prove nor disprove provenance. This is what keeps the ADR-0035 contract
+// neither prove nor disprove provenance. This is what keeps the ADR-0036 contract
 // honest: an agent we don't recognize cannot relax its own busy gate by emitting a
 // monitor-shaped tool result, and keeps the historical reject-while-RUNNING
 // behavior. (The payload's `Name` is likewise unusable as a discriminator: it

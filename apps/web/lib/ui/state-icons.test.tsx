@@ -34,7 +34,7 @@ describe("getTaskStateIcon", () => {
 });
 
 describe("getSessionStateIcon — fine-grained busy tri-state", () => {
-  // ADR-0035. Three distinguishable conditions:
+  // ADR-0036. Three distinguishable conditions:
   //  (a) RUNNING + generating  → the established static "running" dot (unchanged)
   //  (b) RUNNING + background   → working-in-background spinner, NOT the done check
   //  (c) COMPLETED              → done checkmark
