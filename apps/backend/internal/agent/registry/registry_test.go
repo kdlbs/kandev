@@ -253,6 +253,9 @@ func TestRegistry_LoadDefaults(t *testing.T) {
 	if !reg.Exists("auggie") {
 		t.Error("expected default agent 'auggie' to be loaded")
 	}
+	if !reg.Exists("grok-acp") {
+		t.Error("expected default agent 'grok-acp' to be loaded")
+	}
 }
 
 func TestRegistry_List_OrderedByDisplayOrder(t *testing.T) {

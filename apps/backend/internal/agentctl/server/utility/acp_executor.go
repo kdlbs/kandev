@@ -717,6 +717,7 @@ var allowedProbeCommands = map[string]string{
 	"auggie":        "auggie",
 	"cursor-agent":  "cursor-agent",
 	"devin":         "devin",
+	"grok":          "grok",
 	"kimi":          "kimi",
 	"kiro-cli-chat": "kiro-cli-chat",
 	"mock-agent":    "mock-agent",

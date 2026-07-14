@@ -89,6 +89,7 @@ func TestUserSkillDir_KnownProviders(t *testing.T) {
 		{"codex", NewCodexACP(), ".codex/skills"},
 		{"opencode", NewOpenCodeACP(), ".config/opencode/skills"},
 		{"copilot", NewCopilotACP(), ".copilot/skills"},
+		{"grok", NewGrokACP(), ".grok/skills"},
 		{"mock-agent", NewMockAgent(), ".mock-agent/skills"},
 	}
 	for _, tt := range tests {
