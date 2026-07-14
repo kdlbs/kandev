@@ -97,8 +97,8 @@ When creating follow-up or delegated Kandev work from an active task, use `creat
 
 For remediation discovered while reviewing a PR that must start after the PR
 merges, create a related subtask with `parent_id: "self"`,
-`workspace_mode: "new_workspace"`, and `base_branch: "main"`; otherwise a
-same-repository subtask inherits the reviewed branch. Set `start_agent: false`
+`workspace_mode: "new_workspace"`, and the reviewed PR's base branch; otherwise
+a same-repository subtask inherits the reviewed branch. Set `start_agent: false`
 when the follow-up is intentionally queued until merge.
 
 ### Third-party integrations

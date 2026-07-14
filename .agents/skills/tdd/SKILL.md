@@ -46,7 +46,9 @@ Prefer state/output assertions over interaction assertions. Mock only slow, nond
 ### Concurrent and event-driven behavior
 
 Test ordering-sensitive behavior with channels, barriers, or controllable fakes;
-do not use sleeps to create a race. Pause at the ownership boundary, start the
+do not use sleeps to create a race, except for a bounded, named delay that
+models a known poll-loop schedule when synchronization would alter that
+relationship. Pause at the ownership boundary, start the
 competing operation, then release. Exercise the real delivery path where
 practical, and prove the old interleaving fails before the fix. Assert both the
 winner state and the untouched replacement state, including relevant buffers,

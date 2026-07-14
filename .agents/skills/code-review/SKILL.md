@@ -116,10 +116,11 @@ Check every changed file for the following layers. Skip layers that don't apply 
 
 ### 4. Fix or report
 
-When the user asks for a review only, says not to post or modify the PR, or is
-reviewing an external contributor's branch, do not edit the checkout or make
-any GitHub mutation: no fixes, comments, review submissions, or thread
-resolution. Report findings only, even when a fix appears straightforward.
+When the user asks for a review only or says not to post or modify the PR, do
+not edit the checkout or make any GitHub mutation: no fixes, comments, review
+submissions, or thread resolution. For an external contributor's branch without
+that restriction, do not edit or push code; report findings through the channel
+the user requested. Do not submit or resolve reviews unless explicitly asked.
 
 - **Fix directly** any issues you can resolve confidently (dead code, unused imports, simple duplication, missing early returns)
 - **Report** issues that need the author's input — always explain *why* the issue matters and provide a concrete suggested fix
