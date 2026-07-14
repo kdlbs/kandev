@@ -349,18 +349,18 @@ func (m *Manager) handleToolUpdateEvent(execution *AgentExecution, event agentct
 	}
 }
 
-// handleErrorEvent processes the "error" agent event: flushes buffers, marks state as failed,
-// and signals prompt completion. The raw error event is not published to the frontend stream;
-// the agent failure path (handleAgentFailed) sets session FAILED with the error message.
-func (m *Manager) handleErrorEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	m.flushMessageBuffer(execution)
-	m.logger.Error("agent error",
-		zap.String("execution_id", execution.ID),
-		zap.String("error", event.Error),
-		zap.String("text", event.Text),
-		zap.Any("data", event.Data))
-	m.handleCompleteEventMarkState(execution, &event, true)
-	handleCompleteEventSignal(execution, &event, true)
+// handleErrorEvent processes a raw "error" as an error completion so generation
+// ownership remains held across validation, buffer flushing, and state mutation.
+// The raw error event is not published to the frontend stream; the agent failure
+// path (handleAgentFailed) sets session FAILED with the error message.
+func (m *Manager) handleErrorEvent(execution *AgentExecution, event agentctl.AgentEvent) bool {
+	data := make(map[string]any, len(event.Data)+1)
+	for key, value := range event.Data {
+		data[key] = value
+	}
+	data["is_error"] = true
+	event.Data = data
+	return m.handleCompleteEvent(execution, &event)
 }
 
 // handleContextWindowEvent processes the "context_window" agent event: logs and publishes it.
@@ -488,15 +488,7 @@ func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
 
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	if event.Type == "error" &&
-		event.PromptGeneration != 0 &&
-		!m.OwnsPromptGeneration(execution.SessionID, execution.ID, event.PromptGeneration) {
-		m.logger.Debug("ignoring error for superseded prompt generation",
-			zap.String("execution_id", execution.ID),
-			zap.Uint64("event_prompt_generation", event.PromptGeneration))
-		return
-	}
-	if event.Type != toolStatusComplete || event.PromptGeneration == 0 {
+	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != "error") {
 		m.recordActivity(execution, event)
 	}
 

@@ -6,7 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -603,6 +607,90 @@ func TestHandleAgentEvent_DelayedCompleteCannotFinishReplacementPrompt(t *testin
 		if published.Subject == events.AgentReady {
 			t.Fatal("delayed completion published AgentReady for replacement prompt")
 		}
+	}
+}
+
+func TestHandleAgentEvent_ErrorClaimCannotRaceReplacementPrompt(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if _, err := mgr.executionStore.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin original prompt: %v", err)
+	}
+
+	errorReached := make(chan struct{})
+	releaseError := make(chan struct{})
+	var blockOnce sync.Once
+	zapLogger := zap.NewExample().WithOptions(zap.Hooks(func(entry zapcore.Entry) error {
+		if entry.Message != "agent error" && entry.Message != "agent turn complete" {
+			return nil
+		}
+		blockOnce.Do(func() {
+			close(errorReached)
+			<-releaseError
+		})
+		return nil
+	}))
+	mgr.logger, _ = logger.NewFromZap(zapLogger)
+
+	errorHandled := make(chan struct{})
+	go func() {
+		defer close(errorHandled)
+		mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+			Type:             "error",
+			Error:            "original prompt failed",
+			SessionID:        execution.SessionID,
+			PromptGeneration: 1,
+		})
+	}()
+	<-errorReached
+
+	errorOwnsLifecycle := !execution.promptLifecycleMu.TryLock()
+	if !errorOwnsLifecycle {
+		execution.promptLifecycleMu.Unlock()
+	}
+
+	replacementStarted := make(chan error, 1)
+	go func() {
+		_, err := mgr.executionStore.BeginPrompt(execution.ID)
+		replacementStarted <- err
+	}()
+	writeReplacementOutput := func() {
+		execution.messageMu.Lock()
+		execution.messageBuffer.WriteString("replacement output")
+		execution.currentMessageID = "replacement-message"
+		execution.messageMu.Unlock()
+	}
+	if !errorOwnsLifecycle {
+		if err := <-replacementStarted; err != nil {
+			t.Fatalf("begin replacement prompt: %v", err)
+		}
+		writeReplacementOutput()
+	}
+
+	close(releaseError)
+	if errorOwnsLifecycle {
+		if err := <-replacementStarted; err != nil {
+			t.Fatalf("begin replacement prompt: %v", err)
+		}
+		writeReplacementOutput()
+	}
+	<-errorHandled
+
+	if !errorOwnsLifecycle {
+		t.Error("error event released prompt lifecycle ownership before mutating execution state")
+	}
+	if execution.Status != v1.AgentStatusRunning {
+		t.Fatalf("replacement status = %s, want %s", execution.Status, v1.AgentStatusRunning)
+	}
+	execution.messageMu.Lock()
+	buffer := execution.messageBuffer.String()
+	messageID := execution.currentMessageID
+	execution.messageMu.Unlock()
+	if buffer != "replacement output" || messageID != "replacement-message" {
+		t.Fatalf("replacement stream state changed: buffer=%q message_id=%q", buffer, messageID)
 	}
 }
 
