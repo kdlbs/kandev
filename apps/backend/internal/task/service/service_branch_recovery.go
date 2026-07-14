@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -51,10 +52,11 @@ func (s *Service) RecoverTaskBranches(ctx context.Context, taskID string) []Bran
 	}
 	reposByID := s.taskRepositoriesByRepoID(ctx, taskID)
 	out := make([]BranchRecovery, 0, len(latest))
+	restored := false
 	for _, wt := range latest {
 		status := prober.BranchRecoveryStatus(ctx, wt.RepositoryPath, wt.Branch)
 		if status != worktree.BranchStatusMissing {
-			s.restoreCheckoutBranch(ctx, reposByID[wt.RepositoryID], wt.Branch)
+			restored = s.restoreCheckoutBranch(ctx, reposByID[wt.RepositoryID], wt.Branch) || restored
 		}
 		out = append(out, BranchRecovery{
 			TaskID:       taskID,
@@ -62,6 +64,15 @@ func (s *Service) RecoverTaskBranches(ctx context.Context, taskID string) []Bran
 			Branch:       wt.Branch,
 			Status:       status,
 		})
+	}
+	// checkout_branch rides along on task events (taskRepositoriesForEvent),
+	// so a successful restore must re-publish task.updated — the unarchive
+	// event already went out with the pre-restore repository rows. Mirrors
+	// the UpdateRepositoryBaseBranch flow.
+	if restored {
+		if task, err := s.tasks.GetTask(ctx, taskID); err == nil && task != nil {
+			s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+		}
 	}
 	return out
 }
@@ -101,9 +112,10 @@ func (s *Service) taskRepositoriesByRepoID(ctx context.Context, taskID string) m
 // repository's checkout_branch so the next session launch checks it out
 // (executor CheckoutBranch flow) instead of creating a new branch. An
 // already-set checkout_branch (e.g. a PR head) is never overwritten.
-func (s *Service) restoreCheckoutBranch(ctx context.Context, tr *models.TaskRepository, branch string) {
+// Returns whether the row was updated.
+func (s *Service) restoreCheckoutBranch(ctx context.Context, tr *models.TaskRepository, branch string) bool {
 	if tr == nil || tr.CheckoutBranch != "" || branch == "" {
-		return
+		return false
 	}
 	tr.CheckoutBranch = branch
 	if err := s.taskRepos.UpdateTaskRepository(ctx, tr); err != nil {
@@ -112,5 +124,7 @@ func (s *Service) restoreCheckoutBranch(ctx context.Context, tr *models.TaskRepo
 			zap.String("repository_id", tr.RepositoryID),
 			zap.String("branch", branch),
 			zap.Error(err))
+		return false
 	}
+	return true
 }

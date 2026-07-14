@@ -123,3 +123,38 @@ func TestBranchRecoveryStatus(t *testing.T) {
 		t.Errorf("status with empty repo path = %q, want %q", got, BranchStatusMissing)
 	}
 }
+
+// TestRecreate_ForkPRFetchesPullHeadRef covers fork-PR tasks: the head
+// branch never exists on origin by name, only under refs/pull/<N>/head.
+// recreate must forward req.PRNumber so fetchBranchToLocal uses the pull
+// refspec instead of failing with ErrBranchUnrecoverable.
+func TestRecreate_ForkPRFetchesPullHeadRef(t *testing.T) {
+	repoPath, prHeadSHA := initGitRepoWithPullRef(t, 974, "feature/fork-pr")
+
+	mgr := newRecreateTestManager(t)
+	existing := &Worktree{
+		ID:             "wt-3",
+		SessionID:      "session-3",
+		TaskID:         "task-3",
+		RepositoryID:   "repo-1",
+		RepositoryPath: repoPath,
+		Path:           filepath.Join(t.TempDir(), "task-3", "repo-1"),
+		Branch:         "feature/fork-pr",
+		Status:         StatusDeleted,
+	}
+
+	wt, err := mgr.recreate(context.Background(), existing, CreateRequest{
+		SessionID:      "session-3",
+		TaskID:         "task-3",
+		RepositoryID:   "repo-1",
+		RepositoryPath: repoPath,
+		PRNumber:       974,
+	})
+	if err != nil {
+		t.Fatalf("recreate() should fetch the fork PR head via pull/<N>/head, got: %v", err)
+	}
+	gotSHA := strings.TrimSpace(runGit(t, wt.Path, "rev-parse", "HEAD"))
+	if gotSHA != prHeadSHA {
+		t.Errorf("worktree HEAD = %q, want %q (PR head)", gotSHA, prHeadSHA)
+	}
+}

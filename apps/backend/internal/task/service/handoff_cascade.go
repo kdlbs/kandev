@@ -364,6 +364,10 @@ func (s *HandoffService) UnarchiveTaskTree(ctx context.Context, rootID string) (
 		}
 		if ok {
 			out.ArchivedTaskIDs = append(out.ArchivedTaskIDs, id)
+			// Publish per restored task — the WS handler keys off
+			// archived_at=null to put the card back on the kanban, same
+			// as ArchiveTaskTree publishes per archived task.
+			s.publishUpdatedTask(ctx, id)
 		} else {
 			out.SkippedTaskIDs = append(out.SkippedTaskIDs, id)
 		}

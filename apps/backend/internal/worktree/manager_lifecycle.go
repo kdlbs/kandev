@@ -845,10 +845,11 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 
 	// Archive deletes the local branch (removeWorktree runs `git branch -D`),
 	// so a recreate after unarchive must restore it first. fetchBranchToLocal
-	// fetches origin <branch>:<branch> and only errors when the branch exists
-	// neither locally nor on origin.
+	// fetches origin <branch>:<branch> — or pull/<N>/head for fork PRs, whose
+	// head branch never exists on origin by name — and only errors when the
+	// branch exists neither locally nor on the remote.
 	if exists, _ := m.branchExists(ctx, req.RepositoryPath, existing.Branch); !exists {
-		if _, fetchErr := m.fetchBranchToLocal(ctx, req.RepositoryPath, existing.Branch, 0); fetchErr != nil {
+		if _, fetchErr := m.fetchBranchToLocal(ctx, req.RepositoryPath, existing.Branch, req.PRNumber); fetchErr != nil {
 			m.logger.Warn("worktree branch unrecoverable during recreate",
 				zap.String("worktree_id", existing.ID),
 				zap.String("branch", existing.Branch),

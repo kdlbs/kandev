@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -39,12 +40,12 @@ func (s *stubTaskRepoRepo) UpdateTaskRepository(_ context.Context, tr *models.Ta
 	return nil
 }
 
-func recoveryTestService(t *testing.T, wt *stubWorktreeRecovery, repos *stubTaskRepoRepo) *Service {
+func recoveryTestService(t *testing.T, wt *stubWorktreeRecovery, repos *stubTaskRepoRepo) (*Service, *MockEventBus) {
 	t.Helper()
-	svc, _, _ := createTestService(t)
+	svc, eventBus, _ := createTestService(t)
 	svc.SetWorktreeCleanup(wt)
 	svc.taskRepos = repos
-	return svc
+	return svc, eventBus
 }
 
 func TestRecoverTaskBranches_RestoresCheckoutBranchWhenBranchSurvives(t *testing.T) {
@@ -59,7 +60,13 @@ func TestRecoverTaskBranches_RestoresCheckoutBranchWhenBranchSurvives(t *testing
 	repos := &stubTaskRepoRepo{
 		repos: []*models.TaskRepository{{TaskID: "task-1", RepositoryID: "repo-1"}},
 	}
-	svc := recoveryTestService(t, wt, repos)
+	svc, eventBus := recoveryTestService(t, wt, repos)
+	if err := svc.tasks.CreateTask(context.Background(), &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "t",
+	}); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	eventBus.ClearEvents()
 
 	out := svc.RecoverTaskBranches(context.Background(), "task-1")
 	if len(out) != 1 {
@@ -70,6 +77,18 @@ func TestRecoverTaskBranches_RestoresCheckoutBranchWhenBranchSurvives(t *testing
 	}
 	if len(repos.updated) != 1 || repos.updated[0].CheckoutBranch != "feature/old-work" {
 		t.Fatalf("checkout_branch not restored: updated = %+v", repos.updated)
+	}
+	// checkout_branch rides on task events — a successful restore must
+	// re-publish task.updated so WS clients pick up the repository change.
+	published := eventBus.GetPublishedEvents()
+	found := false
+	for _, ev := range published {
+		if ev.Type == events.TaskUpdated {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a %s event after checkout_branch restore, got %d events", events.TaskUpdated, len(published))
 	}
 }
 
@@ -85,7 +104,7 @@ func TestRecoverTaskBranches_MissingBranchReportsWithoutUpdate(t *testing.T) {
 	repos := &stubTaskRepoRepo{
 		repos: []*models.TaskRepository{{TaskID: "task-1", RepositoryID: "repo-1"}},
 	}
-	svc := recoveryTestService(t, wt, repos)
+	svc, _ := recoveryTestService(t, wt, repos)
 
 	out := svc.RecoverTaskBranches(context.Background(), "task-1")
 	if len(out) != 1 || out[0].Status != worktree.BranchStatusMissing {
@@ -110,7 +129,7 @@ func TestRecoverTaskBranches_NeverOverwritesExistingCheckoutBranch(t *testing.T)
 			TaskID: "task-1", RepositoryID: "repo-1", CheckoutBranch: "pr-head-branch",
 		}},
 	}
-	svc := recoveryTestService(t, wt, repos)
+	svc, _ := recoveryTestService(t, wt, repos)
 
 	svc.RecoverTaskBranches(context.Background(), "task-1")
 	if len(repos.updated) != 0 {
@@ -134,7 +153,7 @@ func TestRecoverTaskBranches_PicksNewestWorktreePerRepo(t *testing.T) {
 	repos := &stubTaskRepoRepo{
 		repos: []*models.TaskRepository{{TaskID: "task-1", RepositoryID: "repo-1"}},
 	}
-	svc := recoveryTestService(t, wt, repos)
+	svc, _ := recoveryTestService(t, wt, repos)
 
 	out := svc.RecoverTaskBranches(context.Background(), "task-1")
 	if len(out) != 1 || out[0].Branch != "feature/latest-session" {
