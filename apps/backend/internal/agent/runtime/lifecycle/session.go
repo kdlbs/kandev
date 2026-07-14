@@ -27,7 +27,7 @@ type SessionManager struct {
 	eventPublisher *EventPublisher
 	streamManager  *StreamManager
 	executionStore *ExecutionStore
-	statusUpdater  func(executionID string, status v1.AgentStatus) error
+	promptStarter  func(executionID string) error
 	historyManager *SessionHistoryManager
 	stopCh         <-chan struct{} // For graceful shutdown coordination
 }
@@ -49,8 +49,8 @@ func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManage
 	sm.historyManager = history
 }
 
-func (sm *SessionManager) SetStatusUpdater(updater func(executionID string, status v1.AgentStatus) error) {
-	sm.statusUpdater = updater
+func (sm *SessionManager) SetPromptStarter(starter func(executionID string) error) {
+	sm.promptStarter = starter
 }
 
 // InitializeResult contains the result of session initialization
@@ -610,18 +610,26 @@ func (sm *SessionManager) SendPrompt(
 		ctx = trace.ContextWithSpan(ctx, sessionSpan)
 	}
 
-	// For follow-up prompts, validate status and update to RUNNING
+	// For follow-up prompts, validate status before claiming a new generation.
 	if validateStatus {
 		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
 			return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 		}
-		if sm.statusUpdater != nil {
-			if err := sm.statusUpdater(execution.ID, v1.AgentStatusRunning); err != nil {
-				return nil, err
-			}
-		} else if sm.executionStore != nil {
-			sm.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+	}
+
+	// Every dispatch attempt gets a distinct identity, including initial prompts
+	// and replacements accepted while the execution is already running.
+	switch {
+	case sm.promptStarter != nil:
+		if err := sm.promptStarter(execution.ID); err != nil {
+			return nil, err
 		}
+	case sm.executionStore != nil:
+		if err := sm.executionStore.BeginPrompt(execution.ID); err != nil {
+			return nil, err
+		}
+	default:
+		beginExecutionPrompt(execution)
 	}
 
 	// Clear buffers and streaming state before starting prompt

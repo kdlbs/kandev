@@ -193,15 +193,26 @@ func (s *ExecutionStore) UpdateStatus(executionID string, status v1.AgentStatus)
 	defer s.mu.Unlock()
 
 	if execution, exists := s.executions[executionID]; exists {
-		setExecutionStatus(execution, status)
+		execution.Status = status
 	}
 }
 
-func setExecutionStatus(execution *AgentExecution, status v1.AgentStatus) {
-	if status == v1.AgentStatusRunning && execution.Status != v1.AgentStatusRunning {
-		execution.promptGeneration++
+// BeginPrompt assigns a new immutable identity to the next prompt dispatch.
+func (s *ExecutionStore) BeginPrompt(executionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	execution, exists := s.executions[executionID]
+	if !exists {
+		return ErrExecutionNotFound
 	}
-	execution.Status = status
+	beginExecutionPrompt(execution)
+	return nil
+}
+
+func beginExecutionPrompt(execution *AgentExecution) {
+	execution.promptGeneration++
+	execution.Status = v1.AgentStatusRunning
 }
 
 // UpdateError updates the error message of an agent execution and sets its status to failed.

@@ -1056,7 +1056,7 @@ func (m *Manager) UpdateStatus(executionID string, status v1.AgentStatus) error 
 func (m *Manager) updateStatusAndPersist(ctx context.Context, executionID string, status v1.AgentStatus) error {
 	var updated *AgentExecution
 	if err := m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
-		setExecutionStatus(execution, status)
+		execution.Status = status
 		updated = execution
 	}); err != nil {
 		if errors.Is(err, ErrExecutionNotFound) {
@@ -1071,6 +1071,25 @@ func (m *Manager) updateStatusAndPersist(ctx context.Context, executionID string
 
 	if updated != nil {
 		m.persistExecutorRunning(context.WithoutCancel(ctx), updated)
+	}
+	return nil
+}
+
+// BeginPrompt advances prompt ownership and marks the execution running before dispatch.
+func (m *Manager) BeginPrompt(executionID string) error {
+	var updated *AgentExecution
+	if err := m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
+		beginExecutionPrompt(execution)
+		updated = execution
+	}); err != nil {
+		if errors.Is(err, ErrExecutionNotFound) {
+			return fmt.Errorf("execution %q not found", executionID)
+		}
+		return err
+	}
+
+	if updated != nil {
+		m.persistExecutorRunning(context.Background(), updated)
 	}
 	return nil
 }
@@ -1161,7 +1180,7 @@ func (m *Manager) markReadyEventWithContext(ctx context.Context, executionID, ev
 			alreadyReady = true
 			return
 		}
-		setExecutionStatus(execution, v1.AgentStatusReady)
+		execution.Status = v1.AgentStatusReady
 		payload = newAgentEventPayload(execution)
 		updated = execution
 	}); err != nil {

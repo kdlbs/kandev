@@ -10,15 +10,15 @@ Cancel escalation must publish `agent.ready` outside the cancelling goroutine be
 
 ## Decision
 
-Lifecycle prompt ownership is identified by `(agent_execution_id, prompt_generation)`. The generation advances when an execution transitions into `RUNNING` for a new prompt. Turn-ending ready events include both values, and lifecycle captures the complete ready payload atomically with the transition to `Ready` before any detached publication begins.
+Lifecycle prompt ownership is identified by `(agent_execution_id, prompt_generation)`. The generation advances explicitly before every prompt dispatch attempt, including the initial prompt and replacements dispatched while the execution is already `RUNNING`; status transitions alone do not create prompt identities. Turn-ending ready events include both values, and lifecycle captures the complete ready payload atomically with the transition to `Ready` before any detached publication begins.
 
-The orchestrator validates this identity against the lifecycle execution store while holding the session's `cancelInFlightGuard`, before turn completion, pending moves, or `on_turn_complete` evaluation. A generation-bearing ready event that cannot prove current ownership is stale and is ignored. Ordinary `MarkReady` and `MarkBootReady` publication remains synchronous; only cancel escalation uses detached publication.
+The orchestrator validates this identity against the lifecycle execution store while holding the session's `cancelInFlightGuard`, before turn completion, pending moves, or `on_turn_complete` evaluation. Backend adapters between the orchestrator and lifecycle manager must preserve this ownership-validation capability; a generation-bearing ready event that cannot prove current ownership is stale and is ignored. Ordinary `MarkReady` and `MarkBootReady` publication remains synchronous; only cancel escalation uses detached publication.
 
 The same session guard may cover cancel plus replacement-prompt acceptance, but it must be released after acceptance. It must never remain held while waiting for that prompt's complete event.
 
 ## Consequences
 
-Delayed cancel-escalation events cannot be reassigned to replacement turns, including after an execution is replaced and generation numbers restart. Detached publishers carry immutable values instead of reading mutable execution state later. Prompt starts and ready events now have a lifecycle-local generation contract that event consumers must preserve.
+Delayed cancel-escalation events cannot be reassigned to replacement turns, including after an execution is replaced and generation numbers restart. Detached publishers carry immutable values instead of reading mutable execution state later. Prompt dispatch attempts and ready events now have a lifecycle-local generation contract that event consumers must preserve. A failed dispatch may consume a generation; generations identify ownership and are not a count of successful turns.
 
 Guard holders may still wait for bounded cancellation and prompt-dispatch acknowledgement. Concurrent parent interrupts become eligible immediately after a clarification retry is accepted and can either interrupt that recovered turn or back off if they snapshotted the superseded generation.
 

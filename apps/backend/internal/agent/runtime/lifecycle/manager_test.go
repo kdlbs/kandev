@@ -388,24 +388,19 @@ func TestManager_UpdateStatus(t *testing.T) {
 	}
 }
 
-func TestManager_UpdateStatusAdvancesPromptGenerationOnRunningTransition(t *testing.T) {
+func TestManager_BeginPromptAlwaysAdvancesPromptGeneration(t *testing.T) {
 	mgr := newTestManager(t)
 	exec := &AgentExecution{
 		ID:        "exec-prompt-generation",
 		SessionID: "session-prompt-generation",
-		Status:    v1.AgentStatusReady,
+		Status:    v1.AgentStatusRunning,
 	}
 	require.NoError(t, mgr.executionStore.Add(exec))
 
-	require.NoError(t, mgr.UpdateStatus(exec.ID, v1.AgentStatusRunning))
+	require.NoError(t, mgr.BeginPrompt(exec.ID))
 	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 1))
 	require.False(t, mgr.OwnsPromptGeneration(exec.SessionID, "other-execution", 1))
 
-	require.NoError(t, mgr.UpdateStatus(exec.ID, v1.AgentStatusRunning))
-	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 1),
-		"duplicate running status must not create a second generation")
-
-	require.NoError(t, mgr.UpdateStatus(exec.ID, v1.AgentStatusReady))
-	require.NoError(t, mgr.UpdateStatus(exec.ID, v1.AgentStatusRunning))
+	require.NoError(t, mgr.BeginPrompt(exec.ID))
 	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 2))
 }

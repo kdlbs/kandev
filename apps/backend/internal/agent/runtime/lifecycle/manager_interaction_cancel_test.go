@@ -375,7 +375,7 @@ func TestMarkReadyAsync_PublishesImmutablePromptGenerationSnapshot(t *testing.T)
 	payload, payloadOK := (<-publishEntered).(AgentEventPayload)
 	require.True(t, payloadOK)
 
-	require.NoError(t, mgr.UpdateStatus(exec.ID, v1.AgentStatusRunning))
+	require.NoError(t, mgr.BeginPrompt(exec.ID))
 	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 2))
 	close(releasePublish)
 	<-mockBus.Notify

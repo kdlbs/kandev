@@ -19,6 +19,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/pkg/agent"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -887,6 +888,52 @@ func TestSendPrompt_DispatchOnlyReturnsWithoutWaiting(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("SendPrompt(dispatchOnly=true) blocked waiting for completion signal")
+	}
+}
+
+func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+	store := NewExecutionStore()
+	sm.SetDependencies(nil, nil, store, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:            "test-exec",
+		TaskID:        "test-task",
+		SessionID:     "test-session",
+		WorkspacePath: "/workspace",
+		Status:        v1.AgentStatusRunning,
+		agentctl:      client,
+		promptDoneCh:  make(chan PromptCompletionSignal, 1),
+	}
+	if err := store.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	if _, err := sm.SendPrompt(ctx, execution, "initial", false, nil, true); err != nil {
+		t.Fatalf("dispatch initial prompt: %v", err)
+	}
+	if !store.OwnsPromptGeneration(execution.SessionID, execution.ID, 1) {
+		t.Fatal("initial prompt must own generation 1 even when execution starts running")
+	}
+
+	if _, err := sm.SendPrompt(ctx, execution, "replacement", true, nil, true); err != nil {
+		t.Fatalf("dispatch replacement prompt: %v", err)
+	}
+	if !store.OwnsPromptGeneration(execution.SessionID, execution.ID, 2) {
+		t.Fatal("replacement prompt must advance generation while execution remains running")
 	}
 }
 

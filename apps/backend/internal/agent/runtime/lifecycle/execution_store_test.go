@@ -81,23 +81,27 @@ func TestExecutionStore_AddNoSessionIDAlwaysSucceeds(t *testing.T) {
 	}
 }
 
-func TestExecutionStore_UpdateStatusAdvancesPromptGeneration(t *testing.T) {
+func TestExecutionStore_BeginPromptAlwaysAdvancesGeneration(t *testing.T) {
 	store := NewExecutionStore()
 	exec := &AgentExecution{
 		ID:        "exec-1",
 		SessionID: "session-1",
-		Status:    v1.AgentStatusReady,
+		Status:    v1.AgentStatusRunning,
 	}
 	if err := store.Add(exec); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 
-	store.UpdateStatus(exec.ID, v1.AgentStatusRunning)
-	if !store.OwnsPromptGeneration(exec.SessionID, exec.ID, 1) {
-		t.Fatal("first running transition must create generation 1")
+	if err := store.BeginPrompt(exec.ID); err != nil {
+		t.Fatalf("BeginPrompt: %v", err)
 	}
-	store.UpdateStatus(exec.ID, v1.AgentStatusRunning)
 	if !store.OwnsPromptGeneration(exec.SessionID, exec.ID, 1) {
-		t.Fatal("duplicate running status must retain generation 1")
+		t.Fatal("first prompt must create generation 1")
+	}
+	if err := store.BeginPrompt(exec.ID); err != nil {
+		t.Fatalf("BeginPrompt replacement: %v", err)
+	}
+	if !store.OwnsPromptGeneration(exec.SessionID, exec.ID, 2) {
+		t.Fatal("replacement prompt must create generation 2 while already running")
 	}
 }
