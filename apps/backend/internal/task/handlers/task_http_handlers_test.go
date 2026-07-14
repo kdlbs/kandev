@@ -143,6 +143,14 @@ func TestHTTPStartQuickChatRejectsInvalidRepositoryShapes(t *testing.T) {
 			name: "same repository twice",
 			body: `{"repositories":[{"repository_id":"repo-1","base_branch":"main"},{"repository_id":"repo-1","base_branch":"develop"}]}`,
 		},
+		{
+			name: "empty repository id",
+			body: `{"repositories":[{"repository_id":"","base_branch":"main"}]}`,
+		},
+		{
+			name: "empty base branch",
+			body: `{"repositories":[{"repository_id":"repo-1","base_branch":""}]}`,
+		},
 	}
 
 	for _, tc := range tests {

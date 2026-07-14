@@ -126,7 +126,9 @@ export function useQuickChatModal(workspaceId: string) {
     (open: boolean) => {
       if (open) return;
       reset();
-      if (store.activeSessionId === "") store.closeQuickChatSession("");
+      if (store.sessions.some((session) => session.sessionId === "")) {
+        store.closeQuickChatSession("");
+      }
       store.closeQuickChat();
     },
     [store, reset],

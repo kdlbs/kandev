@@ -14,9 +14,9 @@ spec: "../../specs/tasks/quick-chat-repository-context.md"
 unchanged; controls fit narrow viewports.
 
 **Verification:** from `apps/web`, run
-`pnpm e2e:run --host --no-build -- tests/chat/quick-chat.spec.ts --project=chromium`
+`pnpm e2e:run --host --no-build --project chromium -- tests/chat/quick-chat.spec.ts`
 (6 passed) and
-`pnpm e2e:run --host --no-build -- tests/chat/mobile-quick-chat-repository.spec.ts --project=mobile-chrome`
+`pnpm e2e:run --host --no-build --project mobile-chrome -- tests/chat/mobile-quick-chat-repository.spec.ts`
 (1 passed). From the repository root, run `make fmt`, `make typecheck`, `make test`, and
 `make lint`; all completed successfully.
 
