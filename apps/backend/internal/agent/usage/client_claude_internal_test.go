@@ -53,7 +53,7 @@ func TestClaudeFetchUsage_ParsesFloatsAndLimits(t *testing.T) {
 			"five_hour": {"utilization": 62.0, "resets_at": "2026-07-14T22:09:59.781046+00:00"},
 			"seven_day": {"utilization": 15.0, "resets_at": "2026-07-15T00:59:59.781070+00:00"},
 			"limits": [
-				{"kind": "session", "group": "session", "percent": 62, "resets_at": "2026-07-14T22:09:59+00:00", "scope": null},
+				{"kind": "session", "group": "session", "percent": 62, "resets_at": "2026-07-14T22:09:59.781046+00:00", "scope": null},
 				{"kind": "weekly_all", "group": "weekly", "percent": 15, "resets_at": "2026-07-15T00:59:59+00:00", "scope": null},
 				{"kind": "weekly_scoped", "group": "weekly", "percent": 20.5, "resets_at": "2026-07-15T00:59:59+00:00",
 					"scope": {"model": {"id": null, "display_name": "Opus"}}},
@@ -90,6 +90,12 @@ func TestClaudeFetchUsage_ParsesFloatsAndLimits(t *testing.T) {
 	}
 	if got.Windows[2].UtilizationPct != 20.5 {
 		t.Errorf("scoped pct = %v", got.Windows[2].UtilizationPct)
+	}
+	// The live API emits sub-second fractional timestamps; time.Parse accepts
+	// them with the RFC3339 layout even though the layout omits fractions.
+	wantReset := time.Date(2026, 7, 14, 22, 9, 59, 781046000, time.UTC)
+	if !got.Windows[0].ResetAt.Equal(wantReset) {
+		t.Errorf("session ResetAt = %v, want %v", got.Windows[0].ResetAt, wantReset)
 	}
 }
 
