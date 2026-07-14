@@ -19,11 +19,19 @@ type cachedEntry struct {
 type UsageCache struct {
 	mu      sync.RWMutex
 	entries map[string]*cachedEntry
+
+	// fetchLocks serializes fetches per cache key so concurrent misses
+	// coalesce into a single provider request instead of a burst.
+	fetchMu    sync.Mutex
+	fetchLocks map[string]*sync.Mutex
 }
 
 // NewUsageCache creates an empty UsageCache.
 func NewUsageCache() *UsageCache {
-	return &UsageCache{entries: make(map[string]*cachedEntry)}
+	return &UsageCache{
+		entries:    make(map[string]*cachedEntry),
+		fetchLocks: make(map[string]*sync.Mutex),
+	}
 }
 
 // CacheKey builds a deterministic cache key from provider name and credential path.
@@ -54,12 +62,31 @@ func (c *UsageCache) GetOrFetchWithin(
 	if usage := c.get(key, maxAge); usage != nil {
 		return usage, nil
 	}
+	lock := c.keyLock(key)
+	lock.Lock()
+	defer lock.Unlock()
+	// Re-check after acquiring the per-key lock: a concurrent caller may have
+	// completed the fetch while this one was waiting.
+	if usage := c.get(key, maxAge); usage != nil {
+		return usage, nil
+	}
 	usage, err := fetchFn(ctx)
 	if err != nil {
 		return nil, err
 	}
 	c.set(key, usage)
 	return usage, nil
+}
+
+func (c *UsageCache) keyLock(key string) *sync.Mutex {
+	c.fetchMu.Lock()
+	defer c.fetchMu.Unlock()
+	lock, ok := c.fetchLocks[key]
+	if !ok {
+		lock = &sync.Mutex{}
+		c.fetchLocks[key] = lock
+	}
+	return lock
 }
 
 func (c *UsageCache) get(key string, maxAge time.Duration) *ProviderUsage {

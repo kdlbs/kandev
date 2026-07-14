@@ -90,7 +90,9 @@ describe("UsageWindowRows", () => {
         {
           label: "7-day",
           utilization_pct: 39,
-          reset_at: new Date(Date.now() + 5 * 24 * 3_600_000).toISOString(),
+          // 30s under 5 days so the elapsed render time cannot flip the
+          // formatted value between "5d 0h" and "4d 23h".
+          reset_at: new Date(Date.now() + 5 * 24 * 3_600_000 - 30_000).toISOString(),
         },
       ],
       fetched_at: new Date().toISOString(),

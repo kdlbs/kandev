@@ -169,6 +169,40 @@ func TestCodexFetchUsage_RefreshOn401PreservesUnknownFields(t *testing.T) {
 	}
 }
 
+func TestCodexRefreshRejectsEmptyAccessToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+	refreshSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"id_token": "new-id", "access_token": "", "refresh_token": "new-refresh"}`))
+	}))
+	defer refreshSrv.Close()
+
+	path := writeCodexAuth(t, t.TempDir(), true)
+	client := NewCodexUsageClientWithPath(path)
+	client.usageURL = srv.URL
+	client.refreshURL = refreshSrv.URL
+
+	if _, err := client.FetchUsage(context.Background()); err == nil {
+		t.Fatal("expected error for empty access_token in refresh response")
+	}
+
+	// The stored credentials must be untouched.
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var root map[string]any
+	if err := json.Unmarshal(data, &root); err != nil {
+		t.Fatal(err)
+	}
+	toks, _ := root["tokens"].(map[string]any)
+	if toks["access_token"] != "access-token" || toks["refresh_token"] != "refresh-token" {
+		t.Errorf("credentials were modified: %+v", toks)
+	}
+}
+
 func TestCodexHasSubscriptionCredentials(t *testing.T) {
 	missing := NewCodexUsageClientWithPath(filepath.Join(t.TempDir(), "nope.json"))
 	if missing.HasSubscriptionCredentials() {

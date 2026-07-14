@@ -3,6 +3,8 @@ package usage
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -106,5 +108,31 @@ func TestNewHostServiceRegistersHostAgents(t *testing.T) {
 	}
 	if svc.entries[0].agentID != "claude-acp" || svc.entries[1].agentID != "codex-acp" {
 		t.Errorf("agent IDs = %q, %q", svc.entries[0].agentID, svc.entries[1].agentID)
+	}
+}
+
+func TestUsageCacheCoalescesConcurrentFetches(t *testing.T) {
+	cache := NewUsageCache()
+	var calls atomic.Int32
+	fetch := func(_ context.Context) (*ProviderUsage, error) {
+		calls.Add(1)
+		time.Sleep(10 * time.Millisecond)
+		return &ProviderUsage{Provider: "anthropic", FetchedAt: time.Now()}, nil
+	}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := cache.GetOrFetchWithin(context.Background(), "k", freshMaxAge, fetch); err != nil {
+				t.Errorf("GetOrFetchWithin: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := calls.Load(); got != 1 {
+		t.Errorf("concurrent misses fetched %d times, want 1", got)
 	}
 }

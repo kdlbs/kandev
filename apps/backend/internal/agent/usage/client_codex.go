@@ -233,6 +233,11 @@ func (c *CodexUsageClient) refreshTokens(ctx context.Context, old *codexAuthToke
 	if err := json.Unmarshal(respBody, &r); err != nil {
 		return nil, err
 	}
+	if r.AccessToken == "" {
+		// Never persist an empty access token: that would wipe working
+		// credentials and hide Codex usage until the next `codex login`.
+		return nil, fmt.Errorf("refresh: empty access_token in response")
+	}
 
 	updated := &codexAuthTokens{
 		IDToken:      valueOr(r.IDToken, old.IDToken),
