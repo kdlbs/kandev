@@ -198,9 +198,10 @@ type ShellExecPayload struct {
 
 // ShellExecOutput contains the result of a shell command execution.
 type ShellExecOutput struct {
-	ExitCode int    `json:"exit_code"`
-	Stdout   string `json:"stdout,omitempty"`
-	Stderr   string `json:"stderr,omitempty"`
+	ExitCode  *int   `json:"exit_code,omitempty"`
+	Stdout    string `json:"stdout,omitempty"`
+	Stderr    string `json:"stderr,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
 }
 
 // CodeSearchOutput contains the result of a code search operation.

@@ -26,7 +26,7 @@ func (a *Adapter) convertToolCallContents(contents []acp.ToolCallContent) []stre
 			cb := a.convertContentBlockToStreams(c.Content.Content)
 			if cb != nil {
 				items = append(items, streams.ToolCallContentItem{
-					Type:    "content",
+					Type:    toolContentType,
 					Content: cb,
 				})
 			}
@@ -47,7 +47,7 @@ func (a *Adapter) convertToolCallContents(contents []acp.ToolCallContent) []stre
 func (a *Adapter) convertContentBlockToStreams(cb acp.ContentBlock) *streams.ContentBlock {
 	switch {
 	case cb.Text != nil:
-		return &streams.ContentBlock{Type: "text", Text: cb.Text.Text}
+		return &streams.ContentBlock{Type: contentTypeText, Text: cb.Text.Text}
 	case cb.Image != nil:
 		return &streams.ContentBlock{Type: contentTypeImage, Data: cb.Image.Data, MimeType: cb.Image.MimeType, URI: derefStr(cb.Image.Uri)}
 	case cb.Audio != nil:
@@ -142,6 +142,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 //nolint:gocognit,cyclop,funlen // pre-existing complexity preserved from adapter.go file split
 func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.SessionToolCallUpdate) *AgentEvent {
 	toolCallID := string(tcu.ToolCallId)
+	convertedContents := a.convertToolCallContents(tcu.Content)
 	status := ""
 	if tcu.Status != nil {
 		status = string(*tcu.Status)
@@ -215,14 +216,29 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		status = toolStatusComplete
 	}
 
-	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
-
 	// Update stored payload with tool result output. Skip for tracked-Monitor
 	// terminal updates so Generic.Output stays the structured `{monitor: …}`
 	// view rather than getting clobbered by the rawOutput string.
-	if tcu.RawOutput != nil && payload != nil && !isTrackedMonitorTerminal {
+	recognizedShellUpdate := false
+	if payload != nil && payload.Kind() == streams.ToolKindShellExec {
+		recognizedShellUpdate = a.normalizer.NormalizeShellToolUpdate(payload, tcu.Meta, convertedContents, tcu.RawOutput)
+	} else if tcu.RawOutput != nil && payload != nil && !isTrackedMonitorTerminal {
 		a.normalizer.NormalizeToolResult(payload, tcu.RawOutput)
 	}
+	var shellExitCode *int
+	if payload != nil && payload.ShellExec() != nil && payload.ShellExec().Output != nil {
+		shellExitCode = payload.ShellExec().Output.ExitCode
+	}
+	if status == "" && recognizedShellUpdate {
+		status = toolStatusInProgress
+		if shellExitCode != nil {
+			status = toolStatusComplete
+		}
+	}
+	if shellExitCode != nil && *shellExitCode != 0 && status != toolStatusCancelled {
+		status = toolStatusError
+	}
+	isTerminal := status == toolStatusComplete || status == toolStatusError || status == toolStatusCancelled
 
 	// Subagent (Task) result metadata is split across meta (Claude) and
 	// rawOutput (OpenCode/Cursor); enrich the stored payload from both.
@@ -314,7 +330,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		ToolTitle:         title,
 		ToolStatus:        status,
 		NormalizedPayload: payload,
-		ToolCallContents:  a.convertToolCallContents(tcu.Content),
+		ToolCallContents:  convertedContents,
 	}
 }
 

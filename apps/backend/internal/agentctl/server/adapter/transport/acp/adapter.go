@@ -37,6 +37,8 @@ const (
 	contentTypeImage    = "image"
 	contentTypeAudio    = "audio"
 	contentTypeResource = "resource"
+	contentTypeText     = "text"
+	toolContentType     = "content"
 
 	// configOptionIDModel is the well-known ConfigOption ID/Category value used
 	// by ACP agents to surface the active model as a selectable option.
@@ -373,6 +375,9 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 
 	resp, err := a.acpConn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
+		ClientCapabilities: acp.ClientCapabilities{
+			Meta: map[string]any{"terminal_output": true},
+		},
 		ClientInfo: &acp.Implementation{
 			Name:    "kandev-agentctl",
 			Version: "1.0.0",

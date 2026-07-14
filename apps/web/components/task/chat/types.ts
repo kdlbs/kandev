@@ -96,9 +96,10 @@ export type ModifyFilePayload = {
 };
 
 export type ShellExecOutput = {
-  exit_code?: number;
+  exit_code?: number | null;
   stdout?: string;
   stderr?: string;
+  truncated?: boolean;
 };
 
 export type ShellExecPayload = {
