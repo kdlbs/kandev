@@ -146,6 +146,44 @@ describe("buildAllFiles (review dialog)", () => {
   });
 });
 
+describe("buildAllFiles source collisions", () => {
+  it("deduplicates a repo-stamped cumulative file against repo-unaware git status", () => {
+    const path = "src/shared.ts";
+    const gitStatusFiles = {
+      [path]: {
+        path,
+        status: "modified" as const,
+        staged: false,
+        additions: 1,
+        deletions: 1,
+        diff: "@@ -1 +1 @@\n-local\n+fresh\n",
+      },
+    };
+    const cumulativeDiff = {
+      session_id: "s1",
+      base_commit: "abc",
+      head_commit: "def",
+      total_commits: 1,
+      files: {
+        [`${FRONTEND_REPO}\u0000${path}`]: {
+          path,
+          repository_name: FRONTEND_REPO,
+          status: "modified",
+          staged: false,
+          additions: 1,
+          deletions: 1,
+          diff: "@@ -1 +1 @@\n-stale\n+snapshot\n",
+        },
+      },
+    } as unknown as CumulativeDiff;
+
+    const result = buildAllFiles(gitStatusFiles, cumulativeDiff);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ path, source: "uncommitted" });
+  });
+});
+
 describe("buildAllFiles sort order", () => {
   it("sorts multi-repo files by repository name and then path", () => {
     const gitStatusFiles = {

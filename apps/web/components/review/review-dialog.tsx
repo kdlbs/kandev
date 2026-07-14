@@ -56,7 +56,8 @@ function addCumulativeDiffFiles(
     const path = file.path ?? mapKey;
     if (!path) continue;
     const key = fileMapKey(path, repoName);
-    if (fileMap.has(key)) continue;
+    const hasRepoUnawareCollision = key !== path && fileMap.has(path);
+    if (fileMap.has(key) || hasRepoUnawareCollision) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
     const matchingUncommitted = findUncommittedByPathAndRepo(gitStatusFiles, path, repoName);
     fileMap.set(key, {
