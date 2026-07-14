@@ -940,13 +940,14 @@ func (r *Repository) FindActiveTaskSessionTaskIDByTaskEnvironmentExcludingTask(c
 func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (bool, error) {
 	var exists int
 	// Only sessions of live (non-archived) tasks count; archived tasks never
-	// block repository deletion.
+	// block repository deletion. IDLE sessions are resumable and must
+	// preserve their repository rows.
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT 1
 		FROM task_sessions s
 		INNER JOIN task_repositories tr ON tr.task_id = s.task_id
 		INNER JOIN tasks t ON t.id = s.task_id
-		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')
 			AND tr.repository_id = ?
 			AND t.archived_at IS NULL
 		LIMIT 1
@@ -959,14 +960,14 @@ func (r *Repository) HasActiveTaskSessionsByRepository(ctx context.Context, repo
 
 func (r *Repository) CountActiveTaskSessionsByRepository(ctx context.Context, repositoryID string) (int, error) {
 	var count int
-	// Counts only sessions of live (non-archived) tasks, matching
-	// HasActiveTaskSessionsByRepository.
+	// Counts only sessions of live (non-archived) tasks, including resumable
+	// IDLE sessions, matching HasActiveTaskSessionsByRepository.
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT COUNT(*)
 		FROM task_sessions s
 		INNER JOIN task_repositories tr ON tr.task_id = s.task_id
 		INNER JOIN tasks t ON t.id = s.task_id
-		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		WHERE s.state IN ('CREATED', 'STARTING', 'RUNNING', 'IDLE', 'WAITING_FOR_INPUT')
 			AND tr.repository_id = ?
 			AND t.archived_at IS NULL
 	`), repositoryID).Scan(&count)

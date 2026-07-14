@@ -9,8 +9,9 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { PageTopbar } from "@/components/page-topbar";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { usePRKeyToTasks } from "@/hooks/domains/github/use-pr-key-to-tasks";
+import { useIssueKeyToTasks } from "@/hooks/domains/github/use-issue-key-to-tasks";
 import type { Repository, Workflow, WorkflowStep } from "@/lib/types/http";
-import type { GitHubIssue, GitHubPR, TaskPR } from "@/lib/types/github";
+import type { GitHubIssue, GitHubPR, TaskIssueLink, TaskPR } from "@/lib/types/github";
 import { PRList } from "@/components/github/my-github/pr-list";
 import { IssueList } from "@/components/github/my-github/issue-list";
 import {
@@ -129,6 +130,7 @@ function ResultsList({
   issuePresets,
   onStartTask,
   prKeyToTasks,
+  issueKeyToTasks,
 }: {
   selection: SidebarSelection;
   items: Array<GitHubPR | GitHubIssue>;
@@ -138,6 +140,7 @@ function ResultsList({
   issuePresets: TaskPreset[];
   onStartTask: (payload: LaunchPayload) => void;
   prKeyToTasks: Map<string, TaskPR[]>;
+  issueKeyToTasks: Map<string, TaskIssueLink[]>;
 }) {
   if (selection.kind === "pr") {
     return (
@@ -158,6 +161,7 @@ function ResultsList({
       error={error}
       presets={issuePresets}
       onStartTask={onStartTask}
+      issueKeyToTasks={issueKeyToTasks}
     />
   );
 }
@@ -433,6 +437,7 @@ function AuthenticatedLayout({
 }) {
   const { selection, search, repoOptions, title } = state;
   const prKeyToTasks = usePRKeyToTasks(workspaceId ?? null);
+  const issueKeyToTasks = useIssueKeyToTasks(workspaceId ?? null);
   useAllWorkflowSnapshots(workspaceId ?? null);
   return (
     <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -472,6 +477,7 @@ function AuthenticatedLayout({
           issuePresets={issuePresets}
           onStartTask={onStartTask}
           prKeyToTasks={prKeyToTasks}
+          issueKeyToTasks={issueKeyToTasks}
         />
       </div>
       <ResultsPagination

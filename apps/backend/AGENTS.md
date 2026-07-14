@@ -180,6 +180,8 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 
 **Worktrees:** `internal/worktree/Manager` provides workspace isolation. Each session can have its own worktree (branch) to prevent conflicts between concurrent agents.
 
+**Worktree file materialization:** `copy_files` (`Repository.CopyFiles`) is a comma-separated spec of repository-relative gitignored paths/doublestar globs seeded into each new worktree. Copy is the default; the exact terminal `:symlink` suffix (for example `.env.local:symlink`) creates a relative host-worktree link so source changes propagate live. Other colons stay literal (`config:dev`, `.env:`); use `::symlink` to copy a literal path ending in `:symlink`. Malformed reserved syntax is rejected at save time. Parsing and materialization live in `internal/worktree/copyfiles/` (`ParseSpecs`, `ValidateSpec`, `Copy`); duplicates and overlapping matches are first-entry-wins. `Manager.copyConfiguredFiles` runs before setup during worktree creation. Source and destination containment checks reject traversal and symlinked destination parents. Failures are non-fatal warnings. Windows link creation is best-effort. Remote executors cannot link to the host, so `Parse`/`Plan` preserve literal colon paths but turn symlink-mode entries into copied bytes delivered through `WriteEntries`.
+
 **Executor default scripts:** Default prepare scripts are in `internal/agent/runtime/lifecycle/default_scripts.go`; `internal/scriptengine/` handles placeholder resolution.
 
 ## Conventions

@@ -24,6 +24,8 @@ issue, or Sentry issue is identified later.
 - The pull request action accepts a GitHub PR URL. If the task has exactly one GitHub repository, a PR number such as `#1471` is also accepted.
 - The backend fetches the issue through the configured GitHub integration and only links it when the issue belongs to a GitHub repository attached to the task.
 - The link is stored in task metadata using the existing `issue_url` and `issue_number` fields, so kanban cards and task detail surfaces render it through the existing issue indicator.
+- Creating a task from a GitHub issue on the GitHub integration page automatically applies the same metadata-backed link after task creation.
+- The GitHub issues list resolves all metadata-backed issue links in the active workspace and shows the linked task title with navigation to that task. Links created manually, by the GitHub issue quick launcher, and by issue watches use the same indicator.
 - Pull request linking reuses the existing task PR association model and rendering.
 - A linked issue can be explicitly changed or unlinked from the same dialog.
 - Jira ticket linking is shown only when Jira is enabled and healthy for the
@@ -51,6 +53,7 @@ issue, or Sentry issue is identified later.
 - New issue synchronization beyond the existing metadata-backed reference.
 - Creating Jira tickets, Linear issues, or Sentry issues from Kandev.
 - A durable cross-provider `task_external_links` model.
+- Changing issue-watch reservation and deduplication semantics.
 - A Sentry linked-issue top-bar affordance.
 
 ## Scenarios
@@ -85,6 +88,43 @@ GIVEN an existing task that already has GitHub issue metadata
 WHEN the user opens Link > GitHub Issue and chooses Unlink
 THEN Kandev removes only the issue metadata keys and preserves unrelated task metadata
 
+### Create and link a task from the GitHub issues list
+
+GIVEN a GitHub issue shown on the GitHub integration page
+WHEN the user creates a task with an issue action preset
+THEN Kandev creates the task, stores that issue as the task's metadata-backed GitHub issue link, and preserves normal task navigation
+
+### Show tasks linked to an issue
+
+GIVEN one or more active-workspace tasks reference the same GitHub issue through task metadata
+WHEN the GitHub issues list renders that issue
+THEN the issue row shows the linked task title for one task or a task-count menu for multiple tasks, and each entry navigates to its task
+
+### Include issue-watch tasks in the issue indicator
+
+GIVEN an issue watch created a task with `issue_url`, `issue_number`, and `issue_repo` metadata
+WHEN the matching issue appears on the GitHub issues list
+THEN the issue row shows that task through the same indicator as a manually linked task
+
+### Keep unlinked issues unchanged
+
+GIVEN no task in the active workspace references a GitHub issue
+WHEN the GitHub issues list renders that issue
+THEN no task indicator is shown and the existing issue actions remain available
+
+## Data And API
+
+- Task metadata remains the canonical GitHub issue association. Manual links include `issue_url`, `issue_number`, `issue_owner`, `issue_repo`, and `github_issue_linked`; issue-watch tasks may use the legacy `issue_repo: owner/repo` shape.
+- Each task links to at most one GitHub issue, while one GitHub issue may link to multiple tasks.
+- `GET /api/v1/github/task-issues?workspace_id=<id>` returns links grouped by task ID for the requested workspace. The lookup derives owner, repository, and issue number from the canonical GitHub issue URL and never returns links from another workspace.
+- The workspace lookup uses the indexed task workspace boundary and does not depend on the GitHub token being currently configured because it reads persisted task metadata.
+
+## Failure Modes
+
+- A failed automatic link attempt does not roll back a successfully created task or block navigation to it.
+- Invalid or incomplete GitHub issue metadata is ignored by the workspace reverse lookup instead of producing a misleading issue-row association.
+- Existing link validation continues to reject issues from repositories not attached to the task.
+
 ### Link a Jira ticket to an existing task
 
 GIVEN Jira is enabled and healthy for the task workspace
@@ -115,3 +155,4 @@ THEN Kandev renames the task to `ENG-20: Fix login` instead of stacking prefixes
 - Invalid issue references and repository mismatches return clear errors.
 - Right-click context menu, sidebar menu, and touch/dropdown menu users can reach the Link submenu.
 - Jira, Linear, and Sentry actions are hidden when the corresponding integration is disabled or unauthenticated.
+- GitHub issue links are visible only in their task workspace, including after page reload.

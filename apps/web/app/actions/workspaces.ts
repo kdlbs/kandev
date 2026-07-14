@@ -314,6 +314,8 @@ type BackendTemplateStep = {
   events?: StepEvents;
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
+  wip_limit?: number;
+  pull_from_step_id?: string | null;
 };
 
 type BackendWorkflowTemplate = Omit<WorkflowTemplate, "default_steps"> & {
@@ -331,6 +333,8 @@ const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): WorkflowT
     events: step.events,
     is_start_step: step.is_start_step,
     show_in_command_panel: step.show_in_command_panel,
+    wip_limit: step.wip_limit,
+    pull_from_step_id: step.pull_from_step_id ?? null,
   }));
   return {
     ...template,
@@ -365,6 +369,8 @@ type BackendWorkflowStep = {
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
   auto_advance_requires_signal?: boolean;
+  wip_limit?: number;
+  pull_from_step_id?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -383,6 +389,8 @@ const transformWorkflowStep = (step: BackendWorkflowStep): WorkflowStep => ({
   auto_archive_after_hours: step.auto_archive_after_hours,
   agent_profile_id: step.agent_profile_id,
   auto_advance_requires_signal: step.auto_advance_requires_signal,
+  wip_limit: step.wip_limit ?? 0,
+  pull_from_step_id: step.pull_from_step_id ?? null,
   created_at: step.created_at,
   updated_at: step.updated_at,
 });
@@ -422,6 +430,8 @@ export async function createWorkflowStepAction(payload: {
   events?: StepEvents;
   is_start_step?: boolean;
   allow_manual_move?: boolean;
+  wip_limit?: number;
+  pull_from_step_id?: string | null;
 }): Promise<WorkflowStep> {
   const body = {
     workflow_id: payload.workflow_id,
@@ -432,6 +442,8 @@ export async function createWorkflowStepAction(payload: {
     events: payload.events,
     allow_manual_move: payload.allow_manual_move ?? true,
     is_start_step: payload.is_start_step ?? false,
+    wip_limit: payload.wip_limit ?? 0,
+    pull_from_step_id: payload.pull_from_step_id ?? "",
   };
   const response = await fetchJson<BackendWorkflowStep>(`${apiBaseUrl}/api/v1/workflow/steps`, {
     method: "POST",
@@ -456,6 +468,8 @@ export async function updateWorkflowStepAction(
       | "auto_archive_after_hours"
       | "agent_profile_id"
       | "auto_advance_requires_signal"
+      | "wip_limit"
+      | "pull_from_step_id"
     >
   >,
 ): Promise<WorkflowStep> {
@@ -474,6 +488,8 @@ export async function updateWorkflowStepAction(
   if (payload.agent_profile_id !== undefined) body.agent_profile_id = payload.agent_profile_id;
   if (payload.auto_advance_requires_signal !== undefined)
     body.auto_advance_requires_signal = payload.auto_advance_requires_signal;
+  if (payload.wip_limit !== undefined) body.wip_limit = payload.wip_limit;
+  if (payload.pull_from_step_id !== undefined) body.pull_from_step_id = payload.pull_from_step_id;
   const response = await fetchJson<BackendWorkflowStep>(
     `${apiBaseUrl}/api/v1/workflow/steps/${stepId}`,
     {

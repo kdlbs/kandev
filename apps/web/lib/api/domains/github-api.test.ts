@@ -12,6 +12,7 @@ import {
   getTaskCIAutomationOptions,
   GitHubUnavailableError,
   linkTaskIssue,
+  listWorkspaceTaskIssues,
   unlinkTaskIssue,
   updateTaskCIAutomationOptions,
   type AccessibleRepo,
@@ -133,6 +134,18 @@ describe("fetchIssueInfo", () => {
 });
 
 describe("task issue link helpers", () => {
+  it("lists task issue links for a workspace", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ task_issues: {} }));
+
+    await listWorkspaceTaskIssues("workspace/1", { cache: "no-store" });
+
+    const call = fetchSpy.mock.calls.at(-1);
+    expect(String(call?.[0])).toBe(
+      "http://api.test/api/v1/github/task-issues?workspace_id=workspace%2F1",
+    );
+    expect(call?.[1]).toMatchObject({ cache: "no-store" });
+  });
+
   it("links a GitHub pull request to a task", async () => {
     fetchSpy.mockResolvedValueOnce(
       jsonResponse({

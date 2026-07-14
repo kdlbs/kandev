@@ -805,11 +805,11 @@ func (m *Manager) copyConfiguredFiles(ctx context.Context, req CreateRequest, wt
 	if repo == nil || repo.CopyFiles == "" {
 		return
 	}
-	patterns := copyfiles.Parse(repo.CopyFiles)
-	if len(patterns) == 0 {
+	specs := copyfiles.ParseSpecs(repo.CopyFiles)
+	if len(specs) == 0 {
 		return
 	}
-	copied, warnings, err := copyfiles.Copy(ctx, req.RepositoryPath, wt.Path, patterns, m.logger.Zap())
+	copied, warnings, err := copyfiles.Copy(ctx, req.RepositoryPath, wt.Path, specs, m.logger.Zap())
 	if err != nil {
 		m.logger.Warn("worktree copy-files failed",
 			zap.String("session_id", req.SessionID),

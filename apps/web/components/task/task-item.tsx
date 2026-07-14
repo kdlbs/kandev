@@ -273,9 +273,12 @@ function TaskItemStatsRow({
 function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpen: boolean }) {
   return (
     <div
+      data-testid="sidebar-task-diff-stats"
       className={cn(
         "shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
-        menuOpen ? "opacity-0" : "group-hover:opacity-0 group-focus-within:opacity-0",
+        menuOpen
+          ? "opacity-0"
+          : "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within:opacity-0",
       )}
     >
       <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
@@ -558,15 +561,16 @@ function TaskMenuButton({ visible }: { visible: boolean }) {
     <div
       className={cn(
         "self-center shrink-0 flex items-center transition-opacity duration-100",
+        !visible && "[@media(hover:none)]:hidden",
         visible
           ? "opacity-100"
-          : "opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto",
+          : "opacity-0 pointer-events-none [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
       )}
     >
       <button
         type="button"
         className={cn(
-          "flex h-6 w-6 items-center justify-center rounded-md cursor-pointer",
+          "flex size-6 items-center justify-center rounded-md cursor-pointer",
           "text-muted-foreground hover:text-foreground hover:bg-foreground/10",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors",
         )}

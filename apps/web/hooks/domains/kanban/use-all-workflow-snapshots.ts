@@ -35,7 +35,11 @@ async function fetchAndWriteSnapshot(
       allow_manual_move: step.allow_manual_move,
       prompt: step.prompt,
       is_start_step: step.is_start_step,
+      show_in_command_panel: step.show_in_command_panel,
       agent_profile_id: step.agent_profile_id,
+      wip_limit: step.wip_limit,
+      pull_from_step_id: step.pull_from_step_id ?? null,
+      stage_type: step.stage_type,
     }));
     const stepIds = new Set(steps.map((s) => s.id));
 

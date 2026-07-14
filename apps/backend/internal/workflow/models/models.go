@@ -173,6 +173,8 @@ type StepDefinition struct {
 	ShowInCommandPanel    bool       `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
 	AgentProfileID        string     `json:"agent_profile_id,omitempty"`
+	WIPLimit              int        `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepID        string     `json:"pull_from_step_id,omitempty" yaml:"pull_from_step_id,omitempty"`
 	// StageType mirrors WorkflowStep.StageType for templates so the office
 	// default + coordination workflows can declare their UX role
 	// ("work", "review", "approval", "custom") in YAML.
@@ -196,6 +198,8 @@ type WorkflowStep struct {
 	ShowInCommandPanel    bool       `json:"show_in_command_panel"`
 	AutoArchiveAfterHours int        `json:"auto_archive_after_hours,omitempty"`
 	AgentProfileID        string     `json:"agent_profile_id,omitempty"`
+	WIPLimit              int        `json:"wip_limit,omitempty"`
+	PullFromStepID        string     `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend
 	// ("work", "review", "approval", "custom"). The engine does not branch
 	// on it. Stored as TEXT in workflow_steps.stage_type, defaulting to
@@ -234,6 +238,18 @@ func (s *WorkflowStep) HasOnTurnCompleteAction(actionType OnTurnCompleteActionTy
 		}
 	}
 	return false
+}
+
+// RemapStepID returns the mapped workflow-step ID when id references a template
+// step alias; otherwise it returns id unchanged.
+func RemapStepID(id string, idMap map[string]string) string {
+	if id == "" {
+		return ""
+	}
+	if mapped, ok := idMap[id]; ok {
+		return mapped
+	}
+	return id
 }
 
 // StepTransitionTrigger represents how a session moved between steps

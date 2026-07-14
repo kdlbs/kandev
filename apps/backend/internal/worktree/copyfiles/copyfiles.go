@@ -51,32 +51,103 @@ type Entry struct {
 	Content []byte      `json:"content"`
 }
 
+// KeywordSymlink is the only reserved per-entry mode suffix.
+const KeywordSymlink = "symlink"
+
+const (
+	symlinkSuffix        = ":" + KeywordSymlink
+	escapedSymlinkSuffix = ":" + symlinkSuffix
+)
+
+// PatternSpec is a single copy-files entry: a pattern plus its per-entry mode.
+// Symlink is true when the entry carried the `:symlink` keyword.
+type PatternSpec struct {
+	Pattern string
+	Symlink bool
+}
+
+// parsePatternSpec recognizes only the exact terminal :symlink suffix. Other
+// colons remain literal path characters for compatibility with existing specs.
+// A doubled colon escapes a literal filename ending in :symlink.
+func parsePatternSpec(entry string) (PatternSpec, error) {
+	entry = strings.TrimSpace(entry)
+	if strings.HasSuffix(entry, escapedSymlinkSuffix) {
+		pattern := strings.TrimSpace(strings.TrimSuffix(entry, escapedSymlinkSuffix)) + symlinkSuffix
+		return PatternSpec{Pattern: pattern}, nil
+	}
+	if !strings.HasSuffix(entry, symlinkSuffix) {
+		return PatternSpec{Pattern: entry}, nil
+	}
+	pattern := strings.TrimSpace(strings.TrimSuffix(entry, symlinkSuffix))
+	if pattern == "" {
+		return PatternSpec{}, fmt.Errorf("invalid copy-files mode syntax %q: missing path before %q", entry, symlinkSuffix)
+	}
+	return PatternSpec{Pattern: pattern, Symlink: true}, nil
+}
+
 // Parse splits a comma-separated user spec into trimmed, deduplicated,
-// non-empty patterns. Order is preserved (first occurrence wins on dedupe).
-// Commas inside `{...}` are treated as part of the pattern (brace alternation),
-// so `config/{local,dev}.yml` is parsed as a single pattern.
+// non-empty patterns with the exact `:symlink` suffix stripped. Order is preserved
+// (first occurrence wins on dedupe). Commas inside `{...}` are treated as part
+// of the pattern (brace alternation), so `config/{local,dev}.yml` is parsed as
+// a single pattern. This is the copy-only view used by the remote-executor
+// path, where symlinks back to the host repo can't apply.
 func Parse(spec string) []string {
+	specs := ParseSpecs(spec)
+	if len(specs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(specs))
+	for _, s := range specs {
+		out = append(out, s.Pattern)
+	}
+	return out
+}
+
+// ParseSpecs splits a comma-separated user spec into trimmed, deduplicated,
+// non-empty PatternSpecs, extracting the exact per-entry `:symlink` mode.
+// Dedupe is by normalized pattern and the first occurrence wins. Invalid
+// entries are skipped; ValidateSpec reports them before repository settings
+// are persisted.
+func ParseSpecs(spec string) []PatternSpec {
 	if spec == "" {
 		return nil
 	}
 	parts := splitTopLevelCommas(spec)
-	out := make([]string, 0, len(parts))
+	out := make([]PatternSpec, 0, len(parts))
 	seen := make(map[string]struct{}, len(parts))
 	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
+		parsed, err := parsePatternSpec(p)
+		if err != nil || parsed.Pattern == "" {
 			continue
 		}
-		if _, ok := seen[p]; ok {
+		if _, ok := seen[parsed.Pattern]; ok {
 			continue
 		}
-		seen[p] = struct{}{}
-		out = append(out, p)
+		seen[parsed.Pattern] = struct{}{}
+		out = append(out, parsed)
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+// ValidateSpec reports malformed use of the reserved :symlink suffix. Unknown
+// colon suffixes remain literal paths for backward compatibility.
+func ValidateSpec(spec string) error {
+	if spec == "" {
+		return nil
+	}
+	for _, p := range splitTopLevelCommas(spec) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, err := parsePatternSpec(p); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // splitTopLevelCommas splits s on commas that sit outside any `{...}` group,
@@ -105,13 +176,15 @@ func splitTopLevelCommas(s string) []string {
 	return out
 }
 
-// Copy resolves each pattern relative to sourceDir and copies matches into
-// targetDir, preserving relative paths. It returns the relative paths of
-// files newly written into targetDir (skip-if-exists matches are NOT
-// included), one warning per problematic pattern or rejected match, and an
-// error only for IO failures that would corrupt the target.
-func Copy(ctx context.Context, sourceDir, targetDir string, patterns []string, log *zap.Logger) ([]string, []string, error) {
-	if len(patterns) == 0 {
+// Copy resolves each spec's pattern relative to sourceDir and copies (or, for
+// `:symlink` entries, symlinks) matches into targetDir, preserving relative
+// paths. It returns the relative paths of files newly written into targetDir
+// (skip-if-exists matches are NOT included), one warning per problematic
+// pattern or rejected match, and an error only for IO failures that would
+// corrupt the target. Symlink entries create a relative link back to the
+// source in the main repo, so shared files stay centrally managed.
+func Copy(ctx context.Context, sourceDir, targetDir string, specs []PatternSpec, log *zap.Logger) ([]string, []string, error) {
+	if len(specs) == 0 {
 		return nil, nil, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -131,11 +204,12 @@ func Copy(ctx context.Context, sourceDir, targetDir string, patterns []string, l
 		copied:    make(map[string]struct{}),
 	}
 
-	for _, pattern := range patterns {
+	for _, spec := range specs {
 		if err := ctx.Err(); err != nil {
 			return state.copiedRel, state.warnings, fmt.Errorf("copyfiles: %w", err)
 		}
-		if err := state.expandPattern(pattern); err != nil {
+		state.symlinkMode = spec.Symlink
+		if err := state.expandPattern(spec.Pattern); err != nil {
 			return state.copiedRel, state.warnings, err
 		}
 	}
@@ -157,6 +231,12 @@ type copyState struct {
 	// the filesystem.
 	planMode bool
 	entries  []Entry
+
+	// symlinkMode, when true, symlinks matches back to the source instead of
+	// copying their bytes. Set per-pattern by Copy(). Ignored in planMode: a
+	// symlink into the host repo can't apply on a remote executor, so those
+	// entries fall back to a byte copy.
+	symlinkMode bool
 }
 
 // Plan resolves each pattern relative to sourceDir and reads every match
@@ -484,10 +564,56 @@ func (s *copyState) handleMatch(matchPath, pattern string) error {
 		return nil
 	}
 
+	// Symlink mode (host-side only): link the match — file or directory — back
+	// to the source in the main repo rather than copying its bytes. Skipped in
+	// planMode so remote executors fall back to a copy.
+	if s.symlinkMode && !s.planMode {
+		return s.symlinkMatch(safe, rel)
+	}
+
 	if rInfo.IsDir() {
 		return s.copyDir(resolved, rel)
 	}
 	return s.copyFile(resolved, rel, rInfo)
+}
+
+// symlinkMatch creates a relative symlink at targetDir/rel pointing back to the
+// source match (src, the pre-resolution path inside the repo). Idempotent:
+// skips when the destination already exists. The relative target keeps the link
+// valid if the whole worktree tree is relocated.
+func (s *copyState) symlinkMatch(src, rel string) error {
+	dst := filepath.Join(s.targetDir, rel)
+	if _, dup := s.copied[dst]; dup {
+		return nil
+	}
+	if _, err := os.Lstat(dst); err == nil {
+		s.copied[dst] = struct{}{}
+		s.debug("skip existing", zap.String("rel", rel))
+		return nil
+	}
+	parent := filepath.Dir(dst)
+	// Reject a symlinked destination ancestor before MkdirAll/os.Symlink follow
+	// it out of the worktree (e.g. base branch ships `config -> /tmp` and the
+	// entry is `config/.env:symlink`). Mirrors the remote WriteEntries guard.
+	if warn, ok := validateParentChain(s.targetDir, parent); !ok {
+		s.warn("symlink %q rejected: %s", rel, warn)
+		return nil
+	}
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("copyfiles: mkdir %s: %w", parent, err)
+	}
+	target, err := filepath.Rel(parent, src)
+	if err != nil {
+		target = src
+	}
+	if err := os.Symlink(target, dst); err != nil {
+		s.warn("symlink %q -> %q: %v", dst, target, err)
+		return nil
+	}
+	s.copied[dst] = struct{}{}
+	s.copiedRel = append(s.copiedRel, filepath.ToSlash(rel))
+	s.debug("symlinked", zap.String("rel", rel))
+	return nil
 }
 
 // copyDir walks src recursively and copies every regular file inside.

@@ -53,6 +53,8 @@ type StepPortable struct {
 	AutoArchiveAfterHours     int                   `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
 	AgentProfile              *AgentProfilePortable `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
 	AutoAdvanceRequiresSignal bool                  `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
+	WIPLimit                  int                   `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepPosition      *int                  `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
@@ -90,6 +92,10 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			AllowManualMove:           s.AllowManualMove,
 			AutoArchiveAfterHours:     s.AutoArchiveAfterHours,
 			AutoAdvanceRequiresSignal: s.AutoAdvanceRequiresSignal,
+			WIPLimit:                  s.WIPLimit,
+		}
+		if pos, ok := idToPos[s.PullFromStepID]; ok {
+			sp.PullFromStepPosition = &pos
 		}
 		if resolveProfile != nil && s.AgentProfileID != "" {
 			sp.AgentProfile = resolveProfile(s.AgentProfileID)
@@ -135,13 +141,80 @@ func (e *WorkflowExport) Validate() error {
 			if err := validateOnEnterActions(step); err != nil {
 				return fmt.Errorf("workflow %d step %d: %w", i, j, err)
 			}
+			if step.WIPLimit < 0 {
+				return fmt.Errorf("workflow %d step %d: wip_limit must be non-negative", i, j)
+			}
 		}
 		// Validate that move_to_step references point to valid positions.
 		if err := validateStepPositionRefs(wf.Steps, positions); err != nil {
 			return fmt.Errorf("workflow %d: %w", i, err)
 		}
+		if err := validatePullSourceRefs(wf.Steps, positions); err != nil {
+			return fmt.Errorf("workflow %d: %w", i, err)
+		}
 	}
 	return nil
+}
+
+func validatePullSourceRefs(steps []StepPortable, validPositions map[int]bool) error {
+	pullSources := make(map[int]int, len(steps))
+	for _, step := range steps {
+		if step.PullFromStepPosition == nil {
+			continue
+		}
+		pos := *step.PullFromStepPosition
+		if pos == step.Position {
+			return fmt.Errorf("step %q: pull_from_step_position cannot reference itself", step.Name)
+		}
+		if !validPositions[pos] {
+			return fmt.Errorf("step %q: pull_from_step_position %d does not match any step", step.Name, pos)
+		}
+		pullSources[step.Position] = pos
+	}
+	if hasPullSourceCycle(pullSources) {
+		return fmt.Errorf("pull_from_step_position cannot create a pull cycle")
+	}
+	return nil
+}
+
+func hasPullSourceCycle(pullSources map[int]int) bool {
+	const (
+		visiting = 1
+		visited  = 2
+	)
+
+	states := make(map[int]int, len(pullSources))
+	for start := range pullSources {
+		if states[start] == visited {
+			continue
+		}
+		current := start
+		path := make([]int, 0)
+		for states[current] != visited {
+			if states[current] == visiting {
+				return true
+			}
+			states[current] = visiting
+			path = append(path, current)
+			next, ok := pullSources[current]
+			if !ok {
+				break
+			}
+			current = next
+		}
+		for _, position := range path {
+			states[position] = visited
+		}
+	}
+	return false
+}
+
+// PullFromStepID maps the portable pull-source position to a workflow-step ID.
+func (s StepPortable) PullFromStepID(posToID map[int]string) string {
+	if s.PullFromStepPosition == nil {
+		return ""
+	}
+	return posToID[*s.PullFromStepPosition]
 }
 
 // validateOnEnterActions rejects malformed on_enter actions in a portable step.

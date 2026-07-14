@@ -163,7 +163,14 @@ func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
-	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, archived_at DATETIME)`); err != nil {
+	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT,
+		title TEXT NOT NULL DEFAULT '',
+		metadata TEXT NOT NULL DEFAULT '{}',
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		archived_at DATETIME
+	)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
 	store, err := NewStore(sqlxDB, sqlxDB)
@@ -177,6 +184,103 @@ func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
 	return router, store
+}
+
+func TestHttpListTaskIssues_WorkspaceScopedMetadataLinks(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	rows := []struct {
+		id          string
+		workspaceID string
+		title       string
+		metadata    string
+	}{
+		{
+			id:          "manual-task",
+			workspaceID: "ws-1",
+			title:       "Manual issue task",
+			metadata:    `{"issue_url":"https://github.com/kdlbs/kandev/issues/1672","issue_number":1672,"issue_owner":"kdlbs","issue_repo":"kandev","github_issue_linked":true}`,
+		},
+		{
+			id:          "watch-task",
+			workspaceID: "ws-1",
+			title:       "Watched issue task",
+			metadata:    `{"issue_url":"https://github.com/kdlbs/kandev/issues/1672","issue_number":1672,"issue_repo":"kdlbs/kandev","issue_watch_id":"watch-1"}`,
+		},
+		{
+			id:          "other-workspace",
+			workspaceID: "ws-2",
+			title:       "Hidden task",
+			metadata:    `{"issue_url":"https://github.com/kdlbs/kandev/issues/1672","issue_number":1672}`,
+		},
+		{
+			id:          "invalid-metadata",
+			workspaceID: "ws-1",
+			title:       "Invalid task",
+			metadata:    `{"issue_url":"https://gitlab.com/kdlbs/kandev/issues/1672","issue_number":1672}`,
+		},
+	}
+	for _, row := range rows {
+		if _, err := store.db.Exec(
+			`INSERT INTO tasks (id, workspace_id, title, metadata) VALUES (?, ?, ?, ?)`,
+			row.id, row.workspaceID, row.title, row.metadata,
+		); err != nil {
+			t.Fatalf("insert task %s: %v", row.id, err)
+		}
+	}
+	if _, err := store.db.Exec(
+		`INSERT INTO tasks (id, workspace_id, title, metadata, archived_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		"archived-task",
+		"ws-1",
+		"Archived issue task",
+		`{"issue_url":"https://github.com/kdlbs/kandev/issues/1672","issue_number":1672}`,
+	); err != nil {
+		t.Fatalf("insert archived task: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/task-issues?workspace_id=ws-1", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	type listedTaskIssue struct {
+		TaskTitle   string `json:"task_title"`
+		Owner       string `json:"owner"`
+		Repo        string `json:"repo"`
+		IssueNumber int    `json:"issue_number"`
+	}
+	var got struct {
+		TaskIssues map[string]listedTaskIssue `json:"task_issues"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got.TaskIssues) != 2 {
+		t.Fatalf("task issue count = %d, want 2: %+v", len(got.TaskIssues), got.TaskIssues)
+	}
+	if _, ok := got.TaskIssues["archived-task"]; ok {
+		t.Fatalf("archived task should not be listed: %+v", got.TaskIssues)
+	}
+	manual := got.TaskIssues["manual-task"]
+	if manual.TaskTitle != "Manual issue task" || manual.Owner != "kdlbs" ||
+		manual.Repo != "kandev" || manual.IssueNumber != 1672 {
+		t.Fatalf("unexpected manual link: %+v", manual)
+	}
+	watch := got.TaskIssues["watch-task"]
+	if watch.TaskTitle != "Watched issue task" || watch.Owner != manual.Owner ||
+		watch.Repo != manual.Repo || watch.IssueNumber != manual.IssueNumber {
+		t.Fatalf("unexpected watch link: %+v", watch)
+	}
+}
+
+func TestHttpListTaskIssues_RequiresWorkspace(t *testing.T) {
+	router, _ := setupControllerStoreTest(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/task-issues", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", w.Code, w.Body.String())
+	}
 }
 
 func TestHttpTriggerReviewWatchPublishesNewPREvents(t *testing.T) {

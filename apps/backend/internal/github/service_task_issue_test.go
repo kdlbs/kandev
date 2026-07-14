@@ -27,6 +27,15 @@ type countingIssueClient struct {
 	getIssueCalls int
 }
 
+func TestListWorkspaceTaskIssues_RequiresStore(t *testing.T) {
+	svc := NewService(nil, AuthMethodPAT, nil, nil, nil, testLogger(t))
+
+	_, err := svc.ListWorkspaceTaskIssues(context.Background(), "workspace-1")
+	if !errors.Is(err, errStoreUnavailable) {
+		t.Fatalf("err = %v, want errStoreUnavailable", err)
+	}
+}
+
 func (c *countingIssueClient) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
 	c.getIssueCalls++
 	return c.MockClient.GetIssue(ctx, owner, repo, number)

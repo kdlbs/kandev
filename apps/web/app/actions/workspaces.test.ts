@@ -4,7 +4,13 @@ vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "http://backend.test" }),
 }));
 
-import { deleteWorkspaceAction, exportAllWorkflowsAction } from "./workspaces";
+import {
+  createWorkflowStepAction,
+  deleteWorkspaceAction,
+  exportAllWorkflowsAction,
+  listWorkflowStepsAction,
+  updateWorkflowStepAction,
+} from "./workspaces";
 
 describe("exportAllWorkflowsAction", () => {
   beforeEach(() => {
@@ -66,5 +72,93 @@ describe("deleteWorkspaceAction", () => {
     expect(url).toBe("http://backend.test/api/v1/office/workspaces/ws-1");
     expect(init.method).toBe("DELETE");
     expect(JSON.parse(init.body as string)).toEqual({ confirm_name: "My Workspace" });
+  });
+});
+
+describe("workflow step WIP fields", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          id: "step-1",
+          workflow_id: "wf-1",
+          name: "Review",
+          position: 1,
+          color: "bg-blue-500",
+          wip_limit: 2,
+          pull_from_step_id: "step-0",
+          created_at: "",
+          updated_at: "",
+        }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("preserves WIP fields returned from workflow step APIs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          steps: [
+            {
+              id: "step-1",
+              workflow_id: "wf-1",
+              name: "Review",
+              position: 1,
+              color: "bg-blue-500",
+              wip_limit: 2,
+              pull_from_step_id: "step-0",
+              created_at: "",
+              updated_at: "",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await listWorkflowStepsAction("wf-1");
+
+    expect(result.steps[0]).toMatchObject({
+      wip_limit: 2,
+      pull_from_step_id: "step-0",
+    });
+  });
+
+  it("sends WIP fields when creating a workflow step", async () => {
+    await createWorkflowStepAction({
+      workflow_id: "wf-1",
+      name: "Review",
+      position: 1,
+      color: "bg-blue-500",
+      wip_limit: 2,
+      pull_from_step_id: "step-0",
+    } as Parameters<typeof createWorkflowStepAction>[0]);
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      wip_limit: 2,
+      pull_from_step_id: "step-0",
+    });
+  });
+
+  it("sends WIP fields when updating a workflow step", async () => {
+    await updateWorkflowStepAction("step-1", {
+      wip_limit: 3,
+      pull_from_step_id: "",
+    } as Parameters<typeof updateWorkflowStepAction>[1]);
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      wip_limit: 3,
+      pull_from_step_id: "",
+    });
   });
 });

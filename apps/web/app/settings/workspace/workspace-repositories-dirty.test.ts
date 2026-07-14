@@ -62,4 +62,16 @@ describe("isRepositoryDirty", () => {
     const repo = makeRepo();
     expect(isRepositoryDirty(repo, undefined)).toBe(true);
   });
+
+  it("treats a copy_files entry with a :symlink keyword as clean when unchanged", () => {
+    const saved = makeRepo({ copy_files: ".env, .env.local:symlink" });
+    const repo = makeRepo({ copy_files: ".env, .env.local:symlink" });
+    expect(isRepositoryDirty(repo, saved)).toBe(false);
+  });
+
+  it("returns true when a copy_files entry's keyword changes", () => {
+    const saved = makeRepo({ copy_files: ".env.local" });
+    const repo = makeRepo({ copy_files: ".env.local:symlink" });
+    expect(isRepositoryDirty(repo, saved)).toBe(true);
+  });
 });

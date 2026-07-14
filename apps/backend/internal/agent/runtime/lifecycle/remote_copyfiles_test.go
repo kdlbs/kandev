@@ -109,7 +109,7 @@ func TestRunRemoteCopyfiles_HappyPath_EmitsStep(t *testing.T) {
 
 	runRemoteCopyfiles(context.Background(), logger.Default(), remoteCopyfilesRequest{
 		SourceRepoPath: src,
-		CopyFilesSpec:  ".env",
+		CopyFilesSpec:  ".env:symlink",
 		Client:         cli,
 		OnProgress:     cb,
 	})

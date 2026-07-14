@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -369,6 +370,224 @@ func TestService_MoveTaskWithOptionsAllowsRunningPrimarySession(t *testing.T) {
 	}
 }
 
+func TestService_MoveTaskRejectsFullWIPLimitedTarget(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	seedMoveSteps(svc)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source": {ID: "step-source", WorkflowID: "wf-source", Name: "Source", Position: 0},
+		"step-full":   {ID: "step-full", WorkflowID: "wf-source", Name: "Full", Position: 1, WIPLimit: 1},
+	}})
+	createMoveTask(t, ctx, repo, "task-moving", "wf-source", "step-source", nil)
+	createMoveTask(t, ctx, repo, "task-occupant", "wf-source", "step-full", nil)
+
+	_, err := svc.MoveTask(ctx, "task-moving", "wf-source", "step-full", 0)
+	if err == nil {
+		t.Fatalf("expected WIP-limited move to be rejected")
+	}
+	if !strings.Contains(err.Error(), "WIP limit") {
+		t.Fatalf("error = %q, want WIP limit rejection", err.Error())
+	}
+
+	task, err := repo.GetTask(ctx, "task-moving")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.WorkflowStepID != "step-source" {
+		t.Fatalf("task moved despite WIP limit: %s", task.WorkflowStepID)
+	}
+
+}
+
+func TestService_ApproveSessionRejectsFullWIPLimitedTarget(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	sourceStep := &wfmodels.WorkflowStep{
+		ID: "step-source", WorkflowID: "wf-source", Name: "Source", Position: 0,
+		Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+			Type: wfmodels.OnTurnCompleteMoveToStep,
+			Config: map[string]interface{}{
+				"step_id": "step-full",
+			},
+		}}},
+	}
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source": sourceStep,
+		"step-full":   {ID: "step-full", WorkflowID: "wf-source", Name: "Full", Position: 1, WIPLimit: 1},
+	}})
+	createMoveTask(t, ctx, repo, "task-approve", "wf-source", "step-source", nil)
+	createMoveTask(t, ctx, repo, "task-occupant", "wf-source", "step-full", nil)
+	createMoveSession(t, ctx, repo, "session-approve", "task-approve", models.TaskSessionStateWaitingForInput, models.ReviewStatusPending)
+
+	_, err := svc.ApproveSession(ctx, "session-approve")
+	if err == nil {
+		t.Fatalf("expected approval transition to be rejected")
+	}
+	if !strings.Contains(err.Error(), "WIP limit") {
+		t.Fatalf("error = %q, want WIP limit rejection", err.Error())
+	}
+
+	task, err := repo.GetTask(ctx, "task-approve")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if task.WorkflowStepID != "step-source" {
+		t.Fatalf("task moved despite WIP limit: %s", task.WorkflowStepID)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "session-approve")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.ReviewStatus != models.ReviewStatusPending {
+		t.Fatalf("review status = %q, want pending after rejected approval", session.ReviewStatus)
+	}
+}
+
+func TestService_MoveTaskAllowsSameStepReorderWhenStepAlreadyOverLimit(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-full": {ID: "step-full", WorkflowID: "wf-source", Name: "Full", Position: 0, WIPLimit: 1},
+	}})
+	createMoveTask(t, ctx, repo, "task-moving", "wf-source", "step-full", nil)
+	createMoveTask(t, ctx, repo, "task-occupant", "wf-source", "step-full", nil)
+
+	moved, err := svc.MoveTask(ctx, "task-moving", "wf-source", "step-full", 5)
+	if err != nil {
+		t.Fatalf("same-step reorder should be exempt from WIP limit: %v", err)
+	}
+	if moved.Task.Position != 5 {
+		t.Fatalf("position = %d, want 5", moved.Task.Position)
+	}
+}
+
+func TestService_MoveTaskIgnoresArchivedAndEphemeralOccupantsForWIPLimit(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source":  {ID: "step-source", WorkflowID: "wf-source", Name: "Source", Position: 0},
+		"step-limited": {ID: "step-limited", WorkflowID: "wf-source", Name: "Limited", Position: 1, WIPLimit: 1},
+	}})
+	now := time.Now().UTC()
+	createMoveTask(t, ctx, repo, "task-moving", "wf-source", "step-source", nil)
+	createMoveTask(t, ctx, repo, "task-archived", "wf-source", "step-limited", &now)
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "task-ephemeral",
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-source",
+		WorkflowStepID: "step-limited",
+		Title:          "Ephemeral",
+		State:          v1.TaskStateTODO,
+		Priority:       "medium",
+		IsEphemeral:    true,
+	}); err != nil {
+		t.Fatalf("CreateTask(ephemeral): %v", err)
+	}
+
+	moved, err := svc.MoveTask(ctx, "task-moving", "wf-source", "step-limited", 0)
+	if err != nil {
+		t.Fatalf("archived/ephemeral occupants should not consume WIP: %v", err)
+	}
+	if moved.Task.WorkflowStepID != "step-limited" {
+		t.Fatalf("step = %s, want step-limited", moved.Task.WorkflowStepID)
+	}
+}
+
+func TestService_MoveTaskPullsNextFeederTaskOnVacate(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-limited": {
+			ID: "step-limited", WorkflowID: "wf-source", Name: "Limited", Position: 0,
+			WIPLimit: 1, PullFromStepID: "step-feeder",
+		},
+		"step-feeder": {ID: "step-feeder", WorkflowID: "wf-source", Name: "Feeder", Position: 1},
+		"step-target": {ID: "step-target", WorkflowID: "wf-target", Name: "Target", Position: 0},
+	}})
+	createMoveTask(t, ctx, repo, "task-vacating", "wf-source", "step-limited", nil)
+	createMoveTask(t, ctx, repo, "task-low", "wf-source", "step-feeder", nil)
+	createMoveTask(t, ctx, repo, "task-critical", "wf-source", "step-feeder", nil)
+	setMoveTaskOrder(t, ctx, repo, "task-low", 0, "low")
+	setMoveTaskOrder(t, ctx, repo, "task-critical", 0, "critical")
+	eventBus.ClearEvents()
+
+	_, err := svc.MoveTask(ctx, "task-vacating", "wf-target", "step-target", 0)
+	if err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+
+	pulled, err := repo.GetTask(ctx, "task-critical")
+	if err != nil {
+		t.Fatalf("GetTask(task-critical): %v", err)
+	}
+	if pulled.WorkflowStepID != "step-limited" {
+		t.Fatalf("critical feeder task step = %s, want step-limited", pulled.WorkflowStepID)
+	}
+	notPulled, err := repo.GetTask(ctx, "task-low")
+	if err != nil {
+		t.Fatalf("GetTask(task-low): %v", err)
+	}
+	if notPulled.WorkflowStepID != "step-feeder" {
+		t.Fatalf("low feeder task step = %s, want step-feeder", notPulled.WorkflowStepID)
+	}
+
+	movedEvents := 0
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type == events.TaskMoved {
+			movedEvents++
+		}
+	}
+	if movedEvents != 2 {
+		t.Fatalf("task.moved events = %d, want 2", movedEvents)
+	}
+}
+
+func TestService_MoveTaskPullSkipsBlockedFeederCandidate(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-limited": {
+			ID: "step-limited", WorkflowID: "wf-source", Name: "Limited", Position: 0,
+			WIPLimit: 1, PullFromStepID: "step-feeder",
+		},
+		"step-feeder": {ID: "step-feeder", WorkflowID: "wf-source", Name: "Feeder", Position: 1},
+		"step-target": {ID: "step-target", WorkflowID: "wf-target", Name: "Target", Position: 0},
+	}})
+	createMoveTask(t, ctx, repo, "task-vacating", "wf-source", "step-limited", nil)
+	createMoveTask(t, ctx, repo, "task-blocked", "wf-source", "step-feeder", nil)
+	createMoveTask(t, ctx, repo, "task-eligible", "wf-source", "step-feeder", nil)
+	setMoveTaskOrder(t, ctx, repo, "task-blocked", 0, "critical")
+	setMoveTaskOrder(t, ctx, repo, "task-eligible", 1, "medium")
+	createMoveSession(t, ctx, repo, "session-blocked", "task-blocked", models.TaskSessionStateRunning, models.ReviewStatusNone)
+
+	_, err := svc.MoveTask(ctx, "task-vacating", "wf-target", "step-target", 0)
+	if err != nil {
+		t.Fatalf("MoveTask: %v", err)
+	}
+
+	blocked, err := repo.GetTask(ctx, "task-blocked")
+	if err != nil {
+		t.Fatalf("GetTask(task-blocked): %v", err)
+	}
+	if blocked.WorkflowStepID != "step-feeder" {
+		t.Fatalf("blocked task step = %s, want step-feeder", blocked.WorkflowStepID)
+	}
+	eligible, err := repo.GetTask(ctx, "task-eligible")
+	if err != nil {
+		t.Fatalf("GetTask(task-eligible): %v", err)
+	}
+	if eligible.WorkflowStepID != "step-limited" {
+		t.Fatalf("eligible task step = %s, want step-limited", eligible.WorkflowStepID)
+	}
+}
+
 func TestService_MoveTaskRejectsArchivedTask(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -535,6 +754,36 @@ func TestService_BulkMoveSelectedTasksValidatesBatchBeforeMoving(t *testing.T) {
 	}
 }
 
+func TestService_BulkMoveSelectedTasksRejectsOverCapacityBeforeMoving(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedMoveWorkflows(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-source": {ID: "step-source", WorkflowID: "wf-source", Name: "Source", Position: 0},
+		"step-full":   {ID: "step-full", WorkflowID: "wf-source", Name: "Full", Position: 1, WIPLimit: 1},
+	}})
+	createMoveTask(t, ctx, repo, "task-batch-a", "wf-source", "step-source", nil)
+	createMoveTask(t, ctx, repo, "task-batch-b", "wf-source", "step-source", nil)
+
+	_, err := svc.BulkMoveSelectedTasks(ctx, []string{"task-batch-a", "task-batch-b"}, "wf-source", "step-full")
+	if err == nil {
+		t.Fatalf("expected selected batch move to be rejected")
+	}
+	if !strings.Contains(err.Error(), "WIP limit") {
+		t.Fatalf("error = %q, want WIP limit rejection", err.Error())
+	}
+
+	for _, id := range []string{"task-batch-a", "task-batch-b"} {
+		task, err := repo.GetTask(ctx, id)
+		if err != nil {
+			t.Fatalf("GetTask(%s): %v", id, err)
+		}
+		if task.WorkflowStepID != "step-source" {
+			t.Fatalf("%s moved despite rejected batch: %s", id, task.WorkflowStepID)
+		}
+	}
+}
+
 func TestService_BulkMoveSelectedTasksSkipsCurrentTargetAndAppendsInOrder(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
@@ -619,6 +868,22 @@ func createMoveTask(t *testing.T, ctx context.Context, repo interface {
 	}))
 	if archivedAt != nil {
 		must(t, repo.ArchiveTask(ctx, id))
+	}
+}
+
+func setMoveTaskOrder(t *testing.T, ctx context.Context, repo interface {
+	GetTask(context.Context, string) (*models.Task, error)
+	UpdateTask(context.Context, *models.Task) error
+}, id string, position int, priority string) {
+	t.Helper()
+	task, err := repo.GetTask(ctx, id)
+	if err != nil {
+		t.Fatalf("GetTask(%s): %v", id, err)
+	}
+	task.Position = position
+	task.Priority = priority
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("UpdateTask(%s): %v", id, err)
 	}
 }
 

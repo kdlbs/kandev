@@ -14,6 +14,7 @@ var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {

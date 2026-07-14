@@ -37,3 +37,22 @@ func TestFromWorkflowStep_PreservesGenericEvents(t *testing.T) {
 		t.Fatalf("action reason = %v, want children_completed", action.Config["reason"])
 	}
 }
+
+func TestFromWorkflowStep_PreservesWIPFields(t *testing.T) {
+	step := &wfmodels.WorkflowStep{
+		ID:             "step-1",
+		WorkflowID:     "wf-1",
+		Name:           "Work",
+		WIPLimit:       3,
+		PullFromStepID: "queue-step",
+	}
+
+	got := FromWorkflowStep(step)
+
+	if got.WIPLimit != 3 {
+		t.Fatalf("WIPLimit = %d, want 3", got.WIPLimit)
+	}
+	if got.PullFromStepID != "queue-step" {
+		t.Fatalf("PullFromStepID = %q, want queue-step", got.PullFromStepID)
+	}
+}

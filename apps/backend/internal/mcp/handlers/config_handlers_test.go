@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -616,6 +617,21 @@ func TestHandleMoveTask_ActiveSessionWithoutPrompt_DefersMove(t *testing.T) {
 	task, err := svc.GetTask(ctx, "task-move")
 	require.NoError(t, err)
 	assert.Equal(t, "step-work", task.WorkflowStepID, "deferred move must not apply immediately")
+}
+
+func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {
+	assert.Equal(t,
+		"Move task conflicts with the current task or workflow state",
+		moveTaskErrorMessage(fmt.Errorf("WIP limit exceeded for workflow step secret-step")),
+	)
+	assert.Equal(t,
+		"Invalid move_task request",
+		moveTaskErrorMessage(fmt.Errorf("workflow_step_id is required")),
+	)
+	assert.Equal(t,
+		"Failed to move task",
+		moveTaskErrorMessage(fmt.Errorf("database path /tmp/private failed")),
+	)
 }
 
 func TestNormalizeTaskState_AcceptsCommonAliases(t *testing.T) {

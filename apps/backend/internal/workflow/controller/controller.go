@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -105,6 +106,8 @@ type CreateStepRequest struct {
 	IsStartStep               *bool              `json:"is_start_step,omitempty"`
 	ShowInCommandPanel        *bool              `json:"show_in_command_panel,omitempty"`
 	AutoAdvanceRequiresSignal *bool              `json:"auto_advance_requires_signal,omitempty"`
+	WIPLimit                  *int               `json:"wip_limit,omitempty"`
+	PullFromStepID            *string            `json:"pull_from_step_id,omitempty"`
 }
 
 // CreateStep creates a new workflow step.
@@ -131,6 +134,18 @@ func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*Ge
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
 	}
+	if req.WIPLimit != nil {
+		if *req.WIPLimit < 0 {
+			return nil, fmt.Errorf("wip_limit must be non-negative")
+		}
+		step.WIPLimit = *req.WIPLimit
+	}
+	if req.PullFromStepID != nil {
+		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
+	}
+	if err := c.validatePullFromStep(ctx, step); err != nil {
+		return nil, err
+	}
 	demotedStartSteps, err := c.svc.CreateStepWithStartStepUpdates(ctx, step)
 	if err != nil {
 		return nil, err
@@ -152,6 +167,8 @@ type UpdateStepRequest struct {
 	AutoArchiveAfterHours     *int               `json:"auto_archive_after_hours,omitempty"`
 	AgentProfileID            *string            `json:"agent_profile_id,omitempty"`
 	AutoAdvanceRequiresSignal *bool              `json:"auto_advance_requires_signal,omitempty"`
+	WIPLimit                  *int               `json:"wip_limit,omitempty"`
+	PullFromStepID            *string            `json:"pull_from_step_id,omitempty"`
 }
 
 // UpdateStep updates an existing workflow step.
@@ -193,11 +210,68 @@ func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*Ge
 	if req.AutoAdvanceRequiresSignal != nil {
 		step.AutoAdvanceRequiresSignal = *req.AutoAdvanceRequiresSignal
 	}
+	if req.WIPLimit != nil {
+		if *req.WIPLimit < 0 {
+			return nil, fmt.Errorf("wip_limit must be non-negative")
+		}
+		step.WIPLimit = *req.WIPLimit
+	}
+	if req.PullFromStepID != nil {
+		step.PullFromStepID = strings.TrimSpace(*req.PullFromStepID)
+	}
+	if err := c.validatePullFromStep(ctx, step); err != nil {
+		return nil, err
+	}
 	demotedStartSteps, err := c.svc.UpdateStepWithStartStepUpdates(ctx, step)
 	if err != nil {
 		return nil, err
 	}
 	return &GetStepResponse{Step: step, DemotedStartSteps: demotedStartSteps}, nil
+}
+
+func (c *Controller) validatePullFromStep(ctx context.Context, step *models.WorkflowStep) error {
+	if step.PullFromStepID == "" {
+		return nil
+	}
+	if step.ID != "" && step.PullFromStepID == step.ID {
+		return fmt.Errorf("pull_from_step_id cannot reference the same step")
+	}
+	source, err := c.svc.GetStep(ctx, step.PullFromStepID)
+	if err != nil {
+		return fmt.Errorf("pull_from_step_id is invalid: %w", err)
+	}
+	if source.WorkflowID != step.WorkflowID {
+		return fmt.Errorf("pull_from_step_id must reference a step in the same workflow")
+	}
+	if err := c.validatePullFromStepAcyclic(ctx, step.ID, source); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Controller) validatePullFromStepAcyclic(ctx context.Context, stepID string, source *models.WorkflowStep) error {
+	if stepID == "" {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	for current := source; current != nil && current.PullFromStepID != ""; {
+		if current.PullFromStepID == stepID {
+			return fmt.Errorf("pull_from_step_id cannot create a pull cycle")
+		}
+		if _, ok := seen[current.ID]; ok {
+			return fmt.Errorf("pull_from_step_id cannot create a pull cycle")
+		}
+		seen[current.ID] = struct{}{}
+		next, err := c.svc.GetStep(ctx, current.PullFromStepID)
+		if err != nil {
+			return fmt.Errorf("pull_from_step_id is invalid: %w", err)
+		}
+		if next.WorkflowID != source.WorkflowID {
+			return fmt.Errorf("pull_from_step_id must reference a step in the same workflow")
+		}
+		current = next
+	}
+	return nil
 }
 
 // DeleteStep deletes a workflow step.

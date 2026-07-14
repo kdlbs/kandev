@@ -4,6 +4,7 @@ import type { GitHubSlice, GitHubSliceState } from "./types";
 export const defaultGitHubState: GitHubSliceState = {
   githubStatus: { status: null, loaded: false, loading: false },
   taskPRs: { byTaskId: {} },
+  taskIssues: { workspaceId: null, byTaskId: {} },
   pendingPrUrlByTaskId: { byTaskId: {} },
   prWatches: { items: [], loaded: false, loading: false },
   reviewWatches: { items: [], loaded: false, loading: false },
@@ -61,11 +62,25 @@ function clearPendingForTaskPR(
 
 function createTaskPRActions(
   set: ImmerSet,
-): Pick<GitHubSlice, "setTaskPRs" | "setTaskPR" | "setPendingPrUrlForTask"> {
+): Pick<
+  GitHubSlice,
+  "setTaskPRs" | "setTaskPR" | "setPendingPrUrlForTask" | "setTaskIssues" | "upsertTaskIssue"
+> {
   return {
     setTaskPRs: (prs) =>
       set((draft) => {
         draft.taskPRs.byTaskId = prs;
+      }),
+    setTaskIssues: (workspaceId, issues) =>
+      set((draft) => {
+        draft.taskIssues.workspaceId = workspaceId;
+        draft.taskIssues.byTaskId = issues;
+      }),
+    upsertTaskIssue: (workspaceId, issue) =>
+      set((draft) => {
+        if (draft.taskIssues.workspaceId && draft.taskIssues.workspaceId !== workspaceId) return;
+        draft.taskIssues.workspaceId = workspaceId;
+        draft.taskIssues.byTaskId[issue.task_id] = issue;
       }),
     setTaskPR: (taskId, pr) =>
       set((draft) => {

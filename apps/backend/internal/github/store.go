@@ -20,6 +20,12 @@ type Store struct {
 	ro *sqlx.DB // reader
 }
 
+type taskIssueMetadataRow struct {
+	TaskID    string `db:"task_id"`
+	TaskTitle string `db:"task_title"`
+	Metadata  string `db:"metadata"`
+}
+
 // NewStore creates a new GitHub store and initializes the schema.
 func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	s := &Store{db: writer, ro: reader}
@@ -937,6 +943,20 @@ func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string
 		return nil, err
 	}
 	return groupTaskPRsByTask(prs), nil
+}
+
+// ListTaskIssueMetadataByWorkspaceID projects workspace-bounded task metadata for issue-link
+// normalization. Issue links are persisted in metadata, so parsing the two supported shapes in
+// Go keeps the SQL query independent of SQLite's JSON capabilities.
+func (s *Store) ListTaskIssueMetadataByWorkspaceID(ctx context.Context, workspaceID string) ([]taskIssueMetadataRow, error) {
+	var rows []taskIssueMetadataRow
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(
+		`SELECT id AS task_id, title AS task_title, COALESCE(metadata, '{}') AS metadata
+		 FROM tasks
+		 WHERE workspace_id = ? AND archived_at IS NULL
+		 ORDER BY created_at ASC, id ASC`,
+	), workspaceID)
+	return rows, err
 }
 
 // ListTaskIDsByPRNumber returns the IDs of tasks in a workspace that have a PR

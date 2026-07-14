@@ -148,9 +148,40 @@ func (h *Handlers) applyMoveTaskImmediate(
 			}
 		}
 		h.logger.Error("failed to move task", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to move task", nil)
+		return ws.NewError(msg.ID, msg.Action, classifyMoveTaskError(err), moveTaskErrorMessage(err), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(result.Task))
+}
+
+func classifyMoveTaskError(err error) string {
+	if err == nil {
+		return ws.ErrorCodeInternalError
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "wip limit exceeded"),
+		strings.Contains(msg, "active session"),
+		strings.Contains(msg, "archived tasks cannot be moved"),
+		strings.Contains(msg, "different workspace"),
+		strings.Contains(msg, "does not belong to target workflow"):
+		return ws.ErrorCodeConflict
+	case strings.Contains(msg, "invalid"),
+		strings.Contains(msg, "required"):
+		return ws.ErrorCodeValidation
+	default:
+		return ws.ErrorCodeInternalError
+	}
+}
+
+func moveTaskErrorMessage(err error) string {
+	switch classifyMoveTaskError(err) {
+	case ws.ErrorCodeConflict:
+		return "Move task conflicts with the current task or workflow state"
+	case ws.ErrorCodeValidation:
+		return "Invalid move_task request"
+	default:
+		return "Failed to move task"
+	}
 }
 
 // synthesizeMovedTaskDTO returns a task DTO with the post-move step/workflow

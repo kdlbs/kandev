@@ -396,7 +396,19 @@ export function useStepDeleteHandlers({
  * with properly remapped step_id references (template aliases → real UUIDs).
  * If we compared events, the template aliases would overwrite the backend's UUIDs.
  */
-function diffStepUpdates(userStep: WorkflowStep, backendStep: WorkflowStep): Partial<WorkflowStep> {
+function remapPullFromStepID(
+  pullFromStepID: string | null | undefined,
+  stepIDByDraftID: Map<string, string>,
+) {
+  if (!pullFromStepID) return "";
+  return stepIDByDraftID.get(pullFromStepID) ?? pullFromStepID;
+}
+
+function diffStepUpdates(
+  userStep: WorkflowStep,
+  backendStep: WorkflowStep,
+  stepIDByDraftID: Map<string, string>,
+): Partial<WorkflowStep> {
   const updates: Partial<WorkflowStep> = {};
   if (userStep.name !== backendStep.name) updates.name = userStep.name;
   if (userStep.color !== backendStep.color) updates.color = userStep.color;
@@ -405,6 +417,11 @@ function diffStepUpdates(userStep: WorkflowStep, backendStep: WorkflowStep): Par
     updates.is_start_step = userStep.is_start_step;
   if (userStep.allow_manual_move !== backendStep.allow_manual_move)
     updates.allow_manual_move = userStep.allow_manual_move;
+  if ((userStep.wip_limit ?? 0) !== (backendStep.wip_limit ?? 0))
+    updates.wip_limit = userStep.wip_limit ?? 0;
+  const pullFromStepID = remapPullFromStepID(userStep.pull_from_step_id, stepIDByDraftID);
+  if (pullFromStepID !== (backendStep.pull_from_step_id ?? ""))
+    updates.pull_from_step_id = pullFromStepID;
   // Events are NOT compared - backend has correct step_id UUIDs, user has template aliases
   return updates;
 }
@@ -419,7 +436,36 @@ function stepPayload(workflowId: string, step: WorkflowStep) {
     events: step.events,
     is_start_step: step.is_start_step,
     allow_manual_move: step.allow_manual_move,
+    wip_limit: step.wip_limit ?? 0,
+    pull_from_step_id: step.pull_from_step_id ?? "",
   };
+}
+
+function stepPayloadWithoutPullSource(workflowId: string, step: WorkflowStep) {
+  return { ...stepPayload(workflowId, step), pull_from_step_id: "" };
+}
+
+async function createStepsThenRemapPullSources(
+  workflowId: string,
+  steps: WorkflowStep[],
+  existingStepIDByDraftID = new Map<string, string>(),
+) {
+  const createdByDraftID = new Map(existingStepIDByDraftID);
+  const addedStepIDByDraftID = new Map<string, string>();
+  const createdByPosition = new Map<number, string>();
+  for (const step of steps) {
+    const created = await createWorkflowStepAction(stepPayloadWithoutPullSource(workflowId, step));
+    createdByDraftID.set(step.id, created.id);
+    addedStepIDByDraftID.set(step.id, created.id);
+    createdByPosition.set(step.position, created.id);
+  }
+  for (const step of steps) {
+    const pullFromStepID = remapPullFromStepID(step.pull_from_step_id, createdByDraftID);
+    if (!pullFromStepID) continue;
+    const createdID = addedStepIDByDraftID.get(step.id) ?? createdByPosition.get(step.position);
+    if (createdID) await updateWorkflowStepAction(createdID, { pull_from_step_id: pullFromStepID });
+  }
+  return addedStepIDByDraftID;
 }
 
 async function reconcileTemplateSteps(
@@ -428,21 +474,31 @@ async function reconcileTemplateSteps(
   templateStepCount: number,
 ) {
   const { steps: backendSteps = [] } = await listWorkflowStepsAction(createdId);
+  const stepIDByDraftID = new Map<string, string>();
+  for (const backendStep of backendSteps) {
+    const userStep = userSteps.find((s) => s.position === backendStep.position);
+    if (userStep) stepIDByDraftID.set(userStep.id, backendStep.id);
+  }
+
+  // Create added steps first so template-step updates can remap pull sources
+  // that point at a newly-added step.
+  const addedSteps = userSteps.filter((step) => step.position >= templateStepCount);
+  const addedStepIDByDraftID = await createStepsThenRemapPullSources(
+    createdId,
+    addedSteps,
+    stepIDByDraftID,
+  );
+  for (const [draftID, createdID] of addedStepIDByDraftID) {
+    stepIDByDraftID.set(draftID, createdID);
+  }
 
   // Reconcile user edits (name, color, etc.) with backend steps.
   // We do NOT touch events - the backend has correct step_id UUIDs.
   for (const backendStep of backendSteps) {
     const userStep = userSteps.find((s) => s.position === backendStep.position);
     if (!userStep) continue;
-    const updates = diffStepUpdates(userStep, backendStep);
+    const updates = diffStepUpdates(userStep, backendStep, stepIDByDraftID);
     if (Object.keys(updates).length > 0) await updateWorkflowStepAction(backendStep.id, updates);
-  }
-
-  // Create any additional steps the user added beyond the template
-  for (const step of userSteps) {
-    if (step.position >= templateStepCount) {
-      await createWorkflowStepAction(stepPayload(createdId, step));
-    }
   }
 }
 
@@ -480,9 +536,7 @@ export function useWorkflowSaveActions({
       // Reconcile user edits and additions on top.
       await reconcileTemplateSteps(created.id, workflowSteps, templateStepCount);
     } else {
-      for (const step of workflowSteps) {
-        await createWorkflowStepAction(stepPayload(created.id, step));
-      }
+      await createStepsThenRemapPullSources(created.id, workflowSteps);
     }
 
     onWorkflowCreated?.(created);

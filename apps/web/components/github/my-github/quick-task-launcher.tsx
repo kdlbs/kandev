@@ -4,7 +4,8 @@ import { useMemo } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import type { Icon } from "@tabler/icons-react";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
-import { createTaskPR } from "@/lib/api/domains/github-api";
+import { useAppStore } from "@/components/state-provider";
+import { createTaskPR, linkTaskIssue } from "@/lib/api/domains/github-api";
 import type { Repository, Task, TaskRepository, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { GitHubPR, GitHubIssue } from "@/lib/types/github";
 
@@ -180,6 +181,7 @@ export function QuickTaskLauncher({
   onClose,
 }: QuickTaskLauncherProps) {
   const router = useRouter();
+  const upsertTaskIssue = useAppStore((state) => state.upsertTaskIssue);
 
   const defaultWorkflow = workflows[0];
   const sortedStepsForWorkflow = useMemo(
@@ -221,6 +223,15 @@ export function QuickTaskLauncher({
         // Silently ignore — the indicator will populate via the poller path
         // (legacy behavior) if branch matching succeeds.
       });
+    }
+    if (payload?.kind === "issue") {
+      void linkTaskIssue(task.id, { issue: payload.issue.html_url })
+        .then((issue) => {
+          if (workspaceId) upsertTaskIssue(workspaceId, issue);
+        })
+        .catch(() => {
+          // Task creation succeeded; keep navigation available if GitHub linking fails.
+        });
     }
     onClose();
     router.push(`/tasks/${task.id}`);

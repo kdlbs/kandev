@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { Repository } from "@/lib/types/http";
+import { formatWipCount, isOverWipLimit } from "@/lib/kanban/wip-limit";
 
 export interface WorkflowStep {
   id: string;
@@ -17,6 +18,8 @@ export interface WorkflowStep {
     on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
     on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
   };
+  wip_limit?: number;
+  pull_from_step_id?: string | null;
 }
 
 interface KanbanColumnProps {
@@ -76,6 +79,8 @@ export function KanbanColumn({
   // Ordered ids of the cards rendered in this column — the source of truth for
   // shift-click range selection (matches exactly what the user sees).
   const columnTaskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
+  const overWipLimit = isOverWipLimit(tasks.length, step.wip_limit);
+  const wipCountLabel = formatWipCount(tasks.length, step.wip_limit);
 
   return (
     <div
@@ -93,8 +98,17 @@ export function KanbanColumn({
           <div className="flex items-center gap-2">
             <div className={cn("w-2 h-2 rounded-full", step.color)} />
             <h2 className="font-semibold text-sm">{step.title}</h2>
-            <Badge variant="secondary" className="text-xs">
-              {tasks.length}
+            <Badge
+              variant="secondary"
+              className={cn(
+                "text-xs tabular-nums",
+                overWipLimit &&
+                  "border-amber-500/50 bg-amber-500/15 text-amber-700 dark:text-amber-300",
+              )}
+              aria-label={overWipLimit ? `${wipCountLabel} tasks, over WIP limit` : undefined}
+              title={overWipLimit ? "Over WIP limit" : undefined}
+            >
+              {wipCountLabel}
             </Badge>
           </div>
         </div>

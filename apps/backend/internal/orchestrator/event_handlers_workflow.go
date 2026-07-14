@@ -224,16 +224,6 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 // If triggerOnEnter is true, on_enter actions (like auto_start_agent) are processed.
 // If false, only the step change is applied (used for on_turn_start where the user is about to send a message).
 func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID string, fromStep *wfmodels.WorkflowStep, toStepID string, triggerOnEnter bool) {
-	// Process on_exit actions for the step we're leaving (before the step change).
-	// Freshly load the session since the caller may not have it (legacy path).
-	exitSession, exitErr := s.repo.GetTaskSession(ctx, sessionID)
-	if exitErr != nil {
-		s.logger.Warn("failed to load session for on_exit",
-			zap.String("session_id", sessionID), zap.Error(exitErr))
-	} else {
-		s.processOnExit(ctx, taskID, exitSession, fromStep)
-	}
-
 	// Get the target step
 	targetStep, err := s.workflowStepGetter.GetStep(ctx, toStepID)
 	if err != nil {
@@ -252,6 +242,24 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
+	}
+	if err := s.validateTransitionWIPLimit(ctx, task, targetStep); err != nil {
+		s.logger.Warn("workflow transition rejected by WIP limit",
+			zap.String("task_id", taskID),
+			zap.String("to_step_id", toStepID),
+			zap.Error(err))
+		s.setSessionWaitingForInput(ctx, taskID, sessionID)
+		return
+	}
+
+	// Process on_exit actions for the step we're leaving (before the step change).
+	// Freshly load the session since the caller may not have it (legacy path).
+	exitSession, exitErr := s.repo.GetTaskSession(ctx, sessionID)
+	if exitErr != nil {
+		s.logger.Warn("failed to load session for on_exit",
+			zap.String("session_id", sessionID), zap.Error(exitErr))
+	} else {
+		s.processOnExit(ctx, taskID, exitSession, fromStep)
 	}
 
 	// Update the task's workflow step
@@ -278,6 +286,10 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		zap.String("from_step", fromStep.Name),
 		zap.String("to_step", targetStep.Name),
 		zap.Bool("trigger_on_enter", triggerOnEnter))
+
+	if s.workflowStore != nil {
+		s.workflowStore.pullNextTaskOnVacate(ctx, fromStep.ID, taskID)
+	}
 
 	if triggerOnEnter {
 		// ADR 0015 — clear any pending completion-signal bag for the
@@ -310,6 +322,24 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		}
 		s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
 	}
+}
+
+func (s *Service) validateTransitionWIPLimit(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
+	if targetStep == nil || targetStep.WIPLimit <= 0 || task.WorkflowStepID == targetStep.ID {
+		return nil
+	}
+	limitsRepo, ok := s.repo.(workflowMoveLimitsRepository)
+	if !ok {
+		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
+	}
+	occupants, err := limitsRepo.CountTasksByWorkflowStepExcludingTask(ctx, targetStep.ID, task.ID)
+	if err != nil {
+		return fmt.Errorf("count target workflow step tasks: %w", err)
+	}
+	if occupants >= targetStep.WIPLimit {
+		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d already occupied", targetStep.ID, targetStep.WIPLimit)
+	}
+	return nil
 }
 
 // handleTaskMoved handles manual task step changes (drag-and-drop, stepper "Move here").

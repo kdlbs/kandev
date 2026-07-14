@@ -128,6 +128,234 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 	return svc, eventBus, repo
 }
 
+func TestService_ListRepositoriesPrunesMissingTaskWorktreeRepository(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	taskRoot := filepath.Join(t.TempDir(), "tasks")
+	svc.discoveryConfig.TaskWorktreeRoots = []string{taskRoot}
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID:          "repo-orphaned-worktree",
+		WorkspaceID: "ws-1",
+		Name:        "orphaned-worktree",
+		SourceType:  sourceTypeLocal,
+		LocalPath:   filepath.Join(taskRoot, "deleted-task", "repo"),
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+
+	repositories, err := svc.ListRepositories(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repositories) != 0 {
+		t.Fatalf("ListRepositories returned %d repositories, want orphan pruned", len(repositories))
+	}
+	if _, err := repo.GetRepository(ctx, "repo-orphaned-worktree"); err == nil {
+		t.Fatal("orphaned task worktree repository remains live")
+	}
+
+	events := eventBus.GetPublishedEvents()
+	if len(events) != 1 || events[0].Type != "repository.deleted" {
+		t.Fatalf("published events = %#v, want one repository.deleted event", events)
+	}
+}
+
+func TestService_ListRepositoriesPreservesExistingAndUserOwnedRepositories(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	testRoot := t.TempDir()
+	taskRoot := filepath.Join(testRoot, "tasks")
+	existingTaskWorktree := filepath.Join(taskRoot, "active-task", "repo")
+	if err := os.MkdirAll(existingTaskWorktree, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	svc.discoveryConfig.TaskWorktreeRoots = []string{taskRoot}
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	for _, repository := range []*models.Repository{
+		{
+			ID:          "repo-active-worktree",
+			WorkspaceID: "ws-1",
+			Name:        "active-worktree",
+			SourceType:  sourceTypeLocal,
+			LocalPath:   existingTaskWorktree,
+		},
+		{
+			ID:          "repo-user-owned",
+			WorkspaceID: "ws-1",
+			Name:        "user-owned",
+			SourceType:  sourceTypeLocal,
+			LocalPath:   filepath.Join(testRoot, "unmounted-user-repo"),
+		},
+	} {
+		if err := repo.CreateRepository(ctx, repository); err != nil {
+			t.Fatalf("CreateRepository(%s): %v", repository.ID, err)
+		}
+	}
+
+	repositories, err := svc.ListRepositories(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repositories) != 2 {
+		t.Fatalf("ListRepositories returned %d repositories, want both preserved", len(repositories))
+	}
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("published events = %#v, want none", events)
+	}
+}
+
+func TestService_ListRepositoriesPreservesMissingTaskWorktreeWithResumableSession(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	taskRoot := filepath.Join(t.TempDir(), "tasks")
+	svc.discoveryConfig.TaskWorktreeRoots = []string{taskRoot}
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID:          "repo-active-session",
+		WorkspaceID: "ws-1",
+		Name:        "active-session",
+		SourceType:  sourceTypeLocal,
+		LocalPath:   filepath.Join(taskRoot, "active-task", "repo"),
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", Title: "Task"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID:           "task-repo-1",
+		TaskID:       "task-1",
+		RepositoryID: "repo-active-session",
+	}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		State:  models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateIdle,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			if err := repo.UpdateTaskSessionState(ctx, "session-1", state, ""); err != nil {
+				t.Fatalf("UpdateTaskSessionState: %v", err)
+			}
+			repositories, err := svc.ListRepositories(ctx, "ws-1")
+			if err != nil {
+				t.Fatalf("ListRepositories: %v", err)
+			}
+			if len(repositories) != 1 || repositories[0].ID != "repo-active-session" {
+				t.Fatalf("ListRepositories = %#v, want resumable repository preserved", repositories)
+			}
+		})
+	}
+	if _, err := repo.GetRepository(ctx, "repo-active-session"); err != nil {
+		t.Fatalf("resumable repository was deleted: %v", err)
+	}
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("published events = %#v, want none", events)
+	}
+}
+
+func TestService_ListRepositoriesPreservesRepositoryWhenPruningFails(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	taskRoot := filepath.Join(t.TempDir(), "tasks")
+	svc.discoveryConfig.TaskWorktreeRoots = []string{taskRoot}
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID:          "repo-prune-error",
+		WorkspaceID: "ws-1",
+		Name:        "prune-error",
+		SourceType:  sourceTypeLocal,
+		LocalPath:   filepath.Join(taskRoot, "deleted-task", "repo"),
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	svc.repoEntities = failingPruneRepository{RepositoryEntityRepository: repo}
+
+	repositories, err := svc.ListRepositories(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repositories) != 1 || repositories[0].ID != "repo-prune-error" {
+		t.Fatalf("ListRepositories = %#v, want repository preserved", repositories)
+	}
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("published events = %#v, want none", events)
+	}
+}
+
+func TestService_ListRepositoriesPreservesRepositoryWhenRetainedRowReadFails(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	taskRoot := filepath.Join(t.TempDir(), "tasks")
+	svc.discoveryConfig.TaskWorktreeRoots = []string{taskRoot}
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID:          "repo-read-error",
+		WorkspaceID: "ws-1",
+		Name:        "read-error",
+		SourceType:  sourceTypeLocal,
+		LocalPath:   filepath.Join(taskRoot, "active-task", "repo"),
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	svc.repoEntities = retainedRepositoryReadError{RepositoryEntityRepository: repo}
+
+	repositories, err := svc.ListRepositories(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ListRepositories: %v", err)
+	}
+	if len(repositories) != 1 || repositories[0].ID != "repo-read-error" {
+		t.Fatalf("ListRepositories = %#v, want repository preserved", repositories)
+	}
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("published events = %#v, want none", events)
+	}
+}
+
+type failingPruneRepository struct {
+	repository.RepositoryEntityRepository
+}
+
+func (failingPruneRepository) DeleteRepositoryIfNoActiveTaskSessions(context.Context, string) (bool, error) {
+	return false, errors.New("database unavailable")
+}
+
+type retainedRepositoryReadError struct {
+	repository.RepositoryEntityRepository
+}
+
+func (retainedRepositoryReadError) DeleteRepositoryIfNoActiveTaskSessions(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (retainedRepositoryReadError) GetRepository(context.Context, string) (*models.Repository, error) {
+	return nil, errors.New("database unavailable")
+}
+
 // Task tests
 
 func TestService_CreateTask(t *testing.T) {
@@ -849,6 +1077,58 @@ func TestService_CreateRepository_DefaultWorktreeBranchPrefix(t *testing.T) {
 	}
 	if !stored.PullBeforeWorktree {
 		t.Fatalf("expected stored pull_before_worktree to default to true")
+	}
+}
+
+func TestService_CreateRepository_CopyFilesSymlinkKeyword(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Test Repo",
+		CopyFiles:   ".env, .env.local:symlink",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+	if created.CopyFiles != ".env, .env.local:symlink" {
+		t.Fatalf("copy_files not persisted verbatim: %q", created.CopyFiles)
+	}
+}
+
+func TestService_CreateRepository_ColonBearingCopyFilesPath(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "Test Repo",
+		CopyFiles:   ".env.local:hardlink",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+	if created.CopyFiles != ".env.local:hardlink" {
+		t.Fatalf("copy_files not persisted verbatim: %q", created.CopyFiles)
+	}
+}
+
+func TestService_UpdateRepository_MalformedCopyFilesMode(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{WorkspaceID: "ws-1", Name: "Test Repo"})
+	if err != nil {
+		t.Fatalf("CreateRepository failed: %v", err)
+	}
+
+	bad := ":symlink"
+	_, err = svc.UpdateRepository(ctx, created.ID, &UpdateRepositoryRequest{CopyFiles: &bad})
+	if !errors.Is(err, ErrInvalidRepositorySettings) {
+		t.Fatalf("expected ErrInvalidRepositorySettings, got %v", err)
 	}
 }
 

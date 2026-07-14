@@ -1,7 +1,13 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import {
+  createWorkflowAction,
+  createWorkflowStepAction,
+  listWorkflowStepsAction,
+  updateWorkflowStepAction,
+} from "@/app/actions/workspaces";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
-import { useWorkflowStepActions } from "./workflow-card-actions";
+import { useWorkflowSaveActions, useWorkflowStepActions } from "./workflow-card-actions";
 
 vi.mock("@/app/actions/workspaces", () => ({
   createWorkflowAction: vi.fn(),
@@ -78,5 +84,74 @@ describe("useWorkflowStepActions", () => {
         .filter((s) => s.is_start_step)
         .map((s) => s.id),
     ).toEqual(["step-2"]);
+  });
+});
+
+describe("useWorkflowSaveActions", () => {
+  it("remaps template workflow pull sources between backend-created and added steps", async () => {
+    const createdWorkflowId = "wf-created" as Workflow["id"];
+    const templateName = "Template Step";
+    const addedName = "Added Step";
+    const backendTemplateId = "backend-template";
+    const backendAddedId = "backend-added";
+    const draftTemplateId = "draft-template";
+
+    vi.mocked(createWorkflowAction).mockResolvedValue({
+      ...workflow,
+      id: createdWorkflowId,
+      workflow_template_id: "template-1",
+    });
+    vi.mocked(listWorkflowStepsAction).mockResolvedValue({
+      steps: [
+        {
+          ...step(backendTemplateId, templateName, 0, true),
+          id: backendTemplateId,
+          workflow_id: createdWorkflowId,
+        },
+      ],
+      total: 1,
+    });
+    vi.mocked(createWorkflowStepAction).mockResolvedValue({
+      ...step(backendAddedId, addedName, 1, false),
+      id: backendAddedId,
+      workflow_id: createdWorkflowId,
+    });
+    vi.mocked(updateWorkflowStepAction).mockResolvedValue(
+      step(backendAddedId, addedName, 1, false),
+    );
+
+    const templateStep = {
+      ...step(draftTemplateId, templateName, 0, true),
+      pull_from_step_id: "draft-added",
+    };
+    const addedStep = {
+      ...step("draft-added", addedName, 1, false),
+      pull_from_step_id: draftTemplateId,
+    };
+    const { result } = renderHook(() =>
+      useWorkflowSaveActions({
+        workflow: { ...workflow, workflow_template_id: "template-1" },
+        isNewWorkflow: true,
+        workflowSteps: [templateStep, addedStep],
+        templateStepCount: 1,
+        onSaveWorkflow: vi.fn(),
+        onWorkflowCreated: vi.fn(),
+        toast: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleSaveWorkflow();
+    });
+
+    expect(createWorkflowStepAction).toHaveBeenCalledWith(
+      expect.objectContaining({ pull_from_step_id: "" }),
+    );
+    expect(updateWorkflowStepAction).toHaveBeenCalledWith(backendAddedId, {
+      pull_from_step_id: backendTemplateId,
+    });
+    expect(updateWorkflowStepAction).toHaveBeenCalledWith(backendTemplateId, {
+      pull_from_step_id: backendAddedId,
+    });
   });
 });

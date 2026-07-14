@@ -52,6 +52,8 @@ export type KanbanUpdatePayload = {
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
     show_in_command_panel?: boolean;
+    wip_limit?: number;
+    pull_from_step_id?: string | null;
   }>;
   tasks: Array<{
     id: string;
@@ -182,6 +184,8 @@ export type StepPayload = {
   show_in_command_panel?: boolean;
   auto_archive_after_hours?: number;
   agent_profile_id?: string;
+  wip_limit?: number;
+  pull_from_step_id?: string | null;
   /** Phase 2 (ADR-0004) UX hint — frontend-only. */
   stage_type?: "work" | "review" | "approval" | "custom";
   created_at?: string;
@@ -564,13 +568,4 @@ export type RunEventAppendedPayload = {
 };
 
 // Workspace file types (extracted to reduce file size)
-export {
-  type FileTreeNode,
-  type FileTreeResponse,
-  type FileContentResponse,
-  type FileSearchResponse,
-  type FileChangeEvent,
-  type FileChangeNotificationPayload,
-  type OpenFileTab,
-  FILE_EXTENSION_COLORS,
-} from "./workspace-files";
+export * from "./workspace-files";

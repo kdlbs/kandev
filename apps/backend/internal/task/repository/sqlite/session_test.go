@@ -478,8 +478,8 @@ func TestCountActiveTaskSessionsByRepository_NoSessions(t *testing.T) {
 }
 
 // TestCountActiveTaskSessionsByRepository_CountsActiveOnly verifies the join
-// counts sessions in active states (CREATED, STARTING, RUNNING,
-// WAITING_FOR_INPUT) and excludes sessions in terminal states.
+// counts sessions in active or resumable states (CREATED, STARTING, RUNNING,
+// IDLE, WAITING_FOR_INPUT) and excludes sessions in terminal states.
 func TestCountActiveTaskSessionsByRepository_CountsActiveOnly(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -487,6 +487,7 @@ func TestCountActiveTaskSessionsByRepository_CountsActiveOnly(t *testing.T) {
 	// Two active sessions across two tasks linked to the repo.
 	seedRepoLink(t, repo, "ws-a", "repo-a", "task-a1", "sess-a1", "RUNNING")
 	seedRepoLink(t, repo, "ws-a", "repo-a", "task-a2", "sess-a2", "WAITING_FOR_INPUT")
+	seedRepoLink(t, repo, "ws-a", "repo-a", "task-a4", "sess-a4", "IDLE")
 	// Terminal-state session linked to the repo — must NOT count.
 	seedRepoLink(t, repo, "ws-a", "repo-a", "task-a3", "sess-a3", "COMPLETED")
 	// Active session linked to a different repo — must NOT count.
@@ -496,8 +497,8 @@ func TestCountActiveTaskSessionsByRepository_CountsActiveOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if count != 2 {
-		t.Errorf("expected 2 active sessions, got %d", count)
+	if count != 3 {
+		t.Errorf("expected 3 active or resumable sessions, got %d", count)
 	}
 }
 

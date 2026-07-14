@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Icon } from "@tabler/icons-react";
 import type { GitHubIssue, GitHubPR } from "@/lib/types/github";
@@ -6,6 +6,7 @@ import {
   repositoryId,
   workspaceId,
   type Repository,
+  type Task,
   type Workflow,
   type WorkflowStep,
 } from "@/lib/types/http";
@@ -19,11 +20,16 @@ const TASK_WORKTREE_ROOT = "/root/.kandev/tasks";
 const TASK_WORKTREE_PATH = "/root/.kandev/tasks/pr-1541-fix-skip-cle_3bm/kdlbs-kandev";
 const REPO_URL = "https://github.com/kdlbs/kandev/pull/1567";
 const ISSUE_URL = "https://github.com/kdlbs/kandev/issues/1567";
+const LOCAL_REPO_ID = "local-repo";
 
 const mocks = vi.hoisted(() => ({
-  dialogProps: undefined as { initialValues?: Record<string, unknown> } | undefined,
+  dialogProps: undefined as
+    | { initialValues?: Record<string, unknown>; onSuccess?: (task: Task) => void }
+    | undefined,
   push: vi.fn(),
   createTaskPR: vi.fn(),
+  linkTaskIssue: vi.fn(),
+  upsertTaskIssue: vi.fn(),
 }));
 
 vi.mock("@/components/task-create-dialog", () => ({
@@ -37,8 +43,13 @@ vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.push }),
 }));
 
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: typeof mocks) => unknown) => selector(mocks),
+}));
+
 vi.mock("@/lib/api/domains/github-api", () => ({
   createTaskPR: mocks.createTaskPR,
+  linkTaskIssue: mocks.linkTaskIssue,
 }));
 
 const preset: TaskPreset = {
@@ -177,6 +188,8 @@ afterEach(() => {
   mocks.dialogProps = undefined;
   mocks.push.mockClear();
   mocks.createTaskPR.mockClear();
+  mocks.linkTaskIssue.mockClear();
+  mocks.upsertTaskIssue.mockClear();
 });
 
 describe("QuickTaskLauncher repository defaults", () => {
@@ -217,11 +230,11 @@ describe("QuickTaskLauncher repository defaults", () => {
 
   it("still preselects an ordinary matching local GitHub repo for issues", () => {
     const initialValues = renderIssueLauncher([
-      repo({ id: "local-repo", local_path: "/work/kandev" }),
+      repo({ id: LOCAL_REPO_ID, local_path: "/work/kandev" }),
     ]);
 
     expect(initialValues).toMatchObject({
-      repositoryId: "local-repo",
+      repositoryId: LOCAL_REPO_ID,
     });
     expect(initialValues?.githubUrl).toBeUndefined();
   });
@@ -251,5 +264,40 @@ describe("QuickTaskLauncher repository defaults", () => {
       prBaseBranch: "main",
     });
     expect(initialValues?.repositoryId).toBeUndefined();
+  });
+});
+
+describe("QuickTaskLauncher issue linking", () => {
+  it("links and immediately stores a newly created task for the launched issue", async () => {
+    const link = {
+      task_id: "task-1",
+      task_title: "Review: add Download option",
+      owner: "kdlbs",
+      repo: "kandev",
+      issue_number: 1567,
+      issue_url: ISSUE_URL,
+      issue_title: "add Download option",
+    };
+    mocks.linkTaskIssue.mockResolvedValue(link);
+    renderIssueLauncher([repo({ id: LOCAL_REPO_ID })]);
+
+    mocks.dialogProps?.onSuccess?.({ id: "task-1" } as Task);
+
+    expect(mocks.linkTaskIssue).toHaveBeenCalledWith("task-1", { issue: ISSUE_URL });
+    await waitFor(() => {
+      expect(mocks.upsertTaskIssue).toHaveBeenCalledWith(WORKSPACE_ID, link);
+    });
+    expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+  });
+
+  it("navigates when issue linking fails", async () => {
+    mocks.linkTaskIssue.mockRejectedValueOnce(new Error("offline"));
+    renderIssueLauncher([repo({ id: LOCAL_REPO_ID })]);
+
+    mocks.dialogProps?.onSuccess?.({ id: "task-1" } as Task);
+
+    expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+    await waitFor(() => expect(mocks.linkTaskIssue).toHaveBeenCalledTimes(1));
+    expect(mocks.upsertTaskIssue).not.toHaveBeenCalled();
   });
 });

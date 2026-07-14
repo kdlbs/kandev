@@ -2,6 +2,31 @@
 
 All notable changes to Kandev.
 
+## 0.78.0 - 2026-07-13
+
+### Features
+
+- add workflow WIP pull system ([#1613](https://github.com/kdlbs/kandev/pull/1613))
+- add per-file copy/symlink materialization per repository ([#1650](https://github.com/kdlbs/kandev/pull/1650)) by @jcoatelen-ledger
+- support multiple concurrent Sentry instances ([#1469](https://github.com/kdlbs/kandev/pull/1469)) by @ClemDNL
+- add durable plan implement action ([#1645](https://github.com/kdlbs/kandev/pull/1645))
+
+### Bug Fixes
+
+- use long press for mobile task actions ([#1673](https://github.com/kdlbs/kandev/pull/1673))
+- preserve colon paths in copy files ([#1674](https://github.com/kdlbs/kandev/pull/1674))
+- prune orphaned task worktree repositories ([#1667](https://github.com/kdlbs/kandev/pull/1667))
+- clarify plan mode workflow guidance ([#1666](https://github.com/kdlbs/kandev/pull/1666))
+- guard agent profile orphan cleanup ([#1659](https://github.com/kdlbs/kandev/pull/1659))
+- show pending task input before messages load ([#1663](https://github.com/kdlbs/kandev/pull/1663))
+- stop unstable use(params) promise from hiding office tree ([#1664](https://github.com/kdlbs/kandev/pull/1664))
+- use maintained codex acp bridge ([#1656](https://github.com/kdlbs/kandev/pull/1656))
+- wrap Utility Agents sub-sections in bounded cards ([#1654](https://github.com/kdlbs/kandev/pull/1654)) by @ClemDNL
+- simplify walkthrough prompt requests ([#1660](https://github.com/kdlbs/kandev/pull/1660))
+- show implement button whenever plan mode is active ([#1646](https://github.com/kdlbs/kandev/pull/1646))
+- support markdown preview comments ([#1648](https://github.com/kdlbs/kandev/pull/1648))
+- isolate saved layouts from stale sessions ([#1649](https://github.com/kdlbs/kandev/pull/1649))
+
 ## 0.77.0 - 2026-07-10
 
 ### Features

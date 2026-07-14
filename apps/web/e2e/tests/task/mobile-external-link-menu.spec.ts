@@ -40,7 +40,21 @@ test.describe("Mobile sidebar — external link menu", () => {
       hasText: "Mobile external link task",
     });
     await expect(taskRow).toBeVisible({ timeout: 10_000 });
-    await taskRow.getByRole("button", { name: "Task actions" }).click();
+    await taskRow.dispatchEvent("pointerdown", {
+      pointerType: "touch",
+      isPrimary: true,
+      button: 0,
+      clientX: 120,
+      clientY: 240,
+    });
+    await testPage.waitForTimeout(1000);
+    await taskRow.dispatchEvent("pointerup", {
+      pointerType: "touch",
+      isPrimary: true,
+      button: 0,
+      clientX: 120,
+      clientY: 240,
+    });
 
     const linkTrigger = testPage.getByRole("menuitem", { name: /^Link$/ });
     await expect(linkTrigger).toBeVisible();

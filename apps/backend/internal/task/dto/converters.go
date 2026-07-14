@@ -20,6 +20,8 @@ func FromWorkflowStep(step *wfmodels.WorkflowStep) WorkflowStepDTO {
 		ShowInCommandPanel:    step.ShowInCommandPanel,
 		AutoArchiveAfterHours: step.AutoArchiveAfterHours,
 		AgentProfileID:        step.AgentProfileID,
+		WIPLimit:              step.WIPLimit,
+		PullFromStepID:        step.PullFromStepID,
 		StageType:             string(step.StageType),
 	}
 	if hasStepEvents(step.Events) {

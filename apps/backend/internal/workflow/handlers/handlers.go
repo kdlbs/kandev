@@ -162,7 +162,7 @@ func (h *Handlers) httpCreateStep(c *gin.Context) {
 	resp, err := h.controller.CreateStep(c.Request.Context(), req)
 	if err != nil {
 		h.logger.Error("failed to create step", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create step"})
+		h.writeStepMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, resp.Step)
@@ -178,10 +178,29 @@ func (h *Handlers) httpUpdateStep(c *gin.Context) {
 	resp, err := h.controller.UpdateStep(c.Request.Context(), req)
 	if err != nil {
 		h.logger.Error("failed to update step", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update step"})
+		h.writeStepMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, resp.Step)
+}
+
+func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
+	msg := strings.ToLower(err.Error())
+	switch {
+	case isStepValidationError(msg):
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	case strings.Contains(msg, "not found"):
+		c.JSON(http.StatusNotFound, gin.H{"error": "Step not found"})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save step"})
+	}
+}
+
+func isStepValidationError(msg string) bool {
+	return strings.Contains(msg, "wip_limit must be non-negative") ||
+		strings.Contains(msg, "pull_from_step_id") ||
+		strings.Contains(msg, "same workflow") ||
+		strings.Contains(msg, "pull cycle")
 }
 
 func (h *Handlers) httpDeleteStep(c *gin.Context) {
