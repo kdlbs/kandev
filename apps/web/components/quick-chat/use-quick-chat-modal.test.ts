@@ -192,7 +192,7 @@ describe("useAgentSelection — happy path", () => {
     const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
 
     await act(async () => {
-      await result.current.handleSelectAgent("agent-a", vi.fn());
+      await result.current.handleSelectAgent("agent-a");
     });
 
     expect(mockStartQuickChat).toHaveBeenCalledWith(
