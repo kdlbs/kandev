@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -334,6 +335,29 @@ func (c *Client) HasAgentStream() bool {
 }
 
 // readUpdatesStream is the read loop for the agent updates WebSocket stream.
+//
+// Agent events (message_chunk, tool_call, complete, ...) are NOT run inline on
+// this loop. They are handed, in order, to a single dispatchAgentEvents worker
+// goroutine through an unbounded reader-side queue. This keeps the read loop
+// free to deliver request/response frames (e.g. the agent.cancel response) even
+// while an event handler is blocked.
+//
+// Why this matters: handler → orchestrator.handleAgentReady acquires the
+// per-session cancelInFlight guard. During a user cancel, Service.CancelAgent
+// holds that guard while blocked in agentctl.Client.Cancel → sendStreamRequest,
+// waiting for the agent.cancel response frame. If the `complete` event's
+// handler ran inline here, this loop would block on the guard and never read
+// the response frame the guard holder is waiting for — a cross-goroutine
+// deadlock (both sides waited ~forever in production; see the goroutine dump on
+// task 544afdae). Offloading handler execution lets the response frame land
+// immediately, the cancel returns, the guard releases, and the deferred
+// handleAgentReady then safely no-ops.
+//
+// The queue is unbounded on purpose: a fixed buffered channel would let a burst
+// of events pile up behind a blocked handler and then backpressure the read
+// loop on send, re-wedging response-frame delivery exactly as the inline
+// version did. enqueue never blocks the read loop, so no volume of events can
+// starve the cancel response.
 func (c *Client) readUpdatesStream(
 	ctx context.Context,
 	conn *websocket.Conn,
@@ -342,10 +366,32 @@ func (c *Client) readUpdatesStream(
 	onDisconnect func(err error),
 	writeMessage func([]byte) error,
 ) {
+	// Ordered, single-worker dispatch preserves per-stream event ordering while
+	// decoupling handler execution from response-frame delivery.
+	events := newAgentEventQueue()
+	workerDone := make(chan struct{})
+	go c.dispatchAgentEvents(handler, events, workerDone)
+
 	var lastErr error
 	defer func() {
-		// Clean up pending requests before signaling disconnect
+		// Clean up pending requests BEFORE draining the worker. On a
+		// connection drop mid-cancel, a worker handler
+		// (orchestrator.handleAgentReady) can block acquiring the per-session
+		// cancelInFlight guard that an in-flight Service.CancelAgent holds
+		// while it waits inside sendStreamRequest for the agent.cancel
+		// response frame. cleanupPendingRequests closes that pending response
+		// channel, unblocking CancelAgent so it releases the guard, which lets
+		// the blocked handler finish and the worker exit. Draining first
+		// (<-workerDone) would wait on that handler forever, so cleanup could
+		// never run — the exact deadlock class this stream rework fixes, but on
+		// the disconnect path.
 		c.cleanupPendingRequests()
+
+		// Stop the worker and wait for the in-flight handler to unwind before
+		// signaling disconnect, so the drain barrier semantics callers rely on
+		// (promptDoneCh signaling, status updates) still hold.
+		events.close()
+		<-workerDone
 
 		c.mu.Lock()
 		c.agentStreamConn = nil
@@ -403,7 +449,94 @@ func (c *Client) readUpdatesStream(
 		}
 
 		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID, message)
+		// Hand off to the ordered worker rather than running handler inline.
+		// enqueue never blocks the read loop, so a burst of events behind a
+		// blocked handler can't backpressure delivery of response frames.
+		events.enqueue(event)
+	}
+}
+
+// dispatchAgentEvents runs the agent-event handler sequentially for every event
+// pushed onto the queue, preserving arrival order. It is the single consumer of
+// the queue; readUpdatesStream closes the queue on teardown and waits on
+// workerDone so an in-flight handler finishes before disconnect is signaled.
+func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEventQueue, done chan<- struct{}) {
+	defer close(done)
+	for {
+		event, ok := events.dequeue()
+		if !ok {
+			return
+		}
 		handler(event)
+	}
+}
+
+// agentEventQueue is an unbounded FIFO queue decoupling the stream read loop
+// (producer) from the ordered event-dispatch worker (consumer). enqueue never
+// blocks, so no volume of events can backpressure the read loop and starve
+// response-frame delivery. A single-slot notify channel wakes the worker
+// without accumulating a signal per event.
+type agentEventQueue struct {
+	mu     sync.Mutex
+	items  []AgentEvent
+	notify chan struct{}
+	closed bool
+}
+
+func newAgentEventQueue() *agentEventQueue {
+	return &agentEventQueue{notify: make(chan struct{}, 1)}
+}
+
+// enqueue appends an event and wakes the worker. It is a no-op after close.
+func (q *agentEventQueue) enqueue(event AgentEvent) {
+	q.mu.Lock()
+	if q.closed {
+		q.mu.Unlock()
+		return
+	}
+	q.items = append(q.items, event)
+	q.mu.Unlock()
+	select {
+	case q.notify <- struct{}{}:
+	default:
+	}
+}
+
+// close marks the queue closed and wakes the worker so it can drain any
+// remaining items and then exit.
+func (q *agentEventQueue) close() {
+	q.mu.Lock()
+	q.closed = true
+	q.mu.Unlock()
+	select {
+	case q.notify <- struct{}{}:
+	default:
+	}
+}
+
+// dequeue returns the next event in FIFO order, blocking until one is available.
+// It reports ok=false only once the queue is closed AND fully drained, so a
+// close never discards already-enqueued events.
+func (q *agentEventQueue) dequeue() (AgentEvent, bool) {
+	for {
+		q.mu.Lock()
+		if len(q.items) > 0 {
+			event := q.items[0]
+			// Zero the vacated slot before advancing so the evicted event's
+			// maps/slices/pointer fields (tool-call payloads can be large)
+			// become collectable now, not only when the whole backing array is
+			// freed at stream shutdown.
+			q.items[0] = AgentEvent{}
+			q.items = q.items[1:]
+			q.mu.Unlock()
+			return event, true
+		}
+		if q.closed {
+			q.mu.Unlock()
+			return AgentEvent{}, false
+		}
+		q.mu.Unlock()
+		<-q.notify
 	}
 }
 

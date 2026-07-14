@@ -1709,9 +1709,12 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	// Release clarification recovery's cancel; it completes, then it
-	// prompts its own retry synchronously while still holding the guard —
-	// starting a fresh turn for this session.
+	// Release clarification recovery's cancel; it completes, marks the
+	// session busy under the guard, then hands its retry prompt off to the
+	// async take-and-dispatch path and RELEASES the guard before that
+	// (potentially long-blocking) prompt runs — so a jammed agent can no
+	// longer starve the user's Cancel button. retryClarificationAfterCancel
+	// therefore returns promptly rather than blocking on executor.Prompt.
 	close(agentMgr.cancelAgentBlock)
 	select {
 	case <-recoveryDone:
@@ -1734,6 +1737,15 @@ func TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery(t *te
 	// cancel attempt entirely rather than stomping on the recovery's fresh
 	// turn.
 	assert.Equal(t, int32(1), agentMgr.cancelAgentCalls.Load())
+
+	// The retry prompt is dispatched on the async executeQueuedMessage
+	// goroutine (off the guard), so wait for it to land rather than reading
+	// synchronously.
+	require.Eventually(t, func() bool {
+		agentMgr.mu.Lock()
+		defer agentMgr.mu.Unlock()
+		return len(agentMgr.capturedPrompts) == 1
+	}, 2*time.Second, 10*time.Millisecond, "expected exactly one prompt — clarification recovery's retry")
 
 	agentMgr.mu.Lock()
 	prompts := append([]string(nil), agentMgr.capturedPrompts...)
@@ -1825,7 +1837,13 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 	firstPrompt := <-promptAccepted
 	secondPrompt := <-promptAccepted
 	require.Equal(t, "clarification answer", firstPrompt.Prompt)
-	require.True(t, firstPrompt.DispatchOnly)
+	// The clarification retry no longer relies on dispatchOnly to avoid
+	// starving the guard: it is handed to the async take-and-dispatch path
+	// (executeQueuedMessage) on a background goroutine, so
+	// retryClarificationAfterCancel returns before executor.Prompt runs even
+	// though the queued dispatch itself keeps the normal completion-wait
+	// (dispatchOnly=false) behavior.
+	require.False(t, firstPrompt.DispatchOnly, "queue-dispatched retry keeps the normal completion-wait behavior; the guard is released via the async hand-off, not dispatchOnly")
 	require.Equal(t, "parent steer", secondPrompt.Prompt)
 	require.False(t, secondPrompt.DispatchOnly, "normal queued dispatch keeps its existing completion-wait behavior")
 

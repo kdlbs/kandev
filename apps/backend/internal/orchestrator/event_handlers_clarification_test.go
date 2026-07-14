@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -601,6 +604,131 @@ func TestClarificationWatchdog_ExpiresAndClearsEntry(t *testing.T) {
 	if got := countClarificationWatchdogs(svc); got != 0 {
 		t.Fatalf("expected watchdog map to be empty after timeout, got %d", got)
 	}
+}
+
+// TestRetryClarificationAfterCancel_DoesNotStarveUserCancel is the regression
+// test for the production hang where a clarification-timeout recovery left a
+// session permanently unstoppable. retryClarificationAfterCancel used to send
+// its retry prompt inline while holding the per-session cancelInFlight guard.
+// executor.Prompt blocks until a jammed agent accepts the prompt (observed:
+// minutes, stuck in an MCP call), so the guard stayed held the whole time —
+// and every user Cancel-button click TryLocks that same guard, so it was
+// starved and silently no-op'd ("cancel already in flight; skipping
+// duplicate"), leaving the session stuck RUNNING forever.
+//
+// This pins the fix: the retry prompt is dispatched on a background goroutine
+// off the guard, so even while that prompt is blocked in-flight, a concurrent
+// user CancelAgent still acquires the guard and reaches agentManager.CancelAgent.
+func TestRetryClarificationAfterCancel_DoesNotStarveUserCancel(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	retryPromptBlock := make(chan struct{})
+	retryPromptEntered := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+	}
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	// The retry prompt (the only prompt this test dispatches) blocks in-flight,
+	// standing in for a jammed agent that never accepts the resume prompt.
+	var enteredOnce sync.Once
+	agentMgr.promptAgentFunc = func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
+		enteredOnce.Do(func() { close(retryPromptEntered) })
+		<-retryPromptBlock
+		return &executor.PromptResult{}, nil
+	}
+	t.Cleanup(func() { close(retryPromptBlock) })
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	// Kick off the clarification-timeout recovery. Its silent cancel succeeds
+	// (mock CancelAgent returns nil), then it hands the retry prompt to the
+	// async path and returns — releasing the guard — even though that prompt is
+	// still blocked inside PromptAgent.
+	recoveryDone := make(chan struct{})
+	go func() {
+		svc.retryClarificationAfterCancel(ctx, clarificationAnsweredData{
+			TaskID: "task1", SessionID: "session1",
+		}, "the clarification answer", fmt.Errorf("wrap: %w", ErrAgentPromptInProgress))
+		close(recoveryDone)
+	}()
+
+	select {
+	case <-retryPromptEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the async retry prompt to reach the agent")
+	}
+	select {
+	case <-recoveryDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("retryClarificationAfterCancel blocked on the in-flight retry prompt instead of releasing the guard")
+	}
+
+	// The recovery's silent cancel was the first agent-cancel call.
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 agent cancel from recovery's silent cancel, got %d", got)
+	}
+
+	// The user clicks Cancel while the retry prompt is still blocked in-flight.
+	// Before the fix this returned immediately as a starved no-op; now it must
+	// acquire the guard and actually reach agentManager.CancelAgent.
+	if err := svc.CancelAgent(ctx, "session1"); err != nil {
+		t.Fatalf("user CancelAgent returned error: %v", err)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
+		t.Fatalf("user cancel was starved by a leaked guard: expected 2 agent cancel calls, got %d", got)
+	}
+}
+
+// TestDispatchClarificationResumeLocked_ReturnPaths pins the two outcomes that
+// are deterministically reachable at this seam — a genuine error (nil queue)
+// and an immediate dispatch (nil) — so the caller can tell a real failure from
+// success and log accordingly (bot review on PR #1680: the old bool return
+// logged an alarming "failed to resume agent" error even when the answer was
+// safely queued).
+//
+// The third outcome, errClarificationResumeQueuedForDrain, is not unit-testable
+// here: takeAndDispatchEntryLocked always finds and dispatches the entry this
+// function just queued, so the sentinel only arises when a concurrent take
+// removes that entry first (targeted take misses) AND a rival dispatch is
+// already settling (drainQueuedMessageForPromptableSessionLocked backs off on
+// isQueuedDispatchInFlight). That race is driven end-to-end by
+// TestQueueAndInterruptForPeerMessage_RacesClarificationTimeoutRecovery, which
+// asserts the answer stays queued for the recovered turn's own natural drain.
+func TestDispatchClarificationResumeLocked_ReturnPaths(t *testing.T) {
+	ctx := context.Background()
+	data := clarificationAnsweredData{TaskID: "t1", SessionID: "s1"}
+
+	t.Run("nil message queue is a genuine error", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+		svc.messageQueue = nil
+
+		err := svc.dispatchClarificationResumeLocked(ctx, data, "answer")
+		if err == nil {
+			t.Fatal("expected an error when the message queue is not configured")
+		}
+		if errors.Is(err, errClarificationResumeQueuedForDrain) {
+			t.Fatalf("nil queue must not be reported as the benign queued-for-drain case: %v", err)
+		}
+	})
+
+	t.Run("immediate dispatch returns nil", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+		svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+		seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+		seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+		if err := svc.dispatchClarificationResumeLocked(ctx, data, "answer"); err != nil {
+			t.Fatalf("expected nil on immediate dispatch, got %v", err)
+		}
+	})
 }
 
 func countClarificationWatchdogs(svc *Service) int {
