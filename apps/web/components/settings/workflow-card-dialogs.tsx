@@ -132,6 +132,7 @@ type StepDeleteDialogProps = {
   targetStep: string;
   setTargetStep: (id: string) => void;
   loading: boolean;
+  pending: boolean;
   onMigrateAndDelete: () => Promise<void>;
   onDeleteAndTasks: () => Promise<void>;
 };
@@ -144,6 +145,7 @@ export function StepDeleteDialog({
   targetStep,
   setTargetStep,
   loading,
+  pending,
   onMigrateAndDelete,
   onDeleteAndTasks,
 }: StepDeleteDialogProps) {
@@ -162,7 +164,7 @@ export function StepDeleteDialog({
         {stepsForMigration.length > 0 && (
           <div className="space-y-2 py-2">
             <Label>Target Step</Label>
-            <Select value={targetStep} onValueChange={setTargetStep}>
+            <Select value={targetStep} onValueChange={setTargetStep} disabled={loading || pending}>
               <SelectTrigger>
                 <SelectValue placeholder="Select step" />
               </SelectTrigger>
@@ -175,6 +177,11 @@ export function StepDeleteDialog({
               </SelectContent>
             </Select>
           </div>
+        )}
+        {pending && !loading && (
+          <p className="text-sm text-muted-foreground" role="status">
+            Waiting for the failed change to be retried.
+          </p>
         )}
         <DialogFooter>
           <Button
@@ -189,7 +196,7 @@ export function StepDeleteDialog({
             <Button
               type="button"
               onClick={onMigrateAndDelete}
-              disabled={!targetStep || loading}
+              disabled={!targetStep || loading || pending}
               className="cursor-pointer"
             >
               {loading ? "Migrating..." : "Migrate & Delete Step"}
@@ -199,7 +206,7 @@ export function StepDeleteDialog({
             type="button"
             variant="destructive"
             onClick={onDeleteAndTasks}
-            disabled={loading}
+            disabled={loading || pending}
             className="cursor-pointer"
           >
             Delete Step & Tasks
