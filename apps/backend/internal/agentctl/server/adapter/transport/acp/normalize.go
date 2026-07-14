@@ -24,6 +24,7 @@ const (
 	toolTypeGeneric = "tool_call"
 
 	toolStatusComplete   = "complete"
+	toolStatusCompleted  = "completed"
 	toolStatusError      = "error"
 	toolStatusInProgress = "in_progress"
 	toolStatusCancelled  = "cancelled"

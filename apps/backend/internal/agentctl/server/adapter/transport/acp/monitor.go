@@ -456,7 +456,7 @@ func (a *Adapter) captureReplayMonitor(sessionID string, u acp.SessionUpdate) {
 		// post-replay sweep doesn't double-emit a cancellation.
 		if tcu.Status != nil {
 			s := string(*tcu.Status)
-			if s == "completed" || s == "failed" || s == toolStatusCancelled {
+			if s == toolStatusCompleted || s == "failed" || s == toolStatusCancelled {
 				a.dropMonitorByToolCallID(sessionID, toolCallID)
 			}
 		}

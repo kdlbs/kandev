@@ -149,7 +149,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	}
 	// Normalize ACP status spellings for frontend and lifecycle consistency.
 	switch status {
-	case "completed":
+	case toolStatusCompleted:
 		status = toolStatusComplete
 	case "failed":
 		status = toolStatusError
