@@ -152,6 +152,26 @@ func TestNormalizeShellToolUpdateKeepsExplicitStderrTruncation(t *testing.T) {
 	require.True(t, payload.ShellExec().Output.Truncated)
 }
 
+func TestNormalizeShellToolUpdateClearsStdoutTruncationOnShortReplacement(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "test-command"},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output": map[string]any{"data": "authoritative stdout"}},
+		nil,
+		strings.Repeat("x", maxShellOutputBytes+1),
+	)
+
+	require.Equal(t, "authoritative stdout", payload.ShellExec().Output.Stdout)
+	require.False(t, payload.ShellExec().Output.Truncated)
+}
+
 func TestNormalizeShellToolUpdateAppendsNonCumulativeLiveOutput(t *testing.T) {
 	t.Parallel()
 

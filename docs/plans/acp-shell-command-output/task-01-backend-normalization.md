@@ -47,7 +47,7 @@ Report the normalization API chosen, provider precedence, truncation behavior, t
 
 ## Completion Report
 
-- Added `NormalizeShellToolUpdate` and final-result normalization with independent stdout/stderr presence, explicit-field precedence, nullable exit codes, 256 KiB UTF-8 tail retention, and sticky combined truncation state.
+- Added `NormalizeShellToolUpdate` and final-result normalization with independent stdout/stderr presence and truncation state, explicit-field precedence, optional exit codes, and 256 KiB UTF-8 tail retention.
 - Covered Codex, Claude, OpenCode, and Auggie final shapes, malformed/absent exits, precedence, live append/replace behavior, partial stream merges, and truncation.
 - Changed `shell_output.go`, `shell_output_test.go`, `normalize.go`, `normalize_test.go`, and the normalized stream payload type.
 - Targeted ACP adapter tests, full backend tests, formatting, and backend lint passed. No blockers remain; new provider-specific shapes require new fixtures.

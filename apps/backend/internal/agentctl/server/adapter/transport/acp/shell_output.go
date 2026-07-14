@@ -12,12 +12,13 @@ import (
 const maxShellOutputBytes = 256 * 1024
 
 type normalizedShellResult struct {
-	exitCode  *int
-	stdout    string
-	stderr    string
-	hasStdout bool
-	hasStderr bool
-	truncated bool
+	exitCode        *int
+	stdout          string
+	stderr          string
+	hasStdout       bool
+	hasStderr       bool
+	stdoutTruncated bool
+	stderrTruncated bool
 }
 
 func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
@@ -28,12 +29,14 @@ func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
 	output := ensureShellOutput(payload)
 	if normalized.hasStdout {
 		output.Stdout = normalized.stdout
+		output.StdoutTruncated = normalized.stdoutTruncated
 	}
 	if normalized.hasStderr {
 		output.Stderr = normalized.stderr
+		output.StderrTruncated = normalized.stderrTruncated
 	}
 	if normalized.hasStdout || normalized.hasStderr {
-		output.Truncated = output.Truncated || normalized.truncated
+		syncShellTruncation(output)
 	}
 	if normalized.exitCode != nil {
 		output.ExitCode = normalized.exitCode
@@ -87,21 +90,31 @@ func ensureShellOutput(payload *streams.ShellExecPayload) *streams.ShellExecOutp
 	if payload.Output == nil {
 		payload.Output = &streams.ShellExecOutput{}
 	}
+	if payload.Output.Truncated && !payload.Output.StdoutTruncated && !payload.Output.StderrTruncated {
+		payload.Output.StdoutTruncated = payload.Output.Stdout != ""
+		payload.Output.StderrTruncated = payload.Output.Stderr != ""
+	}
 	return payload.Output
+}
+
+func syncShellTruncation(output *streams.ShellExecOutput) {
+	output.Truncated = output.StdoutTruncated || output.StderrTruncated
 }
 
 func appendShellStdout(payload *streams.ShellExecPayload, data string) {
 	output := ensureShellOutput(payload)
 	bounded, truncated := boundShellOutput(output.Stdout + data)
 	output.Stdout = bounded
-	output.Truncated = output.Truncated || truncated
+	output.StdoutTruncated = output.StdoutTruncated || truncated
+	syncShellTruncation(output)
 }
 
 func replaceShellStdout(payload *streams.ShellExecPayload, data string) {
 	output := ensureShellOutput(payload)
 	bounded, truncated := boundShellOutput(data)
 	output.Stdout = bounded
-	output.Truncated = output.Truncated || truncated
+	output.StdoutTruncated = truncated
+	syncShellTruncation(output)
 }
 
 func replaceOrAppendTerminalOutput(payload *streams.ShellExecPayload, data string) {
@@ -215,17 +228,15 @@ func normalizeShellResultMap(result map[string]any) normalizedShellResult {
 		}
 	}
 
-	normalized.stdout, normalized.truncated = boundShellOutput(normalized.stdout)
-	var stderrTruncated bool
-	normalized.stderr, stderrTruncated = boundShellOutput(normalized.stderr)
-	normalized.truncated = normalized.truncated || stderrTruncated
+	normalized.stdout, normalized.stdoutTruncated = boundShellOutput(normalized.stdout)
+	normalized.stderr, normalized.stderrTruncated = boundShellOutput(normalized.stderr)
 	return normalized
 }
 
 func normalizeShellText(output string) normalizedShellResult {
 	if !hasEmbeddedShellTags(output) {
 		stdout, truncated := boundShellOutput(output)
-		return normalizedShellResult{stdout: stdout, hasStdout: true, truncated: truncated}
+		return normalizedShellResult{stdout: stdout, hasStdout: true, stdoutTruncated: truncated}
 	}
 
 	stdout, hasStdout := embeddedShellField(output, "output")
@@ -246,10 +257,8 @@ func normalizeShellText(output string) normalizedShellResult {
 		result.hasStdout = true
 	}
 
-	result.stdout, result.truncated = boundShellOutput(result.stdout)
-	var stderrTruncated bool
-	result.stderr, stderrTruncated = boundShellOutput(result.stderr)
-	result.truncated = result.truncated || stderrTruncated
+	result.stdout, result.stdoutTruncated = boundShellOutput(result.stdout)
+	result.stderr, result.stderrTruncated = boundShellOutput(result.stderr)
 	return result
 }
 

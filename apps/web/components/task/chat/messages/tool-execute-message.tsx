@@ -6,6 +6,7 @@ import { GridSpinner } from "@/components/grid-spinner";
 import { transformPathsInText } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { ExpandableRow } from "./expandable-row";
+import { normalizeToolCallStatus } from "./tool-status";
 import { useExpandState } from "./use-expand-state";
 import type { ShellExecOutput, ToolCallMetadata } from "../types";
 
@@ -134,7 +135,7 @@ function ExecuteOutputContent({
 
 function parseExecuteMetadata(comment: Message) {
   const metadata = comment.metadata as ToolCallMetadata | undefined;
-  const status = metadata?.status === "in_progress" ? "running" : metadata?.status;
+  const status = normalizeToolCallStatus(metadata?.status);
   const shellExec = metadata?.normalized?.shell_exec;
   const output = shellExec?.output;
   const workDir = shellExec?.work_dir;
