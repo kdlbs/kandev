@@ -83,6 +83,10 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 ### GitHub Operations
 Skills use `gh` CLI by default. If a `gh` command fails (not installed, not authenticated, etc.), use whatever GitHub tools are available in the environment (MCP GitHub tools, API tools, etc.) to accomplish the same operation. The goal is the same — the tool may differ.
 
+For multiline Markdown issue or PR bodies, write the body to a file and pass it
+with the relevant `gh ... --body-file <path>` option. Do not send escaped
+newlines through `--body`; GitHub will render them literally.
+
 For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
 
 When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
@@ -90,6 +94,12 @@ When a Kandev system message references an MCP tool that is not visible in the a
 ### Kandev Task Creation
 
 When creating follow-up or delegated Kandev work from an active task, use `create_task_kandev` with `parent_id: "self"` when the work is related. That preserves workspace, workflow, repository, agent profile, and executor context from the current task. For genuinely unrelated top-level tasks, do not rely on workspace defaults when the user expects continuity; explicitly preserve the current task's `agent_profile_id` / `executor_profile_id`, or ask if the intended profile is ambiguous.
+
+For remediation discovered while reviewing a PR that must start after the PR
+merges, create a related subtask with `parent_id: "self"`,
+`workspace_mode: "new_workspace"`, and `base_branch: "main"`; otherwise a
+same-repository subtask inherits the reviewed branch. Set `start_agent: false`
+when the follow-up is intentionally queued until merge.
 
 ### Third-party integrations
 

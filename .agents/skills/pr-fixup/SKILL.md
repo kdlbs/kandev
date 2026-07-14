@@ -17,7 +17,7 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 - **`/e2e`** — Read for debugging guidance when E2E tests fail in CI. Covers test patterns, run commands, failure triage, and local reproduction.
 - **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
 
-Prefer the `pr-poller` and `verify` helpers when the runtime supports delegated helpers. If runtime policy forbids delegated helpers/subagents unless explicitly requested by the user, treat helper delegation as unavailable and use the direct-command fallback. Do not substitute a generic/general subagent for polling; it returns too slowly for the 30s cadence and can look hung. If helper delegation is unavailable, follow the direct-command fallback sections below and keep the same output contract: compact CI state, compact review state, bounded polling, and full local verification before pushing.
+Prefer the `pr-poller` and `verify` helpers when the runtime supports delegated helpers. If runtime policy forbids delegated helpers/subagents unless explicitly requested by the user, or either helper fails to start or initialize, treat helper delegation as unavailable and use the direct-command fallback. Do not substitute a generic/general subagent for polling; it returns too slowly for the 30s cadence and can look hung. If helper delegation is unavailable, follow the direct-command fallback sections below and keep the same output contract: compact CI state, compact review state, bounded polling, and full local verification before pushing.
 
 ## Context
 
@@ -28,7 +28,9 @@ Prefer the `pr-poller` and `verify` helpers when the runtime supports delegated 
 
 The first thing you do — before fetching PR state, before reading logs, before any fixes — is create a task list for the full pipeline. This is non-negotiable because it keeps you accountable to the process and lets the user see where you are.
 
-Create these tasks immediately (use your task/todo tracking tool if available):
+Create these tasks immediately in the current session's todo/checklist tool. Do
+not create Kandev subtasks or persistent work items unless the user explicitly
+requests task tracking:
 
 1. **Gather PR state** — Use `pr-poller` when available; otherwise gather compact CI + bot review state via `scripts/pr-state`; always check PR mergeability and local conflict state
 2. **Fix failing CI checks** — Read failing run logs (via `scripts/run-quiet gh-run -- gh run view ...`), fix issues, run E2E tests locally if needed

@@ -44,6 +44,7 @@ If task has no UI surface, say why this skill does not apply and continue.
    - In this repo, name mobile test files `mobile-*.spec.ts` so the `mobile-chrome` Playwright project picks them up automatically.
    - If no mobile project exists, configure the test or project with a realistic mobile viewport plus touch/mobile settings.
    - Cover mobile-specific controls such as drawers, overflow menus, stacked actions, responsive tables, or bottom controls.
+   - When a touch-only control is replaced or hidden, run `rg` across mobile E2E tests for the removed control. Replace every affected interaction with the intended gesture or alternate control, then run those tests together.
 
 5. Verify visually and behaviorally.
    - Run the narrowest relevant viewport locally or with screenshots when possible.
@@ -98,6 +99,7 @@ test.describe("feature on mobile", () => {
 - Mobile path has designed layout and interaction behavior.
 - Required controls are reachable by touch.
 - No required workflow depends on hover, wide viewport, or hidden desktop-only UI.
+- Mobile E2E tests no longer invoke touch controls that the change replaced or hid.
 - Mobile Playwright coverage exists or absence is justified.
 - Focused rendered/visual verification was run for UI tweaks, or exact "not run" reason is reported.
 - Focused tests were run, or exact blocker is reported.

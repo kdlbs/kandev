@@ -21,6 +21,21 @@ Determine the right diff scope:
 - **Local changes**: `git diff --name-only` (unstaged) and `git diff --cached --name-only` (staged)
 - **PR review**: `git diff origin/<base_branch>...HEAD --name-only` to diff against the base branch
 
+For an existing PR, first confirm the exact head under review. Do not assume the
+local checkout is current: inspect the PR's base branch and head SHA, fetch the
+head if needed, and use that immutable SHA in the diff. If the current PR head
+cannot be fetched, say so rather than reporting a stale checkout as a review of
+the current PR.
+
+Record the base and head SHA for each review round. A new contributor push starts
+a new round: reassess prior findings and the verdict against the new head, and
+verify checks or workflow results for that head rather than relying on a PR
+number or author summary.
+
+Compare the PR description, checklist, and claimed manual validation with that
+exact head, especially after a major refactor. Report stale claims separately;
+they are not verification evidence for the current diff.
+
 Read each changed file in full — understand surrounding code, not just the diff. Navigate callers, interfaces, and tests to understand changes end-to-end.
 
 For each file, identify which requirement or intent it serves. Flag any changes that don't map to the task — scope creep is a blocker.
@@ -32,6 +47,8 @@ Before reviewing implementation details:
 - Check whether tests assert behavior, not implementation details.
 - Check whether the selected test level is appropriate: unit for pure logic, integration for boundaries, E2E for critical browser flows.
 - Identify missing coverage for happy path, key error paths, edge cases, auth/workspace boundaries, and concurrency/order-sensitive behavior.
+- For concurrent or event-driven changes, require a deterministic schedule that checks ownership or generation identity, stale-event handling, cancellation, and lock scope. Channel/barrier coordination is preferable to timing sleeps.
+- For stale-event races, cover both event-before-successor and delayed-old-event-after-successor orderings. Prefer integration coverage for cross-package event or callback paths when practical.
 - Treat missing tests for new or changed non-UI logic as a blocker unless the change is explicitly untestable and says why.
 
 ### 3. Review for issues
@@ -50,6 +67,7 @@ Check every changed file for the following layers. Skip layers that don't apply 
 **Architecture:**
 - Frontend: no direct data fetching in components (must go through store), shadcn imports from `@kandev/ui` not `@/components/ui/*`
 - Backend: provider pattern for DI, context passed through call chains, event bus for cross-component communication
+- Search `docs/specs/` and `docs/decisions/` for the affected subsystem; flag an accepted spec or ADR that the change makes inaccurate
 - New abstractions justified — no over-engineering
 - Concerns cleanly separated (single responsibility)
 
@@ -57,6 +75,11 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - Edge cases handled (empty input, nil/null, zero, max values)
 - Error paths covered and not silently swallowed
 - Race conditions or concurrency issues in concurrent code
+- Async events carry an immutable identity when they can outlive the operation that created them; stale events cannot mutate a replacement operation
+- Locks protect only the atomic ownership boundary and are not held across unbounded I/O or a full asynchronous operation
+- Synchronous callbacks cannot re-enter a lock they already need; moving publication asynchronous also requires an immutable value snapshot, clear shutdown ownership, and protection against a delayed event changing successor state
+- When a generation, token, or lease authorizes a side effect, validate and mutate within one critical section. Check every terminal path separately: success, raw error, cancellation, timeout, and disconnect.
+- Detached goroutines have immutable snapshots and a real happens-before relationship before reading state that can otherwise transition underneath them
 
 **Performance:**
 - No N+1 queries (loop with individual DB calls)
@@ -92,6 +115,11 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - Missing tests for new or changed logic is a **blocker** — suggest what tests to add and recommend `/tdd`
 
 ### 4. Fix or report
+
+When the user asks for a review only, says not to post or modify the PR, or is
+reviewing an external contributor's branch, do not edit the checkout or make
+any GitHub mutation: no fixes, comments, review submissions, or thread
+resolution. Report findings only, even when a fix appears straightforward.
 
 - **Fix directly** any issues you can resolve confidently (dead code, unused imports, simple duplication, missing early returns)
 - **Report** issues that need the author's input — always explain *why* the issue matters and provide a concrete suggested fix

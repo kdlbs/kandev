@@ -43,6 +43,17 @@ Choose the right level:
 
 Prefer state/output assertions over interaction assertions. Mock only slow, nondeterministic, or external boundaries; use real implementations or fakes when they keep the test deterministic.
 
+### Concurrent and event-driven behavior
+
+Test ordering-sensitive behavior with channels, barriers, or controllable fakes;
+do not use sleeps to create a race. Pause at the ownership boundary, start the
+competing operation, then release. Exercise the real delivery path where
+practical, and prove the old interleaving fails before the fix. Assert both the
+winner state and the untouched replacement state, including relevant buffers,
+signals, or queue ownership. Cover stale events acting after a replacement
+operation begins, cancellation/retry ownership, and at-most-once delivery when
+they apply. Run affected Go packages with `-race`.
+
 ## Steps
 
 ### 1. RED — Write a failing test
