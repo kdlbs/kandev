@@ -62,8 +62,12 @@ export function computeRightMaxPx(availableWidth?: number, sidebarWidth = 0): nu
 
 /** Pick the runtime cap appropriate for a given column ID. Non-sidebar
  *  pinned columns get the right-pane cap. */
-export function computePinnedMaxPxFor(columnId: string, availableWidth?: number): number {
+export function computePinnedMaxPxFor(
+  columnId: string,
+  availableWidth?: number,
+  sidebarWidth?: number,
+): number {
   return columnId === "sidebar"
     ? computeSidebarMaxPx(availableWidth)
-    : computeRightMaxPx(availableWidth);
+    : computeRightMaxPx(availableWidth, sidebarWidth);
 }

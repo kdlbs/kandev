@@ -74,6 +74,10 @@ describe("computePinnedMaxPxFor", () => {
     expect(computePinnedMaxPxFor("right", 2000)).toBe(1400);
     expect(computePinnedMaxPxFor("plan", 2000)).toBe(1400);
   });
+
+  it("passes the visible sidebar width through to the right-pane cap", () => {
+    expect(computePinnedMaxPxFor("right", 2000, 600)).toBe(920);
+  });
 });
 
 describe("LAYOUT_PINNED_MIN_PX", () => {
