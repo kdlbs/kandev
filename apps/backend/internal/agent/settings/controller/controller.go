@@ -55,6 +55,7 @@ type Controller struct {
 	mcpService      *mcpconfig.Service
 	modelCache      *modelfetcher.Cache
 	hostUtility     *hostutility.Manager
+	hostUsage       HostUsageLister
 	jobStore        *JobStore
 	hub             JobBroadcaster
 	logger          *logger.Logger

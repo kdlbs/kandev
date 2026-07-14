@@ -3,7 +3,9 @@
 import { memo } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { UsageWindowRows, usageStatus } from "@/components/usage/usage-window-rows";
 import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
+import { useSessionAgentUsage } from "@/hooks/domains/session/use-session-agent-usage";
 
 type TokenUsageDisplayProps = {
   sessionId: string | null;
@@ -37,6 +39,33 @@ function getCircleColor(efficiency: number): string {
   if (efficiency >= 75) return "text-yellow-300";
   if (efficiency >= 50) return "text-blue-500";
   return "text-blue-300";
+}
+
+/**
+ * Subscription utilization rows for the session's agent, rendered inside the
+ * doughnut tooltip. Mounted only while the tooltip is open, so each hover
+ * triggers a fresh provider fetch (server-clamped to one per 15 s).
+ */
+function SessionUsageRows({ sessionId }: { sessionId: string | null }) {
+  const agentUsage = useSessionAgentUsage(sessionId);
+  const usage = agentUsage?.usage;
+  if (!usage || usage.windows.length === 0) return null;
+  const status = usageStatus(usage);
+
+  return (
+    <div
+      className="pt-2 mt-2 border-t border-border/60 space-y-2 min-w-56"
+      data-testid="doughnut-subscription-usage"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+          Subscription usage{usage.plan ? ` · ${usage.plan}` : ""}
+        </span>
+        <span className={cn("text-[10px] font-semibold", status.className)}>{status.label}</span>
+      </div>
+      <UsageWindowRows usage={usage} />
+    </div>
+  );
 }
 
 export const TokenUsageDisplay = memo(function TokenUsageDisplay({
@@ -100,6 +129,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
           <div className="font-medium">
             {usagePercent.toFixed(0)}% ({formatNumber(used)} / {formatNumber(size)})
           </div>
+          <SessionUsageRows sessionId={sessionId} />
         </div>
       </TooltipContent>
     </Tooltip>

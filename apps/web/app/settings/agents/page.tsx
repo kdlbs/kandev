@@ -31,6 +31,7 @@ import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery"
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { AgentLogo } from "@/components/agent-logo";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
+import { AgentUsageSection } from "@/components/settings/agent-usage-section";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import { InstallAgentCard } from "@/components/settings/install-agent-card";
 import { InstalledAgentCard } from "@/components/settings/installed-agent-card";
@@ -574,6 +575,8 @@ export default function AgentsSettingsPage() {
         setTuiDialogOpen={setTuiDialogOpen}
         handleRescan={handleRescan}
       />
+
+      <AgentUsageSection />
 
       <SuggestInstallSection
         notInstalledAgents={notInstalledAgents}

@@ -23,7 +23,7 @@ import { AgentCardsPanel } from "./components/agent-cards-panel";
 import { ProviderHealthCard } from "./components/routing/provider-health-card";
 import { timeAgo } from "@/lib/utils/time";
 
-import { UtilizationBars } from "./components/utilization-bars";
+import { UtilizationBars } from "@/components/usage/utilization-bars";
 import { formatDollars } from "@/lib/utils";
 
 // formatMonthSpend renders the subcents value from /office dashboard

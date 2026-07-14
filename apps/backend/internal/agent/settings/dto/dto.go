@@ -4,7 +4,22 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
+	agentusage "github.com/kandev/kandev/internal/agent/usage"
 )
+
+// AgentSubscriptionUsage is one subscription-billed host agent's utilization
+// entry returned by GET /api/v1/agents/usage.
+type AgentSubscriptionUsage struct {
+	AgentID     string                    `json:"agent_id"`
+	DisplayName string                    `json:"display_name"`
+	Usage       *agentusage.ProviderUsage `json:"usage,omitempty"`
+	Error       string                    `json:"error,omitempty"`
+}
+
+// AgentSubscriptionUsageResponse is the GET /api/v1/agents/usage payload.
+type AgentSubscriptionUsageResponse struct {
+	Agents []AgentSubscriptionUsage `json:"agents"`
+}
 
 type AgentProfileDTO struct {
 	ID               string             `json:"id"`

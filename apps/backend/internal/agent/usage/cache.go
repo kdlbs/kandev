@@ -40,7 +40,18 @@ func (c *UsageCache) GetOrFetch(
 	key string,
 	fetchFn func(ctx context.Context) (*ProviderUsage, error),
 ) (*ProviderUsage, error) {
-	if usage := c.get(key); usage != nil {
+	return c.GetOrFetchWithin(ctx, key, cacheTTL, fetchFn)
+}
+
+// GetOrFetchWithin is GetOrFetch with a caller-chosen staleness bound: the
+// cached entry is served only while younger than maxAge.
+func (c *UsageCache) GetOrFetchWithin(
+	ctx context.Context,
+	key string,
+	maxAge time.Duration,
+	fetchFn func(ctx context.Context) (*ProviderUsage, error),
+) (*ProviderUsage, error) {
+	if usage := c.get(key, maxAge); usage != nil {
 		return usage, nil
 	}
 	usage, err := fetchFn(ctx)
@@ -51,14 +62,14 @@ func (c *UsageCache) GetOrFetch(
 	return usage, nil
 }
 
-func (c *UsageCache) get(key string) *ProviderUsage {
+func (c *UsageCache) get(key string, maxAge time.Duration) *ProviderUsage {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	e, ok := c.entries[key]
 	if !ok {
 		return nil
 	}
-	if time.Since(e.fetchedAt) >= cacheTTL {
+	if time.Since(e.fetchedAt) >= maxAge {
 		return nil
 	}
 	return e.usage

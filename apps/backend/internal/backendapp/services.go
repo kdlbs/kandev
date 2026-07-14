@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/config"
@@ -46,6 +47,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		return nil, nil, err
 	}
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
+	agentSettingsController.SetHostUsageLister(agentusage.NewHostService())
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)

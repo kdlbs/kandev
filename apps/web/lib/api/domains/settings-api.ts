@@ -2,6 +2,7 @@ import { fetchJson, fetchJsonWithRetry, type ApiRequestOptions } from "../client
 import { getBackendConfig } from "@/lib/config";
 import type {
   Agent,
+  AgentSubscriptionUsageResponse,
   ListAgentsResponse,
   ListAgentDiscoveryResponse,
   ListAvailableAgentsResponse,
@@ -213,6 +214,14 @@ export async function listAvailableAgents(
   options?: ApiRequestOptions,
 ): Promise<ListAvailableAgentsResponse> {
   return fetchJson<ListAvailableAgentsResponse>("/api/v1/agents/available", options);
+}
+
+export async function listAgentSubscriptionUsage(
+  options?: ApiRequestOptions & { fresh?: boolean },
+): Promise<AgentSubscriptionUsageResponse> {
+  const { fresh, ...rest } = options ?? {};
+  const path = fresh ? "/api/v1/agents/usage?fresh=true" : "/api/v1/agents/usage";
+  return fetchJson<AgentSubscriptionUsageResponse>(path, rest);
 }
 
 export async function getAgentProfileMcpConfig(
