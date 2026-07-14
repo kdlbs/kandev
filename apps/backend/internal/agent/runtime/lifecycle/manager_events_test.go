@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -556,6 +557,52 @@ func TestHandleAgentEvent_PromptDoneChDoesNotBlockWhenFull(t *testing.T) {
 		// Good — didn't block
 	case <-time.After(2 * time.Second):
 		t.Fatal("handleAgentEvent blocked when promptDoneCh was full")
+	}
+}
+
+func TestHandleAgentEvent_DelayedCompleteCannotFinishReplacementPrompt(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if _, err := mgr.executionStore.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin original prompt: %v", err)
+	}
+	if _, err := mgr.executionStore.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin replacement prompt: %v", err)
+	}
+
+	execution.messageMu.Lock()
+	execution.messageBuffer.WriteString("replacement output")
+	execution.currentMessageID = "replacement-message"
+	execution.messageMu.Unlock()
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             "complete",
+		SessionID:        execution.SessionID,
+		PromptGeneration: 1,
+	})
+
+	if execution.Status != v1.AgentStatusRunning {
+		t.Fatalf("replacement status = %s, want %s", execution.Status, v1.AgentStatusRunning)
+	}
+	select {
+	case signal := <-execution.promptDoneCh:
+		t.Fatalf("delayed completion signaled replacement prompt: %+v", signal)
+	default:
+	}
+	execution.messageMu.Lock()
+	buffer := execution.messageBuffer.String()
+	messageID := execution.currentMessageID
+	execution.messageMu.Unlock()
+	if buffer != "replacement output" || messageID != "replacement-message" {
+		t.Fatalf("replacement stream state changed: buffer=%q message_id=%q", buffer, messageID)
+	}
+	for _, published := range eventBus.PublishedEvents {
+		if published.Subject == events.AgentReady {
+			t.Fatal("delayed completion published AgentReady for replacement prompt")
+		}
 	}
 }
 

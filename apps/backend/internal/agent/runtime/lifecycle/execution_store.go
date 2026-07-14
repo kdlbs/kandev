@@ -198,21 +198,28 @@ func (s *ExecutionStore) UpdateStatus(executionID string, status v1.AgentStatus)
 }
 
 // BeginPrompt assigns a new immutable identity to the next prompt dispatch.
-func (s *ExecutionStore) BeginPrompt(executionID string) error {
+func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
+	execution, exists := s.Get(executionID)
+	if !exists {
+		return 0, ErrExecutionNotFound
+	}
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	execution, exists := s.executions[executionID]
-	if !exists {
-		return ErrExecutionNotFound
+	current, exists := s.executions[executionID]
+	if !exists || current != execution {
+		return 0, ErrExecutionNotFound
 	}
-	beginExecutionPrompt(execution)
-	return nil
+	return beginExecutionPrompt(current), nil
 }
 
-func beginExecutionPrompt(execution *AgentExecution) {
+func beginExecutionPrompt(execution *AgentExecution) uint64 {
 	execution.promptGeneration++
 	execution.Status = v1.AgentStatusRunning
+	return execution.promptGeneration
 }
 
 // UpdateError updates the error message of an agent execution and sets its status to failed.

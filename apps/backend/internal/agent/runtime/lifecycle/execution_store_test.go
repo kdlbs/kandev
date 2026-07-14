@@ -92,13 +92,13 @@ func TestExecutionStore_BeginPromptAlwaysAdvancesGeneration(t *testing.T) {
 		t.Fatalf("Add: %v", err)
 	}
 
-	if err := store.BeginPrompt(exec.ID); err != nil {
+	if _, err := store.BeginPrompt(exec.ID); err != nil {
 		t.Fatalf("BeginPrompt: %v", err)
 	}
 	if !store.OwnsPromptGeneration(exec.SessionID, exec.ID, 1) {
 		t.Fatal("first prompt must create generation 1")
 	}
-	if err := store.BeginPrompt(exec.ID); err != nil {
+	if _, err := store.BeginPrompt(exec.ID); err != nil {
 		t.Fatalf("BeginPrompt replacement: %v", err)
 	}
 	if !store.OwnsPromptGeneration(exec.SessionID, exec.ID, 2) {

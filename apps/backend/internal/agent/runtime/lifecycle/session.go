@@ -27,7 +27,7 @@ type SessionManager struct {
 	eventPublisher *EventPublisher
 	streamManager  *StreamManager
 	executionStore *ExecutionStore
-	promptStarter  func(executionID string) error
+	promptStarter  func(executionID string) (uint64, error)
 	historyManager *SessionHistoryManager
 	stopCh         <-chan struct{} // For graceful shutdown coordination
 }
@@ -49,7 +49,7 @@ func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManage
 	sm.historyManager = history
 }
 
-func (sm *SessionManager) SetPromptStarter(starter func(executionID string) error) {
+func (sm *SessionManager) SetPromptStarter(starter func(executionID string) (uint64, error)) {
 	sm.promptStarter = starter
 }
 
@@ -619,17 +619,24 @@ func (sm *SessionManager) SendPrompt(
 
 	// Every dispatch attempt gets a distinct identity, including initial prompts
 	// and replacements accepted while the execution is already running.
+	var promptGeneration uint64
 	switch {
 	case sm.promptStarter != nil:
-		if err := sm.promptStarter(execution.ID); err != nil {
+		var err error
+		promptGeneration, err = sm.promptStarter(execution.ID)
+		if err != nil {
 			return nil, err
 		}
 	case sm.executionStore != nil:
-		if err := sm.executionStore.BeginPrompt(execution.ID); err != nil {
+		var err error
+		promptGeneration, err = sm.executionStore.BeginPrompt(execution.ID)
+		if err != nil {
 			return nil, err
 		}
 	default:
-		beginExecutionPrompt(execution)
+		// Tests that construct SessionManager without lifecycle dependencies
+		// still need a generation, but no concurrent owner can mutate it here.
+		promptGeneration = beginExecutionPrompt(execution)
 	}
 
 	// Clear buffers and streaming state before starting prompt
@@ -662,21 +669,8 @@ func (sm *SessionManager) SendPrompt(
 	execution.lastActivityAtMu.Unlock()
 
 	// Fire the prompt (returns immediately now — completion comes via WebSocket complete event)
-	if err := execution.agentctl.Prompt(ctx, effectivePrompt, attachments); err != nil {
-		if isAgentStreamNotConnectedErr(err) && sm.streamManager != nil {
-			sm.logger.Warn("agent stream not connected, reconnecting and retrying prompt once",
-				zap.String("execution_id", execution.ID))
-			retryErr := sm.retryPromptAfterReconnect(ctx, execution, effectivePrompt, attachments)
-			if retryErr == nil {
-				if dispatchOnly {
-					return &PromptResult{StopReason: PromptStopReasonDispatched}, nil
-				}
-				return sm.waitForPromptDone(ctx, execution)
-			}
-			sm.logger.Warn("prompt retry after stream reconnect failed",
-				zap.String("execution_id", execution.ID),
-				zap.Error(retryErr))
-		}
+	err := sm.dispatchPrompt(ctx, execution, effectivePrompt, attachments, promptGeneration)
+	if err != nil {
 		if isCancelReleaseError(err.Error()) {
 			sm.logger.Info("prompt trigger abandoned after cancel; requeueing",
 				zap.String("execution_id", execution.ID),
@@ -697,6 +691,30 @@ func (sm *SessionManager) SendPrompt(
 	return sm.waitForPromptDone(ctx, execution)
 }
 
+func (sm *SessionManager) dispatchPrompt(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+) error {
+	err := execution.agentctl.Prompt(ctx, prompt, attachments, promptGeneration)
+	if err == nil || !isAgentStreamNotConnectedErr(err) || sm.streamManager == nil {
+		return err
+	}
+
+	sm.logger.Warn("agent stream not connected, reconnecting and retrying prompt once",
+		zap.String("execution_id", execution.ID))
+	retryErr := sm.retryPromptAfterReconnect(ctx, execution, prompt, attachments, promptGeneration)
+	if retryErr == nil {
+		return nil
+	}
+	sm.logger.Warn("prompt retry after stream reconnect failed",
+		zap.String("execution_id", execution.ID),
+		zap.Error(retryErr))
+	return err
+}
+
 // beginPromptBarrier sets up a completion signal on the execution so CancelAgent
 // can wait for the in-flight SendPrompt to finish before the caller retries.
 // Returns a cleanup function that must be deferred: defer beginPromptBarrier(exec)()
@@ -713,6 +731,7 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 	execution *AgentExecution,
 	prompt string,
 	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
 ) error {
 	reconnectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -734,7 +753,9 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 		}
 
 		if execution.agentctl.HasAgentStream() {
-			if err := execution.agentctl.Prompt(reconnectCtx, prompt, attachments); err == nil {
+			if err := execution.agentctl.Prompt(
+				reconnectCtx, prompt, attachments, promptGeneration,
+			); err == nil {
 				return nil
 			} else if !isAgentStreamNotConnectedErr(err) {
 				return err

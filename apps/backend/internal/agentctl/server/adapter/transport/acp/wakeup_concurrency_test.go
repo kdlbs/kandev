@@ -113,6 +113,42 @@ func waitForPromptComplete(t *testing.T, a *Adapter) {
 	}
 }
 
+func TestPromptCompleteEchoesLifecycleGeneration(t *testing.T) {
+	a, fa := setupConcurrencyFakeAgent(t)
+	ctx := context.Background()
+	if err := a.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if _, err := a.NewSession(ctx, nil); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Prompt(ctx, "user message", nil, 42)
+	}()
+	<-fa.entered
+	close(fa.release)
+	if err := <-done; err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+
+	for {
+		select {
+		case event := <-a.updatesCh:
+			if event.Type != streams.EventTypeComplete {
+				continue
+			}
+			if event.PromptGeneration != 42 {
+				t.Fatalf("complete prompt generation = %d, want 42", event.PromptGeneration)
+			}
+			return
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for complete event")
+		}
+	}
+}
+
 // TestWakeupDoesNotRaceConcurrentPromptWithUserPrompt reproduces the
 // turn-misalignment bug: when a ScheduleWakeup timer fires while a user prompt
 // is still in flight, fireWakeup must NOT issue a second, concurrent
@@ -140,7 +176,7 @@ func TestWakeupDoesNotRaceConcurrentPromptWithUserPrompt(t *testing.T) {
 	userWG.Add(1)
 	go func() {
 		defer userWG.Done()
-		_ = a.Prompt(ctx, "user message", nil)
+		_ = a.Prompt(ctx, "user message", nil, 0)
 	}()
 
 	// Wait until the user prompt is parked inside the agent's Prompt handler.
@@ -198,7 +234,7 @@ func TestWakeupDroppedWhenSessionChangesWhileQueued(t *testing.T) {
 	userWG.Add(1)
 	go func() {
 		defer userWG.Done()
-		_ = a.Prompt(ctx, "user message", nil)
+		_ = a.Prompt(ctx, "user message", nil, 0)
 	}()
 	select {
 	case <-fa.entered:

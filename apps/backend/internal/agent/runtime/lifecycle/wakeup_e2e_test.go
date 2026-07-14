@@ -267,7 +267,7 @@ func TestWakeupE2EFullPipeline_BridgeToEventBus(t *testing.T) {
 
 	t.Logf("sending initial prompt…")
 	initialStart := time.Now()
-	if err := adp.Prompt(ctx, prompt, nil); err != nil {
+	if err := adp.Prompt(ctx, prompt, nil, 0); err != nil {
 		t.Fatalf("initial Prompt: %v", err)
 	}
 	initialEnd := time.Now()

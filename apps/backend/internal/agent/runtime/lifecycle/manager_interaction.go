@@ -1076,22 +1076,19 @@ func (m *Manager) updateStatusAndPersist(ctx context.Context, executionID string
 }
 
 // BeginPrompt advances prompt ownership and marks the execution running before dispatch.
-func (m *Manager) BeginPrompt(executionID string) error {
-	var updated *AgentExecution
-	if err := m.executionStore.WithLock(executionID, func(execution *AgentExecution) {
-		beginExecutionPrompt(execution)
-		updated = execution
-	}); err != nil {
+func (m *Manager) BeginPrompt(executionID string) (uint64, error) {
+	generation, err := m.executionStore.BeginPrompt(executionID)
+	if err != nil {
 		if errors.Is(err, ErrExecutionNotFound) {
-			return fmt.Errorf("execution %q not found", executionID)
+			return 0, fmt.Errorf("execution %q not found", executionID)
 		}
-		return err
+		return 0, err
 	}
 
-	if updated != nil {
+	if updated, exists := m.executionStore.Get(executionID); exists {
 		m.persistExecutorRunning(context.Background(), updated)
 	}
-	return nil
+	return generation, nil
 }
 
 // OwnsPromptGeneration reports whether a ready event's immutable execution and

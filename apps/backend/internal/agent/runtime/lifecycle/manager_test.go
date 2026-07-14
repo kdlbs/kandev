@@ -397,10 +397,12 @@ func TestManager_BeginPromptAlwaysAdvancesPromptGeneration(t *testing.T) {
 	}
 	require.NoError(t, mgr.executionStore.Add(exec))
 
-	require.NoError(t, mgr.BeginPrompt(exec.ID))
+	_, err := mgr.BeginPrompt(exec.ID)
+	require.NoError(t, err)
 	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 1))
 	require.False(t, mgr.OwnsPromptGeneration(exec.SessionID, "other-execution", 1))
 
-	require.NoError(t, mgr.BeginPrompt(exec.ID))
+	_, err = mgr.BeginPrompt(exec.ID)
+	require.NoError(t, err)
 	require.True(t, mgr.OwnsPromptGeneration(exec.SessionID, exec.ID, 2))
 }

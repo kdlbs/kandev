@@ -17,9 +17,14 @@ import (
 // If pending context is set (from SetPendingContext), it will be prepended to the message.
 // Attachments (images) are converted to ACP ImageBlocks and included in the prompt.
 // When the prompt completes, a complete event is emitted via the updates channel.
-func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.MessageAttachment) error {
+func (a *Adapter) Prompt(
+	ctx context.Context,
+	message string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+) error {
 	// A user prompt always targets the current session, so it is not pinned.
-	return a.sendPrompt(ctx, message, attachments, "")
+	return a.sendPrompt(ctx, message, attachments, "", promptGeneration)
 }
 
 // sendPrompt serializes session/prompt calls through promptGate and sends one
@@ -30,7 +35,13 @@ func (a *Adapter) Prompt(ctx context.Context, message string, attachments []v1.M
 // a wakeup must reach the session it was scheduled for or not at all.
 //
 //nolint:cyclop,funlen // pre-existing complexity preserved from adapter.go file split
-func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []v1.MessageAttachment, expectSession string) error {
+func (a *Adapter) sendPrompt(
+	ctx context.Context,
+	message string,
+	attachments []v1.MessageAttachment,
+	expectSession string,
+	promptGeneration uint64,
+) error {
 	// Acquire the prompt gate, honouring ctx so a queued wakeup whose context
 	// is cancelled (timeout / adapter Close) aborts instead of blocking on a
 	// stuck in-flight turn.
@@ -197,10 +208,11 @@ func (a *Adapter) sendPrompt(ctx context.Context, message string, attachments []
 		usage.ProviderReportedCostSubcents = costSubcents
 	}
 	a.sendUpdate(AgentEvent{
-		Type:      streams.EventTypeComplete,
-		SessionID: sessionID,
-		Data:      map[string]any{"stop_reason": stopReason},
-		Usage:     usage,
+		Type:             streams.EventTypeComplete,
+		SessionID:        sessionID,
+		PromptGeneration: promptGeneration,
+		Data:             map[string]any{"stop_reason": stopReason},
+		Usage:            usage,
 	})
 
 	return nil
@@ -314,7 +326,7 @@ func (a *Adapter) fireWakeup(sessionID, prompt string) {
 		defer cancel()
 		// Pin to the scheduled session: if the active session changed while this
 		// wakeup waited on the prompt gate, sendPrompt drops it.
-		if err := a.sendPrompt(ctx, prompt, nil, sessionID); err != nil {
+		if err := a.sendPrompt(ctx, prompt, nil, sessionID, 0); err != nil {
 			a.logger.Error("synthetic wakeup prompt failed",
 				zap.String("session_id", sessionID),
 				zap.Error(err))

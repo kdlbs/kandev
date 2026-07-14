@@ -54,12 +54,14 @@ func (s *stubAdapter) NewSession(_ context.Context, _ []types.McpServer) (string
 	return "", nil
 }
 func (s *stubAdapter) LoadSession(context.Context, string, []types.McpServer) error { return nil }
-func (s *stubAdapter) Prompt(context.Context, string, []v1.MessageAttachment) error { return nil }
-func (s *stubAdapter) Cancel(context.Context) error                                 { return nil }
-func (s *stubAdapter) Updates() <-chan adapter.AgentEvent                           { return s.updatesCh }
-func (s *stubAdapter) GetSessionID() string                                         { return "" }
-func (s *stubAdapter) GetOperationID() string                                       { return "" }
-func (s *stubAdapter) SetPermissionHandler(adapter.PermissionHandler)               {}
+func (s *stubAdapter) Prompt(context.Context, string, []v1.MessageAttachment, uint64) error {
+	return nil
+}
+func (s *stubAdapter) Cancel(context.Context) error                   { return nil }
+func (s *stubAdapter) Updates() <-chan adapter.AgentEvent             { return s.updatesCh }
+func (s *stubAdapter) GetSessionID() string                           { return "" }
+func (s *stubAdapter) GetOperationID() string                         { return "" }
+func (s *stubAdapter) SetPermissionHandler(adapter.PermissionHandler) {}
 func (s *stubAdapter) Close() error {
 	close(s.updatesCh)
 	return nil

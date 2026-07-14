@@ -161,8 +161,107 @@ func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentE
 	}
 }
 
+type promptCompletionClaim struct {
+	execution      *AgentExecution
+	readyPayload   AgentEventPayload
+	runningPayload AgentEventPayload
+	publishRunning bool
+	locked         bool
+}
+
+func (m *Manager) claimPromptCompletion(
+	execution *AgentExecution,
+	event *agentctl.AgentEvent,
+	isError bool,
+) (promptCompletionClaim, bool) {
+	claim := promptCompletionClaim{}
+	if event.PromptGeneration == 0 {
+		return claim, true
+	}
+
+	execution.promptLifecycleMu.Lock()
+	claim.locked = true
+	claimed := false
+	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		if current != execution || current.promptGeneration != event.PromptGeneration {
+			return
+		}
+		claimed = true
+		claim.execution = current
+		if isError {
+			return
+		}
+		if current.Status != v1.AgentStatusReady {
+			current.firstActivityOnce.Do(func() {
+				claim.publishRunning = true
+				claim.runningPayload = newAgentEventPayload(current)
+			})
+		}
+		current.Status = v1.AgentStatusReady
+		claim.readyPayload = newAgentEventPayload(current)
+	})
+	if err == nil && claimed {
+		return claim, true
+	}
+
+	execution.promptLifecycleMu.Unlock()
+	m.logger.Debug("ignoring completion for superseded prompt generation",
+		zap.String("execution_id", execution.ID),
+		zap.Uint64("event_prompt_generation", event.PromptGeneration))
+	return promptCompletionClaim{}, false
+}
+
+func completeEventResult(event *agentctl.AgentEvent) (bool, string) {
+	isError := false
+	if event.Data != nil {
+		isError, _ = event.Data["is_error"].(bool)
+	}
+	if isError {
+		return true, "error"
+	}
+	if event.Data != nil {
+		if stopReason, ok := event.Data["stop_reason"].(string); ok && stopReason != "" {
+			return false, stopReason
+		}
+	}
+	return false, "end_turn"
+}
+
+func (m *Manager) finishPromptCompletion(
+	execution *AgentExecution,
+	event *agentctl.AgentEvent,
+	isError bool,
+	claim promptCompletionClaim,
+) {
+	handleCompleteEventSignal(execution, event, isError)
+	if event.PromptGeneration == 0 || isError {
+		m.handleCompleteEventMarkState(execution, event, isError)
+		if claim.locked {
+			execution.promptLifecycleMu.Unlock()
+		}
+		return
+	}
+
+	m.persistExecutorRunning(context.Background(), claim.execution)
+	execution.promptLifecycleMu.Unlock()
+	if claim.publishRunning {
+		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
+	}
+	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+}
+
 // handleCompleteEvent handles a "complete" agent event: flushes buffers, marks state, and signals SendPrompt.
-func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl.AgentEvent) {
+func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl.AgentEvent) bool {
+	isError, stopReason := completeEventResult(event)
+	claim, claimed := m.claimPromptCompletion(execution, event, isError)
+	if !claimed {
+		return false
+	}
+
+	execution.lastActivityAtMu.Lock()
+	execution.lastActivityAt = time.Now()
+	execution.lastActivityAtMu.Unlock()
+
 	// Check buffer content BEFORE any processing
 	execution.messageMu.Lock()
 	bufferContentBeforeFlush := execution.messageBuffer.String()
@@ -172,24 +271,6 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 	bufferPreview := bufferContentBeforeFlush
 	if len(bufferPreview) > 100 {
 		bufferPreview = bufferPreview[:100] + "..."
-	}
-
-	// Check if this is an error completion (agent failed to process the prompt)
-	isError := false
-	if event.Data != nil {
-		if v, ok := event.Data["is_error"].(bool); ok {
-			isError = v
-		}
-	}
-
-	// Determine stop reason for tracing
-	stopReason := "end_turn"
-	if isError {
-		stopReason = "error"
-	} else if event.Data != nil {
-		if sr, ok := event.Data["stop_reason"].(string); ok && sr != "" {
-			stopReason = sr
-		}
 	}
 
 	// Create a turn_end span on the session trace
@@ -231,8 +312,8 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 	// the drain races with the first SendPrompt's receive and can steal the signal,
 	// leaving the first SendPrompt hung and the second prompt's completion event
 	// never reaching the event bus.
-	handleCompleteEventSignal(execution, event, isError)
-	m.handleCompleteEventMarkState(execution, event, isError)
+	m.finishPromptCompletion(execution, event, isError, claim)
+	return true
 }
 
 // handleToolCallEvent processes the "tool_call" agent event: flushes the message buffer
@@ -407,7 +488,17 @@ func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
 
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	m.recordActivity(execution, event)
+	if event.Type == "error" &&
+		event.PromptGeneration != 0 &&
+		!m.OwnsPromptGeneration(execution.SessionID, execution.ID, event.PromptGeneration) {
+		m.logger.Debug("ignoring error for superseded prompt generation",
+			zap.String("execution_id", execution.ID),
+			zap.Uint64("event_prompt_generation", event.PromptGeneration))
+		return
+	}
+	if event.Type != toolStatusComplete || event.PromptGeneration == 0 {
+		m.recordActivity(execution, event)
+	}
 
 	m.logger.Debug("handleAgentEvent entry",
 		zap.String("execution_id", execution.ID),
@@ -439,7 +530,9 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		return
 
 	case toolStatusComplete:
-		m.handleCompleteEvent(execution, &event)
+		if !m.handleCompleteEvent(execution, &event) {
+			return
+		}
 
 	case "permission_request":
 		m.logger.Debug("permission request received",

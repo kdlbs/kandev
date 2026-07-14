@@ -89,6 +89,11 @@ type AgentEvent struct {
 	// For Codex this is the turn ID, for other protocols it may be empty.
 	OperationID string `json:"operation_id,omitempty"`
 
+	// PromptGeneration is the lifecycle-owned identity assigned when this
+	// prompt was accepted. Terminal events echo it so delayed completions
+	// cannot be attributed to a newer prompt on the same execution.
+	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
+
 	// --- Message fields (for "message_chunk" type) ---
 
 	// Text contains streaming text content from the agent.

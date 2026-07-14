@@ -120,8 +120,10 @@ clarification-timeout recovery — that the loser correctly does not cancel into
 is accounted for exactly once: dispatched, or left queued for its own future turn boundary.
 
 The guard is acquired *before* any turn-completion bookkeeping runs (not just around the
-final queue-drain decision). Each turn-ending `agent.ready` signal carries the immutable
-`(agent_execution_id, prompt_generation)` captured when lifecycle created the ready signal.
+final queue-drain decision). Lifecycle assigns each accepted prompt an immutable generation,
+passes it through agentctl, and requires the terminal event to echo it before lifecycle may
+flush or complete that prompt. Each resulting turn-ending `agent.ready` signal carries the
+immutable `(agent_execution_id, prompt_generation)` captured from that accepted prompt.
 Once the guard is held, bookkeeping verifies that identity still owns the session and also
 re-validates the active orchestrator turn when turn tracking is wired. A ready event that
 raced a parent interrupt and lost cannot complete (or transition the workflow for) a turn the
