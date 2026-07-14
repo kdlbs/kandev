@@ -21,8 +21,9 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.mobileSearchToggle).toBeVisible();
     const metricsBox = await metrics.boundingBox();
     const actionBox = await mobile.mobileSearchToggle.boundingBox();
+    if (!metricsBox || !actionBox) throw new Error("topbar action has no bounding box");
 
-    expect(metricsBox?.height).toBe(actionBox?.height);
+    expect(metricsBox.height).toBe(actionBox.height);
   });
 
   test("renders mobile layout with column tabs and swipeable columns", async ({
