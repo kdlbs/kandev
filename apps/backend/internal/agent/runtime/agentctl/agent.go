@@ -333,7 +333,30 @@ func (c *Client) HasAgentStream() bool {
 	return c.agentStreamConn != nil
 }
 
+// agentEventQueueSize bounds the buffered channel between the stream read loop
+// and its ordered event-dispatch worker. It only needs to absorb events that
+// arrive while a single handler call is transiently blocked (see
+// dispatchAgentEvents); a jammed handler that outlasts this buffer degrades to
+// the pre-fix behavior (read loop backpressures) rather than dropping events.
+const agentEventQueueSize = 256
+
 // readUpdatesStream is the read loop for the agent updates WebSocket stream.
+//
+// Agent events (message_chunk, tool_call, complete, ...) are NOT run inline on
+// this loop. They are handed, in order, to a single dispatchAgentEvents worker
+// goroutine. This keeps the read loop free to deliver request/response frames
+// (e.g. the agent.cancel response) even while an event handler is blocked.
+//
+// Why this matters: handler → orchestrator.handleAgentReady acquires the
+// per-session cancelInFlight guard. During a user cancel, Service.CancelAgent
+// holds that guard while blocked in agentctl.Client.Cancel → sendStreamRequest,
+// waiting for the agent.cancel response frame. If the `complete` event's
+// handler ran inline here, this loop would block on the guard and never read
+// the response frame the guard holder is waiting for — a cross-goroutine
+// deadlock (both sides waited ~forever in production; see the goroutine dump on
+// task 544afdae). Offloading handler execution lets the response frame land
+// immediately, the cancel returns, the guard releases, and the deferred
+// handleAgentReady then safely no-ops.
 func (c *Client) readUpdatesStream(
 	ctx context.Context,
 	conn *websocket.Conn,
@@ -342,8 +365,20 @@ func (c *Client) readUpdatesStream(
 	onDisconnect func(err error),
 	writeMessage func([]byte) error,
 ) {
+	// Ordered, single-worker dispatch preserves per-stream event ordering while
+	// decoupling handler execution from response-frame delivery.
+	eventCh := make(chan AgentEvent, agentEventQueueSize)
+	workerDone := make(chan struct{})
+	go c.dispatchAgentEvents(handler, eventCh, workerDone)
+
 	var lastErr error
 	defer func() {
+		// Stop the worker and wait for the in-flight handler to unwind before
+		// signaling disconnect, so the drain barrier semantics callers rely on
+		// (promptDoneCh signaling, status updates) still hold.
+		close(eventCh)
+		<-workerDone
+
 		// Clean up pending requests before signaling disconnect
 		c.cleanupPendingRequests()
 
@@ -403,6 +438,25 @@ func (c *Client) readUpdatesStream(
 		}
 
 		tracing.TraceAgentEvent(ctx, event.Type, event.SessionID, c.executionID, message)
+		// Hand off to the ordered worker rather than running handler inline.
+		// The buffered channel absorbs events that arrive while the worker is
+		// transiently blocked; ctx cancellation is observed here so a shutdown
+		// mid-block can't wedge the read loop on a full channel.
+		select {
+		case eventCh <- event:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// dispatchAgentEvents runs the agent-event handler sequentially for every event
+// delivered on eventCh, preserving arrival order. It is the single consumer of
+// the channel; readUpdatesStream closes eventCh on teardown and waits on
+// workerDone so an in-flight handler finishes before disconnect is signaled.
+func (c *Client) dispatchAgentEvents(handler func(AgentEvent), eventCh <-chan AgentEvent, done chan<- struct{}) {
+	defer close(done)
+	for event := range eventCh {
 		handler(event)
 	}
 }
