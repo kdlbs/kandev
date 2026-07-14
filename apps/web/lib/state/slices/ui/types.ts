@@ -68,28 +68,20 @@ export type SystemHealthState = {
   loading: boolean;
 };
 
-export type QuickChatState = {
-  isOpen: boolean;
-  sessions: Array<{
-    sessionId: string;
-    workspaceId: string;
-    name?: string;
-    agentProfileId?: string;
-  }>;
-  activeSessionId: string | null;
-};
+export type QuickChatSessionKind = "chat" | "config";
 
-export type ConfigChatSession = {
+export type QuickChatSession = {
+  kind: QuickChatSessionKind;
   sessionId: string;
   workspaceId: string;
   name?: string;
+  agentProfileId?: string;
 };
 
-export type ConfigChatState = {
+export type QuickChatState = {
   isOpen: boolean;
-  sessions: ConfigChatSession[];
+  sessions: QuickChatSession[];
   activeSessionId: string | null;
-  workspaceId: string | null;
 };
 
 export type SessionFailureNotification = {
@@ -152,7 +144,6 @@ export type UISliceState = {
   documentPanel: DocumentPanelState;
   systemHealth: SystemHealthState;
   quickChat: QuickChatState;
-  configChat: ConfigChatState;
   sessionFailureNotification: SessionFailureNotification | null;
   /** Set when the focused task is deleted live, so a toast can explain why. */
   taskDeletedNotification: TaskDeletedNotification | null;
@@ -200,17 +191,16 @@ export type UISliceActions = {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
-  openQuickChat: (sessionId: string, workspaceId: string, agentProfileId?: string) => void;
+  openQuickChat: (
+    sessionId: string,
+    workspaceId: string,
+    agentProfileId?: string,
+    kind?: QuickChatSessionKind,
+  ) => void;
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
-  setActiveQuickChatSession: (sessionId: string) => void;
+  setActiveQuickChatSession: (sessionId: string, workspaceId?: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
-  openConfigChat: (sessionId: string, workspaceId: string) => void;
-  startNewConfigChat: (workspaceId: string) => void;
-  closeConfigChat: () => void;
-  closeConfigChatSession: (sessionId: string) => void;
-  setActiveConfigChatSession: (sessionId: string) => void;
-  renameConfigChatSession: (sessionId: string, name: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;
   toggleBottomTerminal: () => void;

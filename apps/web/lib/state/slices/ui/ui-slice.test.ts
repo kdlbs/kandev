@@ -23,6 +23,45 @@ function makeStore() {
   );
 }
 
+const WORKSPACE_A = "workspace-a";
+
+describe("typed quick chat sessions", () => {
+  it("opens a configuration setup tab in the unified quick chat store", () => {
+    const store = makeStore();
+    const openTyped = store.getState().openQuickChat as (...args: unknown[]) => void;
+
+    openTyped("", WORKSPACE_A, undefined, "config");
+
+    expect(store.getState().quickChat).toMatchObject({
+      isOpen: true,
+      activeSessionId: "",
+      sessions: [{ sessionId: "", workspaceId: WORKSPACE_A, kind: "config" }],
+    });
+  });
+
+  it("keeps ordinary and configuration sessions together without cross-workspace activation", () => {
+    const store = makeStore();
+    const openTyped = store.getState().openQuickChat as (...args: unknown[]) => void;
+    const activateTyped = store.getState().setActiveQuickChatSession as (
+      sessionId: string,
+      workspaceId: string,
+    ) => void;
+
+    openTyped("chat-a", WORKSPACE_A, "agent-a", "chat");
+    openTyped("config-a", WORKSPACE_A, "agent-config", "config");
+    openTyped("chat-b", "workspace-b", "agent-b", "chat");
+    activateTyped("config-a", "workspace-b");
+
+    expect(store.getState().quickChat.sessions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sessionId: "chat-a", kind: "chat" }),
+        expect.objectContaining({ sessionId: "config-a", kind: "config" }),
+      ]),
+    );
+    expect(store.getState().quickChat.activeSessionId).toBe("chat-b");
+  });
+});
+
 type UIStore = UseBoundStore<StoreApi<UISlice>>;
 
 const KEY = "kandev.sidebar.collapsedSubtasks";

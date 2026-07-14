@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -29,6 +29,20 @@ function useQuickChatStore() {
 }
 
 type QuickChatStore = ReturnType<typeof useQuickChatStore>;
+
+function useWorkspaceQuickChat(store: QuickChatStore, workspaceId: string) {
+  const sessions = useMemo(
+    () => store.sessions.filter((session) => session.workspaceId === workspaceId),
+    [store.sessions, workspaceId],
+  );
+  const activeSession = sessions.find((session) => session.sessionId === store.activeSessionId);
+  useEffect(() => {
+    if (store.isOpen && store.activeSessionId !== null && !activeSession) {
+      store.closeQuickChat();
+    }
+  }, [activeSession, store]);
+  return { sessions, activeSession };
+}
 
 /** POSTs to start a quick-chat session and returns the response. */
 async function startQuickChatForAgent(
@@ -109,6 +123,7 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
 export function useQuickChatModal(workspaceId: string) {
   const { toast } = useToast();
   const store = useQuickChatStore();
+  const { sessions, activeSession } = useWorkspaceQuickChat(store, workspaceId);
   const [setupKey, setSetupKey] = useState(0);
   const [sessionToClose, setSessionToClose] = useState<string | null>(null);
   const {
@@ -121,12 +136,12 @@ export function useQuickChatModal(workspaceId: string) {
     (open: boolean) => {
       if (open) return;
       reset();
-      if (store.sessions.some((session) => session.sessionId === "")) {
+      if (sessions.some((session) => session.sessionId === "")) {
         store.closeQuickChatSession("");
       }
       store.closeQuickChat();
     },
-    [store, reset],
+    [sessions, store, reset],
   );
 
   // Any picker-bypassing user action while a pick is pending should supersede
@@ -135,7 +150,7 @@ export function useQuickChatModal(workspaceId: string) {
   const handleNewChat = useCallback(() => {
     reset();
     setSetupKey((key) => key + 1);
-    store.openQuickChat("", workspaceId);
+    store.openQuickChat("", workspaceId, undefined, "chat");
   }, [reset, store, workspaceId]);
 
   const handleSelectAgent = useCallback(
@@ -147,7 +162,7 @@ export function useQuickChatModal(workspaceId: string) {
   const setActiveQuickChatSession = useCallback(
     (sessionId: string) => {
       reset();
-      store.setActiveQuickChatSession(sessionId);
+      store.setActiveQuickChatSession(sessionId, workspaceId);
     },
     [reset, store],
   );
@@ -193,11 +208,12 @@ export function useQuickChatModal(workspaceId: string) {
 
   return {
     isOpen: store.isOpen,
-    sessions: store.sessions,
-    activeSessionId: store.activeSessionId,
+    sessions,
+    activeSessionId: activeSession?.sessionId ?? null,
+    activeSession,
     sessionToClose,
     setupKey,
-    activeSessionNeedsAgent: store.activeSessionId === "",
+    activeSessionNeedsAgent: activeSession?.sessionId === "",
     pendingAgentId,
     setActiveQuickChatSession,
     setSessionToClose,

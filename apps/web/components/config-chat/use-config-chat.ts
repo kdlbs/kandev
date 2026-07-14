@@ -3,94 +3,84 @@
 import { useCallback, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import {
   agentProfileId as toAgentProfileId,
   sessionId as toSessionId,
   taskId as toTaskId,
 } from "@/lib/types/ids";
 
+type PendingConfigPrompt = {
+  sessionId: string;
+  prompt: string;
+};
+
 function useConfigChatStore() {
   return useAppStore(
-    useShallow((s) => ({
-      isOpen: s.configChat.isOpen,
-      sessions: s.configChat.sessions,
-      activeSessionId: s.configChat.activeSessionId,
-      workspaceId: s.configChat.workspaceId,
-      openConfigChat: s.openConfigChat,
-      startNewConfigChat: s.startNewConfigChat,
-      closeConfigChat: s.closeConfigChat,
-      closeConfigChatSession: s.closeConfigChatSession,
-      setActiveConfigChatSession: s.setActiveConfigChatSession,
-      renameConfigChatSession: s.renameConfigChatSession,
+    useShallow((state) => ({
+      openQuickChat: state.openQuickChat,
+      closeQuickChatSession: state.closeQuickChatSession,
+      renameQuickChatSession: state.renameQuickChatSession,
     })),
   );
 }
 
 function useUpdateWorkspaceInStore() {
   const storeApi = useAppStoreApi();
-  return (workspaceId: string, updates: Record<string, unknown>) => {
-    const { workspaces, setWorkspaces } = storeApi.getState();
-    setWorkspaces(workspaces.items.map((w) => (w.id === workspaceId ? { ...w, ...updates } : w)));
-  };
+  return useCallback(
+    (workspaceId: string, updates: Record<string, unknown>) => {
+      const { workspaces, setWorkspaces } = storeApi.getState();
+      setWorkspaces(workspaces.items.map((w) => (w.id === workspaceId ? { ...w, ...updates } : w)));
+    },
+    [storeApi],
+  );
 }
 
 export function useConfigChat(workspaceId: string) {
   const store = useConfigChatStore();
   const storeApi = useAppStoreApi();
+  const updateWorkspaceInStore = useUpdateWorkspaceInStore();
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
-  const updateWorkspaceInStore = useUpdateWorkspaceInStore();
-
+  const [pendingPrompt, setPendingPrompt] = useState<PendingConfigPrompt | null>(null);
   const workspace = useAppStore(
-    (s) => s.workspaces.items.find((w) => w.id === workspaceId) ?? null,
+    (state) => state.workspaces.items.find((item) => item.id === workspaceId) ?? null,
   );
-
   const defaultProfileId =
     workspace?.default_config_agent_profile_id ?? workspace?.default_agent_profile_id ?? undefined;
 
-  const open = useCallback(() => {
-    if (store.activeSessionId && store.workspaceId === workspaceId) {
-      store.openConfigChat(store.activeSessionId, workspaceId);
-      return;
-    }
-    store.startNewConfigChat(workspaceId);
-  }, [workspaceId, store]);
-
   const startSession = useCallback(
-    async (agentProfileId: string, prompt?: string) => {
+    async (agentProfileId: string, prompt: string) => {
       if (isStarting) return;
       setIsStarting(true);
       setError(null);
       try {
-        // Don't send the prompt to the backend — it will be sent via WS
-        // message.add by QuickChatContent after the WS subscription is
-        // established. This avoids a race condition where the agent completes
-        // before the frontend subscribes and events are lost.
+        const profile = storeApi
+          .getState()
+          .agentProfiles.items.find((item) => item.id === agentProfileId);
+        const isPassthrough = profile?.cli_passthrough === true;
+        // ACP chats send through the subscribed shell so a fast turn cannot
+        // finish before WS attaches. Passthrough chats render only a terminal.
         const response = await startConfigChat(workspaceId, {
           agent_profile_id: agentProfileId,
+          ...(isPassthrough ? { prompt } : {}),
         });
-
-        // Seed the task session in the main store so QuickChatContent can find it
-        // immediately. The WS event will merge on top when it arrives.
+        const now = new Date().toISOString();
         storeApi.getState().setTaskSession({
           id: toSessionId(response.session_id),
           task_id: toTaskId(response.task_id),
           state: "CREATED",
-          started_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          started_at: now,
+          updated_at: now,
           agent_profile_id: toAgentProfileId(agentProfileId),
         });
 
-        // Store the prompt so QuickChatContent can send it via WS.
-        setPendingPrompt(prompt ?? null);
+        setPendingPrompt(isPassthrough ? null : { sessionId: response.session_id, prompt });
+        store.closeQuickChatSession("");
+        store.openQuickChat(response.session_id, workspaceId, agentProfileId, "config");
+        store.renameQuickChatSession(response.session_id, prompt.slice(0, 40) || "Config Chat");
 
-        store.openConfigChat(response.session_id, workspaceId);
-        store.renameConfigChatSession(response.session_id, prompt?.slice(0, 40) || "Config Chat");
-
-        // Save the selected profile as the workspace default for future sessions
         if (!workspace?.default_config_agent_profile_id) {
           try {
             await updateWorkspaceAction(workspaceId, {
@@ -100,51 +90,35 @@ export function useConfigChat(workspaceId: string) {
               default_config_agent_profile_id: agentProfileId,
             });
           } catch {
-            // Non-critical — don't fail the chat start for this
+            // The chat is usable even when saving the future default fails.
           }
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Unknown error";
-        setError(message);
+        setError(err instanceof Error ? err.message : "Unknown error");
       } finally {
         setIsStarting(false);
       }
     },
     [
-      workspaceId,
       isStarting,
       store,
       storeApi,
-      workspace?.default_config_agent_profile_id,
       updateWorkspaceInStore,
+      workspace?.default_config_agent_profile_id,
+      workspaceId,
     ],
   );
 
-  const close = useCallback(() => {
-    store.closeConfigChat();
-  }, [store]);
-
-  const newChat = useCallback(() => {
-    store.startNewConfigChat(workspaceId);
-  }, [store, workspaceId]);
-
-  const clearPendingPrompt = useCallback(() => setPendingPrompt(null), []);
+  const clearPendingPrompt = useCallback((sessionId: string) => {
+    setPendingPrompt((current) => (current?.sessionId === sessionId ? null : current));
+  }, []);
 
   return {
-    isOpen: store.isOpen,
-    sessions: store.sessions,
-    activeSessionId: store.activeSessionId,
     isStarting,
     error,
-    workspace,
     defaultProfileId,
     pendingPrompt,
-    clearPendingPrompt,
-    open,
     startSession,
-    close,
-    closeSession: store.closeConfigChatSession,
-    setActiveSession: store.setActiveConfigChatSession,
-    newChat,
+    clearPendingPrompt,
   };
 }

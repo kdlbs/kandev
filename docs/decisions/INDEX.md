@@ -44,3 +44,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0036 | [Normalize ACP shell output at the adapter boundary](0036-normalize-acp-shell-output-at-adapter-boundary.md)                        | accepted   | backend, frontend, protocol | 2026-07-14 |
 | 0037 | [Resource-aware frontend unit tests](0037-resource-aware-frontend-unit-tests.md)                                                     | accepted   | frontend, infra             | 2026-07-14 |
 | 0038 | [Quick Chat Repository Isolation](0038-quick-chat-repository-isolation.md)                                                           | accepted   | backend, frontend           | 2026-07-14 |
+| 0039 | [Typed Utility Chats Share the Quick Chat Session Model](0039-typed-quick-chat-sessions.md)                                         | accepted   | backend, frontend           | 2026-07-14 |

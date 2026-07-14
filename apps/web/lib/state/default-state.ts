@@ -142,7 +142,11 @@ function mergeQuickChatState(initialState: Partial<DefaultState>): DefaultState[
     ...quickChat,
     sessions: initialState.quickChat.sessions.map((session) => {
       const localName = storedNames[session.sessionId];
-      return localName ? { ...session, name: localName } : session;
+      return {
+        ...session,
+        kind: session.kind ?? "chat",
+        ...(localName ? { name: localName } : {}),
+      };
     }),
   };
 }

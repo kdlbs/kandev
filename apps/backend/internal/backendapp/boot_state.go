@@ -20,6 +20,8 @@ const (
 	legacyOfficeWorkspaceCookie = "office-active-workspace"
 	bootStateKeySessionID       = "sessionId"
 	bootStateKeyWorkspaceID     = "workspaceId"
+	quickChatSessionKindChat    = "chat"
+	quickChatSessionKindConfig  = "config"
 )
 
 func bootInitialState(
@@ -363,7 +365,7 @@ func (b bootStateBuilder) listQuickChatTasks(ctx context.Context, workspaceID st
 	const pageSize = 1000
 	var all []*taskmodels.Task
 	for page := 1; ; page++ {
-		tasks, total, err := b.p.taskSvc.ListTasksByWorkspace(ctx, workspaceID, "", "", "", page, pageSize, "", false, false, true, true)
+		tasks, total, err := b.p.taskSvc.ListTasksByWorkspace(ctx, workspaceID, "", "", "", page, pageSize, "", false, false, true, false)
 		if err != nil {
 			return nil, err
 		}
@@ -431,6 +433,7 @@ func mapQuickChatSessionState(task *taskmodels.Task, primary *taskmodels.TaskSes
 	state := map[string]any{
 		bootStateKeySessionID:   primary.ID,
 		bootStateKeyWorkspaceID: task.WorkspaceID,
+		"kind":                  quickChatSessionKind(task),
 	}
 	if task.Title != "" && task.Title != "Quick Chat" {
 		state["name"] = task.Title
@@ -439,6 +442,15 @@ func mapQuickChatSessionState(task *taskmodels.Task, primary *taskmodels.TaskSes
 		state["agentProfileId"] = agentProfileID
 	}
 	return state
+}
+
+func quickChatSessionKind(task *taskmodels.Task) string {
+	if task != nil {
+		if configMode, ok := task.Metadata["config_mode"].(bool); ok && configMode {
+			return quickChatSessionKindConfig
+		}
+	}
+	return quickChatSessionKindChat
 }
 
 func quickChatAgentProfileID(task *taskmodels.Task, primary *taskmodels.TaskSession) string {

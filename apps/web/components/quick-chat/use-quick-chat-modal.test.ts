@@ -32,14 +32,22 @@ type MockStore = Parameters<typeof useAgentSelection>[1];
 
 function makeAppState() {
   return {
-    quickChat: { isOpen: true, sessions: [] as Array<{ sessionId: string }>, activeSessionId: "" },
+    quickChat: {
+      isOpen: true,
+      sessions: [] as Array<{
+        sessionId: string;
+        workspaceId: string;
+        kind: "chat" | "config";
+      }>,
+      activeSessionId: "",
+    },
     closeQuickChat: vi.fn(),
     closeQuickChatSession: vi.fn(),
     setActiveQuickChatSession: vi.fn(),
     renameQuickChatSession: vi.fn(),
     openQuickChat: vi.fn(),
     agentProfiles: { items: [] },
-    taskSessions: { items: {} },
+    taskSessions: { items: {} as Record<string, { task_id: string }> },
   };
 }
 
@@ -73,7 +81,10 @@ beforeEach(() => {
 
 describe("useQuickChatModal — setup lifecycle", () => {
   it("removes a blank placeholder when dismissed from an active session", () => {
-    mockAppState.quickChat.sessions = [{ sessionId: "" }, { sessionId: "session-1" }];
+    mockAppState.quickChat.sessions = [
+      { sessionId: "", workspaceId: WORKSPACE_ID, kind: "chat" },
+      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat" },
+    ];
     mockAppState.quickChat.activeSessionId = "session-1";
     const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
 
@@ -90,7 +101,28 @@ describe("useQuickChatModal — setup lifecycle", () => {
     act(() => result.current.handleNewChat());
 
     expect(result.current.setupKey).toBe(1);
-    expect(mockAppState.openQuickChat).toHaveBeenCalledWith("", WORKSPACE_ID);
+    expect(mockAppState.openQuickChat).toHaveBeenCalledWith("", WORKSPACE_ID, undefined, "chat");
+  });
+});
+
+describe("useQuickChatModal — persisted config lifecycle", () => {
+  it("deletes the backing task only after config-tab close is confirmed", async () => {
+    const configSessionId = "config-session";
+    mockAppState.quickChat.sessions = [
+      { sessionId: configSessionId, workspaceId: WORKSPACE_ID, kind: "config" },
+    ];
+    mockAppState.quickChat.activeSessionId = configSessionId;
+    mockAppState.taskSessions.items = { [configSessionId]: { task_id: "config-task" } };
+    mockDeleteTask.mockResolvedValue(undefined);
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    act(() => result.current.handleCloseTab(configSessionId));
+    expect(mockDeleteTask).not.toHaveBeenCalled();
+
+    await act(async () => result.current.handleConfirmClose());
+
+    expect(mockAppState.closeQuickChatSession).toHaveBeenCalledWith(configSessionId);
+    expect(mockDeleteTask).toHaveBeenCalledWith("config-task");
   });
 });
 
