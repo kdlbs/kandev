@@ -152,7 +152,7 @@ function StepConfigHeader({
         size="sm"
         onClick={onRemove}
         disabled={readOnly}
-        className="h-8 self-end text-destructive hover:text-destructive sm:self-auto"
+        className="h-8 self-end cursor-pointer text-destructive hover:text-destructive sm:self-auto"
       >
         <IconTrash className="h-3.5 w-3.5 mr-1" />
         Delete

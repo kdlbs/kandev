@@ -167,6 +167,14 @@ function brandWorkflowUpdates(updates: {
   };
 }
 
+function hasNewerWorkflowMetadata(current: Workflow, savedFrom: Workflow) {
+  return (
+    current.name !== savedFrom.name ||
+    current.description !== savedFrom.description ||
+    current.agent_profile_id !== savedFrom.agent_profile_id
+  );
+}
+
 function useWorkflowActions({
   workspace,
   workflowItems,
@@ -229,13 +237,18 @@ function useWorkflowActions({
     updates.agent_profile_id = workflow.agent_profile_id ?? "";
     if (Object.keys(updates).length) await updateWorkflowAction(workflowId, updates);
     const branded = brandWorkflowUpdates(updates);
+    const savedSnapshot = { ...workflow, ...branded };
     setWorkflowItems((prev) =>
-      prev.map((item) => (item.id === workflowId ? { ...item, ...branded } : item)),
+      prev.map((item) =>
+        item.id === workflowId && !hasNewerWorkflowMetadata(item, workflow)
+          ? { ...item, ...branded }
+          : item,
+      ),
     );
     setSavedWorkflowItems((prev) =>
       prev.some((item) => item.id === workflowId)
-        ? prev.map((item) => (item.id === workflowId ? { ...workflow, ...branded } : item))
-        : [...prev, { ...workflow, ...branded }],
+        ? prev.map((item) => (item.id === workflowId ? savedSnapshot : item))
+        : [...prev, savedSnapshot],
     );
   };
 

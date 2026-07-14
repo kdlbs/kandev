@@ -34,6 +34,22 @@ test.describe("Workflow settings on mobile", () => {
         return steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed;
       })
       .toEqual([{ type: "move_to_next" }]);
+
+    const viewportWidth = await testPage.evaluate(() => window.innerWidth);
+    const editorControls = [
+      card.getByPlaceholder("Step name"),
+      childCompletionSelect,
+      card.getByRole("button", { name: "Delete", exact: true }),
+    ];
+    for (const control of editorControls) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewportWidth);
+    }
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
   });
 
   test("keeps workflow controls within the mobile viewport", async ({ testPage, seedData }) => {

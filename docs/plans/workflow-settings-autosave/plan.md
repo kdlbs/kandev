@@ -57,9 +57,18 @@ Wave 3:
 ```bash
 cd apps && pnpm --filter @kandev/web test -- --run app/settings/workspace/use-workflow-creation.test.ts components/settings/workflow-card-actions.test.ts
 cd apps/web && pnpm run typecheck
-cd apps/web && pnpm e2e:run tests/workflow/workflow-settings.spec.ts tests/workflow/mobile-workflow-settings.spec.ts
+cd apps/web && pnpm e2e:run tests/workflow/workflow-settings.spec.ts
+cd apps/web && pnpm e2e:run --project mobile-chrome --no-build tests/workflow/mobile-workflow-settings.spec.ts
 GOCACHE=/tmp/kandev-go-cache make fmt
 GOCACHE=/tmp/kandev-go-cache make typecheck
 GOCACHE=/tmp/kandev-go-cache make test
 GOCACHE=/tmp/kandev-go-cache GOLANGCI_LINT_CACHE=/tmp/kandev-golangci-cache make lint
 ```
+
+## Completion Report
+
+- Verification: focused creation/autosave tests, web typecheck, desktop workflow E2E, mobile Chrome E2E, and the full repository format/typecheck/test/lint pipeline passed locally.
+- Behavior: workflow creation is immediate; metadata and step writes are serialized behind one status; failures pause later writes and retry the exact failed operation.
+- Responsive result: page actions, card fields, destructive actions, and the open step editor remain within a 390px viewport without document overflow.
+- Blockers: no implementation blocker. PR CI later exposed a shared `runtime-latest` Playwright browser-revision mismatch before any E2E spec started.
+- Residual races: cross-tab edits remain last-write-wins and are explicitly out of scope; within one card, stale completions cannot overwrite newer local metadata.

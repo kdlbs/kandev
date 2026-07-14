@@ -138,8 +138,13 @@ export function CreateWorkflowDialog({
   onCreate,
   createLoading = false,
 }: CreateWorkflowDialogProps) {
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (createLoading && !nextOpen) return;
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent
         className="sm:w-[900px] sm:max-w-none max-h-[90vh] flex flex-col"
         data-testid="create-workflow-dialog"
@@ -196,7 +201,12 @@ export function CreateWorkflowDialog({
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={createLoading}
+            className="cursor-pointer"
+          >
             Cancel
           </Button>
           <Button
@@ -204,6 +214,7 @@ export function CreateWorkflowDialog({
             disabled={createLoading}
             className="cursor-pointer"
             data-testid="confirm-create-workflow"
+            data-dialog-default-action
           >
             {createLoading ? "Adding..." : "Add Workflow"}
           </Button>

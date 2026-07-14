@@ -19,7 +19,7 @@ spec: "../../specs/workflow-settings-autosave/spec.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run components/settings/workflow-card-actions.test.ts
+cd apps && pnpm --filter @kandev/web test -- --run app/settings/workspace/use-workflow-creation.test.ts components/settings/use-serialized-mutation-queue.test.ts components/settings/workflow-card-actions.test.ts
 cd apps/web && pnpm run typecheck
 ```
 
@@ -39,3 +39,11 @@ cd apps/web && pnpm run typecheck
 ## Output Contract
 
 Report behavior implemented, files changed, targeted tests run, blockers, residual races, and update this task plus `plan.md` to done.
+
+## Completion Report
+
+- Behavior: Add Workflow persists before exposing the card; workflow and step mutations share ordered autosave status and exact-operation retry; failed rollback keeps the partial workflow recoverable.
+- Files: creation hook/dialog/client, workflow card/actions, serialized mutation queue, and focused unit tests.
+- Tests: the targeted creation, queue, and card-action Vitest files plus web typecheck passed.
+- Blockers: none.
+- Residual races: cross-tab concurrent edits are out of scope; same-card writes are serialized and stale metadata completions are ignored.

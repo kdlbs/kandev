@@ -4,8 +4,9 @@ import {
   createWorkflowAction,
   createWorkflowStepAction,
   deleteWorkflowAction,
+  listWorkflowStepsAction,
 } from "@/app/actions/workspaces";
-import type { Workflow, WorkflowStep, Workspace } from "@/lib/types/http";
+import type { Workflow, WorkflowStep, WorkflowTemplate, Workspace } from "@/lib/types/http";
 import { useWorkflowCreation } from "./use-workflow-creation";
 
 vi.mock("@/app/actions/workspaces", () => ({
@@ -31,14 +32,20 @@ function createdStep(position: number): WorkflowStep {
   } as WorkflowStep;
 }
 
-function renderCreationHook() {
+const template = {
+  id: "template-1",
+  name: "Template",
+  default_steps: [{ name: "Template Step", position: 0 }],
+} as WorkflowTemplate;
+
+function renderCreationHook(workflowTemplates: WorkflowTemplate[] = []) {
   const setWorkflowItems = vi.fn();
   const setSavedWorkflowItems = vi.fn();
   const toast = vi.fn();
   const view = renderHook(() =>
     useWorkflowCreation({
       workspace,
-      workflowTemplates: [],
+      workflowTemplates,
       setWorkflowItems,
       setSavedWorkflowItems,
       toast,
@@ -87,5 +94,57 @@ describe("useWorkflowCreation", () => {
     expect(deleteWorkflowAction).toHaveBeenCalledWith(workflow.id);
     expect(setWorkflowItems).not.toHaveBeenCalled();
     expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+  });
+
+  it("loads and exposes the persisted steps for a template workflow", async () => {
+    const templateStep = createdStep(0);
+    vi.mocked(createWorkflowAction).mockResolvedValue(workflow);
+    vi.mocked(listWorkflowStepsAction).mockResolvedValue({ steps: [templateStep], total: 1 });
+    const { result, setWorkflowItems } = renderCreationHook([template]);
+
+    await act(async () => {
+      result.current.setSelectedTemplateId(template.id);
+    });
+    await act(async () => {
+      await result.current.handleCreateWorkflow();
+    });
+
+    expect(listWorkflowStepsAction).toHaveBeenCalledWith(workflow.id);
+    expect(result.current.initialStepsByWorkflowId.get(workflow.id)).toEqual([templateStep]);
+    expect(setWorkflowItems).toHaveBeenCalledOnce();
+  });
+
+  it("deletes a partially created template workflow when loading its steps fails", async () => {
+    vi.mocked(createWorkflowAction).mockResolvedValue(workflow);
+    vi.mocked(listWorkflowStepsAction).mockRejectedValueOnce(new Error("step fetch failed"));
+    const { result, setWorkflowItems, toast } = renderCreationHook([template]);
+
+    await act(async () => {
+      result.current.setSelectedTemplateId(template.id);
+    });
+    await act(async () => {
+      await result.current.handleCreateWorkflow();
+    });
+
+    expect(deleteWorkflowAction).toHaveBeenCalledWith(workflow.id);
+    expect(setWorkflowItems).not.toHaveBeenCalled();
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+  });
+
+  it("keeps a partially initialized workflow visible when rollback fails", async () => {
+    vi.mocked(createWorkflowAction).mockResolvedValue(workflow);
+    vi.mocked(createWorkflowStepAction).mockRejectedValueOnce(new Error("step failed"));
+    vi.mocked(deleteWorkflowAction).mockRejectedValueOnce(new Error("cleanup failed"));
+    const { result, setWorkflowItems, setSavedWorkflowItems, toast } = renderCreationHook();
+
+    await act(async () => {
+      await result.current.handleCreateWorkflow();
+    });
+
+    expect(setWorkflowItems).toHaveBeenCalledOnce();
+    expect(setSavedWorkflowItems).toHaveBeenCalledOnce();
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Workflow created with setup errors", variant: "error" }),
+    );
   });
 });

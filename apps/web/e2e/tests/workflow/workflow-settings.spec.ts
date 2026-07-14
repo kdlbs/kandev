@@ -1,5 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+
+function waitForMutation(page: Page, method: string, path: RegExp) {
+  return page.waitForResponse((response) => {
+    const request = response.request();
+    return request.method() === method && path.test(new URL(response.url()).pathname);
+  });
+}
 
 test.describe("Workflow settings", () => {
   test("hides system-only templates from the add workflow dialog", async ({
@@ -83,7 +91,10 @@ test.describe("Workflow settings", () => {
     await expect(card).toBeVisible();
 
     // Click the add step button
-    await page.addStepButton(card).click();
+    await Promise.all([
+      waitForMutation(testPage, "POST", /^\/api\/v1\/workflow\/steps$/),
+      page.addStepButton(card).click(),
+    ]);
 
     // A "New Step" should appear
     await expect(card.getByText("New Step")).toBeVisible();
@@ -188,8 +199,10 @@ test.describe("Workflow settings", () => {
 
     // Find the step name input in the config panel and rename it
     const nameInput = card.getByPlaceholder("Step name");
-    await nameInput.clear();
-    await nameInput.fill("Renamed Step");
+    await Promise.all([
+      waitForMutation(testPage, "PUT", /^\/api\/v1\/workflow\/steps\/[^/]+$/),
+      nameInput.fill("Renamed Step"),
+    ]);
 
     await expect(page.saveStatus(card)).toContainText("Saved");
 
@@ -268,7 +281,10 @@ test.describe("Workflow settings", () => {
 
     const card = await page.findWorkflowCard("E2E Workflow");
     const nameInput = card.locator("input").first();
-    await nameInput.fill("Autosaved Workflow Name");
+    await Promise.all([
+      waitForMutation(testPage, "PATCH", /^\/api\/v1\/workflows\/[^/]+$/),
+      nameInput.fill("Autosaved Workflow Name"),
+    ]);
 
     await expect(page.saveButton(card)).toHaveCount(0);
     await expect(page.saveStatus(card)).toContainText("Saved");

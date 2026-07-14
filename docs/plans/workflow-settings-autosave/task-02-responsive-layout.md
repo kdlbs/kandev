@@ -20,6 +20,7 @@ spec: "../../specs/workflow-settings-autosave/spec.md"
 
 ```bash
 cd apps/web && pnpm run typecheck
+cd apps/web && pnpm e2e:run --project mobile-chrome --no-build tests/workflow/mobile-workflow-settings.spec.ts
 ```
 
 ## Files Likely Touched
@@ -37,3 +38,10 @@ cd apps/web && pnpm run typecheck
 ## Output Contract
 
 Report responsive rules changed, rendered viewport checks, files touched, blockers, and update this task plus `plan.md` to done.
+
+## Completion Report
+
+- Responsive changes: section actions wrap, workflow fields stack, the pipeline owns horizontal scrolling, and step header/destructive controls remain reachable.
+- Viewport check: the mobile Chrome suite verified card controls and an open step editor at the Pixel 5 viewport with no document-level horizontal overflow.
+- Files: settings section, workflow card, pipeline editor/panels, and mobile workflow E2E.
+- Blockers: none.

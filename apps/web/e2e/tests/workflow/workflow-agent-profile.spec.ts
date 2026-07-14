@@ -1,10 +1,18 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Page } from "@playwright/test";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { KanbanPage } from "../../pages/kanban-page";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
+
+function waitForMutation(page: Page, method: string, path: RegExp) {
+  return page.waitForResponse((response) => {
+    const request = response.request();
+    return request.method() === method && path.test(new URL(response.url()).pathname);
+  });
+}
 
 test.describe("Workflow agent profile", () => {
   test("autosaves the workflow-level agent profile in settings", async ({
@@ -31,7 +39,10 @@ test.describe("Workflow agent profile", () => {
 
     // Open the select and pick the agent profile
     await profileSelect.click();
-    await testPage.getByRole("option", { name: profileLabel }).click();
+    await Promise.all([
+      waitForMutation(testPage, "PATCH", /^\/api\/v1\/workflows\/[^/]+$/),
+      testPage.getByRole("option", { name: profileLabel }).click(),
+    ]);
 
     await expect(page.saveStatus(card)).toContainText("Saved");
 
@@ -76,7 +87,10 @@ test.describe("Workflow agent profile", () => {
       content: '[data-slot="tooltip-content"] { display: none !important; }',
     });
     await stepProfileSelect.click();
-    await testPage.getByRole("option", { name: profileLabel }).click();
+    await Promise.all([
+      waitForMutation(testPage, "PUT", /^\/api\/v1\/workflow\/steps\/[^/]+$/),
+      testPage.getByRole("option", { name: profileLabel }).click(),
+    ]);
 
     await expect(page.saveStatus(card)).toContainText("Saved");
 
