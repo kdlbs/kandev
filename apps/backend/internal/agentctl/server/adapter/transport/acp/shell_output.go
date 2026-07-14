@@ -105,6 +105,8 @@ func replaceOrAppendTerminalOutput(payload *streams.ShellExecPayload, data strin
 		replaceShellStdout(payload, data)
 		return
 	}
+	// ACP does not identify cumulative terminal_output values. Treat values
+	// without the current prefix as new chunks so mixed update streams remain intact.
 	appendShellStdout(payload, data)
 }
 

@@ -19,7 +19,7 @@ function ExecuteStatusIcon({
   exitCode,
 }: {
   status: string | undefined;
-  exitCode: number | null | undefined;
+  exitCode: number | undefined;
 }) {
   if (status === "complete") {
     if (exitCode === 0) {
@@ -134,7 +134,7 @@ function ExecuteOutputContent({
 
 function parseExecuteMetadata(comment: Message) {
   const metadata = comment.metadata as ToolCallMetadata | undefined;
-  const status = metadata?.status;
+  const status = metadata?.status === "in_progress" ? "running" : metadata?.status;
   const shellExec = metadata?.normalized?.shell_exec;
   const output = shellExec?.output;
   const workDir = shellExec?.work_dir;

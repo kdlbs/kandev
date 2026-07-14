@@ -7,7 +7,11 @@ import { extractKandevStem, extractMcpResult } from "./kandev/parse";
 import { getKandevRenderer } from "./kandev/registry";
 import { PermissionActionRow } from "./permission-action-row";
 import { parsePermission, usePermissionResponseHandlers } from "./use-permission-handlers";
-import { KandevPermissionUIProvider, type KandevPermissionUIState } from "./kandev/shared";
+import {
+  KandevPermissionUIProvider,
+  type KandevPermissionUIState,
+  type KandevStatus,
+} from "./kandev/shared";
 import type { PermissionRequestMetadata } from "./use-permission-handlers";
 
 // Approval falls through to `undefined` on purpose: the tool_call status
@@ -26,6 +30,10 @@ type KandevToolMessageProps = {
   comment: Message;
   permissionMessage?: Message;
 };
+
+function normalizeKandevStatus(status: ToolCallMetadata["status"]): KandevStatus {
+  return status === "in_progress" ? "running" : status;
+}
 
 // kandevStemOf scans the several fields that may carry the raw MCP tool name
 // and returns the first one that parses to a known kandev stem. The fields
@@ -94,6 +102,7 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   const args = argsCandidate && typeof argsCandidate === "object" ? argsCandidate : undefined;
   const rawResult = generic?.output ?? meta?.result;
   const result = extractMcpResult(rawResult);
+  const status = normalizeKandevStatus(meta?.status);
 
   const permissionUI = derivePermissionUI(permissionStatus, isPermissionPending);
 
@@ -102,7 +111,7 @@ export const KandevToolMessage = memo(function KandevToolMessage({
   // and avoids the lint rule against "components created during render".
   const rendered = (
     <KandevPermissionUIProvider value={permissionUI}>
-      {renderer({ args, result, status: meta?.status })}
+      {renderer({ args, result, status })}
     </KandevPermissionUIProvider>
   );
 

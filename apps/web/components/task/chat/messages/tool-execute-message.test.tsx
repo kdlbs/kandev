@@ -6,14 +6,14 @@ import { ToolExecuteMessage } from "./tool-execute-message";
 afterEach(cleanup);
 
 type ShellOutput = {
-  exit_code?: number | null;
+  exit_code?: number;
   stdout?: string;
   stderr?: string;
   truncated?: boolean;
 };
 
 function executeMessage(
-  status: "pending" | "running" | "complete" | "error",
+  status: "pending" | "running" | "in_progress" | "complete" | "error",
   output?: ShellOutput,
 ): Message {
   return {
@@ -88,6 +88,18 @@ describe("ToolExecuteMessage command result", () => {
 
     expect(screen.getByLabelText("Command running")).toBeTruthy();
     expect(screen.getByText("partial output")).toBeTruthy();
+    expect(screen.queryByText(/Exit code/)).toBeNull();
+  });
+
+  it("treats ACP in_progress output as live", () => {
+    render(
+      <ToolExecuteMessage
+        comment={executeMessage("in_progress", { stdout: "ACP partial output\n" })}
+      />,
+    );
+
+    expect(screen.getByLabelText("Command running")).toBeTruthy();
+    expect(screen.getByText("ACP partial output")).toBeTruthy();
     expect(screen.queryByText(/Exit code/)).toBeNull();
   });
 

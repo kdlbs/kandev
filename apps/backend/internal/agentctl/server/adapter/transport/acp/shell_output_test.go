@@ -127,6 +127,31 @@ func TestNormalizeShellToolUpdateKeepsExplicitStderrTruncation(t *testing.T) {
 	require.True(t, payload.ShellExec().Output.Truncated)
 }
 
+func TestNormalizeShellToolUpdateAppendsNonCumulativeLiveOutput(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "test-command"},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output_delta": map[string]any{"data": "hello\n"}},
+		nil,
+		nil,
+	)
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output": map[string]any{"data": "world\n"}},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, "hello\nworld\n", payload.ShellExec().Output.Stdout)
+}
+
 func shellOutputJSON(t *testing.T, output any) map[string]any {
 	t.Helper()
 	require.NotNil(t, output)

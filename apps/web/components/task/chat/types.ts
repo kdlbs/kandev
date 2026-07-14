@@ -96,7 +96,7 @@ export type ModifyFilePayload = {
 };
 
 export type ShellExecOutput = {
-  exit_code?: number | null;
+  exit_code?: number;
   stdout?: string;
   stderr?: string;
   truncated?: boolean;
@@ -134,7 +134,7 @@ export type ToolCallMetadata = {
   parent_tool_call_id?: string; // For subagent nesting
   tool_name?: string;
   title?: string;
-  status?: "pending" | "running" | "complete" | "error";
+  status?: "pending" | "running" | "in_progress" | "complete" | "error";
   args?: Record<string, unknown>;
   result?: string;
   normalized?: NormalizedPayload;
