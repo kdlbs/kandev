@@ -76,7 +76,96 @@ async function sendQuickChatMessage(dialog: Locator, page: Page, text: string) {
   }).toPass({ timeout: 30_000, intervals: [250, 500, 1_000] });
 }
 
+async function waitForQuickChatWidth(dialog: Locator) {
+  await expect
+    .poll(() =>
+      dialog.evaluate((element) => {
+        const preferred = Number.parseFloat(
+          getComputedStyle(element).getPropertyValue("--quick-chat-width"),
+        );
+        return Math.abs(element.getBoundingClientRect().width - preferred);
+      }),
+    )
+    .toBeLessThan(2);
+}
+
 test.describe("Quick Chat", () => {
+  test("resizes from either edge, restores width, and keeps tab actions adjacent", async ({
+    testPage,
+  }) => {
+    const dialog = await openQuickChatSetup(testPage);
+    await waitForQuickChatWidth(dialog);
+    const initialBox = await dialog.boundingBox();
+    expect(initialBox).not.toBeNull();
+
+    const rightHandle = dialog.getByTestId("quick-chat-resize-right");
+    await expect(rightHandle).toBeVisible();
+    const rightBox = await rightHandle.boundingBox();
+    expect(rightBox).not.toBeNull();
+    await testPage.mouse.move(
+      rightBox!.x + rightBox!.width / 2,
+      rightBox!.y + rightBox!.height / 2,
+    );
+    await testPage.mouse.down();
+    await expect.poll(() => testPage.evaluate(() => document.body.style.cursor)).toBe("ew-resize");
+    await testPage.mouse.move(
+      rightBox!.x + rightBox!.width / 2 + 50,
+      rightBox!.y + rightBox!.height / 2,
+    );
+    await testPage.mouse.up();
+    await waitForQuickChatWidth(dialog);
+
+    const rightResizedBox = await dialog.boundingBox();
+    expect(rightResizedBox!.width).toBeGreaterThan(initialBox!.width + 80);
+
+    const leftHandle = dialog.getByTestId("quick-chat-resize-left");
+    const leftBox = await leftHandle.boundingBox();
+    expect(leftBox).not.toBeNull();
+    await testPage.mouse.move(leftBox!.x + leftBox!.width / 2, leftBox!.y + leftBox!.height / 2);
+    await testPage.mouse.down();
+    await testPage.mouse.move(
+      leftBox!.x + leftBox!.width / 2 - 40,
+      leftBox!.y + leftBox!.height / 2,
+    );
+    await testPage.mouse.up();
+    await waitForQuickChatWidth(dialog);
+
+    const finalBox = await dialog.boundingBox();
+    expect(finalBox!.width).toBeGreaterThan(rightResizedBox!.width + 50);
+    expect(finalBox!.x + finalBox!.width / 2).toBeCloseTo(
+      (await testPage.evaluate(() => window.innerWidth)) / 2,
+      0,
+    );
+
+    const tab = dialog.getByTestId("quick-chat-tab").last();
+    const newChat = dialog.getByLabel("Start new chat");
+    const tabBox = await tab.boundingBox();
+    const newChatBox = await newChat.boundingBox();
+    expect(newChatBox!.x - (tabBox!.x + tabBox!.width)).toBeLessThanOrEqual(8);
+
+    await startQuickChatFromSetup(dialog, testPage);
+    const surfaces = await dialog.evaluate((element) => {
+      const messages = element.querySelector<HTMLElement>('[data-testid="quick-chat-messages"]');
+      const input = element.querySelector<HTMLElement>('[data-testid="chat-input-area"]');
+      return {
+        messages: messages ? getComputedStyle(messages).backgroundColor : null,
+        input: input ? getComputedStyle(input).backgroundColor : null,
+      };
+    });
+    expect(surfaces.input).toBe(surfaces.messages);
+
+    await testPage.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+Shift+q`);
+    await expect(dialog).toBeVisible();
+    await waitForQuickChatWidth(dialog);
+    const restoredBox = await dialog.boundingBox();
+    expect(restoredBox!.width).toBeCloseTo(finalBox!.width, 0);
+  });
+
   test("explains quick chat and starts with repository context", async ({
     testPage,
     seedData,

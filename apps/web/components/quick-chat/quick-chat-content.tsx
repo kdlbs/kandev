@@ -84,7 +84,10 @@ export const QuickChatContent = memo(function QuickChatContent({
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
-      <div className="flex-1 min-h-0 overflow-hidden">
+      <div
+        className="flex-1 min-h-0 overflow-hidden bg-background"
+        data-testid="quick-chat-messages"
+      >
         <MessageList
           items={panelState.groupedItems}
           messages={panelState.allMessages}
@@ -129,6 +132,7 @@ export const QuickChatContent = memo(function QuickChatContent({
         minimalToolbar={minimalToolbar}
         hidePlanMode={true}
         placeholderOverride={placeholderOverride}
+        surfaceClassName="bg-background"
       />
     </div>
   );

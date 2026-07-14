@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
@@ -12,6 +12,7 @@ import { QuickChatDeleteDialog } from "./quick-chat-delete-dialog";
 import { QuickChatTabItem } from "./quick-chat-tab-item";
 import { QuickChatSetup } from "./quick-chat-setup";
 import { useQuickChatModal } from "./use-quick-chat-modal";
+import { useQuickChatWidth } from "@/hooks/use-quick-chat-width";
 
 type QuickChatModalProps = {
   workspaceId: string;
@@ -52,17 +53,40 @@ function QuickChatTabs({
             />
           );
         })}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-6 w-6 p-0 cursor-pointer shrink-0"
+          onClick={onNewChat}
+          aria-label="Start new chat"
+        >
+          <IconPlus className="h-3.5 w-3.5" />
+        </Button>
       </div>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="h-6 w-6 p-0 cursor-pointer shrink-0"
-        onClick={onNewChat}
-        aria-label="Start new chat"
-      >
-        <IconPlus className="h-3.5 w-3.5" />
-      </Button>
     </div>
+  );
+}
+
+function QuickChatResizeHandle({
+  edge,
+  onMouseDown,
+}: {
+  edge: "left" | "right";
+  onMouseDown: (event: React.MouseEvent) => void;
+}) {
+  return (
+    <button
+      type="button"
+      tabIndex={-1}
+      aria-label={`Resize quick chat from ${edge}`}
+      data-testid={`quick-chat-resize-${edge}`}
+      onMouseDown={onMouseDown}
+      className={`group absolute inset-y-0 z-20 hidden w-2 cursor-ew-resize items-center justify-center sm:flex ${
+        edge === "left" ? "left-0" : "right-0"
+      }`}
+    >
+      <span className="h-full w-px bg-transparent transition-colors group-hover:bg-primary/60" />
+    </button>
   );
 }
 
@@ -110,17 +134,21 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
     handleConfirmClose,
     handleRename,
   } = useQuickChatModal(workspaceId);
+  const { width, leftResizeHandleProps, rightResizeHandleProps } = useQuickChatWidth();
   const hasCreatedChat = sessions.some((session) => session.sessionId !== "");
 
   return (
     <>
       <Dialog open={isOpen} onOpenChange={handleOpenChange}>
         <DialogContent
-          className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[80vw] sm:!max-w-[80vw] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
+          className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
+          style={{ "--quick-chat-width": `${width}px` } as CSSProperties}
           showCloseButton={false}
           overlayClassName="bg-transparent"
         >
           <DialogTitle className="sr-only">Quick Chat</DialogTitle>
+          <QuickChatResizeHandle edge="left" {...leftResizeHandleProps} />
+          <QuickChatResizeHandle edge="right" {...rightResizeHandleProps} />
           <QuickChatTabs
             sessions={sessions}
             activeSessionId={activeSessionId || ""}

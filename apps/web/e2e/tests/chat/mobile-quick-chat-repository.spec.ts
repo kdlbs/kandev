@@ -17,6 +17,8 @@ test.describe("Quick Chat repository context on mobile", () => {
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByTestId("quick-chat-resize-left")).not.toBeVisible();
+    await expect(dialog.getByTestId("quick-chat-resize-right")).not.toBeVisible();
     await expect(
       dialog.getByText("Chat with an agent about an idea, question, or codebase."),
     ).toBeVisible();

@@ -33,6 +33,7 @@ import { useExecutorEnvironmentAvailability } from "@/hooks/domains/session/use-
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
 import type { useChatPanelState } from "./use-chat-panel-state";
+import { cn } from "@/lib/utils";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -365,6 +366,7 @@ type ChatInputAreaProps = {
   /** Hide the plan mode toggle button (for ephemeral/quick chat sessions) */
   hidePlanMode?: boolean;
   placeholderOverride?: string;
+  surfaceClassName?: string;
 };
 
 function useExecutorUnavailable(taskId: string | null, sessionId: string | null) {
@@ -417,6 +419,7 @@ export function ChatInputArea({
   minimalToolbar,
   hidePlanMode,
   placeholderOverride,
+  surfaceClassName,
 }: ChatInputAreaProps) {
   const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled, todoItems } =
     panelState;
@@ -429,7 +432,10 @@ export function ChatInputArea({
   );
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
   return (
-    <div className="bg-card flex-shrink-0 px-2 pb-2 pt-1">
+    <div
+      data-testid="chat-input-area"
+      className={cn("bg-card flex-shrink-0 px-2 pb-2 pt-1", surfaceClassName)}
+    >
       <QueueAffordance
         sessionId={resolvedSessionId}
         canDrain={canDrainQueue}

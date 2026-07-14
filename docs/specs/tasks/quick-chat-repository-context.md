@@ -27,8 +27,13 @@ context without changing their checked-out branches or creating a kanban task.
 - Repository context contains committed branch state. Uncommitted files from the user's
   working directory are not copied into the chat.
 - Repo-less quick chats retain their current scratch workspace and default-executor behavior.
+- The desktop quick-chat dialog stays horizontally centered and can be resized from either
+  horizontal edge. Its last user-selected width is restored across browser sessions and clamped
+  to the current viewport.
+- The quick-chat composer uses the same surface background as the message history, and the new
+  chat action appears immediately after the last chat tab.
 - The setup flow supports desktop and mobile layouts without horizontal page scrolling or
-  hover-only actions.
+  hover-only actions. Mobile quick chat remains full-screen and does not expose resize handles.
 
 Decision: [ADR 0038](../../decisions/0038-quick-chat-repository-isolation.md).
 
@@ -89,6 +94,11 @@ them through the existing quick-chat task deletion path.
   first-use introduction is omitted while field helper copy remains.
 - **GIVEN** a mobile viewport, **WHEN** the user selects an agent and repository branch, **THEN**
   all controls remain touch-accessible and the page has no horizontal overflow.
+- **GIVEN** a desktop quick-chat dialog, **WHEN** the user drags either horizontal edge, **THEN**
+  the centered dialog resizes within viewport limits and restores that width the next time it
+  opens.
+- **GIVEN** one or more quick-chat tabs, **WHEN** the tab strip renders, **THEN** the new-chat
+  action sits directly after the final tab rather than at the far edge of the dialog.
 
 ## Out of scope
 

@@ -62,6 +62,7 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
 
   return (
     <div
+      data-testid="quick-chat-tab"
       className={`flex items-center gap-1 rounded transition-colors whitespace-nowrap ${
         isActive
           ? "bg-background text-foreground shadow-sm"
