@@ -281,6 +281,7 @@ func (m *mockAgentManager) LaunchAgent(ctx context.Context, req *executor.Launch
 	return nil, nil
 }
 func (m *mockAgentManager) StartAgentProcess(_ context.Context, _ string) error { return nil }
+func (m *mockAgentManager) IsAgentCommandConfigured(_ string) bool              { return true }
 func (m *mockAgentManager) StopAgent(_ context.Context, agentExecutionID string, force bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

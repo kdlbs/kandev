@@ -23,6 +23,7 @@ type mockAgentManager struct {
 	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
+	isAgentCommandConfiguredFunc     func(agentExecutionID string) bool
 	isAgentRunningForSessionFunc     func(ctx context.Context, sessionID string) bool
 	cleanupStaleExecutionFunc        func(ctx context.Context, sessionID string) error
 	promptAgentFunc                  func(ctx context.Context, agentExecutionID, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error)
@@ -76,6 +77,13 @@ func (m *mockAgentManager) StartAgentProcess(ctx context.Context, agentExecution
 		return m.startAgentProcessFunc(ctx, agentExecutionID)
 	}
 	return nil
+}
+
+func (m *mockAgentManager) IsAgentCommandConfigured(agentExecutionID string) bool {
+	if m.isAgentCommandConfiguredFunc != nil {
+		return m.isAgentCommandConfiguredFunc(agentExecutionID)
+	}
+	return true
 }
 
 func (m *mockAgentManager) StopAgent(ctx context.Context, agentExecutionID string, force bool) error {
