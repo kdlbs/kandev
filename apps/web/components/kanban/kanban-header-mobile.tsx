@@ -68,7 +68,7 @@ export function KanbanHeaderMobile({
         actionsClassName="gap-2"
         actions={
           <>
-            <TopbarMetrics />
+            <TopbarMetrics size="lg" />
             {onSearchChange && (
               <Button
                 variant={isSearchOpen ? "secondary" : "outline"}

@@ -19,9 +19,10 @@ import type { SystemMetricSample, SystemMetricsSource } from "@/lib/types/system
 
 type TopbarMetricsProps = {
   activeSessionId?: string | null;
+  size?: "sm" | "lg";
 };
 
-export function TopbarMetrics({ activeSessionId }: TopbarMetricsProps) {
+export function TopbarMetrics({ activeSessionId, size = "lg" }: TopbarMetricsProps) {
   const enabled = useAppStore((s) => s.userSettings.systemMetricsDisplay.showInTopbar);
   const snapshot = useAppStore((s) => s.system.metrics);
   const { usesDesktopWorkbench } = useResponsiveBreakpoint();
@@ -32,7 +33,10 @@ export function TopbarMetrics({ activeSessionId }: TopbarMetricsProps) {
   const sources = selectSources(snapshot?.sources ?? [], activeSessionId);
   if (sources.length === 0) {
     return (
-      <div className="flex h-8 items-center gap-1 rounded px-2 text-xs text-muted-foreground md:border md:border-border">
+      <div
+        className={`flex ${metricsHeight(size)} items-center gap-1 rounded px-2 text-xs text-muted-foreground md:border md:border-border`}
+        data-testid="topbar-metrics"
+      >
         <IconActivity className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Metrics</span>
       </div>
@@ -43,17 +47,22 @@ export function TopbarMetrics({ activeSessionId }: TopbarMetricsProps) {
       <CompactSourceMetrics
         source={selectCompactSource(sources, activeSessionId)}
         updatedAt={snapshot?.timestamp}
+        size={size}
       />
     );
   }
   return (
-    <div className="hidden md:flex max-w-[42vw] items-center gap-1 overflow-hidden">
+    <div
+      className="hidden max-w-[42vw] items-center gap-1 overflow-hidden md:flex"
+      data-testid="topbar-metrics"
+    >
       {sources.map((source) => (
         <SourceMetrics
           key={source.id}
           source={source}
           updatedAt={snapshot?.timestamp}
           showSource={sources.length > 1}
+          size={size}
         />
       ))}
     </div>
@@ -75,15 +84,19 @@ function SourceMetrics({
   source,
   updatedAt,
   showSource,
+  size,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
   showSource: boolean;
+  size: NonNullable<TopbarMetricsProps["size"]>;
 }) {
   const metrics = source.metrics.slice(0, 4);
 
   return (
-    <div className="flex h-8 max-w-[220px] items-center gap-1 overflow-hidden rounded border border-border px-1.5 text-xs">
+    <div
+      className={`flex ${metricsHeight(size)} max-w-[220px] items-center gap-1 overflow-hidden rounded border border-border px-1.5 text-xs`}
+    >
       {showSource ? <SourceBadge source={source} updatedAt={updatedAt} /> : null}
       {metrics.length > 0 ? (
         metrics.map((metric) => (
@@ -99,15 +112,17 @@ function SourceMetrics({
 function CompactSourceMetrics({
   source,
   updatedAt,
+  size,
 }: {
   source: SystemMetricsSource;
   updatedAt?: string;
+  size: NonNullable<TopbarMetricsProps["size"]>;
 }) {
   const metrics = source.metrics.slice(0, 2);
 
   return (
     <div
-      className="flex h-9 max-w-[34vw] items-center gap-1 overflow-hidden rounded px-1.5 text-xs"
+      className={`flex ${metricsHeight(size)} max-w-[34vw] items-center gap-1 overflow-hidden rounded px-1.5 text-xs`}
       data-testid="mobile-topbar-metrics"
     >
       <SourceBadge source={source} updatedAt={updatedAt} />
@@ -120,6 +135,10 @@ function CompactSourceMetrics({
       )}
     </div>
   );
+}
+
+function metricsHeight(size: NonNullable<TopbarMetricsProps["size"]>) {
+  return size === "sm" ? "h-7" : "h-8";
 }
 
 function SourceBadge({ source, updatedAt }: { source: SystemMetricsSource; updatedAt?: string }) {

@@ -173,7 +173,7 @@ function TabletHeader({
               className="hidden md:flex w-48 lg:w-56 [&_input]:h-8"
             />
           )}
-          <TopbarMetrics />
+          <TopbarMetrics size="lg" />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
@@ -249,7 +249,7 @@ function DesktopHeader({
       actions={
         <>
           {actionsSearch}
-          <TopbarMetrics />
+          <TopbarMetrics size="lg" />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>

@@ -3,6 +3,22 @@ import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { missingGitHealth } from "./health-fixtures";
 
 test.describe("Mobile kanban view", () => {
+  test("metrics match the height of the mobile topbar actions", async ({ testPage, apiClient }) => {
+    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      system_metrics_display: { show_in_topbar: true },
+    });
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    const metrics = testPage.getByTestId("mobile-topbar-metrics");
+    await expect(metrics).toBeVisible();
+    await expect(mobile.mobileSearchToggle).toBeVisible();
+    const metricsBox = await metrics.boundingBox();
+    const actionBox = await mobile.mobileSearchToggle.boundingBox();
+
+    expect(metricsBox?.height).toBe(actionBox?.height);
+  });
+
   test("renders mobile layout with column tabs and swipeable columns", async ({
     testPage,
     apiClient,
