@@ -107,7 +107,7 @@ export function WorkspaceRepoChips({
       {freshBranchToggle}
       <Tooltip>
         <TooltipTrigger asChild>
-          <span className="inline-flex">
+          <span className="inline-flex" tabIndex={canAddMore ? undefined : 0}>
             <button
               type="button"
               onClick={onAdd}

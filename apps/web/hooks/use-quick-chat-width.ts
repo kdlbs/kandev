@@ -48,6 +48,7 @@ export function useQuickChatWidth() {
   const dragRef = useRef<{
     edge: ResizeEdge;
     startX: number;
+    lastX: number;
     startWidth: number;
     dialog: HTMLElement;
   } | null>(null);
@@ -61,7 +62,13 @@ export function useQuickChatWidth() {
     event.preventDefault();
     const dialog = event.currentTarget.parentElement;
     if (!dialog) return;
-    dragRef.current = { edge, startX: event.clientX, startWidth: widthRef.current, dialog };
+    dragRef.current = {
+      edge,
+      startX: event.clientX,
+      lastX: event.clientX,
+      startWidth: widthRef.current,
+      dialog,
+    };
     document.body.style.cursor = "ew-resize";
     document.body.style.userSelect = "none";
   }, []);
@@ -79,6 +86,7 @@ export function useQuickChatWidth() {
     const handleMouseMove = (event: MouseEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
+      drag.lastX = event.clientX;
       const pointerDelta = event.clientX - drag.startX;
       const widthDelta = (drag.edge === "right" ? pointerDelta : -pointerDelta) * 2;
       const nextWidth = clampQuickChatWidth(drag.startWidth + widthDelta);
@@ -97,6 +105,8 @@ export function useQuickChatWidth() {
       const drag = dragRef.current;
       if (drag) {
         widthRef.current = nextWidth;
+        drag.startWidth = nextWidth;
+        drag.startX = drag.lastX;
         drag.dialog.style.setProperty("--quick-chat-width", `${nextWidth}px`);
         return;
       }

@@ -6,6 +6,8 @@ import {
   useQuickChatWidth,
 } from "./use-quick-chat-width";
 
+const WIDTH_PROPERTY = "--quick-chat-width";
+
 function mouseDown(clientX: number, dialog: HTMLElement) {
   const handle = document.createElement("button");
   dialog.appendChild(handle);
@@ -52,7 +54,7 @@ describe("quick chat dialog width", () => {
     act(() => result.current.rightResizeHandleProps.onMouseDown(mouseDown(900, dialog)));
     act(() => mouseMove(950));
 
-    expect(dialog.style.getPropertyValue("--quick-chat-width")).toBe("1060px");
+    expect(dialog.style.getPropertyValue(WIDTH_PROPERTY)).toBe("1060px");
     expect(result.current.width).toBe(960);
     act(() => mouseUp());
     expect(result.current.width).toBe(1060);
@@ -65,7 +67,7 @@ describe("quick chat dialog width", () => {
     act(() => result.current.leftResizeHandleProps.onMouseDown(mouseDown(300, dialog)));
     act(() => mouseMove(250));
 
-    expect(dialog.style.getPropertyValue("--quick-chat-width")).toBe("1060px");
+    expect(dialog.style.getPropertyValue(WIDTH_PROPERTY)).toBe("1060px");
     expect(result.current.width).toBe(960);
     act(() => mouseUp());
     expect(result.current.width).toBe(1060);
@@ -92,10 +94,26 @@ describe("quick chat dialog width", () => {
     Object.defineProperty(window, "innerWidth", { configurable: true, value: 1000 });
     act(() => window.dispatchEvent(new Event("resize")));
 
-    expect(dialog.style.getPropertyValue("--quick-chat-width")).toBe("968px");
+    expect(dialog.style.getPropertyValue(WIDTH_PROPERTY)).toBe("968px");
     expect(result.current.width).toBe(960);
     act(() => mouseUp());
     expect(result.current.width).toBe(968);
+  });
+
+  it("rebases an active drag after the viewport changes", () => {
+    const { result } = renderHook(() => useQuickChatWidth());
+    const dialog = document.createElement("div");
+
+    act(() => result.current.rightResizeHandleProps.onMouseDown(mouseDown(900, dialog)));
+    act(() => mouseMove(950));
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1000 });
+    act(() => window.dispatchEvent(new Event("resize")));
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1200 });
+    act(() => window.dispatchEvent(new Event("resize")));
+    act(() => mouseMove(951));
+
+    expect(dialog.style.getPropertyValue(WIDTH_PROPERTY)).toBe("970px");
+    act(() => mouseUp());
   });
 
   it("clamps to the minimum and current viewport", () => {
