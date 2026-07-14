@@ -54,16 +54,39 @@ let enforcing = false;
  *  reverted to the previous target on every intermediate layout change. */
 let sashDragging = false;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function restoreColumnToTarget(sv: any, idx: number, target: number | undefined): void {
+function restoreColumnToTarget(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sv: any,
+  idx: number,
+  target: number | undefined,
+  maximumWidth: number,
+): void {
   if (target === undefined) return;
+  const reachableTarget = Math.min(target, maximumWidth);
   const cur = sv.getViewSize(idx);
-  if (Math.abs(cur - target) <= 1) return;
+  if (Math.abs(cur - reachableTarget) <= 1) return;
   try {
-    sv.resizeView(idx, target);
+    sv.resizeView(idx, reachableTarget);
   } catch {
     /* dockview rejects unreachable sizes — ignore */
   }
+}
+
+/** Keep right-column constraints tied to Dockview's measured container, not
+ * `window.innerWidth`. The app sidebar sits outside Dockview, so the browser
+ * viewport can materially overstate the space available to chat + files. */
+function applyRightConstraints(api: DockviewReadyEvent["api"]): number {
+  const measuredWidth = api.width > 0 ? api.width : undefined;
+  const maximumWidth = computeRightMaxPx(measuredWidth);
+  for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
+    const group = api.groups.find((candidate) => candidate.id === gid);
+    if (!group) continue;
+    group.api.setConstraints({
+      maximumWidth,
+      minimumWidth: LAYOUT_PINNED_MIN_PX,
+    });
+  }
+  return maximumWidth;
 }
 
 function enforcePinnedTargets(api: DockviewReadyEvent["api"]): void {
@@ -76,7 +99,8 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"]): void {
   enforcing = true;
   try {
     if (store.rightPanelsVisible) {
-      restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"));
+      const maximumWidth = applyRightConstraints(api);
+      restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"), maximumWidth);
     }
   } finally {
     enforcing = false;
@@ -89,17 +113,7 @@ function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
   if (store.isRestoringLayout) return;
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
 
-  if (store.rightPanelsVisible) {
-    for (const gid of [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]) {
-      const group = api.groups.find((g) => g.id === gid);
-      if (group) {
-        group.api.setConstraints({
-          maximumWidth: computeRightMaxPx(),
-          minimumWidth: LAYOUT_PINNED_MIN_PX,
-        });
-      }
-    }
-  }
+  if (store.rightPanelsVisible) applyRightConstraints(api);
 }
 
 /**
@@ -216,9 +230,10 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
     if (w <= 0 || h <= 0) return;
     if (w === api.width && h === api.height) return;
     api.layout(w, h);
-    // `enforcePinnedTargets` (wired in `setupSashDragCapToggle`) restores
-    // sidebar/right to their target widths via `onDidLayoutChange`, so we
-    // don't need to redo that here.
+    // Dockview's direct `api.layout` path does not consistently emit
+    // `onDidLayoutChange`, so enforce immediately after the proportional
+    // rebalance instead of relying on the subscription above.
+    enforcePinnedTargets(api);
   });
   ro.observe(parent);
   return () => ro.disconnect();
