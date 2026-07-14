@@ -1329,8 +1329,9 @@ func (body *httpStartQuickChatRequest) resolveParams(workspace *models.Workspace
 	if agentProfileID == "" && workspace.DefaultAgentProfileID != nil {
 		agentProfileID = *workspace.DefaultAgentProfileID
 	}
+	repos := body.buildRepositories()
 	executorID := body.ExecutorID
-	if len(body.buildRepositories()) > 0 {
+	if len(repos) > 0 {
 		executorID = models.ExecutorIDWorktree
 	} else if executorID == "" && workspace.DefaultExecutorID != nil {
 		executorID = *workspace.DefaultExecutorID
@@ -1353,7 +1354,7 @@ func (body *httpStartQuickChatRequest) resolveParams(workspace *models.Workspace
 		agentProfileID: agentProfileID,
 		executorID:     executorID,
 		title:          title,
-		repos:          body.buildRepositories(),
+		repos:          repos,
 		metadata:       metadata,
 	}
 }

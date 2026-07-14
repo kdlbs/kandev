@@ -114,7 +114,7 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
 export function useQuickChatModal(workspaceId: string) {
   const { toast } = useToast();
   const store = useQuickChatStore();
-  const [showAgentPicker, setShowAgentPicker] = useState(false);
+  const [setupKey, setSetupKey] = useState(0);
   const [sessionToClose, setSessionToClose] = useState<string | null>(null);
   const {
     pendingAgentId,
@@ -126,8 +126,8 @@ export function useQuickChatModal(workspaceId: string) {
     (open: boolean) => {
       if (open) return;
       reset();
+      if (store.activeSessionId === "") store.closeQuickChatSession("");
       store.closeQuickChat();
-      setShowAgentPicker(false);
     },
     [store, reset],
   );
@@ -137,12 +137,13 @@ export function useQuickChatModal(workspaceId: string) {
   // instead of yanking the user back to that session.
   const handleNewChat = useCallback(() => {
     reset();
+    setSetupKey((key) => key + 1);
     store.openQuickChat("", workspaceId);
   }, [reset, store, workspaceId]);
 
   const handleSelectAgent = useCallback(
     (agentId: string, repositories: QuickChatRepositoryInput[] = []) =>
-      doSelectAgent(agentId, () => setShowAgentPicker(false), repositories),
+      doSelectAgent(agentId, () => {}, repositories),
     [doSelectAgent],
   );
 
@@ -198,7 +199,8 @@ export function useQuickChatModal(workspaceId: string) {
     sessions: store.sessions,
     activeSessionId: store.activeSessionId,
     sessionToClose,
-    activeSessionNeedsAgent: store.activeSessionId === "" || showAgentPicker,
+    setupKey,
+    activeSessionNeedsAgent: store.activeSessionId === "",
     pendingAgentId,
     setActiveQuickChatSession,
     setSessionToClose,

@@ -51,7 +51,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [wip-limit-pull-system](tasks/wip-limit-pull-system.md) | building |
 | [multi-branch](tasks/multi-branch/spec.md) | shipped |
 | [quick-chat-expiration](tasks/quick-chat-expiration.md) | draft |
-| [quick-chat-repository-context](tasks/quick-chat-repository-context.md) | building |
+| [quick-chat-repository-context](tasks/quick-chat-repository-context.md) | shipped |
 | [parent-child-message-interrupt](tasks/parent-child-message-interrupt.md) | shipped |
 
 ## agents/ — agent governance

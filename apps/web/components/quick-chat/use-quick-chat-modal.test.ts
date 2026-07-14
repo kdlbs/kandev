@@ -5,6 +5,12 @@ import { renderHook, act } from "@testing-library/react";
 const mockToast = vi.fn();
 const mockStartQuickChat = vi.fn();
 const mockDeleteTask = vi.fn();
+let mockAppState: ReturnType<typeof makeAppState>;
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: ReturnType<typeof makeAppState>) => unknown) =>
+    selector(mockAppState),
+}));
 
 vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: mockToast }),
@@ -18,11 +24,24 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
   deleteTask: (...args: unknown[]) => mockDeleteTask(...args),
 }));
 
-import { useAgentSelection } from "./use-quick-chat-modal";
+import { useAgentSelection, useQuickChatModal } from "./use-quick-chat-modal";
 
 const WORKSPACE_ID = "ws-1";
 
 type MockStore = Parameters<typeof useAgentSelection>[1];
+
+function makeAppState() {
+  return {
+    quickChat: { isOpen: true, sessions: [], activeSessionId: "" },
+    closeQuickChat: vi.fn(),
+    closeQuickChatSession: vi.fn(),
+    setActiveQuickChatSession: vi.fn(),
+    renameQuickChatSession: vi.fn(),
+    openQuickChat: vi.fn(),
+    agentProfiles: { items: [] },
+    taskSessions: { items: {} },
+  };
+}
 
 function makeStore(overrides: Partial<MockStore> = {}): MockStore {
   return {
@@ -49,6 +68,28 @@ function flushPromises() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockAppState = makeAppState();
+});
+
+describe("useQuickChatModal — setup lifecycle", () => {
+  it("removes a blank placeholder when the setup is dismissed", () => {
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    act(() => result.current.handleOpenChange(false));
+
+    expect(mockAppState.closeQuickChatSession).toHaveBeenCalledWith("");
+    expect(mockAppState.closeQuickChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("changes the setup key when a fresh blank chat is requested", () => {
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    expect(result.current.setupKey).toBe(0);
+    act(() => result.current.handleNewChat());
+
+    expect(result.current.setupKey).toBe(1);
+    expect(mockAppState.openQuickChat).toHaveBeenCalledWith("", WORKSPACE_ID);
+  });
 });
 
 describe("useAgentSelection — happy path", () => {

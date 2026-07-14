@@ -13,8 +13,12 @@ spec: "../../specs/tasks/quick-chat-repository-context.md"
 **Acceptance:** desktop and mobile flows start a repo-backed quick chat; source checkout remains
 unchanged; controls fit narrow viewports.
 
-**Verification:** run focused managed Playwright specs from `apps/web` and the full repository
-format/typecheck/test/lint pipeline.
+**Verification:** from `apps/web`, run
+`pnpm e2e:run --host --no-build -- tests/chat/quick-chat.spec.ts --project=chromium`
+(6 passed) and
+`pnpm e2e:run --host --no-build -- tests/chat/mobile-quick-chat-repository.spec.ts --project=mobile-chrome`
+(1 passed). From the repository root, run `make fmt`, `make typecheck`, `make test`, and
+`make lint`; all completed successfully.
 
 **Files likely touched:** quick-chat desktop/mobile E2E specs.
 

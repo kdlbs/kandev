@@ -85,18 +85,33 @@ export async function listRepositoryScripts(repositoryId: string, options?: ApiR
 }
 
 // Quick Chat operations
-export type StartQuickChatRequest = {
+type StartQuickChatCommon = {
   title?: string;
-  repository_id?: string;
   agent_profile_id?: string;
   executor_id?: string;
   prompt?: string;
+};
+
+type StartQuickChatLegacyRepository = {
+  repositories?: never;
+  repository_id?: string;
   local_path?: string;
   repository_name?: string;
   default_branch?: string;
   base_branch?: string;
-  repositories?: QuickChatRepositoryInput[];
 };
+
+type StartQuickChatRepositories = {
+  repositories: QuickChatRepositoryInput[];
+  repository_id?: never;
+  local_path?: never;
+  repository_name?: never;
+  default_branch?: never;
+  base_branch?: never;
+};
+
+export type StartQuickChatRequest = StartQuickChatCommon &
+  (StartQuickChatLegacyRepository | StartQuickChatRepositories);
 
 export type QuickChatRepositoryInput = {
   repository_id: string;

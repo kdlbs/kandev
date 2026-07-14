@@ -98,6 +98,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
     sessions,
     activeSessionId,
     sessionToClose,
+    setupKey,
     activeSessionNeedsAgent,
     pendingAgentId,
     setActiveQuickChatSession,
@@ -115,7 +116,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
     <>
       <Dialog open={isOpen} onOpenChange={handleOpenChange}>
         <DialogContent
-          className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 gap-0 p-0 shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[80vw] sm:!max-w-[80vw] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
+          className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[80vw] sm:!max-w-[80vw] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
           showCloseButton={false}
           overlayClassName="bg-transparent"
         >
@@ -133,6 +134,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
           )}
           {activeSessionNeedsAgent && (
             <QuickChatSetup
+              key={`${workspaceId}:${setupKey}`}
               workspaceId={workspaceId}
               showIntroduction={!hasCreatedChat}
               pendingAgentId={pendingAgentId}

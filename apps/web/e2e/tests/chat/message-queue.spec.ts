@@ -31,18 +31,23 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   const dialog = page.getByRole("dialog", { name: "Quick Chat" });
   await expect(dialog).toBeVisible({ timeout: 10_000 });
 
-  const agentPicker = dialog.getByText("Choose an agent to start chatting");
-  if (!(await agentPicker.isVisible({ timeout: 1_000 }).catch(() => false))) {
+  const setup = dialog.getByTestId("quick-chat-setup");
+  if (!(await setup.isVisible({ timeout: 1_000 }).catch(() => false))) {
     await dialog.getByLabel("Start new chat").click();
   }
-  await expect(agentPicker).toBeVisible({ timeout: 5_000 });
+  await expect(setup).toBeVisible({ timeout: 5_000 });
 
-  const agentCard = dialog
-    .locator("button")
-    .filter({ has: page.locator(".rounded-md.border") })
-    .first();
-  await expect(agentCard).toBeVisible({ timeout: 5_000 });
-  await agentCard.click();
+  const agentSelector = dialog.getByTestId("agent-profile-selector");
+  if (
+    await agentSelector
+      .getByText("Select agent", { exact: false })
+      .isVisible()
+      .catch(() => false)
+  ) {
+    await agentSelector.click();
+    await page.getByRole("option").first().click();
+  }
+  await dialog.getByTestId("quick-chat-start").click();
 
   // Wait for chat input to appear AND become editable. Eager init means the
   // agent starts during the picker → tab transition; the input is briefly

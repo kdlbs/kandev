@@ -83,7 +83,7 @@ test.describe("Quick Chat", () => {
     backend,
   }) => {
     const sourceRepo = path.join(backend.tmpDir, "repos", "e2e-repo");
-    execFileSync("git", ["branch", "context-branch"], { cwd: sourceRepo });
+    execFileSync("git", ["branch", "-f", "context-branch"], { cwd: sourceRepo });
     const dialog = await openQuickChatSetup(testPage);
     await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
       "Chat with an agent about an idea, question, or codebase.",

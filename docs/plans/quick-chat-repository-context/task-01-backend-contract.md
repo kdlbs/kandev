@@ -13,7 +13,7 @@ spec: "../../specs/tasks/quick-chat-repository-context.md"
 **Acceptance:** plural repository inputs preserve order and branches; legacy singleton input
 remains accepted; repo-backed starts always launch with the worktree executor.
 
-**Verification:** `rtk go test ./internal/task/handlers -run QuickChat` from `apps/backend`.
+**Verification:** `make -C apps/backend test` from the repository root.
 
 **Files likely touched:** `apps/backend/internal/task/handlers/task_http_handlers.go`,
 `apps/backend/internal/task/handlers/task_http_handlers_test.go`.

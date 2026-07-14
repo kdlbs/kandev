@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconInfoCircle, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -169,6 +169,7 @@ function SetupFooter({
         disabled={startDisabled}
         className="min-w-28 cursor-pointer"
         data-testid="quick-chat-start"
+        data-dialog-default-action
       >
         {isStarting ? <IconLoader2 className="h-4 w-4 animate-spin" /> : null}
         {isStarting ? "Starting chat..." : "Start chat"}
@@ -191,6 +192,10 @@ export function QuickChatSetup({
         ?.default_agent_profile_id ?? "",
   );
   const [agentProfileId, setAgentProfileId] = useState(defaultAgentId);
+  useEffect(() => {
+    if (!defaultAgentId) return;
+    setAgentProfileId((current) => current || defaultAgentId);
+  }, [defaultAgentId]);
   const { repositories, isLoading } = useRepositories(workspaceId, true);
   const repoState = useRepositoriesState();
   const isStarting = pendingAgentId !== null;
