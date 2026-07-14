@@ -91,6 +91,33 @@ func (m *Manager) checkoutBranchExistsAnywhere(ctx context.Context, repoPath, br
 	return remote
 }
 
+// Branch recovery statuses reported by BranchRecoveryStatus.
+const (
+	BranchStatusLocal   = "local"
+	BranchStatusRemote  = "remote"
+	BranchStatusMissing = "missing"
+)
+
+// BranchRecoveryStatus reports where a worktree branch still exists:
+// "local" when refs/heads/<branch> resolves, "remote" when only the
+// remote-tracking ref refs/remotes/origin/<branch> does, "missing"
+// otherwise. Offline-friendly best-effort probe — it inspects local refs
+// only (no network), so a remote-tracking ref that was deleted upstream
+// but not yet pruned still reports "remote"; the recreate-time fetch is
+// the authoritative check.
+func (m *Manager) BranchRecoveryStatus(ctx context.Context, repoPath, branch string) string {
+	if repoPath == "" || branch == "" {
+		return BranchStatusMissing
+	}
+	if exists, err := m.branchExists(ctx, repoPath, "refs/heads/"+branch); err == nil && exists {
+		return BranchStatusLocal
+	}
+	if exists, err := m.branchExists(ctx, repoPath, "refs/remotes/origin/"+branch); err == nil && exists {
+		return BranchStatusRemote
+	}
+	return BranchStatusMissing
+}
+
 func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 	// Same Acquire-then-build-execCtx ordering as branchExists.
 	release, err := subproc.Git().Acquire(ctx)

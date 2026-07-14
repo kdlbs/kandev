@@ -58,6 +58,12 @@ var (
 	// used as a directory segment.
 	ErrInvalidRepoName = errors.New("repo name has no usable characters after sanitization")
 
+	// ErrBranchUnrecoverable is returned by recreate when the worktree's
+	// branch no longer exists locally (archive deletes it via `git branch
+	// -D`) and could not be fetched from origin either. Callers can treat
+	// this as "prior work is gone" and fall back to a fresh worktree.
+	ErrBranchUnrecoverable = errors.New("worktree branch no longer exists locally or on origin")
+
 	// ErrInvalidBranchSlug is returned when BranchSlug is set but contains no
 	// usable characters after sanitization. Callers that pass an explicit slug
 	// must populate something the filesystem can accept.

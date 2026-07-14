@@ -846,6 +846,22 @@ func (r *Repository) UnarchiveTaskByCascade(ctx context.Context, id, cascadeID s
 	return rows > 0, nil
 }
 
+// UnarchiveTask clears archived_at regardless of how the task was
+// archived (cascade or manual/legacy). Used by the root-only unarchive
+// path for tasks with no cascade stamp. Returns whether a row was
+// actually updated.
+func (r *Repository) UnarchiveTask(ctx context.Context, id string) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET archived_at = NULL, archived_by_cascade_id = '', updated_at = ?
+		WHERE id = ? AND archived_at IS NOT NULL
+	`), time.Now().UTC(), id)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
 // ListTasksForAutoArchive returns tasks eligible for auto-archiving based on workflow step settings
 func (r *Repository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
 	drv := r.ro.DriverName()

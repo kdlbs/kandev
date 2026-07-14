@@ -190,6 +190,29 @@ export async function archiveTask(
   });
 }
 
+export type BranchRecovery = {
+  task_id: string;
+  repository_id: string;
+  branch: string;
+  status: "local" | "remote" | "missing";
+};
+
+export type UnarchiveTaskResponse = {
+  success: boolean;
+  cascade_id: string;
+  unarchived_ids: string[];
+  skipped_ids: string[];
+  affected_group_ids: string[];
+  recovery: BranchRecovery[];
+};
+
+export async function unarchiveTask(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<UnarchiveTaskResponse>(`/api/v1/tasks/${taskId}/unarchive`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
 export async function getSubtaskCount(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<{ count: number }>(`/api/v1/tasks/${taskId}/subtask-count`, options);
 }

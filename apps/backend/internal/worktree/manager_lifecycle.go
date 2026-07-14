@@ -843,6 +843,20 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		return nil, fmt.Errorf("cannot recreate worktree: existing record has no path")
 	}
 
+	// Archive deletes the local branch (removeWorktree runs `git branch -D`),
+	// so a recreate after unarchive must restore it first. fetchBranchToLocal
+	// fetches origin <branch>:<branch> and only errors when the branch exists
+	// neither locally nor on origin.
+	if exists, _ := m.branchExists(ctx, req.RepositoryPath, existing.Branch); !exists {
+		if _, fetchErr := m.fetchBranchToLocal(ctx, req.RepositoryPath, existing.Branch, 0); fetchErr != nil {
+			m.logger.Warn("worktree branch unrecoverable during recreate",
+				zap.String("worktree_id", existing.ID),
+				zap.String("branch", existing.Branch),
+				zap.Error(fetchErr))
+			return nil, fmt.Errorf("%w: %q", ErrBranchUnrecoverable, existing.Branch)
+		}
+	}
+
 	// Try to add worktree using existing branch
 	usesGitCrypt, err := m.gitAddWorktreeForRecreate(ctx, req.RepositoryPath, existing.Branch, worktreePath)
 	if err != nil {
