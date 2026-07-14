@@ -94,14 +94,18 @@ test.describe("Review file status", () => {
     git.modifyFile(MODIFIED_PATH, "after\n");
     git.deleteFile(DELETED_PATH);
 
-    const changesTab = testPage.locator(".dv-default-tab", { hasText: "Changes" });
+    const changesTab = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTab).toBeVisible();
     await changesTab.click();
     for (const filePath of [ADDED_PATH, MODIFIED_PATH, DELETED_PATH]) {
       await expect(testPage.getByTestId(`file-row-${filePath}`)).toBeVisible({ timeout: 20_000 });
     }
 
-    await testPage.evaluate(() => window.dispatchEvent(new CustomEvent("open-review-dialog")));
+    await testPage
+      .getByTestId("changes-panel")
+      .getByRole("button", { name: "Diff", exact: true })
+      .click();
+    await testPage.getByRole("button", { name: "Expand review" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();
     const sidebar = dialog.getByTestId("review-dialog-sidebar");

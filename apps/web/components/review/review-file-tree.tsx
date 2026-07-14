@@ -185,6 +185,7 @@ function ReviewFileRow({
     <div
       data-testid="review-file-row"
       data-file-path={file.path}
+      data-repository-name={file.repository_name}
       className={cn(
         "flex items-center gap-1.5 px-2 py-1 cursor-pointer transition-colors group",
         isSelected ? "bg-accent/50" : "hover:bg-muted/50",

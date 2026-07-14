@@ -70,16 +70,16 @@ function collectReviewPaths(
 ): Set<string> {
   const paths = new Set<string>();
   for (const file of uncommittedFiles) {
-    if (file.diff && normalizeDiffContent(file.diff)) paths.add(file.path);
+    paths.add(file.path);
   }
   if (cumulativeDiffFiles) {
-    for (const [path, file] of Object.entries(cumulativeDiffFiles)) {
-      if (!paths.has(path) && file.diff && normalizeDiffContent(file.diff)) paths.add(path);
+    for (const path of Object.keys(cumulativeDiffFiles)) {
+      if (!paths.has(path)) paths.add(path);
     }
   }
   if (prFiles) {
     for (const file of prFiles) {
-      if (!paths.has(file.filename) && file.patch) paths.add(file.filename);
+      if (!paths.has(file.filename)) paths.add(file.filename);
     }
   }
   return paths;

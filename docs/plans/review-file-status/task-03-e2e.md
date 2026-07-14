@@ -20,7 +20,8 @@ Verify the complete Review workflow against a production Vite build on desktop a
 
 ## Verification
 
-- `cd apps/web && pnpm e2e:run tests/review/review-file-status.spec.ts tests/review/mobile-review-file-status.spec.ts`
+- `cd apps && pnpm --filter @kandev/web e2e:run tests/review/review-file-status.spec.ts`
+- `cd apps && pnpm --filter @kandev/web e2e:run --project mobile-chrome tests/review/mobile-review-file-status.spec.ts`
 
 ## Files likely touched
 

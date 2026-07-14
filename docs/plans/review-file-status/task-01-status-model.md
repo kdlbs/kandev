@@ -20,7 +20,7 @@ Extract the existing Changes status language into a domain-neutral, accessible p
 
 ## Verification
 
-- `cd apps/web && pnpm test components/shared/file-status-icon.test.tsx components/task/changes-panel-helpers.test.ts`
+- `cd apps && pnpm --filter @kandev/web test components/shared/file-status-icon.test.tsx components/task/changes-panel-helpers.test.ts`
 - `cd apps/web && pnpm run typecheck`
 
 ## Files likely touched

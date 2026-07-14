@@ -146,6 +146,32 @@ describe("buildAllFiles (review dialog)", () => {
   });
 });
 
+describe("buildAllFiles sort order", () => {
+  it("sorts multi-repo files by repository name and then path", () => {
+    const gitStatusFiles = {
+      "frontend\u0000src/a.ts": {
+        path: "src/a.ts",
+        status: "modified" as const,
+        staged: false,
+        repository_name: FRONTEND_REPO,
+      },
+      "backend\u0000src/b.ts": {
+        path: "src/b.ts",
+        status: "modified" as const,
+        staged: false,
+        repository_name: BACKEND_REPO,
+      },
+    };
+
+    const result = buildAllFiles(gitStatusFiles, null);
+
+    expect(result.map((file) => `${file.repository_name}:${file.path}`)).toEqual([
+      "backend:src/b.ts",
+      "frontend:src/a.ts",
+    ]);
+  });
+});
+
 describe("buildAllFiles patchless status files", () => {
   it("keeps a patchless PR rename with its previous path", () => {
     const result = buildAllFiles(null, null, [

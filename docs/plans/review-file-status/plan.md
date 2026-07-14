@@ -55,10 +55,12 @@ Wave 3 (depends on Wave 2):
 ## Verification
 
 ```bash
-cd apps/web && pnpm test components/shared/file-status-icon.test.tsx components/task/changes-panel-helpers.test.ts components/review/review-file-tree.test.tsx components/review/review-dialog.build-files.test.ts hooks/domains/session/use-review-sources.test.ts
-cd apps/web && pnpm e2e:run tests/review/review-file-status.spec.ts tests/review/mobile-review-file-status.spec.ts
 make fmt
 make typecheck test lint
+(cd apps && pnpm --filter @kandev/web test components/shared/file-status-icon.test.tsx components/task/changes-panel-helpers.test.ts components/review/review-file-tree.test.tsx components/review/types.test.ts components/review/review-dialog.build-files.test.ts hooks/domains/session/use-review-sources.test.ts)
+(cd apps && pnpm --filter @kandev/web e2e:run tests/review/review-file-status.spec.ts)
+(cd apps && pnpm --filter @kandev/web e2e:run --project mobile-chrome tests/review/mobile-review-file-status.spec.ts)
+(cd apps/web && pnpm run typecheck)
 ```
 
 ## Risks

@@ -20,13 +20,13 @@ Carry canonical status metadata through Review and render it on desktop, mobile,
 
 ## Verification
 
-- `cd apps/web && pnpm test components/review/review-file-tree.test.tsx components/review/review-dialog.build-files.test.ts hooks/domains/session/use-review-sources.test.ts`
+- `cd apps && pnpm --filter @kandev/web test components/review/review-file-tree.test.tsx components/review/types.test.ts components/review/review-dialog.build-files.test.ts hooks/domains/session/use-review-sources.test.ts`
 - `cd apps/web && pnpm run typecheck`
 
 ## Files likely touched
 
 - `apps/web/components/review/types.ts`
-- focused status-empty-state test beside `apps/web/components/review/types.ts`
+- `apps/web/components/review/types.test.ts`
 - `apps/web/components/review/review-dialog.tsx`
 - `apps/web/components/review/review-dialog.build-files.test.ts`
 - `apps/web/hooks/domains/session/use-review-sources.ts`

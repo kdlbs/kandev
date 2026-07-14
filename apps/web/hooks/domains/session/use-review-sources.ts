@@ -179,6 +179,8 @@ export type BuildReviewSourcesResult = {
  * (single-repo). Committed and PR files write next under the same key shape
  * but skip any path already present in the uncommitted set — preserving
  * dedup priority (uncommitted > committed > PR).
+ * Keep priority, dedup keys, and sorting aligned with `buildAllFiles` in
+ * `components/review/review-dialog.tsx`.
  */
 export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewSourcesResult {
   const { gitStatus, statusByRepo, cumulativeDiff, prDiffFiles, prRepoName } = input;

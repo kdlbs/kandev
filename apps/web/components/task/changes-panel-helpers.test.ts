@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildPrByRepoMap, mapPRFilesToChangedFiles } from "./changes-panel-helpers";
+import {
+  buildPrByRepoMap,
+  computeReviewProgress,
+  mapPRFilesToChangedFiles,
+} from "./changes-panel-helpers";
 import type { PRDiffFile } from "@/lib/types/github";
 
 function diffFile(overrides: Partial<PRDiffFile>): PRDiffFile {
@@ -71,6 +75,38 @@ describe("mapPRFilesToChangedFiles", () => {
   it("returns an empty array for empty input", () => {
     expect(mapPRFilesToChangedFiles([])).toEqual([]);
     expect(mapPRFilesToChangedFiles([], "frontend")).toEqual([]);
+  });
+});
+
+describe("computeReviewProgress", () => {
+  it("counts patchless-only status and PR files", () => {
+    const progress = computeReviewProgress(
+      [
+        {
+          path: "src/local-renamed.ts",
+          status: "renamed",
+          staged: false,
+          additions: 0,
+          deletions: 0,
+          old_path: "src/local-old.ts",
+          diff: "",
+        },
+      ],
+      null,
+      new Map(),
+      [
+        diffFile({
+          filename: "src/pr-renamed.ts",
+          status: "renamed",
+          additions: 0,
+          deletions: 0,
+          old_path: "src/pr-old.ts",
+          patch: "",
+        }),
+      ],
+    );
+
+    expect(progress.totalFileCount).toBe(2);
   });
 });
 

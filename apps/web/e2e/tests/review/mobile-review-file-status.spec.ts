@@ -4,6 +4,8 @@ import { SessionPage } from "../../pages/session-page";
 import path from "node:path";
 
 const MOBILE_FILE = "mobile-review-status-added.ts";
+const MOBILE_MOVED_FROM_FILE = "mobile-review-status-old-name.ts";
+const MOBILE_MOVED_FILE = "mobile-review-status-new-name.ts";
 
 test.describe("Review file status on mobile", () => {
   test.describe.configure({ timeout: 120_000 });
@@ -14,6 +16,32 @@ test.describe("Review file status on mobile", () => {
     seedData,
     backend,
   }) => {
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("reviewer");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 72,
+        title: "Mobile review status cues",
+        state: "open",
+        head_branch: "feat/mobile-review-status",
+        base_branch: "main",
+        author_login: "reviewer",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+        additions: 0,
+        deletions: 0,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRFiles("testorg", "testrepo", 72, [
+      {
+        filename: MOBILE_MOVED_FILE,
+        status: "renamed",
+        additions: 0,
+        deletions: 0,
+        old_path: MOBILE_MOVED_FROM_FILE,
+      },
+    ]);
+
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile Review File Status E2E",
@@ -25,6 +53,19 @@ test.describe("Review file status on mobile", () => {
         repository_ids: [seedData.repositoryId],
       },
     );
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 72,
+      pr_url: "https://github.com/testorg/testrepo/pull/72",
+      pr_title: "Mobile review status cues",
+      head_branch: "feat/mobile-review-status",
+      base_branch: "main",
+      author_login: "reviewer",
+      additions: 0,
+      deletions: 0,
+    });
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -50,6 +91,17 @@ test.describe("Review file status on mobile", () => {
     await expect(header).toBeVisible();
     const marker = header.getByRole("img", { name: "Added" });
     await expect(marker).toBeVisible();
+
+    const movedHeader = dialog
+      .getByTestId("review-file-header")
+      .filter({ hasText: MOBILE_MOVED_FILE });
+    await expect(movedHeader).toBeVisible();
+    await expect(
+      movedHeader.getByRole("img", { name: `Moved from ${MOBILE_MOVED_FROM_FILE}` }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText(`Moved from ${MOBILE_MOVED_FROM_FILE}; no textual changes`),
+    ).toBeVisible();
 
     const headerGeometry = await header.evaluate((element) => {
       const markerElement = element.querySelector<HTMLElement>('[data-file-status="added"]');
