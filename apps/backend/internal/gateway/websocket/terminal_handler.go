@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -49,48 +48,6 @@ var terminalUpgrader = gorillaws.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 	CheckOrigin:     checkWebSocketOrigin,
-}
-
-// checkWebSocketOrigin validates the Origin header for WebSocket connections.
-// This prevents cross-site WebSocket hijacking attacks.
-func checkWebSocketOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		// No origin header - allow (could be a non-browser client)
-		return true
-	}
-
-	// Allow localhost origins for development
-	if strings.HasPrefix(origin, "http://localhost") ||
-		strings.HasPrefix(origin, "http://127.0.0.1") ||
-		strings.HasPrefix(origin, "https://localhost") ||
-		strings.HasPrefix(origin, "https://127.0.0.1") {
-		return true
-	}
-
-	// Check same-origin: Origin should match the Host header
-	host := r.Host
-	if host == "" {
-		host = r.URL.Host
-	}
-
-	// Parse the origin URL to get its host
-	originURL, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-
-	// Compare hosts (ignoring port for flexibility)
-	originHost := originURL.Hostname()
-	requestHost := host
-	if colonIdx := strings.LastIndex(requestHost, ":"); colonIdx != -1 {
-		// Strip port from host if present (but be careful with IPv6)
-		if !strings.Contains(requestHost, "]") || colonIdx > strings.Index(requestHost, "]") {
-			requestHost = requestHost[:colonIdx]
-		}
-	}
-
-	return originHost == requestHost
 }
 
 type terminalRoute struct {
