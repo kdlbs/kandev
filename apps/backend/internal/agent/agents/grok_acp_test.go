@@ -179,6 +179,9 @@ func TestGrokACP_SessionAndSkills(t *testing.T) {
 	if sc.SessionDirTemplate != "{home}/.grok" {
 		t.Errorf("SessionDirTemplate = %q, want {home}/.grok", sc.SessionDirTemplate)
 	}
+	if sc.SessionDirTarget != "/root/.grok" {
+		t.Errorf("SessionDirTarget = %q, want /root/.grok", sc.SessionDirTarget)
+	}
 }
 
 func TestGrokACP_PermissionAndBillingDefaults(t *testing.T) {

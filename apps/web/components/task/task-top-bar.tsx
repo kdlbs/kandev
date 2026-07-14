@@ -95,6 +95,7 @@ const TaskTopBar = memo(function TaskTopBar({
         )}
       </div>
       <TopBarRight
+        taskId={taskId}
         activeSessionId={activeSessionId}
         showDebugOverlay={showDebugOverlay}
         onToggleDebugOverlay={onToggleDebugOverlay}
@@ -336,6 +337,7 @@ function TopbarToolsGroup({
  *  The former overflow popover was removed in the UI overhaul — every cluster
  *  is always visible so users don't have to discover the dots menu. */
 function TopBarRight({
+  taskId,
   activeSessionId,
   showDebugOverlay,
   onToggleDebugOverlay,
@@ -348,6 +350,7 @@ function TopBarRight({
   issueNumber,
   officeTaskHref,
 }: {
+  taskId?: string | null;
   activeSessionId?: string | null;
   showDebugOverlay?: boolean;
   onToggleDebugOverlay?: () => void;

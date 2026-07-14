@@ -85,6 +85,7 @@ func (a *GrokACP) Runtime() *RuntimeConfig {
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 			SessionDirTemplate:  "{home}/.grok",
+			SessionDirTarget:    "/root/.grok",
 		},
 	}
 }

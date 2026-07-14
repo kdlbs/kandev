@@ -235,6 +235,7 @@ func TestBuildContainerConfig_SessionDirIsKandevManagedForEveryAgent(t *testing.
 		{"amp-acp", agents.NewAmpACP()},
 		{"gemini", agents.NewGemini()},
 		{"auggie", agents.NewAuggie()},
+		{"grok-acp", agents.NewGrokACP()},
 	}
 	const kandevHome = "/tmp/kandev-test-home"
 	const instanceID = "0123456789abcdef"

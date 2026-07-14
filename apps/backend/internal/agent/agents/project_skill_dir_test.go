@@ -8,9 +8,8 @@ import (
 )
 
 // TestProjectSkillDir_AllAgentTypes verifies that every registered agent type
-// sets a non-empty ProjectSkillDir in its RuntimeConfig, and that the fallback
-// function ProjectSkillDirFromRuntime returns a sensible default when the field
-// is absent.
+// resolves to a non-empty project skill directory, including agents that use
+// the default because ProjectSkillDir is absent from their RuntimeConfig.
 func TestProjectSkillDir_AllAgentTypes(t *testing.T) {
 	allAgents := []Agent{
 		NewClaudeACP(),
@@ -20,6 +19,19 @@ func TestProjectSkillDir_AllAgentTypes(t *testing.T) {
 		NewCopilotACP(),
 		NewAuggie(),
 		NewAmpACP(),
+		NewQwenACP(),
+		NewIFlowACP(),
+		NewDroidACP(),
+		NewKilocodeACP(),
+		NewPiACP(),
+		NewCursorACP(),
+		NewKimiACP(),
+		NewKiroACP(),
+		NewQoderACP(),
+		NewTraeACP(),
+		NewOmpACP(),
+		NewDevinACP(),
+		NewGrokACP(),
 		NewMockAgent(),
 	}
 
