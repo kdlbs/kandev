@@ -195,14 +195,20 @@ function ModeBody({
     );
   }
   return (
-    <ChipsList
-      fs={fs}
+    <WorkspaceRepoChips
+      rows={fs.repositories}
       repositories={repositories}
+      discoveredRepositories={fs.discoveredRepositories}
       workspaceId={workspaceId}
       branchLocked={branchLocked}
       isLocalExecutor={isLocalExecutor}
+      currentLocalBranch={fs.currentLocalBranch}
+      currentLocalBranchLoading={fs.currentLocalBranchLoading}
+      freshBranchEnabled={fs.freshBranchEnabled}
       canAddMore={canAddMore}
       addHint={addHint}
+      onAdd={fs.addRepository}
+      onRemove={fs.removeRepository}
       onRowRepositoryChange={onRowRepositoryChange}
       onRowBranchChange={onRowBranchChange}
       lastUsedBranch={lastUsedBranch}
@@ -223,28 +229,44 @@ function ModeBody({
  * button. Extracted from RepoChipsRow so the parent stays under the
  * function-length cap; logic is unchanged.
  */
-function ChipsList({
-  fs,
+export function WorkspaceRepoChips({
+  rows,
   repositories,
+  discoveredRepositories,
   workspaceId,
   branchLocked,
   isLocalExecutor,
+  currentLocalBranch,
+  currentLocalBranchLoading,
+  freshBranchEnabled,
   canAddMore,
   addHint,
+  addLabel,
+  allowDuplicateRepositories = true,
   freshBranchToggle,
+  onAdd,
+  onRemove,
   onRowRepositoryChange,
   onRowBranchChange,
   lastUsedBranch,
   userSettingsLoaded,
 }: {
-  fs: DialogFormState;
+  rows: TaskRepoRow[];
   repositories: Repository[];
+  discoveredRepositories?: LocalRepository[];
   workspaceId: string | null;
-  branchLocked: boolean;
-  isLocalExecutor: boolean;
+  branchLocked?: boolean;
+  isLocalExecutor?: boolean;
+  currentLocalBranch?: string;
+  currentLocalBranchLoading?: boolean;
+  freshBranchEnabled?: boolean;
   canAddMore: boolean;
   addHint?: string;
+  addLabel?: string;
+  allowDuplicateRepositories?: boolean;
   freshBranchToggle?: React.ReactNode;
+  onAdd: () => void;
+  onRemove: (key: string) => void;
   onRowRepositoryChange: (key: string, value: string) => void;
   onRowBranchChange: (key: string, value: string) => void;
   lastUsedBranch?: string | null;
@@ -252,36 +274,36 @@ function ChipsList({
 }) {
   return (
     <>
-      {fs.repositories.map((row) => (
+      {rows.map((row) => (
         <RepoChip
           key={row.key}
           row={row}
           workspaceId={workspaceId}
           repositories={repositories}
-          discoveredRepositories={fs.discoveredRepositories}
+          discoveredRepositories={discoveredRepositories ?? []}
           // Multi-branch: the same repository may be reused across rows when
           // each row picks a different branch. Only exclude rows that hold
           // the exact (repo, branch) pair this row would clash with on the
           // backend — empty-branch rows can't collide yet, so they pass.
-          excludedRepoIds={collectExactDuplicateRepoIds(fs.repositories, row)}
+          excludedRepoIds={collectExcludedRepoIds(rows, row, allowDuplicateRepositories)}
           branchLocked={branchLocked}
           // For local-executor rows, seed row.branch with the workspace's
           // current branch via this prop. Non-local rows leave it undefined
           // and fall back to the existing last-used / preferred-default
           // autoselect path.
-          preferredDefaultBranch={isLocalExecutor ? fs.currentLocalBranch : undefined}
-          preferredDefaultBranchLoading={isLocalExecutor ? fs.currentLocalBranchLoading : false}
+          preferredDefaultBranch={isLocalExecutor ? currentLocalBranch : undefined}
+          preferredDefaultBranchLoading={isLocalExecutor ? currentLocalBranchLoading : false}
           lastUsedBranch={lastUsedBranch}
           userSettingsLoaded={userSettingsLoaded}
           branchPrefix={computeBranchPrefix({
-            isLocalExecutor,
+            isLocalExecutor: !!isLocalExecutor,
             rowBranch: row.branch,
-            currentLocalBranch: fs.currentLocalBranch,
-            freshBranchEnabled: !!fs.freshBranchEnabled,
+            currentLocalBranch: currentLocalBranch ?? "",
+            freshBranchEnabled: !!freshBranchEnabled,
           })}
           onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
           onBranchChange={(value) => onRowBranchChange(row.key, value)}
-          onRemove={() => fs.removeRepository(row.key)}
+          onRemove={() => onRemove(row.key)}
         />
       ))}
       {freshBranchToggle}
@@ -290,18 +312,20 @@ function ChipsList({
           <span className="inline-flex">
             <button
               type="button"
-              onClick={fs.addRepository}
+              onClick={onAdd}
               disabled={!canAddMore}
               aria-label="Add repository"
               data-testid="add-repository"
               className={cn(
-                "h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground",
+                "inline-flex items-center justify-center gap-1.5 rounded-md text-muted-foreground",
+                addLabel ? "h-9 px-2 text-xs" : "h-7 w-7",
                 canAddMore
                   ? "hover:bg-muted hover:text-foreground cursor-pointer"
                   : "opacity-40 cursor-not-allowed",
               )}
             >
               <IconPlus className="h-3.5 w-3.5" />
+              {addLabel ? <span>{addLabel}</span> : null}
             </button>
           </span>
         </TooltipTrigger>
@@ -369,11 +393,15 @@ function computeAddHint(canAddMore: boolean, workspaceRepoCount: number): string
  * selectable; without that, after the user pairs (repo, branch) the chip
  * would suddenly render its current repo as unavailable.
  */
-function collectExactDuplicateRepoIds(rows: TaskRepoRow[], currentRow: TaskRepoRow): Set<string> {
+function collectExcludedRepoIds(
+  rows: TaskRepoRow[],
+  currentRow: TaskRepoRow,
+  allowDuplicateRepositories: boolean,
+): Set<string> {
   const ids = new Set<string>();
   for (const r of rows) {
     if (r.key === currentRow.key) continue;
-    if (!r.branch || r.branch !== currentRow.branch) continue;
+    if (allowDuplicateRepositories && (!r.branch || r.branch !== currentRow.branch)) continue;
     if (r.repositoryId) ids.add(r.repositoryId);
     if (r.localPath) ids.add(r.localPath);
   }

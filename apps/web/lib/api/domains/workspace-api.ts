@@ -95,6 +95,12 @@ export type StartQuickChatRequest = {
   repository_name?: string;
   default_branch?: string;
   base_branch?: string;
+  repositories?: QuickChatRepositoryInput[];
+};
+
+export type QuickChatRepositoryInput = {
+  repository_id: string;
+  base_branch: string;
 };
 
 export type StartQuickChatResponse = {

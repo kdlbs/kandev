@@ -1244,16 +1244,44 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 
 // httpStartQuickChatRequest is the request body for starting a quick chat session.
 type httpStartQuickChatRequest struct {
-	Title             string `json:"title,omitempty"`
-	RepositoryID      string `json:"repository_id,omitempty"`
-	AgentProfileID    string `json:"agent_profile_id,omitempty"`
-	ExecutorID        string `json:"executor_id,omitempty"`
-	Prompt            string `json:"prompt,omitempty"`
-	LocalPath         string `json:"local_path,omitempty"`
-	RepositoryName    string `json:"repository_name,omitempty"`
-	DefaultBranch     string `json:"default_branch,omitempty"`
-	BaseBranch        string `json:"base_branch,omitempty"`
-	LaunchImmediately bool   `json:"launch_immediately,omitempty"`
+	Title             string                         `json:"title,omitempty"`
+	RepositoryID      string                         `json:"repository_id,omitempty"`
+	Repositories      []httpQuickChatRepositoryInput `json:"repositories,omitempty"`
+	AgentProfileID    string                         `json:"agent_profile_id,omitempty"`
+	ExecutorID        string                         `json:"executor_id,omitempty"`
+	Prompt            string                         `json:"prompt,omitempty"`
+	LocalPath         string                         `json:"local_path,omitempty"`
+	RepositoryName    string                         `json:"repository_name,omitempty"`
+	DefaultBranch     string                         `json:"default_branch,omitempty"`
+	BaseBranch        string                         `json:"base_branch,omitempty"`
+	LaunchImmediately bool                           `json:"launch_immediately,omitempty"`
+}
+
+type httpQuickChatRepositoryInput struct {
+	RepositoryID string `json:"repository_id"`
+	BaseBranch   string `json:"base_branch"`
+}
+
+func (body *httpStartQuickChatRequest) validateRepositories() error {
+	hasLegacyRepository := body.RepositoryID != "" || body.LocalPath != "" ||
+		body.RepositoryName != "" || body.DefaultBranch != "" || body.BaseBranch != ""
+	if len(body.Repositories) > 0 && hasLegacyRepository {
+		return errors.New("repositories cannot be combined with legacy repository fields")
+	}
+	seen := make(map[string]struct{}, len(body.Repositories))
+	for _, repo := range body.Repositories {
+		if repo.RepositoryID == "" {
+			return errors.New("repository_id is required")
+		}
+		if repo.BaseBranch == "" {
+			return fmt.Errorf("base_branch is required for repository %q", repo.RepositoryID)
+		}
+		if _, exists := seen[repo.RepositoryID]; exists {
+			return fmt.Errorf("repository %q can only be selected once", repo.RepositoryID)
+		}
+		seen[repo.RepositoryID] = struct{}{}
+	}
+	return nil
 }
 
 // httpStartQuickChatResponse is returned when a quick chat session is created.
@@ -1273,6 +1301,16 @@ type quickChatParams struct {
 
 // buildQuickChatRepositories builds the repository input list from the request.
 func (body *httpStartQuickChatRequest) buildRepositories() []service.TaskRepositoryInput {
+	if len(body.Repositories) > 0 {
+		repos := make([]service.TaskRepositoryInput, 0, len(body.Repositories))
+		for _, repo := range body.Repositories {
+			repos = append(repos, service.TaskRepositoryInput{
+				RepositoryID: repo.RepositoryID,
+				BaseBranch:   repo.BaseBranch,
+			})
+		}
+		return repos
+	}
 	if body.RepositoryID == "" && body.LocalPath == "" {
 		return nil
 	}
@@ -1292,7 +1330,9 @@ func (body *httpStartQuickChatRequest) resolveParams(workspace *models.Workspace
 		agentProfileID = *workspace.DefaultAgentProfileID
 	}
 	executorID := body.ExecutorID
-	if executorID == "" && workspace.DefaultExecutorID != nil {
+	if len(body.buildRepositories()) > 0 {
+		executorID = models.ExecutorIDWorktree
+	} else if executorID == "" && workspace.DefaultExecutorID != nil {
 		executorID = *workspace.DefaultExecutorID
 	}
 
@@ -1324,6 +1364,10 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 	var body httpStartQuickChatRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if err := body.validateRepositories(); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 

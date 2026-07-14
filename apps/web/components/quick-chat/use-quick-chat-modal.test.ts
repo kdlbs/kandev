@@ -69,6 +69,26 @@ describe("useAgentSelection — happy path", () => {
     expect(mockDeleteTask).not.toHaveBeenCalled();
     expect(result.current.pendingAgentId).toBeNull();
   });
+
+  it("forwards ordered repository context to the start request", async () => {
+    const store = makeStore();
+    mockStartQuickChat.mockResolvedValue({ task_id: "task-a", session_id: "sess-a" });
+    const repositories = [
+      { repository_id: "repo-front", base_branch: "main" },
+      { repository_id: "repo-back", base_branch: "develop" },
+    ];
+
+    const { result } = renderHook(() => useAgentSelection(WORKSPACE_ID, store));
+
+    await act(async () => {
+      await result.current.handleSelectAgent("agent-a", vi.fn(), repositories);
+    });
+
+    expect(mockStartQuickChat).toHaveBeenCalledWith(
+      WORKSPACE_ID,
+      expect.objectContaining({ repositories }),
+    );
+  });
 });
 
 describe("useAgentSelection — supersession", () => {

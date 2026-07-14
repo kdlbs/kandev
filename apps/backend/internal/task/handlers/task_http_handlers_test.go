@@ -57,6 +57,111 @@ func (m *captureOrchestrator) EnsureSession(_ context.Context, _ string, _ ...or
 	return nil, nil
 }
 
+func TestQuickChatRequestBuildRepositoriesAcceptsPluralInput(t *testing.T) {
+	var body httpStartQuickChatRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"repositories": [
+			{"repository_id":"repo-1","base_branch":"main"},
+			{"repository_id":"repo-2","base_branch":"develop"}
+		]
+	}`), &body))
+
+	repos := body.buildRepositories()
+
+	require.Len(t, repos, 2)
+	assert.Equal(t, service.TaskRepositoryInput{RepositoryID: "repo-1", BaseBranch: "main"}, repos[0])
+	assert.Equal(t, service.TaskRepositoryInput{RepositoryID: "repo-2", BaseBranch: "develop"}, repos[1])
+}
+
+func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) {
+	defaultExecutor := models.ExecutorIDLocal
+	body := httpStartQuickChatRequest{
+		AgentProfileID: "profile-1",
+		RepositoryID:   "repo-1",
+		BaseBranch:     "main",
+	}
+
+	params := body.resolveParams(&models.Workspace{DefaultExecutorID: &defaultExecutor})
+
+	assert.Equal(t, models.ExecutorIDWorktree, params.executorID)
+}
+
+type quickChatHandlerRepo struct {
+	mockRepository
+	taskRepos []*models.TaskRepository
+}
+
+func (r *quickChatHandlerRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
+	defaultAgent := "profile-1"
+	defaultExecutor := models.ExecutorIDLocal
+	return &models.Workspace{
+		ID:                    id,
+		DefaultAgentProfileID: &defaultAgent,
+		DefaultExecutorID:     &defaultExecutor,
+	}, nil
+}
+
+func (r *quickChatHandlerRepo) GetRepository(_ context.Context, id string) (*models.Repository, error) {
+	return &models.Repository{ID: id, WorkspaceID: "ws-1", Name: id, DefaultBranch: "main"}, nil
+}
+
+func (r *quickChatHandlerRepo) CreateTaskRepository(_ context.Context, taskRepo *models.TaskRepository) error {
+	r.taskRepos = append(r.taskRepos, taskRepo)
+	return nil
+}
+
+func (r *quickChatHandlerRepo) ListTaskRepositories(_ context.Context, _ string) ([]*models.TaskRepository, error) {
+	return r.taskRepos, nil
+}
+
+func newQuickChatHandlerForTest(t *testing.T) (*TaskHandlers, *captureOrchestrator) {
+	t.Helper()
+	log := newTestLogger(t)
+	repo := &quickChatHandlerRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	orch := &captureOrchestrator{}
+	return &TaskHandlers{service: svc, orchestrator: orch, logger: log}, orch
+}
+
+func TestHTTPStartQuickChatRejectsInvalidRepositoryShapes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "mixed legacy and plural repositories",
+			body: `{"repository_id":"repo-legacy","repositories":[{"repository_id":"repo-1","base_branch":"main"}]}`,
+		},
+		{
+			name: "same repository twice",
+			body: `{"repositories":[{"repository_id":"repo-1","base_branch":"main"},{"repository_id":"repo-1","base_branch":"develop"}]}`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, orch := newQuickChatHandlerForTest(t)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/workspaces/ws-1/quick-chat", strings.NewReader(tc.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Params = gin.Params{{Key: "id", Value: "ws-1"}}
+
+			h.httpStartQuickChat(c)
+
+			assert.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+			assert.Empty(t, orch.requests)
+		})
+	}
+}
+
 // TestStartAgentForNewTask_SetsDeferredStart pins the call-site half of the
 // passthrough start_agent prompt-delivery fix: the synchronous prepare must
 // carry DeferredStart=true so launchPrepare does not eagerly upgrade a

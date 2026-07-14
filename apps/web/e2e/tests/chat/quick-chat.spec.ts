@@ -1,4 +1,6 @@
 import { type Locator, type Page } from "@playwright/test";
+import { execFileSync } from "node:child_process";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { attachAvailableCommandsCapture } from "../../helpers/ws-capture";
 
@@ -6,7 +8,7 @@ import { attachAvailableCommandsCapture } from "../../helpers/ws-capture";
  * Quick Chat E2E tests: basic flow, enhance prompt, queued messages, multi-tab.
  */
 
-async function openQuickChatWithAgent(page: Page): Promise<Locator> {
+async function openQuickChatSetup(page: Page): Promise<Locator> {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
 
@@ -18,20 +20,31 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   const dialog = page.getByRole("dialog", { name: "Quick Chat" });
   await expect(dialog).toBeVisible({ timeout: 10_000 });
 
-  // If a stale session tab is showing, click "+" to start a fresh agent picker.
-  const agentPicker = dialog.getByText("Choose an agent to start chatting");
-  if (!(await agentPicker.isVisible({ timeout: 1_000 }).catch(() => false))) {
+  // If a stale session tab is showing, click "+" to start a fresh setup form.
+  const setup = dialog.getByTestId("quick-chat-setup");
+  if (!(await setup.isVisible({ timeout: 1_000 }).catch(() => false))) {
     await dialog.getByLabel("Start new chat").click();
   }
-  await expect(agentPicker).toBeVisible({ timeout: 5_000 });
+  await expect(setup).toBeVisible({ timeout: 5_000 });
+  return dialog;
+}
 
-  // Click the first agent profile card.
-  const agentCard = dialog
-    .locator("button")
-    .filter({ has: page.locator(".rounded-md.border") })
-    .first();
-  await expect(agentCard).toBeVisible({ timeout: 5_000 });
-  await agentCard.click();
+async function selectAgentIfNeeded(dialog: Locator, page: Page) {
+  const selector = dialog.getByTestId("agent-profile-selector");
+  if (
+    await selector
+      .getByText("Select agent", { exact: false })
+      .isVisible()
+      .catch(() => false)
+  ) {
+    await selector.click();
+    await page.getByRole("option").first().click();
+  }
+}
+
+async function startQuickChatFromSetup(dialog: Locator, page: Page) {
+  await selectAgentIfNeeded(dialog, page);
+  await dialog.getByTestId("quick-chat-start").click();
 
   // Wait for chat input to appear AND become editable. Eager init means the
   // agent starts during the HTTP request, so the input is briefly disabled
@@ -39,7 +52,11 @@ async function openQuickChatWithAgent(page: Page): Promise<Locator> {
   const editor = dialog.locator(".tiptap.ProseMirror");
   await expect(editor).toBeVisible({ timeout: 15_000 });
   await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+}
 
+async function openQuickChatWithAgent(page: Page): Promise<Locator> {
+  const dialog = await openQuickChatSetup(page);
+  await startQuickChatFromSetup(dialog, page);
   return dialog;
 }
 
@@ -60,6 +77,47 @@ async function sendQuickChatMessage(dialog: Locator, page: Page, text: string) {
 }
 
 test.describe("Quick Chat", () => {
+  test("explains quick chat and starts with repository context", async ({
+    testPage,
+    seedData,
+    backend,
+  }) => {
+    const sourceRepo = path.join(backend.tmpDir, "repos", "e2e-repo");
+    execFileSync("git", ["branch", "context-branch"], { cwd: sourceRepo });
+    const dialog = await openQuickChatSetup(testPage);
+    await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
+      "Chat with an agent about an idea, question, or codebase.",
+    );
+    await expect(
+      dialog.getByText("Add repository context to focus on specific code and branches."),
+    ).toBeVisible();
+    await selectAgentIfNeeded(dialog, testPage);
+
+    await dialog.getByTestId("add-repository").click();
+    await dialog.getByTestId("repo-chip-trigger").click();
+    await testPage.getByRole("option").first().click();
+    await dialog.getByTestId("branch-chip-trigger").click();
+    await testPage.getByRole("option", { name: "context-branch" }).click();
+
+    const startRequest = testPage.waitForRequest(
+      (request) => request.url().includes("/quick-chat") && request.method() === "POST",
+    );
+    await dialog.getByTestId("quick-chat-start").click();
+    const payload = (await startRequest).postDataJSON() as {
+      repositories?: Array<{ repository_id: string; base_branch: string }>;
+    };
+    expect(payload.repositories).toEqual([
+      { repository_id: seedData.repositoryId, base_branch: "context-branch" },
+    ]);
+    await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
+    expect(
+      execFileSync("git", ["branch", "--show-current"], {
+        cwd: sourceRepo,
+        encoding: "utf8",
+      }).trim(),
+    ).toBe("main");
+  });
+
   test("opens quick chat, selects agent, sends message and receives response", async ({
     testPage,
   }) => {
@@ -186,20 +244,10 @@ test.describe("Quick Chat", () => {
     const newChatBtn = dialog.getByLabel("Start new chat");
     await newChatBtn.click();
 
-    // Agent picker should appear.
-    await expect(dialog.getByText("Choose an agent to start chatting")).toBeVisible({
-      timeout: 5_000,
-    });
-
-    // Select agent for the new tab.
-    const agentCard = dialog
-      .locator("button")
-      .filter({ has: testPage.locator(".rounded-md.border") })
-      .first();
-    await agentCard.click();
-
-    // Wait for chat input in new tab.
-    await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 15_000 });
+    // Setup should appear without the first-use introduction once a chat exists.
+    await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 5_000 });
+    await expect(dialog.getByTestId("quick-chat-introduction")).not.toBeVisible();
+    await startQuickChatFromSetup(dialog, testPage);
 
     // Send a message in the second tab using script mode.
     await sendQuickChatMessage(dialog, testPage, 'e2e:message("second tab response")');
