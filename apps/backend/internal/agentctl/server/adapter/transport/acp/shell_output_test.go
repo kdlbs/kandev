@@ -131,6 +131,29 @@ func TestNormalizeShellToolResultBoundsOutputAndPreservesUTF8(t *testing.T) {
 	require.NotContains(t, output, "exit_code")
 }
 
+func TestNormalizeShellToolResultProviderMapPreservesTruncation(t *testing.T) {
+	t.Parallel()
+
+	for _, field := range []string{"formatted_output", "output"} {
+		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+
+			normalizer := NewNormalizer("")
+			payload := normalizer.NormalizeToolCall("execute", map[string]any{
+				"kind":      "execute",
+				"raw_input": map[string]any{"command": "long-command"},
+			})
+
+			normalizer.NormalizeToolResult(payload, map[string]any{
+				field: strings.Repeat("x", maxShellOutputBytes+1),
+			})
+
+			require.Len(t, payload.ShellExec().Output.Stdout, maxShellOutputBytes)
+			require.True(t, payload.ShellExec().Output.Truncated)
+		})
+	}
+}
+
 func TestNormalizeShellToolUpdateKeepsExplicitStderrTruncation(t *testing.T) {
 	t.Parallel()
 
@@ -263,6 +286,7 @@ func TestNormalizeShellToolUpdateCumulativeOutputRemainsCorrectAfterTruncation(t
 
 	want, _ := boundShellOutput(cumulative)
 	require.Equal(t, want, payload.ShellExec().Output.Stdout)
+	require.True(t, payload.ShellExec().Output.Truncated)
 }
 
 func shellOutputJSON(t *testing.T, output any) map[string]any {

@@ -228,8 +228,12 @@ func normalizeShellResultMap(result map[string]any) normalizedShellResult {
 		}
 	}
 
-	normalized.stdout, normalized.stdoutTruncated = boundShellOutput(normalized.stdout)
-	normalized.stderr, normalized.stderrTruncated = boundShellOutput(normalized.stderr)
+	stdout, stdoutTruncated := boundShellOutput(normalized.stdout)
+	stderr, stderrTruncated := boundShellOutput(normalized.stderr)
+	normalized.stdout = stdout
+	normalized.stderr = stderr
+	normalized.stdoutTruncated = normalized.stdoutTruncated || stdoutTruncated
+	normalized.stderrTruncated = normalized.stderrTruncated || stderrTruncated
 	return normalized
 }
 

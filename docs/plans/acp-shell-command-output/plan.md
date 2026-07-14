@@ -132,8 +132,8 @@ make -C apps/backend fmt
 (cd apps && pnpm --filter @kandev/web test -- components/task/chat/messages/tool-execute-message.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps && pnpm --filter @kandev/web lint)
-(cd apps/web && pnpm e2e:run --project=chromium tests/chat/tool-execute-output.spec.ts)
-(cd apps/web && pnpm e2e:run --project=mobile-chrome tests/chat/mobile-tool-execute-output.spec.ts)
+(cd apps/web && pnpm e2e:run --project chromium tests/chat/tool-execute-output.spec.ts)
+(cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/chat/mobile-tool-execute-output.spec.ts)
 make -C apps/backend test
 make -C apps/backend lint
 ```

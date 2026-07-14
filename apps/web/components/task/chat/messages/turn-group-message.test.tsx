@@ -25,6 +25,23 @@ function toolExecute(id: string, command = "gh pr checks"): Message {
   };
 }
 
+function cancelledToolExecute(id: string): Message {
+  const message = toolExecute(id);
+  return {
+    ...message,
+    metadata: {
+      ...message.metadata,
+      status: "cancelled",
+      normalized: {
+        shell_exec: {
+          command: "cancelled-command",
+          output: { stdout: "cancelled-output" },
+        },
+      },
+    },
+  };
+}
+
 describe("TurnGroupMessage repeated tool compaction", () => {
   it("summarizes the middle of a long run of identical terminal commands", () => {
     const messages = Array.from({ length: 6 }, (_, i) => toolExecute(`tool-${i + 1}`));
@@ -46,5 +63,22 @@ describe("TurnGroupMessage repeated tool compaction", () => {
 
     expect(html).toContain('data-testid="repeated-tool-summary"');
     expect(html).toContain("4 repeated identical terminal commands hidden");
+  });
+
+  it("treats a cancelled tool as terminal", () => {
+    const html = renderToStaticMarkup(
+      <TurnGroupMessage
+        group={{
+          type: "turn_group",
+          id: "turn-group-cancelled",
+          turnId: "turn-1",
+          messages: [cancelledToolExecute("tool-cancelled")],
+        }}
+        sessionId="s1"
+        permissionsByToolCallId={new Map()}
+      />,
+    );
+
+    expect(html).not.toContain('aria-label="Loading"');
   });
 });
