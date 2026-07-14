@@ -92,6 +92,10 @@ export function reviewDiffUnavailableLabel(file: ReviewFile): string {
         : "File moved; no textual changes";
     case "modified":
       return "No textual diff available";
+    default: {
+      const exhaustiveStatus: never = file.status;
+      return exhaustiveStatus;
+    }
   }
 }
 
