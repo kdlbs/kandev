@@ -22,10 +22,10 @@ Workflow settings currently mix manual saving for workflow details with immediat
 
 ## Failure Modes
 
-- Automatic saves run in order. A failed save pauses later queued writes, leaves the user's current value visible, shows `Couldn't save`, and offers Retry for the exact failed operation.
+- Automatic saves run in order within the metadata and step mutation streams. A failed save pauses later queued writes in the affected stream, leaves the user's current value visible, shows `Couldn't save`, and offers Retry for the exact failed operation.
 - A failed workflow creation keeps the Add Workflow dialog open, preserves its inputs, and shows an error notification.
 - If both workflow creation and rollback fail, the partial workflow remains visible so the user can retry setup or delete it.
-- Retrying does not create duplicate workflows or replay an operation that already succeeded; queued writes resume only after the failed write succeeds.
+- Retrying does not create duplicate workflows or replay an operation that already succeeded; queued writes in the affected stream resume only after the failed write succeeds.
 
 ## Persistence Guarantees
 

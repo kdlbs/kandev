@@ -42,8 +42,8 @@ Report behavior implemented, files changed, targeted tests run, blockers, residu
 
 ## Completion Report
 
-- Behavior: Add Workflow persists before exposing the card; workflow and step mutations share ordered autosave status and exact-operation retry; failed rollback keeps the partial workflow recoverable.
+- Behavior: Add Workflow persists before exposing the card; workflow and step mutations use separate ordered queues with a combined autosave status and exact-operation retry; failed rollback keeps the partial workflow recoverable.
 - Files: creation hook/dialog/client, workflow card/actions, serialized mutation queue, and focused unit tests.
 - Tests: the targeted creation, queue, and card-action Vitest files plus web typecheck passed.
 - Blockers: none.
-- Residual races: cross-tab concurrent edits are out of scope; same-card writes are serialized and stale metadata completions are ignored.
+- Residual races: cross-tab concurrent edits are out of scope; same-card writes are serialized within their metadata or step stream, and stale metadata completions are ignored.

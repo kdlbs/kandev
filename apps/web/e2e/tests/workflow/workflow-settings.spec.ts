@@ -1,13 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
-import type { Page } from "@playwright/test";
+import { waitForMutation } from "../../helpers/wait-for-mutation";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
-
-function waitForMutation(page: Page, method: string, path: RegExp) {
-  return page.waitForResponse((response) => {
-    const request = response.request();
-    return request.method() === method && path.test(new URL(response.url()).pathname);
-  });
-}
 
 test.describe("Workflow settings", () => {
   test("hides system-only templates from the add workflow dialog", async ({

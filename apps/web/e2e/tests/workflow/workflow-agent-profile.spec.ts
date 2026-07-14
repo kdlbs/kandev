@@ -1,18 +1,11 @@
 import { test, expect } from "../../fixtures/test-base";
-import type { Page } from "@playwright/test";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { waitForMutation } from "../../helpers/wait-for-mutation";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { KanbanPage } from "../../pages/kanban-page";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
-
-function waitForMutation(page: Page, method: string, path: RegExp) {
-  return page.waitForResponse((response) => {
-    const request = response.request();
-    return request.method() === method && path.test(new URL(response.url()).pathname);
-  });
-}
 
 test.describe("Workflow agent profile", () => {
   test("autosaves the workflow-level agent profile in settings", async ({

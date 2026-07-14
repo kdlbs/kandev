@@ -68,7 +68,7 @@ GOCACHE=/tmp/kandev-go-cache GOLANGCI_LINT_CACHE=/tmp/kandev-golangci-cache make
 ## Completion Report
 
 - Verification: focused creation/autosave tests, web typecheck, desktop workflow E2E, mobile Chrome E2E, and the full repository format/typecheck/test/lint pipeline passed locally.
-- Behavior: workflow creation is immediate; metadata and step writes are serialized behind one status; failures pause later writes and retry the exact failed operation.
+- Behavior: workflow creation is immediate; metadata and step writes use separate serialized queues whose statuses are combined on the card; failures pause and retry the exact failed operation within the affected queue.
 - Responsive result: page actions, card fields, destructive actions, and the open step editor remain within a 390px viewport without document overflow.
 - Blockers: no implementation blocker. PR CI later exposed a shared `runtime-latest` Playwright browser-revision mismatch before any E2E spec started.
 - Residual races: cross-tab edits remain last-write-wins and are explicitly out of scope; within one card, stale completions cannot overwrite newer local metadata.
