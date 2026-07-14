@@ -101,16 +101,37 @@ function scheduleNote(ctx: AudioContext, note: SoundNote): void {
   oscillator.stop(end);
 }
 
+// A suspended context (autoplay policy, no user gesture yet) resumes only when the
+// user eventually interacts. Scheduling before resume() fulfills would queue every
+// pending alert and play them stacked at that later moment — so plays are scheduled
+// after resume() fulfills, and dropped as stale if that takes longer than this.
+const STALE_PLAY_TIMEOUT_MS = 2000;
+
+function schedulePreset(ctx: AudioContext, preset: SoundPreset): void {
+  try {
+    for (const note of preset.notes) scheduleNote(ctx, note);
+  } catch {
+    // Ignore playback failures.
+  }
+}
+
 /** Best-effort playback: autoplay policy or a broken audio stack must never break the app. */
 export function playSoundPreset(presetId: string): void {
   const preset = SOUND_PRESETS.find((p) => p.id === presetId) ?? SOUND_PRESETS[0];
   const ctx = getSharedAudioContext();
   if (!ctx) return;
+  if (ctx.state !== "suspended") {
+    schedulePreset(ctx, preset);
+    return;
+  }
   try {
-    if (ctx.state === "suspended") {
-      ctx.resume().catch(() => undefined);
-    }
-    for (const note of preset.notes) scheduleNote(ctx, note);
+    const requestedAt = Date.now();
+    ctx
+      .resume()
+      .then(() => {
+        if (Date.now() - requestedAt < STALE_PLAY_TIMEOUT_MS) schedulePreset(ctx, preset);
+      })
+      .catch(() => undefined);
   } catch {
     // Ignore playback failures.
   }

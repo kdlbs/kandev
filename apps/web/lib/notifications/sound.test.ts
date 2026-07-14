@@ -101,18 +101,43 @@ describe("playSoundPreset", () => {
     expect(ctx.createOscillator).toHaveBeenCalledTimes(SOUND_PRESETS[0].notes.length);
   });
 
-  it("resumes a suspended context before playing", async () => {
+  it("plays after a suspended context resumes promptly", async () => {
     const { ctx } = makeFakeAudioContext();
     ctx.state = "suspended";
     vi.stubGlobal(
       "AudioContext",
       vi.fn(() => ctx),
     );
+    const { playSoundPreset, SOUND_PRESETS } = await loadSoundModule();
+
+    playSoundPreset("plim");
+    expect(ctx.resume).toHaveBeenCalled();
+    expect(ctx.createOscillator).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const plim = SOUND_PRESETS.find((p) => p.id === "plim")!;
+    expect(ctx.createOscillator).toHaveBeenCalledTimes(plim.notes.length);
+  });
+
+  it("drops the play when a suspended context resumes too late", async () => {
+    const { ctx } = makeFakeAudioContext();
+    ctx.state = "suspended";
+    let resolveResume!: () => void;
+    ctx.resume = vi.fn(() => new Promise<void>((resolve) => (resolveResume = resolve)));
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn(() => ctx),
+    );
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(0);
     const { playSoundPreset } = await loadSoundModule();
 
     playSoundPreset("plim");
+    nowSpy.mockReturnValue(60_000);
+    resolveResume();
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(ctx.resume).toHaveBeenCalled();
+    expect(ctx.createOscillator).not.toHaveBeenCalled();
+    nowSpy.mockRestore();
   });
 
   it("reuses a single AudioContext across plays", async () => {
