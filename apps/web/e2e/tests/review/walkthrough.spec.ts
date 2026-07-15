@@ -3,6 +3,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import type { Page, Locator } from "@playwright/test";
+import { expectWalkthroughBehindDialog } from "./walkthrough-layering";
 
 async function seedWalkthroughTask(
   testPage: Page,
@@ -309,11 +310,26 @@ test.describe("Code walkthrough", () => {
     const card = await openWalkthrough(testPage);
     await expect(session.walkthroughEditorRange()).toBeVisible({ timeout: 15_000 });
 
+    await testPage.evaluate(() => window.dispatchEvent(new CustomEvent("open-review-dialog")));
+    const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
+    await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
+    await expectWalkthroughBehindDialog(testPage, reviewDialog, [
+      { locator: card, name: "walkthrough window" },
+      { locator: session.walkthroughLauncher().locator(".."), name: "walkthrough launcher" },
+    ]);
+    await reviewDialog.getByRole("button", { name: "Close review" }).click();
+    await expect(reviewDialog).toBeHidden({ timeout: 15_000 });
+
     await session.walkthroughLauncher().hover();
     await expect(session.walkthroughDiscardButton()).toBeVisible({ timeout: 5_000 });
     await session.walkthroughDiscardButton().click();
-    await expect(session.walkthroughDiscardDialog()).toBeVisible();
-    await session.walkthroughDiscardDialog().getByRole("button", { name: "Cancel" }).click();
+    const discardDialog = session.walkthroughDiscardDialog();
+    await expect(discardDialog).toBeVisible();
+    await expectWalkthroughBehindDialog(testPage, discardDialog, [
+      { locator: card, name: "walkthrough window" },
+      { locator: session.walkthroughLauncher().locator(".."), name: "walkthrough launcher" },
+    ]);
+    await discardDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(card).toBeVisible();
     await expect(session.walkthroughLauncher()).toHaveCount(1);
 
