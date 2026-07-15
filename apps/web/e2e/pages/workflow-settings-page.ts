@@ -6,6 +6,7 @@ export class WorkflowSettingsPage {
   readonly createDialog: Locator;
   readonly workflowNameInput: Locator;
   readonly confirmCreateButton: Locator;
+  readonly cycleGuardDialog: Locator;
 
   constructor(page: Page) {
     this.page = page;
@@ -13,6 +14,7 @@ export class WorkflowSettingsPage {
     this.createDialog = page.getByTestId("create-workflow-dialog");
     this.workflowNameInput = page.getByTestId("workflow-name-input");
     this.confirmCreateButton = page.getByTestId("confirm-create-workflow");
+    this.cycleGuardDialog = page.getByTestId("workflow-cycle-guard-dialog");
   }
 
   async goto(workspaceId: string) {
@@ -60,6 +62,52 @@ export class WorkflowSettingsPage {
   /** Find a step node by its name text within a card. */
   stepNodeByName(card: Locator, stepName: string): Locator {
     return card.locator(".group.relative").filter({ hasText: stepName });
+  }
+
+  /** A replay-cycle diagnostic rendered inside a workflow card or guard dialog. */
+  cycleDiagnostic(container: Locator, autoStartStepId: string): Locator {
+    return container.getByTestId(`workflow-cycle-diagnostic-${autoStartStepId}`);
+  }
+
+  /** Select a step and return its configuration panel. */
+  async selectStep(card: Locator, stepName: string, touch = false): Promise<Locator> {
+    const currentName = card.getByPlaceholder("Step name");
+    const alreadySelected =
+      (await currentName.isVisible().catch(() => false)) &&
+      (await currentName.inputValue().catch(() => "")) === stepName;
+    if (!alreadySelected) {
+      await this.activate(this.stepNodeByName(card, stepName), touch);
+    }
+    await expect(currentName).toHaveValue(stepName);
+    return currentName.locator(
+      "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' rounded-lg ')][1]",
+    );
+  }
+
+  /** Toggle auto-start for a step through the visible configuration panel. */
+  async setAutoStart(card: Locator, stepName: string, enabled: boolean, touch = false) {
+    const panel = await this.selectStep(card, stepName, touch);
+    const checkbox = panel.getByRole("checkbox", { name: "Auto-start agent" });
+    if ((await checkbox.isChecked()) !== enabled) {
+      await this.activate(checkbox, touch);
+    }
+    if (enabled) await expect(checkbox).toBeChecked();
+    else await expect(checkbox).not.toBeChecked();
+  }
+
+  /** Set the On Turn Complete transition in a step's configuration panel. */
+  async setTurnCompleteTransition(
+    card: Locator,
+    stepName: string,
+    optionName: string,
+    touch = false,
+  ) {
+    const panel = await this.selectStep(card, stepName, touch);
+    const transitionSection = panel
+      .getByText("On Turn Complete", { exact: true })
+      .locator("xpath=../..");
+    await this.activate(transitionSection.getByRole("combobox").first(), touch);
+    await this.activate(this.page.getByRole("option", { name: optionName }), touch);
   }
 
   /** The add-step (+) button within a workflow card. */
@@ -118,6 +166,26 @@ export class WorkflowSettingsPage {
     await expect(this.createDialog).not.toBeVisible();
   }
 
+  /** Open the Add Workflow dialog and create a draft using touch interactions. */
+  async createWorkflowByTouch(name: string, templateName?: string) {
+    await this.addWorkflowButton.tap();
+    await expect(this.createDialog).toBeVisible();
+
+    if (name) {
+      await this.workflowNameInput.tap();
+      await this.workflowNameInput.fill(name);
+    }
+
+    if (templateName === "Custom") {
+      await this.createDialog.locator('label[for="custom"]').tap();
+    } else if (templateName) {
+      await this.createDialog.getByText(templateName, { exact: false }).first().tap();
+    }
+
+    await this.confirmCreateButton.tap();
+    await expect(this.createDialog).not.toBeVisible();
+  }
+
   /** The workflow-level agent profile select trigger within a workflow card. */
   workflowAgentProfileSelect(card: Locator): Locator {
     return card.getByTestId("workflow-agent-profile-select");
@@ -136,5 +204,10 @@ export class WorkflowSettingsPage {
       .locator("button")
       .filter({ has: this.page.locator(".tabler-icon-trash") })
       .click();
+  }
+
+  private async activate(locator: Locator, touch: boolean) {
+    if (touch) await locator.tap();
+    else await locator.click();
   }
 }

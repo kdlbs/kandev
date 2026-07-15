@@ -4,7 +4,6 @@ import { useEffect } from "react";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
 import { useRequest } from "@/lib/http/use-request";
-import { generateUUID } from "@/lib/utils";
 import {
   createWorkflowAction,
   createWorkflowStepAction,
@@ -17,19 +16,23 @@ import {
   exportWorkflowAction,
   bulkMoveTasks,
 } from "@/app/actions/workspaces";
+import {
+  useWorkflowMutationGuard,
+  type WorkflowMutationGuardController,
+} from "./workflow-mutation-guard";
+import {
+  addLocalStep,
+  addRemoteStep,
+  applyWorkflowStepUpdates,
+  newWorkflowStep,
+  updateRemoteWorkflowStep,
+} from "./workflow-step-mutations";
 
 const FALLBACK_ERROR_MESSAGE = "Request failed";
 
 type WorkflowStepActionsParams = {
   workflow: Workflow;
   isNewWorkflow: boolean;
-  /**
-   * Workflows synced from GitHub (`workflow.source === "github"`) are
-   * read-only in the UI; the backend also rejects step mutations with a 409.
-   * Gating here is defense-in-depth in case a disabled control is somehow
-   * still triggered.
-   */
-  readOnly?: boolean;
   workflowSteps: WorkflowStep[];
   setWorkflowSteps: (updater: ((prev: WorkflowStep[]) => WorkflowStep[]) | WorkflowStep[]) => void;
   refreshWorkflowSteps: () => Promise<void>;
@@ -38,6 +41,7 @@ type WorkflowStepActionsParams = {
   setTargetStepForMigration: (id: string) => void;
   setStepDeleteOpen: (open: boolean) => void;
   toast: ReturnType<typeof useToast>["toast"];
+  mutationGuard?: WorkflowMutationGuardController;
 };
 
 type RemoveStepParams = {
@@ -82,65 +86,9 @@ async function removeWorkflowStep({
   }
 }
 
-const NEW_STEP_DEFAULTS = { name: "New Step", color: "bg-slate-500" } as const;
-
-function addLocalStep(
-  workflow: Workflow,
-  setWorkflowSteps: WorkflowStepActionsParams["setWorkflowSteps"],
-) {
-  setWorkflowSteps((prev) => [
-    ...prev,
-    {
-      id: `temp-step-${generateUUID()}`,
-      workflow_id: workflow.id,
-      ...NEW_STEP_DEFAULTS,
-      position: prev.length,
-      allow_manual_move: true,
-      created_at: "",
-      updated_at: "",
-    },
-  ]);
-}
-
-async function addRemoteStep(
-  workflow: Workflow,
-  stepCount: number,
-  refreshWorkflowSteps: () => Promise<void>,
-  toast: WorkflowStepActionsParams["toast"],
-) {
-  try {
-    await createWorkflowStepAction({
-      workflow_id: workflow.id,
-      ...NEW_STEP_DEFAULTS,
-      position: stepCount,
-    });
-    await refreshWorkflowSteps();
-  } catch (error) {
-    toast({
-      title: "Failed to add workflow step",
-      description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-      variant: "error",
-    });
-  }
-}
-
-function applyWorkflowStepUpdates(
-  steps: WorkflowStep[],
-  stepId: string,
-  updates: Partial<WorkflowStep>,
-): WorkflowStep[] {
-  const isSettingStartStep = updates.is_start_step === true;
-  return steps.map((step) => {
-    if (step.id === stepId) return { ...step, ...updates };
-    if (isSettingStartStep) return { ...step, is_start_step: false };
-    return step;
-  });
-}
-
 export function useWorkflowStepActions({
   workflow,
   isNewWorkflow,
-  readOnly = false,
   workflowSteps,
   setWorkflowSteps,
   refreshWorkflowSteps,
@@ -149,71 +97,88 @@ export function useWorkflowStepActions({
   setTargetStepForMigration,
   setStepDeleteOpen,
   toast,
+  mutationGuard: suppliedMutationGuard,
 }: WorkflowStepActionsParams) {
+  const fallbackMutationGuard = useWorkflowMutationGuard(workflowSteps);
+  const mutationGuard = suppliedMutationGuard ?? fallbackMutationGuard;
   const handleUpdateWorkflowStep = async (stepId: string, updates: Partial<WorkflowStep>) => {
-    if (readOnly) return;
     if (isNewWorkflow) {
       setWorkflowSteps((prev) => applyWorkflowStepUpdates(prev, stepId, updates));
       return;
     }
-    try {
-      await updateWorkflowStepAction(stepId, updates);
-      await refreshWorkflowSteps();
-    } catch (error) {
-      toast({
-        title: "Failed to update workflow step",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-    }
+    const proposedSteps = applyWorkflowStepUpdates(workflowSteps, stepId, updates);
+    await mutationGuard.guardMutation({
+      proposedSteps,
+      operation: () => updateRemoteWorkflowStep({ stepId, updates, refreshWorkflowSteps, toast }),
+    });
   };
 
   const handleAddWorkflowStep = async () => {
-    if (readOnly) return;
     if (isNewWorkflow) {
       addLocalStep(workflow, setWorkflowSteps);
       return;
     }
-    await addRemoteStep(workflow, workflowSteps.length, refreshWorkflowSteps, toast);
+    const proposedSteps = [
+      ...workflowSteps,
+      newWorkflowStep(workflow, workflowSteps.length, `proposed-step-${workflow.id}`),
+    ];
+    await mutationGuard.guardMutation({
+      proposedSteps,
+      operation: () => addRemoteStep(workflow, workflowSteps.length, refreshWorkflowSteps, toast),
+    });
   };
 
   const handleRemoveWorkflowStep = async (stepId: string) => {
-    if (readOnly) return;
     if (isNewWorkflow) {
       setWorkflowSteps((prev) =>
         prev.filter((s) => s.id !== stepId).map((s, i) => ({ ...s, position: i })),
       );
       return;
     }
-    await removeWorkflowStep({
-      stepId,
-      workflowSteps,
-      refreshWorkflowSteps,
-      setStepToDelete,
-      setStepTaskCount,
-      setTargetStepForMigration,
-      setStepDeleteOpen,
-      toast,
+    const proposedSteps = workflowSteps
+      .filter((step) => step.id !== stepId)
+      .map((step, position) => ({ ...step, position }));
+    await mutationGuard.guardMutation({
+      proposedSteps,
+      operation: () =>
+        removeWorkflowStep({
+          stepId,
+          workflowSteps,
+          refreshWorkflowSteps,
+          setStepToDelete,
+          setStepTaskCount,
+          setTargetStepForMigration,
+          setStepDeleteOpen,
+          toast,
+        }),
     });
   };
 
   const handleReorderWorkflowSteps = async (reorderedSteps: WorkflowStep[]) => {
-    if (readOnly) return;
-    setWorkflowSteps(reorderedSteps);
-    if (isNewWorkflow) return;
-    try {
-      await reorderWorkflowStepsAction(
-        workflow.id,
-        reorderedSteps.map((s) => s.id),
-      );
-    } catch (error) {
-      toast({
-        title: "Failed to reorder workflow steps",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-        variant: "error",
-      });
-      await refreshWorkflowSteps();
+    const proposedSteps = reorderedSteps.map((step, position) => ({ ...step, position }));
+    if (isNewWorkflow) {
+      setWorkflowSteps(proposedSteps);
+      return;
     }
+    await mutationGuard.guardMutation({
+      proposedSteps,
+      operation: async () => {
+        setWorkflowSteps(proposedSteps);
+        try {
+          await reorderWorkflowStepsAction(
+            workflow.id,
+            proposedSteps.map((step) => step.id),
+          );
+        } catch (error) {
+          toast({
+            title: "Failed to reorder workflow steps",
+            description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
+            variant: "error",
+          });
+          await refreshWorkflowSteps();
+        }
+      },
+    });
   };
 
   return {
@@ -221,14 +186,13 @@ export function useWorkflowStepActions({
     handleAddWorkflowStep,
     handleRemoveWorkflowStep,
     handleReorderWorkflowSteps,
+    mutationGuard,
   };
 }
 
 type WorkflowDeleteHandlersParams = {
   workflow: Workflow;
   isNewWorkflow: boolean;
-  /** See `WorkflowStepActionsParams.readOnly` — defense-in-depth for synced workflows. */
-  readOnly?: boolean;
   otherWorkflows: Workflow[];
   wfDel: {
     setDeleteOpen: (v: boolean) => void;
@@ -248,7 +212,6 @@ type WorkflowDeleteHandlersParams = {
 export function useWorkflowDeleteHandlers({
   workflow,
   isNewWorkflow,
-  readOnly = false,
   otherWorkflows,
   wfDel,
   deleteWorkflowRun,
@@ -278,7 +241,6 @@ export function useWorkflowDeleteHandlers({
   }, [wfDel.targetWorkflowId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDeleteWorkflowClick = async () => {
-    if (readOnly) return;
     if (isNewWorkflow) {
       wfDel.setWorkflowTaskCount(0);
       wfDel.setDeleteOpen(true);
@@ -303,9 +265,6 @@ export function useWorkflowDeleteHandlers({
   };
 
   const handleDeleteWorkflow = async () => {
-    // A background sync can flip the workflow read-only while the delete
-    // dialog is already open; re-check at confirm time.
-    if (readOnly) return;
     try {
       await deleteWorkflowRun();
       wfDel.setDeleteOpen(false);
@@ -319,7 +278,6 @@ export function useWorkflowDeleteHandlers({
   };
 
   const handleMigrateAndDeleteWorkflow = async () => {
-    if (readOnly) return;
     if (!wfDel.targetWorkflowId || !wfDel.targetStepId) return;
     wfDel.setMigrateLoading(true);
     try {
@@ -525,25 +483,26 @@ async function reconcileTemplateSteps(
 type WorkflowSaveActionsParams = {
   workflow: Workflow;
   isNewWorkflow: boolean;
-  /** See `WorkflowStepActionsParams.readOnly` — defense-in-depth for synced workflows. */
-  readOnly?: boolean;
   workflowSteps: WorkflowStep[];
   templateStepCount: number;
   onSaveWorkflow: () => Promise<unknown>;
   onWorkflowCreated?: (created: Workflow) => void;
   toast: ReturnType<typeof useToast>["toast"];
+  mutationGuard?: WorkflowMutationGuardController;
 };
 
 export function useWorkflowSaveActions({
   workflow,
   isNewWorkflow,
-  readOnly = false,
   workflowSteps,
   templateStepCount,
   onSaveWorkflow,
   onWorkflowCreated,
   toast,
+  mutationGuard: suppliedMutationGuard,
 }: WorkflowSaveActionsParams) {
+  const fallbackMutationGuard = useWorkflowMutationGuard(workflowSteps);
+  const mutationGuard = suppliedMutationGuard ?? fallbackMutationGuard;
   const saveWorkflowRequest = useRequest(onSaveWorkflow);
 
   const saveNewWorkflowRequest = useRequest(async () => {
@@ -567,8 +526,7 @@ export function useWorkflowSaveActions({
 
   const activeSaveRequest = isNewWorkflow ? saveNewWorkflowRequest : saveWorkflowRequest;
 
-  const handleSaveWorkflow = async () => {
-    if (readOnly) return;
+  const runSaveWorkflow = async () => {
     try {
       if (isNewWorkflow) await saveNewWorkflowRequest.run();
       else await saveWorkflowRequest.run();
@@ -581,7 +539,20 @@ export function useWorkflowSaveActions({
     }
   };
 
-  return { activeSaveRequest, handleSaveWorkflow };
+  const handleSaveWorkflow = async () => {
+    if (!isNewWorkflow) {
+      await runSaveWorkflow();
+      return;
+    }
+    await mutationGuard.guardMutation({
+      baselineSteps: [],
+      proposedSteps: workflowSteps,
+      intent: "create",
+      operation: runSaveWorkflow,
+    });
+  };
+
+  return { activeSaveRequest, handleSaveWorkflow, mutationGuard };
 }
 
 type WorkflowExportActionsParams = {

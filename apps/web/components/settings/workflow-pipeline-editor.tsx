@@ -22,6 +22,7 @@ import {
   IconTrash,
   IconChevronRight,
   IconRosetteNumber1,
+  IconAlertTriangle,
 } from "@tabler/icons-react";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import {
@@ -37,8 +38,10 @@ import {
 import { ScrollArea, ScrollBar } from "@kandev/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { WorkflowStep } from "@/lib/types/http";
+import type { WorkflowReplayCycleDiagnostic } from "@/lib/workflows/replay-cycle-analysis";
 import { cn } from "@/lib/utils";
 import { StepConfigPanel } from "./workflow-pipeline-editor-panels";
+import { WorkflowCycleDiagnostic } from "./workflow-cycle-diagnostic";
 
 type WorkflowPipelineEditorProps = {
   steps: WorkflowStep[];
@@ -46,6 +49,7 @@ type WorkflowPipelineEditorProps = {
   onAddStep: () => void;
   onRemoveStep: (stepId: string) => void;
   onReorderSteps: (steps: WorkflowStep[]) => void;
+  diagnostics?: WorkflowReplayCycleDiagnostic[];
   readOnly?: boolean;
 };
 
@@ -73,6 +77,7 @@ type PipelineNodeProps = {
   isSelected: boolean;
   onSelect: () => void;
   onRemove: () => void;
+  isReplayCycleAffected: boolean;
   readOnly?: boolean;
 };
 
@@ -81,6 +86,7 @@ function PipelineNode({
   isSelected,
   onSelect,
   onRemove,
+  isReplayCycleAffected,
   readOnly = false,
 }: PipelineNodeProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -98,6 +104,7 @@ function PipelineNode({
         isSelected
           ? "border-primary bg-primary/5"
           : "border-border bg-card hover:border-primary/50",
+        isReplayCycleAffected && "border-dashed border-amber-500 ring-1 ring-amber-500/30",
         isDragging && "opacity-50 z-50",
       )}
       onClick={onSelect}
@@ -137,6 +144,15 @@ function PipelineNode({
           agentProfileId={step.agent_profile_id}
           fallback={<span className="text-xs text-muted-foreground/50">manual</span>}
         />
+        {isReplayCycleAffected && (
+          <span
+            className="flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300"
+            aria-label={`${step.name} is part of a replay cycle`}
+          >
+            <IconAlertTriangle className="size-3 shrink-0" aria-hidden="true" />
+            Cycle
+          </span>
+        )}
       </div>
       {!readOnly && (
         <button
@@ -176,6 +192,7 @@ type PipelineAreaProps = {
   onSelectStep: (stepId: string) => void;
   onRemoveStep: (stepId: string) => void;
   onAddStep: () => void;
+  affectedStepIds: Set<string>;
   readOnly: boolean;
 };
 
@@ -185,6 +202,7 @@ function PipelineArea({
   onSelectStep,
   onRemoveStep,
   onAddStep,
+  affectedStepIds,
   readOnly,
 }: PipelineAreaProps) {
   return (
@@ -197,6 +215,7 @@ function PipelineArea({
             isSelected={selectedStepId === step.id}
             onSelect={() => onSelectStep(step.id)}
             onRemove={() => onRemoveStep(step.id)}
+            isReplayCycleAffected={affectedStepIds.has(step.id)}
             readOnly={readOnly}
           />
         </div>
@@ -252,6 +271,21 @@ function StepDeleteConfirmation({
   );
 }
 
+function affectedStepIds(diagnostics: WorkflowReplayCycleDiagnostic[]): Set<string> {
+  return new Set(diagnostics.flatMap((diagnostic) => diagnostic.affectedStepIds));
+}
+
+function WorkflowCycleAlerts({ diagnostics }: { diagnostics: WorkflowReplayCycleDiagnostic[] }) {
+  if (diagnostics.length === 0) return null;
+  return (
+    <div className="grid min-w-0 gap-3">
+      {diagnostics.map((diagnostic) => (
+        <WorkflowCycleDiagnostic key={diagnostic.identity} diagnostic={diagnostic} />
+      ))}
+    </div>
+  );
+}
+
 // --- Main Pipeline Editor ---
 
 export function WorkflowPipelineEditor({
@@ -260,6 +294,7 @@ export function WorkflowPipelineEditor({
   onAddStep,
   onRemoveStep,
   onReorderSteps,
+  diagnostics = [],
   readOnly = false,
 }: WorkflowPipelineEditorProps) {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
@@ -273,6 +308,7 @@ export function WorkflowPipelineEditor({
   }
 
   const stepItems = useMemo(() => steps.map((step) => step.id), [steps]);
+  const affectedIds = useMemo(() => affectedStepIds(diagnostics), [diagnostics]);
   const isMounted = useSyncExternalStore(
     () => () => {},
     () => true,
@@ -317,12 +353,14 @@ export function WorkflowPipelineEditor({
       onSelectStep={handleSelectStep}
       onRemoveStep={requestRemoveStep}
       onAddStep={onAddStep}
+      affectedStepIds={affectedIds}
       readOnly={readOnly}
     />
   );
 
   return (
     <div className="space-y-3">
+      <WorkflowCycleAlerts diagnostics={diagnostics} />
       <ScrollArea className="w-full pb-1">
         {isMounted ? (
           <DndContext
