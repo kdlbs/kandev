@@ -100,6 +100,7 @@ type PendingMutation = (views: SavedView[]) => SavedView[];
 
 export function useSavedViews() {
   const [custom, setCustom] = useState<SavedView[]>([]);
+  const customRef = useRef(custom);
   const hydrated = useRef(false);
   const pendingMutations = useRef<PendingMutation[]>([]);
 
@@ -114,6 +115,7 @@ export function useSavedViews() {
       pendingMutations.current = [];
       const hydratedViews = mutations.reduce((views, mutate) => mutate(views), serverViews ?? []);
       hydrated.current = true;
+      customRef.current = hydratedViews;
       setCustom(hydratedViews);
       if (mutations.length > 0) {
         void syncServer(hydratedViews);
@@ -123,6 +125,13 @@ export function useSavedViews() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  const commitMutation = useCallback((mutate: PendingMutation) => {
+    const next = mutate(customRef.current);
+    customRef.current = next;
+    setCustom(next);
+    void syncServer(next);
   }, []);
 
   const save = useCallback(
@@ -138,28 +147,23 @@ export function useSavedViews() {
         pendingMutations.current.push(mutate);
         return view;
       }
-      setCustom((prev) => {
-        const next = mutate(prev);
-        void syncServer(next);
-        return next;
-      });
+      commitMutation(mutate);
       return view;
     },
-    [],
+    [commitMutation],
   );
 
-  const remove = useCallback((id: string) => {
-    const mutate: PendingMutation = (views) => views.filter((v) => v.id !== id);
-    if (!hydrated.current) {
-      pendingMutations.current.push(mutate);
-      return;
-    }
-    setCustom((prev) => {
-      const next = mutate(prev);
-      void syncServer(next);
-      return next;
-    });
-  }, []);
+  const remove = useCallback(
+    (id: string) => {
+      const mutate: PendingMutation = (views) => views.filter((v) => v.id !== id);
+      if (!hydrated.current) {
+        pendingMutations.current.push(mutate);
+        return;
+      }
+      commitMutation(mutate);
+    },
+    [commitMutation],
+  );
 
   return {
     views: [...BUILTIN_VIEWS, ...custom],
