@@ -42,5 +42,6 @@ To build the complete docs site, clone `kdlbs/landing` beside this repository an
 
 ```bash
 cd ../landing
+pnpm install --frozen-lockfile
 KANDEV_DOCS_SOURCE_PATH=../kandev/docs pnpm --filter @kandev/docs build
 ```
