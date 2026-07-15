@@ -43,6 +43,9 @@ func (m *captureUpdateTaskRepo) DeleteTaskRepositoriesByTask(_ context.Context, 
 }
 
 func (m *captureUpdateTaskRepo) ListTaskRepositories(_ context.Context, taskID string) ([]*models.TaskRepository, error) {
+	if m.deleteReposCalled {
+		return nil, nil
+	}
 	return []*models.TaskRepository{
 		{ID: "tr-1", TaskID: taskID, RepositoryID: "repo-1", BaseBranch: "main"},
 	}, nil
@@ -60,6 +63,21 @@ func newUpdateTaskHandlers(t *testing.T) (*TaskHandlers, *captureUpdateTaskRepo)
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	return &TaskHandlers{service: svc, logger: log}, repo
+}
+
+func decodeTaskRepositoryIDs(t *testing.T, data []byte) []string {
+	t.Helper()
+	var resp struct {
+		Repositories []struct {
+			RepositoryID string `json:"repository_id"`
+		} `json:"repositories"`
+	}
+	require.NoError(t, json.Unmarshal(data, &resp))
+	ids := make([]string, 0, len(resp.Repositories))
+	for _, r := range resp.Repositories {
+		ids = append(ids, r.RepositoryID)
+	}
+	return ids
 }
 
 func doUpdateTaskRequest(t *testing.T, h *TaskHandlers, body string) *httptest.ResponseRecorder {
@@ -84,15 +102,7 @@ func TestHTTPUpdateTaskTitleOnlyPreservesRepositories(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	assert.False(t, repo.deleteReposCalled, "title-only update must not touch task repositories")
-
-	var resp struct {
-		Repositories []struct {
-			RepositoryID string `json:"repository_id"`
-		} `json:"repositories"`
-	}
-	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
-	require.Len(t, resp.Repositories, 1)
-	assert.Equal(t, "repo-1", resp.Repositories[0].RepositoryID)
+	assert.Equal(t, []string{"repo-1"}, decodeTaskRepositoryIDs(t, rec.Body.Bytes()))
 }
 
 func TestHTTPUpdateTaskExplicitEmptyRepositoriesClears(t *testing.T) {
@@ -103,6 +113,7 @@ func TestHTTPUpdateTaskExplicitEmptyRepositoriesClears(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	assert.True(t, repo.deleteReposCalled, "an explicitly empty repositories list must still clear")
+	assert.Empty(t, decodeTaskRepositoryIDs(t, rec.Body.Bytes()), "response must reflect the cleared repositories")
 }
 
 func TestWSUpdateTaskTitleOnlyPreservesRepositories(t *testing.T) {
@@ -119,6 +130,7 @@ func TestWSUpdateTaskTitleOnlyPreservesRepositories(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, ws.MessageTypeResponse, resp.Type)
 	assert.False(t, repo.deleteReposCalled, "title-only update must not touch task repositories")
+	assert.Equal(t, []string{"repo-1"}, decodeTaskRepositoryIDs(t, resp.Payload))
 }
 
 func TestConvertUpdateRepositories(t *testing.T) {
