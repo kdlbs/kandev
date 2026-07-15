@@ -3,10 +3,7 @@
 import { useEffect } from "react";
 import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
-import { getLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-import { syncTaskCreateLastUsed } from "@/components/task-create-dialog-handlers";
 
 const selectionDebug = createDebugLogger("task-create:selection");
 
@@ -14,8 +11,6 @@ type RepositoryAutoPickDecision = {
   pickId: string | null;
   source: string;
   defer: boolean;
-  localStorageRepoId: string | null;
-  localStorageValid: boolean;
   settingsRepoId: string | null;
   settingsValid: boolean;
 };
@@ -50,9 +45,6 @@ export function useRepositoryAutoSelectEffect(
     if (decision.defer) return;
     const { pickId } = decision;
     if (rows.length > 0 && !canReplaceEmptyRepositoryPlaceholder(rows, pickId)) return;
-    if (shouldQueueRepositoryFallback(decision)) {
-      syncTaskCreateLastUsed({ repository_id: pickId, branch: null });
-    }
     void Promise.resolve().then(() => {
       setRepositories((prev) => {
         if (prev.length > 0) return replaceSeededRepositoryRows(prev, pickId);
@@ -91,14 +83,10 @@ function decideRepositoryAutoPick(
   lastUsedRepositoryId?: string | null,
   userSettingsLoaded = true,
 ): RepositoryAutoPickDecision {
-  const localStorageRepoId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null);
   const settingsRepoId = lastUsedRepositoryId ?? null;
-  const localStorageValid = isRepositoryIdValid(localStorageRepoId, repositories);
   const settingsValid = isRepositoryIdValid(settingsRepoId, repositories);
   if (settingsRepoId && settingsValid) {
     return buildRepositoryAutoPickDecision("settings:taskCreateLastUsed", settingsRepoId, {
-      localStorageRepoId,
-      localStorageValid,
       settingsRepoId,
       settingsValid,
     });
@@ -106,16 +94,6 @@ function decideRepositoryAutoPick(
   if (!userSettingsLoaded) {
     return buildRepositoryAutoPickDecision("user-settings-loading", null, {
       defer: true,
-      localStorageRepoId,
-      localStorageValid,
-      settingsRepoId,
-      settingsValid,
-    });
-  }
-  if (localStorageRepoId && localStorageValid) {
-    return buildRepositoryAutoPickDecision("localStorage:lastRepositoryId", localStorageRepoId, {
-      localStorageRepoId,
-      localStorageValid,
       settingsRepoId,
       settingsValid,
     });
@@ -123,7 +101,7 @@ function decideRepositoryAutoPick(
   return buildRepositoryAutoPickDecision(
     repositories.length === 1 ? "single-workspace-repo" : "empty-row",
     repositories.length === 1 ? repositories[0].id : null,
-    { localStorageRepoId, localStorageValid, settingsRepoId, settingsValid },
+    { settingsRepoId, settingsValid },
   );
 }
 
@@ -138,8 +116,6 @@ function buildRepositoryAutoPickDecision(
     pickId,
     source,
     defer: fields.defer ?? false,
-    localStorageRepoId: fields.localStorageRepoId,
-    localStorageValid: fields.localStorageValid,
     settingsRepoId: fields.settingsRepoId,
     settingsValid: fields.settingsValid,
   };
@@ -147,12 +123,6 @@ function buildRepositoryAutoPickDecision(
 
 function isRepositoryIdValid(repositoryId: string | null, repositories: Repository[]): boolean {
   return Boolean(repositoryId && repositories.some((r: Repository) => r.id === repositoryId));
-}
-
-function shouldQueueRepositoryFallback(
-  decision: RepositoryAutoPickDecision,
-): decision is RepositoryAutoPickDecision & { pickId: string } {
-  return decision.source === "localStorage:lastRepositoryId" && Boolean(decision.pickId);
 }
 
 function logRepositoryAutoPick(
@@ -163,8 +133,6 @@ function logRepositoryAutoPick(
   if (!isDebug()) return;
   selectionDebug("repository-autopick", {
     workspace_id: workspaceId,
-    local_storage_id: decision.localStorageRepoId ?? "-",
-    local_storage_valid: decision.localStorageValid,
     settings_id: decision.settingsRepoId ?? "-",
     settings_valid: decision.settingsValid,
     repo_count: repoCount,

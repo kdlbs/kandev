@@ -1,17 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useDefaultSelectionsEffect } from "./task-create-dialog-effects";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
-
-beforeEach(() => {
-  localStorage.clear();
-});
 
 const PROFILE_DOCKER = "profile-docker";
 const PROFILE_LOCAL = "profile-local";
 const PROFILE_WORKTREE = "profile-worktree";
 const PROFILE_WORKTREE_B = "profile-worktree-b";
+const EXECUTOR_DOCKER = "exec-docker";
+const REMOTE_URL_A = "github.com/acme/a";
+const REMOTE_URL_B = "github.com/acme/b";
 
 type DefaultSelFake = Pick<
   DialogFormState,
@@ -68,7 +66,7 @@ function localExecutor(): StoreSelections["executors"][number] {
 
 function dockerExecutor(): StoreSelections["executors"][number] {
   return {
-    id: "exec-docker",
+    id: EXECUTOR_DOCKER,
     type: "local_docker",
     profiles: [{ id: PROFILE_DOCKER, executor_type: "local_docker" }],
   } as unknown as StoreSelections["executors"][number];
@@ -168,7 +166,6 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
 
 describe("useDefaultSelectionsEffect - executor profile restoration", () => {
   it("defers executor profile fallback until user settings have loaded or settled", async () => {
-    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
     const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
     const worktree = worktreeExecutor();
     const selBefore = makeSel({
@@ -192,46 +189,10 @@ describe("useDefaultSelectionsEffect - executor profile restoration", () => {
 
     await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
   });
-
-  it("keeps deferring when a valid cached executor profile exists but settings are loading", async () => {
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-      JSON.stringify(PROFILE_WORKTREE),
-    );
-    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
-    const sel = makeSel({
-      executors: [worktreeExecutor()],
-      userSettingsLoaded: false,
-    });
-
-    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fs.setExecutorId).not.toHaveBeenCalled();
-    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
-  });
-
-  it("keeps deferring when cached executor profile is ineligible for the source mode", async () => {
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-      JSON.stringify(PROFILE_WORKTREE),
-    );
-    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "", noRepository: true });
-    const sel = makeSel({
-      executors: [worktreeExecutor(), localExecutor()],
-      userSettingsLoaded: false,
-    });
-
-    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
-  });
 });
 
 describe("useDefaultSelectionsEffect - executor profile settings restoration", () => {
-  it("restores executor profile from store-backed settings when localStorage is not primed", async () => {
-    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
+  it("restores executor profile from backend settings", async () => {
     const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
     const worktree = worktreeExecutor();
     const sel = makeSel({
@@ -246,7 +207,6 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
   });
 
   it("does not pick a fallback executor id while a valid last-used profile is restoring", async () => {
-    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
     const local = localExecutor();
     const worktree = worktreeExecutor();
     const sel = makeSel({
@@ -288,16 +248,36 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
 });
 
 describe("useDefaultSelectionsEffect - multi-repo guard counts Remote rows", () => {
+  it("prefers the saved worktree profile when multi-repo mode needs a switch", async () => {
+    const fs = makeDefaultSelFs({
+      executorId: EXECUTOR_DOCKER,
+      executorProfileId: PROFILE_DOCKER,
+      useRemote: true,
+      remoteRepos: [
+        { key: "remote-0", url: REMOTE_URL_A, branch: "", source: "paste" },
+        { key: "remote-1", url: REMOTE_URL_B, branch: "", source: "paste" },
+      ] as DialogFormState["remoteRepos"],
+    });
+    const sel = makeSel({
+      executors: [dockerExecutor(), worktreeExecutor()],
+      lastUsedExecutorProfileId: PROFILE_WORKTREE_B,
+    });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE_B));
+  });
+
   it("swaps a non-worktree profile to worktree when 2+ Remote URL rows are set", async () => {
     // Regression: the guard used to count only workspace/local rows, so 2
     // Remote rows slipped past it with an already-selected non-worktree profile.
     const fs = makeDefaultSelFs({
-      executorId: "exec-docker",
+      executorId: EXECUTOR_DOCKER,
       executorProfileId: PROFILE_DOCKER,
       useRemote: true,
       remoteRepos: [
-        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
-        { key: "remote-1", url: "github.com/acme/b", branch: "", source: "paste" },
+        { key: "remote-0", url: REMOTE_URL_A, branch: "", source: "paste" },
+        { key: "remote-1", url: REMOTE_URL_B, branch: "", source: "paste" },
       ] as DialogFormState["remoteRepos"],
     });
     const sel = makeSel({ executors: [dockerExecutor(), worktreeExecutor()] });
@@ -313,8 +293,8 @@ describe("useDefaultSelectionsEffect - multi-repo guard counts Remote rows", () 
       executorProfileId: PROFILE_WORKTREE,
       useRemote: true,
       remoteRepos: [
-        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
-        { key: "remote-1", url: "github.com/acme/b", branch: "", source: "paste" },
+        { key: "remote-0", url: REMOTE_URL_A, branch: "", source: "paste" },
+        { key: "remote-1", url: REMOTE_URL_B, branch: "", source: "paste" },
       ] as DialogFormState["remoteRepos"],
     });
     const sel = makeSel({ executors: [worktreeExecutor()] });
@@ -327,11 +307,11 @@ describe("useDefaultSelectionsEffect - multi-repo guard counts Remote rows", () 
 
   it("does not swap when only a single Remote row is filled", async () => {
     const fs = makeDefaultSelFs({
-      executorId: "exec-docker",
+      executorId: EXECUTOR_DOCKER,
       executorProfileId: PROFILE_DOCKER,
       useRemote: true,
       remoteRepos: [
-        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
+        { key: "remote-0", url: REMOTE_URL_A, branch: "", source: "paste" },
         { key: "remote-1", url: "", branch: "", source: "paste" },
       ] as DialogFormState["remoteRepos"],
     });

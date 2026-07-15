@@ -30,6 +30,10 @@ type Hub struct {
 	// Clients subscribed to backend/resource metrics.
 	systemMetricsSubscribers map[*Client]bool
 
+	// done closes after Run has stopped so late connection teardown cannot
+	// block trying to unregister from an unserviced hub channel.
+	done chan struct{}
+
 	// Channels for client management
 	register   chan *Client
 	unregister chan *Client
@@ -68,6 +72,7 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 		userSubscribers:          make(map[string]map[*Client]bool),
 		runSubscribers:           make(map[string]map[*Client]bool),
 		systemMetricsSubscribers: make(map[*Client]bool),
+		done:                     make(chan struct{}),
 		register:                 make(chan *Client),
 		unregister:               make(chan *Client),
 		broadcast:                make(chan *ws.Message, 256),
@@ -85,7 +90,10 @@ type SystemMetricsInterestTracker interface {
 // Run starts the hub's main processing loop
 func (h *Hub) Run(ctx context.Context) {
 	h.logger.Info("WebSocket hub started")
-	defer h.logger.Info("WebSocket hub stopped")
+	defer func() {
+		close(h.done)
+		h.logger.Info("WebSocket hub stopped")
+	}()
 
 	h.mu.Lock()
 	h.dispatchCtx = ctx
@@ -254,12 +262,20 @@ func (h *Hub) broadcastMessage(msg *ws.Message) {
 
 // Register adds a client to the hub
 func (h *Hub) Register(client *Client) {
-	h.register <- client
+	select {
+	case h.register <- client:
+	case <-h.done:
+		client.closeSend()
+	}
 }
 
 // Unregister removes a client from the hub
 func (h *Hub) Unregister(client *Client) {
-	h.unregister <- client
+	select {
+	case h.unregister <- client:
+	case <-h.done:
+		client.closeSend()
+	}
 }
 
 // Broadcast sends a notification to all connected clients

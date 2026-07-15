@@ -1876,7 +1876,6 @@ dependencies = [
  "idna_adapter",
  "libc",
  "minisign-verify",
- "notify-rust",
  "plist",
  "serde",
  "serde_json",

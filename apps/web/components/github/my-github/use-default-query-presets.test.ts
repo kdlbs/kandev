@@ -12,7 +12,6 @@ import {
 } from "./use-default-query-presets";
 
 const STORAGE_KEY = "kandev:github-default-queries:v1";
-const SYNC_FAILED_KEY = "kandev:github-default-queries:sync-failed:v1";
 const WORKSPACE_ID = "ws-1";
 const SETTINGS_TIMESTAMP = "2026-01-01T00:00:00Z";
 
@@ -82,88 +81,18 @@ function resetMocks() {
   );
 }
 
-describe("useDefaultQueryPresets legacy sync", () => {
-  beforeEach(resetMocks);
-
-  it("retries local defaults after a failed backend sync and clears the marker", async () => {
-    const local = { pr: [preset], issue: [] };
-    localStorageMock.setItem(STORAGE_KEY, JSON.stringify(local));
-    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
-
-    renderHook(() => useDefaultQueryPresets());
-
-    await waitFor(() => {
-      expect(updateUserSettings).toHaveBeenCalledWith({
-        github_default_query_presets: local,
-      });
-      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
-    });
-  });
-
-  it("retries null local defaults after a failed reset sync", async () => {
-    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
-    vi.mocked(fetchUserSettings).mockResolvedValue({
-      settings: { github_default_query_presets: { pr: [preset], issue: [] } },
-    } as Awaited<ReturnType<typeof fetchUserSettings>>);
-
-    renderHook(() => useDefaultQueryPresets());
-
-    await waitFor(() => {
-      expect(updateUserSettings).toHaveBeenCalledWith({
-        github_default_query_presets: null,
-      });
-      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
-    });
-  });
-
-  it("does not overwrite cross-tab local changes with a stale hydration response", async () => {
-    const initial = { pr: [preset], issue: [] };
-    const crossTab = { pr: [], issue: [preset] };
-    const server = {
-      pr: [{ ...preset, value: "server", label: "Server" }],
-      issue: [],
-    };
-    let resolveFetch: (value: Awaited<ReturnType<typeof fetchUserSettings>>) => void = () => {};
-    vi.mocked(fetchUserSettings).mockReturnValue(
-      new Promise((resolve) => {
-        resolveFetch = resolve;
-      }),
-    );
-    localStorageMock.setItem(STORAGE_KEY, JSON.stringify(initial));
-
-    renderHook(() => useDefaultQueryPresets());
-
-    await waitFor(() => expect(fetchUserSettings).toHaveBeenCalled());
-    localStorageMock.setItem(STORAGE_KEY, JSON.stringify(crossTab));
-    const event = new Event("storage");
-    Object.defineProperty(event, "key", { value: STORAGE_KEY });
-    window.dispatchEvent(event);
-    resolveFetch({
-      settings: { github_default_query_presets: server },
-    } as Awaited<ReturnType<typeof fetchUserSettings>>);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(localStorageMock.getItem(STORAGE_KEY)).toBe(JSON.stringify(crossTab));
-    expect(updateUserSettings).not.toHaveBeenCalled();
-  });
-});
-
 describe("useDefaultQueryPresets workspace sync", () => {
   beforeEach(resetMocks);
 
-  it("migrates local defaults into a fresh workspace", async () => {
+  it("ignores stale local defaults when workspace settings are empty", async () => {
     const local = { pr: [preset], issue: [] };
     localStorageMock.setItem(STORAGE_KEY, JSON.stringify(local));
     __resetSnapshotForTests();
 
     const { result } = renderHook(() => useDefaultQueryPresets(WORKSPACE_ID));
 
-    await waitFor(() => expect(result.current.prPresets[0]?.value).toBe("mine"));
-    expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith({
-      workspace_id: WORKSPACE_ID,
-      default_query_presets: local,
-    });
+    await waitFor(() => expect(result.current.prPresets[0]?.value).not.toBe("mine"));
+    expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
   });
 
   it("does not migrate local defaults over existing workspace defaults", async () => {

@@ -107,6 +107,14 @@ test.describe("Sidebar filter bar — popover basics", () => {
     await filters.setClauseTextValue(0, "persist");
     await filters.saveAs("Persist View");
     await filters.expectActiveViewChip("Persist View");
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
+          (view) => view.name === "Persist View",
+        );
+      })
+      .toBe(true);
 
     await testPage.reload();
     const session = new SessionPage(testPage);

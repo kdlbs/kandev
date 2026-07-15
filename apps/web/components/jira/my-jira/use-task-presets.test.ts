@@ -5,7 +5,6 @@ import { useJiraTaskPresets } from "./use-task-presets";
 import type { JiraStoredPreset } from "./presets";
 
 const STORAGE_KEY = "kandev:jira:task-presets:v1";
-const SYNC_FAILED_KEY = "kandev:jira:task-presets:sync-failed:v1";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchUserSettings: vi.fn(),
@@ -48,29 +47,12 @@ describe("useJiraTaskPresets", () => {
     } as Awaited<ReturnType<typeof updateUserSettings>>);
   });
 
-  it("retries local presets after a failed backend sync and clears the marker", async () => {
+  it("ignores stale local presets when backend settings are empty", async () => {
     localStorageMock.setItem(STORAGE_KEY, JSON.stringify([preset]));
-    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
 
-    renderHook(() => useJiraTaskPresets());
+    const { result } = renderHook(() => useJiraTaskPresets());
 
-    await waitFor(() => {
-      expect(updateUserSettings).toHaveBeenCalledWith({ jira_task_presets: [preset] });
-      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
-    });
-  });
-
-  it("retries null local presets after a failed reset sync", async () => {
-    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
-    vi.mocked(fetchUserSettings).mockResolvedValue({
-      settings: { jira_task_presets: [preset] },
-    } as Awaited<ReturnType<typeof fetchUserSettings>>);
-
-    renderHook(() => useJiraTaskPresets());
-
-    await waitFor(() => {
-      expect(updateUserSettings).toHaveBeenCalledWith({ jira_task_presets: null });
-      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
-    });
+    await waitFor(() => expect(result.current.stored).not.toContainEqual(preset));
+    expect(updateUserSettings).not.toHaveBeenCalled();
   });
 });

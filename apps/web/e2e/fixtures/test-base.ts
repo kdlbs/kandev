@@ -169,6 +169,11 @@ export const test = backendFixture.extend<
       enable_preview_on_click: false,
       confirm_task_archive: true,
       sidebar_views: [],
+      task_create_last_used: {
+        repository_id: seedData.repositoryId,
+        branch: "main",
+        agent_profile_id: seedData.agentProfileId,
+      },
       // Reset to default kanban view. Pipeline-view tests switch this to
       // "graph2", which persists per-workspace; without this reset the next
       // test renders cards with data-testid="pipeline-task-<id>" instead of
@@ -184,7 +189,7 @@ export const test = backendFixture.extend<
         console.log(`[browser:${msg.type()}]`, msg.text());
       });
     }
-    await setupPage(page, backend, seedData);
+    await setupPage(page, backend);
     await use(page);
     await context.close();
   },
@@ -233,28 +238,20 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     confirm_task_archive: true,
     sidebar_views: [],
     kanban_view_mode: "",
+    task_create_last_used: {
+      repository_id: seedData.repositoryId,
+      branch: "main",
+      agent_profile_id: seedData.agentProfileId,
+    },
   });
 });
 
 export { expect } from "@playwright/test";
 
-async function setupPage(page: Page, backend: BackendContext, seedData: SeedData): Promise<void> {
+async function setupPage(page: Page, backend: BackendContext): Promise<void> {
   await page.addInitScript(
-    ({
-      backendPort,
-      repositoryId,
-      agentProfileId,
-    }: {
-      backendPort: string;
-      repositoryId: string;
-      agentProfileId: string;
-    }) => {
+    ({ backendPort }: { backendPort: string }) => {
       localStorage.setItem("kandev.onboarding.completed", "true");
-      // Pre-seed dialog selections so auto-select effects resolve on their
-      // first render cycle instead of waiting for async API chains.
-      localStorage.setItem("kandev.dialog.lastRepositoryId", JSON.stringify(repositoryId));
-      localStorage.setItem("kandev.dialog.lastAgentProfileId", JSON.stringify(agentProfileId));
-      localStorage.setItem("kandev.dialog.lastBranch", JSON.stringify("main"));
       // Set the window global that getBackendConfig() reads for API/WS connections
       // (e2e tests run frontend and backend on separate ports, like dev mode)
       window.__KANDEV_API_PORT = backendPort;
@@ -297,8 +294,6 @@ async function setupPage(page: Page, backend: BackendContext, seedData: SeedData
     },
     {
       backendPort: String(backend.port),
-      repositoryId: seedData.repositoryId,
-      agentProfileId: seedData.agentProfileId,
     },
   );
 }

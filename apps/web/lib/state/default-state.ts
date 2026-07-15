@@ -15,6 +15,7 @@ import {
   defaultSystemState,
 } from "./slices";
 import { getStoredQuickChatNames } from "@/lib/local-storage";
+import { migrateView } from "./slices/ui/ui-slice";
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
@@ -147,6 +148,45 @@ function mergeQuickChatState(initialState: Partial<DefaultState>): DefaultState[
   };
 }
 
+function mergeSidebarViewState(initialState: Partial<DefaultState>): DefaultState["sidebarViews"] {
+  const sidebarViews = { ...defaultState.sidebarViews, ...initialState.sidebarViews };
+  const userSettings = initialState.userSettings;
+  const serverViews = userSettings?.sidebarViews?.map(migrateView) ?? [];
+  if (serverViews.length > 0) sidebarViews.views = serverViews;
+
+  const activeViewId = userSettings?.sidebarActiveViewId;
+  if (activeViewId && sidebarViews.views.some((view) => view.id === activeViewId)) {
+    sidebarViews.activeViewId = activeViewId;
+  } else if (!sidebarViews.views.some((view) => view.id === sidebarViews.activeViewId)) {
+    sidebarViews.activeViewId = sidebarViews.views[0].id;
+  }
+  if (userSettings?.sidebarDraft !== undefined) sidebarViews.draft = userSettings.sidebarDraft;
+  return sidebarViews;
+}
+
+function mergeSidebarTaskPrefsState(
+  initialState: Partial<DefaultState>,
+): DefaultState["sidebarTaskPrefs"] {
+  const sidebarTaskPrefs = {
+    ...defaultState.sidebarTaskPrefs,
+    ...initialState.sidebarTaskPrefs,
+  };
+  const serverPrefs = initialState.userSettings?.sidebarTaskPrefs;
+  if (!serverPrefs) return sidebarTaskPrefs;
+
+  return {
+    ...sidebarTaskPrefs,
+    pinnedTaskIds: [...serverPrefs.pinnedTaskIds],
+    orderedTaskIds: [...serverPrefs.orderedTaskIds],
+    subtaskOrderByParentId: Object.fromEntries(
+      Object.entries(serverPrefs.subtaskOrderByParentId).map(([parentId, taskIds]) => [
+        parentId,
+        [...taskIds],
+      ]),
+    ),
+  };
+}
+
 export function mergeInitialState(initialState?: Partial<DefaultState>): DefaultState {
   if (!initialState) return defaultState;
 
@@ -243,7 +283,8 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     sessionFailureNotification:
       initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },
-    sidebarViews: { ...defaultState.sidebarViews, ...initialState.sidebarViews },
+    sidebarViews: mergeSidebarViewState(initialState),
+    sidebarTaskPrefs: mergeSidebarTaskPrefsState(initialState),
     collapsedSubtaskParents:
       initialState.collapsedSubtaskParents ?? defaultState.collapsedSubtaskParents,
   };

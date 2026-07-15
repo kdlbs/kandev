@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
+import { ApiError } from "@/lib/api/client";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { createQueuedUserSettingsSync } from "./user-settings-sync";
 
@@ -26,7 +27,7 @@ describe("createQueuedUserSettingsSync", () => {
     vi.mocked(updateUserSettings)
       .mockReturnValueOnce(first.promise)
       .mockResolvedValueOnce({ settings: {} } as Awaited<ReturnType<typeof updateUserSettings>>);
-    const sync = createQueuedUserSettingsSync<string>("sync-key", (value) => ({
+    const sync = createQueuedUserSettingsSync<string>((value) => ({
       preferred_shell: value,
     }));
 
@@ -44,5 +45,35 @@ describe("createQueuedUserSettingsSync", () => {
       expect(updateUserSettings).toHaveBeenCalledTimes(2);
       expect(updateUserSettings).toHaveBeenLastCalledWith({ preferred_shell: "zsh" });
     });
+  });
+
+  it("retries a transient settings write before processing the next payload", async () => {
+    vi.mocked(updateUserSettings)
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ settings: {} } as Awaited<ReturnType<typeof updateUserSettings>>)
+      .mockResolvedValueOnce({ settings: {} } as Awaited<ReturnType<typeof updateUserSettings>>);
+    const sync = createQueuedUserSettingsSync<string>((value) => ({
+      preferred_shell: value,
+    }));
+
+    void sync("bash");
+    void sync("zsh");
+
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenNthCalledWith(1, { preferred_shell: "bash" });
+      expect(updateUserSettings).toHaveBeenNthCalledWith(2, { preferred_shell: "bash" });
+      expect(updateUserSettings).toHaveBeenNthCalledWith(3, { preferred_shell: "zsh" });
+    });
+  });
+
+  it("does not retry an API error", async () => {
+    vi.mocked(updateUserSettings).mockRejectedValueOnce(new ApiError("invalid settings", 400, {}));
+    const sync = createQueuedUserSettingsSync<string>((value) => ({
+      preferred_shell: value,
+    }));
+
+    await sync("bash");
+
+    expect(updateUserSettings).toHaveBeenCalledTimes(1);
   });
 });

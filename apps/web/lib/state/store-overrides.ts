@@ -84,5 +84,7 @@ export function buildStateOverrides(m: DefaultState) {
     quickChat: m.quickChat,
     sessionFailureNotification: m.sessionFailureNotification,
     bottomTerminal: m.bottomTerminal,
+    sidebarViews: m.sidebarViews,
+    sidebarTaskPrefs: m.sidebarTaskPrefs,
   };
 }

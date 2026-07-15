@@ -5,6 +5,7 @@ import type {
   ListWorkflowsResponse,
   ListWorkflowStepsResponse,
   TaskSessionState,
+  TaskCreateLastUsedApi,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
@@ -672,6 +673,7 @@ export class ApiClient {
     kanban_view_mode?: string;
     tasks_list_sort?: string;
     tasks_list_group?: string;
+    task_create_last_used?: TaskCreateLastUsedApi;
     voice_mode?: VoiceModeSettings;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);

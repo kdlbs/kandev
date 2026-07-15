@@ -462,6 +462,10 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"lspServerConfigs":            mapStringMap(settings.LspServerConfigs),
 		"savedLayouts":                settings.SavedLayouts,
 		"sidebarViews":                mapSidebarViews(settings.SidebarViews),
+		"sidebarActiveViewId":         nullString(settings.SidebarActiveViewID),
+		"sidebarDraft":                mapSidebarDraft(settings.SidebarDraft),
+		"sidebarTaskPrefs":            mapSidebarTaskPrefs(settings.SidebarTaskPrefs),
+		"taskCreateLastUsed":          mapTaskCreateLastUsed(settings.TaskCreateLastUsed),
 		"defaultUtilityAgentId":       nullString(settings.DefaultUtilityAgentID),
 		"keyboardShortcuts":           mapStringAny(settings.KeyboardShortcuts),
 		"terminalLinkBehavior":        terminalLinkBehavior(settings.TerminalLinkBehavior),
@@ -576,6 +580,36 @@ func mapSidebarViews(views []usermodels.SidebarView) []map[string]any {
 		})
 	}
 	return result
+}
+
+func mapSidebarDraft(draft *usermodels.SidebarViewDraft) map[string]any {
+	if draft == nil {
+		return nil
+	}
+	return map[string]any{
+		"baseViewId": draft.BaseViewID,
+		"filters":    draft.Filters,
+		"sort":       draft.Sort,
+		"group":      draft.Group,
+	}
+}
+
+func mapSidebarTaskPrefs(prefs usermodels.SidebarTaskPrefs) map[string]any {
+	return map[string]any{
+		"pinnedTaskIds":          stringSlice(prefs.PinnedTaskIDs),
+		"orderedTaskIds":         stringSlice(prefs.OrderedTaskIDs),
+		"subtaskOrderByParentId": stringSliceMap(prefs.SubtaskOrderByParentID),
+	}
+}
+
+func mapTaskCreateLastUsed(value usermodels.TaskCreateLastUsed) map[string]any {
+	return map[string]any{
+		"repositoryId":      nullString(value.RepositoryID),
+		"branch":            nullString(value.Branch),
+		"agentProfileId":    nullString(value.AgentProfileID),
+		"executorProfileId": nullString(value.ExecutorProfileID),
+		"synced":            value.RepositoryID != "" || value.Branch != "" || value.AgentProfileID != "" || value.ExecutorProfileID != "",
+	}
 }
 
 func mapVoiceMode(value usermodels.VoiceModeSettings) map[string]any {
@@ -693,6 +727,13 @@ func nullInt(value int) any {
 func stringSlice(value []string) []string {
 	if value == nil {
 		return []string{}
+	}
+	return value
+}
+
+func stringSliceMap(value map[string][]string) map[string][]string {
+	if value == nil {
+		return map[string][]string{}
 	}
 	return value
 }
