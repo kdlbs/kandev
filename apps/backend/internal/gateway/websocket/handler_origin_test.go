@@ -54,15 +54,16 @@ func dialWS(t *testing.T, wsURL, origin string) (*gorillaws.Conn, *http.Response
 	return conn, resp, err
 }
 
-// waitForNoClients blocks until every connection has unregistered from the hub
-// so goleak sees clean read/write pumps at package teardown.
-func waitForNoClients(t *testing.T, g *Gateway) {
+// waitForClientCount blocks until the hub observes the expected client count.
+// Successful WebSocket dials can return before the handler goroutine has
+// registered the client, so tests must synchronize on the hub before cleanup.
+func waitForClientCount(t *testing.T, g *Gateway, want int) {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
-	for g.Hub.GetClientCount() != 0 {
+	for g.Hub.GetClientCount() != want {
 		if time.Now().After(deadline) {
-			t.Fatalf("hub still has %d client(s)", g.Hub.GetClientCount())
+			t.Fatalf("hub has %d client(s), want %d", g.Hub.GetClientCount(), want)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -110,8 +111,9 @@ func TestHandleConnection_AllowsTrustedOrigins(t *testing.T) {
 				}
 				t.Fatalf("upgrade with origin %q failed (status %d): %v", origin, status, err)
 			}
+			waitForClientCount(t, g, 1)
 			_ = conn.Close()
-			waitForNoClients(t, g)
+			waitForClientCount(t, g, 0)
 		})
 	}
 }
