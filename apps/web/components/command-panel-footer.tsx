@@ -16,6 +16,11 @@ import {
 import { Kbd, KbdGroup } from "@kandev/ui/kbd";
 import { Badge } from "@kandev/ui/badge";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
+import {
+  getCommandSearchTerms,
+  scoreCommandSearch,
+  sortCommandsForSearch,
+} from "@/lib/commands/search";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useAppStore } from "@/components/state-provider";
@@ -42,10 +47,6 @@ function getFileName(filePath: string) {
   return filePath.split("/").pop() ?? filePath;
 }
 
-function getCommandValue(cmd: CommandItemType) {
-  return cmd.id + " " + cmd.label + " " + (cmd.keywords?.join(" ") ?? "");
-}
-
 export function getTaskResultValue(task: Task) {
   return `__task:${task.id} ${task.title}`;
 }
@@ -62,7 +63,12 @@ function CommandItemRow({
   onSelect: (cmd: CommandItemType) => void;
 }) {
   return (
-    <CommandItem key={cmd.id} value={getCommandValue(cmd)} onSelect={() => onSelect(cmd)}>
+    <CommandItem
+      key={cmd.id}
+      value={cmd.id}
+      keywords={getCommandSearchTerms(cmd)}
+      onSelect={() => onSelect(cmd)}
+    >
       {cmd.icon && <span className="text-muted-foreground">{cmd.icon}</span>}
       <span>{cmd.label}</span>
       {cmd.shortcut && <CommandShortcut>{formatShortcut(cmd.shortcut)}</CommandShortcut>}
@@ -179,7 +185,7 @@ function CommandsListContent({
       )}
       {search.trim() ? (
         <CommandGroup heading="Commands">
-          {commands.map((cmd) => (
+          {sortCommandsForSearch(commands, search).map((cmd) => (
             <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
           ))}
         </CommandGroup>
@@ -346,6 +352,7 @@ export function CommandPanelView({
       overlayClassName="supports-backdrop-filter:backdrop-blur-none!"
     >
       <Command
+        filter={scoreCommandSearch}
         shouldFilter={mode === MODE_COMMANDS}
         loop
         value={selectedValue}
