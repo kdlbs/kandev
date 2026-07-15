@@ -96,18 +96,27 @@ const syncServer = createQueuedUserSettingsSync<SavedView[]>((views) => ({
   jira_saved_views: views,
 }));
 
+type PendingMutation = (views: SavedView[]) => SavedView[];
+
 export function useSavedViews() {
   const [custom, setCustom] = useState<SavedView[]>([]);
-  const writeVersion = useRef(0);
+  const hydrated = useRef(false);
+  const pendingMutations = useRef<PendingMutation[]>([]);
 
   useEffect(() => {
     let cancelled = false;
-    const initialVersion = writeVersion.current;
     async function init() {
       const response = await fetchUserSettings({ cache: "no-store" }).catch(() => null);
       const serverViews = readServerViews(response?.settings.jira_saved_views);
-      if (!cancelled && serverViews && writeVersion.current === initialVersion) {
-        setCustom(serverViews);
+      if (cancelled) return;
+
+      const mutations = pendingMutations.current;
+      pendingMutations.current = [];
+      const hydratedViews = mutations.reduce((views, mutate) => mutate(views), serverViews ?? []);
+      hydrated.current = true;
+      setCustom(hydratedViews);
+      if (mutations.length > 0) {
+        void syncServer(hydratedViews);
       }
     }
     void init();
@@ -124,9 +133,13 @@ export function useSavedViews() {
         filters,
         customJql,
       };
+      const mutate: PendingMutation = (views) => [...views, view];
+      if (!hydrated.current) {
+        pendingMutations.current.push(mutate);
+        return view;
+      }
       setCustom((prev) => {
-        const next = [...prev, view];
-        writeVersion.current += 1;
+        const next = mutate(prev);
         void syncServer(next);
         return next;
       });
@@ -136,9 +149,13 @@ export function useSavedViews() {
   );
 
   const remove = useCallback((id: string) => {
+    const mutate: PendingMutation = (views) => views.filter((v) => v.id !== id);
+    if (!hydrated.current) {
+      pendingMutations.current.push(mutate);
+      return;
+    }
     setCustom((prev) => {
-      const next = prev.filter((v) => v.id !== id);
-      writeVersion.current += 1;
+      const next = mutate(prev);
       void syncServer(next);
       return next;
     });

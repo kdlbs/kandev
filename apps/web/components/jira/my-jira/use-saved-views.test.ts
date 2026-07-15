@@ -24,6 +24,14 @@ function makeLocalStorageMock() {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 const localStorageMock = makeLocalStorageMock();
 vi.stubGlobal("localStorage", localStorageMock);
 
@@ -87,6 +95,34 @@ describe("useSavedViews", () => {
       expect(loaded?.filters.statuses).toEqual([]);
       expect(loaded?.filters.projectKeys).toEqual(["CLIP"]);
       expect("statusCategories" in loaded!.filters).toBe(false);
+    });
+  });
+
+  it("replays a saved view mutation on hydrated server views", async () => {
+    const settings = deferred<Awaited<ReturnType<typeof fetchUserSettings>>>();
+    vi.mocked(fetchUserSettings).mockReturnValueOnce(settings.promise);
+    const serverView = { ...view, id: "custom:server", name: "Server view" };
+
+    const { result } = renderHook(() => useSavedViews());
+    const saved = result.current.save("New view", view.filters, null);
+
+    expect(updateUserSettings).not.toHaveBeenCalled();
+
+    settings.resolve({
+      settings: { jira_saved_views: [serverView] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
+
+    await waitFor(() => {
+      expect(result.current.custom.map((savedView) => savedView.id)).toEqual([
+        "custom:server",
+        saved.id,
+      ]);
+      expect(updateUserSettings).toHaveBeenCalledWith({
+        jira_saved_views: expect.arrayContaining([
+          expect.objectContaining({ id: "custom:server" }),
+          expect.objectContaining({ id: saved.id }),
+        ]),
+      });
     });
   });
 });
