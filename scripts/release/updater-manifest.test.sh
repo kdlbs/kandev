@@ -181,6 +181,19 @@ pass "updater manifest rejects prerelease versions"
 
 if node "$SCRIPT" generate \
   --assets-dir "$complete_assets" \
+  --output "$TMP_DIR/leading-zero-version.json" \
+  --version "01.2.3" \
+  --tag "v01.2.3" \
+  --repository "kdlbs/kandev" \
+  --notes-file "$complete_assets/notes.md" \
+  --pub-date "2026-07-15T12:00:00Z" >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "generator should reject leading-zero SemVer metadata"
+fi
+grep -q "stable SemVer" "$TMP_DIR/err" || fail "leading-zero SemVer error was not actionable"
+pass "updater manifest rejects leading-zero versions"
+
+if node "$SCRIPT" generate \
+  --assets-dir "$complete_assets" \
   --output "$TMP_DIR/invalid-date.json" \
   --version "1.2.3" \
   --tag "v1.2.3" \

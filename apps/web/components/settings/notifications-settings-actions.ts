@@ -10,6 +10,7 @@ import {
 import { useRequest } from "@/lib/http/use-request";
 import { DEFAULT_NOTIFICATION_EVENTS } from "@/lib/notifications/events";
 import { useNotificationProviders } from "@/hooks/domains/settings/use-notification-providers";
+import { useAppStore } from "@/components/state-provider";
 import type { NotificationProvider } from "@/lib/types/http";
 
 type ProviderUpdatePayload = {
@@ -94,6 +95,7 @@ export function useNotificationsState() {
     events: storeEvents,
     appriseAvailable: storeAppriseAvailable,
   } = useNotificationProviders();
+  const setNotificationProviders = useAppStore((state) => state.setNotificationProviders);
   const [providers, setProviders] = useState<NotificationProvider[]>(() => storeProviders ?? []);
   const [baselineProviders, setBaselineProviders] = useState<NotificationProvider[]>(
     () => storeProviders ?? [],
@@ -135,6 +137,7 @@ export function useNotificationsState() {
     setActiveAppriseId,
     pendingDeletes,
     setPendingDeletes,
+    setNotificationProviders,
   };
 }
 
@@ -151,6 +154,7 @@ export function useSaveRequest(state: NotificationsState) {
     setAppriseNameEdits,
     pendingDeletes,
     setPendingDeletes,
+    setNotificationProviders,
   } = state;
   return useRequest(async () => {
     const updates: Array<Promise<NotificationProvider>> = [];
@@ -172,6 +176,13 @@ export function useSaveRequest(state: NotificationsState) {
     }
     const updatedById = new Map(updated.map((provider) => [provider.id, provider]));
     const nextProviders = providers.map((provider) => updatedById.get(provider.id) ?? provider);
+    setNotificationProviders({
+      items: nextProviders,
+      events: state.notificationEvents,
+      appriseAvailable: state.appriseAvailable,
+      loaded: true,
+      loading: false,
+    });
     setProviders(nextProviders);
     setBaselineProviders(nextProviders);
     setAppriseEdits((prev) => {

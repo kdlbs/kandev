@@ -178,10 +178,11 @@ function desktopCardView(updater: DesktopUpdaterController) {
   }
   const available = state.phase === "available";
   const installing = updater.installing || ["downloading", "installing"].includes(state.phase);
+  const busy = updater.checking || installing || state.phase === "checking";
   return {
     available,
-    checking: updater.checking || state.phase === "checking",
-    showApply: available && state.installSupported === true && !installing,
+    checking: busy,
+    showApply: available && state.installSupported === true && !busy,
     installSupported: state.installSupported === true,
     current: state.currentVersion,
     latest: state.latestVersion ?? (state.phase === "up-to-date" ? state.currentVersion : "-"),

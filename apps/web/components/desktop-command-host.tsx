@@ -45,10 +45,13 @@ export function DesktopCommandHost({
     if (!adapter.isAvailable()) return;
     let disposed = false;
     let stop: (() => void) | undefined;
-    void subscribeDesktopCommandActions(adapter, actions).then((unlisten) => {
-      if (disposed) unlisten();
-      else stop = unlisten;
-    });
+    void subscribeDesktopCommandActions(adapter, actions).then(
+      (unlisten) => {
+        if (disposed) unlisten();
+        else stop = unlisten;
+      },
+      () => undefined,
+    );
     return () => {
       disposed = true;
       stop?.();
@@ -64,10 +67,13 @@ export function DesktopCommandHost({
         router.push("/settings/system/updates");
         void updater.checkForUpdates().catch(() => undefined);
       })
-      .then((unlisten) => {
-        if (disposed) unlisten();
-        else stop = unlisten;
-      });
+      .then(
+        (unlisten) => {
+          if (disposed) unlisten();
+          else stop = unlisten;
+        },
+        () => undefined,
+      );
     return () => {
       disposed = true;
       stop?.();

@@ -4,6 +4,8 @@ import type { SessionFailureNotification } from "@/lib/state/slices/ui/types";
 
 let mockNotification: SessionFailureNotification | null = null;
 const mockClearNotification = vi.fn();
+const mockSetNotificationProviders = vi.fn();
+const mockSetNotificationProvidersLoading = vi.fn();
 const mockToast = vi.fn();
 let mockProviders: Array<Record<string, unknown>> = [];
 let mockProvidersLoaded = true;
@@ -22,6 +24,8 @@ vi.mock("@/components/state-provider", () => ({
         items: mockProviders,
         loaded: mockProvidersLoaded,
       },
+      setNotificationProviders: mockSetNotificationProviders,
+      setNotificationProvidersLoading: mockSetNotificationProvidersLoading,
     }),
 }));
 
@@ -135,6 +139,13 @@ describe("useSessionFailureToast native delivery", () => {
     renderHook(() => useSessionFailureToast());
 
     await waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+    expect(mockSetNotificationProviders).toHaveBeenCalledWith({
+      items: expect.any(Array),
+      events: [WAITING_EVENT],
+      appriseAvailable: false,
+      loaded: true,
+      loading: false,
+    });
   });
 });
 

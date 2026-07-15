@@ -23,6 +23,7 @@ function isLoopbackHostname(hostname: string): boolean {
     normalized === "[::1]" ||
     normalized === "[::]" ||
     normalized === "0.0.0.0" ||
+    normalized === "[::ffff:0:0]" ||
     normalized.startsWith("[::ffff:7f") ||
     /^127(?:\.\d{1,3}){3}$/.test(normalized)
   );
@@ -108,8 +109,8 @@ export function subscribeDesktopExternalLinks(
     event.preventDefault();
     if (disposition === "external") void adapter.open(rawUrl).catch(() => undefined);
   };
-  doc.addEventListener("click", handleClick, true);
-  return () => doc.removeEventListener("click", handleClick, true);
+  doc.addEventListener("click", handleClick);
+  return () => doc.removeEventListener("click", handleClick);
 }
 
 export const desktopExternalLinks = createDesktopExternalLinkAdapter(createTauriInvokeTransport());

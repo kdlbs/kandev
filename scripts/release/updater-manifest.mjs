@@ -82,7 +82,7 @@ function requireOption(options, key) {
 }
 
 function validateReleaseMetadata(version, tag, repository) {
-  if (!/^\d+\.\d+\.\d+$/.test(version)) {
+  if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(version)) {
     fail(`Updater version must be stable SemVer (X.Y.Z): ${version}`);
   }
   if (tag !== `v${version}`) {

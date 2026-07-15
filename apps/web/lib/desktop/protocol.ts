@@ -1,10 +1,12 @@
 export const DESKTOP_PROTOCOL_VERSION = "v1" as const;
+const desktopEvent = (name: string) =>
+  `kandev-desktop-${DESKTOP_PROTOCOL_VERSION}-${name}` as const;
 
 export const DESKTOP_NATIVE_EVENTS = {
-  "close-context": "kandev-desktop-v1-close-context",
-  "open-settings": "kandev-desktop-v1-open-settings",
-  "new-task": "kandev-desktop-v1-new-task",
-  "check-for-updates": "kandev-desktop-v1-check-for-updates",
+  "close-context": desktopEvent("close-context"),
+  "open-settings": desktopEvent("open-settings"),
+  "new-task": desktopEvent("new-task"),
+  "check-for-updates": desktopEvent("check-for-updates"),
 } as const;
 
 export type DesktopEventName = keyof typeof DESKTOP_NATIVE_EVENTS;

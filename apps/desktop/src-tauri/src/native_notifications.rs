@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::VecDeque,
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
     },
 };
+
+const MAX_SEEN_EVENT_IDS: usize = 1_024;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,7 +29,7 @@ pub enum NativeNotificationResult {
 
 #[derive(Debug, Default)]
 pub struct NativeNotificationState {
-    seen_event_ids: Mutex<HashSet<String>>,
+    seen_event_ids: Mutex<VecDeque<String>>,
     permission_prompt_attempted: AtomicBool,
 }
 
@@ -37,14 +39,21 @@ impl NativeNotificationState {
             .seen_event_ids
             .lock()
             .expect("notification identity mutex poisoned");
-        seen.insert(event_id.to_string())
+        if seen.iter().any(|seen_id| seen_id == event_id) {
+            return false;
+        }
+        if seen.len() == MAX_SEEN_EVENT_IDS {
+            seen.pop_front();
+        }
+        seen.push_back(event_id.to_string());
+        true
     }
 
     fn release(&self, event_id: &str) {
         self.seen_event_ids
             .lock()
             .expect("notification identity mutex poisoned")
-            .remove(event_id);
+            .retain(|seen_id| seen_id != event_id);
     }
 
     fn claim_after_permission(
@@ -159,6 +168,17 @@ mod tests {
 
         assert!(state.claim(&request.event_id));
         assert!(!state.claim(&request.event_id));
+    }
+
+    #[test]
+    fn event_identity_cache_is_bounded() {
+        let state = NativeNotificationState::default();
+
+        for index in 0..=MAX_SEEN_EVENT_IDS {
+            assert!(state.claim(&format!("session.failed:{index}")));
+        }
+
+        assert!(state.claim("session.failed:0"));
     }
 
     #[test]

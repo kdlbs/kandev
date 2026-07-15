@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { desktopUpdater } from "@/lib/desktop/updater-client";
 import type { DesktopUpdateState } from "@/lib/desktop/protocol";
 import type { DesktopUpdaterAdapter } from "@/lib/desktop/updater-adapter";
@@ -28,10 +28,14 @@ export function useDesktopUpdater(
   const [checking, setChecking] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const busyRef = useRef(false);
+  const stateRevisionRef = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!adapter.isAvailable()) return;
-    setState(await adapter.getState());
+    const revision = ++stateRevisionRef.current;
+    const nextState = await adapter.getState();
+    if (revision === stateRevisionRef.current) setState(nextState);
   }, [adapter]);
 
   useEffect(() => {
@@ -74,29 +78,39 @@ export function useDesktopUpdater(
   }, [available, checking, installing, refresh, state?.phase]);
 
   const check = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    const revision = ++stateRevisionRef.current;
     setChecking(true);
     setLocalError(null);
     try {
-      setState(await adapter.checkForUpdates());
+      const nextState = await adapter.checkForUpdates();
+      if (revision === stateRevisionRef.current) setState(nextState);
     } catch (error) {
       setLocalError(message(error));
       await refresh().catch(() => undefined);
       throw error;
     } finally {
+      busyRef.current = false;
       setChecking(false);
     }
   }, [adapter, refresh]);
 
   const install = useCallback(async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    const revision = ++stateRevisionRef.current;
     setInstalling(true);
     setLocalError(null);
     try {
-      setState(await adapter.installUpdate());
+      const nextState = await adapter.installUpdate();
+      if (revision === stateRevisionRef.current) setState(nextState);
     } catch (error) {
       setLocalError(message(error));
       await refresh().catch(() => undefined);
       throw error;
     } finally {
+      busyRef.current = false;
       setInstalling(false);
     }
   }, [adapter, refresh]);

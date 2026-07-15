@@ -47,11 +47,10 @@ preference-disabled behavior, focus without inferred routing, and permission den
 
 ## Platform Limitation
 
-The official Tauri notification plugin can send notifications on macOS, Windows, and Linux, but
-its action/click callback API is mobile-only. Dock reopen and second-instance activation therefore
-show, unminimize, and focus the existing main window without consuming a task route. The
-notification body click itself cannot be reliably correlated with an arbitrary payload on all
-three desktop platforms, so generic focus and activation events never navigate.
+The Tauri notification plugin exposes desktop action callbacks, but Kandev does not register
+actions because the generic notification body click has no portable task-route payload. Dock reopen
+and second-instance activation therefore show, unminimize, and focus the existing main window
+without consuming a task route. Generic focus and activation events never navigate.
 
 ## Output Contract
 

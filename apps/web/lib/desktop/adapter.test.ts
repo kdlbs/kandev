@@ -38,4 +38,16 @@ describe("desktop v1 adapter", () => {
     expect(adapter.isAvailable()).toBe(false);
     expect(transport.listen).not.toHaveBeenCalled();
   });
+
+  it("preserves the transport receiver when checking availability", () => {
+    const transport = {
+      available: true,
+      isAvailable() {
+        return this.available;
+      },
+      listen: vi.fn(),
+    };
+
+    expect(createDesktopV1Adapter(transport).isAvailable()).toBe(true);
+  });
 });

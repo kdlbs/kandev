@@ -55,14 +55,15 @@ platform behavior that could not be exercised locally before release.
 
 Completed on Linux x64 on 2026-07-15:
 
-- Rust formatting and the full desktop runtime suite passed (48 tests).
+- `PATH=/root/.rustup/toolchains/1.88.0-x86_64-unknown-linux-gnu/bin:$PATH RUSTC=/root/.rustup/toolchains/1.88.0-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=/root/.rustup/toolchains/1.88.0-x86_64-unknown-linux-gnu/bin/rustdoc rtk make fmt` passed.
+- `cd apps/desktop/src-tauri && PATH=/root/.rustup/toolchains/1.88.0-x86_64-unknown-linux-gnu/bin:$PATH RUSTC=/root/.rustup/toolchains/1.88.0-x86_64-unknown-linux-gnu/bin/rustc RUSTDOC=/root/.rustup/toolchains/1.88.0-x86_64-unknown-linux-gnu/bin/rustdoc /root/.rustup/toolchains/1.88.0-x86_64-unknown-linux-gnu/bin/cargo test --features desktop-runtime` passed (53 tests), including menu dispatch, contextual-close, zoom, window-state, notification, and lifecycle assertions.
 - Web type checking, lint, and the full Vitest suite passed (4,889 passed, 4 skipped).
 - The focused Updates-page Playwright suite passed its four applicable desktop/mobile workflows;
   changelog pagination skipped because the generated fixture had only one page.
 - Backend formatting, tests, and lint passed.
 - CLI release configuration tests and the complete desktop release/signature fixture matrix
   passed, including invalid, unsigned, wrong-key, partial-feed, and OS-signing warning paths.
-- The Linux `.deb`/`.rpm` package build and native desktop launch smoke passed.
+- The Linux `.deb`/`.rpm` package build and native desktop launch smoke passed. That smoke proves backend startup and WebView navigation only; native interaction scenarios are covered by the focused cross-platform unit/integration tests above, not by the launch smoke itself.
 
 macOS and Windows native menu rendering, notification permission prompts, OS code signing, and
 real updater installation remain release-runner/manual platform checks; their config and dispatch

@@ -46,3 +46,9 @@ and retention of `.app.tar.gz`, `.AppImage.tar.gz`, NSIS updater bundles, and `.
 
 Record required CI secret names without values, update this task to `done`, and check its plan item
 only after fixture-based manifest verification passes.
+
+## CI Secrets
+
+Updater publication requires `TAURI_SIGNING_PRIVATE_KEY`. If the updater key is encrypted, also
+configure `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. These are distinct from optional macOS and Windows
+OS-signing credentials.

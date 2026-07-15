@@ -33,6 +33,14 @@ function adapter(getState: DesktopUpdaterAdapter["getState"]): DesktopUpdaterAda
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function setVisibility(value: DocumentVisibilityState) {
   Object.defineProperty(document, "visibilityState", { configurable: true, value });
   document.dispatchEvent(new Event("visibilitychange"));
@@ -82,5 +90,33 @@ describe("useDesktopUpdater background synchronization", () => {
     await act(async () => setVisibility("visible"));
     expect(getState).toHaveBeenCalledTimes(2);
     expect(result.current.state?.phase).toBe("up-to-date");
+  });
+
+  it("serializes actions and ignores a stale refresh result", async () => {
+    const initialRefresh = deferred<DesktopUpdateState>();
+    const checked = deferred<DesktopUpdateState>();
+    const updater = adapter(vi.fn().mockReturnValue(initialRefresh.promise));
+    updater.checkForUpdates = vi.fn().mockReturnValue(checked.promise);
+    const { result } = renderHook(() => useDesktopUpdater(updater));
+
+    let check: Promise<void>;
+    await act(async () => {
+      check = result.current.check();
+      await Promise.resolve();
+    });
+    await act(async () => result.current.install());
+    expect(updater.installUpdate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      checked.resolve(updateState({ phase: "available", latestVersion: "1.1.0" }));
+      await check;
+    });
+    await act(async () => {
+      initialRefresh.resolve(updateState());
+      await Promise.resolve();
+    });
+
+    expect(result.current.state?.phase).toBe("available");
+    expect(result.current.state?.latestVersion).toBe("1.1.0");
   });
 });

@@ -1,6 +1,6 @@
 # 0026: Tauri Desktop Shell Over Native Runtime
 
-**Status:** accepted
+**Status:** accepted (amended 2026-07-15)
 **Date:** 2026-06-23
 **Area:** frontend, backend, cli, infra
 

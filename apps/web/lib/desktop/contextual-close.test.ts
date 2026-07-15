@@ -28,7 +28,7 @@ afterEach(() => {
 describe("closeDesktopContext", () => {
   it("dismisses only the topmost overlay before considering a document", () => {
     const first = addOverlay(DIALOG_CONTENT_SLOT);
-    const top = addOverlay("popover-content");
+    const top = addOverlay("popover-content", 60);
     const firstEscape = vi.fn();
     const topEscape = vi.fn();
     first.addEventListener("keydown", firstEscape);
@@ -108,5 +108,9 @@ describe("closeDesktopContext", () => {
 
     expect(escape).not.toHaveBeenCalled();
     expect(dock.close).not.toHaveBeenCalled();
+  });
+
+  it("does nothing without an overlay or active dock API", () => {
+    expect(closeDesktopContext(document, null)).toBe("none");
   });
 });

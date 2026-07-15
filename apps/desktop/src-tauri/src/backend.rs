@@ -121,7 +121,7 @@ impl BackendState {
             .lock()
             .expect("backend child mutex poisoned")
             .as_mut()
-            .is_some_and(|child| child.try_wait().ok().is_none())
+            .is_some_and(|child| matches!(child.try_wait(), Ok(None)))
     }
 
     fn set_child(&self, mut child: Child) -> bool {
@@ -972,6 +972,19 @@ mod tests {
     #[test]
     fn desktop_commands_are_denied_before_backend_origin_is_set() {
         assert!(!BackendState::default().accepts_url("http://127.0.0.1:38430"));
+    }
+
+    #[test]
+    fn live_child_is_recognized_as_running() {
+        let state = BackendState::default();
+        let child = Command::new("sh")
+            .args(["-c", "sleep 1"])
+            .spawn()
+            .expect("start child");
+
+        assert!(state.set_child(child));
+        assert!(state.has_live_child());
+        state.stop();
     }
 
     #[test]

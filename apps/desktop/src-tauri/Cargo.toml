@@ -21,7 +21,6 @@ path = "src/bin/updater_signature_verifier.rs"
 [features]
 default = []
 desktop-runtime = [
-  "dep:notify-rust",
   "dep:tauri",
   "dep:tauri-plugin-opener",
   "dep:tauri-plugin-updater",
@@ -41,7 +40,6 @@ idna_adapter = "=1.0.0"
 libc = "0.2"
 minisign-verify = "=0.2.5"
 plist = "=1.10.0"
-notify-rust = { version = "=4.17.0", optional = true }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 serde_with = "=3.15.0"

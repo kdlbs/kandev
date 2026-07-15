@@ -20,6 +20,7 @@ describe("classifyDesktopLink", () => {
     "http://dev.localhost:4300/forwarded",
     "http://[::1]:4300/forwarded",
     "http://[::ffff:127.0.0.1]:4300/forwarded",
+    "http://[::ffff:0.0.0.0]:4300/forwarded",
     "http://0.0.0.0:4300/forwarded",
     "http://[::]:4300/forwarded",
     "blob:http://127.0.0.1:4100/asset",
@@ -194,6 +195,19 @@ describe("subscribeDesktopExternalLinks", () => {
     anchor.dispatchEvent(event);
 
     expect(event.defaultPrevented).toBe(false);
+    expect(invoke).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("respects application handlers that cancel an external link", async () => {
+    const { invoke, unsubscribe } = setupDesktop();
+    const { anchor } = addAnchor(EXTERNAL_URL);
+    anchor.addEventListener("click", (event) => event.preventDefault());
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+
+    anchor.dispatchEvent(event);
+    await Promise.resolve();
+
     expect(invoke).not.toHaveBeenCalled();
     unsubscribe();
   });

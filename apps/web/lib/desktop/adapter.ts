@@ -26,7 +26,7 @@ const noOpUnlisten: DesktopUnlisten = () => undefined;
 
 export function createDesktopV1Adapter(transport: DesktopEventTransport): DesktopV1Adapter {
   return {
-    isAvailable: transport.isAvailable,
+    isAvailable: () => transport.isAvailable(),
     listen: async (eventName, listener) => {
       if (!transport.isAvailable()) return noOpUnlisten;
       return transport.listen(DESKTOP_NATIVE_EVENTS[eventName], (payload) => {
