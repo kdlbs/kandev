@@ -63,9 +63,12 @@ guard. The `origin` guard distinguishes user-started quick chats (`origin =
 last_activity = MAX(task.updated_at, MAX(session.updated_at) over its task_sessions)
 ```
 
-Using the greater of the task row and its newest session row makes the metric
-robust to whichever row a message/turn bumps. A quick chat expires when
-`now - last_activity > 7 days`.
+Message and turn writes update their own rows only. A dispatched prompt changes
+the quick-chat session's runtime state, which updates `task_sessions.updated_at`;
+the associated task runtime-state transition can also update `tasks.updated_at`.
+Using the greater of the task row and its newest session row therefore captures
+the persisted activity written by the shipped prompt lifecycle. A quick chat
+expires when `now - last_activity > 7 days`.
 
 ## API surface
 
@@ -177,9 +180,11 @@ the same directory cleanup and event publishing.
   the existing close behavior.
 - Changing config-mode chat, automation-run, or kanban/office task lifecycles.
 
-## Open questions
+## Verified implementation
 
-- Does a message/turn in a quick chat currently bump `tasks.updated_at`, or only
-  `task_sessions.updated_at` / turn rows? The `MAX(task, session)` definition is
-  chosen to be correct either way, but the implementation should confirm which
-  row actually moves so the sweep query reads the right column(s).
+- Raw message and turn persistence does not update the parent task or session.
+- Prompt dispatch and completion transition the quick-chat session state and
+  update `task_sessions.updated_at`.
+- A quick-chat task runtime-state transition can also update `tasks.updated_at`.
+- The expiration query reads both parent timestamps and excludes `RUNNING` and
+  `IDLE` sessions, so active or recently completed prompt lifecycles are retained.
