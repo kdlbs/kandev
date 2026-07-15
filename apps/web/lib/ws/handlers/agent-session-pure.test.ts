@@ -202,6 +202,22 @@ describe("pickReplacementSessionId", () => {
 });
 
 describe("shouldPreservePinnedSessionForTask", () => {
+  it("preserves a pinned idle session for the active task", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-pinned",
+        pinnedSessionId: "s-pinned",
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: { "s-pinned": { id: "s-pinned", task_id: "t-1", state: "IDLE" } },
+      } as unknown as AppState["taskSessions"],
+    });
+
+    expect(shouldPreservePinnedSessionForTask(state, "t-1")).toBe(true);
+  });
+
   it("preserves a missing pinned session while the per-task list is hydrating", () => {
     const state = makeAppState({
       tasks: {

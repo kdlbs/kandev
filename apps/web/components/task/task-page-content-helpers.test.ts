@@ -168,4 +168,20 @@ describe("syncActiveTaskSession", () => {
     expect(setActiveSessionAuto).toHaveBeenCalledWith("task-1", "session-1");
     expect(setActiveTask).not.toHaveBeenCalled();
   });
+
+  it("falls back to selecting the task when there is no initial session", () => {
+    const setActiveSessionAuto = vi.fn();
+    const setActiveTask = vi.fn();
+
+    syncActiveTaskSession({
+      initialTaskId: "task-1",
+      fallbackTaskId: null,
+      initialSessionId: null,
+      setActiveSessionAuto,
+      setActiveTask,
+    });
+
+    expect(setActiveTask).toHaveBeenCalledWith("task-1");
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
 });
