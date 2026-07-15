@@ -71,6 +71,17 @@ function baseState(entries: QueuedMessage[]) {
 
 const CHILD = <div data-testid="child-marker">input</div>;
 
+function pressQueueEscape(): ReturnType<typeof vi.fn> {
+  const outerEscapeHandler = vi.fn();
+  document.addEventListener("keydown", outerEscapeHandler);
+  try {
+    fireEvent.keyDown(screen.getByTestId("queue-close"), { key: "Escape" });
+  } finally {
+    document.removeEventListener("keydown", outerEscapeHandler);
+  }
+  return outerEscapeHandler;
+}
+
 beforeEach(() => {
   useQueueMock.mockReset();
 });
@@ -130,14 +141,6 @@ describe("QueueAffordance", () => {
     expect(screen.queryByTestId(PANEL_ID)).toBeNull();
   });
 
-  it("Escape collapses an open panel", () => {
-    useQueueMock.mockReturnValue(queueState([entry()]));
-    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
-    fireEvent.click(screen.getByTestId(CHIP_ID));
-    fireEvent.keyDown(window, { key: "Escape" });
-    expect(screen.queryByTestId(PANEL_ID)).toBeNull();
-  });
-
   it("auto-collapses the panel when the queue drains to zero", () => {
     useQueueMock.mockReturnValue(queueState([entry()]));
     const { rerender } = render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
@@ -189,6 +192,18 @@ describe("QueueAffordance", () => {
     );
     fireEvent.click(screen.getByTestId(CHIP_ID));
     expect(screen.queryByTestId("queue-drain-next")).toBeNull();
+  });
+});
+
+describe("QueueAffordance Escape handling", () => {
+  it("collapses an open panel without reaching an outer dialog", () => {
+    useQueueMock.mockReturnValue(queueState([entry()]));
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    const outerEscapeHandler = pressQueueEscape();
+    expect(screen.queryByTestId(PANEL_ID)).toBeNull();
+    expect(screen.getByTestId(CHIP_ID)).toBeTruthy();
+    expect(outerEscapeHandler).not.toHaveBeenCalled();
   });
 });
 
