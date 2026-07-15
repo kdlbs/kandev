@@ -155,15 +155,17 @@ describe("hasResolvedTaskDetails", () => {
 describe("syncActiveTaskSession", () => {
   it("restores the initial session without creating a user pin", () => {
     const setActiveSessionAuto = vi.fn();
+    const setActiveTask = vi.fn();
 
     syncActiveTaskSession({
       initialTaskId: "task-1",
       fallbackTaskId: null,
       initialSessionId: "session-1",
       setActiveSessionAuto,
-      setActiveTask: vi.fn(),
+      setActiveTask,
     });
 
     expect(setActiveSessionAuto).toHaveBeenCalledWith("task-1", "session-1");
+    expect(setActiveTask).not.toHaveBeenCalled();
   });
 });

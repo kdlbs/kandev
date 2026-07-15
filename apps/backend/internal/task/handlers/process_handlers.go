@@ -488,7 +488,13 @@ func (h *ProcessHandlers) applyIfSessionReady(sessionID string, allowPassthrough
 		(!allowPassthrough || execution.PassthroughProcessID == "") {
 		return nil
 	}
-	return apply()
+	if err := apply(); err != nil {
+		if _, stillRunning := h.lifecycleMgr.GetExecutionBySessionID(sessionID); !stillRunning {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // httpSetSessionMode applies the session mode now or records it for the next launch.
