@@ -19,6 +19,12 @@ type Provider struct {
 	config Config
 }
 
+const (
+	workspaceRecoveryStatusNotFound = "not_found"
+	workspaceRecoveryStatusFailed   = "failed"
+	workspaceRecoveryStatusRestored = "restored"
+)
+
 func New(config Config) *Provider {
 	if config.Now == nil {
 		config.Now = time.Now
@@ -228,15 +234,15 @@ func (p *Provider) Restore(ctx context.Context, id string) (storage.QuarantineEn
 }
 
 func (p *Provider) RestoreTask(ctx context.Context, taskID string) WorkspaceRecovery {
-	recovery := WorkspaceRecovery{TaskID: taskID, Status: "not_found"}
+	recovery := WorkspaceRecovery{TaskID: taskID, Status: workspaceRecoveryStatusNotFound}
 	if p.config.Store == nil {
-		recovery.Status = "failed"
+		recovery.Status = workspaceRecoveryStatusFailed
 		recovery.Message = "workspace quarantine store is unavailable"
 		return recovery
 	}
 	entries, err := p.config.Store.ListQuarantineEntries(ctx, false)
 	if err != nil {
-		recovery.Status = "failed"
+		recovery.Status = workspaceRecoveryStatusFailed
 		recovery.Message = err.Error()
 		return recovery
 	}
@@ -257,21 +263,21 @@ func (p *Provider) RestoreTask(ctx context.Context, taskID string) WorkspaceReco
 	if newest.State == storage.QuarantineStateFailed {
 		resolved, err := p.resolveFailedTaskRestore(ctx, *newest)
 		if err != nil {
-			recovery.Status = "failed"
+			recovery.Status = workspaceRecoveryStatusFailed
 			recovery.Message = err.Error()
 			return recovery
 		}
 		if resolved {
-			recovery.Status = "restored"
+			recovery.Status = workspaceRecoveryStatusRestored
 			return recovery
 		}
 	}
 	if _, err := p.Restore(ctx, newest.ID); err != nil {
-		recovery.Status = "failed"
+		recovery.Status = workspaceRecoveryStatusFailed
 		recovery.Message = err.Error()
 		return recovery
 	}
-	recovery.Status = "restored"
+	recovery.Status = workspaceRecoveryStatusRestored
 	return recovery
 }
 
