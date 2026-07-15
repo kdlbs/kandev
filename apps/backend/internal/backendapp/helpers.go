@@ -69,6 +69,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/telemetry"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
 	userhandlers "github.com/kandev/kandev/internal/user/handlers"
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
@@ -449,6 +450,7 @@ type routeParams struct {
 	eventBus                bus.EventBus
 	services                *Services
 	systemSvc               *systemsvc.Service
+	telemetrySvc            *telemetry.Service
 	runtimeFlagsSvc         *runtimeflags.Service
 	agentSettingsController *agentsettingscontroller.Controller
 	agentSettingsRepo       settingsstore.Repository
@@ -938,6 +940,10 @@ func registerSecondaryRoutes(
 	registerSystemRoutes(p)
 	if p.runtimeFlagsSvc != nil {
 		runtimeflags.RegisterRoutes(p.router, p.runtimeFlagsSvc)
+	}
+
+	if p.telemetrySvc != nil {
+		telemetry.RegisterRoutes(p.router, p.telemetrySvc)
 	}
 
 	if p.repoCloner != nil {

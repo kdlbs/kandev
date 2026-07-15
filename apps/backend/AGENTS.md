@@ -97,6 +97,7 @@ apps/backend/
 │   ├── secrets/          # Secret management
 │   ├── sprites/          # Sprites AI integration
 │   ├── sysprompt/        # System prompt injection
+│   ├── telemetry/        # Strictly opt-in product telemetry (consent, event allowlist, PostHog EU sink) — ADR 0039
 │   ├── tools/            # Tool integrations
 │   ├── user/             # User management
 │   ├── utility/          # Shared utility functions

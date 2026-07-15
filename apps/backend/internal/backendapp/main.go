@@ -111,6 +111,9 @@ import (
 	// System pages (status / database / backups / logs / updates / about)
 	systemsvc "github.com/kandev/kandev/internal/system"
 
+	// Opt-in product telemetry
+	"github.com/kandev/kandev/internal/telemetry"
+
 	// Database
 	"github.com/kandev/kandev/internal/db"
 
@@ -724,10 +727,21 @@ func startGatewayAndServe(
 	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)
 
 	// ============================================
+	// TELEMETRY (strictly opt-in; see internal/telemetry)
+	// ============================================
+	telemetrySvc, telemetryErr := telemetry.Provide(cfg, log, dbPool, eventBus, Version)
+	if telemetryErr != nil {
+		log.Warn("Telemetry service unavailable (non-fatal)", zap.Error(telemetryErr))
+	} else {
+		telemetrySvc.Start(ctx)
+		addCleanup(func() error { telemetrySvc.Stop(); return nil })
+	}
+
+	// ============================================
 	// HTTP SERVER
 	// ============================================
 	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup, repoCloner, systemSvc)
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup, repoCloner, systemSvc, telemetrySvc)
 
 	port := cfg.Server.Port
 	if port == 0 {
@@ -1613,6 +1627,7 @@ func buildHTTPServer(
 	addCleanup func(func() error),
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
+	telemetrySvc *telemetry.Service,
 ) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -1639,6 +1654,7 @@ func buildHTTPServer(
 		eventBus:                eventBus,
 		services:                services,
 		systemSvc:               systemSvc,
+		telemetrySvc:            telemetrySvc,
 		runtimeFlagsSvc:         services.RuntimeFlags,
 		agentSettingsController: agentSettingsController,
 		agentSettingsRepo:       repos.AgentSettings,

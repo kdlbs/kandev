@@ -48,6 +48,7 @@ import { HealthIssuesCard } from "@/components/settings/system/health-issues-car
 import { LicensesList } from "@/components/settings/system/licenses-list";
 import { LogViewer } from "@/components/settings/system/log-viewer";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
+import { TelemetrySettings } from "@/components/settings/system/telemetry-settings";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
@@ -197,6 +198,14 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       </div>
       <DiskUsageCard />
       <UIStateCard />
+    </SystemPageShell>
+  ),
+  "/settings/system/telemetry": () => (
+    <SystemPageShell
+      title="Telemetry"
+      description="Strictly opt-in anonymous usage sharing. Nothing is sent unless you enable it."
+    >
+      <TelemetrySettings />
     </SystemPageShell>
   ),
   "/settings/system/updates": renderUpdatesRoute,

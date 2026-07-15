@@ -117,6 +117,19 @@ debug:
     dev:  "true"
     e2e:  ""
 
+# ── Telemetry ─────────────────────────────────────────────────────
+# Opt-in product telemetry (PostHog EU). The env var is a hard kill
+# switch checked before the user's stored consent: "off" disables all
+# collection and hides the consent prompts. Prod leaves it unset so
+# the (strictly opt-in) consent flow is available; dev and e2e force
+# it off so local development and test runs can never emit events.
+# DO_NOT_TRACK=1 is honoured unconditionally as well.
+telemetry:
+  KANDEV_TELEMETRY:
+    prod: ""
+    dev:  "off"
+    e2e:  "off"
+
 # ── E2E test tuning ───────────────────────────────────────────────
 # Behaviour knobs that only matter when running playwright. These
 # don't belong in dev (would mask real interactions) and never in

@@ -3,6 +3,7 @@
 import {
   IconActivity,
   IconArchive,
+  IconChartDots,
   IconDatabase,
   IconFileText,
   IconFlask,
@@ -23,6 +24,7 @@ const ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
   { href: `${ROOT_HREF}/database`, label: "Database", icon: IconDatabase },
   { href: `${ROOT_HREF}/backups`, label: "Backups", icon: IconArchive },
   { href: `${ROOT_HREF}/logs`, label: "Logs", icon: IconFileText },
+  { href: `${ROOT_HREF}/telemetry`, label: "Telemetry", icon: IconChartDots },
   { href: `${ROOT_HREF}/updates`, label: "Updates", icon: IconRefresh },
   { href: `${ROOT_HREF}/about`, label: "About", icon: IconInfoCircle },
   { href: `${ROOT_HREF}/licenses`, label: "Licenses", icon: IconScale },

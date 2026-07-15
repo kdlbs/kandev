@@ -31,6 +31,7 @@ Backend configuration normally uses the `KANDEV_` prefix. Nested keys map by rep
 | `homeDir` | `KANDEV_HOME_DIR` (alias) |
 | `logging.level` | `KANDEV_LOG_LEVEL` (alias) |
 | `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` (aliases) |
+| `telemetry.apiKey` | `KANDEV_TELEMETRY_API_KEY` (alias) |
 
 The aliases on the right are explicit bindings - see `LoadWithPath` in `config.go` for the full list. New keys should follow the deterministic rule (`KANDEV_<SECTION>_<KEYUPPERCASE>`) unless compatibility requires an explicit alias.
 
@@ -117,7 +118,15 @@ repoClone:
 
 debug:
   pprofEnabled: false      # enables /debug/pprof and /api/v1/debug/memory
+
+telemetry:
+  endpoint: ""             # empty = built-in PostHog EU host; see telemetry.md
+  apiKey: ""               # empty = built-in write-only project key
+  debug: false             # log every outgoing telemetry payload locally
 ```
+
+Telemetry is strictly opt-in regardless of these keys — see [telemetry.md](telemetry.md)
+for the consent model and the `KANDEV_TELEMETRY=off` / `DO_NOT_TRACK=1` kill switches.
 
 ## Required vs optional
 

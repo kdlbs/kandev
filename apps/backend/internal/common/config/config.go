@@ -43,6 +43,7 @@ type Config struct {
 	Office              OfficeConfig              `mapstructure:"office"`
 	Voice               VoiceConfig               `mapstructure:"voice"`
 	Features            FeaturesConfig            `mapstructure:"features"`
+	Telemetry           TelemetryConfig           `mapstructure:"telemetry"`
 }
 
 // expandTilde expands a leading "~/" to the user's home directory.
@@ -160,6 +161,22 @@ type VoiceConfig struct {
 	// OpenAIAPIKey is the API key used to call OpenAI's Whisper transcription
 	// endpoint. Set via KANDEV_VOICE_OPENAI_API_KEY.
 	OpenAIAPIKey string `mapstructure:"openAIApiKey"`
+}
+
+// TelemetryConfig holds configuration for opt-in product telemetry.
+// Emission additionally requires the user's stored consent and is blocked
+// outright by the KANDEV_TELEMETRY=off / DO_NOT_TRACK=1 env kill switches,
+// which internal/telemetry reads directly from the process environment.
+type TelemetryConfig struct {
+	// Endpoint overrides the analytics ingestion host. Empty means the
+	// built-in default (PostHog EU). Set via KANDEV_TELEMETRY_ENDPOINT.
+	Endpoint string `mapstructure:"endpoint"`
+	// APIKey overrides the built-in write-only project API key.
+	// Set via KANDEV_TELEMETRY_API_KEY.
+	APIKey string `mapstructure:"apiKey"`
+	// Debug logs every outgoing telemetry payload locally so users can
+	// inspect exactly what would be sent. Set via KANDEV_TELEMETRY_DEBUG.
+	Debug bool `mapstructure:"debug"`
 }
 
 // FeaturesConfig is the central registry of runtime feature flags. Every flag
@@ -336,6 +353,12 @@ func setDefaults(v *viper.Viper) {
 	// Voice defaults
 	v.SetDefault("voice.openAIApiKey", "")
 
+	// Telemetry defaults — empty endpoint/apiKey mean "use the built-in
+	// PostHog EU defaults" declared in internal/telemetry.
+	v.SetDefault("telemetry.endpoint", "")
+	v.SetDefault("telemetry.apiKey", "")
+	v.SetDefault("telemetry.debug", false)
+
 	// Feature-flag defaults live in ./features.yaml (symlinked to
 	// apps/backend/internal/features/features.yaml). LoadWithPath applies
 	// them via features.ApplyDefaults after this function returns so the
@@ -453,6 +476,7 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("debug.devMode", "KANDEV_DEBUG_DEV_MODE")
 	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
 	_ = v.BindEnv("voice.openAIApiKey", "KANDEV_VOICE_OPENAI_API_KEY")
+	_ = v.BindEnv("telemetry.apiKey", "KANDEV_TELEMETRY_API_KEY")
 
 	// Configure config file
 	v.SetConfigName("config")

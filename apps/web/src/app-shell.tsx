@@ -9,6 +9,7 @@ import { RecentTaskSwitcher } from "@/components/task/recent-task-switcher";
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
 import { TaskDeletedToastBridge } from "@/components/task-deleted-toast-bridge";
 import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
+import { TelemetryPageViewBridge } from "@/components/telemetry-page-view-bridge";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { WebSocketConnector } from "@/components/ws-connector";
@@ -30,6 +31,7 @@ export function AppShell({ children }: AppShellProps) {
             <SessionFailureToastBridge />
             <TaskDeletedToastBridge />
             <SidebarViewsSyncBridge />
+            <TelemetryPageViewBridge />
             <LogBufferBridge />
             <CommandRegistryProvider>
               <WebSocketConnector />

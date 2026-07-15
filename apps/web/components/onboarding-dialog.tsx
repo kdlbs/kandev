@@ -33,6 +33,7 @@ import { permissionsToProfilePatch, profilePermissionValues } from "@/lib/agent-
 import { listAvailableAgents, listWorkflowTemplates } from "@/lib/api";
 import { listAgentsAction, updateAgentProfileAction } from "@/app/actions/agents";
 import { StepAgents, type AgentSetting } from "@/components/onboarding/step-agents";
+import { StepTelemetry, useTelemetryOnboarding } from "@/components/onboarding/step-telemetry";
 import type { AvailableAgent, ToolStatus, WorkflowTemplate, AgentProfile } from "@/lib/types/http";
 
 interface OnboardingDialogProps {
@@ -74,6 +75,12 @@ const STEP_DESCRIPTIONS = [
   "Quick access to actions from anywhere with a keyboard shortcut.",
 ];
 
+// Appended only while the install has never been asked about telemetry
+// (and the env kill switches are off). See step-telemetry.tsx.
+const TELEMETRY_STEP_TITLE = "Help improve Kandev";
+const TELEMETRY_STEP_DESCRIPTION =
+  "Optional anonymous usage sharing — stays off unless you turn it on.";
+
 function buildAgentSettings(
   avail: AvailableAgent[],
   saved: {
@@ -112,16 +119,17 @@ function buildAgentSettings(
 
 type OnboardingFooterProps = {
   step: number;
+  totalSteps: number;
   onSkip: () => void;
   onBack: () => void;
   onNext: () => void;
   onGetStarted: () => void;
 };
 
-function OnboardingStepDots({ step }: { step: number }) {
+function OnboardingStepDots({ step, totalSteps }: { step: number; totalSteps: number }) {
   return (
     <div className="flex justify-center gap-1.5 pb-2">
-      {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
+      {Array.from({ length: totalSteps }).map((_, i) => (
         <div
           key={i}
           className={`h-1.5 rounded-full transition-all ${i === step ? "w-6 bg-primary" : "w-1.5 bg-muted-foreground/30"}`}
@@ -213,7 +221,14 @@ function useOnboardingResources(open: boolean) {
   };
 }
 
-function OnboardingFooter({ step, onSkip, onBack, onNext, onGetStarted }: OnboardingFooterProps) {
+function OnboardingFooter({
+  step,
+  totalSteps,
+  onSkip,
+  onBack,
+  onNext,
+  onGetStarted,
+}: OnboardingFooterProps) {
   return (
     <DialogFooter>
       <div className="flex w-full items-center justify-between">
@@ -228,7 +243,7 @@ function OnboardingFooter({ step, onSkip, onBack, onNext, onGetStarted }: Onboar
               Back
             </Button>
           )}
-          {step < TOTAL_STEPS - 1 ? (
+          {step < totalSteps - 1 ? (
             <Button onClick={onNext} className="cursor-pointer">
               Next
               <IconArrowRight className="ml-1.5 h-4 w-4" />
@@ -256,6 +271,11 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     loadingAgents,
     loadingTemplates,
   } = useOnboardingResources(open);
+  const { showTelemetryStep } = useTelemetryOnboarding(open);
+  const totalSteps = showTelemetryStep ? TOTAL_STEPS + 1 : TOTAL_STEPS;
+  const stepTitle = step === TOTAL_STEPS ? TELEMETRY_STEP_TITLE : STEP_TITLES[step];
+  const stepDescription =
+    step === TOTAL_STEPS ? TELEMETRY_STEP_DESCRIPTION : STEP_DESCRIPTIONS[step];
 
   const saveAgentSettings = useCallback(async () => {
     await Promise.all(
@@ -278,7 +298,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
   };
   const handleNext = async () => {
     if (step === 0) await saveAgentSettings();
-    if (step < TOTAL_STEPS - 1) setStep(step + 1);
+    if (step < totalSteps - 1) setStep(step + 1);
   };
   const handleBack = () => {
     if (step > 0) setStep(step - 1);
@@ -303,8 +323,8 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
     <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-3xl" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle className="text-center text-2xl">{STEP_TITLES[step]}</DialogTitle>
-          <DialogDescription className="text-center">{STEP_DESCRIPTIONS[step]}</DialogDescription>
+          <DialogTitle className="text-center text-2xl">{stepTitle}</DialogTitle>
+          <DialogDescription className="text-center">{stepDescription}</DialogDescription>
         </DialogHeader>
         <div className="py-4 min-h-[220px]">
           {step === 0 && (
@@ -319,10 +339,12 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
           {step === 1 && <StepEnvironments />}
           {step === 2 && <StepWorkflows templates={templates} loading={loadingTemplates} />}
           {step === 3 && <StepCommandPanel />}
+          {step === 4 && <StepTelemetry />}
         </div>
-        <OnboardingStepDots step={step} />
+        <OnboardingStepDots step={step} totalSteps={totalSteps} />
         <OnboardingFooter
           step={step}
+          totalSteps={totalSteps}
           onSkip={handleSkip}
           onBack={handleBack}
           onNext={handleNext}

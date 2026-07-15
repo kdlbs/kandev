@@ -77,3 +77,4 @@ We'll move Office into the live feature inventory after it ships.
 - **Backups and restore:** Kandev creates snapshots before version upgrades and supports manual snapshots, download, restore, and deletion from the system settings page.
 - **Disk usage:** inspect storage used by worktrees, repositories, sessions, tasks, quick chat, and backups.
 - **Logs, database status, about, and licenses:** system settings include operational views useful for self-hosted installs.
+- **Opt-in telemetry:** strictly opt-in anonymous usage sharing, off by default, with env kill switches and a documented event allowlist. See [telemetry.md](telemetry.md).
