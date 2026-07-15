@@ -2,6 +2,8 @@ import { defineConfig, mergeConfig } from "vitest/config";
 
 import viteConfig from "./vite.config";
 
+if (process.env.DEBUG === "1") process.env.DEBUG = "";
+
 const configuredMaxWorkers = process.env.VITEST_MAX_WORKERS?.trim();
 const maxWorkers = resolveMaxWorkers(configuredMaxWorkers, Boolean(process.env.CI));
 
@@ -10,6 +12,15 @@ export default mergeConfig(
   defineConfig({
     test: {
       environment: "happy-dom",
+      environmentOptions: {
+        happyDOM: {
+          settings: {
+            navigation: {
+              disableChildFrameNavigation: true,
+            },
+          },
+        },
+      },
       setupFiles: ["./vitest.setup.ts"],
       exclude: ["e2e/**", "node_modules/**"],
       pool: "threads",
