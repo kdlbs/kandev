@@ -17,7 +17,7 @@ Wait for CI and code review to complete on a pull request, fix any failures or v
 - **`/e2e`** — Read for debugging guidance when E2E tests fail in CI. Covers test patterns, run commands, failure triage, and local reproduction.
 - **`/commit`** — Use for staging and committing fixes with Conventional Commits format.
 
-Prefer the `pr-poller` and `verify` helpers when the runtime supports delegated helpers. If runtime policy forbids delegated helpers/subagents unless explicitly requested by the user, or either helper fails to start or initialize, treat helper delegation as unavailable and use the direct-command fallback. Do not substitute a generic/general subagent for polling; it returns too slowly for the 30s cadence and can look hung. If helper delegation is unavailable, follow the direct-command fallback sections below and keep the same output contract: compact CI state, compact review state, bounded polling, and full local verification before pushing.
+Prefer the registered `pr-poller` and `verify` helpers when the runtime supports delegated helpers. If runtime policy forbids delegated helpers/subagents unless explicitly requested by the user, either named helper is not registered, or a helper fails to start, initialize, or access the required GitHub network/shared-worktree resources, treat helper delegation as unavailable and use the direct-command fallback. Do not substitute a generic/general subagent for polling; it returns too slowly for the 30s cadence and can look hung, and may lack DNS or shared `.git` write access. If helper delegation is unavailable, follow the direct-command fallback sections below and keep the same output contract: compact CI state, compact review state, bounded polling, and full local verification before pushing.
 
 ## Context
 
@@ -81,6 +81,8 @@ If delegated polling is unavailable, gather the same information directly withou
 scripts/pr-state --summary <PR>
 ```
 
+If this command, `scripts/pr-resolve`, or another GitHub helper fails with a transient DNS/network error, retry the parent command with the runtime's required network escalation; treat state as unknown until it succeeds.
+
 `scripts/pr-state` accepts flags before or after the PR (`scripts/pr-state --summary <PR>` and `scripts/pr-state <PR> --summary` both work). When parsing output with `jq`, prefer writing the JSON to a temp file first, then running `jq` against that file; this avoids `set -e` surprises and prevents stderr from corrupting a JSON pipe.
 
 Prefer `scripts/pr-state --summary <PR>` for direct polling and `scripts/pr-resolve list <PR>` for review-thread state over raw `gh pr checks`. `gh pr checks` only reports CI/status checks; review bots can open unresolved threads after CI is green, and a checks-only poll will miss that blocker.
@@ -122,13 +124,9 @@ scripts/pr-resolve list <PR>
 
 If `unresolved_review_thread_count` is nonzero but `unresolved_threads` is empty, or if `hidden_unresolved_threads` is non-empty, run `scripts/pr-resolve list <PR>` before acting. Fetch each full body with `scripts/pr-state --comment <comment_id>` or `scripts/pr-resolve show <PR> <THREAD_ID_OR_COMMENT_ID>`; hidden threads can contain valid current blockers even when the current-head filtered view is empty. `pr-state` can briefly report total unresolved count from historical state while current-head unresolved threads are empty; `pr-resolve list` is the authoritative actionable thread set for fixup work. If `scripts/pr-state --summary` reports a nonzero unresolved count but `scripts/pr-resolve show <PR> <THREAD_ID>` says the listed thread is `resolved: true`, treat the summary as stale state. Wait briefly, rerun `scripts/pr-state --summary <PR>`, and do not reply again to an already-resolved thread.
 
-Poll at a 30s cadence with a **20 min cap**. Prefer one-shot `scripts/pr-state --summary <PR>` checks, or a bounded command that can finish naturally, over long inline shell loops. In this environment, a running non-TTY loop may not receive Ctrl-C through `write_stdin`, so avoid `while sleep ...; do ...; done` polling in the main session. To wait one cadence without accidentally immediate-polling, use:
+Poll at a 30s cadence with a **20 min cap**. Prefer one-shot `scripts/pr-state --summary <PR>` checks, or a bounded command that can finish naturally, over long inline shell loops. In this environment, a running non-TTY loop may not receive Ctrl-C through `write_stdin`, so avoid `while sleep ...; do ...; done` polling in the main session. Run `sleep 30` and then a fresh `scripts/pr-state --summary <PR>` as separate commands; a combined command can capture blank output. Rerun a blank summary before interpreting it.
 
-```bash
-bash -lc 'sleep 30; scripts/pr-state --summary <PR>'
-```
-
-Stop early if any required check fails. If the cap hits and only E2E shards are still pending with no failures or unresolved comments, report "CI in progress" instead of continuing to watch indefinitely, and include the exact pending shard names from `pending_checks`. If the user explicitly asks to poll until CI is green, continue past the normal pending-E2E stopping point with bounded one-shot `sleep N; scripts/pr-state --summary <PR>` checks; stop immediately on any `failed_checks`, and continue until `failed_checks: []`, `pending_checks: []`, and `unresolved_review_thread_count: 0`. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.
+Stop early if any required check fails. A `queued` or `in_progress` job caused by GitHub runner capacity is pending CI, not a failure: when the requested watch window or cap ends with no failures or unresolved comments, do not make speculative code changes. Report each pending job's exact name and status, plus its `details_url` or Actions run URL. If the user explicitly asks to poll until CI is green, continue past the normal pending-E2E stopping point with bounded one-shot `sleep N; scripts/pr-state --summary <PR>` checks; stop immediately on any `failed_checks`, and continue until `failed_checks: []`, `pending_checks: []`, and `unresolved_review_thread_count: 0`. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.
 
 For E2E-only pending phases, summarize counts before dumping long shard lists into context:
 
@@ -255,6 +253,11 @@ Then classify:
 - **Nitpick or preference** — subjective style not covered by linters. Skip unless the reviewer insists.
 - **Wrong or outdated** — misunderstands the code, refers to old state, or is technically incorrect. Push back with reasoning.
 
+For sanitizer-schema feedback, inspect the installed package's `defaultSchema`
+and the production renderer before changing code. If the claimed element or
+attribute is already allowed, add or retain a regression that proves the
+behavior and reply with that evidence rather than duplicating a schema change.
+
 For review comments about CI/workflow changes, account for `pull_request_target` trust boundaries. Source agent instructions from the base commit or trusted workflow content, not PR-head harness/config files; keep `GH_TOKEN` out of direct model execution when a trusted wrapper can post comments afterward; and validate model-produced comment targets against the computed diff scope before posting.
 
 **Push back when:**
@@ -316,7 +319,7 @@ for simple bodies, `--body-file` for multi-sentence replies, or plain text
 without Markdown code formatting. If quoting is awkward, shorten the reply and
 reference the commit SHA.
 
-If `scripts/pr-resolve reply` fails mid-flight, run `scripts/pr-resolve show <PR> <THREAD_ID>` and `scripts/pr-resolve list <PR>` before retrying. Confirm whether the reply landed and only resolve/reaction failed, so you do not post a duplicate reply. When replying to several threads, check every command result; retry individual failures caused by transient GitHub, DNS, or API errors before treating that thread as still actionable.
+If `scripts/pr-resolve reply` fails mid-flight, first rerun `scripts/pr-resolve list <PR>` (with network escalation after a transient DNS/network error), then run `scripts/pr-resolve show <PR> <THREAD_ID>` before retrying. Confirm whether the reply landed and only resolve/reaction failed, so you do not post a duplicate reply. When replying to several threads, check every command result; retry individual failures caused by transient GitHub, DNS, or API errors before treating that thread as still actionable.
 
 `scripts/pr-resolve list` only prints previews. Before deciding whether a thread is valid, stale, duplicate, or already fixed, fetch the full comment/thread body:
 

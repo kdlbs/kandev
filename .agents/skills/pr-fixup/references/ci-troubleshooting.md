@@ -58,6 +58,27 @@ headers` are infrastructure/package-registry issues, not app or test failures.
 If GitHub rejects `gh run rerun <run-id> --failed` while the workflow is still
 active, wait for the workflow/report job to finish and retry.
 
+## Go Race-Suite Flakes
+
+For a backend race-suite failure, extract the named failure from the saved log:
+
+```bash
+rg -n '"Action":"fail"|--- FAIL:|goleak:' /tmp/kandev-job.log
+```
+
+Reproduce that exact failure first, then exercise the affected package for
+suite interaction or leak-cleanup timing:
+
+```bash
+go test -race ./path/to/package -run '^TestName$' -count=20
+go test -race ./path/to/package -count=3
+```
+
+If a failed-job rerun reports a different, unrelated package or test, validate
+that second failure the same way and allow one additional failed-job rerun
+instead of changing unrelated PR code. Stop and fix code when the same failure
+reproduces locally or repeats in CI.
+
 ## E2E Failures
 
 If any failing check is an E2E test:

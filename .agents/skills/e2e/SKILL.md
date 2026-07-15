@@ -123,6 +123,30 @@ Without this, tests run against stale code and failures are misleading. `make bu
 4. Use page objects for common interactions; create new ones for new pages
 5. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
 
+### Visual alignment regressions
+
+For a UI change whose contract is a rendered size or alignment relationship,
+assert that relationship from the intended elements' bounding boxes rather than
+only asserting visibility. Scope locators to the affected toolbar, dialog, or
+panel so unrelated controls cannot make the assertion pass.
+
+```typescript
+const metrics = page.getByTestId("task-metrics");
+const actions = page.getByTestId("task-actions");
+const [metricsBox, actionsBox] = await Promise.all([
+  metrics.boundingBox(),
+  actions.boundingBox(),
+]);
+
+expect(metricsBox).not.toBeNull();
+expect(actionsBox).not.toBeNull();
+expect(metricsBox!.height).toBe(actionsBox!.height);
+```
+
+Run the assertion in the relevant desktop and mobile projects when responsive
+layout can change the result. Do not rely on fixed pixels when the product
+contract is equality or alignment.
+
 ### IDs and response shapes — common pitfalls
 
 - **`apiClient.createTaskWithAgent(...)` returns `CreateTaskResponse`**, which is `Task & { session_id?: string; agent_execution_id?: string }`. Read `created.session_id` directly — don't call `listTaskSessions(taskId)` just to fetch the session that was auto-started by the same call.
@@ -257,6 +281,8 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 
 - **Test through the UI, not the API.** E2E tests verify user-facing behavior. Don't write tests that only call the API and assert the response -- those are integration tests. Instead, navigate to the page, interact with UI elements, and assert what the user sees.
 - **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and Go boot-payload/client-store mismatches.
+- **Restore patched persisted settings.** When a test PATCHes user settings, capture the baseline and restore it in `test.afterEach`. The backend is worker-scoped, and `e2eReset` does not reset every persisted setting, including `system_metrics_display`; leaking one can affect later tests in the same worker.
+- **Nested Escape controls.** If an inner panel inside a Radix Dialog handles Escape, intercept the key in capture phase and call both `preventDefault()` and `stopPropagation()` before dismissing the inner panel. A bubble-phase window handler runs after Radix can dismiss the outer dialog. Add a regression that asserts the inner panel collapses while the outer dialog remains open.
 - **Seed via API, assert via UI.** Use `apiClient` to set up preconditions quickly, but always verify the result by opening the page and checking the DOM.
 - **Workflow/session invariants.** For session-primary/profile behavior, prefer polling backend state with `apiClient.listTaskSessions(taskId)` for invariants such as `agent_profile_id`, `is_primary`, `state`, and session count, then add UI assertions as secondary evidence. UI tab markers can lag or be absent when the backend invariant is the behavior under test.
 - **Scope terminal helpers to the active panel.** Terminal/mobile helpers must avoid document-wide `.xterm` or `terminal-xterm-host` selectors because multiple terminal panels can be mounted at once. Scope locators through `data-testid="terminal-panel"` and prefer the visible or latest panel for `page.evaluate` helpers.
