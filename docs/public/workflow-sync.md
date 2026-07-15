@@ -20,7 +20,10 @@ This is useful for:
 ## Setup
 
 1. Open **Settings → Workspaces → \<workspace\> → Workflows**.
-2. In the **Sync from GitHub** section, enter:
+2. In the **Sync from GitHub** section, paste a GitHub link into
+   **Repository link** to fill the fields automatically — a plain repo URL, an
+   SSH remote, or a `…/tree/<branch>/<directory>` link that carries the branch
+   and directory too. Or enter the fields by hand:
    - **Owner / Repository** — e.g. `acme` / `kandev-workflows`.
    - **Branch** — defaults to `main`.
    - **Path** — directory inside the repo containing the definition files;

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { IconBrandGithub, IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -12,6 +13,7 @@ import {
   useWorkflowSync,
   type WorkflowSyncFormState,
 } from "@/hooks/domains/settings/use-workflow-sync";
+import { parseGitHubRepoUrl, type ParsedGitHubRepoUrl } from "@/lib/utils/github-repo-url";
 
 const HELP_TEXT =
   "The directory should contain workflow export files (.yml/.yaml/.json) in the kandev_workflow format — the same format produced by workflow export.";
@@ -21,6 +23,41 @@ type FieldsProps = {
   loading: boolean;
   update: <K extends keyof WorkflowSyncFormState>(key: K, value: WorkflowSyncFormState[K]) => void;
 };
+
+type RepoUrlFieldProps = {
+  loading: boolean;
+  onParsed: (parsed: ParsedGitHubRepoUrl) => void;
+};
+
+// RepoUrlField lets the user paste a full GitHub link (optionally with
+// /tree/<branch>/<directory>) and auto-fills the structured fields below.
+function RepoUrlField({ loading, onParsed }: RepoUrlFieldProps) {
+  const [url, setUrl] = useState("");
+  const invalid = !!url.trim() && !parseGitHubRepoUrl(url);
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="workflow-sync-url">Repository link</Label>
+      <Input
+        id="workflow-sync-url"
+        data-testid="workflow-sync-url-input"
+        placeholder="https://github.com/kdlbs/kandev/tree/main/.kandev/workflows"
+        value={url}
+        onChange={(e) => {
+          setUrl(e.target.value);
+          const parsed = parseGitHubRepoUrl(e.target.value);
+          if (parsed) onParsed(parsed);
+        }}
+        disabled={loading}
+        aria-invalid={invalid}
+      />
+      <p className={invalid ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
+        {invalid
+          ? "Not a recognized GitHub repository link."
+          : "Paste a GitHub link to fill the fields below — /tree/… links carry the branch and directory too."}
+      </p>
+    </div>
+  );
+}
 
 function RepoFields({ form, loading, update }: FieldsProps) {
   return (
@@ -186,6 +223,7 @@ export function WorkflowSyncSection({ workspaceId }: { workspaceId: string }) {
       <Card data-testid="workflow-sync-section">
         <CardContent className="space-y-4 pt-6">
           <WorkflowSyncStatusBanner config={s.config} />
+          <RepoUrlField loading={s.loading} onParsed={s.applyParsedUrl} />
           <RepoFields form={s.form} loading={s.loading} update={s.update} />
           <BranchPathFields form={s.form} loading={s.loading} update={s.update} />
           <IntervalField form={s.form} loading={s.loading} update={s.update} />

@@ -10,6 +10,7 @@ import {
   forceWorkflowSync,
 } from "@/lib/api/domains/workflow-sync-api";
 import type { WorkflowSyncConfig, WorkflowSyncSetConfigRequest } from "@/lib/types/workflow-sync";
+import type { ParsedGitHubRepoUrl } from "@/lib/utils/github-repo-url";
 
 export type WorkflowSyncFormState = {
   repo_owner: string;
@@ -58,10 +59,38 @@ function useWorkflowSyncConfigRefresh(
   }, [workspaceId, setConfig]);
 }
 
+// useWorkflowSyncForm owns the editable form state: per-field updates plus
+// bulk fill from a pasted GitHub link. Branch and directory are only
+// overwritten when the link actually carried them (/tree/... or /blob/...
+// forms), so a bare repo URL keeps the defaults.
+function useWorkflowSyncForm() {
+  const [form, setForm] = useState<WorkflowSyncFormState>(DEFAULT_FORM);
+
+  const update = useCallback(
+    <K extends keyof WorkflowSyncFormState>(key: K, value: WorkflowSyncFormState[K]) =>
+      setForm((prev) => ({ ...prev, [key]: value })),
+    [],
+  );
+
+  const applyParsedUrl = useCallback(
+    (parsed: ParsedGitHubRepoUrl) =>
+      setForm((prev) => ({
+        ...prev,
+        repo_owner: parsed.owner,
+        repo_name: parsed.repo,
+        branch: parsed.branch ?? prev.branch,
+        path: parsed.path ?? prev.path,
+      })),
+    [],
+  );
+
+  return { form, setForm, update, applyParsedUrl };
+}
+
 export function useWorkflowSync(workspaceId: string) {
   const { toast } = useToast();
   const [config, setConfig] = useState<WorkflowSyncConfig | null>(null);
-  const [form, setForm] = useState<WorkflowSyncFormState>(DEFAULT_FORM);
+  const { form, setForm, update, applyParsedUrl } = useWorkflowSyncForm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -87,12 +116,6 @@ export function useWorkflowSync(workspaceId: string) {
   }, [load]);
 
   useWorkflowSyncConfigRefresh(workspaceId, setConfig);
-
-  const update = useCallback(
-    <K extends keyof WorkflowSyncFormState>(key: K, value: WorkflowSyncFormState[K]) =>
-      setForm((prev) => ({ ...prev, [key]: value })),
-    [],
-  );
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -158,6 +181,7 @@ export function useWorkflowSync(workspaceId: string) {
     saving,
     syncing,
     update,
+    applyParsedUrl,
     handleSave,
     handleDelete,
     handleSyncNow,
