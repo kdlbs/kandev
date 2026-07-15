@@ -1166,7 +1166,11 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 
 // UpdateTaskStateIfCurrentIn transitions state inside a transaction, re-checking
 // the current state on write so concurrent handlers cannot clobber a task that
-// moved out of allowed between read and update.
+// moved out of allowed between read and update. The write is also scoped to
+// archived_at IS NULL: if ArchiveTask commits between the caller's earlier
+// archived-state guard and this call, the archived_at check in the UPDATE's
+// WHERE clause (not just the state check) makes the no-op atomic, so a late
+// runtime write can never resurrect an archived task's state.
 func (r *Repository) UpdateTaskStateIfCurrentIn(
 	ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState,
 ) (v1.TaskState, bool, error) {
@@ -1194,7 +1198,7 @@ func (r *Repository) UpdateTaskStateIfCurrentIn(
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET state = ?, updated_at = ?
-		WHERE id = ? AND state = ?
+		WHERE id = ? AND state = ? AND archived_at IS NULL
 	`), state, time.Now().UTC(), id, currentState)
 	if err != nil {
 		return "", false, err

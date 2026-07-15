@@ -148,7 +148,23 @@ func (e *Executor) writeTaskReviewStateIfNoWorkingSessions(ctx context.Context, 
 	if e.hasOtherWorkingSessions(ctx, taskID, failedSessionID) {
 		return
 	}
-	if updateErr := e.updateTaskState(ctx, taskID, v1.TaskStateReview); updateErr != nil {
+	// When onTaskStateChange is configured, it owns event publishing for
+	// this write (see its doc comment) — keep routing through it rather
+	// than bypassing it. Only when NEITHER callback is set (no orchestrator
+	// wiring at all — production always wires both, see service.go's
+	// exec.SetOnTaskStateChange/SetOnTaskReviewStateReconcile) do we fall
+	// back to the archive-aware UpdateTaskStateIfCurrentIn CAS directly on
+	// the repository, so even that raw path can't race an archive that
+	// commits between shouldSkipFailedStartReviewForTask's read and this write.
+	if e.onTaskStateChange != nil {
+		if updateErr := e.onTaskStateChange(ctx, taskID, v1.TaskStateReview); updateErr != nil {
+			e.logger.Warn("failed to update task state to REVIEW after start error",
+				zap.String("task_id", taskID),
+				zap.Error(updateErr))
+		}
+		return
+	}
+	if _, _, updateErr := e.repo.UpdateTaskStateIfCurrentIn(ctx, taskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress, v1.TaskStateScheduling}); updateErr != nil {
 		e.logger.Warn("failed to update task state to REVIEW after start error",
 			zap.String("task_id", taskID),
 			zap.Error(updateErr))

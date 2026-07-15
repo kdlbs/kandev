@@ -3594,6 +3594,14 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 		if state != v1.TaskStateReview {
 			t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, state)
 		}
+		// The write must go through the archive-aware UpdateTaskStateIfCurrentIn
+		// CAS, not the unconditional UpdateTaskState — see the comment on this
+		// call site in reconcileOneSessionOnStartup. Otherwise an archive that
+		// commits between the taskArchived guard read and this write could
+		// still resurrect the task to REVIEW (PR #1706 review finding).
+		if n := taskRepo.unconditionalWrites["task1"]; n != 0 {
+			t.Fatalf("expected REVIEW write to use UpdateTaskStateIfCurrentIn, got %d unconditional UpdateTaskState call(s)", n)
+		}
 	})
 
 	t.Run("archived_task_active_session_state_preserved", func(t *testing.T) {
@@ -3665,6 +3673,51 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 
 		if state, ok := taskRepo.updatedStates["task1"]; ok {
 			t.Fatalf("expected archived task state to be left untouched, got write to %q", state)
+		}
+	})
+
+	// TestReconcileSessionsOnStartup/failed_session_moved_to_review covers the
+	// non-archived REVIEW write in handleFailedSessionOnStartup — previously
+	// untested (only the archived-guard branch above had coverage). Confirms
+	// both the resulting state and that the write goes through the
+	// archive-aware UpdateTaskStateIfCurrentIn CAS, not the unconditional
+	// UpdateTaskState (PR #1706 review finding).
+	t.Run("failed_session_moved_to_review", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:        "er1",
+			SessionID: "session1",
+			TaskID:    "task1",
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		taskRepo := newMockTaskRepo()
+		taskRepo.tasks["task1"] = &v1.Task{
+			ID:    "task1",
+			State: v1.TaskStateInProgress,
+		}
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+		svc.reconcileSessionsOnStartup(ctx)
+
+		state, ok := taskRepo.updatedStates["task1"]
+		if !ok {
+			t.Fatal("expected task state to be updated")
+		}
+		if state != v1.TaskStateReview {
+			t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, state)
+		}
+		if n := taskRepo.unconditionalWrites["task1"]; n != 0 {
+			t.Fatalf("expected REVIEW write to use UpdateTaskStateIfCurrentIn, got %d unconditional UpdateTaskState call(s)", n)
 		}
 	})
 }

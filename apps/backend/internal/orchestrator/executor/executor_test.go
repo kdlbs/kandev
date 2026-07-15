@@ -1358,6 +1358,58 @@ func TestRunAgentProcessAsync_ResumeDoesNotEscalateTaskState(t *testing.T) {
 	}
 }
 
+// TestRunAgentProcessAsync_ResumeFailureUsesRawCASWithoutCallbacks covers the
+// true raw-fallback branch: neither onTaskReviewStateReconcile nor
+// onTaskStateChange is configured (a standalone Executor with no orchestrator
+// wiring at all — never the case in production, see service.go's
+// exec.SetOnTaskStateChange/SetOnTaskReviewStateReconcile). The REVIEW write
+// must go straight through the archive-aware UpdateTaskStateIfCurrentIn CAS
+// on the repository rather than the unconditional UpdateTaskState, so a late
+// write here still can't race an archive.
+func TestRunAgentProcessAsync_ResumeFailureUsesRawCASWithoutCallbacks(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateInProgress}
+	stopCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
+		},
+		stopAgentFunc: func(ctx context.Context, agentExecutionID string, force bool) error {
+			close(stopCh)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	// Deliberately no SetOnTaskStateChange / SetOnTaskReviewStateReconcile.
+
+	exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		false, true) // resume path: no escalation, fromResume=true
+
+	select {
+	case <-stopCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for StopAgent to be called")
+	}
+
+	if got := repo.tasks["task-123"].State; got != v1.TaskStateReview {
+		t.Errorf("expected resume failure to reconcile task state to REVIEW via the raw CAS, got %q", got)
+	}
+	if len(repo.updateTaskStateIfCurrentInCalls) != 1 {
+		t.Fatalf("expected exactly 1 UpdateTaskStateIfCurrentIn call, got %d: %+v", len(repo.updateTaskStateIfCurrentInCalls), repo.updateTaskStateIfCurrentInCalls)
+	}
+	call := repo.updateTaskStateIfCurrentInCalls[0]
+	if call.TaskID != "task-123" || call.State != v1.TaskStateReview {
+		t.Errorf("unexpected CAS call: %+v", call)
+	}
+	if len(call.Allowed) != 2 || call.Allowed[0] != v1.TaskStateInProgress || call.Allowed[1] != v1.TaskStateScheduling {
+		t.Errorf("expected CAS allowed=[IN_PROGRESS, SCHEDULING], got %v", call.Allowed)
+	}
+}
+
 func TestRunAgentProcessAsync_ResumeFailureDoesNotReviewWhileSiblingWorks(t *testing.T) {
 	f := newRunAgentProcessAsyncFailureFixture(t)
 	f.repo.sessions["session-456"] = &models.TaskSession{

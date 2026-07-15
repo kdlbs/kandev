@@ -96,15 +96,23 @@ type mockTaskRepo struct {
 	// dispatch's IN_PROGRESS write) — tests asserting a state was NEVER
 	// written at any point must check stateHistory, not updatedStates.
 	stateHistory map[string][]v1.TaskState
-	getTaskErr   error // if set, GetTask returns this error
+	// unconditionalWrites counts UpdateTaskState (the non-CAS write) calls per
+	// task, tracked separately from stateWrites (which both UpdateTaskState
+	// and UpdateTaskStateIfCurrentIn increment). Startup/crash reconciliation
+	// callers must route guarded REVIEW writes through the CAS method so an
+	// archive can't race a late write; tests assert this stays 0 for those
+	// paths instead of just checking the resulting state.
+	unconditionalWrites map[string]int
+	getTaskErr          error // if set, GetTask returns this error
 }
 
 func newMockTaskRepo() *mockTaskRepo {
 	return &mockTaskRepo{
-		tasks:         make(map[string]*v1.Task),
-		updatedStates: make(map[string]v1.TaskState),
-		stateWrites:   make(map[string]int),
-		stateHistory:  make(map[string][]v1.TaskState),
+		tasks:               make(map[string]*v1.Task),
+		updatedStates:       make(map[string]v1.TaskState),
+		stateWrites:         make(map[string]int),
+		stateHistory:        make(map[string][]v1.TaskState),
+		unconditionalWrites: make(map[string]int),
 	}
 }
 
@@ -130,6 +138,7 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 	m.updatedStates[taskID] = state
 	m.stateWrites[taskID]++
 	m.stateHistory[taskID] = append(m.stateHistory[taskID], state)
+	m.unconditionalWrites[taskID]++
 	if t, ok := m.tasks[taskID]; ok {
 		t.State = state
 	}

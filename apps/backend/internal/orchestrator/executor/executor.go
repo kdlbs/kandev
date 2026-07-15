@@ -24,6 +24,13 @@ type executorStore interface {
 	// Task
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
+	// UpdateTaskStateIfCurrentIn atomically transitions state only when the
+	// current state is in allowed AND the task is not archived (archived_at
+	// IS NULL). Used instead of UpdateTaskState for guarded REVIEW writes so
+	// a late write can never race an archive that lands after an earlier
+	// (non-transactional) archived-state check. Returns the pre-update state
+	// and whether a row was modified.
+	UpdateTaskStateIfCurrentIn(ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState) (v1.TaskState, bool, error)
 	// Task↔repo junction
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)

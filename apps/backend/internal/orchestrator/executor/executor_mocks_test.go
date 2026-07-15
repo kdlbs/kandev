@@ -260,12 +260,23 @@ type mockRepository struct {
 	createTaskSessionFunc func(ctx context.Context, session *models.TaskSession) error
 
 	// Track calls for verification
-	createTaskSessionCalls     []*models.TaskSession
-	updateTaskSessionCalls     []*models.TaskSession
-	setSessionMetadataKeyCalls []setSessionMetadataKeyCall
-	setSessionPrimaryCalls     []string
-	createTaskEnvironmentCalls []*models.TaskEnvironment
-	updateTaskEnvironmentCalls []*models.TaskEnvironment
+	createTaskSessionCalls          []*models.TaskSession
+	updateTaskSessionCalls          []*models.TaskSession
+	setSessionMetadataKeyCalls      []setSessionMetadataKeyCall
+	setSessionPrimaryCalls          []string
+	createTaskEnvironmentCalls      []*models.TaskEnvironment
+	updateTaskEnvironmentCalls      []*models.TaskEnvironment
+	updateTaskStateIfCurrentInCalls []updateTaskStateIfCurrentInCall
+}
+
+// updateTaskStateIfCurrentInCall records one UpdateTaskStateIfCurrentIn
+// invocation so tests can assert callers route guarded REVIEW/IN_PROGRESS
+// writes through the archive-aware CAS instead of the unconditional
+// UpdateTaskState.
+type updateTaskStateIfCurrentInCall struct {
+	TaskID  string
+	State   v1.TaskState
+	Allowed []v1.TaskState
 }
 
 type setSessionMetadataKeyCall struct {
@@ -387,6 +398,34 @@ func (m *mockRepository) CreateTaskSessionWorktree(_ context.Context, worktree *
 
 func (m *mockRepository) UpdateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
 	return nil
+}
+
+// UpdateTaskStateIfCurrentIn mirrors the real repository's archive-aware CAS
+// semantics (task.go's UpdateTaskStateIfCurrentIn): the write only lands when
+// the task's current state is in allowed AND the task is not archived.
+func (m *mockRepository) UpdateTaskStateIfCurrentIn(
+	ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
+) (v1.TaskState, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updateTaskStateIfCurrentInCalls = append(m.updateTaskStateIfCurrentInCalls, updateTaskStateIfCurrentInCall{
+		TaskID: taskID, State: state, Allowed: allowed,
+	})
+	task, ok := m.tasks[taskID]
+	if !ok {
+		return "", false, fmt.Errorf("task not found: %s", taskID)
+	}
+	currentState := task.State
+	if task.ArchivedAt != nil {
+		return currentState, false, nil
+	}
+	for _, candidate := range allowed {
+		if currentState == candidate {
+			task.State = state
+			return currentState, true, nil
+		}
+	}
+	return currentState, false, nil
 }
 func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
