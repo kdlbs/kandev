@@ -346,13 +346,21 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 			continue
 		}
 		items = append(items, quickChatBootSession{
-			state:     mapQuickChatSessionState(task, primary),
-			createdAt: task.CreatedAt,
+			state:          mapQuickChatSessionState(task, primary),
+			taskID:         task.ID,
+			createdAt:      task.CreatedAt,
+			lastActivityAt: quickChatLastActivityAt(task, primary),
 		})
 		taskSessions[primary.ID] = taskdto.FromTaskSession(primary)
 	}
 	sort.SliceStable(items, func(i, j int) bool {
-		return items[i].createdAt.Before(items[j].createdAt)
+		if !items[i].lastActivityAt.Equal(items[j].lastActivityAt) {
+			return items[i].lastActivityAt.After(items[j].lastActivityAt)
+		}
+		if !items[i].createdAt.Equal(items[j].createdAt) {
+			return items[i].createdAt.Before(items[j].createdAt)
+		}
+		return items[i].taskID < items[j].taskID
 	})
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -377,8 +385,17 @@ func (b bootStateBuilder) listQuickChatTasks(ctx context.Context, workspaceID st
 }
 
 type quickChatBootSession struct {
-	state     map[string]any
-	createdAt time.Time
+	state          map[string]any
+	taskID         string
+	createdAt      time.Time
+	lastActivityAt time.Time
+}
+
+func quickChatLastActivityAt(task *taskmodels.Task, primary *taskmodels.TaskSession) time.Time {
+	if primary.UpdatedAt.After(task.UpdatedAt) {
+		return primary.UpdatedAt
+	}
+	return task.UpdatedAt
 }
 
 type quickChatBootState struct {
