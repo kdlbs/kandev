@@ -1,6 +1,7 @@
 import type { StoreApi } from "zustand";
 import { NOTIFICATION_EVENT_TASK_SESSION_WAITING_FOR_INPUT } from "@/lib/notifications/events";
 import { playWaitingForInputSound } from "@/lib/notifications/sound";
+import { nativeNotifications } from "@/lib/desktop/native-notification-client";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSessionWaitingForInputPayload } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
@@ -43,7 +44,19 @@ export function registerNotificationsHandlers(store: StoreApi<AppState>): WsHand
 
       // Sound is its own opt-in channel — it plays regardless of Notification permission.
       playWaitingForInputSound();
-      showDesktopNotification(message.payload);
+      if (nativeNotifications.isAvailable()) {
+        void nativeNotifications
+          .show({
+            eventId: `${NOTIFICATION_EVENT_TASK_SESSION_WAITING_FOR_INPUT}:${message.id}`,
+            title: message.payload.title || "Task needs your input",
+            body: message.payload.body || "An agent is waiting for your input.",
+            taskId: taskId ?? "",
+            sessionId,
+          })
+          .catch(() => undefined);
+      } else {
+        showDesktopNotification(message.payload);
+      }
     },
   };
 }

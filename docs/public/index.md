@@ -73,7 +73,7 @@ We'll move Office into the live feature inventory after it ships.
 ## System Management
 
 - **Feature toggles:** runtime feature flags can be viewed and overridden from Settings > System, with restart prompts when required.
-- **Updates:** Kandev can check for newer releases and, in supported service installs, apply an update through the UI.
+- **Updates:** Kandev can check for newer releases and apply signed, confirmed updates from the desktop app or supported service installs.
 - **Backups and restore:** Kandev creates snapshots before version upgrades and supports manual snapshots, download, restore, and deletion from the system settings page.
 - **Disk usage:** inspect storage used by worktrees, repositories, sessions, tasks, quick chat, and backups.
 - **Logs, database status, about, and licenses:** system settings include operational views useful for self-hosted installs.

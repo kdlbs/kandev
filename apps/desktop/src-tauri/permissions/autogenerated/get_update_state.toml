@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-update-state"
+description = "Enables the get_update_state command without any pre-configured scope."
+commands.allow = ["get_update_state"]
+
+[[permission]]
+identifier = "deny-get-update-state"
+description = "Denies the get_update_state command without any pre-configured scope."
+commands.deny = ["get_update_state"]

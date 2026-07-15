@@ -2,6 +2,7 @@ import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { CommandPanel } from "@/components/command-panel";
 import { ConfigChatProvider } from "@/components/config-chat/config-chat-provider";
 import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
+import { DesktopCommandHost } from "@/components/desktop-command-host";
 import { GlobalCommands } from "@/components/global-commands";
 import { LogBufferBridge } from "@/components/log-buffer-bridge";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
@@ -32,6 +33,7 @@ export function AppShell({ children }: AppShellProps) {
             <SidebarViewsSyncBridge />
             <LogBufferBridge />
             <CommandRegistryProvider>
+              <DesktopCommandHost />
               <WebSocketConnector />
               <GlobalCommands />
               <CommandPanel />

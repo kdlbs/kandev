@@ -21,6 +21,7 @@ import {
   type AgentLoginSession,
 } from "@/lib/api";
 import type { ApiRequestOptions } from "@/lib/api";
+import { openExternalLink } from "@/lib/desktop/external-links";
 
 type SessionStatus = "connecting" | "running" | "exited" | "error";
 
@@ -82,7 +83,7 @@ function createTerminal(container: HTMLDivElement): { term: Terminal; fit: FitAd
       // Open in a new tab. Holding the modifier (Cmd/Ctrl) is xterm's default
       // gesture, but addon-web-links doesn't require it - any click works.
       event.preventDefault();
-      window.open(uri, "_blank", "noopener,noreferrer");
+      void openExternalLink(uri).catch(() => undefined);
     }),
   );
   term.open(container);

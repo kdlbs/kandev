@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { openExternalLink } from "@/lib/desktop/external-links";
 
 /**
  * Returns a stable callback for handling terminal link clicks.
@@ -29,6 +30,6 @@ export function useTerminalLinkHandler(): (event: MouseEvent, uri: string) => vo
         return;
       }
     }
-    window.open(uri, "_blank", "noopener,noreferrer");
+    void openExternalLink(uri).catch(() => undefined);
   }, []);
 }

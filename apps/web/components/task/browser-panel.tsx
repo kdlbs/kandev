@@ -11,6 +11,7 @@ import { InspectButton } from "./inspector/inspect-button";
 import { AnnotationsPanel } from "./inspector/annotations-panel";
 import { useInspectMode } from "@/hooks/use-inspect-mode";
 import { usePreviewConsoleForwarder } from "@/hooks/use-preview-console-forwarder";
+import { openExternalLink } from "@/lib/desktop/external-links";
 
 function BrowserPanelContent({
   showIframeDelayed,
@@ -115,7 +116,7 @@ function useBrowserPanelUrl(initialUrl: string, useProxy: boolean) {
   }
 
   function handleOpenInTab() {
-    if (directUrl) window.open(directUrl, "_blank", "noopener,noreferrer");
+    if (directUrl) void openExternalLink(directUrl).catch(() => undefined);
   }
 
   return {

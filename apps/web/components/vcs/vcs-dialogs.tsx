@@ -33,6 +33,7 @@ import { useGitWithFeedback } from "@/hooks/use-git-with-feedback";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useToast } from "@/components/toast-provider";
+import { openExternalLink } from "@/lib/desktop/external-links";
 import type { FileInfo } from "@/lib/state/slices";
 
 type VcsDialogsContextValue = {
@@ -494,7 +495,7 @@ function useCreatePRHandler(
           if (activeTaskId) {
             setPendingPrUrlForTask(activeTaskId, ps.repo || "", result.pr_url);
           }
-          window.open(result.pr_url, "_blank");
+          void openExternalLink(result.pr_url).catch(() => undefined);
         }
       } else {
         toast({

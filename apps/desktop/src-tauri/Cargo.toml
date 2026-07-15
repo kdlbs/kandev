@@ -14,10 +14,18 @@ path = "src/main.rs"
 required-features = ["desktop-runtime"]
 test = false
 
+[[bin]]
+name = "updater-signature-verifier"
+path = "src/bin/updater_signature_verifier.rs"
+
 [features]
 default = []
 desktop-runtime = [
+  "dep:notify-rust",
   "dep:tauri",
+  "dep:tauri-plugin-opener",
+  "dep:tauri-plugin-updater",
+  "dep:tauri-plugin-notification",
   "dep:tauri-plugin-single-instance",
   "dep:tauri-runtime",
 ]
@@ -26,13 +34,21 @@ desktop-runtime = [
 tauri-build = { version = "=2.4.1", features = [] }
 
 [dependencies]
+base64 = "0.22"
 darling = "=0.21.3"
 getrandom = "0.3"
 idna_adapter = "=1.0.0"
 libc = "0.2"
+minisign-verify = "=0.2.5"
 plist = "=1.10.0"
+notify-rust = { version = "=4.17.0", optional = true }
 serde_json = "1"
+serde = { version = "1", features = ["derive"] }
 serde_with = "=3.15.0"
 tauri = { version = "=2.8.4", features = [], optional = true }
 tauri-runtime = { version = "=2.9.0", optional = true }
 tauri-plugin-single-instance = { version = "=2.2.1", optional = true }
+tauri-plugin-updater = { version = "=2.9.0", optional = true }
+tauri-plugin-notification = { version = "=2.3.3", optional = true }
+tauri-plugin-opener = { version = "=2.4.0", optional = true }
+url = "2"

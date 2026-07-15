@@ -13,6 +13,8 @@ import { playWaitingForInputSound } from "@/lib/notifications/sound";
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
 const OTHER_TASK_ID = "task-2";
+const MESSAGE_TITLE = "Task needs your input";
+const MESSAGE_BODY = "An agent is waiting for your input.";
 
 function makeStore(overrides: Partial<AppState> = {}) {
   const state = {
@@ -24,16 +26,16 @@ function makeStore(overrides: Partial<AppState> = {}) {
   return { getState: () => state } as unknown as StoreApi<AppState>;
 }
 
-function makeMessage(): BackendMessageMap["session.waiting_for_input"] {
+function makeMessage(id = "message-1"): BackendMessageMap["session.waiting_for_input"] {
   return {
-    id: "message-1",
+    id,
     type: "notification",
     action: "session.waiting_for_input",
     payload: {
       task_id: TASK_ID,
       session_id: SESSION_ID,
-      title: "Task needs your input",
-      body: "An agent is waiting for your input.",
+      title: MESSAGE_TITLE,
+      body: MESSAGE_BODY,
     },
   };
 }
@@ -55,14 +57,50 @@ describe("session.waiting_for_input handler", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("deduplicates the same WS message but delivers distinct messages in one session", () => {
+    const invoke = vi.fn().mockResolvedValue("shown");
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke,
+      transformCallback: vi.fn(),
+    };
+
+    const handler = getHandler(makeStore());
+    handler(makeMessage());
+    handler(makeMessage());
+    handler(makeMessage("message-2"));
+
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(invoke).toHaveBeenNthCalledWith(1, "show_native_notification", {
+      request: {
+        eventId: "session.waiting_for_input:message-1",
+        title: MESSAGE_TITLE,
+        body: MESSAGE_BODY,
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+      },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "show_native_notification", {
+      request: {
+        eventId: "session.waiting_for_input:message-2",
+        title: MESSAGE_TITLE,
+        body: MESSAGE_BODY,
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+      },
+    });
+    expect(notificationMock).not.toHaveBeenCalled();
+    expect(playWaitingForInputSound).toHaveBeenCalledTimes(3);
   });
 
   it("plays the sound and shows a notification when not suppressed", () => {
     getHandler(makeStore())(makeMessage());
 
     expect(playWaitingForInputSound).toHaveBeenCalledTimes(1);
-    expect(notificationMock).toHaveBeenCalledWith("Task needs your input", {
-      body: "An agent is waiting for your input.",
+    expect(notificationMock).toHaveBeenCalledWith(MESSAGE_TITLE, {
+      body: MESSAGE_BODY,
     });
   });
 
