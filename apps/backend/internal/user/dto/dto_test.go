@@ -8,9 +8,11 @@ import (
 )
 
 func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
-	dto := FromUserSettings(&models.UserSettings{ConfirmTaskArchive: true})
-	if !dto.ConfirmTaskArchive {
-		t.Fatal("expected archive confirmation preference in DTO")
+	for _, want := range []bool{true, false} {
+		dto := FromUserSettings(&models.UserSettings{ConfirmTaskArchive: want})
+		if dto.ConfirmTaskArchive != want {
+			t.Fatalf("ConfirmTaskArchive = %v, want %v", dto.ConfirmTaskArchive, want)
+		}
 	}
 }
 

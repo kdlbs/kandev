@@ -121,13 +121,13 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/general/editors": () => <EditorsSettings />,
   "/settings/general/keyboard-shortcuts": () => <KeyboardShortcutsSettings />,
   "/settings/general/notifications": () => <NotificationsSettings />,
-  "/settings/general/task-actions": () => <TaskActionsSettings />,
   "/settings/general/resource-metrics": () => (
     <SettingsRedirect to="/settings/general/appearance" />
   ),
   "/settings/general/secrets": () => <SecretsSettings />,
   "/settings/general/shell": () => <SettingsRedirect to="/settings/general/terminal" />,
   "/settings/general/sprites": () => <SpritesSettings />,
+  "/settings/general/task-actions": () => <TaskActionsSettings />,
   "/settings/general/terminal": () => <TerminalSettings />,
   "/settings/workspace": () => <WorkspacesPage />,
   "/settings/agents": () => <AgentsSettingsPage />,

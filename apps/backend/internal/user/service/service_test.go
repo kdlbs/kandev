@@ -126,6 +126,18 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 			t.Fatal("expected archive confirmation to be disabled")
 		}
 	})
+
+	t.Run("explicit true re-enables confirmation", func(t *testing.T) {
+		settings := &models.UserSettings{ConfirmTaskArchive: false}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+			ConfirmTaskArchive: ptr(true),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !settings.ConfirmTaskArchive {
+			t.Fatal("expected archive confirmation to be enabled")
+		}
+	})
 }
 
 func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
@@ -675,6 +687,20 @@ func TestUpdateUserSettingsCombinesSettingsAndTaskCreatePatch(t *testing.T) {
 	if repo.preservingPatch == nil || *repo.preservingPatch != patch {
 		t.Fatalf("expected preserving write patch %+v, got %+v", patch, repo.preservingPatch)
 	}
+	if len(eventBus.publishedEvents) != 1 {
+		t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
+	}
+}
+
+func TestPublishUserSettingsEventIncludesArchiveConfirmation(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(&recordingUserRepository{}, eventBus, log)
+	svc.publishUserSettingsEvent(context.Background(), &models.UserSettings{ConfirmTaskArchive: false})
+
 	if len(eventBus.publishedEvents) != 1 {
 		t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
 	}

@@ -21,8 +21,8 @@ spec: "../../specs/tasks/archive-confirmation.md"
 ```bash
 cd apps/web && pnpm e2e:run tests/task/archive-confirmation-preference.spec.ts
 cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-archive-confirmation-preference.spec.ts
-rtk make -C apps/backend fmt
-rtk make -C apps/backend lint
+make -C apps/backend fmt
+make -C apps/backend lint
 cd apps/web && pnpm run typecheck && pnpm run lint
 ```
 

@@ -1,7 +1,7 @@
 import { StrictMode, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
-import { StateProvider } from "@/components/state-provider";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { StateProvider, useAppStore } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
 
 const mockGetSubtaskCount = vi.fn();
@@ -21,6 +21,20 @@ function renderDialog(ui: ReactNode, confirmTaskArchive = true) {
     >
       {ui}
     </StateProvider>,
+  );
+}
+
+function DisableArchiveConfirmationButton() {
+  const settings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+
+  return (
+    <button
+      type="button"
+      onClick={() => setUserSettings({ ...settings, confirmTaskArchive: false })}
+    >
+      Disable archive confirmation
+    </button>
   );
 }
 
@@ -54,6 +68,30 @@ describe("TaskArchiveConfirmDialog preference", () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
     expect(onOpenChange).toHaveBeenCalledWith(false);
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("does not auto-archive an already-open dialog after a settings sync", () => {
+    const onConfirm = vi.fn();
+
+    renderDialog(
+      <>
+        <DisableArchiveConfirmationButton />
+        <TaskArchiveConfirmDialog
+          open
+          onOpenChange={() => {}}
+          taskTitle="My task"
+          taskId="task-1"
+          executorType="worktree"
+          onConfirm={onConfirm}
+        />
+      </>,
+    );
+
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    fireEvent.click(screen.getByText("Disable archive confirmation", { selector: "button" }));
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
   });
 });
 

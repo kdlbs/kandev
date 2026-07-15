@@ -34,6 +34,40 @@ type TaskArchiveConfirmDialogProps = {
   confirmTestId?: string;
 };
 
+type ArchiveOpenMode = "pending" | "confirm" | "bypass";
+
+function useArchiveConfirmationMode(
+  open: boolean,
+  confirmTaskArchive: boolean,
+  onConfirm: TaskArchiveConfirmDialogProps["onConfirm"],
+  onOpenChange: TaskArchiveConfirmDialogProps["onOpenChange"],
+) {
+  const wasOpenRef = useRef(false);
+  const [archiveOpenMode, setArchiveOpenMode] = useState<ArchiveOpenMode>("pending");
+
+  useEffect(() => {
+    const openedNow = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+
+    if (!open) {
+      setArchiveOpenMode("pending");
+      return;
+    }
+    if (!openedNow) return;
+
+    if (confirmTaskArchive) {
+      setArchiveOpenMode("confirm");
+      return;
+    }
+
+    setArchiveOpenMode("bypass");
+    onConfirm({ cascade: false });
+    onOpenChange(false);
+  }, [confirmTaskArchive, onConfirm, onOpenChange, open]);
+
+  return archiveOpenMode === "confirm" || (archiveOpenMode === "pending" && confirmTaskArchive);
+}
+
 export function TaskArchiveConfirmDialog({
   open,
   onOpenChange,
@@ -49,7 +83,6 @@ export function TaskArchiveConfirmDialog({
   confirmTestId,
 }: TaskArchiveConfirmDialogProps) {
   const confirmTaskArchive = useAppStore((state) => state.userSettings?.confirmTaskArchive ?? true);
-  const bypassHandledRef = useRef(false);
   const safeCount = count ?? 0;
   const label = isBulkOperation ? `task${safeCount !== 1 ? "s" : ""}` : "task";
   const title = isBulkOperation ? `Archive ${safeCount} ${label}?` : "Archive task?";
@@ -61,26 +94,20 @@ export function TaskArchiveConfirmDialog({
     : getCleanupSummary(executorType);
 
   const [cascade, setCascade] = useState(false);
-  const subtaskCount = useSubtaskCount(open && confirmTaskArchive, taskId, taskIds);
-
-  useEffect(() => {
-    if (!open) {
-      bypassHandledRef.current = false;
-      return;
-    }
-    if (confirmTaskArchive || bypassHandledRef.current) return;
-
-    bypassHandledRef.current = true;
-    onConfirm({ cascade: false });
-    onOpenChange(false);
-  }, [confirmTaskArchive, onConfirm, onOpenChange, open]);
+  const requiresConfirmation = useArchiveConfirmationMode(
+    open,
+    confirmTaskArchive,
+    onConfirm,
+    onOpenChange,
+  );
+  const subtaskCount = useSubtaskCount(open && requiresConfirmation, taskId, taskIds);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setCascade(false);
     onOpenChange(next);
   };
 
-  if (!confirmTaskArchive) return null;
+  if (!requiresConfirmation) return null;
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>

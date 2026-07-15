@@ -18,6 +18,7 @@ export function ArchiveConfirmationSettings() {
 
     const current = storeApi.getState().userSettings;
     const previous = current.confirmTaskArchive;
+    const workspaceId = current.workspaceId;
     setIsSaving(true);
     setUserSettings({ ...current, confirmTaskArchive: checked });
 
@@ -25,7 +26,9 @@ export function ArchiveConfirmationSettings() {
       await updateUserSettings({ confirm_task_archive: checked });
     } catch {
       const latest = storeApi.getState().userSettings;
-      setUserSettings({ ...latest, confirmTaskArchive: previous });
+      if (latest.workspaceId === workspaceId && latest.confirmTaskArchive === checked) {
+        setUserSettings({ ...latest, confirmTaskArchive: previous });
+      }
     } finally {
       setIsSaving(false);
     }

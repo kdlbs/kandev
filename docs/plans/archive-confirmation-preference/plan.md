@@ -45,12 +45,12 @@ Extend the existing per-user JSON settings contract with a default-true archive 
 ## Verification
 
 ```bash
-rtk make -C apps/backend fmt
+make -C apps/backend fmt
 rtk go test ./internal/user/... ./internal/backendapp/...
 cd apps && pnpm --filter @kandev/web test -- --run lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts components/task/task-archive-confirm-dialog.test.tsx components/settings/archive-confirmation-settings.test.tsx
 cd apps/web && pnpm e2e:run tests/task/archive-confirmation-preference.spec.ts
 cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-archive-confirmation-preference.spec.ts
-rtk make -C apps/backend lint
+make -C apps/backend lint
 cd apps/web && pnpm run typecheck && pnpm run lint
 ```
 
