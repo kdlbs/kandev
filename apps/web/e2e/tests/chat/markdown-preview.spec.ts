@@ -23,6 +23,17 @@ console.log("hello");
 \`\`\`
 `;
 
+const HTML_MARKDOWN_CONTENT = `<div align="center">
+  <a href="https://github.com/kdlbs/kandev">
+    <img width="120" height="80" src="./logo.svg" alt="Kandev logo" onerror="alert('xss')">
+  </a>
+  <br>
+  <h1>Embedded HTML</h1>
+  <p>Rendered from a README.</p>
+  <a href="javascript:alert('xss')">Unsafe link</a>
+  <script>window.markdownXss = true</script>
+</div>`;
+
 async function seedTaskWithSession(
   testPage: Page,
   apiClient: ApiClient,
@@ -145,6 +156,39 @@ test.describe("Markdown preview", () => {
 
     // Preview should be gone
     await expect(preview).not.toBeVisible({ timeout: 5_000 });
+  });
+
+  test("renders safe embedded HTML and strips executable content", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+    fs.writeFileSync(path.join(repoDir, "html-readme.md"), HTML_MARKDOWN_CONTENT);
+
+    const { session } = await seedTaskWithSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Markdown Embedded HTML Test",
+    );
+    await openFileInPreview(testPage, session, "html-readme.md");
+
+    const preview = testPage.getByTestId("markdown-preview");
+    const centeredContent = preview.locator('div[align="center"]');
+    await expect(centeredContent).toBeVisible();
+    await expect(centeredContent.getByRole("heading", { name: "Embedded HTML" })).toBeVisible();
+
+    const image = centeredContent.getByRole("img", { name: "Kandev logo" });
+    await expect(image).toHaveAttribute("src", "./logo.svg");
+    await expect(image).toHaveAttribute("width", "120");
+    await expect(image).not.toHaveAttribute("onerror");
+    await expect(centeredContent.locator("a", { hasText: "Unsafe link" })).not.toHaveAttribute(
+      "href",
+    );
+    await expect(preview.locator("script")).toHaveCount(0);
+    expect(await testPage.evaluate(() => "markdownXss" in window)).toBe(false);
   });
 
   test("markdown preview persists across page refresh", async ({
