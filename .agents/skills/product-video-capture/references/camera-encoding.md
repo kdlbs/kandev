@@ -42,13 +42,13 @@ Design 4-7 keyframes from semantic story events:
 
 Use normalized centers from target bounds. Keep full menus/dialogs/diffs inside the crop at maximum zoom. Optical focus may differ from exact pointer center when surrounding context is important.
 
-Example config shape:
+Example config shape. Replace `<capture-root>` with the unique resolved `CAPTURE_ROOT` before encoding:
 
 ```json
 {
   "slug": "desktop-run-inspect",
-  "rawPath": "/tmp/capture/raw/desktop-run.mp4",
-  "outputDir": "/tmp/capture/delivery",
+  "rawPath": "<capture-root>/raw/desktop-run.mp4",
+  "outputDir": "<capture-root>/delivery",
   "trimStartMs": 480,
   "posterAtMs": 7200,
   "sourceWidth": 3840,

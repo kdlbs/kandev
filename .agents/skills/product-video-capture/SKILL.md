@@ -27,15 +27,16 @@ Produce reusable clean masters first; derive presentation from them later.
 ## Pipeline
 
 1. Resolve and verify `KANDEV_REPO` and `LANDING_REPO` as described above. Do not assume task-specific absolute paths.
-2. Review the seed handoff and rehearse the full native desktop/mobile story once.
-3. Record one continuous, unzoomed, high-resolution master per form factor. Use true physical pixels, not a padded Playwright video canvas.
-4. Record semantic action timestamps, target bounds, and pointer/touch journeys beside the raw file.
-5. Stop recording before capturing the clean poster.
-6. Inspect raw frames before post-production. Reject UI bugs, padding, double cursors, fixture text, dead waits, and unreadable states.
-7. Build a smooth post camera from semantic events. Camera follows story focus, not every cursor twitch.
-8. Encode WebM, MP4, and WebP through landing's tested camera/encoder scripts.
-9. Review fixed-fraction frames and playback on desktop, native mobile, and reduced motion.
-10. Copy only approved delivery assets into `public/product/loops/`; keep raw/proof files outside production unless requested.
+2. Create a unique writable `CAPTURE_ROOT`, for example with `mktemp -d "${TMPDIR:-/tmp}/kandev-product-capture.XXXXXX"`. Use it for every raw, proof, config, and staged delivery path.
+3. Review the seed handoff and rehearse the full native desktop/mobile story once.
+4. Record one continuous, unzoomed, high-resolution master per form factor. Use true physical pixels, not a padded Playwright video canvas.
+5. Record semantic action timestamps, target bounds, and pointer/touch journeys beside the raw file.
+6. Stop recording before capturing the clean poster.
+7. Inspect raw frames before post-production. Reject UI bugs, padding, double cursors, fixture text, dead waits, and unreadable states.
+8. Build a smooth post camera from semantic events. Camera follows story focus, not every cursor twitch.
+9. Encode WebM, MP4, and WebP through landing's tested camera/encoder scripts.
+10. Review fixed-fraction frames and playback on desktop, native mobile, and reduced motion.
+11. Copy only approved delivery assets into `public/product/loops/`; keep raw/proof files outside production unless requested.
 
 Read [capture-pipeline.md](references/capture-pipeline.md) before recording and [camera-encoding.md](references/camera-encoding.md) before conforming media.
 

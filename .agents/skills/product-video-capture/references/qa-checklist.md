@@ -17,12 +17,17 @@ Use `ffprobe` on every raw and delivery file:
 ffprobe -v error \
   -show_entries stream=codec_name,width,height,r_frame_rate,avg_frame_rate:format=duration,size \
   -of json <video>
+
+ffprobe -v error -select_streams v:0 \
+  -show_entries frame=best_effort_timestamp_time,pkt_duration_time \
+  -of csv=p=0 <video>
 ```
 
 Verify:
 
 - decoded dimensions match profile;
 - `r_frame_rate` and `avg_frame_rate` are constant 25 fps;
+- consecutive decoded frame timestamps advance by 0.04 seconds within one stream time-base tick, with no duplicate, negative, or missing-frame gaps;
 - duration matches marked story and camera timeline;
 - WebM codec is VP9, MP4 codec is H.264;
 - no audio stream exists;
