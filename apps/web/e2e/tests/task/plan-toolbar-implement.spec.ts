@@ -57,6 +57,25 @@ test.describe("Plan toolbar implement", () => {
     const toolbarButton = testPage.getByTestId("plan-toolbar-implement-button");
     await expect(toolbarButton).toBeVisible({ timeout: 10_000 });
 
+    const toolbarSpacing = await testPage
+      .getByTestId("plan-toolbar-implement-control")
+      .evaluate((control) => {
+        const toolbar = control.closest(".border-b");
+        if (!(toolbar instanceof HTMLElement)) return null;
+        const controlRect = control.getBoundingClientRect();
+        const toolbarRect = toolbar.getBoundingClientRect();
+        return {
+          top: controlRect.top - toolbarRect.top,
+          bottom: toolbarRect.bottom - controlRect.bottom,
+          toolbarHeight: toolbarRect.height,
+          controlHeight: controlRect.height,
+        };
+      });
+    expect(toolbarSpacing?.toolbarHeight).toBe(30);
+    expect(toolbarSpacing?.controlHeight).toBeLessThanOrEqual(26);
+    expect(toolbarSpacing?.top).toBeGreaterThanOrEqual(1);
+    expect(toolbarSpacing?.bottom).toBeGreaterThanOrEqual(1);
+
     const uniqueEdit = `toolbar marker ${Date.now()}`;
     await session.planEditor().click();
     await testPage.keyboard.press(process.platform === "darwin" ? "Meta+End" : "Control+End");

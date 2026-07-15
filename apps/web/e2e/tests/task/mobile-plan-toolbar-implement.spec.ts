@@ -53,6 +53,25 @@ test.describe("mobile: Plan toolbar implement", () => {
     await expect(toolbarButton).toBeVisible({ timeout: 10_000 });
     await expect(toolbarButton).toBeInViewport();
 
+    const toolbarSpacing = await testPage
+      .getByTestId("plan-toolbar-implement-control")
+      .evaluate((control) => {
+        const toolbar = control.closest(".border-b");
+        if (!(toolbar instanceof HTMLElement)) return null;
+        const controlRect = control.getBoundingClientRect();
+        const toolbarRect = toolbar.getBoundingClientRect();
+        return {
+          top: controlRect.top - toolbarRect.top,
+          bottom: toolbarRect.bottom - controlRect.bottom,
+          toolbarHeight: toolbarRect.height,
+          controlHeight: controlRect.height,
+        };
+      });
+    expect(toolbarSpacing?.toolbarHeight).toBe(30);
+    expect(toolbarSpacing?.controlHeight).toBeLessThanOrEqual(26);
+    expect(toolbarSpacing?.top).toBeGreaterThanOrEqual(1);
+    expect(toolbarSpacing?.bottom).toBeGreaterThanOrEqual(1);
+
     const overflow = await testPage.evaluate(() => {
       const root = document.scrollingElement ?? document.documentElement;
       return root.scrollWidth > root.clientWidth + 1;

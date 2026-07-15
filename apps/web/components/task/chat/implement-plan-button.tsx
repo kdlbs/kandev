@@ -67,6 +67,7 @@ export function ImplementPlanButton({
     menuTrigger: testIds?.menuTrigger ?? "implement-plan-menu-trigger",
     freshItem: testIds?.freshItem ?? "implement-fresh-menu-item",
   };
+  const controlHeightClass = framed ? "h-6" : "h-7";
   const primaryButton = (
     <span className="inline-flex">
       <Button
@@ -76,7 +77,8 @@ export function ImplementPlanButton({
         data-testid={ids.button}
         disabled={disabled}
         className={cn(
-          "h-7 gap-1.5 px-2 text-violet-400 rounded-r-none pr-1.5 border-transparent",
+          "gap-1.5 px-2 text-violet-400 rounded-r-none pr-1.5 border-transparent",
+          controlHeightClass,
           "hover:bg-muted/40 focus-visible:border-transparent focus-visible:ring-violet-400/30",
           disabled ? "pointer-events-none cursor-not-allowed" : "cursor-pointer",
         )}
@@ -117,7 +119,8 @@ export function ImplementPlanButton({
             aria-disabled={disabled}
             disabled={disabled}
             className={cn(
-              "h-7 px-1 text-violet-400 rounded-l-none border-y-0 border-r-0 border-l border-violet-400/20",
+              "px-1 text-violet-400 rounded-l-none border-y-0 border-r-0 border-l border-violet-400/20",
+              controlHeightClass,
               "hover:bg-muted/40 focus-visible:border-y-0 focus-visible:border-r-0 focus-visible:border-l-violet-400/20 focus-visible:ring-0",
               disabled ? "pointer-events-none cursor-not-allowed" : "cursor-pointer",
             )}
