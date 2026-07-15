@@ -6,7 +6,7 @@ An unzoomed native master supports alternate focus, deeper/shallow zoom, new pos
 
 ## Use Landing's Tested Pipeline
 
-Locate sibling landing repo explicitly, then verify:
+Use the already-resolved `$LANDING_REPO`, then verify these paths within it:
 
 ```text
 scripts/product-loop-camera.mjs
@@ -15,7 +15,7 @@ scripts/product-loop-encoder.mjs
 scripts/product-loop-encoder.test.mjs
 ```
 
-Run focused tests before encoding. Current contract:
+Run focused tests from `$LANDING_REPO` before encoding. Current contract:
 
 - 25 fps constant cadence;
 - desktop delivery 2560x1600 from at least 3840x2400 source;
@@ -73,6 +73,7 @@ Example config shape:
 Encode from landing repo:
 
 ```bash
+cd "$LANDING_REPO"
 node scripts/product-loop-encoder.mjs /path/to/config.json
 ```
 

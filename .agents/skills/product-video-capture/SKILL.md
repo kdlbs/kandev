@@ -51,7 +51,7 @@ Read [capture-pipeline.md](references/capture-pipeline.md) before recording and 
 
 ## Camera And Delivery
 
-Use `<landing-repo>/scripts/product-loop-camera.mjs` and `product-loop-encoder.mjs`. Their tests define current dimensions, frame rate, maximum zoom, smoothness, loop reset, codecs, and poster quality. Change those contracts test-first when the user requests a genuinely different delivery format.
+Use `$LANDING_REPO/scripts/product-loop-camera.mjs` and `$LANDING_REPO/scripts/product-loop-encoder.mjs`. Their tests define current dimensions, frame rate, maximum zoom, smoothness, loop reset, codecs, and poster quality. Change those contracts test-first when the user requests a genuinely different delivery format.
 
 Do not remove waits with cuts or speed changes. Improve the source choreography or recapture. One trim at the beginning/end is acceptable; time skips are not.
 
