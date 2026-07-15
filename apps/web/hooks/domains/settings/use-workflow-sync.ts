@@ -152,8 +152,10 @@ export function useWorkflowSync(workspaceId: string) {
       setConfig(saved);
       reset(saved);
       toast({ description: "Workflow sync configuration saved", variant: "success" });
+      return true;
     } catch (err) {
       toast({ description: `Save failed: ${String(err)}`, variant: "error" });
+      return false;
     } finally {
       setSaving(false);
     }
@@ -163,15 +165,17 @@ export function useWorkflowSync(workspaceId: string) {
     if (
       !confirm("Remove workflow sync configuration? This will not delete already-synced workflows.")
     ) {
-      return;
+      return false;
     }
     try {
       await deleteWorkflowSyncConfig({ workspaceId });
       setConfig(null);
       reset(null);
       toast({ description: "Workflow sync configuration removed", variant: "success" });
+      return true;
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
+      return false;
     }
   }, [workspaceId, toast, reset]);
 
@@ -210,3 +214,5 @@ export function useWorkflowSync(workspaceId: string) {
     handleSyncNow,
   };
 }
+
+export type WorkflowSyncController = ReturnType<typeof useWorkflowSync>;

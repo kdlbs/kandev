@@ -1,18 +1,42 @@
 "use client";
 
 import { formatDistanceToNow } from "date-fns";
-import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconClock,
+  IconLoader2,
+  IconRefresh,
+} from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
+import { Badge } from "@kandev/ui/badge";
+import { Button } from "@kandev/ui/button";
 import { useTick } from "@/components/integrations/auth-status-banner";
 import type { WorkflowSyncConfig } from "@/lib/types/workflow-sync";
 
-function LastSyncedLabel({ syncedAt }: { syncedAt: Date }) {
+type SyncState = "waiting" | "ok" | "failed";
+
+function syncState(config: WorkflowSyncConfig): SyncState {
+  if (!config.last_synced_at) return "waiting";
+  return config.last_ok ? "ok" : "failed";
+}
+
+function StateIcon({ state }: { state: SyncState }) {
+  if (state === "ok") return <IconCheck className="h-4 w-4 text-green-600 dark:text-green-400" />;
+  if (state === "failed") return <IconAlertTriangle className="h-4 w-4 text-destructive" />;
+  return <IconClock className="h-4 w-4 text-muted-foreground" />;
+}
+
+function MetadataLine({ config }: { config: WorkflowSyncConfig }) {
   useTick(30_000);
-  return (
-    <span className="text-xs text-muted-foreground ml-2">
-      · checked {formatDistanceToNow(syncedAt, { addSuffix: true })}
-    </span>
-  );
+  const parts = [
+    `Directory ${config.path || "(repository root)"}`,
+    `every ${config.interval_seconds}s`,
+    config.last_synced_at
+      ? `last synced ${formatDistanceToNow(new Date(config.last_synced_at), { addSuffix: true })}`
+      : "waiting for first sync…",
+  ];
+  return <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p>;
 }
 
 function WarningsAlert({ warnings }: { warnings: string[] }) {
@@ -36,49 +60,62 @@ function WarningsAlert({ warnings }: { warnings: string[] }) {
   );
 }
 
-function SyncStatusAlert({ config }: { config: WorkflowSyncConfig }) {
-  if (!config.last_synced_at) {
-    return (
-      <Alert data-testid="workflow-sync-status" data-state="waiting">
-        <AlertDescription className="text-sm">Waiting for first sync…</AlertDescription>
-      </Alert>
-    );
-  }
-  if (config.last_ok) {
-    return (
-      <Alert
-        data-testid="workflow-sync-status"
-        data-state="ok"
-        className="border-green-500/40 bg-green-500/10 dark:border-green-400/30 dark:bg-green-400/10"
-      >
-        <IconCheck className="h-4 w-4 text-green-600 dark:text-green-400" />
-        <AlertDescription className="text-sm font-medium">
-          Synced
-          <LastSyncedLabel syncedAt={new Date(config.last_synced_at)} />
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  return (
-    <Alert data-testid="workflow-sync-status" data-state="failed" variant="destructive">
-      <IconAlertTriangle className="h-4 w-4" />
-      <AlertDescription className="text-sm">
-        {config.last_error || "Sync failed"}
-        <LastSyncedLabel syncedAt={new Date(config.last_synced_at)} />
-      </AlertDescription>
-    </Alert>
-  );
-}
+type WorkflowSyncStatusCardProps = {
+  config: WorkflowSyncConfig;
+  syncing: boolean;
+  onSyncNow: () => void;
+};
 
-// WorkflowSyncStatusBanner renders the last-sync outcome (never-synced / ok /
-// failed) plus, independently, any non-empty warnings from the most recent
-// attempt — warnings can be present even when last_ok is true (e.g. an
-// individual file failed to parse but the rest synced).
-export function WorkflowSyncStatusBanner({ config }: { config: WorkflowSyncConfig | null }) {
-  if (!config) return null;
+// WorkflowSyncStatusCard is the compact always-visible summary of an active
+// GitHub sync (mirrors the GitHub integration's connection-status card):
+// headline with state icon, repo and branch, a muted metadata line, the last
+// error when failing, and any warnings from the most recent attempt —
+// warnings can be present even when last_ok is true (e.g. one file failed to
+// parse but the rest synced).
+export function WorkflowSyncStatusCard({
+  config,
+  syncing,
+  onSyncNow,
+}: WorkflowSyncStatusCardProps) {
+  const state = syncState(config);
   return (
-    <div className="space-y-2">
-      <SyncStatusAlert config={config} />
+    <div
+      className="rounded-lg border bg-card p-4 space-y-2"
+      data-testid="workflow-sync-status"
+      data-state={state}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-sm">
+          <StateIcon state={state} />
+          <span>
+            Syncing from{" "}
+            <span className="font-semibold">
+              {config.repo_owner}/{config.repo_name}
+            </span>
+          </span>
+          <Badge variant="secondary">{config.branch}</Badge>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onSyncNow}
+          disabled={syncing}
+          className="cursor-pointer"
+          data-testid="workflow-sync-now"
+        >
+          {syncing ? (
+            <IconLoader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <IconRefresh className="h-4 w-4 mr-2" />
+          )}
+          Sync now
+        </Button>
+      </div>
+      <MetadataLine config={config} />
+      {state === "failed" && (
+        <p className="text-xs text-destructive">{config.last_error || "Sync failed"}</p>
+      )}
       <WarningsAlert warnings={config.last_warnings ?? []} />
     </div>
   );
