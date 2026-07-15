@@ -5,7 +5,7 @@ import { AgentUsageSection } from "@/components/settings/agent-usage-section";
 import type { AgentSubscriptionUsageResponse } from "@/lib/types/http";
 
 const listAgentSubscriptionUsage = vi.hoisted(() =>
-  vi.fn<[], Promise<AgentSubscriptionUsageResponse>>(),
+  vi.fn<() => Promise<AgentSubscriptionUsageResponse>>(),
 );
 
 vi.mock("@/lib/api", () => ({
