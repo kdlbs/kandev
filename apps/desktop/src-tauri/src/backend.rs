@@ -974,6 +974,7 @@ mod tests {
         assert!(!BackendState::default().accepts_url("http://127.0.0.1:38430"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn live_child_is_recognized_as_running() {
         let state = BackendState::default();

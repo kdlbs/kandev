@@ -1,6 +1,8 @@
 export const DESKTOP_PROTOCOL_VERSION = "v1" as const;
-const desktopEvent = (name: string) =>
-  `kandev-desktop-${DESKTOP_PROTOCOL_VERSION}-${name}` as const;
+const desktopEvent = <TName extends string>(
+  name: TName,
+): `kandev-desktop-${typeof DESKTOP_PROTOCOL_VERSION}-${TName}` =>
+  `kandev-desktop-${DESKTOP_PROTOCOL_VERSION}-${name}`;
 
 export const DESKTOP_NATIVE_EVENTS = {
   "close-context": desktopEvent("close-context"),

@@ -169,11 +169,6 @@ export function useSaveRequest(state: NotificationsState) {
       await deleteNotificationProvider(providerId);
     }
     const updated = await Promise.all(updates);
-    if (updated.length === 0) {
-      setBaselineProviders(providers);
-      setPendingDeletes(new Set());
-      return [] as NotificationProvider[];
-    }
     const updatedById = new Map(updated.map((provider) => [provider.id, provider]));
     const nextProviders = providers.map((provider) => updatedById.get(provider.id) ?? provider);
     setNotificationProviders({
@@ -183,6 +178,11 @@ export function useSaveRequest(state: NotificationsState) {
       loaded: true,
       loading: false,
     });
+    if (updated.length === 0) {
+      setBaselineProviders(nextProviders);
+      setPendingDeletes(new Set());
+      return [] as NotificationProvider[];
+    }
     setProviders(nextProviders);
     setBaselineProviders(nextProviders);
     setAppriseEdits((prev) => {
