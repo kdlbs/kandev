@@ -5,7 +5,9 @@ import type { UserSettingsUpdatePayload } from "@/lib/types/http-user-settings";
 const MAX_SYNC_ATTEMPTS = 3;
 const BASE_SYNC_RETRY_DELAY_MS = 100;
 
-async function updateWithRetry(payload: UserSettingsUpdatePayload): Promise<void> {
+export async function updateUserSettingsWithRetry(
+  payload: UserSettingsUpdatePayload,
+): Promise<void> {
   let lastError: unknown;
   for (let attempt = 0; attempt < MAX_SYNC_ATTEMPTS; attempt += 1) {
     try {
@@ -32,7 +34,7 @@ export function createQueuedUserSettingsSync<T>(
     const payload = buildPayload(value);
     queue = queue
       .catch(() => undefined)
-      .then(() => updateWithRetry(payload))
+      .then(() => updateUserSettingsWithRetry(payload))
       .catch(() => undefined);
     return queue;
   };

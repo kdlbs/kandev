@@ -1,4 +1,5 @@
-import { updateUserSettings } from "@/lib/api/domains/settings-api";
+import { updateUserSettingsWithRetry } from "@/lib/user-settings-sync";
+import type { UserSettingsUpdatePayload } from "@/lib/types/http-user-settings";
 import type { UISlice, UISliceState } from "./types";
 import type {
   FilterClause,
@@ -61,12 +62,12 @@ function draftsEqual(a: SidebarViewDraft | null, b: SidebarViewDraft | null): bo
 
 function enqueueSidebarSettingsSync(
   set: ImmerSet,
-  payload: Parameters<typeof updateUserSettings>[0],
+  payload: UserSettingsUpdatePayload,
 ): Promise<void> {
   const previous = sidebarSettingsQueues.get(set);
   const request = previous
-    ? previous.then(() => updateUserSettings(payload).then(() => undefined))
-    : updateUserSettings(payload).then(() => undefined);
+    ? previous.then(() => updateUserSettingsWithRetry(payload))
+    : updateUserSettingsWithRetry(payload);
   sidebarSettingsQueues.set(
     set,
     request.catch(() => undefined),

@@ -29,6 +29,7 @@ const KEY = "kandev.sidebar.collapsedSubtasks";
 const TASK_A = "task-a";
 const TASK_B = "task-b";
 const BACKEND_DOWN = "backend down";
+const RENAME_FAILED = "rename failed";
 const PINNED_KEY = "kandev.sidebar.pinnedTaskIds";
 const ORDER_KEY = "kandev.sidebar.orderedTaskIds";
 
@@ -243,7 +244,9 @@ describe("sidebar view sync rollback", () => {
     const store = makeStore();
     seedViews(store);
     vi.mocked(updateUserSettings)
-      .mockRejectedValueOnce(new Error("rename failed"))
+      .mockRejectedValueOnce(new Error(RENAME_FAILED))
+      .mockRejectedValueOnce(new Error(RENAME_FAILED))
+      .mockRejectedValueOnce(new Error(RENAME_FAILED))
       .mockResolvedValueOnce({
         settings: {},
       } as Awaited<ReturnType<typeof updateUserSettings>>);
@@ -252,7 +255,7 @@ describe("sidebar view sync rollback", () => {
     store.getState().setSidebarActiveView("view-b");
 
     await waitFor(() => {
-      expect(store.getState().sidebarViews.syncError).toBe("rename failed");
+      expect(store.getState().sidebarViews.syncError).toBe(RENAME_FAILED);
     });
 
     expect(store.getState().sidebarViews.activeViewId).toBe("view-b");
