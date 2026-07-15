@@ -211,10 +211,8 @@ describe("AppSidebar", () => {
     render(<AppSidebar />);
 
     await waitFor(() => {
-      expect(
-        storeState.toggleAppSidebarSettingsMode.mock.calls.length +
-          storeState.setAppSidebarSettingsMode.mock.calls.length,
-      ).toBe(2);
+      expect(storeState.toggleAppSidebarSettingsMode).toHaveBeenCalledOnce();
+      expect(storeState.setAppSidebarSettingsMode).toHaveBeenCalledOnce();
     });
     expect(storeState.appSidebar.settingsMode).toBe(true);
   });
