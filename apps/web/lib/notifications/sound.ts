@@ -81,7 +81,11 @@ let sharedContext: AudioContext | null = null;
 
 function getSharedAudioContext(): AudioContext | null {
   if (typeof window === "undefined" || typeof window.AudioContext !== "function") return null;
-  sharedContext ??= new window.AudioContext();
+  try {
+    sharedContext ??= new window.AudioContext();
+  } catch {
+    return null;
+  }
   return sharedContext;
 }
 
@@ -103,9 +107,12 @@ function scheduleNote(ctx: AudioContext, note: SoundNote): void {
 
 // A suspended context (autoplay policy, no user gesture yet) resumes only when the
 // user eventually interacts. Scheduling before resume() fulfills would queue every
-// pending alert and play them stacked at that later moment — so plays are scheduled
-// after resume() fulfills, and dropped as stale if that takes longer than this.
+// pending alert and play them stacked at that later moment — so at most one play is
+// kept pending, scheduled after resume() fulfills, and dropped as stale if that
+// takes longer than this.
 const STALE_PLAY_TIMEOUT_MS = 2000;
+
+let pendingResumePlay = false;
 
 function schedulePreset(ctx: AudioContext, preset: SoundPreset): void {
   try {
@@ -120,20 +127,26 @@ export function playSoundPreset(presetId: string): void {
   const preset = SOUND_PRESETS.find((p) => p.id === presetId) ?? SOUND_PRESETS[0];
   const ctx = getSharedAudioContext();
   if (!ctx) return;
-  if (ctx.state !== "suspended") {
+  if (ctx.state === "running") {
     schedulePreset(ctx, preset);
     return;
   }
+  // Suspended (autoplay policy) or interrupted (iOS backgrounding): resume first.
+  if (pendingResumePlay) return;
   try {
+    pendingResumePlay = true;
     const requestedAt = Date.now();
     ctx
       .resume()
       .then(() => {
+        pendingResumePlay = false;
         if (Date.now() - requestedAt < STALE_PLAY_TIMEOUT_MS) schedulePreset(ctx, preset);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        pendingResumePlay = false;
+      });
   } catch {
-    // Ignore playback failures.
+    pendingResumePlay = false;
   }
 }
 

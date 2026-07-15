@@ -72,6 +72,7 @@ describe("playSoundPreset", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("schedules one oscillator per note of the preset", async () => {
@@ -99,6 +100,47 @@ describe("playSoundPreset", () => {
     playSoundPreset("nope");
 
     expect(ctx.createOscillator).toHaveBeenCalledTimes(SOUND_PRESETS[0].notes.length);
+  });
+
+  it("does not throw when AudioContext construction fails", async () => {
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn(() => {
+        throw new Error("audio stack broken");
+      }),
+    );
+    const { playSoundPreset } = await loadSoundModule();
+
+    expect(() => playSoundPreset("plim")).not.toThrow();
+  });
+
+  it("reuses a single AudioContext across plays", async () => {
+    const { ctx } = makeFakeAudioContext();
+    const ctor = vi.fn(() => ctx);
+    vi.stubGlobal("AudioContext", ctor);
+    const { playSoundPreset } = await loadSoundModule();
+
+    playSoundPreset("plim");
+    playSoundPreset("ding");
+
+    expect(ctor).toHaveBeenCalledTimes(1);
+  });
+
+  it("is a no-op when AudioContext is unavailable", async () => {
+    const { playSoundPreset } = await loadSoundModule();
+    expect(() => playSoundPreset("plim")).not.toThrow();
+  });
+});
+
+describe("playSoundPreset with a non-running context", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    window.localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it("plays after a suspended context resumes promptly", async () => {
@@ -137,24 +179,40 @@ describe("playSoundPreset", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(ctx.createOscillator).not.toHaveBeenCalled();
-    nowSpy.mockRestore();
   });
 
-  it("reuses a single AudioContext across plays", async () => {
+  it("coalesces plays queued while the context is not running", async () => {
     const { ctx } = makeFakeAudioContext();
-    const ctor = vi.fn(() => ctx);
-    vi.stubGlobal("AudioContext", ctor);
-    const { playSoundPreset } = await loadSoundModule();
+    ctx.state = "suspended";
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn(() => ctx),
+    );
+    const { playSoundPreset, SOUND_PRESETS } = await loadSoundModule();
 
     playSoundPreset("plim");
-    playSoundPreset("ding");
+    playSoundPreset("plim");
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(ctor).toHaveBeenCalledTimes(1);
+    expect(ctx.resume).toHaveBeenCalledTimes(1);
+    const plim = SOUND_PRESETS.find((p) => p.id === "plim")!;
+    expect(ctx.createOscillator).toHaveBeenCalledTimes(plim.notes.length);
   });
 
-  it("is a no-op when AudioContext is unavailable", async () => {
-    const { playSoundPreset } = await loadSoundModule();
-    expect(() => playSoundPreset("plim")).not.toThrow();
+  it("resumes an interrupted context before playing", async () => {
+    const { ctx } = makeFakeAudioContext();
+    ctx.state = "interrupted";
+    vi.stubGlobal(
+      "AudioContext",
+      vi.fn(() => ctx),
+    );
+    const { playSoundPreset, SOUND_PRESETS } = await loadSoundModule();
+
+    playSoundPreset("ding");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const ding = SOUND_PRESETS.find((p) => p.id === "ding")!;
+    expect(ctx.createOscillator).toHaveBeenCalledTimes(ding.notes.length);
   });
 });
 
