@@ -1,5 +1,5 @@
 ---
-status: approved
+status: building
 created: 2026-07-15
 owner: kandev
 ---
@@ -25,15 +25,15 @@ pipeline view makes the complete trigger path easy to miss.
   automation because the runtime deliberately skips destination `on_enter`
   actions while dispatching the user's prompt.
 - A cycle is **fully automatic** when every hop can occur without a user action:
-  every hop is an `on_turn_complete` transition from a step that auto-starts an
-  agent on entry, and no hop requires approval. Creating or applying a newly
-  introduced fully automatic cycle is blocked.
+  every transition starts from a step that auto-starts an agent on entry, and
+  no hop requires approval. This includes `on_turn_start` transitions fired by
+  an auto-started prompt. Creating or applying a newly introduced fully
+  automatic cycle is blocked.
 - A cycle is **user-mediated** when its `on_turn_complete` replay edge re-enters
-  an auto-start step but at least one other hop needs a user action: an
-  `on_turn_start` transition, a transition that requires approval, or an
-  `on_turn_complete` transition from a step that does not auto-start its own
-  turn. Creating or applying a newly introduced user-mediated cycle requires
-  explicit confirmation.
+  an auto-start step but at least one hop needs a user action: a transition
+  from a step that does not auto-start its own turn, or a transition that
+  requires approval. Creating or applying a newly introduced user-mediated
+  cycle requires explicit confirmation.
 - Transition guards are treated conservatively as possible paths. A guard does
   not make a cycle safe merely because its condition is not currently met.
 - Intentional cycles that do not re-enter an `auto_start_agent` step remain
@@ -121,10 +121,15 @@ one. The analysis is deterministic and has no persisted state.
   other on turn completion, **WHEN** an author attempts to save the second
   transition, **THEN** the request is blocked and the trace shows
   `Build --on_turn_complete--> Review --on_turn_complete--> Build`.
-- **GIVEN** `In Progress` auto-starts, a path includes one or more
-  `on_turn_start` transitions, and its final `on_turn_complete` edge returns to
-  `In Progress`, **WHEN** an author applies the final edit, **THEN** the editor
-  requires **Apply anyway** and sends no mutation before confirmation.
+- **GIVEN** `In Progress` auto-starts, a path includes an `on_turn_start`
+  transition from a step that does not auto-start, and its final
+  `on_turn_complete` edge returns to `In Progress`, **WHEN** an author applies
+  the final edit, **THEN** the editor requires **Apply anyway** and sends no
+  mutation before confirmation.
+- **GIVEN** every source in the same path auto-starts, **WHEN** an
+  `on_turn_start` transition is fired by an auto-started prompt, **THEN** that
+  hop is automatic and a newly introduced fully automatic replay cycle is
+  blocked.
 - **GIVEN** `Review` moves to auto-starting `In Progress` on `on_turn_start`,
   **WHEN** that feedback cycle is analyzed, **THEN** the editor shows no replay
   warning because the runtime sends the user's prompt without executing
@@ -132,9 +137,9 @@ one. The analysis is deterministic and has no persisted state.
 - **GIVEN** a cycle contains only `on_turn_complete` transitions but one source
   step does not auto-start, **WHEN** the cycle is introduced, **THEN** it is a
   user-mediated warning because a user must start that step's turn.
-- **GIVEN** a transition in the cycle requires approval, **WHEN** the cycle is
-  introduced, **THEN** it is a user-mediated warning rather than a fully
-  automatic block.
+- **GIVEN** any transition in the cycle, including the replay edge, requires
+  approval, **WHEN** the cycle is introduced, **THEN** it is a user-mediated
+  warning rather than a fully automatic block.
 - **GIVEN** a draft workflow has a user-mediated replay cycle, **WHEN** the user
   clicks Save and then cancels the confirmation, **THEN** the draft remains and
   no workflow or step creation request is sent.

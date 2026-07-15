@@ -1,4 +1,4 @@
-import type { WorkflowStep } from "@/lib/types/http";
+import { stepHasOnEnterAction, type WorkflowStep } from "@/lib/types/http";
 import type {
   OnTurnCompleteAction,
   OnTurnCompleteActionType,
@@ -71,7 +71,7 @@ export function analyzeWorkflowReplayCycles(
   const graph = buildReplayGraph(orderedSteps);
 
   return orderedSteps.flatMap((autoStartStep) => {
-    if (!hasAutoStart(autoStartStep)) return [];
+    if (!stepHasOnEnterAction(autoStartStep, "auto_start_agent")) return [];
     const selected = findPreferredCycleCandidate(autoStartStep, graph);
     if (!selected) return [];
 
@@ -135,8 +135,7 @@ function resolveTriggerEdges(
         trigger,
         actionKind: action.type,
         requiresUserInvolvement:
-          trigger === "on_turn_start" ||
-          !hasAutoStart(source) ||
+          !stepHasOnEnterAction(source, "auto_start_agent") ||
           action.config?.requires_approval === true,
       });
     }
@@ -388,8 +387,4 @@ function affectedStepIds(autoStartStepId: string, trace: WorkflowReplayCycleHop[
 function classifyPromptSource(prompt: string | undefined): WorkflowReplayPromptSource {
   if (!prompt) return "task_description";
   return prompt.includes("{{task_prompt}}") ? "step_prompt_with_task_description" : "step_prompt";
-}
-
-function hasAutoStart(step: WorkflowStep): boolean {
-  return step.events?.on_enter?.some((action) => action.type === "auto_start_agent") ?? false;
 }

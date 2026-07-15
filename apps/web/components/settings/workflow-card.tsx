@@ -499,7 +499,11 @@ export function WorkflowCard(props: WorkflowCardProps) {
             setExportOpen={s.setExportOpen}
             toast={s.toast}
             onDeleteClick={s.wfDeleteHandlers.handleDeleteWorkflowClick}
-            deleteDisabled={s.deleteWorkflowRequest.isLoading || s.wfDel.workflowDeleteLoading}
+            deleteDisabled={
+              s.mutationGuard.isMutationPending ||
+              s.deleteWorkflowRequest.isLoading ||
+              s.wfDel.workflowDeleteLoading
+            }
           />
         </div>
       </CardContent>

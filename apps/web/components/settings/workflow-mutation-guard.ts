@@ -70,7 +70,11 @@ export function useWorkflowMutationGuard(
   const confirmProposal = useCallback(async () => {
     if (mutationPhase.current !== "proposal") return;
     const operation = pendingOperation.current;
-    if (!operation) return;
+    if (!operation) {
+      setProposal(null);
+      releaseMutation();
+      return;
+    }
     pendingOperation.current = null;
     mutationPhase.current = "running";
     setProposal(null);

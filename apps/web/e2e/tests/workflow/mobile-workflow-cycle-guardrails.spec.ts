@@ -10,7 +10,7 @@ test.describe("Workflow cycle guardrails on mobile", () => {
     const workflowName = "Mobile warning draft";
     const settings = new WorkflowSettingsPage(testPage);
     await settings.goto(seedData.workspaceId);
-    await settings.createWorkflowByTouch(workflowName, "Custom");
+    await settings.createWorkflow(workflowName, "Custom", true);
     const card = await settings.findWorkflowCard(workflowName);
 
     await settings.setAutoStart(card, "Todo", true, true);

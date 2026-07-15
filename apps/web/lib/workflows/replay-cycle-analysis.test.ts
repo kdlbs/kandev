@@ -93,17 +93,41 @@ describe("replay cycle detection", () => {
     });
   });
 
-  it("marks a replay path containing on_turn_start as user-mediated", () => {
+  it("treats on_turn_start from an auto-start step as automatic", () => {
     const [diagnostic] = analyzeWorkflowReplayCycles([
       step("work", 0, {
         autoStart: true,
         onTurnStart: [{ type: "move_to_next" }],
       }),
-      step("review", 1, { onTurnComplete: [{ type: "move_to_previous" }] }),
+      step("review", 1, {
+        autoStart: true,
+        onTurnComplete: [{ type: "move_to_previous" }],
+      }),
+    ]);
+
+    expect(diagnostic.severity).toBe("blocking");
+    expect(diagnostic.trace.map((hop) => hop.requiresUserInvolvement)).toEqual([false, false]);
+  });
+
+  it("marks on_turn_start from a non-auto-start step as user-mediated", () => {
+    const [diagnostic] = analyzeWorkflowReplayCycles([
+      step("work", 0, {
+        autoStart: true,
+        onTurnComplete: [{ type: "move_to_next" }],
+      }),
+      step("review", 1, { onTurnStart: [{ type: "move_to_next" }] }),
+      step("finish", 2, {
+        autoStart: true,
+        onTurnComplete: [moveToStep("work")],
+      }),
     ]);
 
     expect(diagnostic.severity).toBe("warning");
-    expect(diagnostic.trace.map((hop) => hop.requiresUserInvolvement)).toEqual([true, true]);
+    expect(diagnostic.trace.map((hop) => hop.requiresUserInvolvement)).toEqual([
+      false,
+      true,
+      false,
+    ]);
   });
 
   it("does not report the built-in Kanban return because on_turn_start skips on_enter", () => {

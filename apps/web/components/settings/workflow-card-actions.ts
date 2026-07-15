@@ -16,10 +16,7 @@ import {
   exportWorkflowAction,
   bulkMoveTasks,
 } from "@/app/actions/workspaces";
-import {
-  useWorkflowMutationGuard,
-  type WorkflowMutationGuardController,
-} from "./workflow-mutation-guard";
+import type { WorkflowMutationGuardController } from "./workflow-mutation-guard";
 import {
   addLocalStep,
   addRemoteStep,
@@ -41,7 +38,7 @@ type WorkflowStepActionsParams = {
   setTargetStepForMigration: (id: string) => void;
   setStepDeleteOpen: (open: boolean) => void;
   toast: ReturnType<typeof useToast>["toast"];
-  mutationGuard?: WorkflowMutationGuardController;
+  mutationGuard: WorkflowMutationGuardController;
 };
 
 type RemoveStepParams = {
@@ -97,10 +94,8 @@ export function useWorkflowStepActions({
   setTargetStepForMigration,
   setStepDeleteOpen,
   toast,
-  mutationGuard: suppliedMutationGuard,
+  mutationGuard,
 }: WorkflowStepActionsParams) {
-  const fallbackMutationGuard = useWorkflowMutationGuard(workflowSteps);
-  const mutationGuard = suppliedMutationGuard ?? fallbackMutationGuard;
   const handleUpdateWorkflowStep = async (stepId: string, updates: Partial<WorkflowStep>) => {
     if (isNewWorkflow) {
       setWorkflowSteps((prev) => applyWorkflowStepUpdates(prev, stepId, updates));
@@ -488,7 +483,7 @@ type WorkflowSaveActionsParams = {
   onSaveWorkflow: () => Promise<unknown>;
   onWorkflowCreated?: (created: Workflow) => void;
   toast: ReturnType<typeof useToast>["toast"];
-  mutationGuard?: WorkflowMutationGuardController;
+  mutationGuard: WorkflowMutationGuardController;
 };
 
 export function useWorkflowSaveActions({
@@ -499,10 +494,8 @@ export function useWorkflowSaveActions({
   onSaveWorkflow,
   onWorkflowCreated,
   toast,
-  mutationGuard: suppliedMutationGuard,
+  mutationGuard,
 }: WorkflowSaveActionsParams) {
-  const fallbackMutationGuard = useWorkflowMutationGuard(workflowSteps);
-  const mutationGuard = suppliedMutationGuard ?? fallbackMutationGuard;
   const saveWorkflowRequest = useRequest(onSaveWorkflow);
 
   const saveNewWorkflowRequest = useRequest(async () => {

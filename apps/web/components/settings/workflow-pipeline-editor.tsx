@@ -286,6 +286,8 @@ function WorkflowCycleAlerts({ diagnostics }: { diagnostics: WorkflowReplayCycle
   );
 }
 
+const EMPTY_DIAGNOSTICS: WorkflowReplayCycleDiagnostic[] = [];
+
 // --- Main Pipeline Editor ---
 
 export function WorkflowPipelineEditor({
@@ -294,7 +296,7 @@ export function WorkflowPipelineEditor({
   onAddStep,
   onRemoveStep,
   onReorderSteps,
-  diagnostics = [],
+  diagnostics = EMPTY_DIAGNOSTICS,
   readOnly = false,
 }: WorkflowPipelineEditorProps) {
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);

@@ -70,8 +70,9 @@ function renderNewWorkflowStepActions(initialSteps: WorkflowStep[]) {
       steps = typeof updater === "function" ? updater(steps) : updater;
     },
   );
-  const view = renderHook(() =>
-    useWorkflowStepActions({
+  const view = renderHook(() => {
+    const mutationGuard = useWorkflowMutationGuard(steps);
+    return useWorkflowStepActions({
       workflow,
       isNewWorkflow: true,
       workflowSteps: steps,
@@ -82,8 +83,9 @@ function renderNewWorkflowStepActions(initialSteps: WorkflowStep[]) {
       setTargetStepForMigration: vi.fn(),
       setStepDeleteOpen: vi.fn(),
       toast: vi.fn(),
-    }),
-  );
+      mutationGuard,
+    });
+  });
   return { ...view, getSteps: () => steps };
 }
 
@@ -144,8 +146,9 @@ it("does not update a persisted step when the proposal introduces a blocking cyc
     }),
     step("review", "Review", 1, false, { autoStart: true }),
   ];
-  const { result } = renderHook(() =>
-    useWorkflowStepActions({
+  const { result } = renderHook(() => {
+    const mutationGuard = useWorkflowMutationGuard(steps);
+    return useWorkflowStepActions({
       workflow,
       isNewWorkflow: false,
       workflowSteps: steps,
@@ -156,8 +159,9 @@ it("does not update a persisted step when the proposal introduces a blocking cyc
       setTargetStepForMigration: vi.fn(),
       setStepDeleteOpen: vi.fn(),
       toast: vi.fn(),
-    }),
-  );
+      mutationGuard,
+    });
+  });
 
   await act(async () => {
     await result.current.handleUpdateWorkflowStep("review", {
@@ -213,7 +217,10 @@ it("does not replace a pending warning proposal with a second edit", async () =>
 
   await act(async () => {
     await result.current.actions.handleUpdateWorkflowStep("review", {
-      events: { on_turn_complete: [{ type: "move_to_previous" }] },
+      events: {
+        ...steps[1].events,
+        on_turn_complete: [{ type: "move_to_previous" }],
+      },
     });
   });
   const proposal = result.current.mutationGuard.proposal;
@@ -248,6 +255,35 @@ it("does not replace a pending blocking proposal with a second edit", async () =
   });
 
   expect(result.current.mutationGuard.proposal).toBe(proposal);
+  expect(updateWorkflowStepAction).not.toHaveBeenCalled();
+});
+
+it("releases a blocking proposal if confirmation is invoked defensively", async () => {
+  const steps = [
+    step("build", "Build", 0, true, {
+      autoStart: true,
+      onTurnComplete: [{ type: "move_to_next" }],
+    }),
+    step("review", "Review", 1, false, { autoStart: true }),
+  ];
+  const { result } = renderPersistedWorkflowStepActions(steps);
+
+  await act(async () => {
+    await result.current.actions.handleUpdateWorkflowStep("review", {
+      events: {
+        ...steps[1].events,
+        on_turn_complete: [{ type: "move_to_previous" }],
+      },
+    });
+  });
+  expect(result.current.mutationGuard.proposal?.severity).toBe("blocking");
+
+  await act(async () => {
+    await result.current.mutationGuard.confirmProposal();
+  });
+
+  expect(result.current.mutationGuard.proposal).toBeNull();
+  expect(result.current.mutationGuard.isMutationPending).toBe(false);
   expect(updateWorkflowStepAction).not.toHaveBeenCalled();
 });
 
@@ -407,16 +443,18 @@ it("does not create a draft workflow with a blocking cycle", async () => {
       onTurnComplete: [{ type: "move_to_previous" }],
     }),
   ];
-  const { result } = renderHook(() =>
-    useWorkflowSaveActions({
+  const { result } = renderHook(() => {
+    const mutationGuard = useWorkflowMutationGuard(draftSteps);
+    return useWorkflowSaveActions({
       workflow: { ...workflow, id: "temp-workflow" as Workflow["id"] },
       isNewWorkflow: true,
       workflowSteps: draftSteps,
       templateStepCount: 0,
       onSaveWorkflow: vi.fn(),
       toast: vi.fn(),
-    }),
-  );
+      mutationGuard,
+    });
+  });
 
   await act(async () => {
     await result.current.handleSaveWorkflow();
@@ -442,16 +480,18 @@ it("cancels a warning draft with no requests and creates it once after confirmat
       onTurnComplete: [{ type: "move_to_previous" }],
     }),
   ];
-  const { result } = renderHook(() =>
-    useWorkflowSaveActions({
+  const { result } = renderHook(() => {
+    const mutationGuard = useWorkflowMutationGuard(draftSteps);
+    return useWorkflowSaveActions({
       workflow: { ...workflow, id: "temp-workflow" as Workflow["id"] },
       isNewWorkflow: true,
       workflowSteps: draftSteps,
       templateStepCount: 0,
       onSaveWorkflow: vi.fn(),
       toast: vi.fn(),
-    }),
-  );
+      mutationGuard,
+    });
+  });
 
   await act(async () => {
     await result.current.handleSaveWorkflow();
@@ -508,17 +548,20 @@ it("remaps template workflow pull sources between backend-created and added step
     ...step("draft-added", addedName, 1, false),
     pull_from_step_id: draftTemplateId,
   };
-  const { result } = renderHook(() =>
-    useWorkflowSaveActions({
+  const workflowSteps = [templateStep, addedStep];
+  const { result } = renderHook(() => {
+    const mutationGuard = useWorkflowMutationGuard(workflowSteps);
+    return useWorkflowSaveActions({
       workflow: { ...workflow, workflow_template_id: "template-1" },
       isNewWorkflow: true,
-      workflowSteps: [templateStep, addedStep],
+      workflowSteps,
       templateStepCount: 1,
       onSaveWorkflow: vi.fn(),
       onWorkflowCreated: vi.fn(),
       toast: vi.fn(),
-    }),
-  );
+      mutationGuard,
+    });
+  });
 
   await act(async () => {
     await result.current.handleSaveWorkflow();

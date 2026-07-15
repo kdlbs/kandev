@@ -148,41 +148,25 @@ export class WorkflowSettingsPage {
   }
 
   /** Open the "Add Workflow" dialog and create a workflow. */
-  async createWorkflow(name: string, templateName?: string) {
-    await this.addWorkflowButton.click();
+  async createWorkflow(name: string, templateName?: string, touch = false) {
+    await this.activate(this.addWorkflowButton, touch);
     await expect(this.createDialog).toBeVisible();
 
     if (name) {
+      if (touch) await this.workflowNameInput.tap();
       await this.workflowNameInput.fill(name);
     }
 
     if (templateName === "Custom") {
-      await this.createDialog.locator('label[for="custom"]').click();
+      await this.activate(this.createDialog.locator('label[for="custom"]'), touch);
     } else if (templateName) {
-      await this.createDialog.getByText(templateName, { exact: false }).first().click();
+      await this.activate(
+        this.createDialog.getByText(templateName, { exact: false }).first(),
+        touch,
+      );
     }
 
-    await this.confirmCreateButton.click();
-    await expect(this.createDialog).not.toBeVisible();
-  }
-
-  /** Open the Add Workflow dialog and create a draft using touch interactions. */
-  async createWorkflowByTouch(name: string, templateName?: string) {
-    await this.addWorkflowButton.tap();
-    await expect(this.createDialog).toBeVisible();
-
-    if (name) {
-      await this.workflowNameInput.tap();
-      await this.workflowNameInput.fill(name);
-    }
-
-    if (templateName === "Custom") {
-      await this.createDialog.locator('label[for="custom"]').tap();
-    } else if (templateName) {
-      await this.createDialog.getByText(templateName, { exact: false }).first().tap();
-    }
-
-    await this.confirmCreateButton.tap();
+    await this.activate(this.confirmCreateButton, touch);
     await expect(this.createDialog).not.toBeVisible();
   }
 
