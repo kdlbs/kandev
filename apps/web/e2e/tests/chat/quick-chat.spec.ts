@@ -197,39 +197,44 @@ test.describe("Quick Chat", () => {
     backend,
   }) => {
     const sourceRepo = path.join(backend.tmpDir, "repos", "e2e-repo");
-    execFileSync("git", ["branch", "-f", "context-branch"], { cwd: sourceRepo });
-    const dialog = await openQuickChatSetup(testPage);
-    await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
-      "Chat with an agent about an idea, question, or codebase.",
-    );
-    await expect(
-      dialog.getByText("Add repository context to focus on specific code and branches."),
-    ).toBeVisible();
-    await selectAgentIfNeeded(dialog, testPage);
+    const contextBranch = "quick-chat-context-branch";
+    execFileSync("git", ["branch", "-f", contextBranch], { cwd: sourceRepo });
+    try {
+      const dialog = await openQuickChatSetup(testPage);
+      await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
+        "Chat with an agent about an idea, question, or codebase.",
+      );
+      await expect(
+        dialog.getByText("Add repository context to focus on specific code and branches."),
+      ).toBeVisible();
+      await selectAgentIfNeeded(dialog, testPage);
 
-    await dialog.getByTestId("add-repository").click();
-    await dialog.getByTestId("repo-chip-trigger").click();
-    await testPage.getByRole("option").first().click();
-    await dialog.getByTestId("branch-chip-trigger").click();
-    await testPage.getByRole("option", { name: "context-branch" }).click();
+      await dialog.getByTestId("add-repository").click();
+      await dialog.getByTestId("repo-chip-trigger").click();
+      await testPage.getByRole("option").first().click();
+      await dialog.getByTestId("branch-chip-trigger").click();
+      await testPage.getByRole("option", { name: contextBranch }).click();
 
-    const startRequest = testPage.waitForRequest(
-      (request) => request.url().includes("/quick-chat") && request.method() === "POST",
-    );
-    await dialog.getByTestId("quick-chat-start").click();
-    const payload = (await startRequest).postDataJSON() as {
-      repositories?: Array<{ repository_id: string; base_branch: string }>;
-    };
-    expect(payload.repositories).toEqual([
-      { repository_id: seedData.repositoryId, base_branch: "context-branch" },
-    ]);
-    await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
-    expect(
-      execFileSync("git", ["branch", "--show-current"], {
-        cwd: sourceRepo,
-        encoding: "utf8",
-      }).trim(),
-    ).toBe("main");
+      const startRequest = testPage.waitForRequest(
+        (request) => request.url().includes("/quick-chat") && request.method() === "POST",
+      );
+      await dialog.getByTestId("quick-chat-start").click();
+      const payload = (await startRequest).postDataJSON() as {
+        repositories?: Array<{ repository_id: string; base_branch: string }>;
+      };
+      expect(payload.repositories).toEqual([
+        { repository_id: seedData.repositoryId, base_branch: contextBranch },
+      ]);
+      await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
+      expect(
+        execFileSync("git", ["branch", "--show-current"], {
+          cwd: sourceRepo,
+          encoding: "utf8",
+        }).trim(),
+      ).toBe("main");
+    } finally {
+      execFileSync("git", ["branch", "-D", contextBranch], { cwd: sourceRepo });
+    }
   });
 
   test("opens quick chat, selects agent, sends message and receives response", async ({

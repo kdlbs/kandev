@@ -421,7 +421,7 @@ describe("useDialogFormState — title autofill from first row GitHub URL info",
     expect(result.current.taskName).toBe("PR #99: Another PR");
   });
 
-  it("does NOT autofill from a non-first row's PR info", () => {
+  it("autofills from the first non-empty row when an earlier placeholder is empty", () => {
     const SECOND_PR_URL = "https://github.com/acme/api/pull/99";
     prInfoMap.set(SECOND_PR_URL, {
       prHeadBranch: "feature/y",
@@ -441,7 +441,7 @@ describe("useDialogFormState — title autofill from first row GitHub URL info",
     act(() => {
       result.current.updateRemoteRepo(secondKey!, { url: SECOND_PR_URL });
     });
-    expect(result.current.taskName).toBe("");
+    expect(result.current.taskName).toBe("PR #99: Second PR");
   });
 });
 

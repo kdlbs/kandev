@@ -186,6 +186,9 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     // survives the truncation, so assert on that.
     const trigger = testPage.getByTestId("remote-repo-chip-trigger").first();
     await expect(trigger).toContainText("paste-repo", { timeout: 5_000 });
+    await expect(testPage.getByTestId("remote-branch-chip-trigger").first()).toContainText("main", {
+      timeout: 10_000,
+    });
 
     await testPage.getByTestId("task-title-input").fill("Remote paste happy path");
     await testPage.getByTestId("task-description-input").fill("test");

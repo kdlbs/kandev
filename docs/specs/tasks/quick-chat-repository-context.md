@@ -18,6 +18,8 @@ context without changing their checked-out branches or creating a kanban task.
   it can start.
 - A user may add zero, one, or multiple imported workspace repositories. Each selected
   repository has one explicit base branch and can appear at most once in a chat.
+- Selecting a repository automatically fills its preferred branch (`main`, `master`, or the
+  first available branch), including when another repository lookup is still pending.
 - A workspace with no existing quick chats explains that quick chat is for discussing an idea,
   question, or codebase outside the task board.
 - Agent and repository fields include concise helper copy. Repository copy explains that the
@@ -89,6 +91,8 @@ them through the existing quick-chat task deletion path.
   the existing repo-less scratch workspace.
 - **GIVEN** an agent and two repository/branch selections, **WHEN** the user starts a chat,
   **THEN** the agent workspace contains both repositories at committed state from those branches.
+- **GIVEN** a repository with an empty branch selection, **WHEN** its branch list loads, **THEN**
+  the preferred branch is selected automatically even if a prior repository request is pending.
 - **GIVEN** the user's source checkout is on another branch or dirty, **WHEN** a repo-backed chat
   starts, **THEN** the source checkout and its uncommitted files remain unchanged.
 - **GIVEN** one repo-backed chat is active, **WHEN** another chat targets the same repository and

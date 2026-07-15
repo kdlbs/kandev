@@ -9,6 +9,8 @@ import {
   createTaskPR,
   fetchAccessibleRepos,
   fetchIssueInfo,
+  fetchPRInfo,
+  fetchRepoBranches,
   getTaskCIAutomationOptions,
   GitHubUnavailableError,
   linkTaskIssue,
@@ -45,6 +47,29 @@ function lastCallUrl(): string {
   if (!call) throw new Error("expected fetch to have been called");
   return String(call[0]);
 }
+
+describe("remote repository reads", () => {
+  it("retries a transient network failure when loading branches", async () => {
+    fetchSpy.mockRejectedValueOnce(new TypeError("fetch failed"));
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ branches: [{ name: "main" }] }));
+
+    await expect(fetchRepoBranches("acme", "site")).resolves.toEqual({
+      branches: [{ name: "main" }],
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries a transient network failure when loading PR title metadata", async () => {
+    fetchSpy.mockRejectedValueOnce(new TypeError("fetch failed"));
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ number: 42, title: "Recovered" }));
+
+    await expect(fetchPRInfo("acme", "site", 42)).resolves.toMatchObject({
+      number: 42,
+      title: "Recovered",
+    });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+});
 
 describe("fetchAccessibleRepos — URL & parsing", () => {
   it("builds the correct URL with both q and limit", async () => {

@@ -1,4 +1,4 @@
-import { fetchJson, ApiError, type ApiRequestOptions } from "../client";
+import { fetchJson, fetchJsonWithRetry, ApiError, type ApiRequestOptions } from "../client";
 import type {
   GitHubStatusResponse,
   GitHubOrg,
@@ -443,7 +443,7 @@ export async function fetchPRInfo(
   number: number,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<GitHubPR>(
+  return fetchJsonWithRetry<GitHubPR>(
     `/api/v1/github/prs/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info`,
     options,
   );
@@ -456,7 +456,7 @@ export async function fetchIssueInfo(
   number: number,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<GitHubIssue>(
+  return fetchJsonWithRetry<GitHubIssue>(
     `/api/v1/github/issues/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info`,
     options,
   );
@@ -464,7 +464,7 @@ export async function fetchIssueInfo(
 
 // Remote repo branches
 export async function fetchRepoBranches(owner: string, repo: string, options?: ApiRequestOptions) {
-  return fetchJson<{ branches: { name: string }[] }>(
+  return fetchJsonWithRetry<{ branches: { name: string }[] }>(
     `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`,
     options,
   );

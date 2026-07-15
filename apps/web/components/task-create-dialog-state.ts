@@ -429,12 +429,13 @@ export function useDialogFormState(
 
   useRemoteReposSeedEffect(ghUrl.useRemote, remoteRepos.remoteRepos, remoteRepos.setRemoteRepos);
 
-  // Title autofill: the first remote-repo row's PR info seeds the task title
-  // when the user hasn't typed one. Keyed only off row 0 — adding more PR
-  // rows later never overwrites the title.
-  useTitleAutofillFromFirstRowGitHubInfo({
+  // Title autofill follows the first populated remote-repo row. Empty
+  // placeholders do not prevent a later pasted PR or issue from suggesting
+  // its title.
+  const primaryRemoteUrl = remoteRepos.remoteRepos.find((row) => row.url.trim())?.url ?? "";
+  useTitleAutofillFromPrimaryGitHubInfo({
     open: open && ghUrl.useRemote,
-    firstRowUrl: remoteRepos.remoteRepos[0]?.url ?? "",
+    primaryRemoteUrl,
     prInfoByUrl,
     taskName: form.taskName,
     setTaskName: form.setTaskName,
@@ -464,7 +465,7 @@ export function useDialogFormState(
 }
 
 /**
- * Seeds the task title from the first Remote row's GitHub URL info (when present)
+ * Seeds the task title from the first populated Remote row's GitHub URL info
  * the first time it arrives, and only when the user hasn't typed a title.
  * Subsequent info changes for the same URL don't overwrite — the
  * lastAutoFilledRef tracks our own writes so re-pasting a different GitHub
@@ -476,30 +477,32 @@ export function useDialogFormState(
  * autofill for the current URL until the URL itself changes. */
 const USER_CLEARED_SENTINEL = "\0cleared";
 
-function useTitleAutofillFromFirstRowGitHubInfo(args: {
+function useTitleAutofillFromPrimaryGitHubInfo(args: {
   open: boolean;
-  firstRowUrl: string;
+  primaryRemoteUrl: string;
   prInfoByUrl: ReturnType<typeof usePRInfoByURL>;
   taskName: string;
   setTaskName: (v: string) => void;
   setHasTitle: (v: boolean) => void;
 }) {
-  const { open, firstRowUrl, prInfoByUrl, taskName, setTaskName, setHasTitle } = args;
+  const { open, primaryRemoteUrl, prInfoByUrl, taskName, setTaskName, setHasTitle } = args;
   const lastAutoFilledRef = useRef("");
   const lastUrlRef = useRef("");
   // Re-read latest info on every render; cheap because the cache is memoized
   // by URL inside the hook.
-  const suggested = firstRowUrl ? prInfoByUrl.info(firstRowUrl)?.suggestedTitle : undefined;
+  const suggested = primaryRemoteUrl
+    ? prInfoByUrl.info(primaryRemoteUrl)?.suggestedTitle
+    : undefined;
 
   // Reset ownership-tracking when the URL changes — switching to a different
   // PR URL grants a fresh autofill opportunity even if the user previously
   // cleared an autofill on the prior URL.
   useEffect(() => {
-    if (firstRowUrl !== lastUrlRef.current) {
-      lastUrlRef.current = firstRowUrl;
+    if (primaryRemoteUrl !== lastUrlRef.current) {
+      lastUrlRef.current = primaryRemoteUrl;
       lastAutoFilledRef.current = "";
     }
-  }, [firstRowUrl]);
+  }, [primaryRemoteUrl]);
 
   useEffect(() => {
     // Detect the "user cleared an auto-filled title" transition. Once we see

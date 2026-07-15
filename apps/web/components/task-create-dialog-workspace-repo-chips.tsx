@@ -312,7 +312,7 @@ function computeRepoChipDisplay(
 ) {
   const workspaceRepo = repositories.find((r) => r.id === row.repositoryId);
   const discoveredRepo = discoveredRepositories.find((r) => r.path === row.localPath);
-  const repoLabel = workspaceRepo?.name ?? discoveredRepo?.path?.split("/").pop() ?? "";
+  const repoLabel = workspaceRepo?.name ?? (discoveredRepo ? leafSegment(discoveredRepo.path) : "");
   const repoPath = workspaceRepo?.local_path || discoveredRepo?.path || "";
   const repoTooltip = repoPath ? `Repository · ${formatUserHomePath(repoPath)}` : "Repository";
   return { repoLabel, repoTooltip };
