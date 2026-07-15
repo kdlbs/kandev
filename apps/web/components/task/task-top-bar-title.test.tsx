@@ -32,7 +32,7 @@ function startEditing() {
   return screen.getByTestId("task-title-rename-input") as HTMLInputElement;
 }
 
-describe("TaskTopBarTitle", () => {
+describe("TaskTopBarTitle — idle state", () => {
   it("renders the title as the breadcrumb page when idle", () => {
     render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
 
@@ -40,14 +40,35 @@ describe("TaskTopBarTitle", () => {
     expect(queryInput()).toBeNull();
     // Not aria-disabled, so pointer-actionability checks treat it as interactive.
     expect(getTitle().getAttribute("aria-disabled")).toBe("false");
+    // Keyboard-operable: reachable via Tab.
+    expect(getTitle().getAttribute("tabindex")).toBe("0");
   });
 
-  it("keeps the breadcrumb aria-disabled when the task is archived", () => {
+  it("keeps the breadcrumb aria-disabled and unfocusable when the task is archived", () => {
     render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" isArchived />);
 
     expect(getTitle().getAttribute("aria-disabled")).toBe("true");
+    expect(getTitle().getAttribute("tabindex")).toBeNull();
   });
 
+  it("does not enter edit mode when the task is archived", () => {
+    render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" isArchived />);
+
+    fireEvent.doubleClick(getTitle());
+
+    expect(queryInput()).toBeNull();
+  });
+
+  it("does not enter edit mode without a task id", () => {
+    render(<TaskTopBarTitle taskTitle="My task" />);
+
+    fireEvent.doubleClick(getTitle());
+
+    expect(queryInput()).toBeNull();
+  });
+});
+
+describe("TaskTopBarTitle — entering edit mode", () => {
   it("swaps to an input pre-filled with the current title on double-click", () => {
     render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
 
@@ -56,6 +77,25 @@ describe("TaskTopBarTitle", () => {
     expect(input.value).toBe("My task");
   });
 
+  it("enters edit mode on Enter when the title is focused", () => {
+    render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
+
+    fireEvent.keyDown(getTitle(), { key: "Enter" });
+
+    const input = screen.getByTestId("task-title-rename-input") as HTMLInputElement;
+    expect(input.value).toBe("My task");
+  });
+
+  it("does not enter edit mode on title Enter when the task is archived", () => {
+    render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" isArchived />);
+
+    fireEvent.keyDown(getTitle(), { key: "Enter" });
+
+    expect(queryInput()).toBeNull();
+  });
+});
+
+describe("TaskTopBarTitle — committing a rename", () => {
   it("renames on Enter with a changed value, trimming whitespace", () => {
     render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
 
@@ -121,7 +161,9 @@ describe("TaskTopBarTitle", () => {
     expect(mockRename).not.toHaveBeenCalled();
     expect(queryInput()).toBeNull();
   });
+});
 
+describe("TaskTopBarTitle — cancelling a rename", () => {
   it("cancels on Escape without renaming", () => {
     render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
 
@@ -145,19 +187,12 @@ describe("TaskTopBarTitle", () => {
     expect(queryInput()).toBeNull();
   });
 
-  it("does not enter edit mode when the task is archived", () => {
-    render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" isArchived />);
+  it("returns focus to the title after a keyboard exit", () => {
+    render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
 
-    fireEvent.doubleClick(getTitle());
+    const input = startEditing();
+    fireEvent.keyDown(input, { key: "Escape" });
 
-    expect(queryInput()).toBeNull();
-  });
-
-  it("does not enter edit mode without a task id", () => {
-    render(<TaskTopBarTitle taskTitle="My task" />);
-
-    fireEvent.doubleClick(getTitle());
-
-    expect(queryInput()).toBeNull();
+    expect(document.activeElement).toBe(getTitle());
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@kandev/ui/breadcrumb";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Input } from "@kandev/ui/input";
@@ -16,13 +16,35 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
   const { renameTaskById } = useTaskActions();
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const titleRef = useRef<HTMLSpanElement>(null);
+  const restoreFocusRef = useRef(false);
   const canRename = Boolean(taskId) && !isArchived;
 
-  const handleDoubleClick = useCallback(() => {
+  // Return focus to the title after a keyboard-driven exit (Enter/Escape) so
+  // keyboard users don't lose their place; blur exits keep focus where the
+  // user clicked.
+  useEffect(() => {
+    if (!isEditing && restoreFocusRef.current) {
+      restoreFocusRef.current = false;
+      titleRef.current?.focus();
+    }
+  }, [isEditing]);
+
+  const startEditing = useCallback(() => {
     if (!taskId || isArchived) return;
     setDraft(taskTitle ?? "");
     setIsEditing(true);
   }, [taskId, isArchived, taskTitle]);
+
+  const handleTitleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLSpanElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        startEditing();
+      }
+    },
+    [startEditing],
+  );
 
   const handleCancel = useCallback(() => setIsEditing(false), []);
 
@@ -40,10 +62,12 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
             console.error("Failed to rename task:", err),
           );
         }
+        restoreFocusRef.current = true;
         setIsEditing(false);
       } else if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
+        restoreFocusRef.current = true;
         setIsEditing(false);
       }
     },
@@ -72,13 +96,16 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
         <BreadcrumbItem className="min-w-0 max-w-full">
           <Tooltip>
             <TooltipTrigger asChild>
-              {/* BreadcrumbPage defaults to aria-disabled="true"; mark it enabled
-                  when renameable so pointer-actionability checks (and AT) see the
-                  double-click target as interactive. */}
+              {/* BreadcrumbPage defaults to aria-disabled="true"; when renameable,
+                  mark it enabled and make it keyboard-operable (tab + Enter) so
+                  AT and pointer-actionability checks see a working control. */}
               <BreadcrumbPage
-                className="block max-w-full truncate font-medium"
+                ref={titleRef}
+                className="block max-w-full truncate rounded-sm font-medium outline-none focus-visible:ring-[2px] focus-visible:ring-ring/35"
                 aria-disabled={!canRename}
-                onDoubleClick={handleDoubleClick}
+                tabIndex={canRename ? 0 : undefined}
+                onDoubleClick={startEditing}
+                onKeyDown={canRename ? handleTitleKeyDown : undefined}
               >
                 {taskTitle ?? "Task details"}
               </BreadcrumbPage>
