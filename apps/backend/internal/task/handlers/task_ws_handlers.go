@@ -285,7 +285,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Description:  description,
 		Priority:     req.Priority,
 		State:        req.State,
-		Repositories: convertToServiceRepos(repos),
+		Repositories: convertUpdateRepositories(req.Repositories != nil, repos),
 		Position:     req.Position,
 		Metadata:     req.Metadata,
 	})

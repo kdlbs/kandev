@@ -1039,7 +1039,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		Description:  description,
 		Priority:     body.Priority,
 		State:        body.State,
-		Repositories: convertToServiceRepos(repos),
+		Repositories: convertUpdateRepositories(body.Repositories != nil, repos),
 		Position:     body.Position,
 		Metadata:     body.Metadata,
 	})
