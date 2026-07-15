@@ -94,12 +94,20 @@ func classifySPARoute(requestPath string) (RouteName, map[string]string) {
 	case requestPath == "/stats":
 		return RouteStats, nil
 	case requestPath == "/office" || strings.HasPrefix(requestPath, "/office/"):
-		return RouteOffice, nil
+		return RouteOffice, officeRouteParams(requestPath)
 	case requestPath == "/settings" || strings.HasPrefix(requestPath, "/settings/"):
 		return RouteSettings, nil
 	default:
 		return classifyTaskRoute(requestPath)
 	}
+}
+
+func officeRouteParams(requestPath string) map[string]string {
+	taskID, ok := cutSingleSegment(requestPath, "/office/tasks/")
+	if !ok {
+		return nil
+	}
+	return map[string]string{"taskId": taskID}
 }
 
 func classifyTaskRoute(requestPath string) (RouteName, map[string]string) {

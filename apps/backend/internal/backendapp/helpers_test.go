@@ -879,40 +879,44 @@ func TestBootPayloadRestoresQuickChatsFromTaskRouteWorkspace(t *testing.T) {
 		updatedAt: base.Add(2 * time.Minute), sessionUpdatedAt: base.Add(2 * time.Minute), agentProfileID: "agent-second",
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/t/route-task", nil)
-	req.AddCookie(&http.Cookie{Name: activeWorkspaceCookie, Value: "ws-active"})
-	payload := bootPayload(ctx, req, routeParams{
-		taskSvc: harness.taskSvc, services: &Services{Workflow: harness.workflowSvc}, userCtrl: harness.userCtrl,
-	}, webapp.ClassifyRoute("/t/route-task"))
+	for _, routePath := range []string{"/t/route-task", "/office/tasks/route-task"} {
+		t.Run(routePath, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, routePath, nil)
+			req.AddCookie(&http.Cookie{Name: activeWorkspaceCookie, Value: "ws-active"})
+			payload := bootPayload(ctx, req, routeParams{
+				taskSvc: harness.taskSvc, services: &Services{Workflow: harness.workflowSvc}, userCtrl: harness.userCtrl,
+			}, webapp.ClassifyRoute(routePath))
 
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("Marshal payload: %v", err)
-	}
-	var decoded struct {
-		InitialState struct {
-			QuickChat struct {
-				Sessions []struct {
-					SessionID   string `json:"sessionId"`
-					WorkspaceID string `json:"workspaceId"`
-				} `json:"sessions"`
-			} `json:"quickChat"`
-		} `json:"initialState"`
-	}
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("Unmarshal payload: %v", err)
-	}
-	sessions := decoded.InitialState.QuickChat.Sessions
-	if len(sessions) != 2 {
-		t.Fatalf("quickChat sessions = %#v, want 2 task-workspace sessions", sessions)
-	}
-	if sessions[0].SessionID != "task-route-first-session" || sessions[1].SessionID != "task-route-second-session" {
-		t.Fatalf("quickChat sessions = %#v, want task-workspace creation order", sessions)
-	}
-	for _, session := range sessions {
-		if session.WorkspaceID != "ws-task" {
-			t.Fatalf("restored workspace = %q, want ws-task", session.WorkspaceID)
-		}
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("Marshal payload: %v", err)
+			}
+			var decoded struct {
+				InitialState struct {
+					QuickChat struct {
+						Sessions []struct {
+							SessionID   string `json:"sessionId"`
+							WorkspaceID string `json:"workspaceId"`
+						} `json:"sessions"`
+					} `json:"quickChat"`
+				} `json:"initialState"`
+			}
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatalf("Unmarshal payload: %v", err)
+			}
+			sessions := decoded.InitialState.QuickChat.Sessions
+			if len(sessions) != 2 {
+				t.Fatalf("quickChat sessions = %#v, want 2 task-workspace sessions", sessions)
+			}
+			if sessions[0].SessionID != "task-route-first-session" || sessions[1].SessionID != "task-route-second-session" {
+				t.Fatalf("quickChat sessions = %#v, want task-workspace creation order", sessions)
+			}
+			for _, session := range sessions {
+				if session.WorkspaceID != "ws-task" {
+					t.Fatalf("restored workspace = %q, want ws-task", session.WorkspaceID)
+				}
+			}
+		})
 	}
 }
 

@@ -20,9 +20,9 @@ abandoned quick chats don't accumulate forever.
 
 - Open quick-chat tabs SHALL be restored after a full page reload, reconstructed
   from backend state rather than client-only memory.
-- Hydration SHALL resolve the workspace represented by the current route. On a
-  task-detail route, the task's workspace is authoritative over a stale active-workspace
-  cookie or user setting.
+- Hydration SHALL resolve the workspace represented by the current route. On `/t/:id`
+  and `/office/tasks/:id` task-detail routes, the task's workspace is authoritative over
+  a stale active-workspace cookie or user setting.
 - A quick chat that has been idle longer than the retention window SHALL be
   deleted automatically (task row, its sessions, and its workspace directory),
   the same as an explicit close.

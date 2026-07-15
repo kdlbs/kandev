@@ -327,7 +327,7 @@ func (b bootStateBuilder) quickChatTaskRouteWorkspaceID(
 	ctx context.Context,
 	route webapp.RouteClassification,
 ) string {
-	if route.Route != webapp.RouteTaskDetail || b.p.taskSvc == nil {
+	if b.p.taskSvc == nil || (route.Route != webapp.RouteTaskDetail && route.Route != webapp.RouteOffice) {
 		return ""
 	}
 	taskID := route.Params["taskId"]
