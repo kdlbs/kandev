@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseGitHubRepoUrl } from "./github-repo-url";
+import { buildGitHubRepoUrl, parseGitHubRepoUrl } from "./github-repo-url";
 
 describe("parseGitHubRepoUrl", () => {
   it("parses a plain repository URL", () => {
@@ -81,5 +81,31 @@ describe("parseGitHubRepoUrl", () => {
       branch: "main",
       path: "my flows",
     });
+  });
+});
+
+describe("buildGitHubRepoUrl", () => {
+  it("renders owner/repo/branch/path back into a tree link", () => {
+    const url = buildGitHubRepoUrl({
+      owner: "jcfs",
+      repo: "kandev-workflows-test",
+      branch: "main",
+      path: ".kandev/workflows",
+    });
+    expect(url).toBe("https://github.com/jcfs/kandev-workflows-test/tree/main/.kandev/workflows");
+  });
+
+  it("round-trips through parseGitHubRepoUrl", () => {
+    const parts = { owner: "jcfs", repo: "repo", branch: "dev", path: "my flows/sub" };
+    expect(parseGitHubRepoUrl(buildGitHubRepoUrl(parts))).toEqual(parts);
+  });
+
+  it("omits the tree suffix without a branch and the path when empty", () => {
+    expect(buildGitHubRepoUrl({ owner: "jcfs", repo: "repo" })).toBe(
+      "https://github.com/jcfs/repo",
+    );
+    expect(buildGitHubRepoUrl({ owner: "jcfs", repo: "repo", branch: "main" })).toBe(
+      "https://github.com/jcfs/repo/tree/main",
+    );
   });
 });

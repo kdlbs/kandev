@@ -21,16 +21,14 @@ This is useful for:
 
 1. Open **Settings → Workspaces → \<workspace\> → Workflows**.
 2. In the **Sync from GitHub** section, paste a GitHub link into
-   **Repository link** to fill the fields automatically — a plain repo URL, an
-   SSH remote, or a `…/tree/<branch>/<directory>` link that carries the branch
-   and directory too. Or enter the fields by hand:
-   - **Owner / Repository** — e.g. `acme` / `kandev-workflows`.
-   - **Branch** — defaults to `main`.
-   - **Path** — directory inside the repo containing the definition files;
-     defaults to `.kandev/workflows`.
-   - **Interval** — how often Kandev checks the repo, in seconds
-     (default 300, minimum 60).
-3. Save. Use **Sync now** to run the first sync immediately instead of waiting
+   **Repository link** — a plain repo URL, an SSH remote, or a
+   `…/tree/<branch>/<directory>` link that also carries the branch and
+   directory. The resolved target (owner/repo and directory) is shown under
+   the field; the directory defaults to `.kandev/workflows` when the link
+   doesn't include one.
+3. Adjust **Branch** (defaults to `main`) and the **Poll interval** — how
+   often Kandev checks the repo, in seconds (default 300, minimum 60).
+4. Save. Use **Sync now** to run the first sync immediately instead of waiting
    for the poller.
 
 Authentication reuses Kandev's existing GitHub access (the `gh` CLI login, a

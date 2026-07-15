@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { IconBrandGithub, IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -13,7 +12,6 @@ import {
   useWorkflowSync,
   type WorkflowSyncFormState,
 } from "@/hooks/domains/settings/use-workflow-sync";
-import { parseGitHubRepoUrl, type ParsedGitHubRepoUrl } from "@/lib/utils/github-repo-url";
 
 const HELP_TEXT =
   "The directory should contain workflow export files (.yml/.yaml/.json) in the kandev_workflow format — the same format produced by workflow export.";
@@ -25,15 +23,18 @@ type FieldsProps = {
 };
 
 type RepoUrlFieldProps = {
+  url: string;
+  invalid: boolean;
+  resolved: string;
   loading: boolean;
-  onParsed: (parsed: ParsedGitHubRepoUrl) => void;
+  onChange: (value: string) => void;
 };
 
-// RepoUrlField lets the user paste a full GitHub link (optionally with
-// /tree/<branch>/<directory>) and auto-fills the structured fields below.
-function RepoUrlField({ loading, onParsed }: RepoUrlFieldProps) {
-  const [url, setUrl] = useState("");
-  const invalid = !!url.trim() && !parseGitHubRepoUrl(url);
+// RepoUrlField is the primary input: a full GitHub link (optionally with
+// /tree/<branch>/<directory>) that resolves into the stored owner, repo,
+// branch, and directory. The resolved target is echoed underneath so the
+// hidden structured fields stay visible to the user.
+function RepoUrlField({ url, invalid, resolved, loading, onChange }: RepoUrlFieldProps) {
   return (
     <div className="space-y-1.5">
       <Label htmlFor="workflow-sync-url">Repository link</Label>
@@ -42,53 +43,22 @@ function RepoUrlField({ loading, onParsed }: RepoUrlFieldProps) {
         data-testid="workflow-sync-url-input"
         placeholder="https://github.com/kdlbs/kandev/tree/main/.kandev/workflows"
         value={url}
-        onChange={(e) => {
-          setUrl(e.target.value);
-          const parsed = parseGitHubRepoUrl(e.target.value);
-          if (parsed) onParsed(parsed);
-        }}
+        onChange={(e) => onChange(e.target.value)}
         disabled={loading}
         aria-invalid={invalid}
       />
-      <p className={invalid ? "text-xs text-destructive" : "text-xs text-muted-foreground"}>
-        {invalid
-          ? "Not a recognized GitHub repository link."
-          : "Paste a GitHub link to fill the fields below — /tree/… links carry the branch and directory too."}
-      </p>
+      {invalid ? (
+        <p className="text-xs text-destructive">Not a recognized GitHub repository link.</p>
+      ) : (
+        <p className="text-xs text-muted-foreground" data-testid="workflow-sync-resolved">
+          {resolved || "Paste a GitHub link — /tree/… links carry the branch and directory too."}
+        </p>
+      )}
     </div>
   );
 }
 
-function RepoFields({ form, loading, update }: FieldsProps) {
-  return (
-    <div className="grid gap-4 sm:grid-cols-2">
-      <div className="space-y-1.5">
-        <Label htmlFor="workflow-sync-owner">Repository owner</Label>
-        <Input
-          id="workflow-sync-owner"
-          data-testid="workflow-sync-owner-input"
-          placeholder="kdlbs"
-          value={form.repo_owner}
-          onChange={(e) => update("repo_owner", e.target.value)}
-          disabled={loading}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="workflow-sync-repo">Repository name</Label>
-        <Input
-          id="workflow-sync-repo"
-          data-testid="workflow-sync-repo-input"
-          placeholder="kandev"
-          value={form.repo_name}
-          onChange={(e) => update("repo_name", e.target.value)}
-          disabled={loading}
-        />
-      </div>
-    </div>
-  );
-}
-
-function BranchPathFields({ form, loading, update }: FieldsProps) {
+function BranchIntervalFields({ form, loading, update }: FieldsProps) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div className="space-y-1.5">
@@ -103,34 +73,18 @@ function BranchPathFields({ form, loading, update }: FieldsProps) {
         />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="workflow-sync-path">Directory</Label>
+        <Label htmlFor="workflow-sync-interval">Poll interval (seconds)</Label>
         <Input
-          id="workflow-sync-path"
-          data-testid="workflow-sync-path-input"
-          placeholder=".kandev/workflows"
-          value={form.path}
-          onChange={(e) => update("path", e.target.value)}
+          id="workflow-sync-interval"
+          data-testid="workflow-sync-interval-input"
+          type="number"
+          min={60}
+          value={form.interval_seconds}
+          onChange={(e) => update("interval_seconds", Number(e.target.value) || 0)}
           disabled={loading}
         />
+        <p className="text-xs text-muted-foreground">Minimum 60 seconds.</p>
       </div>
-    </div>
-  );
-}
-
-function IntervalField({ form, loading, update }: FieldsProps) {
-  return (
-    <div className="space-y-1.5 sm:w-1/2">
-      <Label htmlFor="workflow-sync-interval">Poll interval (seconds)</Label>
-      <Input
-        id="workflow-sync-interval"
-        data-testid="workflow-sync-interval-input"
-        type="number"
-        min={60}
-        value={form.interval_seconds}
-        onChange={(e) => update("interval_seconds", Number(e.target.value) || 0)}
-        disabled={loading}
-      />
-      <p className="text-xs text-muted-foreground">Minimum 60 seconds.</p>
     </div>
   );
 }
@@ -212,7 +166,11 @@ function ActionBar({
 export function WorkflowSyncSection({ workspaceId }: { workspaceId: string }) {
   const s = useWorkflowSync(workspaceId);
   const hasConfig = !!s.config;
-  const disableSave = s.saving || !s.form.repo_owner.trim() || !s.form.repo_name.trim();
+  const disableSave =
+    s.saving || s.urlInvalid || !s.form.repo_owner.trim() || !s.form.repo_name.trim();
+  const resolved = s.form.repo_owner
+    ? `Syncing ${s.form.repo_owner}/${s.form.repo_name} — directory ${s.form.path || "(repository root)"}.`
+    : "";
 
   return (
     <SettingsSection
@@ -223,10 +181,14 @@ export function WorkflowSyncSection({ workspaceId }: { workspaceId: string }) {
       <Card data-testid="workflow-sync-section">
         <CardContent className="space-y-4 pt-6">
           <WorkflowSyncStatusBanner config={s.config} />
-          <RepoUrlField loading={s.loading} onParsed={s.applyParsedUrl} />
-          <RepoFields form={s.form} loading={s.loading} update={s.update} />
-          <BranchPathFields form={s.form} loading={s.loading} update={s.update} />
-          <IntervalField form={s.form} loading={s.loading} update={s.update} />
+          <RepoUrlField
+            url={s.url}
+            invalid={s.urlInvalid}
+            resolved={resolved}
+            loading={s.loading}
+            onChange={s.setUrlInput}
+          />
+          <BranchIntervalFields form={s.form} loading={s.loading} update={s.update} />
           <p className="text-xs text-muted-foreground">{HELP_TEXT}</p>
           <Separator />
           <ActionBar

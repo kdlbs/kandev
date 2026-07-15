@@ -38,6 +38,16 @@ export function parseGitHubRepoUrl(input: string): ParsedGitHubRepoUrl | null {
   return { owner, repo, ...parseBranchAndPath(rest) };
 }
 
+// buildGitHubRepoUrl renders a stored config back into a canonical GitHub
+// link (the inverse of parseGitHubRepoUrl) so the settings form can show one
+// URL instead of separate owner/repo/path fields.
+export function buildGitHubRepoUrl(parts: ParsedGitHubRepoUrl): string {
+  const base = `https://github.com/${parts.owner}/${parts.repo}`;
+  if (!parts.branch) return base;
+  const path = parts.path ? `/${parts.path.split("/").map(encodeURIComponent).join("/")}` : "";
+  return `${base}/tree/${encodeURIComponent(parts.branch)}${path}`;
+}
+
 function parseBranchAndPath(segments: string[]): Pick<ParsedGitHubRepoUrl, "branch" | "path"> {
   const [marker, branch, ...rest] = segments;
   if ((marker !== "tree" && marker !== "blob") || !branch) return {};
