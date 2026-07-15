@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 import { useSavedViews, type SavedView } from "./use-saved-views";
 
@@ -128,14 +128,38 @@ describe("useSavedViews", () => {
 
   it("does not sync queued mutations when fetching settings fails", async () => {
     vi.mocked(fetchUserSettings).mockRejectedValueOnce(new Error("network unavailable"));
+    vi.mocked(fetchUserSettings).mockRejectedValueOnce(new Error("network still unavailable"));
+    const fetchCallsBefore = vi.mocked(fetchUserSettings).mock.calls.length;
     const syncCallsBefore = vi.mocked(updateUserSettings).mock.calls.length;
 
     const { result } = renderHook(() => useSavedViews());
-    result.current.save("New view", view.filters, null);
-
-    await waitFor(() => {
-      expect(fetchUserSettings).toHaveBeenCalled();
+    await waitFor(() => expect(fetchUserSettings).toHaveBeenCalledTimes(fetchCallsBefore + 1));
+    act(() => {
+      result.current.save("New view", view.filters, null);
     });
+
+    await waitFor(() => expect(fetchUserSettings).toHaveBeenCalledTimes(fetchCallsBefore + 2));
     expect(updateUserSettings).toHaveBeenCalledTimes(syncCallsBefore);
+  });
+
+  it("keeps saved views visible and retries hydration after a fetch failure", async () => {
+    vi.mocked(fetchUserSettings).mockRejectedValueOnce(new Error("network unavailable"));
+    const fetchCallsBefore = vi.mocked(fetchUserSettings).mock.calls.length;
+
+    const { result } = renderHook(() => useSavedViews());
+    await waitFor(() => expect(fetchUserSettings).toHaveBeenCalledTimes(fetchCallsBefore + 1));
+
+    let saved!: SavedView;
+    act(() => {
+      saved = result.current.save("New view", view.filters, null);
+    });
+
+    expect(result.current.custom.map((savedView) => savedView.id)).toEqual([saved.id]);
+    await waitFor(() => {
+      expect(fetchUserSettings).toHaveBeenCalledTimes(fetchCallsBefore + 2);
+      expect(updateUserSettings).toHaveBeenCalledWith({
+        jira_saved_views: [expect.objectContaining({ id: saved.id })],
+      });
+    });
   });
 });

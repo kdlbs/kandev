@@ -102,13 +102,24 @@ export function useSavedViews() {
   const [custom, setCustom] = useState<SavedView[]>([]);
   const customRef = useRef(custom);
   const hydrated = useRef(false);
+  const mounted = useRef(true);
+  const hydrationRequest = useRef<Promise<void> | null>(null);
   const pendingMutations = useRef<PendingMutation[]>([]);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function init() {
+  const hydrate = useCallback(async () => {
+    const activeRequest = hydrationRequest.current;
+    if (activeRequest) {
+      await activeRequest;
+      if (hydrated.current || !mounted.current) return;
+      if (hydrationRequest.current) {
+        await hydrationRequest.current;
+        return;
+      }
+    }
+
+    const request = (async () => {
       const response = await fetchUserSettings({ cache: "no-store" }).catch(() => null);
-      if (!response || cancelled) return;
+      if (!response || !mounted.current) return;
       const serverViews = readServerViews(response.settings.jira_saved_views);
 
       const mutations = pendingMutations.current;
@@ -120,12 +131,24 @@ export function useSavedViews() {
       if (mutations.length > 0) {
         void syncServer(hydratedViews);
       }
+    })();
+    hydrationRequest.current = request;
+    try {
+      await request;
+    } finally {
+      if (hydrationRequest.current === request) {
+        hydrationRequest.current = null;
+      }
     }
-    void init();
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    void hydrate();
+    return () => {
+      mounted.current = false;
+    };
+  }, [hydrate]);
 
   const commitMutation = useCallback((mutate: PendingMutation) => {
     const next = mutate(customRef.current);
@@ -133,6 +156,17 @@ export function useSavedViews() {
     setCustom(next);
     void syncServer(next);
   }, []);
+
+  const stageMutation = useCallback(
+    (mutate: PendingMutation) => {
+      pendingMutations.current.push(mutate);
+      const next = mutate(customRef.current);
+      customRef.current = next;
+      setCustom(next);
+      void hydrate();
+    },
+    [hydrate],
+  );
 
   const save = useCallback(
     (name: string, filters: FilterState, customJql: string | null): SavedView => {
@@ -144,25 +178,25 @@ export function useSavedViews() {
       };
       const mutate: PendingMutation = (views) => [...views, view];
       if (!hydrated.current) {
-        pendingMutations.current.push(mutate);
+        stageMutation(mutate);
         return view;
       }
       commitMutation(mutate);
       return view;
     },
-    [commitMutation],
+    [commitMutation, stageMutation],
   );
 
   const remove = useCallback(
     (id: string) => {
       const mutate: PendingMutation = (views) => views.filter((v) => v.id !== id);
       if (!hydrated.current) {
-        pendingMutations.current.push(mutate);
+        stageMutation(mutate);
         return;
       }
       commitMutation(mutate);
     },
-    [commitMutation],
+    [commitMutation, stageMutation],
   );
 
   return {
