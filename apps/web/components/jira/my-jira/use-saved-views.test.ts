@@ -125,4 +125,17 @@ describe("useSavedViews", () => {
       });
     });
   });
+
+  it("does not sync queued mutations when fetching settings fails", async () => {
+    vi.mocked(fetchUserSettings).mockRejectedValueOnce(new Error("network unavailable"));
+    const syncCallsBefore = vi.mocked(updateUserSettings).mock.calls.length;
+
+    const { result } = renderHook(() => useSavedViews());
+    result.current.save("New view", view.filters, null);
+
+    await waitFor(() => {
+      expect(fetchUserSettings).toHaveBeenCalled();
+    });
+    expect(updateUserSettings).toHaveBeenCalledTimes(syncCallsBefore);
+  });
 });

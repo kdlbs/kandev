@@ -108,8 +108,8 @@ export function useSavedViews() {
     let cancelled = false;
     async function init() {
       const response = await fetchUserSettings({ cache: "no-store" }).catch(() => null);
-      const serverViews = readServerViews(response?.settings.jira_saved_views);
-      if (cancelled) return;
+      if (!response || cancelled) return;
+      const serverViews = readServerViews(response.settings.jira_saved_views);
 
       const mutations = pendingMutations.current;
       pendingMutations.current = [];
