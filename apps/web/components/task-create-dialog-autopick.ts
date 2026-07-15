@@ -2,8 +2,6 @@
 
 import { useEffect } from "react";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import { getLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
 
@@ -23,7 +21,7 @@ const workflowAutopickDebug = createDebugLogger("executor-compat:workflow-autopi
  * effect can stay below the 100-line lint cap once the autopick trace logs
  * are inlined, and so the same decision can be tested without rendering.
  *
- * Order: lastId (localStorage) → defId (workspace default) → first
+ * Order: last-used backend setting → workspace default → first
  * compatible. Every candidate is filtered against `compatibleAgentProfiles`
  * so a previously-used profile that's not wired for the chosen executor
  * isn't restored, then immediately fails the executor-compat gate.
@@ -106,8 +104,8 @@ function buildAgentAutopickDebugFields(input: {
     current: input.agentProfileId || "-",
     workflow_id: input.selectedWorkflowId ?? "-",
     executor_profile_id: input.executorProfileId || "-",
-    local_storage_id: lastId ?? "-",
-    local_storage_valid: Boolean(
+    last_used_settings_id: lastId ?? "-",
+    last_used_settings_valid: Boolean(
       lastId && input.compatibleAgentProfiles.some((p) => p.id === lastId),
     ),
     workspace_default_id: defId ?? "-",
@@ -125,14 +123,12 @@ function resolveLastUsedAgentProfileId(
   compatibleAgentProfiles: AgentProfileOption[],
   settingsAgentProfileId?: string | null,
 ) {
-  const localId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null);
   if (
     settingsAgentProfileId &&
     compatibleAgentProfiles.some((p) => p.id === settingsAgentProfileId)
   ) {
     return settingsAgentProfileId;
   }
-  if (localId && compatibleAgentProfiles.some((p) => p.id === localId)) return localId;
   return null;
 }
 

@@ -231,7 +231,6 @@ export type UISliceActions = {
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: () => void;
   clearSidebarTaskPrefsSyncError: () => void;
-  migrateLocalViewsToBackend: () => void;
   setKanbanPreviewedTaskId: (taskId: string | null) => void;
   togglePinnedTask: (taskId: string) => void;
   /** Pin every id that isn't already pinned (bulk "Pin" for multi-select). */

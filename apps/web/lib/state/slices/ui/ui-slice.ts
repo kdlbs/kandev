@@ -1,16 +1,9 @@
 import type { StateCreator } from "zustand";
 import {
   getStoredCollapsedSubtaskParents,
-  getStoredOrderedTaskIds,
-  getStoredPinnedTaskIds,
-  getStoredSidebarActiveViewId,
-  getStoredSidebarDraft,
-  getStoredSidebarUserViews,
-  getStoredSubtaskOrderByParentId,
   setLocalStorage,
   setStoredCollapsedSubtaskParents,
   setStoredQuickChatName,
-  setStoredSidebarUserViews,
 } from "@/lib/local-storage";
 import { buildDismissedAgentErrors } from "./dismissed-agent-errors-actions";
 import {
@@ -21,21 +14,13 @@ import {
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
-import { DEFAULT_ACTIVE_VIEW_ID, DEFAULT_VIEW } from "./sidebar-view-builtins";
-import type { SidebarView, SidebarViewDraft, SortSpec } from "./sidebar-view-types";
+import { DEFAULT_VIEW } from "./sidebar-view-builtins";
+import type { SidebarView, SortSpec } from "./sidebar-view-types";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 
 function loadSidebarState(): UISliceState["sidebarViews"] {
-  let views = getStoredSidebarUserViews<SidebarView[]>([]).map(migrateView);
-  if (views.length === 0) {
-    views = [DEFAULT_VIEW];
-  }
-  setStoredSidebarUserViews(views);
-  const storedActive = getStoredSidebarActiveViewId(DEFAULT_ACTIVE_VIEW_ID);
-  const activeViewId = views.some((v) => v.id === storedActive) ? storedActive : views[0].id;
-  const draft = getStoredSidebarDraft<SidebarViewDraft | null>(null);
-  return { views, activeViewId, draft, syncError: null };
+  return { views: [DEFAULT_VIEW], activeViewId: DEFAULT_VIEW.id, draft: null, syncError: null };
 }
 
 export const KNOWN_DIMENSIONS = new Set<string>([
@@ -379,11 +364,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   // Hydrate from sessionStorage at slice creation (runs in the browser, after
   // the default static state) so tests and SSR both see a fresh read.
   collapsedSubtaskParents: getStoredCollapsedSubtaskParents(),
-  sidebarTaskPrefs: {
-    pinnedTaskIds: getStoredPinnedTaskIds(),
-    orderedTaskIds: getStoredOrderedTaskIds(),
-    subtaskOrderByParentId: getStoredSubtaskOrderByParentId(),
-  },
+  sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
   appSidebar: loadAppSidebarState(),
   ...buildAppSidebarActions(set),
   ...buildPreviewActions(set),

@@ -530,7 +530,6 @@ export type AppState = {
   toggleSubtaskCollapsed: UIA["toggleSubtaskCollapsed"];
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
   clearSidebarTaskPrefsSyncError: UIA["clearSidebarTaskPrefsSyncError"];
-  migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
   setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
   togglePinnedTask: UIA["togglePinnedTask"];
   pinTasks: UIA["pinTasks"];

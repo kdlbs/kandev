@@ -63,9 +63,8 @@ task-creating pollers.
   current behavior until a workspace changes its GitHub scope.
 - Workspace-scoped GitHub searches have cache keys that include the workspace
   scope so scoped and unscoped result pages do not share cached data.
-- Default query presets migrate opportunistically from the older global
-  browser/user-settings path into the first workspace where the user opens
-  GitHub settings or the `/github` page.
+- The temporary opportunistic browser/user-settings migration for default
+  query presets was removed by ADR 0039 after the migration window.
 - Task creation repo/branch pickers remain governed by workspace repositories;
   GitHub repository scope only affects GitHub integration surfaces.
 - Config/status APIs must either require `workspace_id` or derive it from the

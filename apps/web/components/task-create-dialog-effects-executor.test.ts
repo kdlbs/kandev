@@ -1,12 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useDefaultSelectionsEffect } from "./task-create-dialog-effects";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
-
-beforeEach(() => {
-  localStorage.clear();
-});
 
 const PROFILE_DOCKER = "profile-docker";
 const PROFILE_LOCAL = "profile-local";
@@ -168,7 +163,6 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
 
 describe("useDefaultSelectionsEffect - executor profile restoration", () => {
   it("defers executor profile fallback until user settings have loaded or settled", async () => {
-    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
     const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
     const worktree = worktreeExecutor();
     const selBefore = makeSel({
@@ -192,46 +186,10 @@ describe("useDefaultSelectionsEffect - executor profile restoration", () => {
 
     await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
   });
-
-  it("keeps deferring when a valid cached executor profile exists but settings are loading", async () => {
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-      JSON.stringify(PROFILE_WORKTREE),
-    );
-    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
-    const sel = makeSel({
-      executors: [worktreeExecutor()],
-      userSettingsLoaded: false,
-    });
-
-    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fs.setExecutorId).not.toHaveBeenCalled();
-    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
-  });
-
-  it("keeps deferring when cached executor profile is ineligible for the source mode", async () => {
-    window.localStorage.setItem(
-      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-      JSON.stringify(PROFILE_WORKTREE),
-    );
-    const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "", noRepository: true });
-    const sel = makeSel({
-      executors: [worktreeExecutor(), localExecutor()],
-      userSettingsLoaded: false,
-    });
-
-    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
-
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
-  });
 });
 
 describe("useDefaultSelectionsEffect - executor profile settings restoration", () => {
-  it("restores executor profile from store-backed settings when localStorage is not primed", async () => {
-    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
+  it("restores executor profile from backend settings", async () => {
     const fs = makeDefaultSelFs({ executorProfileId: "", executorId: "" });
     const worktree = worktreeExecutor();
     const sel = makeSel({
@@ -246,7 +204,6 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
   });
 
   it("does not pick a fallback executor id while a valid last-used profile is restoring", async () => {
-    window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
     const local = localExecutor();
     const worktree = worktreeExecutor();
     const sel = makeSel({

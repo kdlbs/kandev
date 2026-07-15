@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useRepositoryAutoSelectEffect } from "./task-create-dialog-repository-autopick";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import type { Repository } from "@/lib/types/http";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
+const STORAGE_KEYS = { LAST_REPOSITORY_ID: "kandev.dialog.lastRepositoryId" } as const;
 import {
   readQueuedTaskCreateLastUsedState,
   resetTaskCreateLastUsedSync,
@@ -40,7 +40,6 @@ function makeRepoAutoSelectFs(
 
 describe("useRepositoryAutoSelectEffect loading gates", () => {
   it("waits for store-backed settings before falling back to an empty row", async () => {
-    window.localStorage.removeItem(STORAGE_KEYS.LAST_REPOSITORY_ID);
     const setRepositories = vi.fn();
     const fs = makeRepoAutoSelectFs([], setRepositories);
 
@@ -69,7 +68,7 @@ describe("useRepositoryAutoSelectEffect loading gates", () => {
     expect(updater([])).toEqual([{ key: "row-0", repositoryId: "repo-2", branch: "" }]);
   });
 
-  it("waits for store-backed settings before trusting a valid cached repository id", async () => {
+  it("ignores a stale cached repository while waiting for backend settings", async () => {
     window.localStorage.setItem(STORAGE_KEYS.LAST_REPOSITORY_ID, JSON.stringify("repo-1"));
     const setRepositories = vi.fn();
     const fs = makeRepoAutoSelectFs([], setRepositories);
@@ -91,10 +90,8 @@ describe("useRepositoryAutoSelectEffect loading gates", () => {
     expect(setRepositories).not.toHaveBeenCalled();
     expect(readQueuedTaskCreateLastUsedState()).toEqual({});
   });
-});
 
-describe("useRepositoryAutoSelectEffect defaults", () => {
-  it("queues a consumed cached repository id until backend settings catch up", async () => {
+  it("ignores a stale cached repository after user settings have loaded", async () => {
     window.localStorage.setItem(STORAGE_KEYS.LAST_REPOSITORY_ID, JSON.stringify("repo-1"));
     const setRepositories = vi.fn();
     const fs = makeRepoAutoSelectFs([], setRepositories);
@@ -105,25 +102,19 @@ describe("useRepositoryAutoSelectEffect defaults", () => {
         true,
         "ws-1",
         [makeRepository("repo-1"), makeRepository("repo-2")],
-        {
-          lastUsedRepositoryId: null,
-          userSettingsLoaded: true,
-        },
+        { userSettingsLoaded: true },
       ),
     );
 
     await waitFor(() => expect(setRepositories).toHaveBeenCalled());
     const updater = setRepositories.mock.calls[0]![0] as (prev: TaskRepoRow[]) => TaskRepoRow[];
-
-    expect(updater([])).toEqual([{ key: "row-0", repositoryId: "repo-1", branch: "" }]);
-    expect(readQueuedTaskCreateLastUsedState()).toMatchObject({
-      repositoryId: "repo-1",
-      branch: null,
-    });
+    expect(updater([])).toEqual([{ key: "row-0", branch: "" }]);
+    expect(readQueuedTaskCreateLastUsedState()).toEqual({});
   });
+});
 
-  it("fills an untouched placeholder row from store-backed settings when localStorage is not primed", async () => {
-    window.localStorage.removeItem(STORAGE_KEYS.LAST_REPOSITORY_ID);
+describe("useRepositoryAutoSelectEffect defaults", () => {
+  it("fills an untouched placeholder row from backend settings", async () => {
     const setRepositories = vi.fn();
     const fs = makeRepoAutoSelectFs([{ key: "row-0", branch: "" }], setRepositories);
 
@@ -145,8 +136,7 @@ describe("useRepositoryAutoSelectEffect defaults", () => {
     ]);
   });
 
-  it("fills an empty repo row list from store-backed settings when localStorage is not primed", async () => {
-    window.localStorage.removeItem(STORAGE_KEYS.LAST_REPOSITORY_ID);
+  it("fills an empty repo row list from backend settings", async () => {
     const setRepositories = vi.fn();
     const fs = makeRepoAutoSelectFs([], setRepositories);
 

@@ -10,8 +10,6 @@ import type {
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
-import { getLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { createDebugLogger } from "@/lib/debug/log";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToTask } from "@/lib/links";
@@ -61,16 +59,12 @@ export function autoSelectBranch(
   setBranch: (value: string) => void,
   options: { lastUsedBranch?: string | null; userSettingsLoaded?: boolean } = {},
 ): void {
-  const localStorageBranch = getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null);
   const settingsBranch = options.lastUsedBranch ?? null;
-  const localStorageValid = isBranchSelectable(branchList, localStorageBranch);
   const settingsValid = isBranchSelectable(branchList, settingsBranch);
   if (settingsBranch && settingsValid) {
     selectionDebug(BRANCH_AUTOPICK_DEBUG, {
       source: "settings:taskCreateLastUsed",
       pick: settingsBranch,
-      local_storage_value: localStorageBranch ?? "-",
-      local_storage_valid: localStorageValid,
       branch_count: branchList.length,
     });
     setBranch(settingsBranch);
@@ -80,29 +74,14 @@ export function autoSelectBranch(
     selectionDebug(BRANCH_AUTOPICK_DEBUG, {
       source: "user-settings-loading",
       pick: "-",
-      local_storage_value: localStorageBranch ?? "-",
-      local_storage_valid: localStorageValid,
       branch_count: branchList.length,
     });
-    return;
-  }
-  if (localStorageBranch && localStorageValid) {
-    selectionDebug(BRANCH_AUTOPICK_DEBUG, {
-      source: "localStorage:lastBranch",
-      pick: localStorageBranch,
-      local_storage_value: localStorageBranch,
-      local_storage_valid: true,
-      branch_count: branchList.length,
-    });
-    setBranch(localStorageBranch);
     return;
   }
   const preferredBranch = selectPreferredBranch(branchList);
   selectionDebug(BRANCH_AUTOPICK_DEBUG, {
     source: preferredBranch ? "preferred" : "none",
     pick: preferredBranch ?? "-",
-    local_storage_value: localStorageBranch ?? "-",
-    local_storage_valid: localStorageValid,
     branch_count: branchList.length,
   });
   if (preferredBranch) setBranch(preferredBranch);

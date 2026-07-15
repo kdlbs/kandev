@@ -672,6 +672,12 @@ export class ApiClient {
     kanban_view_mode?: string;
     tasks_list_sort?: string;
     tasks_list_group?: string;
+    task_create_last_used?: {
+      repository_id?: string | null;
+      branch?: string | null;
+      agent_profile_id?: string | null;
+      executor_profile_id?: string | null;
+    };
     voice_mode?: VoiceModeSettings;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);

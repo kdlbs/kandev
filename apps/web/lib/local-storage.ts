@@ -651,22 +651,6 @@ export function cleanupTaskStorage(
     setStoredCollapsedSubtaskParents(collapsed.filter((id) => id !== taskId));
   }
 
-  // Sidebar pin + manual-order arrays. Strip the deleted task so the lists
-  // don't grow unboundedly across reloads.
-  const pinned = getStoredPinnedTaskIds();
-  if (pinned.includes(taskId)) {
-    setStoredPinnedTaskIds(pinned.filter((id) => id !== taskId));
-  }
-  const ordered = getStoredOrderedTaskIds();
-  if (ordered.includes(taskId)) {
-    setStoredOrderedTaskIds(ordered.filter((id) => id !== taskId));
-  }
-
-  // Per-parent subtask order: drop the deleted task as a parent key, and strip
-  // it from any other parent's subtask-order list (in case it was a subtask).
-  const subOrder = getStoredSubtaskOrderByParentId();
-  if (pruneSubtaskOrder(subOrder, taskId)) setStoredSubtaskOrderByParentId(subOrder);
-
   // Env-keyed storage — dockview layout + maximize live under task envs.
   for (const envId of envIds) {
     removeEnvMaximizeState(envId);
@@ -718,112 +702,6 @@ export function removeStoredQuickChatName(sessionId: string): void {
   if (!(sessionId in all)) return;
   delete all[sessionId];
   setLocalStorage(QUICK_CHAT_NAMES_KEY, all);
-}
-
-// --- Sidebar filter views (localStorage, global) ---
-
-const SIDEBAR_VIEWS_KEY = "kandev.sidebar.views";
-const SIDEBAR_ACTIVE_VIEW_KEY = "kandev.sidebar.activeViewId";
-const SIDEBAR_DRAFT_KEY = "kandev.sidebar.draft";
-
-// The SidebarView / SidebarViewDraft types aren't structurally assignable to
-// JsonValue (the filter clause value is `unknown`), so these wrappers take the
-// domain type and do the cast once here — keeps call sites type-safe.
-export function getStoredSidebarUserViews<T>(fallback: T): T {
-  return getLocalStorage(SIDEBAR_VIEWS_KEY, fallback as unknown as JsonValue) as unknown as T;
-}
-
-export function setStoredSidebarUserViews<T>(views: T): void {
-  setLocalStorage(SIDEBAR_VIEWS_KEY, views as unknown as JsonValue);
-}
-
-export function getStoredSidebarActiveViewId(fallback: string): string {
-  return getLocalStorage(SIDEBAR_ACTIVE_VIEW_KEY, fallback);
-}
-
-export function setStoredSidebarActiveViewId(id: string): void {
-  setLocalStorage(SIDEBAR_ACTIVE_VIEW_KEY, id);
-}
-
-export function getStoredSidebarDraft<T>(fallback: T): T {
-  return getLocalStorage(SIDEBAR_DRAFT_KEY, fallback as unknown as JsonValue) as unknown as T;
-}
-
-export function setStoredSidebarDraft<T>(draft: T): void {
-  setLocalStorage(SIDEBAR_DRAFT_KEY, draft as unknown as JsonValue);
-}
-
-export function removeStoredSidebarDraft(): void {
-  removeLocalStorage(SIDEBAR_DRAFT_KEY);
-}
-
-// --- Sidebar task prefs: pin + manual order (localStorage, global) ---
-
-const SIDEBAR_PINNED_TASKS_KEY = "kandev.sidebar.pinnedTaskIds";
-const SIDEBAR_TASK_ORDER_KEY = "kandev.sidebar.orderedTaskIds";
-
-function readStringArray(key: string): string[] {
-  const raw = getLocalStorage<string[]>(key, []) as unknown;
-  if (!Array.isArray(raw)) return [];
-  return raw.filter((id): id is string => typeof id === "string");
-}
-
-export function getStoredPinnedTaskIds(): string[] {
-  return readStringArray(SIDEBAR_PINNED_TASKS_KEY);
-}
-
-export function setStoredPinnedTaskIds(ids: string[]): void {
-  setLocalStorage(SIDEBAR_PINNED_TASKS_KEY, ids);
-}
-
-export function getStoredOrderedTaskIds(): string[] {
-  return readStringArray(SIDEBAR_TASK_ORDER_KEY);
-}
-
-export function setStoredOrderedTaskIds(ids: string[]): void {
-  setLocalStorage(SIDEBAR_TASK_ORDER_KEY, ids);
-}
-
-const SIDEBAR_SUBTASK_ORDER_KEY = "kandev.sidebar.subtaskOrderByParentId";
-
-export function getStoredSubtaskOrderByParentId(): Record<string, string[]> {
-  const raw = getLocalStorage<Record<string, string[]>>(SIDEBAR_SUBTASK_ORDER_KEY, {}) as unknown;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  const out: Record<string, string[]> = {};
-  for (const [parentId, ids] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof parentId !== "string" || !Array.isArray(ids)) continue;
-    const filtered = ids.filter((id): id is string => typeof id === "string");
-    if (filtered.length > 0) out[parentId] = filtered;
-  }
-  return out;
-}
-
-export function setStoredSubtaskOrderByParentId(map: Record<string, string[]>): void {
-  setLocalStorage(SIDEBAR_SUBTASK_ORDER_KEY, map);
-}
-
-/**
- * Strip a task id from a subtask-order map: drop it as a parent key, and
- * remove it from every other parent's subtask list (cleaning up the parent
- * entry if its list becomes empty). Mutates `map` in place and returns
- * `true` if anything changed. Used by both `cleanupTaskStorage` (plain
- * object) and `removeTaskFromSidebarPrefs` (Immer draft) to keep the two
- * cleanup paths in lockstep.
- */
-export function pruneSubtaskOrder(map: Record<string, string[]>, taskId: string): boolean {
-  let changed = false;
-  if (taskId in map) {
-    delete map[taskId];
-    changed = true;
-  }
-  for (const [parentId, ids] of Object.entries(map)) {
-    if (!ids.includes(taskId)) continue;
-    const next = ids.filter((id) => id !== taskId);
-    if (next.length === 0) delete map[parentId];
-    else map[parentId] = next;
-    changed = true;
-  }
-  return changed;
 }
 
 // AppSidebar collapse/section/width storage helpers live in

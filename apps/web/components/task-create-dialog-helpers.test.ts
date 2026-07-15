@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { autoSelectBranch } from "./task-create-dialog-helpers";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
+const STORAGE_KEYS = { LAST_BRANCH: "kandev.dialog.lastBranch" } as const;
 
 beforeEach(() => {
   localStorage.clear();
@@ -21,7 +21,7 @@ describe("autoSelectBranch", () => {
     expect(setBranch).toHaveBeenCalledWith("main");
   });
 
-  it("uses store-backed last-used branch when localStorage is not primed", () => {
+  it("uses the backend last-used branch before settings finish loading", () => {
     const setBranch = vi.fn();
 
     autoSelectBranch(branches, setBranch, {
@@ -32,7 +32,7 @@ describe("autoSelectBranch", () => {
     expect(setBranch).toHaveBeenCalledWith("feature");
   });
 
-  it("uses store-backed last-used branch when localStorage branch is stale", () => {
+  it("uses the backend last-used branch when browser storage is stale", () => {
     const setBranch = vi.fn();
     localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("deleted"));
 
@@ -52,18 +52,8 @@ describe("autoSelectBranch", () => {
     expect(setBranch).not.toHaveBeenCalled();
   });
 
-  it("defers when localStorage branch is stale and user settings are still loading", () => {
+  it("defers while user settings are loading", () => {
     const setBranch = vi.fn();
-    localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("deleted"));
-
-    autoSelectBranch(branches, setBranch, { userSettingsLoaded: false });
-
-    expect(setBranch).not.toHaveBeenCalled();
-  });
-
-  it("defers when localStorage branch is valid but user settings are still loading", () => {
-    const setBranch = vi.fn();
-    localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("feature"));
 
     autoSelectBranch(branches, setBranch, { userSettingsLoaded: false });
 
@@ -72,6 +62,15 @@ describe("autoSelectBranch", () => {
 
   it("falls back to preferred branch after user settings have loaded without a valid last-used branch", () => {
     const setBranch = vi.fn();
+
+    autoSelectBranch(branches, setBranch, { userSettingsLoaded: true });
+
+    expect(setBranch).toHaveBeenCalledWith("main");
+  });
+
+  it("ignores a stale localStorage branch after user settings have loaded", () => {
+    const setBranch = vi.fn();
+    localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("feature"));
 
     autoSelectBranch(branches, setBranch, { userSettingsLoaded: true });
 

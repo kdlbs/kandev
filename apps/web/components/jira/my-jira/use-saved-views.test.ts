@@ -4,7 +4,6 @@ import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/setting
 import { useSavedViews, type SavedView } from "./use-saved-views";
 
 const STORAGE_KEY = "kandev:jira:saved-views:v1";
-const SYNC_FAILED_KEY = "kandev:jira:saved-views:sync-failed:v1";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchUserSettings: vi.fn(),
@@ -53,16 +52,13 @@ describe("useSavedViews", () => {
     } as Awaited<ReturnType<typeof updateUserSettings>>);
   });
 
-  it("retries local views after a failed backend sync and clears the marker", async () => {
+  it("ignores stale local views when backend settings are empty", async () => {
     localStorageMock.setItem(STORAGE_KEY, JSON.stringify([view]));
-    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
 
-    renderHook(() => useSavedViews());
+    const { result } = renderHook(() => useSavedViews());
 
-    await waitFor(() => {
-      expect(updateUserSettings).toHaveBeenCalledWith({ jira_saved_views: [view] });
-      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
-    });
+    await waitFor(() => expect(result.current.custom).toEqual([]));
+    expect(updateUserSettings).not.toHaveBeenCalled();
   });
 
   it("hydrates a legacy statusCategories view to statuses: [] without throwing", async () => {
@@ -79,7 +75,9 @@ describe("useSavedViews", () => {
         sort: "updated",
       },
     };
-    localStorageMock.setItem(STORAGE_KEY, JSON.stringify([legacy]));
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { jira_saved_views: [legacy] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
 
     const { result } = renderHook(() => useSavedViews());
 
@@ -89,21 +87,6 @@ describe("useSavedViews", () => {
       expect(loaded?.filters.statuses).toEqual([]);
       expect(loaded?.filters.projectKeys).toEqual(["CLIP"]);
       expect("statusCategories" in loaded!.filters).toBe(false);
-    });
-  });
-
-  it("retries empty local views after a failed backend sync", async () => {
-    localStorageMock.setItem(STORAGE_KEY, JSON.stringify([]));
-    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
-    vi.mocked(fetchUserSettings).mockResolvedValue({
-      settings: { jira_saved_views: [view] },
-    } as Awaited<ReturnType<typeof fetchUserSettings>>);
-
-    renderHook(() => useSavedViews());
-
-    await waitFor(() => {
-      expect(updateUserSettings).toHaveBeenCalledWith({ jira_saved_views: [] });
-      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
     });
   });
 });

@@ -169,8 +169,8 @@ function usePresetDraft() {
   const [draft, setDraft] = useState<JiraStoredPreset[]>(stored);
   // Render-time conditional setState is React's documented "adjust state
   // during render" pattern; it resets the draft when the hook's stored value
-  // changes (e.g. after reset or cross-tab edit). Gate the sync on `loaded` so
-  // an in-progress edit isn't wiped when the initial localStorage read lands.
+  // changes (e.g. after reset or a backend refresh). Gate the sync on `loaded`
+  // so an in-progress edit isn't wiped when the initial settings read lands.
   const [synced, setSynced] = useState(stored);
   if (loaded && stored !== synced) {
     setSynced(stored);

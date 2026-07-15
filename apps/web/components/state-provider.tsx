@@ -14,8 +14,6 @@ import { useStore } from "zustand";
 import { isDebug, registerSessionTaskResolver } from "@/lib/debug/log";
 import type { AppState, StoreProviderProps } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
-import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { clearQueuedTaskCreateLastUsedIfSynced } from "./task-create-dialog-handlers";
 
 const StoreContext = createContext<StoreApi<AppState> | null>(null);
@@ -43,7 +41,7 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
   }, [store]);
 
   useLayoutEffect(() => {
-    syncTaskCreateLastUsedCache(store.getState());
+    clearQueuedTaskCreateLastUsed(store.getState());
     return store.subscribe((state, prevState) => {
       if (
         state.userSettings.loaded === prevState.userSettings.loaded &&
@@ -54,7 +52,7 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
       ) {
         return;
       }
-      syncTaskCreateLastUsedCache(state);
+      clearQueuedTaskCreateLastUsed(state);
     });
   }, [store]);
 
@@ -71,38 +69,9 @@ export function StateProvider({ children, initialState }: StoreProviderProps) {
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
 }
 
-function syncTaskCreateLastUsedCache(state: AppState) {
+function clearQueuedTaskCreateLastUsed(state: AppState) {
   if (!state.userSettings.loaded) return;
-  const lastUsed = state.userSettings.taskCreateLastUsed;
-  syncTaskCreateLastUsedCacheField(
-    STORAGE_KEYS.LAST_REPOSITORY_ID,
-    lastUsed?.repositoryId,
-    lastUsed?.synced,
-  );
-  syncTaskCreateLastUsedCacheField(STORAGE_KEYS.LAST_BRANCH, lastUsed?.branch, lastUsed?.synced);
-  syncTaskCreateLastUsedCacheField(
-    STORAGE_KEYS.LAST_AGENT_PROFILE_ID,
-    lastUsed?.agentProfileId,
-    lastUsed?.synced,
-  );
-  syncTaskCreateLastUsedCacheField(
-    STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-    lastUsed?.executorProfileId,
-    lastUsed?.synced,
-  );
-  clearQueuedTaskCreateLastUsedIfSynced(lastUsed);
-}
-
-function syncTaskCreateLastUsedCacheField(
-  key: string,
-  value: string | null | undefined,
-  synced: boolean | undefined,
-) {
-  if (value) {
-    setLocalStorage(key, value);
-    return;
-  }
-  if (synced) removeLocalStorage(key);
+  clearQueuedTaskCreateLastUsedIfSynced(state.userSettings.taskCreateLastUsed);
 }
 
 function taskCreateLastUsedEqual(

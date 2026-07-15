@@ -1,9 +1,3 @@
-import {
-  pruneSubtaskOrder,
-  setStoredOrderedTaskIds,
-  setStoredPinnedTaskIds,
-  setStoredSubtaskOrderByParentId,
-} from "@/lib/local-storage";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import type { UISlice } from "./types";
 
@@ -11,6 +5,22 @@ type ImmerSet = (recipe: (draft: UISlice) => void, shouldReplace?: false | undef
 
 let sidebarTaskPrefsSync = Promise.resolve();
 let sidebarTaskPrefsSyncVersion = 0;
+
+function pruneSubtaskOrder(map: Record<string, string[]>, taskId: string): boolean {
+  let changed = false;
+  if (taskId in map) {
+    delete map[taskId];
+    changed = true;
+  }
+  for (const [parentId, ids] of Object.entries(map)) {
+    if (!ids.includes(taskId)) continue;
+    const next = ids.filter((id) => id !== taskId);
+    if (next.length === 0) delete map[parentId];
+    else map[parentId] = next;
+    changed = true;
+  }
+  return changed;
+}
 
 function syncSidebarTaskPrefs(prefs: UISlice["sidebarTaskPrefs"], set: ImmerSet) {
   const syncVersion = ++sidebarTaskPrefsSyncVersion;
@@ -59,7 +69,6 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
         const idx = list.indexOf(taskId);
         if (idx === -1) list.push(taskId);
         else list.splice(idx, 1);
-        setStoredPinnedTaskIds(list);
       });
       syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
     },
@@ -76,7 +85,6 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
         }
         if (changed) {
           draft.sidebarTaskPrefs.syncPending = true;
-          setStoredPinnedTaskIds(list);
         }
       });
       if (changed) syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
@@ -92,7 +100,6 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
         changed = true;
         draft.sidebarTaskPrefs.syncPending = true;
         draft.sidebarTaskPrefs.pinnedTaskIds = next;
-        setStoredPinnedTaskIds(next);
       });
       if (changed) syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
     },
@@ -100,7 +107,6 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
       set((draft) => {
         draft.sidebarTaskPrefs.syncPending = true;
         draft.sidebarTaskPrefs.orderedTaskIds = orderedTaskIds;
-        setStoredOrderedTaskIds(orderedTaskIds);
       });
       syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
     },
@@ -110,7 +116,6 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
         const map = draft.sidebarTaskPrefs.subtaskOrderByParentId;
         if (orderedSubtaskIds.length === 0) delete map[parentTaskId];
         else map[parentTaskId] = orderedSubtaskIds;
-        setStoredSubtaskOrderByParentId(map);
       });
       syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);
     },
@@ -123,19 +128,16 @@ export function buildSidebarTaskPrefsActions(set: ImmerSet, get: () => UISlice) 
           changed = true;
           prefs.syncPending = true;
           prefs.pinnedTaskIds.splice(pinIdx, 1);
-          setStoredPinnedTaskIds(prefs.pinnedTaskIds);
         }
         const orderIdx = prefs.orderedTaskIds.indexOf(taskId);
         if (orderIdx !== -1) {
           changed = true;
           prefs.syncPending = true;
           prefs.orderedTaskIds.splice(orderIdx, 1);
-          setStoredOrderedTaskIds(prefs.orderedTaskIds);
         }
         if (pruneSubtaskOrder(prefs.subtaskOrderByParentId, taskId)) {
           changed = true;
           prefs.syncPending = true;
-          setStoredSubtaskOrderByParentId(prefs.subtaskOrderByParentId);
         }
       });
       if (changed) syncSidebarTaskPrefs(get().sidebarTaskPrefs, set);

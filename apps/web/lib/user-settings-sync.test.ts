@@ -26,7 +26,7 @@ describe("createQueuedUserSettingsSync", () => {
     vi.mocked(updateUserSettings)
       .mockReturnValueOnce(first.promise)
       .mockResolvedValueOnce({ settings: {} } as Awaited<ReturnType<typeof updateUserSettings>>);
-    const sync = createQueuedUserSettingsSync<string>("sync-key", (value) => ({
+    const sync = createQueuedUserSettingsSync<string>((value) => ({
       preferred_shell: value,
     }));
 

@@ -112,28 +112,24 @@ export const dockerTest = backendFixture.extend<
 
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
     await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+      task_create_last_used: {
+        repository_id: seedData.repositoryId,
+        branch: "main",
+        agent_profile_id: seedData.agentProfileId,
+      },
+    });
     const context = await browser.newContext({ baseURL: backend.frontendUrl });
     const page = await context.newPage();
     await page.addInitScript(
-      ({
-        backendPort,
-        repositoryId,
-        agentProfileId,
-      }: {
-        backendPort: string;
-        repositoryId: string;
-        agentProfileId: string;
-      }) => {
+      ({ backendPort }: { backendPort: string }) => {
         localStorage.setItem("kandev.onboarding.completed", "true");
-        localStorage.setItem("kandev.dialog.lastRepositoryId", JSON.stringify(repositoryId));
-        localStorage.setItem("kandev.dialog.lastAgentProfileId", JSON.stringify(agentProfileId));
-        localStorage.setItem("kandev.dialog.lastBranch", JSON.stringify("main"));
         window.__KANDEV_API_PORT = backendPort;
       },
       {
         backendPort: String((backend as BackendContext).port),
-        repositoryId: seedData.repositoryId,
-        agentProfileId: seedData.agentProfileId,
       },
     );
     await use(page);
