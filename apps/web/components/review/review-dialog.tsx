@@ -40,7 +40,11 @@ function fileMapKey(path: string, repositoryName?: string): string {
   return reviewFileKey({ path, repository_name: repositoryName });
 }
 
-function addCumulativeDiffFiles(fileMap: Map<string, ReviewFile>, files: CumulativeDiff["files"]) {
+function addCumulativeDiffFiles(
+  fileMap: Map<string, ReviewFile>,
+  files: CumulativeDiff["files"],
+  useRepositoryKeys: boolean,
+) {
   // Multi-repo: backend stamps each per-file payload with `repository_name`
   // + the repo-relative `path`, and uses a NUL-composite `<repo>\x00<path>`
   // map key. Single-repo payloads from `parseCommitDiff` carry the bare path
@@ -48,8 +52,8 @@ function addCumulativeDiffFiles(fileMap: Map<string, ReviewFile>, files: Cumulat
   // value so the composite key doesn't bleed into the displayed path, and
   // fall back to the map key so single-repo files aren't silently dropped.
   for (const [mapKey, file] of Object.entries(files)) {
-    const repoName = file.repository_name;
-    const path = file.path ?? mapKey;
+    const repoName = useRepositoryKeys ? file.repository_name : undefined;
+    const path = file.path ?? splitFileKey(mapKey).path;
     if (!path) continue;
     const key = fileMapKey(path, repoName);
     const hasRepoUnawareCollision = key !== path && fileMap.has(path);
@@ -119,6 +123,7 @@ export function buildAllFiles(
   cumulativeDiff: CumulativeDiff | null,
   prDiffFiles?: PRDiffFile[],
   prRepoName?: string,
+  useRepositoryKeys = true,
 ): ReviewFile[] {
   const fileMap = new Map<string, ReviewFile>();
   // Keep priority, dedup keys, and sorting aligned with `buildReviewSources`
@@ -130,7 +135,9 @@ export function buildAllFiles(
   // diff snapshot from the last fetch) — the dialog appeared to show outdated
   // content even though the cumulative-diff hook was successfully refetching.
   if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
-  if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files);
+  if (cumulativeDiff?.files) {
+    addCumulativeDiffFiles(fileMap, cumulativeDiff.files, useRepositoryKeys);
+  }
   if (prDiffFiles) addPRFiles(fileMap, prDiffFiles, prRepoName);
   return Array.from(fileMap.values()).sort((a, b) => {
     const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");
@@ -159,6 +166,7 @@ type ReviewDialogProps = {
   cumulativeDiff: CumulativeDiff | null;
   prDiffFiles?: PRDiffFile[];
   prRepoName?: string;
+  useRepositoryKeys?: boolean;
 };
 
 function computeReviewSets(
@@ -330,6 +338,7 @@ function useReviewDialogState(props: ReviewDialogProps) {
     cumulativeDiff,
     prDiffFiles,
     prRepoName,
+    useRepositoryKeys = true,
   } = props;
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [splitView, setSplitView] = useState(() =>
@@ -348,8 +357,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
 
   const [filter, setFilter] = useState("");
   const allFiles = useMemo<ReviewFile[]>(
-    () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName),
-    [gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName],
+    () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName, useRepositoryKeys),
+    [gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName, useRepositoryKeys],
   );
   const filteredFiles = useFilteredReviewFiles(allFiles, filter);
   const { reviewedFiles, staleFiles } = useMemo(

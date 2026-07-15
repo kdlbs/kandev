@@ -8,13 +8,17 @@ import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useToast } from "@/components/toast-provider";
 import { useVcsDialogs } from "@/components/vcs/vcs-dialogs";
 import type { PRChangedFile } from "./changes-panel-timeline";
-import type { PRDiffFile } from "@/lib/types/github";
 import { useChangesGitHandlers, useChangesDialogHandlers } from "./changes-panel-hooks";
 import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
 import { useBaseBranchByRepo } from "@/hooks/domains/session/use-base-branch-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { useActiveTaskPRsWithFiles } from "@/hooks/domains/github/use-active-task-pr-files";
 import { usePRCommits } from "@/hooks/domains/github/use-pr-commits";
+import {
+  getCumulativeReviewRepositoryNames,
+  isReviewMultiRepo,
+  resolvePRReviewRepositoryName,
+} from "@/components/review/types";
 import {
   type ChangedFile,
   computePRGroupStamp,
@@ -25,6 +29,8 @@ import {
   mapToChangedFiles,
   buildPrByRepoMap,
   buildRepoNameById,
+  selectPRFilesForReviewProgress,
+  type ReviewProgressPRSource,
 } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
 
@@ -148,16 +154,18 @@ function usePerRepoCallbacks(
   );
 }
 
-function useChangesPanelPRData() {
+function useChangesPanelPRData(repositoryNames: string[]) {
   const { prs, filesByPRKey } = useActiveTaskPRsWithFiles();
   const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
-  const taskHasMultipleRepos = useAppStore((s) => {
+  const taskRepositoryCount = useAppStore((s) => {
     const taskId = s.tasks.activeTaskId;
-    if (!taskId) return false;
+    if (!taskId) return 0;
     const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return (task?.repositories?.length ?? 0) > 1;
+    return task?.repositories?.length ?? 0;
   });
+  const taskHasMultipleRepos = taskRepositoryCount > 1;
+  const useRepositoryKeys = isReviewMultiRepo(taskRepositoryCount, repositoryNames);
   const taskPR = useActiveTaskPR();
   const refreshKey = taskPR?.last_synced_at ?? null;
   const { commits: prCommitsList } = usePRCommits(
@@ -168,7 +176,7 @@ function useChangesPanelPRData() {
   );
   const { prFiles, prDiffFiles } = useMemo(() => {
     const merged: PRChangedFile[] = [];
-    const flat: PRDiffFile[] = [];
+    const progressSources = new Map<string, ReviewProgressPRSource>();
     // Multi-branch tasks open multiple PRs on the same repo — files must
     // split by PR so the agent's two branches don't get conflated under one
     // "kandev" header. We stamp each row with a label unique per PR.
@@ -200,13 +208,28 @@ function useChangesPanelPRData() {
         prNumber: pr.pr_number,
       });
       merged.push(...mapPRFilesToChangedFiles(files, stamp));
-      flat.push(...files);
+      progressSources.set(pr.id, {
+        repositoryName: resolvePRReviewRepositoryName(pr, repoName || undefined) ?? pr.repo,
+        files,
+      });
     }
-    return { prFiles: merged, prDiffFiles: flat };
-  }, [prs, filesByPRKey, repoNameById, taskHasMultipleRepos]);
+    const progressFiles = selectPRFilesForReviewProgress(
+      progressSources,
+      taskPR?.id,
+      useRepositoryKeys,
+    );
+    return { prFiles: merged, prDiffFiles: progressFiles };
+  }, [prs, filesByPRKey, repoNameById, taskHasMultipleRepos, taskPR?.id, useRepositoryKeys]);
   const hasPRFiles = prFiles.length > 0;
   const hasPRCommits = prCommitsList.length > 0;
-  return { prDiffFiles, prCommitsList, hasPRFiles, hasPRCommits, prFiles };
+  return {
+    prDiffFiles,
+    prCommitsList,
+    hasPRFiles,
+    hasPRCommits,
+    prFiles,
+    useRepositoryKeys,
+  };
 }
 
 function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): boolean {
@@ -219,14 +242,25 @@ export function useChangesPanelData() {
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
   const { reviews } = useSessionFileReviews(activeSessionId);
-  const prData = useChangesPanelPRData();
+  const reviewRepositoryNames = useMemo(
+    () => [...git.repoNames, ...getCumulativeReviewRepositoryNames(git.cumulativeDiff?.files)],
+    [git.repoNames, git.cumulativeDiff],
+  );
+  const prData = useChangesPanelPRData(reviewRepositoryNames);
   const vcsDialogs = useVcsDialogs();
   const baseBranchDisplay = useMemo(() => getBaseBranchDisplay(baseBranch), [baseBranch]);
   const unstagedFiles = useMemo(() => mapToChangedFiles(git.unstagedFiles), [git.unstagedFiles]);
   const stagedFiles = useMemo(() => mapToChangedFiles(git.stagedFiles), [git.stagedFiles]);
   const { reviewedCount, totalFileCount } = useMemo(
-    () => computeReviewProgress(git.allFiles, git.cumulativeDiff, reviews, prData.prDiffFiles),
-    [git.allFiles, git.cumulativeDiff, reviews, prData.prDiffFiles],
+    () =>
+      computeReviewProgress(
+        git.allFiles,
+        git.cumulativeDiff,
+        reviews,
+        prData.prDiffFiles,
+        prData.useRepositoryKeys,
+      ),
+    [git.allFiles, git.cumulativeDiff, reviews, prData.prDiffFiles, prData.useRepositoryKeys],
   );
   const staged = useMemo(() => computeStagedStats(git.stagedFiles), [git.stagedFiles]);
   const gitHandlers = useChangesGitHandlers(git, toast, baseBranch);

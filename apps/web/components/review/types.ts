@@ -36,6 +36,57 @@ export function reviewFileKey(file: { path: string; repository_name?: string }):
   return file.repository_name ? `${file.repository_name}${FILE_KEY_SEP}${file.path}` : file.path;
 }
 
+/** Mirrors backend `worktree.SanitizeRepoDirName`, which defines the
+ * repository_name stamped on multi-repo agentctl events. */
+export function sanitizeReviewRepositoryName(name: string): string {
+  let sanitized = "";
+  for (const character of name) {
+    const code = character.charCodeAt(0);
+    const isASCIIAlphaNumeric =
+      (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+    sanitized +=
+      isASCIIAlphaNumeric || character === "_" || character === "." || character === "-"
+        ? character
+        : "-";
+  }
+  return sanitized.replace(/-+/g, "-").replace(/^[-.]+|[-.]+$/g, "");
+}
+
+export function resolvePRReviewRepositoryName(
+  pr: { repository_id?: string; repo: string } | null | undefined,
+  workspaceRepositoryName?: string | null,
+): string | undefined {
+  if (!pr) return undefined;
+  if (pr.repository_id && workspaceRepositoryName) {
+    const canonicalName = sanitizeReviewRepositoryName(workspaceRepositoryName);
+    if (canonicalName) return canonicalName;
+  }
+  return pr.repo || undefined;
+}
+
+export function isReviewMultiRepo(
+  taskRepositoryCount: number,
+  repositoryNames: Iterable<string>,
+): boolean {
+  if (taskRepositoryCount > 1) return true;
+  const namedRepositories = new Set<string>();
+  for (const name of repositoryNames) {
+    if (name) namedRepositories.add(name);
+    if (namedRepositories.size > 1) return true;
+  }
+  return false;
+}
+
+export function getCumulativeReviewRepositoryNames(
+  files: Record<string, { repository_name?: string }> | null | undefined,
+): string[] {
+  const names = new Set<string>();
+  for (const file of Object.values(files ?? {})) {
+    if (file.repository_name) names.add(file.repository_name);
+  }
+  return Array.from(names);
+}
+
 export function splitReviewFileKey(key: string): { repositoryName: string; path: string } {
   const sep = key.indexOf(FILE_KEY_SEP);
   if (sep < 0) return { repositoryName: "", path: key };

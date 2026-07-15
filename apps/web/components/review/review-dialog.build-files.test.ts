@@ -182,6 +182,31 @@ describe("buildAllFiles source collisions", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ path, source: "uncommitted" });
   });
+
+  it("uses a bare cumulative key in single-repository review mode", () => {
+    const path = "src/committed.ts";
+    const cumulativeDiff = {
+      session_id: "s1",
+      base_commit: "abc",
+      head_commit: "def",
+      total_commits: 1,
+      files: {
+        [`${FRONTEND_REPO}\u0000${path}`]: {
+          path,
+          repository_name: FRONTEND_REPO,
+          status: "modified",
+          staged: false,
+          diff: "@@committed@@",
+        },
+      },
+    } as CumulativeDiff;
+
+    const result = buildAllFiles(null, cumulativeDiff, undefined, undefined, false);
+
+    expect(result).toHaveLength(1);
+    expect(reviewFileKey(result[0])).toBe(path);
+    expect(result[0].repository_name).toBeUndefined();
+  });
 });
 
 describe("buildAllFiles sort order", () => {

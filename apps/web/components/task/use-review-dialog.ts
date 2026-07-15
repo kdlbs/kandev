@@ -11,7 +11,13 @@ import { useFileEditors } from "@/hooks/use-file-editors";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
 import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositories";
+import { useRepository } from "@/hooks/domains/workspace/use-repository";
 import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
+import {
+  getCumulativeReviewRepositoryNames,
+  isReviewMultiRepo,
+  resolvePRReviewRepositoryName,
+} from "@/components/review/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
@@ -26,9 +32,13 @@ export function buildReviewGitStatusFiles(
   reviewGitStatus: GitStatusEntry | undefined,
   statusByRepo: Array<{ repository_name: string; status: GitStatusEntry }>,
   taskRepositoryCount: number,
+  cumulativeRepositoryNames: Iterable<string> = [],
 ): ReviewGitStatusFiles {
   const named = statusByRepo.filter((entry) => entry.repository_name !== "");
-  const isMultiRepo = taskRepositoryCount > 1 || named.length > 1;
+  const isMultiRepo = isReviewMultiRepo(
+    taskRepositoryCount,
+    named.map((entry) => entry.repository_name).concat(Array.from(cumulativeRepositoryNames)),
+  );
   if (!isMultiRepo) {
     return {
       files: reviewGitStatus?.files ?? named[0]?.status.files ?? null,
@@ -65,12 +75,19 @@ export function buildReviewGitStatusFiles(
 function useReviewGitStatusFiles(
   sessionId: string | null,
   taskRepositoryCount: number,
+  cumulativeRepositoryNames: string[],
 ): ReviewGitStatusFiles {
   const reviewGitStatus = useSessionGitStatus(sessionId);
   const statusByRepo = useSessionGitStatusByRepo(sessionId);
   return useMemo(
-    () => buildReviewGitStatusFiles(reviewGitStatus, statusByRepo, taskRepositoryCount),
-    [reviewGitStatus, statusByRepo, taskRepositoryCount],
+    () =>
+      buildReviewGitStatusFiles(
+        reviewGitStatus,
+        statusByRepo,
+        taskRepositoryCount,
+        cumulativeRepositoryNames,
+      ),
+    [reviewGitStatus, statusByRepo, taskRepositoryCount, cumulativeRepositoryNames],
   );
 }
 
@@ -83,10 +100,23 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     if (!effectiveSessionId) return undefined;
     return state.taskSessions.items[effectiveSessionId]?.base_branch;
   });
-  const reviewGitStatus = useReviewGitStatusFiles(effectiveSessionId, taskRepositories.length);
   const { diff: reviewCumulativeDiff } = useCumulativeDiff(effectiveSessionId);
+  const cumulativeRepositoryNames = useMemo(
+    () => getCumulativeReviewRepositoryNames(reviewCumulativeDiff?.files),
+    [reviewCumulativeDiff],
+  );
+  const reviewGitStatus = useReviewGitStatusFiles(
+    effectiveSessionId,
+    taskRepositories.length,
+    cumulativeRepositoryNames,
+  );
   const { openFile: reviewOpenFile } = useFileEditors();
   const reviewTaskPR = useActiveTaskPR();
+  const reviewPRRepository = useRepository(reviewTaskPR?.repository_id ?? null);
+  const reviewPRRepositoryName = resolvePRReviewRepositoryName(
+    reviewTaskPR,
+    reviewPRRepository?.name,
+  );
   const { files: reviewPRDiffFiles } = usePRDiff(
     reviewTaskPR?.owner ?? null,
     reviewTaskPR?.repo ?? null,
@@ -126,7 +156,8 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     reviewGitStatusFiles: reviewGitStatus.files,
     reviewCumulativeDiff,
     reviewPRDiffFiles,
-    reviewPRRepoName: reviewGitStatus.isMultiRepo ? reviewTaskPR?.repo : undefined,
+    reviewPRRepoName: reviewGitStatus.isMultiRepo ? reviewPRRepositoryName : undefined,
+    reviewUseRepositoryKeys: reviewGitStatus.isMultiRepo,
     reviewOpenFile,
     handleReviewSendComments,
   };

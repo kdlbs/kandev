@@ -92,4 +92,18 @@ describe("buildReviewGitStatusFiles", () => {
       "frontend\u0000src/app.ts",
     ]);
   });
+
+  it("uses cumulative repositories while task and status metadata hydrate", () => {
+    const frontend = { [README_PATH]: file() };
+
+    const result = buildReviewGitStatusFiles(
+      undefined,
+      [{ repository_name: "frontend", status: status(frontend) }],
+      0,
+      ["frontend", "backend"],
+    );
+
+    expect(result.isMultiRepo).toBe(true);
+    expect(Object.keys(result.files ?? {})).toEqual(["frontend\u0000README.md"]);
+  });
 });

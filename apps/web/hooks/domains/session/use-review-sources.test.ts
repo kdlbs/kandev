@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { buildReviewSources } from "./use-review-sources";
+import { resolvePRReviewRepositoryName } from "@/components/review/types";
 import type { PRDiffFile } from "@/lib/types/github";
 
 const RENAMED_PATH = "src/new-name.ts";
 const PREVIOUS_PATH = "src/old-name.ts";
 
-/* eslint-disable max-lines-per-function -- multi-case describe block */
+/* eslint-disable max-lines-per-function -- comprehensive source merge cases */
 describe("buildReviewSources", () => {
   it("returns empty result when no inputs", () => {
     const result = buildReviewSources({
@@ -79,6 +80,7 @@ describe("buildReviewSources", () => {
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("pr");
+    expect(result.allFiles[0].repository_name).toBeUndefined();
     expect(result.sourceCounts).toEqual({ uncommitted: 0, committed: 0, pr: 1 });
   });
 
@@ -308,12 +310,16 @@ describe("buildReviewSources", () => {
     expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
   });
 
-  it("multi-repo uncommitted + PR overlap: file appears once as uncommitted (same repo)", () => {
+  it("dedupes PR files using the canonical workspace repo rather than provider repo name", () => {
+    const prRepoName = resolvePRReviewRepositoryName(
+      { repository_id: "repo-1", repo: "widgets" },
+      "acme/widgets",
+    );
     const result = buildReviewSources({
       gitStatus: undefined,
       statusByRepo: [
         {
-          repository_name: "frontend",
+          repository_name: "acme-widgets",
           status: {
             files: {
               "src/shared.ts": {
@@ -336,7 +342,7 @@ describe("buildReviewSources", () => {
           deletions: 0,
         },
       ],
-      prRepoName: "frontend",
+      prRepoName,
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("uncommitted");

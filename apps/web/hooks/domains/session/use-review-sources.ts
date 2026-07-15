@@ -1,9 +1,19 @@
 import { useEffect, useMemo } from "react";
+import { useAppStore } from "@/components/state-provider";
 import { useSessionGitStatus, useSessionGitStatusByRepo } from "./use-session-git-status";
 import { useCumulativeDiff } from "./use-cumulative-diff";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { usePRDiff } from "@/hooks/domains/github/use-pr-diff";
-import { normalizeDiffContent, reviewFileKey } from "@/components/review/types";
+import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositories";
+import { useRepository } from "@/hooks/domains/workspace/use-repository";
+import {
+  getCumulativeReviewRepositoryNames,
+  isReviewMultiRepo,
+  normalizeDiffContent,
+  resolvePRReviewRepositoryName,
+  reviewFileKey,
+  splitReviewFileKey,
+} from "@/components/review/types";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { ReviewFile } from "@/components/review/types";
 import type { PRDiffFile } from "@/lib/types/github";
@@ -69,6 +79,7 @@ function addCumulativeFiles(
   fileMap: Map<string, ReviewFile>,
   files: Record<string, CumulativeFile>,
   uncommittedPaths: Set<string>,
+  useRepositoryKeys: boolean,
 ) {
   for (const [mapKey, file] of Object.entries(files)) {
     // Multi-repo cumulative payloads use a NUL-composite `<repo>\x00<path>`
@@ -76,8 +87,9 @@ function addCumulativeFiles(
     // Single-repo keeps the bare path on the map key with no `file.path`.
     // Prefer the stamped value so the composite key doesn't bleed into the
     // displayed path; fall back to the map key for single-repo.
-    const path = file.path ?? mapKey;
-    const key = reviewFileKey({ path, repository_name: file.repository_name });
+    const path = file.path ?? splitReviewFileKey(mapKey).path;
+    const repositoryName = useRepositoryKeys ? file.repository_name : undefined;
+    const key = reviewFileKey({ path, repository_name: repositoryName });
     const hasRepoUnawareCollision = key !== path && fileMap.has(path);
     if (fileMap.has(key) || uncommittedPaths.has(key) || hasRepoUnawareCollision) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
@@ -91,7 +103,7 @@ function addCumulativeFiles(
       source: "committed",
       old_path: file.old_path,
       diff_skip_reason: file.diff_skip_reason,
-      repository_name: file.repository_name,
+      repository_name: repositoryName,
     });
   }
 }
@@ -165,12 +177,47 @@ export type BuildReviewSourcesInput = {
   /** Repository name for the primary PR — used to composite-key PR files so
    *  same-named files in different repos are not incorrectly deduped. */
   prRepoName?: string;
+  /** Whether review identities include repository_name. False keeps every
+   * source bare during legacy/single-repository status hydration. */
+  useRepositoryKeys?: boolean;
 };
 
 export type BuildReviewSourcesResult = {
   allFiles: ReviewFile[];
   sourceCounts: SourceCounts;
 };
+
+type NormalizeReviewStatusSourcesInput = {
+  gitStatus: BuildReviewSourcesInput["gitStatus"];
+  statusByRepo: NonNullable<BuildReviewSourcesInput["statusByRepo"]>;
+  taskRepositoryCount: number;
+  resolvedPRRepoName?: string;
+  cumulativeRepositoryNames?: Iterable<string>;
+};
+
+export function normalizeReviewStatusSources(input: NormalizeReviewStatusSourcesInput) {
+  const namedStatuses = input.statusByRepo.filter((entry) => entry.repository_name !== "");
+  const useRepositoryKeys = isReviewMultiRepo(
+    input.taskRepositoryCount,
+    namedStatuses
+      .map((entry) => entry.repository_name)
+      .concat(Array.from(input.cumulativeRepositoryNames ?? [])),
+  );
+  if (useRepositoryKeys) {
+    return {
+      useRepositoryKeys: true,
+      prRepoName: input.resolvedPRRepoName,
+      normalizedGitStatus: input.gitStatus,
+      normalizedStatusByRepo: namedStatuses.length > 0 ? namedStatuses : undefined,
+    };
+  }
+  return {
+    useRepositoryKeys: false,
+    prRepoName: undefined,
+    normalizedGitStatus: input.gitStatus?.files ? input.gitStatus : namedStatuses[0]?.status,
+    normalizedStatusByRepo: undefined,
+  };
+}
 
 /**
  * Pure helper that merges the three diff sources into one sorted, deduped
@@ -183,7 +230,14 @@ export type BuildReviewSourcesResult = {
  * `components/review/review-dialog.tsx`.
  */
 export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewSourcesResult {
-  const { gitStatus, statusByRepo, cumulativeDiff, prDiffFiles, prRepoName } = input;
+  const {
+    gitStatus,
+    statusByRepo,
+    cumulativeDiff,
+    prDiffFiles,
+    prRepoName,
+    useRepositoryKeys = true,
+  } = input;
   const fileMap = new Map<string, ReviewFile>();
 
   const uncommittedPaths = collectUncommittedPaths(statusByRepo, gitStatus);
@@ -202,7 +256,9 @@ export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewS
     addUncommittedFiles(fileMap, gitStatus.files as Record<string, UncommittedFile>);
   }
 
-  if (cumulativeDiff?.files) addCumulativeFiles(fileMap, cumulativeDiff.files, uncommittedPaths);
+  if (cumulativeDiff?.files) {
+    addCumulativeFiles(fileMap, cumulativeDiff.files, uncommittedPaths, useRepositoryKeys);
+  }
 
   if (prDiffFiles && prDiffFiles.length > 0)
     addPRFiles(fileMap, prDiffFiles, uncommittedPaths, prRepoName);
@@ -242,6 +298,29 @@ export type UseReviewSourcesResult = {
   rawPRFiles: ReviewFile[];
 };
 
+function useReviewRepositoryContext(
+  pr: ReturnType<typeof useActiveTaskPR>,
+  gitStatus: ReturnType<typeof useSessionGitStatus>,
+  statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>,
+  cumulativeDiff: ReturnType<typeof useCumulativeDiff>["diff"],
+) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const taskRepositories = useTaskRepositories(activeTaskId);
+  const prRepository = useRepository(pr?.repository_id ?? null);
+  const resolvedPRRepoName = resolvePRReviewRepositoryName(pr, prRepository?.name);
+  return useMemo(
+    () =>
+      normalizeReviewStatusSources({
+        gitStatus,
+        statusByRepo,
+        taskRepositoryCount: taskRepositories.length,
+        resolvedPRRepoName,
+        cumulativeRepositoryNames: getCumulativeReviewRepositoryNames(cumulativeDiff?.files),
+      }),
+    [gitStatus, statusByRepo, taskRepositories.length, resolvedPRRepoName, cumulativeDiff],
+  );
+}
+
 /**
  * Multi-source merge hook. Aggregates uncommitted / committed / PR diffs
  * into one sorted ReviewFile[] tagged with `.source`. Shared by
@@ -255,6 +334,8 @@ export function useReviewSources(sessionId: string | null | undefined): UseRevie
   const statusByRepo = useSessionGitStatusByRepo(sessionId ?? null);
   const { diff: cumulativeDiff, loading: cumulativeLoading } = useCumulativeDiff(sessionId ?? null);
   const pr = useActiveTaskPR();
+  const { normalizedGitStatus, normalizedStatusByRepo, prRepoName, useRepositoryKeys } =
+    useReviewRepositoryContext(pr, gitStatus, statusByRepo, cumulativeDiff);
   const { files: prDiffFiles, loading: prDiffLoading } = usePRDiff(
     pr?.owner ?? null,
     pr?.repo ?? null,
@@ -264,21 +345,29 @@ export function useReviewSources(sessionId: string | null | undefined): UseRevie
   const { allFiles, sourceCounts } = useMemo(
     () =>
       buildReviewSources({
-        gitStatus,
-        statusByRepo,
+        gitStatus: normalizedGitStatus,
+        statusByRepo: normalizedStatusByRepo,
         cumulativeDiff: cumulativeDiff as { files?: Record<string, CumulativeFile> } | null,
         prDiffFiles: prDiffFiles.length > 0 ? prDiffFiles : undefined,
-        prRepoName: pr?.repo || undefined,
+        prRepoName,
+        useRepositoryKeys,
       }),
-    [gitStatus, statusByRepo, cumulativeDiff, prDiffFiles, pr?.repo],
+    [
+      normalizedGitStatus,
+      normalizedStatusByRepo,
+      cumulativeDiff,
+      prDiffFiles,
+      prRepoName,
+      useRepositoryKeys,
+    ],
   );
 
   const rawPRFiles = useMemo(() => {
     if (!prDiffFiles || prDiffFiles.length === 0) return [] as ReviewFile[];
     const fileMap = new Map<string, ReviewFile>();
-    addPRFiles(fileMap, prDiffFiles, new Set(), pr?.repo || undefined);
+    addPRFiles(fileMap, prDiffFiles, new Set(), prRepoName);
     return Array.from(fileMap.values());
-  }, [prDiffFiles, pr?.repo]);
+  }, [prDiffFiles, prRepoName]);
 
   // Keep `hasPR` keyed on the existence of a TaskPR row, not on whether the
   // PR diff files have loaded yet — avoids the tab bar reflowing the moment

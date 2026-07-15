@@ -3,9 +3,14 @@ import {
   buildPrByRepoMap,
   computeReviewProgress,
   mapPRFilesToChangedFiles,
+  selectPRFilesForReviewProgress,
+  type ReviewProgressPRFile,
 } from "./changes-panel-helpers";
-import { reviewFileKey } from "@/components/review/types";
+import { hashDiff, resolvePRReviewRepositoryName, reviewFileKey } from "@/components/review/types";
 import type { PRDiffFile } from "@/lib/types/github";
+
+const PRIMARY_PR_ID = "primary-pr";
+const RENAMED_PATH = "src/renamed.ts";
 
 function diffFile(overrides: Partial<PRDiffFile>): PRDiffFile {
   return {
@@ -16,6 +21,28 @@ function diffFile(overrides: Partial<PRDiffFile>): PRDiffFile {
     old_path: undefined,
     ...overrides,
   } as PRDiffFile;
+}
+
+function progressPRFile(
+  overrides: Partial<PRDiffFile> & { repository_name?: string },
+): ReviewProgressPRFile {
+  return {
+    ...diffFile(overrides),
+    repository_name: overrides.repository_name,
+  };
+}
+
+function progressPRSource(repositoryName: string, filename: string) {
+  return { repositoryName, files: [diffFile({ filename })] };
+}
+
+type ProgressLocalFile = Parameters<typeof computeReviewProgress>[0][number];
+
+function progressLocalFile(
+  path: string,
+  overrides: Partial<ProgressLocalFile> = {},
+): ProgressLocalFile {
+  return { path, status: "modified", staged: false, diff: "", ...overrides };
 }
 
 describe("mapPRFilesToChangedFiles", () => {
@@ -79,9 +106,117 @@ describe("mapPRFilesToChangedFiles", () => {
   });
 });
 
-describe("computeReviewProgress", () => {
+describe("selectPRFilesForReviewProgress", () => {
+  it("selects only the primary PR and qualifies it in a multi-repo task", () => {
+    const repositoryName = resolvePRReviewRepositoryName(
+      { repository_id: "repo-frontend", repo: "widgets" },
+      "acme/widgets",
+    );
+    const files = selectPRFilesForReviewProgress(
+      new Map([
+        [PRIMARY_PR_ID, progressPRSource(repositoryName ?? "widgets", "README.md")],
+        ["secondary-pr", progressPRSource("backend", "README.md")],
+      ]),
+      PRIMARY_PR_ID,
+      true,
+    );
+
+    expect(files.map((file) => reviewFileKey({ path: file.filename, ...file }))).toEqual([
+      "acme-widgets\u0000README.md",
+    ]);
+  });
+
+  it("keeps the selected primary PR bare in a legacy single-repo task", () => {
+    const files = selectPRFilesForReviewProgress(
+      new Map([[PRIMARY_PR_ID, progressPRSource("kandev", "README.md")]]),
+      PRIMARY_PR_ID,
+      false,
+    );
+
+    expect(files.map((file) => reviewFileKey({ path: file.filename, ...file }))).toEqual([
+      "README.md",
+    ]);
+  });
+});
+
+describe("computeReviewProgress PR files", () => {
+  it("counts same-path PR reviews per repository using each patch hash", () => {
+    const path = "README.md";
+    const frontendPatch = "@@ -1 +1 @@\n-frontend old\n+frontend new";
+    const backendPatch = "@@ -1 +1 @@\n-backend old\n+backend new";
+    const frontendKey = reviewFileKey({ path, repository_name: "frontend" });
+    const backendKey = reviewFileKey({ path, repository_name: "backend" });
+
+    const progress = computeReviewProgress(
+      [],
+      null,
+      new Map([
+        [frontendKey, { reviewed: true, diffHash: hashDiff(frontendPatch) }],
+        [backendKey, { reviewed: true, diffHash: hashDiff(backendPatch) }],
+      ]),
+      [
+        progressPRFile({ filename: path, patch: frontendPatch, repository_name: "frontend" }),
+        progressPRFile({ filename: path, patch: backendPatch, repository_name: "backend" }),
+      ],
+    );
+
+    expect(progress).toEqual({ reviewedCount: 2, totalFileCount: 2 });
+  });
+
+  it("keeps a same-repo uncommitted file over PR data without dropping another repo", () => {
+    const path = "README.md";
+    const frontendDiff = "@@ -1 +1 @@\n-local old\n+local new";
+    const backendPatch = "@@ -1 +1 @@\n-backend old\n+backend new";
+    const frontendKey = reviewFileKey({ path, repository_name: "frontend" });
+    const backendKey = reviewFileKey({ path, repository_name: "backend" });
+
+    const progress = computeReviewProgress(
+      [progressLocalFile(path, { diff: frontendDiff, repository_name: "frontend" })],
+      null,
+      new Map([
+        [frontendKey, { reviewed: true, diffHash: hashDiff(frontendDiff) }],
+        [backendKey, { reviewed: true, diffHash: hashDiff(backendPatch) }],
+      ]),
+      [
+        progressPRFile({
+          filename: path,
+          patch: "@@ -1 +1 @@\n-pr old\n+pr new",
+          repository_name: "frontend",
+        }),
+        progressPRFile({ filename: path, patch: backendPatch, repository_name: "backend" }),
+      ],
+    );
+
+    expect(progress).toEqual({ reviewedCount: 2, totalFileCount: 2 });
+  });
+});
+
+describe("computeReviewProgress rejected source precedence", () => {
+  const uncommittedWinner: Parameters<typeof computeReviewProgress>[0] = [
+    progressLocalFile(RENAMED_PATH, { status: "renamed", old_path: "src/old.ts" }),
+  ];
+  const cumulativeWinner: Parameters<typeof computeReviewProgress>[1] = {
+    files: { [RENAMED_PATH]: { path: RENAMED_PATH, status: "renamed", diff: "" } },
+  };
+
+  it.each([
+    { name: "uncommitted", uncommittedFiles: uncommittedWinner, cumulativeDiff: null },
+    { name: "cumulative", uncommittedFiles: [], cumulativeDiff: cumulativeWinner },
+  ])("does not hash a rejected PR patch past a patchless $name winner", (winner) => {
+    const progress = computeReviewProgress(
+      winner.uncommittedFiles,
+      winner.cumulativeDiff,
+      new Map([[RENAMED_PATH, { reviewed: true, diffHash: hashDiff("") }]]),
+      [diffFile({ filename: RENAMED_PATH, patch: "@@rejected@@" })],
+    );
+
+    expect(progress).toEqual({ reviewedCount: 1, totalFileCount: 1 });
+  });
+});
+
+describe("computeReviewProgress source precedence", () => {
   it("keeps bare uncommitted precedence over a stamped cumulative file at the same path", () => {
-    const path = "src/renamed.ts";
+    const path = RENAMED_PATH;
     const progress = computeReviewProgress(
       [
         {
@@ -138,7 +273,7 @@ describe("computeReviewProgress", () => {
 
   it("counts a reviewed patchless file under its repository-qualified review key", () => {
     const file = {
-      path: "src/renamed.ts",
+      path: RENAMED_PATH,
       status: "renamed" as const,
       staged: false,
       additions: 0,
@@ -183,6 +318,35 @@ describe("computeReviewProgress", () => {
     );
 
     expect(progress.totalFileCount).toBe(2);
+  });
+});
+
+describe("computeReviewProgress repository key mode", () => {
+  it("uses bare local, cumulative, and PR keys for a single named repository", () => {
+    const localPath = "src/local.ts";
+    const cumulativePath = "src/cumulative.ts";
+    const prPath = "src/pr.ts";
+    const progress = computeReviewProgress(
+      [progressLocalFile(localPath, { repository_name: "frontend", diff: "@@local@@" })],
+      {
+        files: {
+          [`frontend\u0000${cumulativePath}`]: {
+            path: cumulativePath,
+            repository_name: "frontend",
+            diff: "@@cumulative@@",
+          },
+        },
+      },
+      new Map([
+        [localPath, { reviewed: true }],
+        [cumulativePath, { reviewed: true }],
+        [prPath, { reviewed: true }],
+      ]),
+      [progressPRFile({ filename: prPath, patch: "@@pr@@" })],
+      false,
+    );
+
+    expect(progress).toEqual({ reviewedCount: 3, totalFileCount: 3 });
   });
 });
 
