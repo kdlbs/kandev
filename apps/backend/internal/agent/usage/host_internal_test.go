@@ -88,7 +88,7 @@ func TestHostServiceList_FreshBypassesStaleCache(t *testing.T) {
 	// Age the entry past freshMaxAge but below the 5-minute TTL: a normal List
 	// still serves the cache, a fresh List re-queries the provider.
 	svc.cache.mu.Lock()
-	svc.cache.entries["k1"].fetchedAt = now.Add(-freshMaxAge - time.Second)
+	svc.cache.entries["k1"].successAt = now.Add(-freshMaxAge - time.Second)
 	svc.cache.mu.Unlock()
 
 	_ = svc.List(context.Background(), false)
@@ -163,12 +163,63 @@ func TestUsageCacheCoalescesFailures(t *testing.T) {
 
 	// Once the negative entry ages past failureCacheTTL, the provider is retried.
 	cache.mu.Lock()
-	cache.entries["k"].fetchedAt = time.Now().Add(-failureCacheTTL - time.Second)
+	cache.entries["k"].errAt = time.Now().Add(-failureCacheTTL - time.Second)
 	cache.mu.Unlock()
 	if _, err := cache.GetOrFetchWithin(context.Background(), "k", freshMaxAge, fetch); err == nil {
 		t.Error("expected error on retry after TTL")
 	}
 	if got := calls.Load(); got != 2 {
 		t.Errorf("expired failure entry should refetch, calls = %d, want 2", got)
+	}
+}
+
+func TestUsageCacheFailureKeepsStaleSuccess(t *testing.T) {
+	cache := NewUsageCache()
+	okUsage := &ProviderUsage{Provider: "anthropic", FetchedAt: time.Now()}
+	okFetch := func(_ context.Context) (*ProviderUsage, error) { return okUsage, nil }
+	failFetch := func(_ context.Context) (*ProviderUsage, error) { return nil, errors.New("boom") }
+
+	if _, err := cache.GetOrFetchWithin(context.Background(), "k", freshMaxAge, okFetch); err != nil {
+		t.Fatalf("seed fetch: %v", err)
+	}
+	// Age the success past the fresh clamp but within the regular TTL.
+	cache.mu.Lock()
+	cache.entries["k"].successAt = time.Now().Add(-freshMaxAge - time.Second)
+	cache.mu.Unlock()
+
+	// A failed fresh refresh returns the error to the fresh caller...
+	if _, err := cache.GetOrFetchWithin(context.Background(), "k", freshMaxAge, failFetch); err == nil {
+		t.Fatal("expected error from failed fresh fetch")
+	}
+	// ...but must not evict the stale-but-valid success for non-fresh callers.
+	got, err := cache.GetOrFetchWithin(context.Background(), "k", cacheTTL, failFetch)
+	if err != nil || got != okUsage {
+		t.Errorf("stale success was evicted: usage=%v err=%v", got, err)
+	}
+}
+
+func TestUsageCacheDoesNotCacheCancellation(t *testing.T) {
+	cache := NewUsageCache()
+	var calls atomic.Int32
+	fetch := func(ctx context.Context) (*ProviderUsage, error) {
+		calls.Add(1)
+		return nil, ctx.Err()
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := cache.GetOrFetchWithin(cancelled, "k", freshMaxAge, fetch); err == nil {
+		t.Fatal("expected cancellation error")
+	}
+
+	// The cancellation must not have been recorded as a provider failure.
+	okUsage := &ProviderUsage{Provider: "anthropic", FetchedAt: time.Now()}
+	got, err := cache.GetOrFetchWithin(context.Background(), "k", freshMaxAge,
+		func(_ context.Context) (*ProviderUsage, error) { return okUsage, nil })
+	if err != nil || got != okUsage {
+		t.Errorf("cancelled fetch poisoned the cache: usage=%v err=%v", got, err)
+	}
+	if calls.Load() != 1 {
+		t.Errorf("fetch calls = %d, want 1", calls.Load())
 	}
 }
