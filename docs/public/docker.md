@@ -30,19 +30,22 @@ Two flavors are published. The default vanilla image is smallest and bundles npm
 docker pull ghcr.io/kdlbs/kandev:universal
 ```
 
-See [`images.md`](../images.md) for the full comparison, inclusion policy, and recipes for deriving your own image.
+See the [repository image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md) for the full comparison, inclusion policy, and recipes for deriving your own image.
 
 ## Building from Source
 
-From the repository root:
+The root `Dockerfile` is a release-image Dockerfile: it copies prebuilt binaries from a `bundle/` directory in the Docker build context. It does not compile the repository inside Docker. On a Linux host matching the target architecture, build the service bundle and prepare the same context layout used by the release workflow:
 
 ```bash
-# Build for your current architecture
-docker build -t kandev:latest .
-
-# Build for a specific architecture
-docker build --platform linux/amd64 -t kandev:latest .
+make service-bundle
+rm -rf ctx
+mkdir -p ctx/bundle
+cp -R dist/kandev/. ctx/bundle/
+cp docker-entrypoint.sh ctx/
+docker build -f Dockerfile -t kandev:latest ctx
 ```
+
+For a cross-architecture image, first produce or download the matching `kandev-linux-x64.tar.gz` or `kandev-linux-arm64.tar.gz` release bundle, extract its top-level `kandev/` directory into `ctx/bundle/`, copy `docker-entrypoint.sh` into `ctx/`, and build that context with the matching `--platform`. Setting `--platform` without a matching bundle only labels an image containing the wrong native binaries.
 
 ## Data Persistence
 
@@ -103,7 +106,7 @@ See [`configuration.md`](./configuration.md) for the full reference (including t
 | `KANDEV_DATABASE_DRIVER` | No | `sqlite` | Database driver (`sqlite` or `postgres`) |
 | `KANDEV_DATABASE_PATH` | No | `$KANDEV_HOME_DIR/data/kandev.db` | SQLite database file path (override) |
 | `KANDEV_LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `KANDEV_LOGGING_FORMAT` | No | `text` | Log format: `text` or `json` |
+| `KANDEV_LOGGING_FORMAT` | No | environment-selected (`text` in ordinary Docker runs) | Explicit format: `text` or `json`. The default becomes `json` when `KANDEV_ENV` is `production` or `prod`. |
 | `KANDEV_LOGGING_OUTPUTPATH` | No | `stdout` | Log destination: `stdout`, `stderr`, or a file path (rotated when a file) |
 | `KANDEV_LOGGING_MAXSIZEMB` | No | `100` | Rotate the log file when it exceeds this size (MB). File output only. |
 | `KANDEV_LOGGING_MAXBACKUPS` | No | `5` | Max rotated files to retain (`0` = unlimited). File output only. |
@@ -112,7 +115,7 @@ See [`configuration.md`](./configuration.md) for the full reference (including t
 | `KANDEV_DOCKER_ENABLED` | No | `false` | Enable Docker runtime for agents (see below) |
 
 > **File-mode note:** when `KANDEV_LOGGING_OUTPUTPATH` is a file path, the active log file is created with mode `0600` (owner read/write only). Run any log shipper or sidecar as the same user, or use `stdout`/`stderr` and let the container runtime collect logs.
-
+>
 > **Upgrading from a pre-`KANDEV_HOME_DIR` image?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`. The backend auto-migrates the legacy `kandev.db` (plus any `-wal`/`-shm` files) on first boot — look for `Migrated SQLite database from pre-KANDEV_HOME_DIR location` in the logs. If you prefer to pin the old location instead, set `-e KANDEV_DATABASE_PATH=/data/kandev.db`. If you previously set `KANDEV_DATA_DIR`, replace it with `KANDEV_HOME_DIR`.
 
 ### PostgreSQL
@@ -242,7 +245,7 @@ volumes:
 
 Example `Caddyfile`:
 
-```
+```text
 kandev.example.com {
     reverse_proxy kandev:38429
 }

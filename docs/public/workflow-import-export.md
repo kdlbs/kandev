@@ -122,7 +122,7 @@ Each entry under `steps:`:
 > `omitempty`, so they always appear in exported files (even when `false` or
 > empty). The `prompt`, `auto_archive_after_hours`, and `agent_profile` fields
 > are omitted when unset.
-
+>
 > **Not in the portable format:** office/Phase-2 step metadata — `stage_type`,
 > step participants (reviewers/approvers), and recorded decisions — is **not**
 > exported or imported. Only the fields listed above round-trip.
@@ -212,54 +212,20 @@ through the conversion.
 > from this portable export format. Do not copy their `step_id:` form into a
 > portable import file — use `step_position:`.
 
-### Office / Phase-2 triggers (intended format — see caveat)
+### Office / Phase-2 triggers are not portable
 
-The seven event-driven "office" triggers use the generic action shape
-(`GenericAction`):
-
-| Trigger | Fires when |
-|---------|-----------|
-| `on_comment` | A comment is added to the task. |
-| `on_blocker_resolved` | A blocker on the task is resolved. |
-| `on_children_completed` | All child tasks complete. |
-| `on_approval_resolved` | An approval request is decided. |
-| `on_heartbeat` | A periodic heartbeat tick. |
-| `on_budget_alert` | A budget threshold is crossed. |
-| `on_agent_error` | The agent errors out. |
-
-Each holds a list of generic actions whose `type` is one of `queue_run`,
-`clear_decisions`, or `queue_run_for_each_participant`, with a free-form
-`config` map interpreted by the engine. Common keys: `target` (e.g. `primary`,
-`workspace.ceo_agent`), `task_id` (e.g. `this`), `reason`, and `role`.
-
-Intended shape:
-
-```yaml
-events:
-  on_comment:
-    - type: queue_run
-      config:
-        target: primary
-        task_id: this
-        reason: task_comment
-  on_children_completed:
-    - type: queue_run
-      config:
-        target: primary
-        task_id: this
-        reason: children_completed
-```
+The portable import/export format is for kanban workflows. The runtime model
+also defines `on_comment`, `on_blocker_resolved`, `on_children_completed`,
+`on_approval_resolved`, `on_heartbeat`, `on_budget_alert`, and
+`on_agent_error`, but these office-style triggers are outside this format.
 
 > [!WARNING]
-> **These seven triggers do not round-trip today** (tracked by
-> [#1109](https://github.com/kdlbs/kandev/issues/1109)). The portable
-> conversion (`remapStepEvents` in `export.go`) only copies `on_enter`,
-> `on_turn_start`, `on_turn_complete`, and `on_exit`. As a result the office
-> triggers are **dropped on export** (they never appear in an exported file) and
-> **dropped on import** (if you hand-author them, they are parsed but discarded
-> before the step is persisted). The format above documents the *intended*
-> shape; until #1109 lands, office-style workflows will not survive a
-> round-trip. Coordinate with that fix before relying on it.
+> Do not hand-author office-style triggers in a portable workflow file. The
+> conversion in `export.go` preserves only `on_enter`, `on_turn_start`,
+> `on_turn_complete`, and `on_exit`; unsupported triggers are discarded. The
+> Settings UI excludes office workflows from export. [Issue
+> #1109](https://github.com/kdlbs/kandev/issues/1109) records the original bug
+> report and the UI-side mitigation.
 
 ---
 

@@ -213,4 +213,9 @@ kandev start
 |------|----------|
 | `~/.kandev/data/` | SQLite database and app data |
 | Homebrew Cellar | Installed runtime (when installed via brew) |
-| `<npm cache>/node_modules/@kdlbs/runtime-{platform}/` | Installed runtime (when installed via npm/npx) |
+| Under the global package root printed by `npm root -g` | Installed runtime dependency tree for `npm install -g kandev` |
+| `<npm cache>/_npx/<run-id>/node_modules/` | Temporary package tree, including the platform runtime, for `npx kandev` |
+
+Run `npm config get cache` to print `<npm cache>`. npm chooses the `_npx`
+run-directory name and may remove cached runs, so do not treat that path as
+persistent application data.

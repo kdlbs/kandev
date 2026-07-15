@@ -53,7 +53,7 @@ mise use -g go
 ### 5. Clone and install
 
 ```bash
-git clone <repo-url> kandev
+git clone https://github.com/kdlbs/kandev.git kandev
 cd kandev
 make install
 ```
@@ -109,4 +109,15 @@ wsl --shutdown
 
 ### `cd: can't cd to apps` during `make install`
 
-This is a symptom of pnpm not being installed. Follow step 4 above.
+The Makefile cannot find the repository's `apps/` directory. Run the command
+from the root of a complete Kandev checkout:
+
+```bash
+cd /path/to/kandev
+test -d apps
+make install
+```
+
+If `test -d apps` fails, check that you cloned the repository above and did not
+run `make -f /path/to/kandev/Makefile install` from another directory. A missing
+pnpm installation produces `pnpm: command not found` instead.

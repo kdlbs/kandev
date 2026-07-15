@@ -138,19 +138,19 @@ func NewMyAgent() *MyAgent {
 
 Key implementation notes:
 
-- **`BuildCommand()`** returns the CLI command for structured protocol mode (the agent communicates via stdin/stdout with a protocol adapter). Include the protocol flag here (e.g. `--acp`, `--stream-json`).
-- **`Runtime()`** returns configuration used when running the agent in Docker or as a standalone process. Set `Protocol` to tell the adapter factory which transport to use.
+- **`BuildCommand()`** returns the CLI or bridge command for structured protocol mode. It must start an ACP-speaking process; include the CLI's ACP flag when one is required.
+- **`Runtime()`** returns configuration used when running the agent in Docker or as a standalone process. Full integrations set `Protocol: agent.ProtocolACP`; the adapter factory only accepts ACP.
 - **`IsInstalled()`** uses the `Detect()` helper with `WithFileExists()` to check for known installation paths. Set `SupportsMCP` and `MCPConfigPaths` on the result.
 - **MCP servers in passthrough** — set `MCPStrategy` on `PassthroughConfig` so the agent receives kandev's own tools server (plus any profile-configured MCP servers) when run in passthrough mode. Omitting it means **no MCP servers are injected in passthrough**. Pick the strategy that matches how your CLI loads MCP servers: `mcpconfig.ClaudeStrategy{}` (temp JSON file + `--mcp-config` flag), `mcpconfig.CodexStrategy{}` (repeated `-c mcp_servers.…` overrides), `mcpconfig.CursorStrategy{}` (project-local `.cursor/mcp.json`), `mcpconfig.PiStrategy{}` (project-local `.pi/mcp.json`), or `mcpconfig.OpenCodeStrategy{}` (temp JSON + `OPENCODE_CONFIG` env var). To add a strategy for a CLI with a different mechanism, implement `mcpconfig.PassthroughMCPStrategy`. See ADR 0014, ADR 0020, and `internal/agent/mcpconfig/passthrough.go`.
 - **MCP project files in protocol mode** — set `RuntimeConfig.ProjectMCPStrategy` only when the structured protocol adapter does not pass ACP `session/new` MCP servers through to the underlying CLI. Pi uses this to write `.pi/mcp.json` before the subprocess starts.
-- **`ListModels()`** can return a static list or dynamically query the CLI. Use `execAndParse()` from `helpers.go` for dynamic model discovery.
+- **Models and modes** are discovered from the ACP server during host-utility probing. Agent definitions do not maintain a separate static model list.
 - Use `Cmd()` builder for constructing commands fluently: `Cmd("myagent", "--flag").Model(...).Settings(...).Build()`.
 
 ### Step 2: Add logos (optional)
 
 Logos are optional - the UI shows a blank placeholder when none is provided. To add them, place SVGs in:
 
-```
+```text
 apps/backend/internal/agent/agents/logos/{agent_id}_light.svg
 apps/backend/internal/agent/agents/logos/{agent_id}_dark.svg
 ```
@@ -181,26 +181,17 @@ func (r *Registry) LoadDefaults() {
 
 That's it for registration. The frontend discovers agents through the API automatically.
 
-### Step 4: Choose a protocol
+### Step 4: Understand ACP, REST, and MCP
 
-Check [`apps/backend/pkg/agent/protocol.go`](../../apps/backend/pkg/agent/protocol.go) for available protocols:
+These names describe separate boundaries; they are not interchangeable agent runtime options:
 
-| Protocol | Constant | Transport | Used By |
-|----------|----------|-----------|---------|
-| ACP | `ProtocolACP` | JSON-RPC 2.0 over stdin/stdout | Gemini, Auggie |
-| stream-json | `ProtocolClaudeCode` | Streaming JSON over stdin/stdout | Claude Code |
-| Codex | `ProtocolCodex` | JSON-RPC variant over stdin/stdout | Codex |
-| OpenCode | `ProtocolOpenCode` | REST/SSE over HTTP | OpenCode |
-| Copilot | `ProtocolCopilot` | Go SDK (JSON-RPC internally) | GitHub Copilot |
-| Amp | `ProtocolAmp` | Streaming JSON over stdin/stdout | Amp |
+| Boundary | Role in Kandev |
+|----------|----------------|
+| ACP | The only structured agent runtime protocol accepted by the agentctl adapter factory. Set `Runtime().Protocol` to `agent.ProtocolACP`. ACP adapters can wrap CLIs whose internals use other transports. |
+| REST | Local HTTP control APIs exposed by agentctl for operations such as Git, processes, and workspace state. REST is not selected as an agent `Protocol`. |
+| MCP | The tool protocol used to give agents Kandev and profile-configured tools. MCP servers are passed through ACP `session/new` when supported or materialized by `MCPStrategy` / `ProjectMCPStrategy`. MCP is not an agent runtime adapter. |
 
-**If an existing protocol fits your agent**, reuse it - set `Protocol` in `Runtime()`. The adapter factory in `factory.go` selects the right transport automatically based on this value.
-
-**If you need a new protocol**, you'll need to:
-
-1. Add a new `Protocol` constant in `apps/backend/pkg/agent/protocol.go`
-2. Create a transport adapter in `apps/backend/internal/agentctl/server/adapter/transport/{protocol}/`
-3. Add the case to the factory switch in [`apps/backend/internal/agentctl/server/adapter/factory.go`](../../apps/backend/internal/agentctl/server/adapter/factory.go)
+To integrate a structured agent, provide or reuse an ACP server/bridge and configure `agent.ProtocolACP`. The adapter factory in [`factory.go`](../../apps/backend/internal/agentctl/server/adapter/factory.go) rejects non-ACP runtime protocols. If a CLI has no ACP server or bridge, integrate it as a passthrough-only `TUIAgent` instead of adding a protocol constant.
 
 ### Step 5: Build and test
 
@@ -221,10 +212,10 @@ Start the dev server and verify:
 | Change | Where |
 |--------|-------|
 | Update CLI version | `BuildCommand()` and `Runtime().Cmd` in the agent file |
-| Add/remove models | `ListModels()` - update static list or dynamic command |
+| Change model or mode discovery | Update the ACP server/bridge capability response; Kandev learns these during host-utility probing |
 | Update permissions | `PermissionSettings()` variable and `PassthroughConfig` |
 | Update Docker image | `Runtime()` - change `Image`/`Tag` fields |
-| Change protocol | `Runtime().Protocol` in the agent file |
+| Change structured runtime | Keep `Runtime().Protocol` on ACP and update the ACP server/bridge command |
 
 ---
 
@@ -236,8 +227,8 @@ Start the dev server and verify:
 | `apps/backend/internal/agent/agents/logos/{agent_id}_{light,dark}.svg` | Optional - agent logos (UI shows blank placeholder if omitted) |
 | `apps/backend/internal/agent/registry/registry.go` | Always - register in `LoadDefaults()` |
 | `apps/backend/internal/agent/agents/tui_agent.go` | Never - provides `TUIAgent` declarative type (read-only reference) |
-| `apps/backend/pkg/agent/protocol.go` | Only if adding a new protocol |
-| `apps/backend/internal/agentctl/server/adapter/factory.go` | Only if adding a new protocol |
-| `apps/backend/internal/agentctl/server/adapter/transport/{proto}/` | Only if adding a new protocol |
+| `apps/backend/pkg/agent/protocol.go` | Read-only reference for the ACP runtime protocol value |
+| `apps/backend/internal/agentctl/server/adapter/factory.go` | Read-only reference for ACP adapter construction |
+| `apps/backend/internal/agentctl/server/adapter/transport/acp/adapter.go` | ACP transport implementation and bridge behavior |
 | `apps/backend/internal/agent/agents/passthrough.go` | Never - provides `StandardPassthrough` (read-only reference) |
 | `apps/backend/internal/agent/agents/agent.go` | Never - defines the `Agent` interface (read-only reference) |

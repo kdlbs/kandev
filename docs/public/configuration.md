@@ -10,7 +10,7 @@ Both the file and env vars are optional; the backend boots with sensible default
 
 ## Config file
 
-The backend looks for `config.yaml` in, in order:
+The backend looks for `config.yaml` in the following order:
 
 - An explicit path passed at startup (used in tests).
 - The current working directory.
@@ -20,7 +20,7 @@ A missing file is not an error - defaults plus env vars take over.
 
 ## Environment variables
 
-All env vars use the `KANDEV_` prefix. Nested keys map by replacing `.` with `_` and uppercasing; **camelCase becomes one uppercase run** (no underscore inserted), because viper does not synthesize a snake_case form.
+Backend configuration normally uses the `KANDEV_` prefix. Nested keys map by replacing `.` with `_` and uppercasing; **camelCase becomes one uppercase run** (no underscore inserted), because Viper does not synthesize a snake_case form. A small set of explicitly bound compatibility aliases is also supported, including the unprefixed `AGENTCTL_PORT`.
 
 | YAML key | Env var |
 |---|---|
@@ -30,8 +30,9 @@ All env vars use the `KANDEV_` prefix. Nested keys map by replacing `.` with `_`
 | `logging.maxSizeMb` | `KANDEV_LOGGING_MAXSIZEMB` |
 | `homeDir` | `KANDEV_HOME_DIR` (alias) |
 | `logging.level` | `KANDEV_LOG_LEVEL` (alias) |
+| `agent.standalonePort` | `AGENTCTL_PORT` or `KANDEV_AGENT_STANDALONE_PORT` (aliases) |
 
-The aliases on the right are explicit bindings - see `LoadWithPath` in `config.go` for the full list. New keys should follow the deterministic rule (`KANDEV_<SECTION>_<KEYUPPERCASE>`) unless there is a reason to add an alias.
+The aliases on the right are explicit bindings - see `LoadWithPath` in `config.go` for the full list. New keys should follow the deterministic rule (`KANDEV_<SECTION>_<KEYUPPERCASE>`) unless compatibility requires an explicit alias.
 
 ## Full `config.yaml` example
 
@@ -90,7 +91,7 @@ auth:
 
 logging:
   level: "info"            # debug | info | warn | error
-  format: "text"           # text | json (auto = json when KUBERNETES_SERVICE_HOST is set)
+  format: "text"           # accepted values: text | json; omit for environment-based default
   outputPath: "stdout"     # stdout | stderr | /path/to/file.log
 
   # Rotation - only applied when outputPath is a file path.
@@ -145,4 +146,4 @@ Validated value sets (any other value is a startup error):
 - **Env vars override the file.** Useful for secrets (`KANDEV_DATABASE_PASSWORD`) and per-environment knobs (`KANDEV_LOG_LEVEL`).
 - **K8s / Docker:** prefer env vars for everything; skip the YAML file entirely.
 - **Local dev:** drop a `config.yaml` next to where you run the backend; viper picks it up from the current working directory.
-- **Format auto-detection** (`logging.format`): set `KANDEV_ENV=production` or run inside K8s and you get JSON logs without changing the config.
+- **Format auto-detection:** when `logging.format` is omitted, Kandev defaults to `json` if `KANDEV_ENV` is `production`/`prod` or `KUBERNETES_SERVICE_HOST` is set; otherwise it defaults to `text`. The literal value `auto` is not accepted.

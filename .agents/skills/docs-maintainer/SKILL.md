@@ -49,7 +49,8 @@ Skip public docs when the change is:
 Run the checks relevant to your change:
 
 ```bash
-rg -n "<changed command|config key|term>" docs/public docs/specs docs/decisions
+# Replace SEARCH_TERM with the command, config key, or terminology that changed.
+rg -n "SEARCH_TERM" docs/public docs/specs docs/decisions
 ```
 
 For website docs publishing changes, also run from the landing repo:

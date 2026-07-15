@@ -1,6 +1,6 @@
 # Git Operations for Worktrees
 
-This document describes the architecture for Git operations (Pull, Push, Rebase, Merge) on worktrees in Kandev.
+This document describes the architecture for Git operations (Pull, Push, Rebase, Merge, and Abort) on worktrees in Kandev.
 
 ## Overview
 
@@ -23,12 +23,12 @@ Git operations are executed **in agentctl**, not in the backend. This ensures co
 ```mermaid
 flowchart TD
     A["Frontend UI (Git Actions Dropdown)"] --> B["WebSocket Client"]
-    B -->|"worktree.pull/push/rebase/merge"| C["Backend WebSocket Gateway"]
+    B -->|"worktree.pull/push/rebase/merge/abort"| C["Backend WebSocket Gateway"]
     C --> D["Git Handlers"]
     D -->|"GetExecutionBySessionID"| E["Lifecycle Manager"]
     E --> F["AgentExecution"]
     F --> G["agentctl.Client"]
-    G -->|"HTTP POST /api/v1/git/op"| H["agentctl HTTP API"]
+    G -->|"HTTP POST /api/v1/git/{operation}"| H["agentctl HTTP API"]
     H --> I["Git Command Execution"]
     I -->|"exec.Command git"| J["Worktree Directory"]
     J --> K["HTTP Response"]
@@ -86,6 +86,8 @@ flowchart TD
 { "operation": "merge" }
 ```
 
+Every request also accepts an optional `repo` subpath for multi-repository task workspaces. Omit it for a single-repository workspace.
+
 **Response (all operations):**
 ```json
 {
@@ -120,11 +122,18 @@ A per-instance mutex in agentctl prevents concurrent git operations on the same 
 ### Hook Usage
 
 ```typescript
-const { pull, push, rebase, merge, isLoading, error } = useGitOperations(sessionId);
+const { pull, push, rebase, merge, abort, isLoading, error } = useGitOperations(sessionId);
 
 // In component
 <Button onClick={() => pull()} disabled={isLoading}>Pull</Button>
+<Button onClick={() => rebase("main")} disabled={isLoading}>Rebase</Button>
+<Button onClick={() => merge("main")} disabled={isLoading}>Merge</Button>
+<Button onClick={() => abort("rebase")} disabled={isLoading}>Abort rebase</Button>
 ```
+
+`rebase` and `merge` require the base branch as their first argument. In a
+multi-repository workspace, pass the repository subpath as the optional second
+argument, for example `rebase("main", "kandev")`.
 
 ## Files
 
@@ -142,5 +151,4 @@ const { pull, push, rebase, merge, isLoading, error } = useGitOperations(session
 ### Frontend
 
 - `lib/types/backend.ts` - TypeScript types
-- `lib/ws/actions/git.ts` - WebSocket action functions
-- `lib/hooks/useGitOperations.ts` - React hook
+- `hooks/use-git-operations.ts` - WebSocket action functions and React hook

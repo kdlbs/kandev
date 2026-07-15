@@ -11,18 +11,18 @@ This guide covers building the Kandev Docker image and deploying it to a Kuberne
 
 ## Building the Image
 
-From the repository root:
+The root `Dockerfile` consumes a prebuilt Linux release bundle; it does not compile the repository inside Docker. On a Linux host matching the cluster architecture, prepare the same build context used by the release workflow:
 
 ```bash
-# Build for your current architecture
-docker build -t kandev:latest .
-
-# Build for a specific architecture (e.g., for amd64 clusters)
-docker build --platform linux/amd64 -t kandev:latest .
-
-# Multi-arch build (requires buildx)
-docker buildx build --platform linux/amd64,linux/arm64 -t kandev:latest .
+make service-bundle
+rm -rf ctx
+mkdir -p ctx/bundle
+cp -R dist/kandev/. ctx/bundle/
+cp docker-entrypoint.sh ctx/
+docker build -f Dockerfile -t kandev:latest ctx
 ```
+
+For cross-architecture or multi-architecture images, produce the matching `kandev-linux-x64.tar.gz` and/or `kandev-linux-arm64.tar.gz` bundles first. For each platform, extract the bundle's top-level `kandev/` directory into `ctx/bundle/`, copy `docker-entrypoint.sh` into `ctx/`, and build that context for the matching platform. A `--platform` flag alone does not cross-compile the native binaries. See the [Docker guide](./docker.md#building-from-source) for the context layout.
 
 ### Using the Pre-built Image
 
@@ -46,7 +46,7 @@ Kandev publishes two flavors: the default vanilla image (smallest, npm-installab
 image: ghcr.io/kdlbs/kandev:universal
 ```
 
-See [`images.md`](../images.md) for the full comparison, inclusion policy, and recipes for deriving your own image when you need something neither flavor includes.
+See the [repository image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md) for the full comparison, inclusion policy, and recipes for deriving your own image when you need something neither flavor includes.
 
 ## Deploying to Kubernetes
 
@@ -90,7 +90,7 @@ No extra configuration is needed. The frontend automatically uses `window.locati
 
 The kandev image ships with `git`, `gh` (GitHub CLI), `node`, and `npm`, but **does not bundle the coding-agent CLIs** (`claude-code`, `codex`, `auggie`, etc.) — agent choice is per-user, and bundling all of them would bloat the image significantly.
 
-> Looking to add tools *beyond* agent CLIs - language toolchains, build tools, internal CLIs? See [`images.md`](../images.md) for the universal-image option and recipes for deriving your own image.
+> Looking to add tools *beyond* agent CLIs - language toolchains, build tools, internal CLIs? See the [repository image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md) for the universal-image option and recipes for deriving your own image.
 
 To install an agent inside the running pod, open **Settings → Agents** in the UI and click **Install** on the agent card under "Available to Install". The backend runs the agent's hard-coded install script (`npm install -g <pkg>`) and rescans on success.
 
@@ -119,7 +119,7 @@ So a one-time `kubectl exec -it deployment/kandev -- gh auth login` (or `claude 
 
 ## Configuration
 
-Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper). Set these in `k8s/configmap.yaml` or as environment variables in the deployment.
+Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper). Put only non-sensitive values in `k8s/configmap.yaml`; inject passwords and signing keys into the Deployment from a Kubernetes Secret.
 
 ### Core Settings
 
@@ -131,9 +131,10 @@ See [`configuration.md`](./configuration.md) for the full reference (every backe
 | `KANDEV_HOME_DIR` | No | `/data` | Kandev home directory - contains `data/` (DB), `tasks/`, `worktrees/`, `repos/`, `sessions/`, and `lsp-servers/` |
 | `KANDEV_DATABASE_DRIVER` | No | `sqlite` | Database driver (`sqlite` or `postgres`) |
 | `KANDEV_DATABASE_PATH` | No | `$KANDEV_HOME_DIR/data/kandev.db` | SQLite database file path (override) |
+| `KANDEV_NATS_URL` | No | empty | Shared NATS event bus URL. Required when multiple backend replicas must share events; empty selects a process-local in-memory bus. |
 | `KANDEV_DOCKER_ENABLED` | No | `false` | Enable Docker runtime for agents (requires DinD) |
 | `KANDEV_LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `KANDEV_LOGGING_FORMAT` | No | auto | Log format: `json` (auto-detected in K8s) or `text` |
+| `KANDEV_LOGGING_FORMAT` | No | environment-selected (`json` in K8s) | Explicit format: `json` or `text`. The literal value `auto` is not accepted. |
 | `KANDEV_LOGGING_OUTPUTPATH` | No | `stdout` | Log destination: `stdout`, `stderr`, or a file path (rotated when a file) |
 | `KANDEV_LOGGING_MAXSIZEMB` | No | `100` | Rotate the log file when it exceeds this size (MB). File output only. |
 | `KANDEV_LOGGING_MAXBACKUPS` | No | `5` | Max rotated files to retain (`0` = unlimited). File output only. |
@@ -141,8 +142,24 @@ See [`configuration.md`](./configuration.md) for the full reference (every backe
 | `KANDEV_LOGGING_COMPRESS` | No | `true` | Gzip rotated files. File output only. |
 
 > **Logging in K8s:** prefer the default `stdout` so kubelet collects logs. If you set `KANDEV_LOGGING_OUTPUTPATH` to a file, the active log is created with mode `0600` (owner read/write only); any sidecar reading it must run as the same user.
-
+>
 > **Upgrading from a pre-`KANDEV_HOME_DIR` deployment?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`, and `KANDEV_DATA_DIR` is gone — point `KANDEV_HOME_DIR` at the same volume mount (`/data`) instead. (`KANDEV_WORKTREE_BASEPATH` still works as an explicit override if you want to keep worktrees outside the home dir.) The backend auto-migrates the legacy `kandev.db` (plus any `-wal`/`-shm` files) on first boot — look for `Migrated SQLite database from pre-KANDEV_HOME_DIR location` in the pod logs. If you'd rather pin the old path, set `KANDEV_DATABASE_PATH=/data/kandev.db` in the ConfigMap.
+
+Keep `KANDEV_DATABASE_PASSWORD`, `KANDEV_AUTH_JWTSECRET`, and `KANDEV_OFFICE_JWTSIGNINGKEY` out of ConfigMaps. Reference Secret keys from the Deployment instead:
+
+```yaml
+env:
+  - name: KANDEV_DATABASE_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: kandev-secrets
+        key: database-password
+  - name: KANDEV_AUTH_JWTSECRET
+    valueFrom:
+      secretKeyRef:
+        name: kandev-secrets
+        key: auth-jwt-secret
+```
 
 ### PostgreSQL Settings (when `KANDEV_DATABASE_DRIVER=postgres`)
 
@@ -167,21 +184,21 @@ See [`configuration.md`](./configuration.md) for the full reference (every backe
 
 ### PostgreSQL (recommended for production)
 
-- Supports multiple replicas for horizontal scaling
+- Supports multiple replicas for horizontal scaling when paired with shared NATS
 - Change deployment strategy to `RollingUpdate`
 - Set via environment variables:
 
 ```yaml
-# In configmap.yaml or a Secret
+# Non-sensitive values in configmap.yaml
 KANDEV_DATABASE_DRIVER: postgres
 KANDEV_DATABASE_HOST: postgres.default.svc.cluster.local
 KANDEV_DATABASE_PORT: "5432"
 KANDEV_DATABASE_USER: kandev
-KANDEV_DATABASE_PASSWORD: <from-secret>
 KANDEV_DATABASE_DBNAME: kandev
+KANDEV_NATS_URL: nats://nats.default.svc.cluster.local:4222
 ```
 
-When using Postgres, the PVC is still needed for worktree storage but the database itself is external.
+Supply `KANDEV_DATABASE_PASSWORD` from a Secret as shown above. When using Postgres, the PVC is still needed for worktree storage but the database itself is external. An empty `KANDEV_NATS_URL` selects an isolated in-memory event bus in each process, so notifications and orchestration events do not coordinate across replicas; do not scale beyond one backend replica without shared NATS.
 
 ## Persistent Storage
 
@@ -212,7 +229,7 @@ The CLI launcher also performs an internal health check — it waits for the bac
 
 **Single replica (SQLite)**: The default configuration uses `replicas: 1` with `Recreate` strategy. This ensures only one instance writes to SQLite at a time.
 
-**Multiple replicas (PostgreSQL)**: Switch to Postgres, change the deployment strategy to `RollingUpdate`, and increase replicas:
+**Multiple replicas (PostgreSQL + NATS)**: Switch to Postgres, configure the same `KANDEV_NATS_URL` on every replica, change the deployment strategy to `RollingUpdate`, and increase replicas:
 
 ```yaml
 spec:
@@ -226,9 +243,11 @@ spec:
 
 ## Upgrading
 
+Rebuild the release bundle and refresh `ctx/` using [Building the Image](#building-the-image) before running the image build below.
+
 ```bash
 # Build and push new image
-docker build -t your-registry.com/kandev:v1.1.0 .
+docker build -f Dockerfile -t your-registry.com/kandev:v1.1.0 ctx
 docker push your-registry.com/kandev:v1.1.0
 
 # Update deployment
