@@ -40,7 +40,7 @@ Skip public docs when the change is:
 2. Search `docs/public/**` first for affected terms and commands.
 3. If public docs exist, update them with the same PR as the behavior change.
 4. If no public docs exist but the behavior is user-facing, add or propose the smallest useful public page/section.
-   When adding a page, include `title` and `description` frontmatter and list its filename in `docs/public/meta.json` exactly once. See `docs/public/README.md`.
+   When adding a page, include `title` and `description` frontmatter and list its page slug or path without the `.md` extension in `docs/public/meta.json` exactly once, for example `cli`. See `docs/public/README.md`.
 5. If the change only updates implementation intent or architectural history, update specs/plans/ADRs instead.
 6. Keep public docs task-oriented: prerequisites, commands, expected result, troubleshooting, and links to reference.
 7. Preserve internal links inside `docs/public/**` where possible. Link to source-only raw docs only when the raw note is intentionally not published.
@@ -60,6 +60,7 @@ node scripts/validate-public-docs.mjs
 For website docs publishing changes, also run from the landing repo:
 
 ```bash
+pnpm install --frozen-lockfile
 pnpm --filter @kandev/docs fetch-docs
 pnpm exec vitest run apps/docs/lib/docs-processing.test.ts apps/docs/lib/public-docs.test.ts
 pnpm --filter @kandev/docs build

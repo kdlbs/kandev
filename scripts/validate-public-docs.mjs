@@ -59,7 +59,12 @@ export async function validatePublicDocs(
   return { pageCount: pagesBySlug.size };
 }
 
-/** Read and validate the shape of public navigation metadata. */
+/**
+ * Read and validate the shape of public navigation metadata.
+ *
+ * @param {string} docsDir Directory containing meta.json.
+ * @returns {Promise<{pages: string[]}>} Parsed navigation metadata.
+ */
 async function readMeta(docsDir) {
   const raw = await fs.readFile(path.join(docsDir, "meta.json"), "utf8");
   const meta = JSON.parse(raw);
@@ -76,7 +81,13 @@ async function readMeta(docsDir) {
   return meta;
 }
 
-/** Recursively collect Markdown paths relative to the published docs root. */
+/**
+ * Recursively collect Markdown paths relative to the published docs root.
+ *
+ * @param {string} dir Published docs root.
+ * @param {string} [relativeDir] Directory relative to the docs root.
+ * @returns {Promise<string[]>} Sorted relative Markdown paths.
+ */
 async function collectMarkdownFiles(dir, relativeDir = "") {
   const entries = await fs.readdir(path.join(dir, relativeDir), {
     withFileTypes: true,
@@ -95,7 +106,13 @@ async function collectMarkdownFiles(dir, relativeDir = "") {
   return files.flat().sort();
 }
 
-/** Require non-empty title and description fields in leading frontmatter. */
+/**
+ * Require non-empty title and description fields in leading frontmatter.
+ *
+ * @param {string} file Relative page path used in validation errors.
+ * @param {string} markdown Page source.
+ * @returns {void}
+ */
 function assertFrontmatter(file, markdown) {
   const block = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
   if (
@@ -109,12 +126,14 @@ function assertFrontmatter(file, markdown) {
   }
 }
 
-/** Return whether a metadata entry is a heading or external-link decoration. */
+/**
+ * Return whether a metadata entry is a navigation heading.
+ *
+ * @param {string} entry Navigation metadata entry.
+ * @returns {boolean} Whether the entry is a heading decoration.
+ */
 function isNavigationDecoration(entry) {
-  return (
-    /^---.*---$/.test(entry) ||
-    /^(?:external:)?\[[^\]]+\]\([^)]+\)$/.test(entry)
-  );
+  return /^---.*---$/.test(entry);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -7,6 +7,13 @@ import { validatePublicDocs } from "./validate-public-docs.mjs";
 
 const tempDirs = [];
 
+/**
+ * Create an isolated published-docs fixture.
+ *
+ * @param {Record<string, string>} files Fixture files keyed by relative path.
+ * @param {{pages: string[]}} meta Navigation metadata.
+ * @returns {Promise<string>} Temporary fixture directory.
+ */
 async function createDocs(files, meta) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "kandev-public-docs-"));
   tempDirs.push(dir);
@@ -71,6 +78,18 @@ test("rejects meta.json entries without a matching file", async () => {
   await assert.rejects(
     validatePublicDocs(dir),
     /meta.json references unknown page: nonexistent/,
+  );
+});
+
+test("rejects unsupported link decorations as unknown pages", async () => {
+  const dir = await createDocs(
+    { "index.md": validPage },
+    { pages: ["index", "external:[Support](https://example.com)"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /meta.json references unknown page: external:\[Support\]\(https:\/\/example.com\)/,
   );
 });
 
