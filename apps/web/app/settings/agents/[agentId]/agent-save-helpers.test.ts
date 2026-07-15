@@ -53,6 +53,33 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+function createTestCallbacks(initialDraft: DraftAgent) {
+  let currentDraft = initialDraft;
+  const upsertAgent = vi.fn();
+  const replaceRoute = vi.fn();
+  const callbacks: SaveAgentCallbacks = {
+    onToastError: vi.fn(),
+    currentAgentModelConfig: {
+      default_model: "mock-fast",
+      available_models: [],
+      supports_dynamic_models: false,
+    },
+    permissionSettings: {},
+    resolveDisplayName: () => "Mock",
+    upsertAgent,
+    setDraftAgent: (value) => {
+      currentDraft = typeof value === "function" ? value(currentDraft) : value;
+    },
+    ensureProfiles: (agent) => agent,
+    cloneAgent: (agent) => ({
+      ...agent,
+      profiles: agent.profiles.map((profile) => ({ ...profile })),
+    }),
+    replaceRoute,
+  };
+  return { callbacks, upsertAgent, replaceRoute, getDraft: () => currentDraft };
+}
+
 describe("toAgentProfilePatch", () => {
   it("maps snake_case form keys to camelCase AgentProfile fields", () => {
     const patch: Partial<ProfileFormData> = {
@@ -213,29 +240,7 @@ describe("saveNewAgent", () => {
     const created = agentWithProfiles([
       { ...draftProfile, id: PERSISTED_PROFILE_ID, mcp_config: undefined },
     ]);
-    let currentDraft = draftAgent;
-    const upsertAgent = vi.fn();
-    const replaceRoute = vi.fn();
-    const callbacks: SaveAgentCallbacks = {
-      onToastError: vi.fn(),
-      currentAgentModelConfig: {
-        default_model: "mock-fast",
-        available_models: [],
-        supports_dynamic_models: false,
-      },
-      permissionSettings: {},
-      resolveDisplayName: () => "Mock",
-      upsertAgent,
-      setDraftAgent: (value) => {
-        currentDraft = typeof value === "function" ? value(currentDraft) : value;
-      },
-      ensureProfiles: (agent) => agent,
-      cloneAgent: (agent) => ({
-        ...agent,
-        profiles: agent.profiles.map((profile) => ({ ...profile })),
-      }),
-      replaceRoute,
-    };
+    const { callbacks, upsertAgent, replaceRoute, getDraft } = createTestCallbacks(draftAgent);
     const failure = new Error("MCP unavailable");
     vi.mocked(createAgentAction).mockResolvedValue(created);
     vi.mocked(updateAgentProfileMcpConfigAction)
@@ -254,18 +259,64 @@ describe("saveNewAgent", () => {
       id: PERSISTED_PROFILE_ID,
       mcp_config: { dirty: true },
     });
-    expect(currentDraft.profiles[0]).toMatchObject({
+    expect(getDraft().profiles[0]).toMatchObject({
       id: PERSISTED_PROFILE_ID,
       mcp_config: { dirty: true },
     });
     expect(replaceRoute).toHaveBeenCalledWith("/settings/agents/mock-agent");
 
-    const savedDraft = await saveExistingAgent(currentDraft, reconciled, false, callbacks);
+    const savedDraft = await saveExistingAgent(getDraft(), reconciled, false, callbacks);
 
     expect(createAgentAction).toHaveBeenCalledOnce();
     expect(createAgentProfileAction).not.toHaveBeenCalled();
     expect(updateAgentProfileMcpConfigAction).toHaveBeenCalledTimes(2);
     expect(savedDraft.profiles[0].mcp_config).toBeUndefined();
+  });
+});
+
+describe("saveExistingAgent", () => {
+  it("reconciles a created profile so a failed MCP write retries without duplication", async () => {
+    const newProfile = draftFrom(baseProfile, {
+      id: toAgentProfileId("draft-new-profile"),
+      name: "New profile",
+      mcp_config: {
+        enabled: true,
+        servers: '{"mcpServers":{"playwright":{"command":"npx"}}}',
+        dirty: true,
+        error: null,
+      },
+    });
+    const savedAgent = agentWithProfiles([baseProfile]);
+    const draftAgent = agentWithProfiles([baseProfile, newProfile]);
+    const createdProfile = { ...newProfile, id: PERSISTED_PROFILE_ID, mcp_config: undefined };
+    const { callbacks, upsertAgent, getDraft } = createTestCallbacks(draftAgent);
+    const failure = new Error("MCP unavailable");
+    vi.mocked(createAgentProfileAction).mockResolvedValue(createdProfile);
+    vi.mocked(updateAgentProfileMcpConfigAction)
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce({
+        profile_id: PERSISTED_PROFILE_ID,
+        enabled: true,
+        servers: {},
+      });
+
+    await expect(saveExistingAgent(draftAgent, savedAgent, false, callbacks)).rejects.toBe(failure);
+
+    const reconciled = upsertAgent.mock.calls[0][0];
+    expect(reconciled.profiles[1]).toMatchObject({
+      id: PERSISTED_PROFILE_ID,
+      mcp_config: { dirty: true },
+    });
+    expect(getDraft().profiles[1]).toMatchObject({
+      id: PERSISTED_PROFILE_ID,
+      mcp_config: { dirty: true },
+    });
+
+    const savedDraft = await saveExistingAgent(getDraft(), reconciled, false, callbacks);
+
+    expect(createAgentProfileAction).toHaveBeenCalledOnce();
+    expect(updateAgentProfileMcpConfigAction).toHaveBeenCalledTimes(2);
+    expect(savedDraft.profiles[1].mcp_config).toBeUndefined();
   });
 });
 
