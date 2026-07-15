@@ -534,6 +534,13 @@ func TestAdoptedCacheCanBeRotatedWithoutManagedMarker(t *testing.T) {
 	if err := provider.ValidateAdoption(context.Background(), cachePath, "ADOPT"); err != nil {
 		t.Fatalf("ValidateAdoption() error = %v", err)
 	}
+	entries, err := os.ReadDir(cachePath)
+	if err != nil {
+		t.Fatalf("read cache after adoption validation: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "artifact" {
+		t.Fatalf("cache after adoption validation = %v, want only artifact", entries)
+	}
 
 	result, err := provider.Cleanup(context.Background())
 	if err != nil {

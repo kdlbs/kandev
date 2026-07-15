@@ -445,24 +445,43 @@ func startsWithParent(rel string) bool {
 }
 
 func probeAtomicRename(cachePath, trashRoot string) error {
-	if err := os.MkdirAll(trashRoot, 0o700); err != nil { // codeql[go/path-injection] validated by validateCacheAndTrash.
+	anchor, err := storage.CommonPath(cachePath, trashRoot)
+	if err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(anchor)
+	if err != nil {
+		return fmt.Errorf("open Go-cache adoption root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+
+	cacheRel, err := filepath.Rel(anchor, cachePath)
+	if err != nil {
+		return fmt.Errorf("resolve Go-cache probe path: %w", err)
+	}
+	trashRel, err := filepath.Rel(anchor, trashRoot)
+	if err != nil {
+		return fmt.Errorf("resolve Go-cache trash path: %w", err)
+	}
+	if err := root.MkdirAll(trashRel, 0o700); err != nil {
 		return fmt.Errorf("create Go-cache trash: %w", err)
 	}
-	probe, err := os.CreateTemp(cachePath, ".kandev-adoption-probe-") // codeql[go/path-injection] cachePath is validated by validateCacheAndTrash.
+	probeName := ".kandev-adoption-probe-" + uuid.NewString()
+	source := filepath.Join(cacheRel, probeName)
+	probe, err := root.OpenFile(source, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("create adoption probe: %w", err)
 	}
-	source := probe.Name()
 	if err := probe.Close(); err != nil {
-		_ = os.Remove(source)
+		_ = root.Remove(source)
 		return fmt.Errorf("close adoption probe: %w", err)
 	}
-	destination := filepath.Join(trashRoot, filepath.Base(source))
-	if err := os.Rename(source, destination); err != nil {
-		_ = os.Remove(source)
+	destination := filepath.Join(trashRel, probeName)
+	if err := root.Rename(source, destination); err != nil {
+		_ = root.Remove(source)
 		return fmt.Errorf("adopted Go cache must support atomic rename into Kandev trash: %w", err)
 	}
-	if err := os.Remove(destination); err != nil {
+	if err := root.Remove(destination); err != nil {
 		return fmt.Errorf("remove adoption probe: %w", err)
 	}
 	return nil

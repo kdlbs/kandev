@@ -14,7 +14,7 @@ Build the desktop and mobile System Storage surface with safe confirmations and 
 
 ## Acceptance
 
-- The page supports analyze, settings persistence, manual run, resource results, run history,
+- The page supports analysis, settings persistence, manual run, resource results, run history,
   quarantine restore, and confirmed permanent deletion without component-level direct fetching.
 - Dedicated-Docker and external-Go-cache warnings are explicit; disabled/unavailable actions explain
   why, and async jobs recover through WS plus polling fallback.
