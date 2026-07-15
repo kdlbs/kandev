@@ -22,9 +22,10 @@ func TestHub_ClientLifecycleCallsReturnAfterShutdown(t *testing.T) {
 		"unregister": h.Unregister,
 	} {
 		t.Run(name, func(t *testing.T) {
+			client := newTestClient(name)
 			returned := make(chan struct{})
 			go func() {
-				lifecycleCall(newTestClient(name))
+				lifecycleCall(client)
 				close(returned)
 			}()
 
@@ -32,6 +33,9 @@ func TestHub_ClientLifecycleCallsReturnAfterShutdown(t *testing.T) {
 			case <-returned:
 			case <-time.After(100 * time.Millisecond):
 				t.Fatal("client lifecycle call blocked after hub shutdown")
+			}
+			if !client.closed {
+				t.Fatal("client send channel remained open after hub shutdown")
 			}
 		})
 	}

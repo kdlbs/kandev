@@ -265,6 +265,7 @@ func (h *Hub) Register(client *Client) {
 	select {
 	case h.register <- client:
 	case <-h.done:
+		client.closeSend()
 	}
 }
 
@@ -273,6 +274,7 @@ func (h *Hub) Unregister(client *Client) {
 	select {
 	case h.unregister <- client:
 	case <-h.done:
+		client.closeSend()
 	}
 }
 
