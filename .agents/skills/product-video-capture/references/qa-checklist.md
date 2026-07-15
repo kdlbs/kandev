@@ -77,9 +77,10 @@ Verify player behavior:
 - controls, tabs, and carousel semantics remain keyboard-accessible;
 - no `cover` crop hides important UI.
 
-Run landing checks:
+Run landing checks only from the resolved landing repository root:
 
 ```bash
+cd "$LANDING_REPO"
 pnpm exec vitest run scripts/product-loop-camera.test.mjs scripts/product-loop-encoder.test.mjs
 pnpm test
 pnpm exec tsc --noEmit

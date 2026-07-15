@@ -1,12 +1,15 @@
 ---
 name: product-demo-seeding
 description: Seed coherent, disposable Kandev demo scenarios for screenshots, product films, landing-page media, and reproducible UI captures. Use whenever media needs believable tasks, workflows, agents, executors, integrations, plans, sessions, diffs, reviews, or native mobile states; invoke before product-video-capture and never use a developer's main instance or data.
-compatibility: Kandev web E2E fixtures, Playwright, pnpm, Git, and a local disposable backend.
 ---
 
 # Product Demo Seeding
 
 Build a truthful product state before recording pixels. Treat narrative, data, and UI route as one artifact.
+
+## Prerequisites
+
+Use a Kandev checkout with its web E2E fixtures, Playwright dependencies, pnpm toolchain, Git, and a disposable local backend available. Verify the checkout contains `scripts/dev-isolated` and `apps/web/e2e/` before creating seed state.
 
 ## Workflow
 

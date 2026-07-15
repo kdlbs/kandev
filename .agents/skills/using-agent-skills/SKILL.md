@@ -20,7 +20,7 @@ Task arrives
 |-- Code change with test coverage? --------> /tdd
 |-- Browser/E2E coverage? ------------------> /e2e
 |-- Seed isolated product demo data? -------> /product-demo-seeding
-|-- Record landing/product media? ----------> /product-demo-seeding -> /product-video-capture
+|-- Record landing/product media? ----------> /product-video-capture (seed first only for new visible state)
 |-- Frontend/UI change? --------------------> /mobile-parity plus /e2e as needed
 |-- Security-sensitive change? -------------> security-auditor subagent plus /code-review
 |-- Test strategy or coverage gaps? --------> test-engineer subagent plus /tdd or /e2e

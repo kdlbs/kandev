@@ -1,12 +1,18 @@
 ---
 name: product-video-capture
 description: Record, camera-process, encode, integrate, and validate polished Kandev product films, landing-page loops, screenshots, and alternate cuts from isolated demo data. Use whenever the user asks for product videos, GIF-like feature demos, smooth cursor-follow zoom, desktop/mobile captures, recaptures, new landing media, or different framing; invoke product-demo-seeding first for new visible state.
-compatibility: Linux Xvfb, Chrome for Testing, Playwright/CDP, FFmpeg/FFprobe, Kandev E2E fixtures, and the sibling landing repository.
 ---
 
 # Product Video Capture
 
 Produce reusable clean masters first; derive presentation from them later.
+
+## Prerequisites And Repo Discovery
+
+- Require Linux Xvfb, Chrome for Testing, Playwright/CDP, FFmpeg/FFprobe, a Kandev checkout with E2E fixtures, and the landing repository.
+- Resolve the Kandev root with `git rev-parse --show-toplevel`, then verify it contains `scripts/dev-isolated` and `apps/web/e2e/`.
+- Resolve the landing root from `KANDEV_LANDING_REPO` when set. Otherwise search the available workspace and sibling checkouts for both `scripts/product-loop-camera.mjs` and `scripts/product-loop-encoder.mjs`; do not select a directory by name alone.
+- If discovery finds zero or multiple landing candidates, ask the user to identify the checkout. Record the resolved roots as `KANDEV_REPO` and `LANDING_REPO`, and use those variables for every command and copy operation.
 
 ## Choose Deliverable
 
@@ -20,7 +26,7 @@ Produce reusable clean masters first; derive presentation from them later.
 
 ## Pipeline
 
-1. Resolve Kandev and landing repo roots. Do not assume task-specific absolute paths.
+1. Resolve and verify `KANDEV_REPO` and `LANDING_REPO` as described above. Do not assume task-specific absolute paths.
 2. Review the seed handoff and rehearse the full native desktop/mobile story once.
 3. Record one continuous, unzoomed, high-resolution master per form factor. Use true physical pixels, not a padded Playwright video canvas.
 4. Record semantic action timestamps, target bounds, and pointer/touch journeys beside the raw file.
