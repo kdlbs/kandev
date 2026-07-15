@@ -1,3 +1,8 @@
+---
+title: "Windows Support"
+description: "Run Kandev on Windows through native and WSL workflows."
+---
+
 # Windows Support (WSL)
 
 Kandev runs on Windows through WSL (Windows Subsystem for Linux).

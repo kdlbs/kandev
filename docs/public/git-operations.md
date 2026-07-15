@@ -1,3 +1,8 @@
+---
+title: "Git Operations"
+description: "Understand how Kandev manages repositories, worktrees, branches, and review surfaces."
+---
+
 # Git Operations for Worktrees
 
 This document describes the architecture for Git operations (Pull, Push, Rebase, Merge, and Abort) on worktrees in Kandev.

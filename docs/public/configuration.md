@@ -1,3 +1,8 @@
+---
+title: "Configuration"
+description: "Configure Kandev workspaces, runtimes, settings, and environment behavior."
+---
+
 # Configuration
 
 Kandev's backend reads configuration from three sources, in this order of precedence (later sources override earlier ones):

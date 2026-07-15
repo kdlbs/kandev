@@ -1,3 +1,8 @@
+---
+title: "Kubernetes"
+description: "Deploy Kandev in Kubernetes environments."
+---
+
 # Kubernetes Deployment Guide
 
 This guide covers building the Kandev Docker image and deploying it to a Kubernetes cluster.

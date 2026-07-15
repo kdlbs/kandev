@@ -1,3 +1,8 @@
+---
+title: "Add an Agent CLI"
+description: "Add a new ACP adapter or agent CLI integration to Kandev."
+---
+
 # Adding a New Agent CLI Integration
 
 This guide explains how to add support for a new coding agent CLI to Kandev.

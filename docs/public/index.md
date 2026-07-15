@@ -1,3 +1,8 @@
+---
+title: "Overview"
+description: "Start building with Kandev agentic development workflows."
+---
+
 # Kandev Feature Guide
 
 This page expands the short feature list in the README without turning the README into a catalog.

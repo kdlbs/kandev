@@ -1,3 +1,8 @@
+---
+title: "Workflow Tips"
+description: "Practical guidance for designing and operating Kandev workflows."
+---
+
 # Workflows
 
 Kandev ships with five workflow templates. Each defines a sequence of steps with automated transitions - agents start, stop, and move between steps based on events like entering a step, sending a message, or an agent completing its turn.

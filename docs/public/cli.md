@@ -1,3 +1,8 @@
+---
+title: "CLI"
+description: "Install, start, and operate Kandev from the command line."
+---
+
 # Kandev CLI
 
 ## Architecture

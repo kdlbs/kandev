@@ -1,3 +1,8 @@
+---
+title: "Run as a Service"
+description: "Run Kandev as a persistent service on your own machine or infrastructure."
+---
+
 # Run Kandev as a Service
 
 Install Kandev as an OS-managed service (systemd on Linux, launchd on macOS) so it auto-starts and stays running. User-mode services installed by `kandev service install` can self-update from the System → Updates page. Non-service installs and `--system` services still update manually: `npm i -g kandev@latest` or `brew upgrade kandev`, then re-run `kandev service install`.

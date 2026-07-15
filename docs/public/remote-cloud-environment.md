@@ -1,3 +1,8 @@
+---
+title: "Remote Cloud Environment"
+description: "Use remote execution environments for agent work."
+---
+
 # Remote Cloud Environment Instructions
 
 Setup notes and caveats for developing Kandev in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, or similar sandboxed environments).

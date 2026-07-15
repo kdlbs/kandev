@@ -1,3 +1,8 @@
+---
+title: "Desktop App"
+description: "Install and run the Tauri desktop app with the native Kandev runtime."
+---
+
 # Kandev Desktop App
 
 Kandev desktop is a Tauri app that starts the native Kandev runtime locally and shows the existing Kandev UI in a system WebView. It does not require Node.js at runtime. Node.js, pnpm, Rust, and the Tauri CLI are build-time tools only.

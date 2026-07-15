@@ -1,0 +1,23 @@
+{
+  "title": "Kandev Docs",
+  "pages": [
+    "---Start---",
+    "index",
+    "cli",
+    "configuration",
+    "desktop-app",
+    "---Execution---",
+    "docker",
+    "k8s",
+    "run-as-a-service",
+    "remote-cloud-environment",
+    "windows-support",
+    "---Workflows---",
+    "workflow-tips",
+    "workflow-import-export",
+    "git-operations",
+    "add-agent-cli",
+    "---Reference---",
+    "websocket-api"
+  ]
+}
