@@ -86,6 +86,20 @@ Post-rebase audit (2026-07-14):
 - Full local verification passed: formatting, typecheck, 632 web test files
   (4,762 tests, 4 skipped), backend, CLI, script tests, and lint.
 
+Post-rebase audit (2026-07-15):
+
+- Rebased onto `origin/main` at `ac2eef8d`; task-list and top-bar conflicts
+  preserved upstream unarchive controls while retaining Query-owned task reads.
+- RED focused tests reproduced a stale archived task-detail cache and two new
+  tests that still asserted deleted kanban Zustand mirrors.
+- Unarchive mutation responses now reconcile task detail/page/snapshot Query
+  caches, and `task.updated` correctly projects explicit `archived_at: null`.
+- Focused typecheck passed, and the bridge/cache/unarchive/ACP output/layout
+  regression slice passed 9 files / 84 tests before full verification.
+- Full local `make fmt`, `make typecheck`, `make test`, and `make lint` passed.
+  The web suite passed 635 files / 4,781 tests with 4 skipped; backend, CLI,
+  script, and harness checks also passed.
+
 ## Files Likely Touched
 
 - `apps/web/e2e/tests/**`

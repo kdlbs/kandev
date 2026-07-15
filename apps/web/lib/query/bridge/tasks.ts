@@ -283,8 +283,16 @@ function taskDetailSessionFields(
     primary_session_id: cachedPrimarySessionIdFromPayload(payload, existing),
     session_count: payload.session_count ?? existing.session_count,
     review_status: payload.review_status ?? existing.review_status,
-    archived_at: payload.archived_at ?? existing.archived_at,
+    archived_at: cachedArchivedAtFromPayload(payload, existing),
   };
+}
+
+function cachedArchivedAtFromPayload(
+  payload: TaskEventMessage["payload"],
+  existing: CachedTask,
+): unknown {
+  if (payload.archived_at !== undefined) return payload.archived_at;
+  return existing.archived_at;
 }
 
 function taskDetailTimestampFields(

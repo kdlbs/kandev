@@ -169,6 +169,22 @@ describe("task query bridge task detail core", () => {
 
     cleanup();
   });
+
+  it("clears the cached archive timestamp when an unarchive update arrives", () => {
+    const { ws, queryClient, cleanup } = setupBridge();
+    queryClient.setQueryData(qk.tasks.detail(TASK_ID), {
+      ...makeTask(TASK_ID, WF_ID, STEP_ID),
+      archived_at: "2026-07-14T12:00:00Z",
+    });
+
+    emitTaskUpdated(ws, { archived_at: null });
+
+    expect(queryClient.getQueryData(qk.tasks.detail(TASK_ID))).toMatchObject({
+      archived_at: null,
+    });
+
+    cleanup();
+  });
 });
 
 describe("task query bridge task detail repository metadata", () => {
@@ -351,8 +367,10 @@ describe("task query bridge workflow snapshots", () => {
 
     cleanup();
   });
+});
 
-  it("removes archived tasks from cached workflow snapshots", () => {
+describe("task query bridge workflow snapshot archive state", () => {
+  it("removes archived tasks", () => {
     const { ws, queryClient, cleanup } = setupBridge();
     queryClient.setQueryData(
       qk.workflows.snapshot(WF_ID),
@@ -363,6 +381,20 @@ describe("task query bridge workflow snapshots", () => {
 
     const snapshot = queryClient.getQueryData<WorkflowSnapshot>(qk.workflows.snapshot(WF_ID));
     expect(snapshot?.tasks).toEqual([]);
+
+    cleanup();
+  });
+
+  it("restores unarchived tasks", () => {
+    const { ws, queryClient, cleanup } = setupBridge();
+    queryClient.setQueryData(qk.workflows.snapshot(WF_ID), makeSnapshot(WF_ID, STEP_ID, []));
+
+    emitTaskUpdated(ws, { archived_at: null, title: "Restored task" });
+
+    const snapshot = queryClient.getQueryData<WorkflowSnapshot>(qk.workflows.snapshot(WF_ID));
+    expect(snapshot?.tasks).toEqual([
+      expect.objectContaining({ id: TASK_ID, title: "Restored task" }),
+    ]);
 
     cleanup();
   });

@@ -1,17 +1,19 @@
 "use client";
 
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { IconArchiveOff, IconLoader } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { unarchiveTask } from "@/lib/api";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
+import { reconcileUnarchiveTaskQueries } from "@/lib/query/task-cache";
 import { useToast } from "@/components/toast-provider";
 
-// Shown in the task top bar when the task is archived. On success the
-// backend publishes task.updated with archived_at=null, which restores the
-// task in the kanban/store — no manual refetch needed here.
+// Shown in the task top bar when the task is archived. The mutation response
+// reconciles Query immediately; task.updated remains the cross-client update.
 export function TaskUnarchiveButton({ taskId }: { taskId?: string | null }) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [isPending, setIsPending] = useState(false);
   if (!taskId) return null;
 
@@ -19,6 +21,7 @@ export function TaskUnarchiveButton({ taskId }: { taskId?: string | null }) {
     setIsPending(true);
     try {
       const result = await unarchiveTask(taskId);
+      reconcileUnarchiveTaskQueries(queryClient, result);
       toast(unarchiveToastPayload(result));
     } catch (err) {
       toast({

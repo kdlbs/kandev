@@ -349,3 +349,20 @@ Post-rebase audit completed locally on 2026-07-14 after rebasing onto
   state to the workflow snapshot Query cache.
 - Preserved the upstream prompt-dispatch behavior and PR title rendering while
   resolving conflicts. Full local format, typecheck, test, and lint passed.
+
+Post-rebase audit completed locally on 2026-07-15 after rebasing onto
+`origin/main` at `ac2eef8d`:
+
+- Preserved upstream task unarchive UI and branch-recovery feedback while
+  keeping paginated task reads and refreshes on TanStack Query.
+- Migrated unarchive mutation recovery to Query cache reconciliation for task
+  details, task pages, and workflow snapshots; WebSocket delivery remains the
+  cross-client update path rather than the only local recovery path.
+- Fixed `task.updated` projection so an explicit `archived_at: null` clears a
+  cached archive timestamp, and replaced new tests for deleted kanban Zustand
+  mirrors with Query bridge/cache regressions.
+- Audited the remaining ACP output, metrics alignment, and dockview resize
+  changes. They render existing message data or manage client-owned
+  preference/layout state, so no additional server-state migration was needed.
+- Full local format, typecheck, test, and lint passed, including 635 web test
+  files (4,781 passed, 4 skipped) plus backend, CLI, script, and harness checks.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import type { PaginationState } from "@tanstack/react-table";
 import { archiveTask, deleteTask, unarchiveTask, updateUserSettings } from "@/lib/api";
@@ -16,6 +16,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { workspaceTasksQueryOptions } from "@/lib/query/query-options";
+import { reconcileUnarchiveTaskQueries } from "@/lib/query/task-cache";
 import { TasksListView } from "./tasks-list-view";
 import {
   parseTasksListGroup,
@@ -116,6 +117,7 @@ function errorDescription(err: unknown): string {
 
 function useTaskMutations(fetchTasks: () => void) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
 
   const handleArchive = useCallback(
@@ -139,8 +141,8 @@ function useTaskMutations(fetchTasks: () => void) {
     async (taskId: string) => {
       try {
         const result = await unarchiveTask(taskId);
+        reconcileUnarchiveTaskQueries(queryClient, result);
         toast(unarchiveToastPayload(result));
-        fetchTasks();
       } catch (err) {
         toast({
           title: "Failed to unarchive task",
@@ -149,7 +151,7 @@ function useTaskMutations(fetchTasks: () => void) {
         });
       }
     },
-    [fetchTasks, toast],
+    [queryClient, toast],
   );
 
   const handleDelete = useCallback(
