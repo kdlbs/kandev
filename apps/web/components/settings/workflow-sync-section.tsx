@@ -2,6 +2,7 @@
 
 import { IconBrandGithub } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Separator } from "@kandev/ui/separator";
 import { WorkflowSyncDialog } from "@/components/settings/workflow-sync-dialog";
 import { WorkflowSyncStatusCard } from "@/components/settings/workflow-sync-status-banner";
 import { useWorkflowSync } from "@/hooks/domains/settings/use-workflow-sync";
@@ -47,12 +48,13 @@ export function WorkflowSyncSection({
   return (
     <>
       {sync.config && (
-        <div className="mb-4" data-testid="workflow-sync-section">
+        <div className="mb-4 space-y-4" data-testid="workflow-sync-section">
           <WorkflowSyncStatusCard
             config={sync.config}
             syncing={sync.syncing}
             onSyncNow={sync.handleSyncNow}
           />
+          <Separator />
         </div>
       )}
       <WorkflowSyncDialog open={dialogOpen} onOpenChange={onDialogOpenChange} sync={sync} />
