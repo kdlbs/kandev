@@ -120,6 +120,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 |---|---|
 | [system-page](system-page/spec.md) | draft |
 | [feature-toggles](feature-toggles/spec.md) | draft |
+| [storage-maintenance](system-page/storage-maintenance.md) | building |
 
 ---
 

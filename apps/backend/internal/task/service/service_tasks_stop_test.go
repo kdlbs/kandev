@@ -157,6 +157,31 @@ func (s *stubStopper) StopSession(_ context.Context, _, _ string, _ bool) error 
 	return s.stopSessionErr
 }
 
+type cancelAfterFirstStopper struct {
+	cancel context.CancelFunc
+	calls  []string
+}
+
+func (s *cancelAfterFirstStopper) StopTask(context.Context, string, string, bool) error {
+	return nil
+}
+
+func (s *cancelAfterFirstStopper) StopExecution(_ context.Context, id, _ string, _ bool) error {
+	s.calls = append(s.calls, id)
+	if len(s.calls) == 1 {
+		s.cancel()
+	}
+	return nil
+}
+
+func (s *cancelAfterFirstStopper) StopSession(_ context.Context, id, _ string, _ bool) error {
+	s.calls = append(s.calls, id)
+	if len(s.calls) == 1 {
+		s.cancel()
+	}
+	return nil
+}
+
 func TestStopTaskRuntimeTargets_TerminalStopFailureDoesNotBlockCleanup(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	svc.executors = &stubExecutors{}
@@ -184,6 +209,22 @@ func TestStopTaskRuntimeTargets_NonTerminalStopFailureBlocksCleanup(t *testing.T
 	failed := svc.stopTaskRuntimeTargets(context.Background(), "task-b", targets, "archive", "stop failed")
 	if _, ok := failed["sess-running"]; !ok {
 		t.Error("non-terminal stop failure must add session to failedStops")
+	}
+}
+
+func TestStopTaskRuntimeTargets_CancellationStopsBeforeNextTarget(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	stopper := &cancelAfterFirstStopper{cancel: cancel}
+	svc.executionStopper = stopper
+
+	svc.stopTaskRuntimeTargets(ctx, "task-cancel", []taskStopTarget{
+		{sessionID: "session-1", executionID: "execution-1"},
+		{sessionID: "session-2", executionID: "execution-2"},
+	}, "archive", "stop failed")
+
+	if len(stopper.calls) != 1 || stopper.calls[0] != "execution-1" {
+		t.Fatalf("stop calls after cancellation = %v, want [execution-1]", stopper.calls)
 	}
 }
 

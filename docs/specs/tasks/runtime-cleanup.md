@@ -52,6 +52,15 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 - Cleanup is idempotent: repeating archive/delete cleanup, startup reconciliation,
   or explicit session stop does not fail because the process, task, session, or
   worktree was already removed.
+- Archive, delete, cascade, workspace-delete, and quick-chat expiration persist a
+  cleanup intent and resource snapshot before mutating or deleting task state.
+  Cleanup is performed by a durable worker rather than a detached goroutine.
+- Archive cleanup revalidates that the task remains archived before every
+  destructive step. Unarchiving a task cancels its pending archive cleanup so a
+  delayed retry cannot remove the newly active task's resources.
+- Cleanup preserves historical archived-task worktree records and branch metadata
+  used by unarchive recovery. Filesystem removal does not imply recovery-history
+  removal.
 
 ## Data Model
 
@@ -80,6 +89,15 @@ is in progress. Rows must not reference missing task/session state indefinitely.
 not imply runtime resources have been released. Cleanup code must not use terminal
 session state as a reason to skip runtime teardown when an `executors_running`
 row exists.
+
+### `task_resource_cleanup_jobs`
+
+`task_resource_cleanup_jobs` is the durable task-lifecycle cleanup intent. It has
+no foreign key to `tasks`, so delete cleanup survives deletion of the owning row.
+It stores the trigger, state, retry timing, last error, and a JSON snapshot of the
+runtime, environment, worktree, and path handles captured before task mutation.
+Only one non-terminal row exists for an operation ID; repeated event delivery
+reuses the same cleanup job.
 
 ## API Surface
 
@@ -124,6 +142,16 @@ Allowed transitions:
 - `stop_requested` -> `retryable_failure` on timeout or uncertain runtime state.
 - `retryable_failure` -> `stop_requested` on the next cleanup attempt.
 
+The durable cleanup job wraps that resource lifecycle:
+
+- `pending` -> `running` when the cleanup worker claims the job.
+- `running` -> `succeeded` when runtime and owned resource cleanup finish.
+- `running` -> `retry_wait` when bounded cleanup fails and the resource snapshot
+  must be retried.
+- `retry_wait` -> `running` on the next scheduled retry or manual storage run.
+- `pending|running|retry_wait` -> `cancelled` when an archive-triggered cleanup
+  observes that its task has been unarchived.
+
 ## Failure Modes
 
 - If querying `executors_running` for a task fails, archive/delete still updates
@@ -153,6 +181,12 @@ Allowed transitions:
 - If startup reconciliation finds rows for archived tasks, deleted tasks, missing
   sessions, or terminal sessions with no live runtime, it removes only rows that
   are positively confirmed safe to remove.
+- If cleanup intent or its resource snapshot cannot be persisted, the lifecycle
+  mutation fails before destructive cleanup begins; Kandev does not rely on an
+  unrecorded background goroutine.
+- If an archived task is unarchived before cleanup completes, the worker cancels
+  remaining archive cleanup. Already completed resource removal remains valid and
+  the unarchive branch-recovery flow recreates the environment when possible.
 
 ## Persistence Guarantees
 
@@ -162,6 +196,12 @@ Allowed transitions:
   attempted for every runtime row owned by the task.
 - Startup reconciliation is allowed to recover from a previous backend crash by
   reattempting cleanup for stale runtime rows.
+- Pending and retryable task cleanup jobs survive restart and resume independently
+  of whether optional scheduled storage maintenance is enabled.
+- Cleanup snapshots needed after task deletion survive without foreign-keyed task,
+  session, environment, or worktree rows.
+- Historical worktree rows for archived tasks remain available to unarchive branch
+  recovery even after their on-disk directories are removed.
 - Orphaned OS processes without any durable `executors_running` row are outside
   normal cleanup guarantees; they may be handled by an explicit operator recovery
   tool, but automatic task cleanup must not rely on process-name scanning.
@@ -207,6 +247,15 @@ Allowed transitions:
   still references, **WHEN** parent cleanup runs, **THEN** destructive
   environment and worktree teardown is deferred until the child no longer holds
   the environment.
+- **GIVEN** the backend exits after a task is deleted but before its worktree is
+  removed, **WHEN** the backend restarts, **THEN** the durable cleanup job retries
+  using its captured resource snapshot.
+- **GIVEN** an archive cleanup job is pending, **WHEN** the task is unarchived,
+  **THEN** the job is cancelled and cannot delete resources created after
+  unarchive.
+- **GIVEN** archive cleanup removed a local worktree, **WHEN** the task is
+  unarchived, **THEN** its historical worktree branch metadata remains available
+  for local/remote recovery.
 
 ## Out of Scope
 

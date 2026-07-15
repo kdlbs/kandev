@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
@@ -385,6 +386,13 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 // createExecution creates an agentctl execution.
 // The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
+	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
+	if err != nil {
+		return nil, err
+	}
+	defer activityLease.Release()
+	activityLease.SetKind(activity.KindExecutionPreparing)
+
 	// Select runtime based on executor type; falls back to standalone if empty/unavailable
 	rt, err := m.getExecutorBackend(info.ExecutorType)
 	if err != nil {
@@ -425,6 +433,11 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		}
 	}
 	m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
+	managedReq := &LaunchRequest{ExecutorType: info.ExecutorType, Env: env}
+	if err := m.prepareManagedGoCacheEnvironment(ctx, managedReq); err != nil {
+		return nil, err
+	}
+	env = managedReq.Env
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {

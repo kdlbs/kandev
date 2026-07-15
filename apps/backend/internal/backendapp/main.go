@@ -98,6 +98,7 @@ import (
 	workflowadapters "github.com/kandev/kandev/internal/workflow/adapters"
 	workflowengine "github.com/kandev/kandev/internal/workflow/engine"
 
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
@@ -734,19 +735,30 @@ func startGatewayAndServe(
 	}, systemsvc.Wiring{
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
 	})
+	storageComposition, err := provideStorageComposition(
+		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,
+	)
+	if err != nil {
+		log.Error("Failed to initialize storage maintenance", zap.Error(err))
+		return false
+	}
+	systemSvc.Storage = storageComposition.handler
+	systemSvc.StorageRuntime = storageComposition.runtime
 	if systemSvc.Metrics != nil {
 		systemSvc.Metrics.SetBroadcaster(gateway.Hub.BroadcastToSystemMetrics)
 		gateway.Hub.SetSystemMetricsInterestTracker(systemSvc.Metrics)
 		systemSvc.Metrics.SetExecutionProvider(lifecycleMetricProvider{manager: lifecycleMgr})
 	}
 	systemSvc.StartBackground(ctx)
+	addCleanup(func() error { systemSvc.StopBackground(); return nil })
 	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)
 
 	// ============================================
 	// HTTP SERVER
 	// ============================================
 	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
-		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr, addCleanup, repoCloner, systemSvc)
+		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
+		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer)
 
 	port := cfg.Server.Port
 	if port == 0 {
@@ -1157,17 +1169,6 @@ func startOfficeSchedulersAndGC(
 		officeRoutines = services.OfficeSvcs.Routines
 	}
 	startCronScheduler(ctx, repos, engineDispatcher, officeRoutines, log)
-	// Start GC sweep for orphaned worktrees and containers.
-	worktreeBase := filepath.Join(cfg.ResolvedHomeDir(), "tasks")
-	gc := officeinfra.NewGarbageCollector(
-		repos.Office,
-		services.WorktreeMgr, // WorktreeInventory — authoritative live-worktrees source
-		log, worktreeBase,
-		nil, // dockerClient - pass if Docker available
-		3*time.Hour,
-	)
-	go gc.Start(ctx)
-	log.Info("Office GC sweep started")
 }
 
 // wireWorkflowEngineForOffice composes the Phase 2 (ADR-0004)
@@ -1636,6 +1637,7 @@ func buildHTTPServer(
 	addCleanup func(func() error),
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
+	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
 ) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
@@ -1662,6 +1664,7 @@ func buildHTTPServer(
 		eventBus:                eventBus,
 		services:                services,
 		systemSvc:               systemSvc,
+		workspaceRestorer:       workspaceRestorer,
 		runtimeFlagsSvc:         services.RuntimeFlags,
 		agentSettingsController: agentSettingsController,
 		agentSettingsRepo:       repos.AgentSettings,

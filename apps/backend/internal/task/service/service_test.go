@@ -124,6 +124,7 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 		Environments:     repo,
 		TaskEnvironments: repo,
 		Reviews:          repo,
+		ResourceCleanups: repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	return svc, eventBus, repo
 }
@@ -1450,6 +1451,16 @@ func TestService_DeleteTaskPreservesExecutorRunningWhenStopFails(t *testing.T) {
 	if _, err := os.Stat(sessionDir); err != nil {
 		t.Fatalf("quick-chat directory should remain when stop fails: %v", err)
 	}
+	var cleanupState string
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT state FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = 'delete'
+	`, "task-123").Scan(&cleanupState); err != nil {
+		t.Fatalf("load cleanup retry state: %v", err)
+	}
+	if cleanupState != string(models.TaskResourceCleanupStateRetryWait) {
+		t.Fatalf("cleanup state = %q, want retry_wait", cleanupState)
+	}
 }
 
 func TestService_DeleteTaskCleansSuccessfulSessionResourcesOnPartialStopFailure(t *testing.T) {
@@ -1776,6 +1787,31 @@ func TestService_ArchiveTaskFailsClosedWhenRuntimeInventoryFails(t *testing.T) {
 	}
 	if task.ArchivedAt != nil {
 		t.Fatal("task should not be archived when runtime inventory fails")
+	}
+}
+
+func TestService_ArchiveTaskPersistsCleanupIntentBeforeMutation(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-cleanup", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-cleanup", WorkspaceID: "ws-cleanup", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{
+		ID: "task-cleanup", WorkspaceID: "ws-cleanup", WorkflowID: "wf-cleanup",
+		WorkflowStepID: "step-cleanup", Title: "Cleanup", Priority: "medium",
+	})
+
+	if err := svc.ArchiveTask(ctx, "task-cleanup"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+	var count int
+	if err := repo.DB().QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger = 'archive'
+	`, "task-cleanup").Scan(&count); err != nil {
+		t.Fatalf("count cleanup jobs: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("archive cleanup jobs = %d, want 1", count)
 	}
 }
 

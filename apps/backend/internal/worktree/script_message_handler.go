@@ -5,7 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,6 +27,7 @@ type ScriptExecutionRequest struct {
 	Script       string
 	WorkingDir   string
 	ScriptType   string // "setup" or "cleanup"
+	Env          map[string]string
 }
 
 // DefaultScriptMessageHandler manages script execution and streams output to session messages.
@@ -216,6 +220,7 @@ func (h *DefaultScriptMessageHandler) createScriptMessage(ctx context.Context, r
 func (h *DefaultScriptMessageHandler) runScriptWithOutput(ctx context.Context, req ScriptExecutionRequest, msg *models.Message) (int, error) {
 	cmd := shellexec.CommandContext(ctx, shellexec.PosixSh, req.Script)
 	cmd.Dir = req.WorkingDir
+	cmd.Env = scriptProcessEnvironment(req.Env)
 
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
@@ -290,6 +295,7 @@ func (h *DefaultScriptMessageHandler) runScriptWithoutMessage(ctx context.Contex
 	// Run script under the host shell (sh -c on Unix, bash/cmd on Windows).
 	cmd := shellexec.CommandContext(ctx, shellexec.PosixSh, req.Script)
 	cmd.Dir = req.WorkingDir
+	cmd.Env = scriptProcessEnvironment(req.Env)
 
 	// Capture output for logging
 	output, err := cmd.CombinedOutput()
@@ -328,4 +334,30 @@ func (h *DefaultScriptMessageHandler) runScriptWithoutMessage(ctx context.Contex
 	}
 
 	return nil
+}
+
+func scriptProcessEnvironment(overrides map[string]string) []string {
+	if len(overrides) == 0 {
+		return nil
+	}
+	merged := make(map[string]string)
+	for _, item := range os.Environ() {
+		key, value, found := strings.Cut(item, "=")
+		if found {
+			merged[key] = value
+		}
+	}
+	for key, value := range overrides {
+		merged[key] = value
+	}
+	keys := make([]string, 0, len(merged))
+	for key := range merged {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	env := make([]string, 0, len(keys))
+	for _, key := range keys {
+		env = append(env, key+"="+merged[key])
+	}
+	return env
 }

@@ -31,7 +31,11 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*a
 		return nil, fmt.Errorf("agentctl client not available for session %s", req.SessionID)
 	}
 
-	return client.StartProcess(ctx, agentctl.StartProcessRequest{
+	lease, err := m.acquireActivity(ctx, processActivityKind(req.Kind))
+	if err != nil {
+		return nil, err
+	}
+	process, err := client.StartProcess(ctx, agentctl.StartProcessRequest{
 		SessionID:  req.SessionID,
 		Kind:       agentctl.ProcessKind(req.Kind),
 		ScriptName: req.ScriptName,
@@ -39,6 +43,12 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*a
 		WorkingDir: req.WorkingDir,
 		Env:        req.Env,
 	})
+	if err != nil {
+		lease.Release()
+		return nil, err
+	}
+	m.trackActivity(processActivityKey(process.ID), lease)
+	return process, nil
 }
 
 // WaitForAgentctlReadyForSession waits for agentctl to be ready for a session.
@@ -67,6 +77,7 @@ func (m *Manager) StopProcess(ctx context.Context, processID string) error {
 			continue
 		}
 		if err := client.StopProcess(ctx, processID); err == nil {
+			m.releaseActivity(processActivityKey(processID))
 			return nil
 		}
 	}
@@ -89,7 +100,11 @@ func (m *Manager) StopProcessForSession(ctx context.Context, sessionID, processI
 	if client == nil {
 		return fmt.Errorf("agentctl client not available for session %s", sessionID)
 	}
-	return client.StopProcess(ctx, processID)
+	if err := client.StopProcess(ctx, processID); err != nil {
+		return err
+	}
+	m.releaseActivity(processActivityKey(processID))
+	return nil
 }
 
 func (m *Manager) ListProcesses(ctx context.Context, sessionID string) ([]agentctl.ProcessInfo, error) {
@@ -140,6 +155,8 @@ func (m *Manager) StopAllProcesses(ctx context.Context) error {
 		for _, proc := range procs {
 			if err := client.StopProcess(ctx, proc.ID); err != nil {
 				errs = append(errs, err)
+			} else {
+				m.releaseActivity(processActivityKey(proc.ID))
 			}
 		}
 	}

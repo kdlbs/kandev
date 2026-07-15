@@ -242,6 +242,16 @@ type TaskResourceCleaner interface {
 	CleanupTaskResources(ctx context.Context, taskID string, deleteEnvRow bool)
 }
 
+type archiveTaskResourceCleanupCanceller interface {
+	CancelArchiveTaskResourceCleanup(ctx context.Context, taskID string) error
+}
+
+type taskResourceCleanupCoordinator interface {
+	PrepareTaskResourceCleanup(ctx context.Context, taskID string, trigger models.TaskResourceCleanupTrigger, operationID string, deleteEnvironmentRow bool) error
+	StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
+	CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
+}
+
 // SetTaskResourceCleaner wires the resource teardown surface invoked by
 // cascade archive/delete to release containers / sandboxes / worktrees.
 // Optional — when nil the cascade does not tear down runtime resources.

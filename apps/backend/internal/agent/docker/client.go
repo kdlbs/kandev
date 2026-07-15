@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types/build"
@@ -18,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -69,10 +71,23 @@ type ContainerInfo struct {
 }
 
 // Client wraps the Docker client.
+type containerRemover interface {
+	ContainerRemove(context.Context, string, container.RemoveOptions) error
+}
+
+type imageBuilder interface {
+	ImageBuild(context.Context, io.Reader, build.ImageBuildOptions) (build.ImageBuildResponse, error)
+}
+
 type Client struct {
-	cli    *client.Client
-	logger *logger.Logger
-	config config.DockerConfig
+	cli      *client.Client
+	storage  storageAPI
+	remover  containerRemover
+	builder  imageBuilder
+	logger   *logger.Logger
+	config   config.DockerConfig
+	activity *activity.Coordinator
+	mu       sync.RWMutex
 }
 
 // NewClient creates a new Docker client.
@@ -100,10 +115,20 @@ func NewClient(cfg config.DockerConfig, log *logger.Logger) (*Client, error) {
 	)
 
 	return &Client{
-		cli:    cli,
-		logger: log,
-		config: cfg,
+		cli:     cli,
+		storage: cli,
+		remover: cli,
+		builder: cli,
+		logger:  log,
+		config:  cfg,
 	}, nil
+}
+
+// SetActivityCoordinator wires the optional install-wide host activity gate.
+func (c *Client) SetActivityCoordinator(coordinator *activity.Coordinator) {
+	c.mu.Lock()
+	c.activity = coordinator
+	c.mu.Unlock()
 }
 
 // Close closes the Docker client.
@@ -143,24 +168,65 @@ func (c *Client) PullImage(ctx context.Context, imageName string) error {
 // The caller is responsible for closing the returned reader.
 func (c *Client) BuildImage(ctx context.Context, dockerfile string, tag string, buildArgs map[string]*string) (io.ReadCloser, error) {
 	c.logger.Info("Building image", zap.String("tag", tag))
+	c.mu.RLock()
+	coordinator := c.activity
+	builder := c.builder
+	c.mu.RUnlock()
+	if builder == nil {
+		builder = c.cli
+	}
+	var activityLease *activity.TaskLease
+	var err error
+	if coordinator != nil {
+		activityLease, err = coordinator.AcquireTask(ctx, activity.KindDockerImageBuild)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	buildContext, err := createDockerfileTar(dockerfile)
 	if err != nil {
+		activityLease.Release()
 		return nil, fmt.Errorf("failed to create build context: %w", err)
 	}
 
-	resp, err := c.cli.ImageBuild(ctx, buildContext, build.ImageBuildOptions{
+	resp, err := builder.ImageBuild(ctx, buildContext, build.ImageBuildOptions{
 		Tags:       []string{tag},
 		BuildArgs:  buildArgs,
 		Dockerfile: "Dockerfile",
 		Remove:     true,
 	})
 	if err != nil {
+		activityLease.Release()
 		c.logger.Error("Failed to build image", zap.String("tag", tag), zap.Error(err))
 		return nil, fmt.Errorf("failed to build image %s: %w", tag, err)
 	}
 
-	return resp.Body, nil
+	return &activityReadCloser{ReadCloser: resp.Body, lease: activityLease}, nil
+}
+
+type activityReadCloser struct {
+	io.ReadCloser
+	lease *activity.TaskLease
+	once  sync.Once
+}
+
+func (r *activityReadCloser) Read(p []byte) (int, error) {
+	n, err := r.ReadCloser.Read(p)
+	if err == io.EOF {
+		r.release()
+	}
+	return n, err
+}
+
+func (r *activityReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	r.release()
+	return err
+}
+
+func (r *activityReadCloser) release() {
+	r.once.Do(func() { r.lease.Release() })
 }
 
 // createDockerfileTar creates a tar archive containing a single Dockerfile.
@@ -299,7 +365,7 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 		zap.Bool("force", force),
 	)
 
-	err := c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
+	err := c.containerRemover().ContainerRemove(ctx, containerID, container.RemoveOptions{
 		Force:         force,
 		RemoveVolumes: true,
 	})
@@ -310,6 +376,13 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 
 	c.logger.Info("Container removed", zap.String("container_id", containerID))
 	return nil
+}
+
+func (c *Client) containerRemover() containerRemover {
+	if c.remover != nil {
+		return c.remover
+	}
+	return c.cli
 }
 
 // KillContainer kills a container.

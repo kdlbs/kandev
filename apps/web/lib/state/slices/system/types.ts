@@ -7,6 +7,9 @@ import type {
   UpdatesResponse,
   SystemJob,
   SystemMetricsSnapshot,
+  StorageMaintenanceRun,
+  StorageOverviewResponse,
+  StorageQuarantineEntry,
 } from "@/lib/types/system";
 
 export type SystemBackupsState = {
@@ -32,6 +35,11 @@ export type SystemSliceState = {
     updates: UpdatesResponse | null;
     jobs: SystemJobsMap;
     metrics: SystemMetricsSnapshot | null;
+    storage: {
+      overview: StorageOverviewResponse | null;
+      runs: StorageMaintenanceRun[];
+      quarantine: StorageQuarantineEntry[];
+    };
   };
 };
 
@@ -46,6 +54,9 @@ export type SystemSliceActions = {
   upsertSystemJob: (job: SystemJob) => void;
   clearSystemJob: (jobId: string) => void;
   setSystemMetricsSnapshot: (snapshot: SystemMetricsSnapshot) => void;
+  setSystemStorageOverview: (overview: StorageOverviewResponse) => void;
+  setSystemStorageRuns: (runs: StorageMaintenanceRun[]) => void;
+  setSystemStorageQuarantine: (entries: StorageQuarantineEntry[]) => void;
 };
 
 export type SystemSlice = SystemSliceState & SystemSliceActions;

@@ -16,8 +16,10 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/events"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -335,6 +337,16 @@ func (m *Manager) resolveScratchWorkspace(ctx context.Context, req *LaunchReques
 			zap.String("workspace_path", scratchPath),
 			zap.Error(err))
 		return ""
+	}
+	if !req.IsEphemeral {
+		if err := storageworkspaces.WriteOwnershipMarker(scratchPath, storageworkspaces.OwnershipMarker{
+			TaskID: req.TaskID, WorkspaceID: req.WorkspaceID, TaskDirName: req.TaskID,
+			LayoutVersion: storageworkspaces.LayoutVersionScratch,
+		}); err != nil {
+			m.logger.Warn("failed to mark scratch workspace ownership",
+				zap.String("workspace_path", scratchPath), zap.Error(err))
+			return ""
+		}
 	}
 	if err := m.initGitRepo(ctx, scratchPath); err != nil {
 		m.logger.Warn("failed to initialize git repository in scratch workspace",
@@ -660,6 +672,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 	repoSetupScript, _ := req.Metadata[MetadataKeyRepoSetupScript].(string)
 	prepReq := &EnvPrepareRequest{
 		TaskID:                 req.TaskID,
+		WorkspaceID:            req.WorkspaceID,
 		SessionID:              req.SessionID,
 		TaskTitle:              req.TaskTitle,
 		ExecutorType:           execName,
@@ -791,8 +804,25 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 // If req.SessionID is empty (quick chat / pre-session contexts), no
 // deduplication key exists and we fall through to direct execution.
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
+	if err != nil {
+		return nil, err
+	}
+	transferredActivity := false
+	defer func() {
+		if !transferredActivity {
+			activityLease.Release()
+		}
+	}()
+	activityLease.SetKind(activity.KindExecutionPreparing)
+
 	if req.SessionID == "" {
-		return m.launchInternal(ctx, req)
+		execution, launchErr := m.launchInternal(ctx, req)
+		if launchErr == nil && req.StartAgent {
+			m.trackActivity(executionActivityKey(execution.ID), activityLease)
+			transferredActivity = true
+		}
+		return execution, launchErr
 	}
 	v, err, _ := m.ensureExecutionGroup.Do(req.SessionID, func() (interface{}, error) {
 		return m.launchInternal(ctx, req)
@@ -811,6 +841,10 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		if err := m.promoteWorkspaceExecution(ctx, execution, req); err != nil {
 			return nil, err
 		}
+	}
+	if req.StartAgent {
+		m.trackActivity(executionActivityKey(execution.ID), activityLease)
+		transferredActivity = true
 	}
 	return execution, nil
 }
@@ -889,6 +923,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	if !agentConfig.Enabled() {
 		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
+	}
+	if err := m.prepareManagedGoCacheEnvironment(ctx, req); err != nil {
+		return nil, err
 	}
 
 	// 3. Check if session already has an agent running. A workspace-only

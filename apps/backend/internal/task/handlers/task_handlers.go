@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"context"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -34,9 +36,24 @@ type TaskHandlers struct {
 	repo                       handlerRepo
 	planService                *service.PlanService
 	handoffSvc                 *service.HandoffService
+	workspaceRestorer          WorkspaceQuarantineRestorer
+	unarchiveRecoveryTimeout   time.Duration
 	taskCreateLastUsedRecorder taskCreateLastUsedRecorder
 	onTaskCreatedWithPR        func(ctx context.Context, taskID, sessionID, prURL, branch string)
 	logger                     *logger.Logger
+}
+
+const defaultUnarchiveRecoveryTimeout = 30 * time.Second
+
+func (h *TaskHandlers) detachedRecoveryTimeout() time.Duration {
+	if h.unarchiveRecoveryTimeout > 0 {
+		return h.unarchiveRecoveryTimeout
+	}
+	return defaultUnarchiveRecoveryTimeout
+}
+
+type WorkspaceQuarantineRestorer interface {
+	RestoreTask(ctx context.Context, taskID string) storageworkspaces.WorkspaceRecovery
 }
 
 type taskCreateLastUsedRecorder interface {
@@ -49,6 +66,10 @@ type taskCreateLastUsedRecorder interface {
 // post-create attachment, matching the pre-handoffs behaviour.
 func (h *TaskHandlers) SetHandoffService(svc *service.HandoffService) {
 	h.handoffSvc = svc
+}
+
+func (h *TaskHandlers) SetWorkspaceQuarantineRestorer(restorer WorkspaceQuarantineRestorer) {
+	h.workspaceRestorer = restorer
 }
 
 func (h *TaskHandlers) SetTaskCreateLastUsedRecorder(recorder taskCreateLastUsedRecorder) {

@@ -20,6 +20,7 @@ import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
 import IntegrationsSlackPage from "@/app/settings/integrations/slack/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
+import StoragePage from "@/app/settings/system/storage/page";
 import UtilityAgentsSettingsPage from "@/app/settings/utility-agents/page";
 import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
@@ -209,6 +210,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <UIStateCard />
     </SystemPageShell>
   ),
+  "/settings/system/storage": () => <StoragePage />,
   "/settings/system/updates": renderUpdatesRoute,
   "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };

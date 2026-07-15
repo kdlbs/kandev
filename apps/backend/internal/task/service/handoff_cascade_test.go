@@ -64,6 +64,7 @@ func (r *fakeCascadeRepo) UnarchiveTask(_ context.Context, id string) (bool, err
 // release/restore/cleanup-status methods.
 type fakeWSGroupRepoCascade struct {
 	*fakeWSGroupRepo
+	releaseErr   error
 	releaseCalls []struct {
 		groupID, taskID, reason, cascadeID string
 	}
@@ -104,12 +105,97 @@ func (f *fakeWSGroupRepoCascade) ListWorkspaceGroupMembers(ctx context.Context, 
 func (f *fakeWSGroupRepoCascade) ReleaseWorkspaceGroupMember(_ context.Context, groupID, taskID, reason, cascadeID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.releaseErr != nil {
+		return f.releaseErr
+	}
 	f.releaseCalls = append(f.releaseCalls, struct {
 		groupID, taskID, reason, cascadeID string
 	}{groupID, taskID, reason, cascadeID})
 	// Mark the member released by removing it from the live members map.
 	delete(f.members[groupID], taskID)
 	return nil
+}
+
+type recordingCleanupCoordinator struct {
+	mu        sync.Mutex
+	prepared  []string
+	started   []string
+	cancelled []string
+	cleaned   []string
+}
+
+func (c *recordingCleanupCoordinator) CleanupTaskResources(_ context.Context, taskID string, _ bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cleaned = append(c.cleaned, taskID)
+}
+
+func (c *recordingCleanupCoordinator) PrepareTaskResourceCleanup(
+	_ context.Context,
+	_ string,
+	_ models.TaskResourceCleanupTrigger,
+	operationID string,
+	_ bool,
+) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.prepared = append(c.prepared, operationID)
+	return nil
+}
+
+func (c *recordingCleanupCoordinator) StartPreparedTaskResourceCleanup(_ context.Context, operationID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.started = append(c.started, operationID)
+	return nil
+}
+
+func (c *recordingCleanupCoordinator) CancelPreparedTaskResourceCleanup(_ context.Context, operationID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cancelled = append(c.cancelled, operationID)
+	return nil
+}
+
+func TestDeleteTaskTree_MembershipReleaseFailureCancelsEveryPreparedCleanup(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	releaseErr := errors.New("membership release unavailable")
+	groups.releaseErr = releaseErr
+	if err := groups.CreateWorkspaceGroup(context.Background(), &orchmodels.WorkspaceGroup{
+		ID: "group-1", WorkspaceID: "ws-1",
+	}); err != nil {
+		t.Fatalf("CreateWorkspaceGroup: %v", err)
+	}
+	for _, taskID := range []string{"root", "child"} {
+		if err := groups.AddWorkspaceGroupMember(context.Background(), "group-1", taskID, "member"); err != nil {
+			t.Fatalf("AddWorkspaceGroupMember(%s): %v", taskID, err)
+		}
+	}
+	coordinator := &recordingCleanupCoordinator{}
+	svc := NewHandoffService(&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, groups, nil)
+	svc.SetTaskResourceCleaner(coordinator)
+
+	_, err := svc.DeleteTaskTree(context.Background(), "root", true)
+	if !errors.Is(err, releaseErr) {
+		t.Fatalf("DeleteTaskTree error = %v, want membership release error", err)
+	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	if len(coordinator.prepared) != 2 {
+		t.Fatalf("prepared cleanup count = %d, want 2", len(coordinator.prepared))
+	}
+	if len(coordinator.cancelled) != len(coordinator.prepared) {
+		t.Fatalf("cancelled cleanup count = %d, want all %d prepared operations", len(coordinator.cancelled), len(coordinator.prepared))
+	}
+	if len(coordinator.started) != 0 || len(coordinator.cleaned) != 0 {
+		t.Fatalf("cleanup ran after release failure: started=%v cleaned=%v", coordinator.started, coordinator.cleaned)
+	}
+	if task, getErr := tasks.GetTask(context.Background(), "root"); getErr != nil || task == nil {
+		t.Fatalf("root task mutated after release failure: task=%#v err=%v", task, getErr)
+	}
 }
 
 func (f *fakeWSGroupRepoCascade) RestoreWorkspaceGroupMemberByCascade(_ context.Context, taskID, cascadeID string) error {

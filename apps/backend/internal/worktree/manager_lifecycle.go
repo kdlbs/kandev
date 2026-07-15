@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
@@ -226,6 +227,12 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 	taskDir := filepath.Dir(worktreePath)
 	if err := os.MkdirAll(taskDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create task directory: %w", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(taskDir, storageworkspaces.OwnershipMarker{
+		TaskID: req.TaskID, WorkspaceID: req.WorkspaceID, TaskDirName: req.TaskDirName,
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		return nil, fmt.Errorf("mark task directory ownership: %w", err)
 	}
 
 	_, branchName := m.buildWorktreeNames(req)

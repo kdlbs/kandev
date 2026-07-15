@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/internal/system/restart"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	"github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/updates"
 	"go.uber.org/zap"
 )
@@ -62,6 +63,9 @@ type Service struct {
 	Metrics  *metrics.Service
 	Updates  *updates.Service
 	Restart  restart.Manager
+	Storage  *storage.Handler
+	// StorageRuntime owns the scheduler, reconciliation, and durable cleanup worker.
+	StorageRuntime *storage.Runtime
 }
 
 // Provide constructs the composed Service. The HTTP routes are
@@ -117,6 +121,9 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	g := router.Group("/api/v1/system")
 
 	g.GET("/info", info.Handler(s.Info))
+	if s.Storage != nil {
+		storage.RegisterRoutes(g, s.Storage)
+	}
 
 	g.GET("/disk-usage", disk.HandleGet(s.Disk))
 	g.POST("/disk-usage/refresh", disk.HandleRefresh(s.Disk))
@@ -153,5 +160,15 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 func (s *Service) StartBackground(ctx context.Context) {
 	if s.Updates != nil {
 		s.Updates.StartPoller(ctx)
+	}
+	if s.StorageRuntime != nil {
+		_ = s.StorageRuntime.Start(ctx)
+	}
+}
+
+// StopBackground joins owned storage background workers.
+func (s *Service) StopBackground() {
+	if s.StorageRuntime != nil {
+		s.StorageRuntime.Stop()
 	}
 }

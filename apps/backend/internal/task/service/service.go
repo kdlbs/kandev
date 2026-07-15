@@ -43,6 +43,15 @@ type TaskExecutionStopper interface {
 	StopExecution(ctx context.Context, executionID, reason string, force bool) error
 }
 
+// TaskResourceCleanupActivityGate serializes durable cleanup with install-wide maintenance.
+type TaskResourceCleanupActivityGate interface {
+	AcquireTaskResourceCleanup(context.Context) (TaskResourceCleanupActivityLease, error)
+}
+
+type TaskResourceCleanupActivityLease interface {
+	Release()
+}
+
 // ProviderDefaultBranchProber resolves a provider repo's default branch
 // (e.g. "main" / "master") without requiring a local clone. Used by
 // AddBranchToTask to satisfy the worktree-create precondition synchronously,
@@ -157,6 +166,7 @@ type Repos struct {
 	Environments     repository.EnvironmentRepository
 	TaskEnvironments repository.TaskEnvironmentRepository
 	Reviews          repository.ReviewRepository
+	ResourceCleanups repository.TaskResourceCleanupRepository
 }
 
 // Service provides task business logic
@@ -174,11 +184,13 @@ type Service struct {
 	environments          repository.EnvironmentRepository
 	taskEnvironments      repository.TaskEnvironmentRepository
 	reviews               repository.ReviewRepository
+	resourceCleanups      repository.TaskResourceCleanupRepository
 	eventBus              bus.EventBus
 	logger                *logger.Logger
 	discoveryConfig       RepositoryDiscoveryConfig
 	worktreeCleanup       WorktreeCleanup
 	executionStopper      TaskExecutionStopper
+	cleanupActivity       TaskResourceCleanupActivityGate
 	branchMaterializer    BranchMaterializer
 	providerProber        ProviderDefaultBranchProber
 	gitArchiveCapture     GitArchiveCapture
@@ -197,7 +209,13 @@ type Service struct {
 	baseBranchPusher      AgentBaseBranchPusher
 	runtimeOverridesMu    sync.Mutex
 	// cleanupDoneForTest lets unit tests wait for async cleanup; nil in production.
-	cleanupDoneForTest chan struct{}
+	cleanupDoneForTest  chan struct{}
+	cleanupWorkerMu     sync.Mutex
+	cleanupWorkerCancel context.CancelFunc
+	cleanupWorkerWG     sync.WaitGroup
+	cleanupWorkerWake   chan struct{}
+	cleanupRunsMu       sync.Mutex
+	cleanupRuns         map[*taskResourceCleanupRun]struct{}
 }
 
 // NewService creates a new task service
@@ -216,6 +234,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		environments:     repos.Environments,
 		taskEnvironments: repos.TaskEnvironments,
 		reviews:          repos.Reviews,
+		resourceCleanups: repos.ResourceCleanups,
 		eventBus:         eventBus,
 		logger:           log,
 		discoveryConfig:  discoveryConfig,
@@ -258,6 +277,10 @@ func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) 
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+func (s *Service) SetTaskResourceCleanupActivityGate(gate TaskResourceCleanupActivityGate) {
+	s.cleanupActivity = gate
 }
 
 // SetGitArchiveCapture wires the git archive capture handler.

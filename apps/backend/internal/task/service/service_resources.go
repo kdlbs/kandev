@@ -33,6 +33,7 @@ type workspaceDeleteTaskCleanup struct {
 	worktrees   []*worktree.Worktree
 	stopTargets []taskStopTarget
 	taskEnv     *models.TaskEnvironment
+	cleanupJob  *models.TaskResourceCleanupJob
 }
 
 type repositorySessionPruner interface {
@@ -147,6 +148,7 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
 	}
 	if err != nil {
+		s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
 		return s.mapWorkspaceDeleteError(workspace.ID, err)
 	}
 	cleanups = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
@@ -165,6 +167,7 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks 
 		}
 		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
 		if err != nil {
+			s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
 			return nil, err
 		}
 		cleanups = append(cleanups, cleanup)
@@ -204,30 +207,47 @@ func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
 }
 
 func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *models.Task) (workspaceDeleteTaskCleanup, error) {
-	cleanup := workspaceDeleteTaskCleanup{
-		task:      task,
-		worktrees: s.gatherWorktreesForDelete(ctx, task.ID),
-		taskEnv:   s.gatherTaskEnvironmentForCleanup(ctx, task.ID),
+	worktrees, err := s.gatherWorktreesForDelete(ctx, task.ID)
+	if err != nil {
+		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list worktrees for workspace delete task %q: %w", task.ID, err)
 	}
-	var err error
+	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, task.ID)
+	if err != nil {
+		return workspaceDeleteTaskCleanup{}, fmt.Errorf("lookup environment for workspace delete task %q: %w", task.ID, err)
+	}
+	cleanup := workspaceDeleteTaskCleanup{task: task, worktrees: worktrees, taskEnv: taskEnv}
 	cleanup.sessions, err = s.sessions.ListTaskSessions(ctx, task.ID)
 	if err != nil {
 		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list task sessions for workspace delete task %q: %w", task.ID, err)
 	}
-	if s.executionStopper == nil {
-		return cleanup, nil
+	if s.executionStopper != nil {
+		activeSessions, listErr := s.sessions.ListActiveTaskSessionsByTaskID(ctx, task.ID)
+		if listErr != nil {
+			return workspaceDeleteTaskCleanup{}, fmt.Errorf("list active sessions for workspace delete task %q: %w", task.ID, listErr)
+		}
+		cleanup.stopTargets, err = s.buildStopTargets(ctx, task.ID, activeSessions)
+		if err != nil {
+			return workspaceDeleteTaskCleanup{}, fmt.Errorf("list runtime cleanup inventory: %w", err)
+		}
 	}
-	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, task.ID)
-	if err != nil {
-		s.logger.Warn("failed to list active task sessions for workspace delete",
-			zap.String("task_id", task.ID),
-			zap.Error(err))
+	cleanup.cleanupJob, err = s.persistTaskResourceCleanup(
+		ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
+		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
+		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets,
+		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false},
+	)
+	return cleanup, err
+}
+
+func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, cleanups []workspaceDeleteTaskCleanup) {
+	for _, cleanup := range cleanups {
+		if cleanup.cleanupJob == nil || s.resourceCleanups == nil {
+			continue
+		}
+		_ = s.resourceCleanups.CompleteTaskResourceCleanupJob(
+			ctx, cleanup.cleanupJob.ID, models.TaskResourceCleanupStateCancelled, "", nil,
+		)
 	}
-	cleanup.stopTargets, err = s.buildStopTargets(ctx, task.ID, activeSessions)
-	if err != nil {
-		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list runtime cleanup inventory: %w", err)
-	}
-	return cleanup, nil
 }
 
 func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks []*models.Task, workflows []*models.Workflow) {
@@ -305,6 +325,12 @@ func (s *Service) runWorkspaceDeleteTaskCleanupJobs(jobs []workspaceDeleteTaskCl
 }
 
 func (s *Service) runWorkspaceDeleteTaskCleanup(cleanup workspaceDeleteTaskCleanup) {
+	if cleanup.cleanupJob != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_ = s.processTaskResourceCleanupJob(ctx, cleanup.cleanupJob.ID)
+		return
+	}
 	envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}
 	s.runTaskCleanup(cleanup.task.ID, cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, envCleanup,
 		"task deleted", "failed to stop session on task delete", "task cleanup completed")

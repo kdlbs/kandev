@@ -211,6 +211,19 @@ type SessionWorktreeRepository interface {
 	DeleteTaskSessionWorktreesBySession(ctx context.Context, sessionID string) error
 }
 
+// TaskResourceCleanupRepository persists restart-safe task lifecycle cleanup.
+type TaskResourceCleanupRepository interface {
+	CreateTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error
+	GetTaskResourceCleanupJob(ctx context.Context, id string) (*models.TaskResourceCleanupJob, error)
+	GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error)
+	ListDueTaskResourceCleanupJobs(ctx context.Context, now time.Time, limit int) ([]*models.TaskResourceCleanupJob, error)
+	MarkTaskResourceCleanupJobRunning(ctx context.Context, id string) (bool, error)
+	CompleteClaimedTaskResourceCleanupJob(ctx context.Context, id string, attempt int, state models.TaskResourceCleanupState, lastError string, nextAttemptAt *time.Time) (bool, error)
+	CompleteTaskResourceCleanupJob(ctx context.Context, id string, state models.TaskResourceCleanupState, lastError string, nextAttemptAt *time.Time) error
+	CancelArchiveTaskResourceCleanupJobs(ctx context.Context, taskID string) error
+	ResetRunningTaskResourceCleanupJobs(ctx context.Context) error
+}
+
 // GitSnapshotRepository handles git snapshots and session commit records.
 type GitSnapshotRepository interface {
 	CreateGitSnapshot(ctx context.Context, snapshot *models.GitSnapshot) error
