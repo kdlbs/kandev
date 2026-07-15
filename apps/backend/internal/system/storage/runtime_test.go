@@ -13,7 +13,7 @@ func TestRuntimeStopSerializesWithApplySettings(t *testing.T) {
 		After: func(time.Duration) <-chan time.Time { return make(chan time.Time) },
 	})
 	t.Cleanup(scheduler.Stop)
-	worker := &blockingStopWorker{started: make(chan struct{}), release: make(chan struct{})}
+	worker := &blockingStopWorker{stopStarted: make(chan struct{}), release: make(chan struct{})}
 	runtime := NewRuntime(RuntimeConfig{
 		Scheduler: scheduler, Settings: staticRuntimeSettings{settings: settings}, Worker: worker,
 	})
@@ -25,7 +25,7 @@ func TestRuntimeStopSerializesWithApplySettings(t *testing.T) {
 		runtime.Stop()
 		close(stopped)
 	}()
-	<-worker.started
+	<-worker.stopStarted
 
 	enabled := settings
 	enabled.Enabled = true
@@ -154,13 +154,13 @@ func (s staticRuntimeSettings) GetSettings(context.Context) (StorageMaintenanceS
 }
 
 type blockingStopWorker struct {
-	started chan struct{}
-	release chan struct{}
+	stopStarted chan struct{}
+	release     chan struct{}
 }
 
 func (*blockingStopWorker) StartTaskResourceCleanupWorker(context.Context) error { return nil }
 
 func (w *blockingStopWorker) StopTaskResourceCleanupWorker() {
-	close(w.started)
+	close(w.stopStarted)
 	<-w.release
 }

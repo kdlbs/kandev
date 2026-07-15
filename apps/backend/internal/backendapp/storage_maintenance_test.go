@@ -388,76 +388,95 @@ func TestQuarantineControllerRetriesFailedGoCacheDelete(t *testing.T) {
 	}
 }
 
-func TestQuarantineControllerFailedGoCacheRetryRecognizesAlreadyRestoredData(t *testing.T) {
-	for _, operation := range []string{"restore", "delete"} {
-		t.Run(operation, func(t *testing.T) {
-			home := t.TempDir()
-			original := filepath.Join(home, "cache", "go-build")
-			quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
-			if err := os.MkdirAll(original, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			artifact := filepath.Join(original, "artifact")
-			if err := os.WriteFile(artifact, []byte("keep"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			settings, store := newStorageMaintenanceStores(t)
-			entry := createGoCacheQuarantineEntry(
-				t, store, original, quarantined, time.Now().UTC().Add(-time.Hour),
-			)
-			markGoCacheQuarantineFailed(t, store, entry.ID)
-			controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
+func TestQuarantineControllerDoesNotTreatPopulatedReplacementAsRestoredPayload(t *testing.T) {
+	states := []storagepkg.QuarantineState{
+		storagepkg.QuarantineStateQuarantined,
+		storagepkg.QuarantineStateFailed,
+	}
+	for _, state := range states {
+		for _, operation := range []string{"restore", "delete"} {
+			t.Run(string(state)+"_"+operation, func(t *testing.T) {
+				home := t.TempDir()
+				original := filepath.Join(home, "cache", "go-build")
+				quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
+				if err := os.MkdirAll(original, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				artifact := filepath.Join(original, "replacement-artifact")
+				if err := os.WriteFile(artifact, []byte("active cache"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				settings, store := newStorageMaintenanceStores(t)
+				entry := createGoCacheQuarantineEntry(
+					t, store, original, quarantined, time.Now().UTC().Add(-time.Hour),
+				)
+				if state == storagepkg.QuarantineStateFailed {
+					markGoCacheQuarantineFailed(t, store, entry.ID)
+				}
+				controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
 
-			var resolved storagepkg.QuarantineEntry
-			var err error
-			if operation == "delete" {
-				resolved, err = controller.PermanentDelete(context.Background(), entry.ID, "DELETE")
-			} else {
-				resolved, err = controller.Restore(context.Background(), entry.ID)
-			}
-			if err != nil {
-				t.Fatalf("%s failed: %v", operation, err)
-			}
-			if resolved.State != storagepkg.QuarantineStateRestored {
-				t.Fatalf("state = %q, want restored", resolved.State)
-			}
-			if data, err := os.ReadFile(artifact); err != nil || string(data) != "keep" {
-				t.Fatalf("original cache changed: data=%q err=%v", data, err)
-			}
-		})
+				var err error
+				if operation == "delete" {
+					_, err = controller.PermanentDelete(context.Background(), entry.ID, "DELETE")
+				} else {
+					_, err = controller.Restore(context.Background(), entry.ID)
+				}
+				if !errors.Is(err, storagepkg.ErrConflict) {
+					t.Fatalf("%s error = %v, want storage ErrConflict", operation, err)
+				}
+				stored, err := store.GetQuarantineEntry(context.Background(), entry.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if stored.State != state {
+					t.Fatalf("state = %q, want unchanged %q", stored.State, state)
+				}
+				if data, err := os.ReadFile(artifact); err != nil || string(data) != "active cache" {
+					t.Fatalf("replacement cache changed: data=%q err=%v", data, err)
+				}
+			})
+		}
 	}
 }
 
-func TestQuarantineControllerQuarantinedGoCacheRetryRecognizesAlreadyRestoredData(t *testing.T) {
+func TestQuarantineControllerDoesNotMarkMissingPayloadPlaceholderRestored(t *testing.T) {
 	home := t.TempDir()
 	original := filepath.Join(home, "cache", "go-build")
 	quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
-	if err := os.MkdirAll(original, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	artifact := filepath.Join(original, "artifact")
-	if err := os.WriteFile(artifact, []byte("keep"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	settings, store := newStorageMaintenanceStores(t)
+	current, err := settings.GetSettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.GoCache.Enabled = true
+	if _, err := settings.SaveSettings(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+	provider := gocache.New(gocache.Config{
+		HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings,
+	})
+	if _, err := provider.ExecutionEnvironment(context.Background()); err != nil {
+		t.Fatalf("create managed replacement: %v", err)
+	}
 	entry := createGoCacheQuarantineEntry(
 		t, store, original, quarantined, time.Now().UTC().Add(time.Hour),
 	)
 	controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
 
-	restored, err := controller.Restore(context.Background(), entry.ID)
+	_, err = controller.Restore(context.Background(), entry.ID)
+	if !errors.Is(err, storagepkg.ErrConflict) {
+		t.Fatalf("Restore error = %v, want storage ErrConflict", err)
+	}
+	stored, err := store.GetQuarantineEntry(context.Background(), entry.ID)
 	if err != nil {
-		t.Fatalf("Restore: %v", err)
+		t.Fatal(err)
 	}
-	if restored.State != storagepkg.QuarantineStateRestored {
-		t.Fatalf("state = %q, want restored", restored.State)
-	}
-	if data, err := os.ReadFile(artifact); err != nil || string(data) != "keep" {
-		t.Fatalf("original cache changed: data=%q err=%v", data, err)
+	if stored.State != storagepkg.QuarantineStateQuarantined {
+		t.Fatalf("state = %q, want quarantined", stored.State)
 	}
 }
 
-func TestQuarantineControllerReportsPersistenceAndRollbackFailures(t *testing.T) {
+func TestQuarantineControllerReportsPersistenceAndFailsClosedAfterRollbackFailure(t *testing.T) {
 	home := t.TempDir()
 	original := filepath.Join(home, "cache", "go-build")
 	quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
@@ -495,12 +514,12 @@ func TestQuarantineControllerReportsPersistenceAndRollbackFailures(t *testing.T)
 	}
 
 	store.err = nil
-	restored, err := controller.Restore(context.Background(), entry.ID)
-	if err != nil {
-		t.Fatalf("reconcile retry: %v", err)
+	_, err = controller.Restore(context.Background(), entry.ID)
+	if !errors.Is(err, storagepkg.ErrConflict) {
+		t.Fatalf("ambiguous retry error = %v, want storage ErrConflict", err)
 	}
-	if restored.State != storagepkg.QuarantineStateRestored {
-		t.Fatalf("retry state = %q, want restored", restored.State)
+	if store.entry.State != storagepkg.QuarantineStateQuarantined {
+		t.Fatalf("retry state = %q, want quarantined", store.entry.State)
 	}
 }
 

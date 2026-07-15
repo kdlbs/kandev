@@ -392,8 +392,8 @@ func (c *workspaceQuarantineController) restoreGoCache(
 	if lease != nil {
 		defer lease.Release()
 	}
-	if restored, resolved, err := c.resolveAlreadyRestoredGoCache(ctx, entry); resolved || err != nil {
-		return restored, err
+	if err := c.rejectAmbiguousMissingGoCachePayload(entry); err != nil {
+		return storagepkg.QuarantineEntry{}, err
 	}
 	if err := c.prepareGoCacheRestoreDestination(entry); err != nil {
 		return storagepkg.QuarantineEntry{}, err
@@ -486,8 +486,8 @@ func (c *workspaceQuarantineController) deleteGoCache(
 	if time.Now().UTC().Before(entry.DeleteAfter) {
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("%w: quarantine retention deadline has not elapsed", storagepkg.ErrConflict)
 	}
-	if restored, resolved, err := c.resolveAlreadyRestoredGoCache(ctx, entry); resolved || err != nil {
-		return restored, err
+	if err := c.rejectAmbiguousMissingGoCachePayload(entry); err != nil {
+		return storagepkg.QuarantineEntry{}, err
 	}
 	if err := os.RemoveAll(entry.QuarantinePath); err != nil {
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("delete quarantined Go cache: %w", err)
@@ -547,34 +547,46 @@ func goCacheEntryOwnership(entry storagepkg.QuarantineEntry) (string, error) {
 	return metadata.Ownership, nil
 }
 
-func (c *workspaceQuarantineController) resolveAlreadyRestoredGoCache(
-	ctx context.Context,
+func (c *workspaceQuarantineController) rejectAmbiguousMissingGoCachePayload(
 	entry storagepkg.QuarantineEntry,
-) (storagepkg.QuarantineEntry, bool, error) {
+) error {
 	if entry.State != storagepkg.QuarantineStateFailed &&
 		entry.State != storagepkg.QuarantineStateQuarantined {
-		return storagepkg.QuarantineEntry{}, false, nil
+		return nil
 	}
 	if _, err := os.Lstat(entry.OriginalPath); errors.Is(err, os.ErrNotExist) {
-		return storagepkg.QuarantineEntry{}, false, nil
+		return nil
 	} else if err != nil {
-		return storagepkg.QuarantineEntry{}, false, fmt.Errorf("inspect failed Go-cache original path: %w", err)
+		return fmt.Errorf("inspect failed Go-cache original path: %w", err)
 	}
 	if _, err := os.Lstat(entry.QuarantinePath); err == nil {
-		return storagepkg.QuarantineEntry{}, false, nil
+		return nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return storagepkg.QuarantineEntry{}, false, fmt.Errorf("inspect failed Go-cache quarantine path: %w", err)
+		return fmt.Errorf("inspect failed Go-cache quarantine path: %w", err)
 	}
 	if err := c.validateGoCacheRestorePath(entry.OriginalPath); err != nil {
-		return storagepkg.QuarantineEntry{}, false, err
+		return err
 	}
-	restored, err := c.store.TransitionQuarantineEntry(
-		ctx, entry.ID, storagepkg.QuarantineStateRestored, "",
+	ownership, err := goCacheEntryOwnership(entry)
+	if err != nil {
+		return err
+	}
+	placeholder, err := gocache.IsRestorePlaceholder(
+		entry.OriginalPath, ownership == goCacheOwnershipAdopted,
 	)
 	if err != nil {
-		return storagepkg.QuarantineEntry{}, false, fmt.Errorf("persist already-restored Go cache: %w", err)
+		return fmt.Errorf("inspect Go-cache restore placeholder: %w", err)
 	}
-	return restored, true, nil
+	if placeholder {
+		return fmt.Errorf(
+			"%w: quarantined Go-cache payload is missing and the original path is only a rotation placeholder",
+			storagepkg.ErrConflict,
+		)
+	}
+	return fmt.Errorf(
+		"%w: quarantined Go-cache payload is missing and the populated original cannot be proven restored",
+		storagepkg.ErrConflict,
+	)
 }
 
 func (c *workspaceQuarantineController) validateGoCacheRestorePath(path string) error {

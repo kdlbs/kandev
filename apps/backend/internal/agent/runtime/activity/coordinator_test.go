@@ -91,7 +91,7 @@ func TestMaintenanceAlreadyRunningReportsMaintenanceKind(t *testing.T) {
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("second TryAcquireMaintenance error = %v, want ErrBusy", err)
 	}
-	want := Kind("maintenance_running")
+	want := KindMaintenanceRunning
 	if len(busy) != 1 || busy[0] != want {
 		t.Fatalf("busy kinds = %v, want [%s]", busy, want)
 	}

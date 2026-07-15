@@ -68,6 +68,33 @@ func TestTaskResourceCleanupJobClaimAndRetry(t *testing.T) {
 	}
 }
 
+func TestListPreparedTaskResourceCleanupJobsExcludesRunnableStates(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	for _, job := range []*models.TaskResourceCleanupJob{
+		{
+			ID: "job-prepared", OperationID: "delete:prepared", TaskID: "task-prepared",
+			Trigger: models.TaskResourceCleanupTriggerDelete, State: models.TaskResourceCleanupStatePrepared,
+		},
+		{
+			ID: "job-pending", OperationID: "delete:pending", TaskID: "task-pending",
+			Trigger: models.TaskResourceCleanupTriggerDelete, State: models.TaskResourceCleanupStatePending,
+		},
+	} {
+		if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+			t.Fatalf("CreateTaskResourceCleanupJob(%s): %v", job.ID, err)
+		}
+	}
+
+	jobs, err := repo.ListPreparedTaskResourceCleanupJobs(ctx)
+	if err != nil {
+		t.Fatalf("ListPreparedTaskResourceCleanupJobs: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].ID != "job-prepared" {
+		t.Fatalf("prepared jobs = %#v, want only job-prepared", jobs)
+	}
+}
+
 func TestTaskResourceCleanupJobStaleClaimCannotOverwriteCancellation(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForHealTests(t)

@@ -958,7 +958,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: true}
 	cleanupJob, err := s.persistTaskResourceCleanup(
 		ctx, id, models.TaskResourceCleanupTriggerArchive, "",
-		sessions, worktrees, stopTargets, envCleanup, false,
+		sessions, worktrees, stopTargets, envCleanup, true,
 	)
 	if err != nil {
 		return err
@@ -997,7 +997,10 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 6. Background: Stop agents and cleanup worktrees
 	if cleanupJob != nil {
-		s.startTaskResourceCleanup(cleanupJob)
+		if err := s.StartPreparedTaskResourceCleanup(ctx, cleanupJob.OperationID); err != nil {
+			s.logger.Warn("start committed archive resource cleanup",
+				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
+		}
 	} else if len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || taskEnv != nil {
 		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
@@ -1084,7 +1087,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false}
 	cleanupJob, err := s.persistTaskResourceCleanup(
-		ctx, id, trigger, "", sessions, worktrees, stopTargets, envCleanup, false,
+		ctx, id, trigger, "", sessions, worktrees, stopTargets, envCleanup, true,
 	)
 	if err != nil {
 		return false, err
@@ -1118,7 +1121,10 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	//    cleanup running when only the env needs reclaiming).
 	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral || taskEnv != nil
 	if cleanupJob != nil {
-		s.startTaskResourceCleanup(cleanupJob)
+		if err := s.StartPreparedTaskResourceCleanup(ctx, cleanupJob.OperationID); err != nil {
+			s.logger.Warn("start committed delete resource cleanup",
+				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
+		}
 	} else if hasCleanup {
 		s.runAsyncTaskCleanup(id, sessions, worktrees, stopTargets, envCleanup,
 			"task deleted", "failed to stop session on task delete", "task cleanup completed")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
@@ -123,6 +124,11 @@ func TestStartAgentProcessFailureReleasesTrackedExecutionActivity(t *testing.T) 
 	if err := manager.executionStore.Add(execution); err != nil {
 		t.Fatalf("Add execution: %v", err)
 	}
+	lease, err := coordinator.AcquireTask(context.Background(), activity.KindExecutionPreparing)
+	if err != nil {
+		t.Fatalf("AcquireTask: %v", err)
+	}
+	manager.trackActivity(executionActivityKey(execution.ID), lease)
 
 	if err := manager.StartAgentProcess(context.Background(), execution.ID); err == nil {
 		t.Fatal("StartAgentProcess returned nil, want missing agentctl error")
@@ -146,9 +152,12 @@ func TestInitialPromptWaitFailureRetainsExecutionActivity(t *testing.T) {
 	}
 	manager.trackActivity(executionActivityKey("execution-prompt-wait"), lease)
 
-	if handler := manager.sessionManager.initialPromptFailure; handler != nil {
-		handler("execution-prompt-wait")
-	}
+	manager.sessionManager.SetInitialPromptFailureHandler(func(executionID string) {
+		if executionID != "execution-prompt-wait" {
+			t.Errorf("initial prompt failure execution ID = %q", executionID)
+		}
+	})
+	manager.sessionManager.initialPromptFailure("execution-prompt-wait")
 	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
 	if maintenance != nil {
 		maintenance.Release()
@@ -159,7 +168,7 @@ func TestInitialPromptWaitFailureRetainsExecutionActivity(t *testing.T) {
 	manager.releaseActivity(executionActivityKey("execution-prompt-wait"))
 }
 
-func TestReleaseInvalidatesPendingExecutionActivityAcquire(t *testing.T) {
+func TestReleaseCancelsPendingExecutionActivityAcquire(t *testing.T) {
 	manager := newTestManager(t)
 	coordinator := activity.NewCoordinator(activity.Options{})
 	manager.SetActivityCoordinator(coordinator)
@@ -170,15 +179,16 @@ func TestReleaseInvalidatesPendingExecutionActivityAcquire(t *testing.T) {
 
 	acquired := make(chan error, 1)
 	go func() {
-		acquired <- manager.ensureExecutionActivity(
+		_, acquireErr := manager.ensureExecutionActivity(
 			context.Background(), "completed-while-acquiring", activity.KindExecutionStarting,
 		)
+		acquired <- acquireErr
 	}()
 	<-maintenance.Context().Done()
 	manager.releaseActivity(executionActivityKey("completed-while-acquiring"))
 	maintenance.Release()
-	if err := <-acquired; err != nil {
-		t.Fatalf("ensureExecutionActivity: %v", err)
+	if err := <-acquired; !errors.Is(err, errExecutionActivityInvalidated) {
+		t.Fatalf("ensureExecutionActivity error = %v, want invalidation", err)
 	}
 
 	next, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
@@ -186,4 +196,73 @@ func TestReleaseInvalidatesPendingExecutionActivityAcquire(t *testing.T) {
 		t.Fatalf("late execution lease remained active: %v", err)
 	}
 	next.Release()
+}
+
+func TestCancelledConcurrentExecutionActivityAcquireDoesNotInvalidateLeader(t *testing.T) {
+	manager := newTestManager(t)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	manager.SetActivityCoordinator(coordinator)
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("TryAcquireMaintenance: %v", err)
+	}
+
+	leaderDone := make(chan error, 1)
+	go func() {
+		claim, acquireErr := manager.ensureExecutionActivity(
+			context.Background(), "shared-start", activity.KindExecutionStarting,
+		)
+		if acquireErr == nil {
+			claim.Commit()
+		}
+		leaderDone <- acquireErr
+	}()
+	select {
+	case <-maintenance.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("leader did not reach activity admission")
+	}
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	claim, err := manager.ensureExecutionActivity(
+		cancelledCtx, "shared-start", activity.KindExecutionStarting,
+	)
+	claim.Release()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("concurrent acquire error = %v, want context cancellation", err)
+	}
+	maintenance.Release()
+	if err := <-leaderDone; err != nil {
+		t.Fatalf("leader acquire: %v", err)
+	}
+	if _, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0); !errors.Is(err, activity.ErrBusy) {
+		t.Fatalf("maintenance error = %v, want ErrBusy after leader acquired", err)
+	}
+	manager.releaseActivity(executionActivityKey("shared-start"))
+}
+
+func TestStaleFailedExecutionActivityDoesNotReleaseSuccessfulSuccessor(t *testing.T) {
+	manager := newTestManager(t)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	manager.SetActivityCoordinator(coordinator)
+
+	stale, err := manager.ensureExecutionActivity(
+		context.Background(), "shared-start", activity.KindExecutionStarting,
+	)
+	if err != nil {
+		t.Fatalf("stale acquire: %v", err)
+	}
+	successor, err := manager.ensureExecutionActivity(
+		context.Background(), "shared-start", activity.KindExecutionPreparing,
+	)
+	if err != nil {
+		t.Fatalf("successor acquire: %v", err)
+	}
+
+	successor.Commit()
+	stale.Release()
+	if _, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0); !errors.Is(err, activity.ErrBusy) {
+		t.Fatalf("maintenance error = %v, want ErrBusy after successor succeeded", err)
+	}
+	manager.releaseActivity(executionActivityKey("shared-start"))
 }

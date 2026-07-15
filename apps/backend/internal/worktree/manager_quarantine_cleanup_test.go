@@ -50,10 +50,20 @@ func TestPruneQuarantinedWorkspacePreservesOtherRecoverableRegistration(t *testi
 	}
 	worktreeList := runGit(t, repoPath, "worktree", "list", "--porcelain")
 	if strings.Contains(worktreeList, "worktree "+firstPath) {
-		t.Fatalf("selected worktree registration was preserved:\n%s", worktreeList)
+		t.Fatalf("selected worktree registration remains after prune:\n%s", worktreeList)
+	}
+	if !strings.Contains(worktreeList, "worktree "+secondPath) {
+		t.Fatalf("recoverable sibling registration was removed:\n%s", worktreeList)
 	}
 	if err := mgr.PruneQuarantinedWorkspace(context.Background(), storage.QuarantineEntry{TaskID: "task-1"}); err != nil {
 		t.Fatalf("repeat PruneQuarantinedWorkspace: %v", err)
+	}
+	worktreeList = runGit(t, repoPath, "worktree", "list", "--porcelain")
+	if strings.Contains(worktreeList, "worktree "+firstPath) {
+		t.Fatalf("selected worktree registration returned after repeated prune:\n%s", worktreeList)
+	}
+	if !strings.Contains(worktreeList, "worktree "+secondPath) {
+		t.Fatalf("repeated prune removed recoverable sibling registration:\n%s", worktreeList)
 	}
 	if err := os.Rename(secondQuarantine, filepath.Dir(secondPath)); err != nil {
 		t.Fatalf("restore second workspace: %v", err)

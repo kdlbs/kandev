@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/kandev/kandev/internal/system/storage"
@@ -91,6 +92,12 @@ func (s *recordingStore) ListQuarantineEntries(
 		}
 		entries = append(entries, entry)
 	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].QuarantinedAt.Equal(entries[j].QuarantinedAt) {
+			return entries[i].ID > entries[j].ID
+		}
+		return entries[i].QuarantinedAt.After(entries[j].QuarantinedAt)
+	})
 	return entries, nil
 }
 
@@ -565,5 +572,39 @@ func TestCleanupDoesNotDiscoverUserDefaultCache(t *testing.T) {
 	}
 	if _, err := os.Stat(artifact); err != nil {
 		t.Fatalf("unadopted user cache was modified: %v", err)
+	}
+}
+
+func TestIsRestorePlaceholderDoesNotModifyCache(t *testing.T) {
+	tests := []struct {
+		name    string
+		adopted bool
+	}{
+		{name: "managed"},
+		{name: "adopted", adopted: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cachePath := filepath.Join(t.TempDir(), "go-build")
+			if err := os.MkdirAll(cachePath, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if !test.adopted {
+				if err := writeMarker(cachePath); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			placeholder, err := IsRestorePlaceholder(cachePath, test.adopted)
+			if err != nil {
+				t.Fatalf("IsRestorePlaceholder: %v", err)
+			}
+			if !placeholder {
+				t.Fatal("expected rotation placeholder")
+			}
+			if _, err := os.Stat(cachePath); err != nil {
+				t.Fatalf("placeholder was modified: %v", err)
+			}
+		})
 	}
 }

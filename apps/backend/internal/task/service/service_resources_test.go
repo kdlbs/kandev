@@ -80,10 +80,17 @@ func TestWorkspaceDeleteDurableCleanupSignalsOwnedWorker(t *testing.T) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(100 * time.Millisecond):
+	case <-barrier.started:
 		close(barrier.release)
-		<-barrier.stopped
+		select {
+		case <-barrier.stopped:
+		case <-time.After(time.Second):
+			t.Fatal("synchronous workspace cleanup did not stop after release")
+		}
 		t.Fatal("workspace deletion processed durable cleanup synchronously")
+	case <-time.After(time.Second):
+		close(barrier.release)
+		t.Fatal("workspace deletion did not return")
 	}
 	select {
 	case <-wake:

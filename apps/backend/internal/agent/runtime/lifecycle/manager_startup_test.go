@@ -5,6 +5,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 )
 
 // mockAgentProfileResolver returns a profile pointing to the mock-agent.
@@ -13,6 +15,41 @@ import (
 type mockAgentProfileResolver struct {
 	cliPassthrough bool
 	err            error
+}
+
+type blockingAgentProfileResolver struct {
+	entered chan chan struct{}
+}
+
+type cancellableAgentProfileResolver struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (r *cancellableAgentProfileResolver) ResolveProfile(
+	ctx context.Context,
+	_ string,
+) (*AgentProfileInfo, error) {
+	close(r.entered)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-r.release:
+		return &AgentProfileInfo{AgentID: "mock-agent"}, nil
+	}
+}
+
+func (r *blockingAgentProfileResolver) ResolveProfile(
+	_ context.Context,
+	profileID string,
+) (*AgentProfileInfo, error) {
+	release := make(chan struct{})
+	r.entered <- release
+	<-release
+	return &AgentProfileInfo{
+		ProfileID: profileID,
+		AgentID:   "mock-agent",
+	}, nil
 }
 
 func (m *mockAgentProfileResolver) ResolveProfile(_ context.Context, profileID string) (*AgentProfileInfo, error) {
@@ -61,6 +98,78 @@ func TestStartAgentProcess_NonPassthrough_NoAgentctl(t *testing.T) {
 	if !strings.Contains(err.Error(), "no agentctl client") {
 		t.Errorf("expected 'no agentctl client' error, got: %v", err)
 	}
+}
+
+func TestFailedConcurrentStartDoesNotReleaseLiveStartActivity(t *testing.T) {
+	mgr := newTestManager(t)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	resolver := &blockingAgentProfileResolver{entered: make(chan chan struct{}, 2)}
+	mgr.profileResolver = resolver
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-shared", AgentProfileID: "profile-1",
+	}); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+
+	results := make(chan error, 2)
+	go func() { results <- mgr.StartAgentProcess(context.Background(), "exec-shared") }()
+	releaseFirst := <-resolver.entered
+	go func() { results <- mgr.StartAgentProcess(context.Background(), "exec-shared") }()
+	releaseSecond := <-resolver.entered
+
+	close(releaseFirst)
+	if err := <-results; err == nil {
+		t.Fatal("first start returned nil, want missing agentctl error")
+	}
+	maintenance, _, maintenanceErr := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if maintenance != nil {
+		maintenance.Release()
+	}
+	close(releaseSecond)
+	if err := <-results; err == nil {
+		t.Fatal("second start returned nil, want missing agentctl error")
+	}
+	if !errors.Is(maintenanceErr, activity.ErrBusy) {
+		t.Fatalf("maintenance error = %v, want ErrBusy while second start is live", maintenanceErr)
+	}
+}
+
+func TestTerminalInvalidationCancelsAndDrainsAdmittedStart(t *testing.T) {
+	mgr := newTestManager(t)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	resolver := &cancellableAgentProfileResolver{
+		entered: make(chan struct{}), release: make(chan struct{}),
+	}
+	mgr.profileResolver = resolver
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-invalidated", AgentProfileID: "profile-1",
+	}); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+
+	result := make(chan error, 1)
+	go func() { result <- mgr.StartAgentProcess(context.Background(), "exec-invalidated") }()
+	<-resolver.entered
+	mgr.releaseActivity(executionActivityKey("exec-invalidated"))
+	maintenance, _, maintenanceErr := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if maintenance != nil {
+		maintenance.Release()
+	}
+	if !errors.Is(maintenanceErr, activity.ErrBusy) {
+		close(resolver.release)
+		<-result
+		t.Fatalf("maintenance error = %v, want ErrBusy until invalidated start drains", maintenanceErr)
+	}
+	if err := <-result; !errors.Is(err, errExecutionActivityInvalidated) {
+		t.Fatalf("StartAgentProcess error = %v, want claim invalidation", err)
+	}
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("maintenance after start drained: %v", err)
+	}
+	maintenance.Release()
 }
 
 func TestStartAgentProcess_Passthrough_NotResumed(t *testing.T) {

@@ -15,7 +15,10 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-const taskResourceCleanupRetryDelay = time.Minute
+const (
+	taskResourceCleanupRetryDelay       = time.Minute
+	preparedCleanupTransitionRetryDelay = 50 * time.Millisecond
+)
 
 type persistedTaskStopTarget struct {
 	SessionID   string `json:"session_id"`
@@ -125,6 +128,7 @@ func (s *Service) StartTaskResourceCleanupWorker(ctx context.Context) error {
 	if s.resourceCleanups == nil {
 		return nil
 	}
+	startupPreparedCutoff := time.Now().UTC()
 	s.cleanupWorkerMu.Lock()
 	if s.cleanupWorkerCancel != nil {
 		s.cleanupWorkerMu.Unlock()
@@ -136,16 +140,17 @@ func (s *Service) StartTaskResourceCleanupWorker(ctx context.Context) error {
 	s.cleanupWorkerWake = wake
 	s.cleanupWorkerWG.Add(1)
 	s.cleanupWorkerMu.Unlock()
-	if err := s.ResumeTaskResourceCleanupJobs(workerCtx); err != nil {
-		s.cleanupWorkerWG.Done()
-		s.StopTaskResourceCleanupWorker()
-		return err
-	}
-	go s.runTaskResourceCleanupWorker(workerCtx, wake)
-	return nil
+	resumeErr := s.resumeTaskResourceCleanupJobs(workerCtx, startupPreparedCutoff)
+	go s.runTaskResourceCleanupWorker(workerCtx, wake, resumeErr != nil, startupPreparedCutoff)
+	return resumeErr
 }
 
-func (s *Service) runTaskResourceCleanupWorker(ctx context.Context, wake <-chan struct{}) {
+func (s *Service) runTaskResourceCleanupWorker(
+	ctx context.Context,
+	wake <-chan struct{},
+	resumePending bool,
+	startupPreparedCutoff time.Time,
+) {
 	defer s.cleanupWorkerWG.Done()
 	ticker := time.NewTicker(taskResourceCleanupRetryDelay)
 	defer ticker.Stop()
@@ -155,6 +160,16 @@ func (s *Service) runTaskResourceCleanupWorker(ctx context.Context, wake <-chan 
 			return
 		case <-ticker.C:
 		case <-wake:
+		}
+		if resumePending {
+			if err := s.resumeTaskResourceCleanupJobs(ctx, startupPreparedCutoff); err != nil {
+				if ctx.Err() == nil {
+					s.logger.Warn("resume task resource cleanup jobs", zap.Error(err))
+				}
+				continue
+			}
+			resumePending = false
+			continue
 		}
 		if err := s.processDueTaskResourceCleanupJobs(ctx); err != nil && ctx.Err() == nil {
 			s.logger.Warn("process due task resource cleanup jobs", zap.Error(err))
@@ -177,19 +192,27 @@ func (s *Service) StopTaskResourceCleanupWorker() {
 // ResumeTaskResourceCleanupJobs reconstructs interrupted task cleanup after a
 // backend restart. It is independent of optional scheduled storage maintenance.
 func (s *Service) ResumeTaskResourceCleanupJobs(ctx context.Context) error {
+	return s.resumeTaskResourceCleanupJobs(ctx, time.Now().UTC())
+}
+
+func (s *Service) resumeTaskResourceCleanupJobs(ctx context.Context, startupPreparedCutoff time.Time) error {
 	if s.resourceCleanups == nil {
 		return nil
 	}
 	if err := s.resourceCleanups.ResetRunningTaskResourceCleanupJobs(ctx); err != nil {
 		return fmt.Errorf("reset interrupted task cleanup jobs: %w", err)
 	}
+	if err := s.reconcilePreparedTaskResourceCleanupJobs(ctx, &startupPreparedCutoff); err != nil {
+		return err
+	}
 	return s.processDueTaskResourceCleanupJobs(ctx)
 }
 
 func (s *Service) processDueTaskResourceCleanupJobs(ctx context.Context) error {
+	reconcileErr := s.reconcilePreparedTaskResourceCleanupJobs(ctx, nil)
 	jobs, err := s.resourceCleanups.ListDueTaskResourceCleanupJobs(ctx, time.Now().UTC(), 100)
 	if err != nil {
-		return fmt.Errorf("list due task cleanup jobs: %w", err)
+		return errors.Join(reconcileErr, fmt.Errorf("list due task cleanup jobs: %w", err))
 	}
 	for _, job := range jobs {
 		if err := s.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
@@ -197,7 +220,65 @@ func (s *Service) processDueTaskResourceCleanupJobs(ctx context.Context) error {
 				zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
 		}
 	}
-	return nil
+	return reconcileErr
+}
+
+func (s *Service) reconcilePreparedTaskResourceCleanupJobs(
+	ctx context.Context,
+	cancelUncommittedBefore *time.Time,
+) error {
+	jobs, err := s.resourceCleanups.ListPreparedTaskResourceCleanupJobs(ctx)
+	if err != nil {
+		return fmt.Errorf("list prepared task cleanup jobs: %w", err)
+	}
+	var errs []error
+	for _, job := range jobs {
+		committed, commitErr := s.preparedTaskCleanupMutationCommitted(ctx, job)
+		if commitErr != nil {
+			errs = append(errs, fmt.Errorf("verify prepared cleanup %s: %w", job.ID, commitErr))
+			continue
+		}
+		if !committed {
+			if cancelUncommittedBefore == nil || !job.CreatedAt.Before(*cancelUncommittedBefore) {
+				continue
+			}
+			if err := s.resourceCleanups.CompleteTaskResourceCleanupJob(
+				ctx, job.ID, models.TaskResourceCleanupStateCancelled, "", nil,
+			); err != nil {
+				errs = append(errs, fmt.Errorf("cancel uncommitted prepared cleanup %s: %w", job.ID, err))
+			}
+			continue
+		}
+		if err := s.activatePreparedTaskResourceCleanupJob(ctx, job); err != nil {
+			errs = append(errs, fmt.Errorf("start committed prepared cleanup %s: %w", job.ID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Service) preparedTaskCleanupMutationCommitted(
+	ctx context.Context,
+	job *models.TaskResourceCleanupJob,
+) (bool, error) {
+	if job == nil || s.tasks == nil {
+		return false, errors.New("task repository is unavailable")
+	}
+	task, err := s.tasks.GetTask(ctx, job.TaskID)
+	if err != nil && !errors.Is(err, taskrepo.ErrTaskNotFound) {
+		return false, err
+	}
+	taskExists := err == nil && task != nil
+	switch job.Trigger {
+	case models.TaskResourceCleanupTriggerArchive, models.TaskResourceCleanupTriggerCascadeArchive:
+		return taskExists && task.ArchivedAt != nil, nil
+	case models.TaskResourceCleanupTriggerDelete,
+		models.TaskResourceCleanupTriggerCascadeDelete,
+		models.TaskResourceCleanupTriggerWorkspaceDelete,
+		models.TaskResourceCleanupTriggerQuickChatExpire:
+		return !taskExists, nil
+	default:
+		return false, nil
+	}
 }
 
 func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) error {
@@ -437,16 +518,35 @@ func (s *Service) StartPreparedTaskResourceCleanup(ctx context.Context, operatio
 	if s.resourceCleanups == nil {
 		return nil
 	}
-	job, err := s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(ctx, operationID)
-	if err != nil {
-		return err
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
+	var lastErr error
+	for {
+		job, err := s.resourceCleanups.GetTaskResourceCleanupJobByOperationID(transitionCtx, operationID)
+		if err == nil {
+			err = s.activatePreparedTaskResourceCleanupJob(transitionCtx, job)
+			if err == nil {
+				return nil
+			}
+		}
+		lastErr = err
+		timer := time.NewTimer(preparedCleanupTransitionRetryDelay)
+		select {
+		case <-transitionCtx.Done():
+			timer.Stop()
+			return errors.Join(lastErr, transitionCtx.Err())
+		case <-timer.C:
+		}
 	}
+}
+
+func (s *Service) activatePreparedTaskResourceCleanupJob(
+	ctx context.Context,
+	job *models.TaskResourceCleanupJob,
+) error {
 	started, err := s.resourceCleanups.StartPreparedTaskResourceCleanupJob(ctx, job.ID)
-	if err != nil {
+	if err != nil || !started {
 		return err
-	}
-	if !started {
-		return nil
 	}
 	job.State = models.TaskResourceCleanupStatePending
 	s.startTaskResourceCleanup(job)

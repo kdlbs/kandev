@@ -75,7 +75,7 @@ func deepestRealDirectory(anchor, relative string) (string, error) {
 			continue
 		}
 		current = filepath.Join(current, component)
-		info, statErr := os.Lstat(current)
+		info, statErr := os.Lstat(current) // codeql[go/path-injection] component is constrained beneath anchor.
 		if errors.Is(statErr, os.ErrNotExist) {
 			break
 		}
@@ -94,7 +94,7 @@ func deepestRealDirectory(anchor, relative string) (string, error) {
 }
 
 func requireRealDirectory(path string) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // codeql[go/path-injection] deliberate validation of the absolute safety anchor.
 	if err != nil {
 		return fmt.Errorf("inspect safety anchor %s: %w", path, err)
 	}

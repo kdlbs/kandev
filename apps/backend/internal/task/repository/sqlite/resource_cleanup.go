@@ -52,6 +52,27 @@ func (r *Repository) GetTaskResourceCleanupJob(ctx context.Context, id string) (
 	return scanTaskResourceCleanupJob(row)
 }
 
+func (r *Repository) ListPreparedTaskResourceCleanupJobs(ctx context.Context) ([]*models.TaskResourceCleanupJob, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskResourceCleanupColumns+`
+		FROM task_resource_cleanup_jobs
+		WHERE state = ? ORDER BY created_at ASC
+	`), models.TaskResourceCleanupStatePrepared)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	jobs := make([]*models.TaskResourceCleanupJob, 0)
+	for rows.Next() {
+		job, scanErr := scanTaskResourceCleanupJob(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
 func scanTaskResourceCleanupJob(row interface{ Scan(...any) error }) (*models.TaskResourceCleanupJob, error) {
 	job := &models.TaskResourceCleanupJob{}
 	err := row.Scan(&job.ID, &job.OperationID, &job.TaskID, &job.Trigger, &job.State,

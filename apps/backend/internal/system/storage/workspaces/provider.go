@@ -244,22 +244,70 @@ func (p *Provider) RestoreTask(ctx context.Context, taskID string) WorkspaceReco
 	for i := range entries {
 		entry := &entries[i]
 		if entry.ResourceType != storage.ResourceTypeTaskWorkspace || entry.TaskID != taskID ||
-			entry.State != storage.QuarantineStateQuarantined {
+			(entry.State != storage.QuarantineStateQuarantined && entry.State != storage.QuarantineStateFailed) {
 			continue
 		}
 		if newest == nil || entry.QuarantinedAt.After(newest.QuarantinedAt) {
 			newest = entry
 		}
 	}
-	if newest != nil {
-		if _, err := p.Restore(ctx, newest.ID); err != nil {
+	if newest == nil {
+		return recovery
+	}
+	if newest.State == storage.QuarantineStateFailed {
+		resolved, err := p.resolveFailedTaskRestore(ctx, *newest)
+		if err != nil {
 			recovery.Status = "failed"
 			recovery.Message = err.Error()
 			return recovery
 		}
-		recovery.Status = "restored"
+		if resolved {
+			recovery.Status = "restored"
+			return recovery
+		}
 	}
+	if _, err := p.Restore(ctx, newest.ID); err != nil {
+		recovery.Status = "failed"
+		recovery.Message = err.Error()
+		return recovery
+	}
+	recovery.Status = "restored"
 	return recovery
+}
+
+func (p *Provider) resolveFailedTaskRestore(
+	ctx context.Context,
+	entry storage.QuarantineEntry,
+) (bool, error) {
+	if err := p.validateEntryPaths(entry); err != nil {
+		return false, err
+	}
+	originalExists, err := workspacePathExists(entry.OriginalPath)
+	if err != nil {
+		return false, fmt.Errorf("inspect failed workspace original: %w", err)
+	}
+	quarantineExists, err := workspacePathExists(entry.QuarantinePath)
+	if err != nil {
+		return false, fmt.Errorf("inspect failed workspace quarantine: %w", err)
+	}
+	if originalExists && !quarantineExists {
+		_, err := p.config.Store.TransitionQuarantineEntry(
+			ctx, entry.ID, storage.QuarantineStateRestored, "",
+		)
+		return err == nil, err
+	}
+	if !originalExists && quarantineExists {
+		return false, nil
+	}
+	return false, fmt.Errorf("%w: failed workspace quarantine state is ambiguous", storage.ErrConflict)
+}
+
+func workspacePathExists(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func (p *Provider) PermanentDelete(

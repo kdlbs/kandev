@@ -79,13 +79,17 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
-	if err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing); err != nil {
+	activityClaim, err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing)
+	if err != nil {
 		return err
 	}
+	operationCtx := activityClaim.Context(ctx)
 	defer func() {
 		if retErr != nil {
-			m.releaseActivity(executionActivityKey(executionID))
+			activityClaim.Release()
+			return
 		}
+		activityClaim.Commit()
 	}()
 
 	// Decide passthrough vs ACP. The session-creation snapshot
@@ -102,8 +106,12 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 	// transient resolve error must not silently route a passthrough session
 	// to ACP — the resume branch routes on the snapshot alone, and the fresh
 	// branch surfaces the resolve error explicitly.
-	if isPassthrough, profileInfo := m.routePassthrough(ctx, execution); isPassthrough {
-		return m.startPassthroughExecution(ctx, execution, profileInfo)
+	isPassthrough, profileInfo := m.routePassthrough(operationCtx, execution)
+	if err := context.Cause(operationCtx); err != nil {
+		return err
+	}
+	if isPassthrough {
+		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
 
 	if execution.agentctl == nil {
@@ -120,13 +128,13 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 	}
 
 	// Wait for agentctl to be ready
-	if err := execution.agentctl.WaitForReady(ctx, 60*time.Second); err != nil {
+	if err := execution.agentctl.WaitForReady(operationCtx, 60*time.Second); err != nil {
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
-	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
+	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
 
 	var bootCommand string
 	if reuseExisting {
@@ -145,7 +153,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("acp_session_id", execution.ACPSessionID))
 
 		var err error
-		bootCommand, err = m.configureAndStartAgent(ctx, execution, approvalPolicy)
+		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
 		if err != nil {
 			return err
 		}
@@ -156,7 +164,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("command", bootCommand))
 	}
 
-	return m.initializeAgentSession(ctx, execution, bootCommand, agentDisplayName, taskDescription)
+	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription)
 }
 
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.

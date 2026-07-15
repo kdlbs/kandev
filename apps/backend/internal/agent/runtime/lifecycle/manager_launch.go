@@ -808,19 +808,18 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 // If req.SessionID is empty (quick chat / pre-session contexts), no
 // deduplication key exists and we fall through to direct execution.
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
-	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
-	if err != nil {
-		return nil, err
-	}
-	transferredActivity := false
-	defer func() {
-		if !transferredActivity {
-			activityLease.Release()
-		}
-	}()
-	activityLease.SetKind(activity.KindExecutionPreparing)
-
 	if req.SessionID == "" {
+		activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
+		if err != nil {
+			return nil, err
+		}
+		transferredActivity := false
+		defer func() {
+			if !transferredActivity {
+				activityLease.Release()
+			}
+		}()
+		activityLease.SetKind(activity.KindExecutionPreparing)
 		execution, launchErr := m.launchInternal(ctx, req)
 		if launchErr == nil && req.StartAgent {
 			m.trackActivity(executionActivityKey(execution.ID), activityLease)
@@ -828,13 +827,19 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		}
 		return execution, launchErr
 	}
-	v, err, _ := m.ensureExecutionGroup.Do(req.SessionID, func() (interface{}, error) {
-		return m.launchInternal(ctx, req)
+	value, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionStarting)
+		if acquireErr != nil {
+			return nil, acquireErr
+		}
+		defer activityLease.Release()
+		activityLease.SetKind(activity.KindExecutionPreparing)
+		return m.launchInternal(sharedCtx, req)
 	})
 	if err != nil {
 		return nil, err
 	}
-	execution := v.(*AgentExecution)
+	execution := value.(*AgentExecution)
 	// If this Launch call joined a workspace-only ensure peer's singleflight
 	// slot (EnsureWorkspaceExecutionForSession / GetOrEnsureExecution), the
 	// returned execution has no AgentCommand and the orchestrator's subsequent
@@ -847,8 +852,11 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		}
 	}
 	if req.StartAgent {
+		activityLease, err := m.acquireActivity(ctx, activity.KindExecutionPreparing)
+		if err != nil {
+			return nil, err
+		}
 		m.trackActivity(executionActivityKey(execution.ID), activityLease)
-		transferredActivity = true
 	}
 	return execution, nil
 }
@@ -859,13 +867,18 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 // dedicated singleflight key so they don't race on the shared AgentExecution
 // pointer.
 func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
-	_, err, _ := m.ensureExecutionGroup.Do("promote:"+req.SessionID, func() (interface{}, error) {
+	_, err := m.doCoalescedExecution(ctx, "promote:"+req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionPreparing)
+		if acquireErr != nil {
+			return nil, acquireErr
+		}
+		defer activityLease.Release()
 		// Re-check after acquiring the slot — a peer Launch may have already
 		// promoted while we were waiting.
 		if execution.AgentCommand != "" {
 			return nil, nil
 		}
-		agentTypeName, profileInfo, err := m.resolveAgentProfile(ctx, req)
+		agentTypeName, profileInfo, err := m.resolveAgentProfile(sharedCtx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -888,7 +901,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		}
 		execution.IsPassthrough = req.IsPassthrough
 		if !req.IsPassthrough {
-			if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig); err != nil {
+			if err := m.materializeRuntimeProjectMCP(sharedCtx, execution, agentConfig); err != nil {
 				execution.AgentCommand = ""
 				execution.ContinueCommand = ""
 				execution.isResumedSession = false

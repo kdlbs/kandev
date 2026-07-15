@@ -322,6 +322,24 @@ func markerPath(cachePath string) string {
 // rotation. Managed caches must contain only their bound ownership marker;
 // adopted caches must be completely empty.
 func RemoveRestorePlaceholder(cachePath string, adopted bool) (bool, error) {
+	placeholder, err := IsRestorePlaceholder(cachePath, adopted)
+	if err != nil || !placeholder {
+		return placeholder, err
+	}
+	if !adopted {
+		if err := os.Remove(markerPath(cachePath)); err != nil {
+			return false, fmt.Errorf("remove Go-cache restore marker: %w", err)
+		}
+	}
+	if err := os.Remove(cachePath); err != nil {
+		return false, fmt.Errorf("remove Go-cache restore placeholder: %w", err)
+	}
+	return true, nil
+}
+
+// IsRestorePlaceholder reports whether cachePath is the empty replacement
+// created after a cache rotation, without modifying it.
+func IsRestorePlaceholder(cachePath string, adopted bool) (bool, error) {
 	info, err := os.Lstat(cachePath)
 	if err != nil {
 		return false, err
@@ -334,21 +352,9 @@ func RemoveRestorePlaceholder(cachePath string, adopted bool) (bool, error) {
 		return false, fmt.Errorf("inspect Go-cache restore placeholder: %w", err)
 	}
 	if adopted {
-		if len(entries) != 0 {
-			return false, nil
-		}
-	} else if len(entries) != 1 || entries[0].Name() != markerName || !hasValidMarker(cachePath) {
-		return false, nil
+		return len(entries) == 0, nil
 	}
-	if !adopted {
-		if err := os.Remove(markerPath(cachePath)); err != nil {
-			return false, fmt.Errorf("remove Go-cache restore marker: %w", err)
-		}
-	}
-	if err := os.Remove(cachePath); err != nil {
-		return false, fmt.Errorf("remove Go-cache restore placeholder: %w", err)
-	}
-	return true, nil
+	return len(entries) == 1 && entries[0].Name() == markerName && hasValidMarker(cachePath), nil
 }
 
 func (p *Provider) validateCachePath(cachePath string) error {
@@ -377,7 +383,7 @@ func (p *Provider) validateCacheAndTrash(cachePath string) error {
 }
 
 func rejectSymlink(path string) error {
-	info, err := os.Lstat(path)
+	info, err := os.Lstat(path) // codeql[go/path-injection] path is constrained by ValidateNoSymlinkPath.
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
@@ -439,7 +445,7 @@ func startsWithParent(rel string) bool {
 }
 
 func probeAtomicRename(cachePath, trashRoot string) error {
-	if err := os.MkdirAll(trashRoot, 0o700); err != nil {
+	if err := os.MkdirAll(trashRoot, 0o700); err != nil { // codeql[go/path-injection] validated by validateCacheAndTrash.
 		return fmt.Errorf("create Go-cache trash: %w", err)
 	}
 	probe, err := os.CreateTemp(cachePath, ".kandev-adoption-probe-")

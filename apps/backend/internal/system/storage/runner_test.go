@@ -222,8 +222,12 @@ func TestRunnerReturnsCancellationWhenPreemptedBetweenProviders(t *testing.T) {
 	if run.State != RunStateCancelled {
 		t.Fatalf("run state = %q, want cancelled", run.State)
 	}
-	lease := <-provider.lease
-	lease.Release()
+	select {
+	case lease := <-provider.lease:
+		lease.Release()
+	case <-time.After(time.Second):
+		t.Fatal("preempting task lease was not acquired")
+	}
 }
 
 type runnerResult struct {

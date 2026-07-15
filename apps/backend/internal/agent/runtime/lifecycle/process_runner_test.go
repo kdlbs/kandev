@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -174,6 +175,39 @@ func TestStopProcessVerifiesExecutionOwnershipBeforeReleasingLease(t *testing.T)
 		t.Fatalf("owned stopped process retained activity lease: %v", err)
 	}
 	maintenance.Release()
+}
+
+func TestStopProcessReturnsOwnerStopErrorAndRetainsLease(t *testing.T) {
+	client := processTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost {
+			http.Error(w, "stop exploded", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"process-owned","session_id":"session-owner","status":"running"}`))
+	}))
+	coordinator := activity.NewCoordinator(activity.Options{})
+	manager := &Manager{executionStore: NewExecutionStore()}
+	manager.SetActivityCoordinator(coordinator)
+	if err := manager.executionStore.Add(&AgentExecution{
+		ID: "exec-owner", SessionID: "session-owner", agentctl: client,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := coordinator.AcquireTask(context.Background(), activity.KindShellCommand)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.trackActivity(processActivityKey("process-owned"), lease)
+
+	err = manager.StopProcess(context.Background(), "process-owned")
+	if err == nil || !strings.Contains(err.Error(), "stop exploded") {
+		t.Fatalf("StopProcess error = %v, want owner stop failure", err)
+	}
+	if _, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0); !errors.Is(err, activity.ErrBusy) {
+		t.Fatalf("maintenance error = %v, want ErrBusy while process may still run", err)
+	}
+	manager.releaseActivity(processActivityKey("process-owned"))
 }
 
 func TestStartProcessClientCancellationDoesNotDropIndeterminateLease(t *testing.T) {

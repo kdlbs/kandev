@@ -86,10 +86,11 @@ func (m *Manager) StopProcess(ctx context.Context, processID string) error {
 		if _, err := client.GetProcess(ctx, processID, false); err != nil {
 			continue
 		}
-		if err := client.StopProcess(ctx, processID); err == nil {
-			m.releaseActivity(processActivityKey(processID))
-			return nil
+		if err := client.StopProcess(ctx, processID); err != nil {
+			return err
 		}
+		m.releaseActivity(processActivityKey(processID))
+		return nil
 	}
 	return fmt.Errorf("process not found: %s", processID)
 }

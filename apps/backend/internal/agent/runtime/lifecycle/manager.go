@@ -140,7 +140,8 @@ type Manager struct {
 	activityCoordinator *activity.Coordinator
 	activityMu          sync.Mutex
 	activityLeases      map[string]*activity.TaskLease
-	activityPending     map[string]uint64
+	activityLeaseOwners map[string]uint64
+	activityPending     map[string]map[uint64]*executionActivityClaim
 	activityGeneration  uint64
 }
 
@@ -163,8 +164,11 @@ func (m *Manager) SetActivityCoordinator(coordinator *activity.Coordinator) {
 	if m.activityLeases == nil {
 		m.activityLeases = make(map[string]*activity.TaskLease)
 	}
+	if m.activityLeaseOwners == nil {
+		m.activityLeaseOwners = make(map[string]uint64)
+	}
 	if m.activityPending == nil {
-		m.activityPending = make(map[string]uint64)
+		m.activityPending = make(map[string]map[uint64]*executionActivityClaim)
 	}
 	m.activityMu.Unlock()
 	if m.executorRegistry == nil {

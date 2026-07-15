@@ -953,6 +953,133 @@ func TestLaunch_RejectsWhenAgentAlreadyRunning(t *testing.T) {
 	require.Contains(t, err.Error(), "already has an agent running")
 }
 
+func TestLaunchDeadlineDoesNotAbortLiveEnsureFollower(t *testing.T) {
+	provider := &notifyingWorkspaceInfoProvider{
+		mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-mixed": {
+					TaskID: "task-1", SessionID: "session-mixed", TaskEnvironmentID: "env-1",
+					WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+				},
+			},
+		},
+		environmentReached: make(chan struct{}),
+	}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	backend.entered = make(chan struct{}, 1)
+	backend.barrier = make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(backend.barrier)
+		}
+	}()
+
+	launchCtx, cancelLaunch := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancelLaunch()
+	launchResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(launchCtx, &LaunchRequest{
+			TaskID: "task-1", SessionID: "session-mixed", TaskEnvironmentID: "env-1",
+			AgentProfileID: "profile-1", WorkspacePath: "/workspace/task-1",
+		})
+		launchResult <- err
+	}()
+	select {
+	case <-backend.entered:
+	case <-time.After(time.Second):
+		t.Fatal("Launch did not reach CreateInstance")
+	}
+
+	ensureResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-1")
+		ensureResult <- err
+	}()
+	<-provider.environmentReached
+	select {
+	case err := <-ensureResult:
+		t.Fatalf("ensure follower returned before shared launch completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := <-launchResult; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Launch error = %v, want caller deadline", err)
+	}
+	if _, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0); !errors.Is(err, activity.ErrBusy) {
+		t.Fatalf("maintenance error = %v, want shared launch activity after leader deadline", err)
+	}
+	close(backend.barrier)
+	released = true
+	if err := <-ensureResult; err != nil {
+		t.Fatalf("live ensure follower failed after Launch deadline: %v", err)
+	}
+}
+
+func TestEnsureLeaderDoesNotHideLaunchWaiterDeadline(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-mixed": {
+				TaskID: "task-1", SessionID: "session-mixed", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+			},
+		},
+	})
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	backend.entered = make(chan struct{}, 1)
+	backend.barrier = make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(backend.barrier)
+		}
+	}()
+
+	ensureResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetOrEnsureExecution(context.Background(), "session-mixed")
+		ensureResult <- err
+	}()
+	select {
+	case <-backend.entered:
+	case <-time.After(time.Second):
+		t.Fatal("ensure did not reach CreateInstance")
+	}
+
+	launchCtx, cancelLaunch := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelLaunch()
+	launchResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(launchCtx, &LaunchRequest{
+			TaskID: "task-1", SessionID: "session-mixed", TaskEnvironmentID: "env-1",
+			AgentProfileID: "profile-1", WorkspacePath: "/workspace/task-1",
+		})
+		launchResult <- err
+	}()
+	select {
+	case err := <-launchResult:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Launch error = %v, want caller deadline", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		close(backend.barrier)
+		released = true
+		<-ensureResult
+		<-launchResult
+		t.Fatal("Launch waiter did not observe its own deadline")
+	}
+	if _, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0); !errors.Is(err, activity.ErrBusy) {
+		t.Fatalf("maintenance error = %v, want shared ensure activity", err)
+	}
+	close(backend.barrier)
+	released = true
+	if err := <-ensureResult; err != nil {
+		t.Fatalf("ensure leader failed after Launch waiter deadline: %v", err)
+	}
+}
+
 // TestLaunch_RaceRollback exercises the race window between the step-3 duplicate
 // session pre-check and the step-8 executionStore.Add in Launch. A barrier inside
 // CreateInstance keeps the goroutine in the race window; the test injects a

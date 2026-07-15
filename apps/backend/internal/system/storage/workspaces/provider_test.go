@@ -563,6 +563,81 @@ func TestRestoreTaskChoosesNewestQuarantinedEntry(t *testing.T) {
 	}
 }
 
+func TestRestoreTaskReconcilesFailedEntryFilesystemState(t *testing.T) {
+	tests := []struct {
+		name             string
+		createOriginal   bool
+		createQuarantine bool
+		wantStatus       string
+		wantState        storage.QuarantineState
+	}{
+		{name: "original only", createOriginal: true, wantStatus: "restored", wantState: storage.QuarantineStateRestored},
+		{name: "quarantine only", createQuarantine: true, wantStatus: "restored", wantState: storage.QuarantineStateRestored},
+		{
+			name: "both paths", createOriginal: true, createQuarantine: true,
+			wantStatus: "failed", wantState: storage.QuarantineStateFailed,
+		},
+		{name: "neither path", wantStatus: "failed", wantState: storage.QuarantineStateFailed},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			provider, root, store := newProviderFixture(t, Inventory{Complete: true}, nil)
+			original := filepath.Join(root, "restore-failed_abc")
+			quarantined := filepath.Join(filepath.Dir(root), "trash", "tasks", "failed-entry")
+			if test.createOriginal {
+				writeWorkspaceArtifact(t, original, "original")
+			}
+			if test.createQuarantine {
+				writeWorkspaceArtifact(t, quarantined, "quarantine")
+			}
+			entry := storage.QuarantineEntry{
+				ID: "failed-entry", ResourceType: storage.ResourceTypeTaskWorkspace, TaskID: "restore-failed",
+				OriginalPath: original, QuarantinePath: quarantined, State: storage.QuarantineStateFailed,
+				QuarantinedAt: time.Now().UTC(),
+			}
+			store.entries[entry.ID] = entry
+			store.order = append(store.order, entry.ID)
+
+			if got := provider.RestoreTask(context.Background(), entry.TaskID); got.Status != test.wantStatus {
+				t.Fatalf("RestoreTask = %#v, want status %q", got, test.wantStatus)
+			}
+			if got := store.entries[entry.ID].State; got != test.wantState {
+				t.Fatalf("entry state = %q, want %q", got, test.wantState)
+			}
+			if test.wantStatus == "restored" {
+				wantContents := "original"
+				if test.createQuarantine {
+					wantContents = "quarantine"
+				}
+				if data, err := os.ReadFile(filepath.Join(original, "artifact")); err != nil || string(data) != wantContents {
+					t.Fatalf("restored artifact: data=%q err=%v", data, err)
+				}
+				return
+			}
+			if test.createOriginal {
+				if data, err := os.ReadFile(filepath.Join(original, "artifact")); err != nil || string(data) != "original" {
+					t.Fatalf("original artifact changed: data=%q err=%v", data, err)
+				}
+			}
+			if test.createQuarantine {
+				if data, err := os.ReadFile(filepath.Join(quarantined, "artifact")); err != nil || string(data) != "quarantine" {
+					t.Fatalf("quarantine artifact changed: data=%q err=%v", data, err)
+				}
+			}
+		})
+	}
+}
+
+func writeWorkspaceArtifact(t *testing.T, root, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "artifact"), []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newProviderFixture(
 	t *testing.T,
 	inventory Inventory,
