@@ -427,6 +427,7 @@ test-scripts:
 	@python3 scripts/lint-harness-files.test.py
 	@bash scripts/release-desktop.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
+	@node --test scripts/validate-public-docs.test.mjs
 
 .PHONY: test-e2e
 test-e2e: build-backend build-web

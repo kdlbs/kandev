@@ -22,7 +22,9 @@ async function createDocs(files, meta) {
 }
 
 after(async () => {
-  await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
+  await Promise.all(
+    tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })),
+  );
 });
 
 const validPage = `---
@@ -82,6 +84,35 @@ test("rejects duplicate entries in meta.json", async () => {
     validatePublicDocs(dir),
     /meta.json lists page more than once: index/,
   );
+});
+
+test("rejects files that resolve to the same published slug", async () => {
+  const dir = await createDocs(
+    { "foo.md": validPage, "foo/index.md": validPage },
+    { pages: ["foo"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /multiple published files resolve to slug foo: foo.md, foo\/index.md/,
+  );
+});
+
+test("accepts single-character frontmatter values", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": `---
+title: x
+description: y
+---
+
+# X
+`,
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
 });
 
 test("rejects published pages without title and description frontmatter", async () => {

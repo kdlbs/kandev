@@ -21,6 +21,12 @@ export async function validatePublicDocs(
     assertFrontmatter(file, markdown);
 
     const slug = file.replace(/\.mdx?$/, "").replace(/\/index$/, "") || "index";
+    const existing = pagesBySlug.get(slug);
+    if (existing) {
+      throw new Error(
+        `multiple published files resolve to slug ${slug}: ${existing}, ${file}`,
+      );
+    }
     pagesBySlug.set(slug, file);
   }
 
@@ -84,8 +90,8 @@ function assertFrontmatter(file, markdown) {
   const block = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
   if (
     !block ||
-    !/^title:\s*\S.+$/m.test(block) ||
-    !/^description:\s*\S.+$/m.test(block)
+    !/^title:\s*\S.*$/m.test(block) ||
+    !/^description:\s*\S.*$/m.test(block)
   ) {
     throw new Error(
       `${file} must start with YAML frontmatter containing title and description`,
