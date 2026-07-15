@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -174,6 +175,35 @@ func (h *WorkflowHandlers) httpCreateWorkflow(c *gin.Context) {
 	c.JSON(http.StatusCreated, dto.FromWorkflow(workflow))
 }
 
+// workflowReadOnlyMsg is returned when a UI mutation targets a workflow whose
+// definition is owned by workflow sync. The sync applier writes through the
+// service layer directly and never hits these handlers.
+const workflowReadOnlyMsg = "workflow is managed by GitHub sync and is read-only; edit its definition in the synced repository"
+
+// isWorkflowReadOnly reports whether the workflow is managed by workflow
+// sync. Lookup errors surface as (false, err) so callers keep their existing
+// not-found handling.
+func (h *WorkflowHandlers) isWorkflowReadOnly(ctx context.Context, id string) (bool, error) {
+	workflow, err := h.service.GetWorkflow(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return workflow.Source == models.WorkflowSourceGitHub, nil
+}
+
+func (h *WorkflowHandlers) rejectReadOnlyWorkflowHTTP(c *gin.Context, id string) bool {
+	readOnly, err := h.isWorkflowReadOnly(c.Request.Context(), id)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workflow not found")
+		return true
+	}
+	if readOnly {
+		c.JSON(http.StatusConflict, gin.H{"error": workflowReadOnlyMsg})
+		return true
+	}
+	return false
+}
+
 type httpUpdateWorkflowRequest struct {
 	Name           *string `json:"name"`
 	Description    *string `json:"description"`
@@ -187,6 +217,9 @@ func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
 		return
 	}
 	id := c.Param("id")
+	if h.rejectReadOnlyWorkflowHTTP(c, id) {
+		return
+	}
 	workflow, err := h.service.UpdateWorkflow(c.Request.Context(), id, &service.UpdateWorkflowRequest{
 		Name:           body.Name,
 		Description:    body.Description,
@@ -201,6 +234,9 @@ func (h *WorkflowHandlers) httpUpdateWorkflow(c *gin.Context) {
 
 func (h *WorkflowHandlers) httpDeleteWorkflow(c *gin.Context) {
 	id := c.Param("id")
+	if h.rejectReadOnlyWorkflowHTTP(c, id) {
+		return
+	}
 	if err := h.service.DeleteWorkflow(c.Request.Context(), id); err != nil {
 		handleNotFound(c, h.logger, err, "workflow not found")
 		return
@@ -406,6 +442,9 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 	if req.ID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
+	if readOnly, roErr := h.isWorkflowReadOnly(ctx, req.ID); roErr == nil && readOnly {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, workflowReadOnlyMsg, nil)
+	}
 
 	workflow, err := h.service.UpdateWorkflow(ctx, req.ID, &service.UpdateWorkflowRequest{
 		Name:           req.Name,
@@ -422,6 +461,9 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 func (h *WorkflowHandlers) wsDeleteWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete workflow",
 		func(ctx context.Context, id string) (any, error) {
+			if readOnly, roErr := h.isWorkflowReadOnly(ctx, id); roErr == nil && readOnly {
+				return nil, errors.New(workflowReadOnlyMsg)
+			}
 			if err := h.service.DeleteWorkflow(ctx, id); err != nil {
 				return nil, err
 			}

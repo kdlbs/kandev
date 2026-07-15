@@ -75,9 +75,12 @@ and commit the exported YAML to the repo.
   synced (they show a **Synced** badge in the workflow list).
 - **Update:** matched workflows are updated in place. Steps are matched **by
   name**, so tasks sitting in a step keep their position when the step's
-  color, prompt, events, or order change. The repo is the source of truth:
-  local UI edits to a synced workflow are reverted on the next sync (periodic
-  or **Sync now**), even when the repo content hasn't changed.
+  color, prompt, events, or order change.
+- **Read-only:** the repo is the source of truth. Synced workflows cannot be
+  renamed, edited, or deleted from the UI (the API rejects such changes) —
+  edit their definitions in the repo instead. Any drift that slips in anyway
+  is repaired on the next sync. Reordering workflows on the board and
+  exporting them remain available.
 - **Delete:** a previously-synced workflow whose definition disappeared from
   the repo is deleted — but only if it holds no tasks.
 - **Manual workflows** (created in the UI) are never modified or deleted by a

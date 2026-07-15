@@ -369,3 +369,14 @@ func TestApplySyncedWorkflows_RecreatesLocallyDeletedStep(t *testing.T) {
 	require.Len(t, steps, 2, "locally deleted step is recreated from the definition")
 	assert.Equal(t, "Done", steps[1].Name)
 }
+
+func TestEnsureWorkflowMutable(t *testing.T) {
+	svc, provider, _ := setupSyncService(t)
+	ctx := context.Background()
+	addSyncedWorkflow(provider, "wf-synced", "ws-1", "Synced Flow", "flows/dev.yml")
+	provider.addWorkflow("wf-manual", "ws-1", "Manual Flow")
+
+	assert.ErrorIs(t, svc.EnsureWorkflowMutable(ctx, "wf-synced"), ErrWorkflowReadOnly)
+	assert.NoError(t, svc.EnsureWorkflowMutable(ctx, "wf-manual"))
+	assert.Error(t, svc.EnsureWorkflowMutable(ctx, "wf-missing"), "lookup errors propagate")
+}

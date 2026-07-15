@@ -23,6 +23,13 @@ const FALLBACK_ERROR_MESSAGE = "Request failed";
 type WorkflowStepActionsParams = {
   workflow: Workflow;
   isNewWorkflow: boolean;
+  /**
+   * Workflows synced from GitHub (`workflow.source === "github"`) are
+   * read-only in the UI; the backend also rejects step mutations with a 409.
+   * Gating here is defense-in-depth in case a disabled control is somehow
+   * still triggered.
+   */
+  readOnly?: boolean;
   workflowSteps: WorkflowStep[];
   setWorkflowSteps: (updater: ((prev: WorkflowStep[]) => WorkflowStep[]) | WorkflowStep[]) => void;
   refreshWorkflowSteps: () => Promise<void>;
@@ -133,6 +140,7 @@ function applyWorkflowStepUpdates(
 export function useWorkflowStepActions({
   workflow,
   isNewWorkflow,
+  readOnly = false,
   workflowSteps,
   setWorkflowSteps,
   refreshWorkflowSteps,
@@ -143,6 +151,7 @@ export function useWorkflowStepActions({
   toast,
 }: WorkflowStepActionsParams) {
   const handleUpdateWorkflowStep = async (stepId: string, updates: Partial<WorkflowStep>) => {
+    if (readOnly) return;
     if (isNewWorkflow) {
       setWorkflowSteps((prev) => applyWorkflowStepUpdates(prev, stepId, updates));
       return;
@@ -160,6 +169,7 @@ export function useWorkflowStepActions({
   };
 
   const handleAddWorkflowStep = async () => {
+    if (readOnly) return;
     if (isNewWorkflow) {
       addLocalStep(workflow, setWorkflowSteps);
       return;
@@ -168,6 +178,7 @@ export function useWorkflowStepActions({
   };
 
   const handleRemoveWorkflowStep = async (stepId: string) => {
+    if (readOnly) return;
     if (isNewWorkflow) {
       setWorkflowSteps((prev) =>
         prev.filter((s) => s.id !== stepId).map((s, i) => ({ ...s, position: i })),
@@ -187,6 +198,7 @@ export function useWorkflowStepActions({
   };
 
   const handleReorderWorkflowSteps = async (reorderedSteps: WorkflowStep[]) => {
+    if (readOnly) return;
     setWorkflowSteps(reorderedSteps);
     if (isNewWorkflow) return;
     try {
@@ -215,6 +227,8 @@ export function useWorkflowStepActions({
 type WorkflowDeleteHandlersParams = {
   workflow: Workflow;
   isNewWorkflow: boolean;
+  /** See `WorkflowStepActionsParams.readOnly` — defense-in-depth for synced workflows. */
+  readOnly?: boolean;
   otherWorkflows: Workflow[];
   wfDel: {
     setDeleteOpen: (v: boolean) => void;
@@ -234,6 +248,7 @@ type WorkflowDeleteHandlersParams = {
 export function useWorkflowDeleteHandlers({
   workflow,
   isNewWorkflow,
+  readOnly = false,
   otherWorkflows,
   wfDel,
   deleteWorkflowRun,
@@ -263,6 +278,7 @@ export function useWorkflowDeleteHandlers({
   }, [wfDel.targetWorkflowId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDeleteWorkflowClick = async () => {
+    if (readOnly) return;
     if (isNewWorkflow) {
       wfDel.setWorkflowTaskCount(0);
       wfDel.setDeleteOpen(true);
@@ -505,6 +521,8 @@ async function reconcileTemplateSteps(
 type WorkflowSaveActionsParams = {
   workflow: Workflow;
   isNewWorkflow: boolean;
+  /** See `WorkflowStepActionsParams.readOnly` — defense-in-depth for synced workflows. */
+  readOnly?: boolean;
   workflowSteps: WorkflowStep[];
   templateStepCount: number;
   onSaveWorkflow: () => Promise<unknown>;
@@ -515,6 +533,7 @@ type WorkflowSaveActionsParams = {
 export function useWorkflowSaveActions({
   workflow,
   isNewWorkflow,
+  readOnly = false,
   workflowSteps,
   templateStepCount,
   onSaveWorkflow,
@@ -545,6 +564,7 @@ export function useWorkflowSaveActions({
   const activeSaveRequest = isNewWorkflow ? saveNewWorkflowRequest : saveWorkflowRequest;
 
   const handleSaveWorkflow = async () => {
+    if (readOnly) return;
     try {
       if (isNewWorkflow) await saveNewWorkflowRequest.run();
       else await saveWorkflowRequest.run();

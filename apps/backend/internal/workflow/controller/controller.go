@@ -91,6 +91,9 @@ func (c *Controller) GetStep(ctx context.Context, id string) (*GetStepResponse, 
 }
 
 func (c *Controller) CreateStepsFromTemplate(ctx context.Context, req CreateStepsFromTemplateRequest) error {
+	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
+		return err
+	}
 	return c.svc.CreateStepsFromTemplate(ctx, req.WorkflowID, req.TemplateID)
 }
 
@@ -112,6 +115,9 @@ type CreateStepRequest struct {
 
 // CreateStep creates a new workflow step.
 func (c *Controller) CreateStep(ctx context.Context, req CreateStepRequest) (*GetStepResponse, error) {
+	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
+		return nil, err
+	}
 	step := &models.WorkflowStep{
 		WorkflowID:      req.WorkflowID,
 		Name:            req.Name,
@@ -175,6 +181,9 @@ type UpdateStepRequest struct {
 func (c *Controller) UpdateStep(ctx context.Context, req UpdateStepRequest) (*GetStepResponse, error) {
 	step, err := c.svc.GetStep(ctx, req.ID)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.svc.EnsureWorkflowMutable(ctx, step.WorkflowID); err != nil {
 		return nil, err
 	}
 	if req.Name != nil {
@@ -276,6 +285,13 @@ func (c *Controller) validatePullFromStepAcyclic(ctx context.Context, stepID str
 
 // DeleteStep deletes a workflow step.
 func (c *Controller) DeleteStep(ctx context.Context, id string) error {
+	step, err := c.svc.GetStep(ctx, id)
+	if err != nil {
+		return err
+	}
+	if err := c.svc.EnsureWorkflowMutable(ctx, step.WorkflowID); err != nil {
+		return err
+	}
 	return c.svc.DeleteStep(ctx, id)
 }
 
@@ -287,6 +303,9 @@ type ReorderStepsRequest struct {
 
 // ReorderSteps reorders workflow steps for a workflow.
 func (c *Controller) ReorderSteps(ctx context.Context, req ReorderStepsRequest) error {
+	if err := c.svc.EnsureWorkflowMutable(ctx, req.WorkflowID); err != nil {
+		return err
+	}
 	return c.svc.ReorderSteps(ctx, req.WorkflowID, req.StepIDs)
 }
 
