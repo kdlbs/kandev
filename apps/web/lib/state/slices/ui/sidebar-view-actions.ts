@@ -31,7 +31,7 @@ function reorderViewsById(
 }
 
 let viewsSyncRequestId = 0;
-let sidebarSettingsQueue: Promise<void> = Promise.resolve();
+const sidebarSettingsQueues = new WeakMap<ImmerSet, Promise<void>>();
 
 type SidebarSnapshot = {
   views: SidebarView[];
@@ -59,6 +59,36 @@ function draftsEqual(a: SidebarViewDraft | null, b: SidebarViewDraft | null): bo
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function enqueueSidebarSettingsSync(
+  set: ImmerSet,
+  payload: Parameters<typeof updateUserSettings>[0],
+): Promise<void> {
+  const previous = sidebarSettingsQueues.get(set);
+  const request = previous
+    ? previous.then(() => updateUserSettings(payload).then(() => undefined))
+    : updateUserSettings(payload).then(() => undefined);
+  sidebarSettingsQueues.set(
+    set,
+    request.catch(() => undefined),
+  );
+  return request;
+}
+
+function syncSidebarViewState(
+  set: ImmerSet,
+  payload: {
+    sidebar_active_view_id: string;
+    sidebar_draft: ReturnType<typeof toApiSidebarDraft> | null;
+  },
+) {
+  enqueueSidebarSettingsSync(set, payload).catch((err) => {
+    const message = err instanceof Error ? err.message : "Failed to sync sidebar views";
+    set((draft) => {
+      draft.sidebarViews.syncError = message;
+    });
+  });
+}
+
 function mutateViews(
   set: ImmerSet,
   get: () => UISlice,
@@ -73,10 +103,7 @@ function mutateViews(
   const after = get().sidebarViews;
   const afterSnapshot = snapshotSidebar(after);
   const thisRequestId = ++viewsSyncRequestId;
-  const request = sidebarSettingsQueue.then(() =>
-    updateUserSettings(toSidebarSettingsPayload(after)).then(() => undefined),
-  );
-  sidebarSettingsQueue = request.catch(() => undefined);
+  const request = enqueueSidebarSettingsSync(set, toSidebarSettingsPayload(after));
   request.catch((err) => {
     if (thisRequestId !== viewsSyncRequestId) return;
     const message = err instanceof Error ? err.message : "Failed to sync sidebar views";
@@ -94,22 +121,29 @@ function mutateViews(
 }
 
 function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
-  const mv = (mutate: (s: UISliceState["sidebarViews"]) => boolean | void) =>
-    mutateViews(set, get, mutate);
   return {
-    setSidebarActiveView: (viewId: string) =>
-      mv((sidebarViews) => {
-        if (!sidebarViews.views.some((v) => v.id === viewId)) return false;
-        sidebarViews.activeViewId = viewId;
-        sidebarViews.draft = null;
-      }),
+    setSidebarActiveView: (viewId: string) => {
+      let committed = false;
+      set((draft) => {
+        if (!draft.sidebarViews.views.some((v) => v.id === viewId)) return;
+        committed = true;
+        draft.sidebarViews.activeViewId = viewId;
+        draft.sidebarViews.draft = null;
+      });
+      if (!committed) return;
+      syncSidebarViewState(set, { sidebar_active_view_id: viewId, sidebar_draft: null });
+    },
     updateSidebarDraft: (
       patch: Partial<{ filters: FilterClause[]; sort: SortSpec; group: GroupKey }>,
-    ) =>
-      mv((sidebarViews) => {
-        const active = sidebarViews.views.find((v) => v.id === sidebarViews.activeViewId);
-        if (!active) return false;
-        const current: SidebarViewDraft = sidebarViews.draft ?? {
+    ) => {
+      let committed = false;
+      set((draft) => {
+        const active = draft.sidebarViews.views.find(
+          (v) => v.id === draft.sidebarViews.activeViewId,
+        );
+        if (!active) return;
+        committed = true;
+        const current: SidebarViewDraft = draft.sidebarViews.draft ?? {
           baseViewId: active.id,
           filters: active.filters,
           sort: active.sort,
@@ -121,13 +155,24 @@ function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
           sort: patch.sort ?? current.sort,
           group: patch.group ?? current.group,
         };
-        sidebarViews.draft = next;
-      }),
-    discardSidebarDraft: () =>
-      mv((sidebarViews) => {
-        if (!sidebarViews.draft) return false;
-        sidebarViews.draft = null;
-      }),
+        draft.sidebarViews.draft = next;
+      });
+      if (!committed) return;
+      const { activeViewId, draft } = get().sidebarViews;
+      syncSidebarViewState(set, {
+        sidebar_active_view_id: activeViewId,
+        sidebar_draft: draft ? toApiSidebarDraft(draft) : null,
+      });
+    },
+    discardSidebarDraft: () => {
+      set((draft) => {
+        draft.sidebarViews.draft = null;
+      });
+      syncSidebarViewState(set, {
+        sidebar_active_view_id: get().sidebarViews.activeViewId,
+        sidebar_draft: null,
+      });
+    },
     clearSidebarSyncError: () =>
       set((draft) => {
         draft.sidebarViews.syncError = null;
