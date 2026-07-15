@@ -67,7 +67,7 @@ func seededMockClient() *github.MockClient {
 
 func TestSyncWorkspace_NotConfigured(t *testing.T) {
 	svc, _ := setupTestService(t, github.NewMockClient())
-	_, err := svc.SyncWorkspace(context.Background(), "ws-1", false)
+	_, err := svc.SyncWorkspace(context.Background(), "ws-1")
 	assert.ErrorIs(t, err, ErrNotConfigured)
 }
 
@@ -76,7 +76,7 @@ func TestSyncWorkspace_AppliesParsedFiles(t *testing.T) {
 	configureWorkspace(t, svc, "ws-1")
 	applier.result = &workflowservice.SyncApplyResult{Created: []string{"Dev Flow"}}
 
-	result, err := svc.SyncWorkspace(context.Background(), "ws-1", false)
+	result, err := svc.SyncWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"Dev Flow"}, result.Created)
 	assert.False(t, result.Unchanged)
@@ -96,28 +96,18 @@ func TestSyncWorkspace_AppliesParsedFiles(t *testing.T) {
 	assert.Empty(t, cfg.LastError)
 }
 
-func TestSyncWorkspace_SkipsUnchangedContent(t *testing.T) {
+func TestSyncWorkspace_AlwaysReconciles(t *testing.T) {
 	svc, applier := setupTestService(t, seededMockClient())
 	configureWorkspace(t, svc, "ws-1")
 
-	_, err := svc.SyncWorkspace(context.Background(), "ws-1", false)
+	_, err := svc.SyncWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
-	result, err := svc.SyncWorkspace(context.Background(), "ws-1", false)
+	result, err := svc.SyncWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
+	// Every sync applies (repairing local edits to synced workflows); the
+	// applier reports nothing changed, which surfaces as Unchanged.
+	assert.Len(t, applier.calls, 2)
 	assert.True(t, result.Unchanged)
-	assert.Len(t, applier.calls, 1, "apply skipped when content hash is unchanged")
-}
-
-func TestSyncWorkspace_ForceBypassesHashCheck(t *testing.T) {
-	svc, applier := setupTestService(t, seededMockClient())
-	configureWorkspace(t, svc, "ws-1")
-
-	_, err := svc.SyncWorkspace(context.Background(), "ws-1", false)
-	require.NoError(t, err)
-	result, err := svc.SyncWorkspace(context.Background(), "ws-1", true)
-	require.NoError(t, err)
-	assert.False(t, result.Unchanged)
-	assert.Len(t, applier.calls, 2, "force sync re-applies even when unchanged")
 }
 
 func TestSyncWorkspace_BrokenFileBecomesWarningAndNilExport(t *testing.T) {
@@ -126,7 +116,7 @@ func TestSyncWorkspace_BrokenFileBecomesWarningAndNilExport(t *testing.T) {
 	svc, applier := setupTestService(t, mock)
 	configureWorkspace(t, svc, "ws-1")
 
-	result, err := svc.SyncWorkspace(context.Background(), "ws-1", false)
+	result, err := svc.SyncWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
 	require.Len(t, result.Warnings, 1)
 	assert.Contains(t, result.Warnings[0], "broken.yml")
@@ -152,7 +142,7 @@ func TestSyncWorkspace_IgnoresNonWorkflowFiles(t *testing.T) {
 	svc, applier := setupTestService(t, mock)
 	configureWorkspace(t, svc, "ws-1")
 
-	_, err := svc.SyncWorkspace(context.Background(), "ws-1", false)
+	_, err := svc.SyncWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
 	require.Len(t, applier.calls, 1)
 	assert.Len(t, applier.calls[0], 1, "only .yml/.yaml/.json files are synced")
@@ -162,7 +152,7 @@ func TestSyncWorkspace_MissingDirectoryRecordsFailure(t *testing.T) {
 	svc, _ := setupTestService(t, github.NewMockClient()) // nothing seeded → 404
 	configureWorkspace(t, svc, "ws-1")
 
-	_, err := svc.SyncWorkspace(context.Background(), "ws-1", false)
+	_, err := svc.SyncWorkspace(context.Background(), "ws-1")
 	require.Error(t, err)
 
 	cfg, cfgErr := svc.GetConfigForWorkspace(context.Background(), "ws-1")
@@ -176,7 +166,7 @@ func TestSyncWorkspace_NilClientRecordsFailure(t *testing.T) {
 	svc, _ := setupTestService(t, nil)
 	configureWorkspace(t, svc, "ws-1")
 
-	_, err := svc.SyncWorkspace(context.Background(), "ws-1", false)
+	_, err := svc.SyncWorkspace(context.Background(), "ws-1")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not authenticated")
 

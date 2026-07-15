@@ -1,7 +1,9 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 
@@ -121,11 +123,12 @@ func (s *Service) createSyncedWorkflow(ctx context.Context, workspaceID string, 
 	result.Created = append(result.Created, pw.Name)
 }
 
-// updateSyncedWorkflow applies a changed definition onto an existing synced
-// workflow. Steps are matched by name so their IDs — referenced by
-// tasks.workflow_step_id — survive the update. The workflow is skipped with a
-// warning when steps can't be matched unambiguously or when a removed step
-// still holds tasks.
+// updateSyncedWorkflow reconciles an existing synced workflow with its
+// definition. Steps are matched by name so their IDs — referenced by
+// tasks.workflow_step_id — survive the update, and steps that already match
+// the definition are left untouched so a no-drift sync writes (and
+// broadcasts) nothing. The workflow is skipped with a warning when steps
+// can't be matched unambiguously or when a removed step still holds tasks.
 func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable, result *SyncApplyResult) {
 	steps, err := s.repo.ListStepsByWorkflow(ctx, wf.ID)
 	if err != nil {
@@ -148,7 +151,8 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		}
 	}
 
-	if err := s.applyWorkflowFields(ctx, wf, pw); err != nil {
+	changed, err := s.applyWorkflowFields(ctx, wf, pw)
+	if err != nil {
 		result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to update: %v", wf.Name, err))
 		return
 	}
@@ -157,6 +161,9 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 		if existing, ok := existingByName[sp.Name]; ok {
 			step.CreatedAt = existing.CreatedAt
 			step.StageType = existing.StageType // not carried by the portable format
+			if stepMatchesDefinition(existing, step) {
+				continue
+			}
 			err = s.repo.UpdateStep(ctx, step)
 		} else {
 			err = s.repo.CreateStep(ctx, step)
@@ -165,14 +172,44 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to apply step %q: %v", wf.Name, sp.Name, err))
 			return
 		}
+		changed = true
 	}
 	for _, st := range toDelete {
 		if err := s.DeleteStep(ctx, st.ID); err != nil {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: failed to remove step %q: %v", wf.Name, st.Name, err))
 			return
 		}
+		changed = true
 	}
-	result.Updated = append(result.Updated, wf.Name)
+	if changed {
+		result.Updated = append(result.Updated, wf.Name)
+	}
+}
+
+// stepMatchesDefinition reports whether an existing step already equals its
+// desired definition (timestamps and stage type aside — stage type is copied
+// from the existing step). Events are compared via their JSON encoding to
+// normalize YAML/JSON numeric type differences in action configs.
+func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
+	return existing.Name == desired.Name &&
+		existing.Position == desired.Position &&
+		existing.Color == desired.Color &&
+		existing.Prompt == desired.Prompt &&
+		existing.AllowManualMove == desired.AllowManualMove &&
+		existing.IsStartStep == desired.IsStartStep &&
+		existing.ShowInCommandPanel == desired.ShowInCommandPanel &&
+		existing.AutoArchiveAfterHours == desired.AutoArchiveAfterHours &&
+		existing.AgentProfileID == desired.AgentProfileID &&
+		existing.WIPLimit == desired.WIPLimit &&
+		existing.PullFromStepID == desired.PullFromStepID &&
+		existing.AutoAdvanceRequiresSignal == desired.AutoAdvanceRequiresSignal &&
+		eventsEqual(existing.Events, desired.Events)
+}
+
+func eventsEqual(a, b models.StepEvents) bool {
+	aj, errA := json.Marshal(a)
+	bj, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(aj, bj)
 }
 
 // planStepChanges matches existing steps to the portable definition by name
@@ -211,17 +248,17 @@ func (s *Service) planStepChanges(ctx context.Context, wf *taskmodels.Workflow, 
 	return existingByName, toDelete, ""
 }
 
-func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable) error {
+func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workflow, pw models.WorkflowPortable) (bool, error) {
 	profileID := ""
 	if pw.AgentProfile != nil && s.matchProfile != nil {
 		profileID = s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode)
 	}
 	if wf.Description == pw.Description && wf.AgentProfileID == profileID {
-		return nil
+		return false, nil
 	}
 	wf.Description = pw.Description
 	wf.AgentProfileID = profileID
-	return s.workflowProvider.UpdateWorkflow(ctx, wf)
+	return true, s.workflowProvider.UpdateWorkflow(ctx, wf)
 }
 
 // deleteVanishedWorkflows removes previously-synced workflows whose

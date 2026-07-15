@@ -94,11 +94,12 @@ type fetchedFile struct {
 }
 
 // SyncWorkspace fetches the configured repo directory and reconciles the
-// workspace's synced workflows with it. When force is false the apply step is
-// skipped if the fetched content hash matches the previous successful sync.
-// The outcome (including failures) is recorded on the config row so the UI
-// can surface it.
-func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string, force bool) (*SyncResult, error) {
+// workspace's synced workflows with it. Every sync applies the definitions —
+// including repairing local edits to synced workflows — but the applier only
+// writes (and broadcasts) what actually differs, so a no-drift sync is
+// silent. The outcome (including failures) is recorded on the config row so
+// the UI can surface it.
+func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncResult, error) {
 	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -112,13 +113,6 @@ func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string, force b
 		s.recordFailure(ctx, workspaceID, err)
 		return nil, err
 	}
-	hash := contentHash(files)
-	if !force && cfg.LastOk && cfg.LastHash == hash {
-		if err := s.store.RecordSyncStatus(ctx, workspaceID, true, "", cfg.LastWarnings, hash, time.Now().UTC()); err != nil {
-			return nil, err
-		}
-		return &SyncResult{Unchanged: true}, nil
-	}
 
 	parsed, warnings := parseFiles(files)
 	applied, err := s.applier.ApplySyncedWorkflows(ctx, workspaceID, parsed)
@@ -127,14 +121,15 @@ func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string, force b
 		return nil, err
 	}
 	warnings = append(warnings, applied.Warnings...)
-	if err := s.store.RecordSyncStatus(ctx, workspaceID, true, "", warnings, hash, time.Now().UTC()); err != nil {
+	if err := s.store.RecordSyncStatus(ctx, workspaceID, true, "", warnings, contentHash(files), time.Now().UTC()); err != nil {
 		return nil, err
 	}
 	return &SyncResult{
-		Created:  applied.Created,
-		Updated:  applied.Updated,
-		Deleted:  applied.Deleted,
-		Warnings: warnings,
+		Created:   applied.Created,
+		Updated:   applied.Updated,
+		Deleted:   applied.Deleted,
+		Warnings:  warnings,
+		Unchanged: len(applied.Created)+len(applied.Updated)+len(applied.Deleted) == 0 && len(warnings) == 0,
 	}, nil
 }
 
@@ -234,7 +229,7 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 		if !isSyncDue(cfg, now) {
 			continue
 		}
-		if _, err := s.SyncWorkspace(ctx, cfg.WorkspaceID, false); err != nil {
+		if _, err := s.SyncWorkspace(ctx, cfg.WorkspaceID); err != nil {
 			s.logger.Warn("periodic workflow sync failed",
 				zap.String("workspace_id", cfg.WorkspaceID), zap.Error(err))
 		}

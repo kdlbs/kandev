@@ -90,8 +90,8 @@ func (c *Controller) httpDeleteConfig(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
-// httpForceSync runs a sync immediately, bypassing the content-hash check so
-// local drift is repaired even when the repo content is unchanged. Sync
+// httpForceSync runs a sync immediately instead of waiting for the poller
+// (every sync — manual or periodic — reconciles, repairing local drift). Sync
 // failures still return 200 with the error embedded — the outcome is also
 // recorded on the config row, which is returned for the status banner.
 func (c *Controller) httpForceSync(ctx *gin.Context) {
@@ -99,7 +99,7 @@ func (c *Controller) httpForceSync(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	result, syncErr := c.service.SyncWorkspace(ctx.Request.Context(), workspaceID, true)
+	result, syncErr := c.service.SyncWorkspace(ctx.Request.Context(), workspaceID)
 	if errors.Is(syncErr, ErrNotConfigured) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": syncErr.Error()})
 		return

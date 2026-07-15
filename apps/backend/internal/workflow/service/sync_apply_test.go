@@ -302,3 +302,70 @@ func TestApplySyncedWorkflows_RemapsStepEventPositions(t *testing.T) {
 	require.Len(t, steps[0].Events.OnTurnComplete, 1)
 	assert.Equal(t, steps[1].ID, steps[0].Events.OnTurnComplete[0].Config["step_id"])
 }
+
+func TestApplySyncedWorkflows_SecondApplyIsNoOp(t *testing.T) {
+	svc, _, _ := setupSyncService(t)
+	ctx := context.Background()
+	files := []SyncFileExport{
+		{Path: "flows/dev.yml", Export: exportOf(portableWorkflow("Dev Flow", "Todo", "Done"))},
+	}
+
+	first, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+	require.Equal(t, []string{"Dev Flow"}, first.Created)
+
+	second, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+	assert.Empty(t, second.Created)
+	assert.Empty(t, second.Updated, "no drift means nothing is rewritten or broadcast")
+	assert.Empty(t, second.Deleted)
+	assert.Empty(t, second.Warnings)
+}
+
+func TestApplySyncedWorkflows_RepairsLocalStepEdit(t *testing.T) {
+	svc, _, _ := setupSyncService(t)
+	ctx := context.Background()
+	files := []SyncFileExport{
+		{Path: "flows/dev.yml", Export: exportOf(portableWorkflow("Dev Flow", "Todo", "Done"))},
+	}
+	_, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+
+	// A user recolors a synced step in the UI.
+	steps, err := svc.ListStepsByWorkflow(ctx, "imported-Dev Flow")
+	require.NoError(t, err)
+	steps[0].Color = "#123456"
+	require.NoError(t, svc.repo.UpdateStep(ctx, steps[0]))
+
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Dev Flow"}, result.Updated, "local drift is repaired")
+
+	steps, err = svc.ListStepsByWorkflow(ctx, "imported-Dev Flow")
+	require.NoError(t, err)
+	assert.Equal(t, "#aabbcc", steps[0].Color, "definition wins over the local edit")
+}
+
+func TestApplySyncedWorkflows_RecreatesLocallyDeletedStep(t *testing.T) {
+	svc, _, _ := setupSyncService(t)
+	ctx := context.Background()
+	files := []SyncFileExport{
+		{Path: "flows/dev.yml", Export: exportOf(portableWorkflow("Dev Flow", "Todo", "Done"))},
+	}
+	_, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+
+	steps, err := svc.ListStepsByWorkflow(ctx, "imported-Dev Flow")
+	require.NoError(t, err)
+	require.Len(t, steps, 2)
+	require.NoError(t, svc.DeleteStep(ctx, steps[1].ID))
+
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", files)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Dev Flow"}, result.Updated)
+
+	steps, err = svc.ListStepsByWorkflow(ctx, "imported-Dev Flow")
+	require.NoError(t, err)
+	require.Len(t, steps, 2, "locally deleted step is recreated from the definition")
+	assert.Equal(t, "Done", steps[1].Name)
+}
