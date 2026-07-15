@@ -147,13 +147,13 @@ describe("SettingsSaveProvider", () => {
   it("disables saving while a dirty contributor is invalid", async () => {
     render(
       <SettingsSaveProvider>
-        <DraftContributor id="invalid profile" canSave={false} onSave={vi.fn()} />
+        <DraftContributor id="invalid-profile" canSave={false} onSave={vi.fn()} />
       </SettingsSaveProvider>,
     );
 
     const save = await screen.findByRole("button", { name: SAVE_CHANGES_LABEL });
     expect(save.hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText("invalid profile is invalid")).toBeTruthy();
+    expect(screen.getByText("invalid-profile is invalid")).toBeTruthy();
   });
 
   it("briefly confirms a successful save", async () => {
