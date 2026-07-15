@@ -479,7 +479,14 @@ func resolveScriptCommand(
 	}
 }
 
-// httpSetSessionMode sets the session mode for a running agent.
+func (h *ProcessHandlers) applyIfSessionRunning(sessionID string, apply func() error) error {
+	if _, running := h.lifecycleMgr.GetExecutionBySessionID(sessionID); !running {
+		return nil
+	}
+	return apply()
+}
+
+// httpSetSessionMode applies the session mode now or records it for the next launch.
 func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 	sessionID := c.Param("id")
 	var req struct {
@@ -489,7 +496,9 @@ func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.lifecycleMgr.SetSessionModeBySessionID(c.Request.Context(), sessionID, req.ModeID); err != nil {
+	if err := h.applyIfSessionRunning(sessionID, func() error {
+		return h.lifecycleMgr.SetSessionModeBySessionID(c.Request.Context(), sessionID, req.ModeID)
+	}); err != nil {
 		h.logger.Error("failed to set session mode",
 			zap.String("session_id", sessionID),
 			zap.String("mode_id", req.ModeID),
@@ -509,7 +518,7 @@ func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 	c.JSON(200, gin.H{"ok": true})
 }
 
-// httpSetSessionModel sets the session model for a running agent.
+// httpSetSessionModel applies the session model now or records it for the next launch.
 func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 	sessionID := c.Param("id")
 	var req struct {
@@ -519,7 +528,9 @@ func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.lifecycleMgr.SetSessionModelBySessionID(c.Request.Context(), sessionID, req.ModelID); err != nil {
+	if err := h.applyIfSessionRunning(sessionID, func() error {
+		return h.lifecycleMgr.SetSessionModelBySessionID(c.Request.Context(), sessionID, req.ModelID)
+	}); err != nil {
 		h.logger.Error("failed to set session model",
 			zap.String("session_id", sessionID),
 			zap.String("model_id", req.ModelID),
@@ -539,7 +550,7 @@ func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 	c.JSON(200, gin.H{"ok": true})
 }
 
-// httpSetSessionConfigOption sets a session config option for a running agent.
+// httpSetSessionConfigOption applies an option now or records it for the next launch.
 func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
 	sessionID := c.Param("id")
 	var req struct {
@@ -550,7 +561,9 @@ func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.lifecycleMgr.SetSessionConfigOptionBySessionID(c.Request.Context(), sessionID, req.ConfigID, req.Value); err != nil {
+	if err := h.applyIfSessionRunning(sessionID, func() error {
+		return h.lifecycleMgr.SetSessionConfigOptionBySessionID(c.Request.Context(), sessionID, req.ConfigID, req.Value)
+	}); err != nil {
 		h.logger.Error("failed to set session config option",
 			zap.String("session_id", sessionID),
 			zap.String("config_id", req.ConfigID),

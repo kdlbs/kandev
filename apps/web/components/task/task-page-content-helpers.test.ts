@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Task } from "@/lib/types/http";
 import {
   buildDebugEntries,
   hasResolvedTaskDetails,
   resolveTaskContentState,
   resolveTaskProps,
+  syncActiveTaskSession,
 } from "./task-page-content-helpers";
 
 function baseParams(overrides: Partial<Parameters<typeof buildDebugEntries>[0]> = {}) {
@@ -148,5 +149,21 @@ describe("hasResolvedTaskDetails", () => {
         initialTaskId: "task-1",
       }),
     ).toBe(false);
+  });
+});
+
+describe("syncActiveTaskSession", () => {
+  it("restores the initial session without creating a user pin", () => {
+    const setActiveSessionAuto = vi.fn();
+
+    syncActiveTaskSession({
+      initialTaskId: "task-1",
+      fallbackTaskId: null,
+      initialSessionId: "session-1",
+      setActiveSessionAuto,
+      setActiveTask: vi.fn(),
+    });
+
+    expect(setActiveSessionAuto).toHaveBeenCalledWith("task-1", "session-1");
   });
 });

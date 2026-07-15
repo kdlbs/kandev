@@ -112,10 +112,10 @@ function maybePromoteAgentctlReady(
  * follow the switch. Returns true when the caller should adopt the new session
  * as the task's active session.
  *
- * Adopts only when the current active session is missing, cross-task, or
- * already terminal — not while a live session for the same task is still
- * running (the backend only creates sessions during workflow step transitions
- * after stopping the previous one, but WS events may arrive out of order).
+ * Adopts only when the current active session is missing, cross-task, parked
+ * IDLE, or already terminal — not while a live session for the same task is
+ * still running. A parked IDLE session has no live process, so a newly started
+ * workflow session should replace it just like a terminal session.
  */
 export function shouldAdoptNewSession(
   state: AppState,
@@ -127,7 +127,11 @@ export function shouldAdoptNewSession(
   const activeSessionId = state.tasks.activeSessionId;
   if (activeSessionId) {
     const activeSession = state.taskSessions.items[activeSessionId];
-    if (activeSession?.task_id === taskId && !isTerminalSessionState(activeSession.state)) {
+    if (
+      activeSession?.task_id === taskId &&
+      activeSession.state !== "IDLE" &&
+      !isTerminalSessionState(activeSession.state)
+    ) {
       return false;
     }
   }

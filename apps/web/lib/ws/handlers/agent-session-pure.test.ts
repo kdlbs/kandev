@@ -111,6 +111,21 @@ describe("shouldAdoptNewSession", () => {
     expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(true);
   });
 
+  it("adopts when the active session is parked idle", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-old",
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "IDLE" } },
+      } as unknown as AppState["taskSessions"],
+    });
+    expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(true);
+  });
+
   it("does NOT adopt while the current active session is still running", () => {
     const state = makeAppState({
       tasks: {

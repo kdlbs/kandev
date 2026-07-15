@@ -523,6 +523,16 @@ func (m *mockRepository) UpdateSessionMetadata(ctx context.Context, sessionID st
 	return nil
 }
 func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error {
+	if session := m.sessions[sessionID]; session != nil {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		if value == nil {
+			delete(session.Metadata, key)
+		} else {
+			session.Metadata[key] = value
+		}
+	}
 	return nil
 }
 func (m *mockRepository) DismissLastAgentError(_ context.Context, _ string, _ models.LastAgentError, _ time.Time) (bool, error) {
@@ -702,6 +712,87 @@ func TestResolveScriptCommandErrors(t *testing.T) {
 	}
 	if _, _, _, err := resolveScriptCommand(context.Background(), svc, repo, "custom", "unknown"); err == nil {
 		t.Fatal("expected error for unknown custom script")
+	}
+}
+
+func TestSetSessionRuntimeConfigPersistsWithoutRunningAgent(t *testing.T) {
+	tests := []struct {
+		name       string
+		path       string
+		body       string
+		assertions func(*testing.T, models.SessionRuntimeConfig, map[string]interface{})
+	}{
+		{
+			name: "model",
+			path: "/api/v1/task-sessions/session-idle/set-model",
+			body: `{"model_id":"claude-opus-4-8"}`,
+			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, _ map[string]interface{}) {
+				t.Helper()
+				if cfg.Model != "claude-opus-4-8" {
+					t.Fatalf("expected persisted model, got %q", cfg.Model)
+				}
+			},
+		},
+		{
+			name: "dynamic model option",
+			path: "/api/v1/task-sessions/session-idle/set-config-option",
+			body: `{"config_id":"model","value":"claude-opus-4-8"}`,
+			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, _ map[string]interface{}) {
+				t.Helper()
+				if cfg.Model != "claude-opus-4-8" || cfg.ConfigOptions["model"] != "claude-opus-4-8" {
+					t.Fatalf("expected persisted dynamic model option, got %+v", cfg)
+				}
+			},
+		},
+		{
+			name: "mode",
+			path: "/api/v1/task-sessions/session-idle/set-mode",
+			body: `{"mode_id":"acceptEdits"}`,
+			assertions: func(t *testing.T, cfg models.SessionRuntimeConfig, metadata map[string]interface{}) {
+				t.Helper()
+				if cfg.Mode != "acceptEdits" || metadata[models.SessionMetaKeySessionMode] != "acceptEdits" {
+					t.Fatalf("expected persisted mode, got config=%+v metadata=%+v", cfg, metadata)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+			if err != nil {
+				t.Fatalf("failed to create logger: %v", err)
+			}
+			session := &models.TaskSession{
+				ID:       "session-idle",
+				TaskID:   "task-1",
+				State:    models.TaskSessionStateIdle,
+				Metadata: make(map[string]interface{}),
+			}
+			repo := &mockRepository{sessions: map[string]*models.TaskSession{session.ID: session}}
+			svc := service.NewService(service.Repos{
+				Workspaces: repo, Tasks: repo, TaskRepos: repo,
+				Workflows: repo, Messages: repo, Turns: repo,
+				Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+				Executors: repo, Environments: repo, TaskEnvironments: repo,
+				Reviews: repo,
+			}, nil, log, service.RepositoryDiscoveryConfig{})
+
+			router := newProcessStopRouter(t, svc, newLifecycleManager(t, log), log)
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			router.ServeHTTP(resp, req)
+
+			if resp.Code != http.StatusOK {
+				t.Fatalf("expected idle session update to succeed, got %d: %s", resp.Code, resp.Body.String())
+			}
+			cfg, ok := models.LoadSessionRuntimeConfig(session.Metadata)
+			if !ok {
+				t.Fatalf("expected persisted runtime config, got %+v", session.Metadata)
+			}
+			tt.assertions(t, cfg, session.Metadata)
+		})
 	}
 }
 

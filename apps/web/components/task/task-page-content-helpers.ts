@@ -127,6 +127,19 @@ export function hasResolvedTaskDetails(params: {
   );
 }
 
+export function syncActiveTaskSession(params: {
+  initialTaskId: string | undefined;
+  fallbackTaskId: string | null | undefined;
+  initialSessionId: string | null;
+  setActiveSessionAuto: (taskId: string, sessionId: string) => void;
+  setActiveTask: (taskId: string) => void;
+}) {
+  const taskId = params.initialTaskId ?? params.fallbackTaskId;
+  if (!taskId) return;
+  if (params.initialSessionId) params.setActiveSessionAuto(taskId, params.initialSessionId);
+  else params.setActiveTask(taskId);
+}
+
 export function resolveTaskIds(task: Task | null) {
   return {
     taskId: task?.id ?? null,
