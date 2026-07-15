@@ -159,6 +159,11 @@ env:
       secretKeyRef:
         name: kandev-secrets
         key: auth-jwt-secret
+  - name: KANDEV_OFFICE_JWTSIGNINGKEY
+    valueFrom:
+      secretKeyRef:
+        name: kandev-secrets
+        key: office-jwt-signing-key
 ```
 
 ### PostgreSQL Settings (when `KANDEV_DATABASE_DRIVER=postgres`)

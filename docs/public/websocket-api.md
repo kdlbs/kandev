@@ -364,30 +364,83 @@ Subscribe to the relevant task and session before depending on resource-scoped n
 ## Browser request helper
 
 ```typescript
-const pending = new Map<string, (message: unknown) => void>();
+type PendingRequest = {
+  resolve: (message: unknown) => void;
+  reject: (error: Error) => void;
+};
+
+const pending = new Map<string, PendingRequest>();
 const socket = new WebSocket('ws://localhost:38429/ws');
 
 socket.addEventListener('message', (event) => {
   const message = JSON.parse(event.data);
-  if (message.id && pending.has(message.id)) {
-    pending.get(message.id)?.(message);
+  const request = message.id ? pending.get(message.id) : undefined;
+  if (request) {
     pending.delete(message.id);
+    request.resolve(message);
   }
 });
 
-function request(action: string, payload: Record<string, unknown>) {
+function rejectPending(reason: string) {
+  const error = new Error(reason);
+  for (const request of pending.values()) request.reject(error);
+  pending.clear();
+}
+
+socket.addEventListener('close', () => rejectPending('WebSocket closed'));
+socket.addEventListener('error', () => rejectPending('WebSocket failed'));
+
+async function waitForSocketOpen() {
+  if (socket.readyState === WebSocket.OPEN) return;
+  if (socket.readyState !== WebSocket.CONNECTING) {
+    throw new Error('WebSocket is not open');
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      socket.removeEventListener('open', handleOpen);
+      socket.removeEventListener('error', handleError);
+      socket.removeEventListener('close', handleClose);
+    };
+    const handleOpen = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error('WebSocket failed to open'));
+    };
+    const handleClose = () => {
+      cleanup();
+      reject(new Error('WebSocket closed before opening'));
+    };
+
+    socket.addEventListener('open', handleOpen);
+    socket.addEventListener('error', handleError);
+    socket.addEventListener('close', handleClose);
+  });
+}
+
+async function request(action: string, payload: Record<string, unknown>) {
+  await waitForSocketOpen();
+
   const id = crypto.randomUUID();
-  const response = new Promise((resolve) => pending.set(id, resolve));
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
 
-  socket.send(JSON.stringify({
-    id,
-    type: 'request',
-    action,
-    payload,
-    timestamp: new Date().toISOString(),
-  }));
-
-  return response;
+    try {
+      socket.send(JSON.stringify({
+        id,
+        type: 'request',
+        action,
+        payload,
+        timestamp: new Date().toISOString(),
+      }));
+    } catch (error) {
+      pending.delete(id);
+      reject(error instanceof Error ? error : new Error('WebSocket send failed'));
+    }
+  });
 }
 
 await request('task.subscribe', { task_id: 'task-uuid' });
@@ -399,7 +452,7 @@ const launch = await request('session.launch', {
 });
 ```
 
-Production clients should also reject pending requests on WebSocket close, enforce timeouts, and route `type: "error"` responses into typed errors.
+Production clients should also enforce request timeouts and route `type: "error"` responses into typed errors.
 
 ## HTTP operations that remain separate
 
