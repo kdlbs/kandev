@@ -105,3 +105,5 @@ Existing explicit command paths in Kandev settings remain authoritative over `PA
 ## Release Trust
 
 See [desktop-tauri-signing.md](../desktop-tauri-signing.md) for the CI secrets and automatic signing behavior used for desktop releases.
+The release feed identifies signed updater artifacts; before installation, Tauri verifies the selected
+artifact against the updater public key embedded in the app.

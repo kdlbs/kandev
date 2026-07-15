@@ -179,6 +179,19 @@ fi
 grep -q "stable SemVer" "$TMP_DIR/err" || fail "prerelease error was not actionable"
 pass "updater manifest rejects prerelease versions"
 
+if node "$SCRIPT" generate \
+  --assets-dir "$complete_assets" \
+  --output "$TMP_DIR/invalid-date.json" \
+  --version "1.2.3" \
+  --tag "v1.2.3" \
+  --repository "kdlbs/kandev" \
+  --notes-file "$complete_assets/notes.md" \
+  --pub-date "2025-02-31T12:00:00Z" >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "generator should reject invalid calendar dates"
+fi
+grep -q "pub_date must be RFC 3339" "$TMP_DIR/err" || fail "invalid date error was not actionable"
+pass "updater manifest rejects invalid calendar dates"
+
 unsigned_assets="$TMP_DIR/unsigned"
 mkdir -p "$unsigned_assets"
 printf 'Release notes\n' > "$unsigned_assets/notes.md"

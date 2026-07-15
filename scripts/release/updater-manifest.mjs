@@ -94,11 +94,21 @@ function validateReleaseMetadata(version, tag, repository) {
 }
 
 function validatePubDate(pubDate) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(
+    pubDate,
+  );
+  if (!match || Number.isNaN(Date.parse(pubDate))) {
+    fail(`Updater pub_date must be RFC 3339: ${pubDate}`);
+  }
+  const [year, month, day, hour, minute, second] = match.slice(1).map(Number);
+  const calendar = new Date(Date.UTC(year, month - 1, day));
   if (
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
-      pubDate,
-    ) ||
-    Number.isNaN(Date.parse(pubDate))
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    calendar.getUTCFullYear() !== year ||
+    calendar.getUTCMonth() !== month - 1 ||
+    calendar.getUTCDate() !== day
   ) {
     fail(`Updater pub_date must be RFC 3339: ${pubDate}`);
   }

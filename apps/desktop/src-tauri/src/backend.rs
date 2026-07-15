@@ -358,6 +358,11 @@ pub fn desktop_environment(
     home_dir: Option<&Path>,
 ) -> BTreeMap<OsString, OsString> {
     let path = normalized_path(env.get(OsStr::new("PATH")), home_dir);
+    env.retain(|key, _| {
+        !key
+            .to_string_lossy()
+            .eq_ignore_ascii_case(DESKTOP_NATIVE_NOTIFICATIONS_ENV)
+    });
     env.insert(
         OsString::from("KANDEV_SERVER_HOST"),
         OsString::from(LOOPBACK_HOST),
@@ -797,6 +802,23 @@ mod tests {
         assert_eq!(entries.first(), Some(&PathBuf::from("/existing/bin")));
         assert!(entries.contains(&PathBuf::from("/usr/local/bin")) || cfg!(windows));
         assert!(entries.contains(&home_dir.join(".local/bin")));
+    }
+
+    #[test]
+    fn desktop_environment_replaces_notification_flag_case_insensitively() {
+        let mut inherited = BTreeMap::new();
+        inherited.insert(
+            OsString::from("kandev_desktop_native_notifications"),
+            OsString::from("false"),
+        );
+
+        let env = desktop_environment(Path::new("/opt/kandev"), inherited, None);
+
+        assert_eq!(
+            env.get(OsStr::new(DESKTOP_NATIVE_NOTIFICATIONS_ENV)),
+            Some(&OsString::from("true"))
+        );
+        assert!(!env.contains_key(OsStr::new("kandev_desktop_native_notifications")));
     }
 
     #[test]
