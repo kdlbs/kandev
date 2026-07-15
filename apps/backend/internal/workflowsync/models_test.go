@@ -40,3 +40,15 @@ func TestSetConfigRequestNormalize_Rejections(t *testing.T) {
 		})
 	}
 }
+
+func TestSetConfigRequestNormalize_PollEnabledDefaultsTrue(t *testing.T) {
+	req := &SetConfigRequest{RepoOwner: "acme", RepoName: "flows"}
+	require.NoError(t, req.Normalize())
+	require.NotNil(t, req.PollEnabled)
+	assert.True(t, *req.PollEnabled)
+
+	disabled := false
+	req = &SetConfigRequest{RepoOwner: "acme", RepoName: "flows", PollEnabled: &disabled}
+	require.NoError(t, req.Normalize())
+	assert.False(t, *req.PollEnabled, "explicit false survives normalization")
+}

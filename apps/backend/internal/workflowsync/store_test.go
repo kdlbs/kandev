@@ -118,3 +118,19 @@ func TestStore_DeleteConfigForWorkspace(t *testing.T) {
 	// Deleting a missing config is a no-op.
 	require.NoError(t, store.DeleteConfigForWorkspace(ctx, "ws-1"))
 }
+
+func TestStore_PollEnabledRoundtrip(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	cfg, err := store.UpsertConfigForWorkspace(ctx, "ws-1", testRequest())
+	require.NoError(t, err)
+	assert.True(t, cfg.PollEnabled, "polling defaults to enabled")
+
+	req := testRequest()
+	disabled := false
+	req.PollEnabled = &disabled
+	cfg, err = store.UpsertConfigForWorkspace(ctx, "ws-1", req)
+	require.NoError(t, err)
+	assert.False(t, cfg.PollEnabled)
+}

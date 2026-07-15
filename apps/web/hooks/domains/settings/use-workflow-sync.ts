@@ -18,6 +18,7 @@ export type WorkflowSyncFormState = {
   branch: string;
   path: string;
   interval_seconds: number;
+  poll_enabled: boolean;
 };
 
 const DEFAULT_FORM: WorkflowSyncFormState = {
@@ -26,6 +27,7 @@ const DEFAULT_FORM: WorkflowSyncFormState = {
   branch: "main",
   path: ".kandev/workflows",
   interval_seconds: 300,
+  poll_enabled: true,
 };
 
 function configToForm(cfg: WorkflowSyncConfig | null): WorkflowSyncFormState {
@@ -36,6 +38,7 @@ function configToForm(cfg: WorkflowSyncConfig | null): WorkflowSyncFormState {
     branch: cfg.branch,
     path: cfg.path,
     interval_seconds: cfg.interval_seconds,
+    poll_enabled: cfg.poll_enabled,
   };
 }
 
@@ -147,6 +150,7 @@ export function useWorkflowSync(workspaceId: string) {
         branch: form.branch.trim(),
         path: form.path.trim(),
         interval_seconds: form.interval_seconds,
+        poll_enabled: form.poll_enabled,
       };
       const saved = await setWorkflowSyncConfig(payload, { workspaceId });
       setConfig(saved);

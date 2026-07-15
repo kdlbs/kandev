@@ -30,6 +30,7 @@ function makeConfig(overrides: Partial<WorkflowSyncConfig> = {}): WorkflowSyncCo
     branch: "main",
     path: ".kandev/workflows",
     interval_seconds: 300,
+    poll_enabled: true,
     last_ok: false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",

@@ -26,8 +26,10 @@ This is useful for:
    carries the branch and directory. The resolved target (owner/repo and
    directory) is shown under the field; the directory defaults to
    `.kandev/workflows` when the link doesn't include one.
-3. Adjust **Branch** (defaults to `main`) and the **Poll interval** — how
-   often Kandev checks the repo, in seconds (default 300, minimum 60).
+3. Adjust **Branch** — picked from the repository's actual branches once the
+   repo is resolved (defaults to `main`) — and **Auto-sync**: when on, Kandev
+   polls the repo every **Poll interval** seconds (default 300, minimum 60);
+   when off, nothing syncs until you press **Sync now**.
 4. Save. A status card appears on the page showing what is syncing, the last
    sync result, and any warnings; use its **Sync now** button to run a sync
    immediately instead of waiting for the poller. Reopen the dialog via

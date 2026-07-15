@@ -37,6 +37,7 @@ type Config struct {
 	Branch          string     `json:"branch"`
 	Path            string     `json:"path"`
 	IntervalSeconds int        `json:"interval_seconds"`
+	PollEnabled     bool       `json:"poll_enabled"`
 	LastSyncedAt    *time.Time `json:"last_synced_at,omitempty"`
 	LastOk          bool       `json:"last_ok"`
 	LastError       string     `json:"last_error,omitempty"`
@@ -55,6 +56,9 @@ type SetConfigRequest struct {
 	Branch          string `json:"branch"`
 	Path            string `json:"path"`
 	IntervalSeconds int    `json:"interval_seconds"`
+	// PollEnabled controls the background polling loop; nil defaults to
+	// true. When false the workspace only syncs via "Sync now".
+	PollEnabled *bool `json:"poll_enabled"`
 }
 
 // Normalize validates the request and fills defaults. It returns a wrapped
@@ -86,6 +90,10 @@ func (r *SetConfigRequest) Normalize() error {
 	}
 	if r.IntervalSeconds < MinIntervalSeconds {
 		return fmt.Errorf("%w: interval_seconds must be at least %d", ErrInvalidConfig, MinIntervalSeconds)
+	}
+	if r.PollEnabled == nil {
+		enabled := true
+		r.PollEnabled = &enabled
 	}
 	return nil
 }

@@ -12,6 +12,8 @@ export interface WorkflowSyncConfig {
   branch: string;
   path: string;
   interval_seconds: number;
+  /** When false, the workspace only syncs via "Sync now". */
+  poll_enabled: boolean;
   /** RFC3339 timestamp; absent until the first sync attempt. */
   last_synced_at?: string;
   last_ok: boolean;
@@ -32,6 +34,8 @@ export interface WorkflowSyncSetConfigRequest {
   branch?: string;
   path?: string;
   interval_seconds?: number;
+  /** Defaults to true server-side when omitted. */
+  poll_enabled?: boolean;
 }
 
 /** Outcome of a single sync run (poller or forced). */

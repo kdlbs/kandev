@@ -27,14 +27,19 @@ function StateIcon({ state }: { state: SyncState }) {
   return <IconClock className="h-4 w-4 text-muted-foreground" />;
 }
 
+function lastSyncedLabel(config: WorkflowSyncConfig): string {
+  if (config.last_synced_at) {
+    return `last synced ${formatDistanceToNow(new Date(config.last_synced_at), { addSuffix: true })}`;
+  }
+  return config.poll_enabled ? "waiting for first sync…" : "not synced yet — use Sync now";
+}
+
 function MetadataLine({ config }: { config: WorkflowSyncConfig }) {
   useTick(30_000);
   const parts = [
     `Directory ${config.path || "(repository root)"}`,
-    `every ${config.interval_seconds}s`,
-    config.last_synced_at
-      ? `last synced ${formatDistanceToNow(new Date(config.last_synced_at), { addSuffix: true })}`
-      : "waiting for first sync…",
+    config.poll_enabled ? `every ${config.interval_seconds}s` : "auto-sync off",
+    lastSyncedLabel(config),
   ];
   return <p className="text-xs text-muted-foreground">{parts.join(" · ")}</p>;
 }

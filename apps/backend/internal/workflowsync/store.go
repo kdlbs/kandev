@@ -34,6 +34,7 @@ const createTablesSQL = `
 		branch TEXT NOT NULL DEFAULT 'main',
 		path TEXT NOT NULL DEFAULT '',
 		interval_seconds INTEGER NOT NULL DEFAULT 300,
+		poll_enabled INTEGER NOT NULL DEFAULT 1,
 		last_synced_at DATETIME,
 		last_ok INTEGER NOT NULL DEFAULT 0,
 		last_error TEXT NOT NULL DEFAULT '',
@@ -45,12 +46,42 @@ const createTablesSQL = `
 `
 
 func (s *Store) initSchema() error {
-	_, err := s.db.Exec(createTablesSQL)
+	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	return s.addPollEnabledColumn()
+}
+
+// addPollEnabledColumn brings databases created before the poll toggle up to
+// the current schema. Idempotent — the column lookup avoids the "duplicate
+// column name" error on installs that already have it.
+func (s *Store) addPollEnabledColumn() error {
+	rows, err := s.ro.Query(`PRAGMA table_info(workflow_sync_configs)`)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dflt interface{}
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "poll_enabled" {
+			return rows.Err()
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`ALTER TABLE workflow_sync_configs ADD COLUMN poll_enabled INTEGER NOT NULL DEFAULT 1`)
 	return err
 }
 
 const configSelectColumns = `workspace_id, repo_owner, repo_name, branch, path, interval_seconds,
-	last_synced_at, last_ok, last_error, last_warnings, last_hash, created_at, updated_at`
+	poll_enabled, last_synced_at, last_ok, last_error, last_warnings, last_hash, created_at, updated_at`
 
 type configScanner interface {
 	Scan(dest ...interface{}) error
@@ -58,7 +89,7 @@ type configScanner interface {
 
 func scanConfig(row configScanner) (*Config, error) {
 	cfg := &Config{}
-	var lastOk int
+	var lastOk, pollEnabled int
 	var lastSyncedAt sql.NullTime
 	var warningsJSON string
 	if err := row.Scan(
@@ -68,6 +99,7 @@ func scanConfig(row configScanner) (*Config, error) {
 		&cfg.Branch,
 		&cfg.Path,
 		&cfg.IntervalSeconds,
+		&pollEnabled,
 		&lastSyncedAt,
 		&lastOk,
 		&cfg.LastError,
@@ -79,6 +111,7 @@ func scanConfig(row configScanner) (*Config, error) {
 		return nil, err
 	}
 	cfg.LastOk = lastOk != 0
+	cfg.PollEnabled = pollEnabled != 0
 	if lastSyncedAt.Valid {
 		t := lastSyncedAt.Time
 		cfg.LastSyncedAt = &t
@@ -131,22 +164,23 @@ func (s *Store) UpsertConfigForWorkspace(ctx context.Context, workspaceID string
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO workflow_sync_configs (
-			workspace_id, repo_owner, repo_name, branch, path, interval_seconds,
+			workspace_id, repo_owner, repo_name, branch, path, interval_seconds, poll_enabled,
 			last_synced_at, last_ok, last_error, last_warnings, last_hash, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, NULL, 0, '', '[]', '', ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, '', '[]', '', ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
 			repo_owner = excluded.repo_owner,
 			repo_name = excluded.repo_name,
 			branch = excluded.branch,
 			path = excluded.path,
 			interval_seconds = excluded.interval_seconds,
+			poll_enabled = excluded.poll_enabled,
 			last_synced_at = NULL,
 			last_ok = 0,
 			last_error = '',
 			last_warnings = '[]',
 			last_hash = '',
 			updated_at = excluded.updated_at
-	`), workspaceID, req.RepoOwner, req.RepoName, req.Branch, req.Path, req.IntervalSeconds, now, now)
+	`), workspaceID, req.RepoOwner, req.RepoName, req.Branch, req.Path, req.IntervalSeconds, boolToInt(req.PollEnabled != nil && *req.PollEnabled), now, now)
 	if err != nil {
 		return nil, err
 	}
@@ -176,4 +210,11 @@ func (s *Store) RecordSyncStatus(ctx context.Context, workspaceID string, ok boo
 func (s *Store) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM workflow_sync_configs WHERE workspace_id = ?`), workspaceID)
 	return err
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

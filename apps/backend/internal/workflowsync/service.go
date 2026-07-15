@@ -237,6 +237,9 @@ func (s *Service) SyncDueConfigs(ctx context.Context) {
 }
 
 func isSyncDue(cfg *Config, now time.Time) bool {
+	if !cfg.PollEnabled {
+		return false
+	}
 	if cfg.LastSyncedAt == nil {
 		return true
 	}

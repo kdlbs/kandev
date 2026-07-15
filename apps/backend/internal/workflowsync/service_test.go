@@ -185,3 +185,22 @@ func TestSyncDueConfigs_HonorsInterval(t *testing.T) {
 	svc.SyncDueConfigs(context.Background())
 	assert.Len(t, applier.calls, 1, "second run within the interval is skipped entirely")
 }
+
+func TestSyncDueConfigs_SkipsPollingDisabled(t *testing.T) {
+	svc, applier := setupTestService(t, seededMockClient())
+	disabled := false
+	_, err := svc.SetConfigForWorkspace(context.Background(), "ws-1", &SetConfigRequest{
+		RepoOwner:   "acme",
+		RepoName:    "flows",
+		PollEnabled: &disabled,
+	})
+	require.NoError(t, err)
+
+	svc.SyncDueConfigs(context.Background())
+	assert.Empty(t, applier.calls, "polling-disabled configs never auto-sync")
+
+	// Manual sync still works.
+	_, err = svc.SyncWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	assert.Len(t, applier.calls, 1)
+}
