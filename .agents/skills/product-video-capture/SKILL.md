@@ -11,7 +11,7 @@ Produce reusable clean masters first; derive presentation from them later.
 
 - Require Linux Xvfb, Chrome for Testing, Playwright/CDP, FFmpeg/FFprobe, a Kandev checkout with E2E fixtures, and the landing repository.
 - Resolve the Kandev root with `git rev-parse --show-toplevel`, then verify it contains `scripts/dev-isolated` and `apps/web/e2e/`.
-- Resolve the landing root from `KANDEV_LANDING_REPO` when set. Otherwise search the available workspace and sibling checkouts for both `scripts/product-loop-camera.mjs` and `scripts/product-loop-encoder.mjs`; do not select a directory by name alone.
+- Resolve the landing root from `KANDEV_LANDING_REPO` when set and verify it contains both `scripts/product-loop-camera.mjs` and `scripts/product-loop-encoder.mjs`. If the variable is unset or its path fails verification, search the available workspace and sibling checkouts for both marker files; do not select a directory by name alone.
 - If discovery finds zero or multiple landing candidates, ask the user to identify the checkout. Record the resolved roots as `KANDEV_REPO` and `LANDING_REPO`, and use those variables for every command and copy operation.
 
 ## Choose Deliverable
