@@ -51,6 +51,17 @@ func TestWrapAgentMessage_BasicShape(t *testing.T) {
 	}
 }
 
+func TestWrapAgentMessage_DiscouragesClosureAcknowledgements(t *testing.T) {
+	sender := &models.Task{ID: "task-uuid-123", Title: "Fix login bug"}
+
+	wrapped, _ := wrapAgentMessage("Acknowledged; no further work is needed.", sender, "session-uuid-456")
+
+	want := "Do not reply merely to acknowledge receipt, thanks, completion, closure, or a request for no further replies."
+	if !strings.Contains(wrapped, want) {
+		t.Errorf("wrapper must terminate acknowledgement-only exchanges; missing %q in %q", want, wrapped)
+	}
+}
+
 func TestWrapAgentMessage_MultilinePrompt(t *testing.T) {
 	sender := &models.Task{ID: "t-id", Title: "Task title"}
 	prompt := "line one\nline two\n\nparagraph two"
