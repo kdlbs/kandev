@@ -10,8 +10,14 @@ import (
 
 const cacheTTL = 5 * time.Minute
 
+// failureCacheTTL bounds negative caching: after a fetch error, lookups for
+// the same key return the cached error instead of re-querying the provider,
+// so bursts of concurrent callers coalesce failures as well as successes.
+const failureCacheTTL = 15 * time.Second
+
 type cachedEntry struct {
 	usage     *ProviderUsage
+	err       error
 	fetchedAt time.Time
 }
 
@@ -59,22 +65,23 @@ func (c *UsageCache) GetOrFetchWithin(
 	maxAge time.Duration,
 	fetchFn func(ctx context.Context) (*ProviderUsage, error),
 ) (*ProviderUsage, error) {
-	if usage := c.get(key, maxAge); usage != nil {
-		return usage, nil
+	if e := c.lookup(key, maxAge); e != nil {
+		return e.usage, e.err
 	}
 	lock := c.keyLock(key)
 	lock.Lock()
 	defer lock.Unlock()
 	// Re-check after acquiring the per-key lock: a concurrent caller may have
 	// completed the fetch while this one was waiting.
-	if usage := c.get(key, maxAge); usage != nil {
-		return usage, nil
+	if e := c.lookup(key, maxAge); e != nil {
+		return e.usage, e.err
 	}
 	usage, err := fetchFn(ctx)
 	if err != nil {
+		c.storeAt(key, &cachedEntry{err: err})
 		return nil, err
 	}
-	c.set(key, usage)
+	c.storeAt(key, &cachedEntry{usage: usage})
 	return usage, nil
 }
 
@@ -89,23 +96,33 @@ func (c *UsageCache) keyLock(key string) *sync.Mutex {
 	return lock
 }
 
-func (c *UsageCache) get(key string, maxAge time.Duration) *ProviderUsage {
+// lookup returns the cached entry when still valid: successes live for
+// maxAge, failures for at most failureCacheTTL (never longer than maxAge).
+func (c *UsageCache) lookup(key string, maxAge time.Duration) *cachedEntry {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	e, ok := c.entries[key]
 	if !ok {
 		return nil
 	}
-	if time.Since(e.fetchedAt) >= maxAge {
+	age := time.Since(e.fetchedAt)
+	if e.err != nil {
+		if age >= min(failureCacheTTL, maxAge) {
+			return nil
+		}
+		return e
+	}
+	if age >= maxAge {
 		return nil
 	}
-	return e.usage
+	return e
 }
 
-func (c *UsageCache) set(key string, usage *ProviderUsage) {
+func (c *UsageCache) storeAt(key string, entry *cachedEntry) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.entries[key] = &cachedEntry{usage: usage, fetchedAt: time.Now()}
+	entry.fetchedAt = time.Now()
+	c.entries[key] = entry
 }
 
 // Invalidate removes the cache entry for the given key.

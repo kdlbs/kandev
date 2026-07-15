@@ -136,3 +136,39 @@ func TestUsageCacheCoalescesConcurrentFetches(t *testing.T) {
 		t.Errorf("concurrent misses fetched %d times, want 1", got)
 	}
 }
+
+func TestUsageCacheCoalescesFailures(t *testing.T) {
+	cache := NewUsageCache()
+	var calls atomic.Int32
+	fetch := func(_ context.Context) (*ProviderUsage, error) {
+		calls.Add(1)
+		time.Sleep(10 * time.Millisecond)
+		return nil, errors.New("boom")
+	}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := cache.GetOrFetchWithin(context.Background(), "k", freshMaxAge, fetch); err == nil {
+				t.Error("expected error from coalesced failing fetch")
+			}
+		}()
+	}
+	wg.Wait()
+	if got := calls.Load(); got != 1 {
+		t.Errorf("concurrent failing fetches called provider %d times, want 1", got)
+	}
+
+	// Once the negative entry ages past failureCacheTTL, the provider is retried.
+	cache.mu.Lock()
+	cache.entries["k"].fetchedAt = time.Now().Add(-failureCacheTTL - time.Second)
+	cache.mu.Unlock()
+	if _, err := cache.GetOrFetchWithin(context.Background(), "k", freshMaxAge, fetch); err == nil {
+		t.Error("expected error on retry after TTL")
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("expired failure entry should refetch, calls = %d, want 2", got)
+	}
+}
