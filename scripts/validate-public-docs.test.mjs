@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 import { validatePublicDocs } from "./validate-public-docs.mjs";
+
+const tempDirs = [];
 
 async function createDocs(files, meta) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "kandev-public-docs-"));
+  tempDirs.push(dir);
   await Promise.all(
     Object.entries(files).map(async ([file, content]) => {
       const target = path.join(dir, file);
@@ -17,6 +20,10 @@ async function createDocs(files, meta) {
   await fs.writeFile(path.join(dir, "meta.json"), JSON.stringify(meta));
   return dir;
 }
+
+after(async () => {
+  await Promise.all(tempDirs.map((dir) => fs.rm(dir, { recursive: true, force: true })));
+});
 
 const validPage = `---
 title: "Overview"
