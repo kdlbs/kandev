@@ -96,8 +96,9 @@ one of these triggers (this feature adds only the last one):
 | Agent profile deleted                       | user                 | yes (`DeleteEphemeralTasksByAgentProfile`)           |
 | **Idle longer than retention window**       | **background sweep** | **new**                                              |
 
-All four converge on `Service.DeleteTask`, so directory cleanup and event
-publishing are identical.
+All triggers use the existing quick-chat deletion cleanup and event path.
+Expiration first rechecks the expiry predicate at delete time, then performs
+the same directory cleanup and event publishing.
 
 ## Failure modes
 
