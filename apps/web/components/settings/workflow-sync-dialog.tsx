@@ -8,13 +8,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@kandev/ui/dialog";
-import { useEffect } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
-import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import type {
   WorkflowSyncController,
   WorkflowSyncFormState,
@@ -62,73 +59,14 @@ type FieldsProps = {
   update: <K extends keyof WorkflowSyncFormState>(key: K, value: WorkflowSyncFormState[K]) => void;
 };
 
-// useRepoBranchOptions loads the repo's branches (like the task-create
-// dialog) once owner/repo are known, and always includes the currently
-// selected branch so a value from a pasted /tree/ link stays selectable even
-// before (or without) a successful fetch.
-function useRepoBranchOptions(form: WorkflowSyncFormState, open: boolean) {
-  const byUrl = useBranchesByURL();
-  const repoUrl =
-    form.repo_owner && form.repo_name
-      ? `https://github.com/${form.repo_owner}/${form.repo_name}`
-      : "";
-  const { ensure } = byUrl;
-  useEffect(() => {
-    if (open && repoUrl) ensure(repoUrl);
-  }, [open, repoUrl, ensure]);
-  const names = repoUrl ? byUrl.branches(repoUrl).map((b) => b.name) : [];
-  if (form.branch && !names.includes(form.branch)) names.unshift(form.branch);
-  return { options: names, loading: repoUrl ? byUrl.loading(repoUrl) : false };
-}
-
-type BranchFieldProps = FieldsProps & { options: string[]; loading: boolean };
-
-function BranchField({ form, update, options, loading }: BranchFieldProps) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor="workflow-sync-branch">Branch</Label>
-      {options.length > 0 ? (
-        <Select value={form.branch} onValueChange={(value) => update("branch", value)}>
-          <SelectTrigger
-            id="workflow-sync-branch"
-            data-testid="workflow-sync-branch-select"
-            className="w-full cursor-pointer"
-          >
-            <SelectValue placeholder="main" />
-          </SelectTrigger>
-          <SelectContent>
-            {options.map((name) => (
-              <SelectItem key={name} value={name} className="cursor-pointer">
-                {name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : (
-        <Input
-          id="workflow-sync-branch"
-          data-testid="workflow-sync-branch-input"
-          placeholder="main"
-          value={form.branch}
-          onChange={(e) => update("branch", e.target.value)}
-        />
-      )}
-      {loading && <p className="text-xs text-muted-foreground">Loading branches…</p>}
-    </div>
-  );
-}
-
+// PollFields is a single compact row: the auto-sync switch and, when on, the
+// interval right beside it. The branch needs no field of its own — it comes
+// from the pasted link (or defaults to main) and is echoed in the resolved
+// summary under the link input.
 function PollFields({ form, update }: FieldsProps) {
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <Label htmlFor="workflow-sync-poll-toggle">Auto-sync</Label>
-          <p className="text-xs text-muted-foreground">
-            Periodically check the repository for changes. When off, workflows only sync via “Sync
-            now”.
-          </p>
-        </div>
+    <div className="space-y-1.5">
+      <div className="flex flex-wrap items-center gap-3">
         <Switch
           id="workflow-sync-poll-toggle"
           data-testid="workflow-sync-poll-toggle"
@@ -136,21 +74,32 @@ function PollFields({ form, update }: FieldsProps) {
           onCheckedChange={(checked) => update("poll_enabled", checked)}
           className="cursor-pointer"
         />
+        <Label htmlFor="workflow-sync-poll-toggle" className="cursor-pointer">
+          Auto-sync
+        </Label>
+        {form.poll_enabled && (
+          <div className="ml-auto flex items-center gap-2">
+            <Label htmlFor="workflow-sync-interval" className="sr-only">
+              Poll interval (seconds)
+            </Label>
+            <Input
+              id="workflow-sync-interval"
+              data-testid="workflow-sync-interval-input"
+              type="number"
+              min={60}
+              className="w-24"
+              value={form.interval_seconds}
+              onChange={(e) => update("interval_seconds", Number(e.target.value) || 0)}
+            />
+            <span className="text-xs text-muted-foreground">seconds</span>
+          </div>
+        )}
       </div>
-      {form.poll_enabled && (
-        <div className="space-y-1.5 sm:w-1/2">
-          <Label htmlFor="workflow-sync-interval">Poll interval (seconds)</Label>
-          <Input
-            id="workflow-sync-interval"
-            data-testid="workflow-sync-interval-input"
-            type="number"
-            min={60}
-            value={form.interval_seconds}
-            onChange={(e) => update("interval_seconds", Number(e.target.value) || 0)}
-          />
-          <p className="text-xs text-muted-foreground">Minimum 60 seconds.</p>
-        </div>
-      )}
+      <p className="text-xs text-muted-foreground">
+        {form.poll_enabled
+          ? "Checks the repository on this interval (minimum 60s)."
+          : "Syncs only run when you press Sync now."}
+      </p>
     </div>
   );
 }
@@ -169,7 +118,7 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
   const disableSave =
     sync.saving || sync.urlInvalid || !sync.form.repo_owner.trim() || !sync.form.repo_name.trim();
   const resolved = sync.form.repo_owner
-    ? `Syncing ${sync.form.repo_owner}/${sync.form.repo_name} — directory ${sync.form.path || "(repository root)"}.`
+    ? `Syncing ${sync.form.repo_owner}/${sync.form.repo_name} @ ${sync.form.branch || "main"} — directory ${sync.form.path || "(repository root)"}.`
     : "";
 
   const handleSave = async () => {
@@ -178,7 +127,6 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
   const handleRemove = async () => {
     if (await sync.handleDelete()) onOpenChange(false);
   };
-  const branchOptions = useRepoBranchOptions(sync.form, open);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -195,12 +143,6 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
             invalid={sync.urlInvalid}
             resolved={resolved}
             onChange={sync.setUrlInput}
-          />
-          <BranchField
-            form={sync.form}
-            update={sync.update}
-            options={branchOptions.options}
-            loading={branchOptions.loading}
           />
           <PollFields form={sync.form} update={sync.update} />
           <p className="text-xs text-muted-foreground">{HELP_TEXT}</p>
