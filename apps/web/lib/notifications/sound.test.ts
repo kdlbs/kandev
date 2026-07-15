@@ -31,6 +31,16 @@ async function loadSoundModule() {
   return import("./sound");
 }
 
+// The stub is invoked with `new`, so the implementation must be a real
+// `function` — an arrow implementation is not constructible.
+function stubAudioContextCtor(implementation: () => unknown) {
+  const ctor = vi.fn(function (this: unknown) {
+    return implementation();
+  });
+  vi.stubGlobal("AudioContext", ctor);
+  return ctor;
+}
+
 describe("sound preferences", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -77,10 +87,7 @@ describe("playSoundPreset", () => {
 
   it("schedules one oscillator per note of the preset", async () => {
     const { ctx } = makeFakeAudioContext();
-    vi.stubGlobal(
-      "AudioContext",
-      vi.fn(() => ctx),
-    );
+    stubAudioContextCtor(() => ctx);
     const { playSoundPreset, SOUND_PRESETS } = await loadSoundModule();
 
     playSoundPreset("chime");
@@ -91,10 +98,7 @@ describe("playSoundPreset", () => {
 
   it("falls back to the first preset for unknown ids", async () => {
     const { ctx } = makeFakeAudioContext();
-    vi.stubGlobal(
-      "AudioContext",
-      vi.fn(() => ctx),
-    );
+    stubAudioContextCtor(() => ctx);
     const { playSoundPreset, SOUND_PRESETS } = await loadSoundModule();
 
     playSoundPreset("nope");
@@ -103,12 +107,9 @@ describe("playSoundPreset", () => {
   });
 
   it("does not throw when AudioContext construction fails", async () => {
-    vi.stubGlobal(
-      "AudioContext",
-      vi.fn(() => {
-        throw new Error("audio stack broken");
-      }),
-    );
+    stubAudioContextCtor(() => {
+      throw new Error("audio stack broken");
+    });
     const { playSoundPreset } = await loadSoundModule();
 
     expect(() => playSoundPreset("plim")).not.toThrow();
@@ -116,8 +117,7 @@ describe("playSoundPreset", () => {
 
   it("reuses a single AudioContext across plays", async () => {
     const { ctx } = makeFakeAudioContext();
-    const ctor = vi.fn(() => ctx);
-    vi.stubGlobal("AudioContext", ctor);
+    const ctor = stubAudioContextCtor(() => ctx);
     const { playSoundPreset } = await loadSoundModule();
 
     playSoundPreset("plim");
@@ -146,10 +146,7 @@ describe("playSoundPreset with a non-running context", () => {
   it("plays after a suspended context resumes promptly", async () => {
     const { ctx } = makeFakeAudioContext();
     ctx.state = "suspended";
-    vi.stubGlobal(
-      "AudioContext",
-      vi.fn(() => ctx),
-    );
+    stubAudioContextCtor(() => ctx);
     const { playSoundPreset, SOUND_PRESETS } = await loadSoundModule();
 
     playSoundPreset("plim");
@@ -166,10 +163,7 @@ describe("playSoundPreset with a non-running context", () => {
     ctx.state = "suspended";
     let resolveResume!: () => void;
     ctx.resume = vi.fn(() => new Promise<void>((resolve) => (resolveResume = resolve)));
-    vi.stubGlobal(
-      "AudioContext",
-      vi.fn(() => ctx),
-    );
+    stubAudioContextCtor(() => ctx);
     const nowSpy = vi.spyOn(Date, "now").mockReturnValue(0);
     const { playSoundPreset } = await loadSoundModule();
 
@@ -184,10 +178,7 @@ describe("playSoundPreset with a non-running context", () => {
   it("coalesces plays queued while the context is not running", async () => {
     const { ctx } = makeFakeAudioContext();
     ctx.state = "suspended";
-    vi.stubGlobal(
-      "AudioContext",
-      vi.fn(() => ctx),
-    );
+    stubAudioContextCtor(() => ctx);
     const { playSoundPreset, SOUND_PRESETS } = await loadSoundModule();
 
     playSoundPreset("plim");
@@ -199,13 +190,25 @@ describe("playSoundPreset with a non-running context", () => {
     expect(ctx.createOscillator).toHaveBeenCalledTimes(plim.notes.length);
   });
 
+  it("keeps only the newest request while a resume is in flight", async () => {
+    const { ctx } = makeFakeAudioContext();
+    ctx.state = "suspended";
+    stubAudioContextCtor(() => ctx);
+    const { playSoundPreset, SOUND_PRESETS } = await loadSoundModule();
+
+    playSoundPreset("plim");
+    playSoundPreset("ding");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ctx.resume).toHaveBeenCalledTimes(1);
+    const ding = SOUND_PRESETS.find((p) => p.id === "ding")!;
+    expect(ctx.createOscillator).toHaveBeenCalledTimes(ding.notes.length);
+  });
+
   it("resumes an interrupted context before playing", async () => {
     const { ctx } = makeFakeAudioContext();
     ctx.state = "interrupted";
-    vi.stubGlobal(
-      "AudioContext",
-      vi.fn(() => ctx),
-    );
+    stubAudioContextCtor(() => ctx);
     const { playSoundPreset, SOUND_PRESETS } = await loadSoundModule();
 
     playSoundPreset("ding");
@@ -226,12 +229,24 @@ describe("playWaitingForInputSound", () => {
     vi.unstubAllGlobals();
   });
 
+  it("does not play a resumed cue when sound was disabled while waiting", async () => {
+    const { ctx } = makeFakeAudioContext();
+    ctx.state = "suspended";
+    stubAudioContextCtor(() => ctx);
+    const { playWaitingForInputSound, setSoundPreferences } = await loadSoundModule();
+    setSoundPreferences({ enabled: true, presetId: "plim" });
+
+    playWaitingForInputSound();
+    setSoundPreferences({ enabled: false, presetId: "plim" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ctx.resume).toHaveBeenCalled();
+    expect(ctx.createOscillator).not.toHaveBeenCalled();
+  });
+
   it("does not play when sound is disabled (default)", async () => {
     const { ctx } = makeFakeAudioContext();
-    vi.stubGlobal(
-      "AudioContext",
-      vi.fn(() => ctx),
-    );
+    stubAudioContextCtor(() => ctx);
     const { playWaitingForInputSound } = await loadSoundModule();
 
     playWaitingForInputSound();
@@ -241,10 +256,7 @@ describe("playWaitingForInputSound", () => {
 
   it("plays the configured preset when enabled", async () => {
     const { ctx } = makeFakeAudioContext();
-    vi.stubGlobal(
-      "AudioContext",
-      vi.fn(() => ctx),
-    );
+    stubAudioContextCtor(() => ctx);
     const { playWaitingForInputSound, setSoundPreferences, SOUND_PRESETS } =
       await loadSoundModule();
     setSoundPreferences({ enabled: true, presetId: "ding" });

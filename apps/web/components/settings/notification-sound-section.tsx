@@ -8,11 +8,11 @@ import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   getSoundPreferences,
+  isSoundPresetId,
   playSoundPreset,
   setSoundPreferences,
   SOUND_PRESETS,
   type SoundPreferences,
-  type SoundPresetId,
 } from "@/lib/notifications/sound";
 
 export function NotificationSoundSection() {
@@ -44,7 +44,8 @@ export function NotificationSoundSection() {
           <Select
             value={prefs.presetId}
             onValueChange={(presetId) => {
-              update({ ...prefs, presetId: presetId as SoundPresetId });
+              if (!isSoundPresetId(presetId)) return;
+              update({ ...prefs, presetId });
               playSoundPreset(presetId);
             }}
           >

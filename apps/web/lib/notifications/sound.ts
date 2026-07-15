@@ -55,7 +55,7 @@ export type SoundPreferences = {
 
 const SOUND_PREFS_KEY = "kandev.notifications.sound";
 
-function isSoundPresetId(value: unknown): value is SoundPresetId {
+export function isSoundPresetId(value: unknown): value is SoundPresetId {
   return SOUND_PRESETS.some((preset) => preset.id === value);
 }
 
@@ -108,11 +108,13 @@ function scheduleNote(ctx: AudioContext, note: SoundNote): void {
 // A suspended context (autoplay policy, no user gesture yet) resumes only when the
 // user eventually interacts. Scheduling before resume() fulfills would queue every
 // pending alert and play them stacked at that later moment — so at most one play is
-// kept pending, scheduled after resume() fulfills, and dropped as stale if that
-// takes longer than this.
+// kept pending (newer requests replace it), scheduled after resume() fulfills, and
+// dropped as stale if that takes longer than this.
 const STALE_PLAY_TIMEOUT_MS = 2000;
 
-let pendingResumePlay = false;
+type PendingPlay = { preset: SoundPreset; requestedAt: number; stillWanted: () => boolean };
+
+let pendingPlay: PendingPlay | null = null;
 
 function schedulePreset(ctx: AudioContext, preset: SoundPreset): void {
   try {
@@ -123,7 +125,7 @@ function schedulePreset(ctx: AudioContext, preset: SoundPreset): void {
 }
 
 /** Best-effort playback: autoplay policy or a broken audio stack must never break the app. */
-export function playSoundPreset(presetId: string): void {
+export function playSoundPreset(presetId: string, stillWanted: () => boolean = () => true): void {
   const preset = SOUND_PRESETS.find((p) => p.id === presetId) ?? SOUND_PRESETS[0];
   const ctx = getSharedAudioContext();
   if (!ctx) return;
@@ -132,21 +134,25 @@ export function playSoundPreset(presetId: string): void {
     return;
   }
   // Suspended (autoplay policy) or interrupted (iOS backgrounding): resume first.
-  if (pendingResumePlay) return;
+  const resumeInFlight = pendingPlay !== null;
+  pendingPlay = { preset, requestedAt: Date.now(), stillWanted };
+  if (resumeInFlight) return;
   try {
-    pendingResumePlay = true;
-    const requestedAt = Date.now();
     ctx
       .resume()
       .then(() => {
-        pendingResumePlay = false;
-        if (Date.now() - requestedAt < STALE_PLAY_TIMEOUT_MS) schedulePreset(ctx, preset);
+        const pending = pendingPlay;
+        pendingPlay = null;
+        if (!pending) return;
+        if (Date.now() - pending.requestedAt < STALE_PLAY_TIMEOUT_MS && pending.stillWanted()) {
+          schedulePreset(ctx, pending.preset);
+        }
       })
       .catch(() => {
-        pendingResumePlay = false;
+        pendingPlay = null;
       });
   } catch {
-    pendingResumePlay = false;
+    pendingPlay = null;
   }
 }
 
@@ -154,5 +160,5 @@ export function playSoundPreset(presetId: string): void {
 export function playWaitingForInputSound(): void {
   const prefs = getSoundPreferences();
   if (!prefs.enabled) return;
-  playSoundPreset(prefs.presetId);
+  playSoundPreset(prefs.presetId, () => getSoundPreferences().enabled);
 }
