@@ -34,7 +34,10 @@ export function WorkflowCardHeaderActions({
     <div className="flex flex-wrap justify-end gap-2">
       <Tooltip>
         <TooltipTrigger asChild>
-          <span>
+          <span
+            tabIndex={exportDisabled ? 0 : undefined}
+            aria-label={exportDisabled ? "Save the workflow before exporting." : undefined}
+          >
             <Button
               type="button"
               variant="outline"

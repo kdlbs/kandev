@@ -45,7 +45,7 @@ export function SettingsFloatingSave({
   return (
     <>
       <div
-        className="pointer-events-none fixed right-[calc(1rem+env(safe-area-inset-right))] bottom-[calc(1rem+env(safe-area-inset-bottom))] z-40 max-w-[calc(100vw_-_2rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))]"
+        className="pointer-events-none fixed right-[calc(1rem_+_env(safe-area-inset-right))] bottom-[calc(1rem_+_env(safe-area-inset-bottom))] z-40 max-w-[calc(100vw_-_2rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))]"
         data-testid="settings-floating-save"
         data-dirty-contributors={dirtyContributorIds}
       >
