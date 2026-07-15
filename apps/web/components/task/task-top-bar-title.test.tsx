@@ -88,6 +88,17 @@ describe("TaskTopBarTitle", () => {
     expect(queryInput()).toBeNull();
   });
 
+  it("ignores Enter fired during IME composition", () => {
+    render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
+
+    const input = startEditing();
+    fireEvent.change(input, { target: { value: "New title" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+
+    expect(mockRename).not.toHaveBeenCalled();
+    expect(queryInput()).not.toBeNull();
+  });
+
   it("cancels on Escape without renaming", () => {
     render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
 

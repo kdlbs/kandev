@@ -28,6 +28,9 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // IME composition uses Enter to confirm a candidate; let the IME
+      // handle it instead of committing the rename.
+      if (e.nativeEvent.isComposing) return;
       if (e.key === "Enter") {
         e.preventDefault();
         const trimmed = draft.trim();
