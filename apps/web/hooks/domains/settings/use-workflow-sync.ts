@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/toast-provider";
+import { useRouter } from "@/lib/routing/client-router";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getWorkflowSyncConfig,
@@ -111,8 +112,17 @@ function useWorkflowSyncForm() {
   return { form, url, urlInvalid, update, setUrlInput, reset };
 }
 
+type SyncToast = { description: string; variant?: "success" | "error" | "default" };
+
+function syncOutcomeToast(error: string | undefined, warnings: string[] | undefined): SyncToast {
+  if (error) return { description: `Sync failed: ${error}`, variant: "error" };
+  if (warnings?.length) return { description: "Sync completed with warnings", variant: "default" };
+  return { description: "Workflow sync completed", variant: "success" };
+}
+
 export function useWorkflowSync(workspaceId: string) {
   const { toast } = useToast();
+  const router = useRouter();
   const [config, setConfig] = useState<WorkflowSyncConfig | null>(null);
   const { form, url, urlInvalid, update, setUrlInput, reset } = useWorkflowSyncForm();
   const [loading, setLoading] = useState(true);
@@ -175,13 +185,16 @@ export function useWorkflowSync(workspaceId: string) {
       await deleteWorkflowSyncConfig({ workspaceId });
       setConfig(null);
       reset(null);
-      toast({ description: "Workflow sync configuration removed", variant: "success" });
+      toast({ description: "Workflow sync removed — synced workflows are editable again" });
+      // Released workflows lose their read-only state server-side; reload the
+      // page data so the cards unlock without a manual refresh.
+      router.refresh();
       return true;
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
       return false;
     }
-  }, [workspaceId, toast, reset]);
+  }, [workspaceId, toast, reset, router]);
 
   const handleSyncNow = useCallback(async () => {
     setSyncing(true);
@@ -189,19 +202,18 @@ export function useWorkflowSync(workspaceId: string) {
       const res = await forceWorkflowSync({ workspaceId });
       setConfig(res.config);
       reset(res.config);
-      if (res.error) {
-        toast({ description: `Sync failed: ${res.error}`, variant: "error" });
-      } else if (res.result?.warnings?.length) {
-        toast({ description: "Sync completed with warnings", variant: "default" });
-      } else {
-        toast({ description: "Workflow sync completed", variant: "success" });
+      toast(syncOutcomeToast(res.error, res.result?.warnings));
+      // Reload the workflow list when the sync actually changed something so
+      // created/updated/deleted workflows show up without a manual refresh.
+      if (res.result && !res.result.unchanged) {
+        router.refresh();
       }
     } catch (err) {
       toast({ description: `Sync failed: ${String(err)}`, variant: "error" });
     } finally {
       setSyncing(false);
     }
-  }, [workspaceId, toast, reset]);
+  }, [workspaceId, toast, reset, router]);
 
   return {
     config,

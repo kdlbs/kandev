@@ -19,8 +19,9 @@ type fakeClients struct {
 func (f fakeClients) Client() github.Client { return f.client }
 
 type fakeApplier struct {
-	calls  [][]workflowservice.SyncFileExport
-	result *workflowservice.SyncApplyResult
+	calls    [][]workflowservice.SyncFileExport
+	result   *workflowservice.SyncApplyResult
+	released []string
 }
 
 func (f *fakeApplier) ApplySyncedWorkflows(_ context.Context, _ string, files []workflowservice.SyncFileExport) (*workflowservice.SyncApplyResult, error) {
@@ -29,6 +30,11 @@ func (f *fakeApplier) ApplySyncedWorkflows(_ context.Context, _ string, files []
 		return f.result, nil
 	}
 	return &workflowservice.SyncApplyResult{}, nil
+}
+
+func (f *fakeApplier) ReleaseSyncedWorkflows(_ context.Context, workspaceID string) ([]string, error) {
+	f.released = append(f.released, workspaceID)
+	return []string{"Dev Flow"}, nil
 }
 
 const validExportYAML = `version: 1
@@ -203,4 +209,16 @@ func TestSyncDueConfigs_SkipsPollingDisabled(t *testing.T) {
 	_, err = svc.SyncWorkspace(context.Background(), "ws-1")
 	require.NoError(t, err)
 	assert.Len(t, applier.calls, 1)
+}
+
+func TestDeleteConfigForWorkspace_ReleasesSyncedWorkflows(t *testing.T) {
+	svc, applier := setupTestService(t, seededMockClient())
+	configureWorkspace(t, svc, "ws-1")
+
+	require.NoError(t, svc.DeleteConfigForWorkspace(context.Background(), "ws-1"))
+	assert.Equal(t, []string{"ws-1"}, applier.released, "deleting the config releases its workflows")
+
+	cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
+	require.NoError(t, err)
+	assert.Nil(t, cfg)
 }

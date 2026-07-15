@@ -19,10 +19,12 @@ import (
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 )
 
-// Applier applies parsed workflow definition files to a workspace. Satisfied
-// by the workflow service.
+// Applier applies parsed workflow definition files to a workspace and
+// releases synced workflows back to manual ownership when syncing stops.
+// Satisfied by the workflow service.
 type Applier interface {
 	ApplySyncedWorkflows(ctx context.Context, workspaceID string, files []workflowservice.SyncFileExport) (*workflowservice.SyncApplyResult, error)
+	ReleaseSyncedWorkflows(ctx context.Context, workspaceID string) ([]string, error)
 }
 
 // ClientProvider hands out the GitHub client used to read the sync repo.
@@ -68,9 +70,18 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 	return s.store.UpsertConfigForWorkspace(ctx, workspaceID, req)
 }
 
-// DeleteConfigForWorkspace removes the workspace's config. Already-synced
-// workflows are left in place; they simply stop syncing.
+// DeleteConfigForWorkspace removes the workspace's config. Previously-synced
+// workflows are released back to manual ownership first so they become
+// editable again — a failed release keeps the config so the user can retry.
 func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
+	released, err := s.applier.ReleaseSyncedWorkflows(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("failed to release synced workflows: %w", err)
+	}
+	if len(released) > 0 {
+		s.logger.Info("released synced workflows",
+			zap.String("workspace_id", workspaceID), zap.Int("count", len(released)))
+	}
 	return s.store.DeleteConfigForWorkspace(ctx, workspaceID)
 }
 

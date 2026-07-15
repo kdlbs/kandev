@@ -380,3 +380,23 @@ func TestEnsureWorkflowMutable(t *testing.T) {
 	assert.NoError(t, svc.EnsureWorkflowMutable(ctx, "wf-manual"))
 	assert.Error(t, svc.EnsureWorkflowMutable(ctx, "wf-missing"), "lookup errors propagate")
 }
+
+func TestReleaseSyncedWorkflows(t *testing.T) {
+	svc, provider, _ := setupSyncService(t)
+	ctx := context.Background()
+	addSyncedWorkflow(provider, "wf-a", "ws-1", "Flow A", "flows/a.yml")
+	addSyncedWorkflow(provider, "wf-b", "ws-1", "Flow B", "flows/b.yml")
+	provider.addWorkflow("wf-manual", "ws-1", "Manual Flow")
+
+	released, err := svc.ReleaseSyncedWorkflows(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Flow A", "Flow B"}, released)
+
+	for _, id := range []string{"wf-a", "wf-b"} {
+		wf, err := provider.GetWorkflow(ctx, id)
+		require.NoError(t, err)
+		assert.Equal(t, taskmodels.WorkflowSourceManual, wf.Source, "released workflows become manual")
+		assert.Empty(t, wf.SourcePath)
+		assert.NoError(t, svc.EnsureWorkflowMutable(ctx, id), "released workflows are editable again")
+	}
+}

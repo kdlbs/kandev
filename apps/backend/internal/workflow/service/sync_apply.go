@@ -261,6 +261,32 @@ func (s *Service) applyWorkflowFields(ctx context.Context, wf *taskmodels.Workfl
 	return true, s.workflowProvider.UpdateWorkflow(ctx, wf)
 }
 
+// ReleaseSyncedWorkflows converts every GitHub-sourced workflow in the
+// workspace back to a manual, editable workflow. Called when the workspace's
+// sync configuration is removed so users aren't locked out of orphaned
+// read-only workflows.
+func (s *Service) ReleaseSyncedWorkflows(ctx context.Context, workspaceID string) ([]string, error) {
+	if s.workflowProvider == nil || s.syncOps == nil {
+		return nil, fmt.Errorf("workflow sync is not wired")
+	}
+	workflows, err := s.workflowProvider.ListWorkflows(ctx, workspaceID, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list workflows: %w", err)
+	}
+	var released []string
+	for _, wf := range workflows {
+		if wf.Source != taskmodels.WorkflowSourceGitHub {
+			continue
+		}
+		if err := s.syncOps.SetWorkflowSource(ctx, wf.ID, taskmodels.WorkflowSourceManual, ""); err != nil {
+			return released, fmt.Errorf("failed to release workflow %q: %w", wf.Name, err)
+		}
+		released = append(released, wf.Name)
+	}
+	sort.Strings(released)
+	return released, nil
+}
+
 // deleteVanishedWorkflows removes previously-synced workflows whose
 // definition disappeared from the source, unless they still hold tasks or
 // come from a file that failed to parse this round.

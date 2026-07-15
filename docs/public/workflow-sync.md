@@ -111,5 +111,5 @@ is also surfaced in the same banner with the error message.
 - Every sync — periodic or manual — reconciles the workspace against the repo,
   but only writes what actually differs, so a no-drift sync changes (and
   broadcasts) nothing.
-- Removing the sync configuration stops future syncs but leaves the already
-  synced workflows in place.
+- Removing the sync configuration releases the previously-synced workflows:
+  they stay in place but become regular, editable workflows again.
