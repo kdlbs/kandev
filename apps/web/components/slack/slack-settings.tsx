@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import Link from "@/components/routing/app-link";
 import { IconBrandSlack } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -13,12 +13,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useSlackEnabled } from "@/hooks/domains/slack/use-slack-enabled";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { useDraftedIntegrationEnabled } from "@/components/integrations/use-drafted-integration-enabled";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getSlackConfig,
@@ -69,11 +71,6 @@ function configToHealth(config: SlackConfig | null): IntegrationAuthHealth | nul
     error: config.lastError ?? "",
     checkedAt: new Date(config.lastCheckedAt),
   };
-}
-
-function saveLabel(saving: boolean, hasConfig: boolean): string {
-  if (saving) return "Saving...";
-  return hasConfig ? "Update" : "Save";
 }
 
 type SecretFieldsProps = {
@@ -301,28 +298,22 @@ function UnsupportedWarning() {
 }
 
 type ActionBarProps = {
-  saving: boolean;
   testing: boolean;
   deleting: boolean;
   loading: boolean;
   hasConfig: boolean;
-  disableSave: boolean;
   disableTest: boolean;
   onTest: () => void;
-  onSave: () => void;
   onDelete: () => void;
 };
 
 function ActionBar({
-  saving,
   testing,
   deleting,
   loading,
   hasConfig,
-  disableSave,
   disableTest,
   onTest,
-  onSave,
   onDelete,
 }: ActionBarProps) {
   return (
@@ -336,9 +327,6 @@ function ActionBar({
         title={disableTest ? "Paste a token and cookie to test the connection" : undefined}
       >
         {testing ? "Testing..." : "Test connection"}
-      </Button>
-      <Button type="button" onClick={onSave} disabled={disableSave} className="cursor-pointer">
-        {saveLabel(saving, hasConfig)}
       </Button>
       {hasConfig && (
         <Button
@@ -377,7 +365,7 @@ type SettingsActionsArgs = {
   workspaceId: string;
   form: FormState;
   setConfig: (cfg: SlackConfig | null) => void;
-  setForm: (form: FormState) => void;
+  setForm: Dispatch<SetStateAction<FormState>>;
   setTestResult: (r: TestSlackConnectionResult | null) => void;
 };
 
@@ -417,6 +405,7 @@ function useSettingsActions({
   }, [workspaceId, form, setTestResult]);
 
   const handleSave = useCallback(async () => {
+    const submitted = form;
     setSaving(true);
     try {
       const saved = await setSlackConfig(
@@ -431,11 +420,14 @@ function useSettingsActions({
         { workspaceId },
       );
       setConfig(saved);
-      setForm(configToForm(saved));
+      setForm((current) =>
+        JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
+      );
       setTestResult(null);
       toast({ description: "Slack configuration saved", variant: "success" });
     } catch (err) {
       toast({ description: `Save failed: ${String(err)}`, variant: "error" });
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -503,6 +495,7 @@ function useSlackSettings(workspaceId: string) {
       setForm((prev) => ({ ...prev, [key]: value })),
     [],
   );
+  const discard = useCallback(() => setForm(configToForm(config)), [config]);
 
   const { saving, testing, deleting, handleTest, handleSave, handleDelete } = useSettingsActions({
     workspaceId,
@@ -524,6 +517,7 @@ function useSlackSettings(workspaceId: string) {
     agents,
     loadingAgents,
     update,
+    discard,
     handleTest,
     handleSave,
     handleDelete,
@@ -532,16 +526,17 @@ function useSlackSettings(workspaceId: string) {
 
 function EnabledPill() {
   const { enabled, setEnabled } = useSlackEnabled();
+  const draft = useDraftedIntegrationEnabled({ id: "slack-enabled", enabled, persist: setEnabled });
   return (
     <div className="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1">
       <Switch
         id="slack-enabled"
-        checked={enabled}
-        onCheckedChange={setEnabled}
+        checked={draft.enabled}
+        onCheckedChange={draft.setEnabled}
         className="cursor-pointer"
       />
       <Label htmlFor="slack-enabled" className="text-xs cursor-pointer">
-        {enabled ? "Enabled" : "Disabled"}
+        {draft.enabled ? "Enabled" : "Disabled"}
       </Label>
     </div>
   );
@@ -554,6 +549,21 @@ export function SlackConnectionSection({ workspaceId }: { workspaceId: string })
   const missingAgent = !s.form.utilityAgentId;
   const disableSave = s.saving || missingSecrets || missingAgent;
   const disableTest = missingSecrets;
+  const revision = JSON.stringify(s.form);
+  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
+  let invalidReason: string | undefined;
+  if (missingSecrets) invalidReason = "A session token and cookie are required.";
+  else if (missingAgent) invalidReason = "A triage agent is required.";
+
+  useSettingsSaveContributor({
+    id: `slack-config:${workspaceId}`,
+    revision,
+    isDirty: dirty,
+    canSave: !disableSave,
+    invalidReason,
+    save: s.handleSave,
+    discard: s.discard,
+  });
 
   return (
     <SettingsSection
@@ -586,15 +596,12 @@ export function SlackConnectionSection({ workspaceId }: { workspaceId: string })
           <TestResultAlert result={s.testResult} />
           <Separator />
           <ActionBar
-            saving={s.saving}
             testing={s.testing}
             deleting={s.deleting}
             loading={s.loading}
             hasConfig={!!s.config}
-            disableSave={disableSave}
             disableTest={disableTest}
             onTest={s.handleTest}
-            onSave={s.handleSave}
             onDelete={s.handleDelete}
           />
         </CardContent>

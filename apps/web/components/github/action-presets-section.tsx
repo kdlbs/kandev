@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@kandev/ui/tabs";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
 import {
   DEFAULT_ISSUE_PRESETS,
@@ -208,46 +209,60 @@ function usePresetDrafts(workspaceId: string): {
   setIssueDraft: (next: GitHubActionPreset[]) => void;
   dirty: boolean;
   save: () => Promise<void>;
-  reset: () => Promise<void>;
+  reset: () => void;
+  discard: () => void;
   loading: boolean;
 } {
-  const { presets, save, reset, loading } = useGitHubActionPresets(workspaceId);
+  const { presets, save, loading } = useGitHubActionPresets(workspaceId);
   const [prDraft, setPrDraft] = useState<GitHubActionPreset[]>(() =>
     presets?.pr?.length ? presets.pr : DEFAULT_PR_PRESETS,
   );
   const [issueDraft, setIssueDraft] = useState<GitHubActionPreset[]>(() =>
     presets?.issue?.length ? presets.issue : DEFAULT_ISSUE_PRESETS,
   );
-  // Render-time conditional setState is React's documented "adjust state
-  // during render" pattern; it resets drafts whenever a new server response
-  // replaces the presets reference.
+  const [prBaseline, setPrBaseline] = useState(prDraft);
+  const [issueBaseline, setIssueBaseline] = useState(issueDraft);
+  const dirty = useMemo(
+    () =>
+      JSON.stringify(prBaseline) !== JSON.stringify(prDraft) ||
+      JSON.stringify(issueBaseline) !== JSON.stringify(issueDraft),
+    [prBaseline, issueBaseline, prDraft, issueDraft],
+  );
   const [syncedPresets, setSyncedPresets] = useState(presets);
-  if (presets && presets !== syncedPresets) {
+  if (presets && presets !== syncedPresets && !dirty) {
+    const nextPr = presets.pr?.length ? presets.pr : DEFAULT_PR_PRESETS;
+    const nextIssue = presets.issue?.length ? presets.issue : DEFAULT_ISSUE_PRESETS;
     setSyncedPresets(presets);
-    setPrDraft(presets.pr?.length ? presets.pr : DEFAULT_PR_PRESETS);
-    setIssueDraft(presets.issue?.length ? presets.issue : DEFAULT_ISSUE_PRESETS);
+    setPrBaseline(nextPr);
+    setIssueBaseline(nextIssue);
+    setPrDraft(nextPr);
+    setIssueDraft(nextIssue);
   }
 
-  const dirty = useMemo(() => {
-    const currentPR = presets?.pr ?? DEFAULT_PR_PRESETS;
-    const currentIssue = presets?.issue ?? DEFAULT_ISSUE_PRESETS;
-    return (
-      JSON.stringify(currentPR) !== JSON.stringify(prDraft) ||
-      JSON.stringify(currentIssue) !== JSON.stringify(issueDraft)
-    );
-  }, [presets, prDraft, issueDraft]);
-
   const persist = useCallback(async () => {
-    await save({ pr: prDraft, issue: issueDraft });
+    const submittedPr = prDraft;
+    const submittedIssue = issueDraft;
+    const response = await save({ pr: submittedPr, issue: submittedIssue });
+    const savedPr = response?.pr?.length ? response.pr : submittedPr;
+    const savedIssue = response?.issue?.length ? response.issue : submittedIssue;
+    setPrBaseline(savedPr);
+    setIssueBaseline(savedIssue);
+    setPrDraft((current) =>
+      JSON.stringify(current) === JSON.stringify(submittedPr) ? savedPr : current,
+    );
+    setIssueDraft((current) =>
+      JSON.stringify(current) === JSON.stringify(submittedIssue) ? savedIssue : current,
+    );
   }, [save, prDraft, issueDraft]);
 
-  const doReset = useCallback(async () => {
-    const response = await reset();
-    if (response) {
-      setPrDraft(response.pr?.length ? response.pr : DEFAULT_PR_PRESETS);
-      setIssueDraft(response.issue?.length ? response.issue : DEFAULT_ISSUE_PRESETS);
-    }
-  }, [reset]);
+  const doReset = useCallback(() => {
+    setPrDraft(DEFAULT_PR_PRESETS);
+    setIssueDraft(DEFAULT_ISSUE_PRESETS);
+  }, []);
+  const discard = useCallback(() => {
+    setPrDraft(prBaseline);
+    setIssueDraft(issueBaseline);
+  }, [prBaseline, issueBaseline]);
 
   return {
     prDraft,
@@ -257,40 +272,31 @@ function usePresetDrafts(workspaceId: string): {
     dirty,
     save: persist,
     reset: doReset,
+    discard,
     loading,
   };
 }
 
 export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
   const { toast } = useToast();
-  const { prDraft, issueDraft, setPrDraft, setIssueDraft, dirty, save, reset, loading } =
+  const { prDraft, issueDraft, setPrDraft, setIssueDraft, dirty, save, reset, discard, loading } =
     usePresetDrafts(workspaceId);
-  const [saving, setSaving] = useState(false);
-  const [resetting, setResetting] = useState(false);
-
-  const handleSave = async () => {
-    setSaving(true);
+  const handleSave = useCallback(async () => {
     try {
       await save();
       toast({ description: "Quick actions saved", variant: "success" });
     } catch {
       toast({ description: "Failed to save quick actions", variant: "error" });
-    } finally {
-      setSaving(false);
+      throw new Error("Failed to save quick actions");
     }
-  };
-
-  const handleReset = async () => {
-    setResetting(true);
-    try {
-      await reset();
-      toast({ description: "Quick actions reset to defaults", variant: "success" });
-    } catch {
-      toast({ description: "Failed to reset quick actions", variant: "error" });
-    } finally {
-      setResetting(false);
-    }
-  };
+  }, [save, toast]);
+  useSettingsSaveContributor({
+    id: `github-action-presets:${workspaceId}`,
+    revision: JSON.stringify([prDraft, issueDraft]),
+    isDirty: dirty,
+    save: handleSave,
+    discard,
+  });
 
   return (
     <SettingsSection
@@ -301,20 +307,12 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
           <Button
             size="sm"
             variant="outline"
-            onClick={handleReset}
-            disabled={loading || saving || resetting}
+            onClick={reset}
+            disabled={loading}
             className="cursor-pointer"
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
             Reset
-          </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={!dirty || saving}
-            className="cursor-pointer"
-          >
-            Save changes
           </Button>
         </div>
       }

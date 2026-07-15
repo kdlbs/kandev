@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { IconAlertTriangle, IconMicrophone } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -17,7 +17,6 @@ import {
 } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { ShortcutRecorder } from "@/components/settings/keyboard-shortcuts-card";
@@ -35,6 +34,7 @@ import type {
   VoiceModeSettings as VoiceModeWire,
   WhisperWebModelSize,
 } from "@/lib/types/http-voice";
+import { useSettingsSaveContributor } from "./settings-save-provider";
 
 // Single source of truth for the language options. Web Speech reads `lang`,
 // Whisper engines treat it as a hint. "auto" defers to the browser locale.
@@ -75,53 +75,73 @@ function toWire(state: VoiceModeState): VoiceModeWire {
   };
 }
 
-// ── Save hook ────────────────────────────────────────────────────────────
+type VoiceDraft = {
+  voiceMode: VoiceModeState;
+  keyboardShortcuts: StoredShortcutOverrides;
+};
 
-function useVoiceModeSaver() {
-  // Read userSettings via the store API (not as a React selector) so the
-  // async save handler reads the latest snapshot at invocation time instead
-  // of capturing a stale closure. Without this, concurrent settings updates
-  // racing with this save (or a rejection rolling back to a stale snapshot)
-  // can silently overwrite unrelated fields.
+type VoiceDraftContextValue = VoiceDraft & {
+  updateVoiceMode: (patch: Partial<VoiceModeState>) => void;
+  updateShortcuts: (shortcuts: StoredShortcutOverrides) => void;
+};
+
+const VoiceDraftContext = createContext<VoiceDraftContextValue | null>(null);
+
+function useVoiceDraft() {
+  const value = useContext(VoiceDraftContext);
+  if (!value) throw new Error("Voice settings require VoiceDraftProvider");
+  return value;
+}
+
+function VoiceDraftProvider({ children }: { children: ReactNode }) {
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
-  const setUserSettings = useAppStore((s) => s.setUserSettings);
-  const { toast } = useToast();
-  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<VoiceDraft>(() => ({
+    voiceMode: userSettings.voiceMode,
+    keyboardShortcuts: userSettings.keyboardShortcuts,
+  }));
+  const [draft, setDraft] = useState(saved);
+  const revision = JSON.stringify(draft);
 
-  const save = useCallback(
-    async (patch: Partial<VoiceModeState>) => {
-      const current = storeApi.getState().userSettings;
-      const previous = current.voiceMode;
-      const next = { ...previous, ...patch };
-      setUserSettings({ ...current, voiceMode: next });
-      setSaving(true);
-      try {
-        await updateUserSettings({ voice_mode: toWire(next) });
-      } catch {
-        // Rollback only the keys this request changed AND only when the live
-        // value still matches what we optimistically wrote. If a newer save
-        // for the same key landed first, that's now the truth — reverting
-        // would silently roll back the user's later edit.
-        const latest = storeApi.getState().userSettings;
-        const reverted: Partial<VoiceModeState> = {};
-        for (const key of Object.keys(patch) as Array<keyof VoiceModeState>) {
-          if (latest.voiceMode[key] !== next[key]) continue;
-          // Cast through unknown so the per-key assignment passes strict checks.
-          (reverted as Record<string, unknown>)[key] = previous[key];
-        }
-        setUserSettings({
-          ...latest,
-          voiceMode: { ...latest.voiceMode, ...reverted },
-        });
-        toast({ title: "Failed to save Voice Mode setting", variant: "error" });
-      } finally {
-        setSaving(false);
-      }
+  useSettingsSaveContributor({
+    id: "voice-mode",
+    revision,
+    isDirty: revision !== JSON.stringify(saved),
+    save: async () => {
+      const submitted = draft;
+      await updateUserSettings({
+        voice_mode: toWire(submitted.voiceMode),
+        keyboard_shortcuts: submitted.keyboardShortcuts,
+      });
+      setSaved(submitted);
+      setUserSettings({ ...storeApi.getState().userSettings, ...submitted });
     },
-    [storeApi, setUserSettings, toast],
+    discard: () => setDraft(saved),
+  });
+
+  const value = useMemo<VoiceDraftContextValue>(
+    () => ({
+      ...draft,
+      updateVoiceMode: (patch) =>
+        setDraft((current) => ({
+          ...current,
+          voiceMode: { ...current.voiceMode, ...patch },
+        })),
+      updateShortcuts: (keyboardShortcuts) =>
+        setDraft((current) => ({ ...current, keyboardShortcuts })),
+    }),
+    [draft],
   );
 
-  return { save, saving };
+  return <VoiceDraftContext.Provider value={value}>{children}</VoiceDraftContext.Provider>;
+}
+
+// ── Draft hook ───────────────────────────────────────────────────────────
+
+function useVoiceModeSaver() {
+  const { updateVoiceMode } = useVoiceDraft();
+  return { save: updateVoiceMode, saving: false };
 }
 
 // ── Engine card ──────────────────────────────────────────────────────────
@@ -171,7 +191,7 @@ function buildEngineOptions(caps: VoiceCapabilities): EngineOption[] {
 }
 
 function EngineCard({ caps }: { caps: VoiceCapabilities }) {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const { voiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   const options = useMemo(() => buildEngineOptions(caps), [caps]);
 
@@ -219,7 +239,7 @@ function EngineCard({ caps }: { caps: VoiceCapabilities }) {
 // ── Behavior card (language + mode + auto-send) ──────────────────────────
 
 function LanguageRow() {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const { voiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="space-y-2">
@@ -252,7 +272,7 @@ function LanguageRow() {
 }
 
 function ModeRow() {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const { voiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="space-y-2">
@@ -277,7 +297,7 @@ function ModeRow() {
 }
 
 function AutoSendRow() {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const { voiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="flex items-center justify-between">
@@ -317,7 +337,7 @@ function BehaviorCard() {
 // ── Whisper Web model card ───────────────────────────────────────────────
 
 function WhisperModelCard() {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const { voiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
 
   return (
@@ -360,7 +380,7 @@ function WhisperModelCard() {
 // ── Enable card (top-level on/off) ───────────────────────────────────────
 
 function EnableCard() {
-  const voiceMode = useAppStore((s) => s.userSettings.voiceMode);
+  const { voiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
     <Card>
@@ -416,40 +436,11 @@ function AvailabilityBanner({ caps }: { caps: VoiceCapabilities }) {
 // ── Voice keyboard shortcut card ─────────────────────────────────────────
 
 function useShortcutSaver() {
-  // Same stale-closure protection as useVoiceModeSaver — read live store
-  // state at call time so a concurrent keyboard-shortcut change from another
-  // settings card isn't clobbered by this card's optimistic update / rollback.
-  const storeApi = useAppStoreApi();
-  const setUserSettings = useAppStore((s) => s.setUserSettings);
-  const { toast } = useToast();
-  return useCallback(
-    (next: StoredShortcutOverrides) => {
-      const current = storeApi.getState().userSettings;
-      const previous = current.keyboardShortcuts;
-      setUserSettings({ ...current, keyboardShortcuts: next });
-      updateUserSettings({ keyboard_shortcuts: next }).catch(() => {
-        // Rollback only the keys this request changed AND only when the live
-        // value still matches what we optimistically wrote. Skip otherwise so
-        // a newer successful save to the same key isn't reverted.
-        const latest = storeApi.getState().userSettings;
-        const restored: StoredShortcutOverrides = { ...latest.keyboardShortcuts };
-        const changedKeys = new Set([...Object.keys(previous), ...Object.keys(next)]);
-        for (const key of changedKeys) {
-          if (previous[key] === next[key]) continue;
-          if (latest.keyboardShortcuts[key] !== next[key]) continue;
-          if (previous[key] === undefined) delete restored[key];
-          else restored[key] = previous[key];
-        }
-        setUserSettings({ ...latest, keyboardShortcuts: restored });
-        toast({ title: "Failed to save shortcut", variant: "error" });
-      });
-    },
-    [storeApi, setUserSettings, toast],
-  );
+  return useVoiceDraft().updateShortcuts;
 }
 
 function VoiceShortcutCard() {
-  const overrides = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const { keyboardShortcuts: overrides } = useVoiceDraft();
   const persist = useShortcutSaver();
   const current = getShortcut("VOICE_INPUT_TOGGLE", overrides);
 
@@ -489,9 +480,10 @@ function VoiceShortcutCard() {
 
 // ── Page ─────────────────────────────────────────────────────────────────
 
-export function VoiceModeSettings() {
+function VoiceModeSettingsContent() {
   const caps = useMemo(() => detectVoiceCapabilities(), []);
-  const enabled = useAppStore((s) => s.userSettings.voiceMode.enabled);
+  const { voiceMode } = useVoiceDraft();
+  const enabled = voiceMode.enabled;
   return (
     <SettingsSection
       icon={<IconMicrophone className="h-5 w-5" />}
@@ -514,5 +506,13 @@ export function VoiceModeSettings() {
         </div>
       </div>
     </SettingsSection>
+  );
+}
+
+export function VoiceModeSettings() {
+  return (
+    <VoiceDraftProvider>
+      <VoiceModeSettingsContent />
+    </VoiceDraftProvider>
   );
 }

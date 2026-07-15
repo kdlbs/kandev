@@ -11,7 +11,8 @@ import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { UnsavedChangesBadge } from "@/components/settings/unsaved-indicator";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { EditableCard } from "@/components/settings/editable-card";
 import { RepositoryBranchTemplateHelp } from "@/components/settings/repository-branch-template-help";
 import { DeleteRepositoryDialog } from "@/components/settings/repository-delete-dialog";
@@ -241,12 +242,10 @@ type RepositoryEditViewProps = {
   repository: RepositoryWithScripts;
   isDirty: boolean;
   areScriptsDirty: boolean;
-  saveRequest: { isLoading: boolean; status: "idle" | "loading" | "success" | "error" };
   onUpdate: (repoId: string, updates: Partial<Repository>) => void;
   onAddScript: (repoId: string) => void;
   onUpdateScript: (repoId: string, scriptId: string, updates: Partial<RepositoryScript>) => void;
   onDeleteScript: (repoId: string, scriptId: string) => void;
-  onSave: (close: () => void) => void;
   onOpenDelete: () => void;
   deleteLoading: boolean;
   close: () => void;
@@ -256,12 +255,10 @@ function RepositoryEditView({
   repository,
   isDirty,
   areScriptsDirty,
-  saveRequest,
   onUpdate,
   onAddScript,
   onUpdateScript,
   onDeleteScript,
-  onSave,
   onOpenDelete,
   deleteLoading,
   close,
@@ -278,13 +275,16 @@ function RepositoryEditView({
                 {isDirty && <UnsavedChangesBadge />}
               </Label>
             </div>
-            <UnsavedSaveButton
-              isDirty={isDirty}
-              isLoading={saveRequest.isLoading}
-              status={saveRequest.status}
-              cleanLabel="Close"
-              onClick={isDirty ? () => onSave(close) : close}
-            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="cursor-pointer"
+              aria-label="Close repository editor"
+              onClick={close}
+            >
+              <IconX className="h-4 w-4" />
+            </Button>
           </div>
 
           <RepositoryBasicFields
@@ -557,18 +557,25 @@ export function RepositoryCard({
   const isDirty = isRepositoryDirty || areScriptsDirty;
   const deleteState = useRepositoryDelete(repository.id, onDelete, () => setIsEditing(false));
 
-  const handleSave = async (close: () => void) => {
+  const handleSave = async () => {
     try {
       await saveRequest.run();
-      close();
     } catch (error) {
       toast({
         title: "Failed to save repository",
         description: error instanceof Error ? error.message : "Request failed",
         variant: "error",
       });
+      throw error;
     }
   };
+  useSettingsSaveContributor({
+    id: `repository:${repository.id}`,
+    revision: JSON.stringify(repository),
+    isDirty,
+    save: handleSave,
+    discard: () => undefined,
+  });
 
   return (
     <>
@@ -582,12 +589,10 @@ export function RepositoryCard({
             repository={repository}
             isDirty={isDirty}
             areScriptsDirty={areScriptsDirty}
-            saveRequest={saveRequest}
             onUpdate={onUpdate}
             onAddScript={onAddScript}
             onUpdateScript={onUpdateScript}
             onDeleteScript={onDeleteScript}
-            onSave={handleSave}
             onOpenDelete={deleteState.handleOpenDelete}
             deleteLoading={deleteState.buttonLoading}
             close={close}

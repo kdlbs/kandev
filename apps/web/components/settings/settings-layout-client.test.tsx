@@ -43,6 +43,18 @@ vi.mock("@/components/integrations/integration-copy-config-menu", () => ({
 }));
 
 import { SettingsLayoutClient } from "./settings-layout-client";
+import { useSettingsSaveContributor } from "./settings-save-provider";
+
+function DirtySettings() {
+  useSettingsSaveContributor({
+    id: "dirty-settings",
+    revision: 1,
+    isDirty: true,
+    save: vi.fn(),
+    discard: vi.fn(),
+  });
+  return <div>Dirty settings</div>;
+}
 
 describe("SettingsLayoutClient integrations actions", () => {
   beforeEach(() => {
@@ -100,5 +112,20 @@ describe("SettingsLayoutClient integrations actions", () => {
     );
 
     expect(screen.getByTestId(COPY_CONFIG_TEST_ID).dataset.sourceWorkspaceId).toBe("ws-1");
+  });
+
+  it("hosts the route save action and reserves safe-area scroll space", async () => {
+    pathname = "/settings/general/appearance";
+
+    render(
+      <SettingsLayoutClient>
+        <DirtySettings />
+      </SettingsLayoutClient>,
+    );
+
+    expect(await screen.findByTestId("settings-floating-save")).toBeTruthy();
+    expect(screen.getByTestId("settings-scroll-container").className).toContain(
+      "safe-area-inset-bottom",
+    );
   });
 });

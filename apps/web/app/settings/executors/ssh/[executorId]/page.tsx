@@ -110,6 +110,7 @@ function SSHExecutorView({
         key={`${executor.id}:${executor.config?.ssh_host_fingerprint ?? "none"}`}
         initial={initial}
         onSave={handleSave}
+        coordinatedSaveId={`ssh-executor:${executor.id}`}
         runningSessionCount={sessionCount}
       />
       <SSHSessionsCard executorId={executor.id} />

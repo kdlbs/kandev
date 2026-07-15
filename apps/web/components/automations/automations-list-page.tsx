@@ -6,6 +6,7 @@ import { Separator } from "@kandev/ui/separator";
 import { IconPlus, IconBolt } from "@tabler/icons-react";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
 import { AutomationsTable } from "./automations-table";
+import { useAutomationEnabledDrafts } from "./use-automation-enabled-drafts";
 
 type AutomationsListPageProps = {
   workspaceId: string;
@@ -14,14 +15,7 @@ type AutomationsListPageProps = {
 export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
   const router = useRouter();
   const { items, loading, enable, disable, trigger, remove } = useAutomations(workspaceId);
-
-  const handleToggleEnabled = async (id: string, enabled: boolean) => {
-    if (enabled) {
-      await enable(id);
-    } else {
-      await disable(id);
-    }
-  };
+  const enabledDrafts = useAutomationEnabledDrafts({ automations: items, enable, disable });
 
   const handleTrigger = async (id: string) => {
     await trigger(id);
@@ -57,9 +51,9 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
         <div className="py-12 text-center text-muted-foreground">Loading automations...</div>
       ) : (
         <AutomationsTable
-          automations={items}
+          automations={enabledDrafts.automations}
           workspaceId={workspaceId}
-          onToggleEnabled={handleToggleEnabled}
+          onToggleEnabled={enabledDrafts.setEnabled}
           onTrigger={handleTrigger}
           onDelete={handleDelete}
         />

@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@kandev/ui/tabs";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import {
   useDefaultQueryPresets,
   toStored,
@@ -127,44 +128,88 @@ function QueryEditor({
   );
 }
 
-export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string }) {
+function useDefaultQueryDrafts(workspaceId?: string) {
   const { toast } = useToast();
-  const { prPresets, issuePresets, save, reset, isCustomized } = useDefaultQueryPresets(
-    workspaceId ?? null,
-  );
+  const { prPresets, issuePresets, save } = useDefaultQueryPresets(workspaceId ?? null);
   const [prDraft, setPrDraft] = useState<StoredQueryPreset[]>(prPresets);
   const [issueDraft, setIssueDraft] = useState<StoredQueryPreset[]>(issuePresets);
-
-  // Sync drafts when external state changes
-  const [syncedPr, setSyncedPr] = useState(prPresets);
-  const [syncedIssue, setSyncedIssue] = useState(issuePresets);
-  if (prPresets !== syncedPr) {
-    setSyncedPr(prPresets);
-    setPrDraft(prPresets);
-  }
-  if (issuePresets !== syncedIssue) {
-    setSyncedIssue(issuePresets);
-    setIssueDraft(issuePresets);
-  }
+  const [prBaseline, setPrBaseline] = useState(prPresets);
+  const [issueBaseline, setIssueBaseline] = useState(issuePresets);
 
   const dirty = useMemo(
     () =>
-      JSON.stringify(prPresets) !== JSON.stringify(prDraft) ||
-      JSON.stringify(issuePresets) !== JSON.stringify(issueDraft),
-    [prPresets, issuePresets, prDraft, issueDraft],
+      JSON.stringify(prBaseline) !== JSON.stringify(prDraft) ||
+      JSON.stringify(issueBaseline) !== JSON.stringify(issueDraft),
+    [prBaseline, issueBaseline, prDraft, issueDraft],
   );
 
-  const handleSave = useCallback(() => {
-    save({ pr: prDraft, issue: issueDraft });
-    toast({ description: "Default queries saved", variant: "success" });
+  const [syncedPr, setSyncedPr] = useState(prPresets);
+  const [syncedIssue, setSyncedIssue] = useState(issuePresets);
+  if (prPresets !== syncedPr && !dirty) {
+    setSyncedPr(prPresets);
+    setPrBaseline(prPresets);
+    setPrDraft(prPresets);
+  }
+  if (issuePresets !== syncedIssue && !dirty) {
+    setSyncedIssue(issuePresets);
+    setIssueBaseline(issuePresets);
+    setIssueDraft(issuePresets);
+  }
+
+  const handleSave = useCallback(async () => {
+    const submittedPr = prDraft;
+    const submittedIssue = issueDraft;
+    try {
+      await save({ pr: submittedPr, issue: submittedIssue });
+      setPrBaseline(submittedPr);
+      setIssueBaseline(submittedIssue);
+      setPrDraft((current) =>
+        JSON.stringify(current) === JSON.stringify(submittedPr) ? submittedPr : current,
+      );
+      setIssueDraft((current) =>
+        JSON.stringify(current) === JSON.stringify(submittedIssue) ? submittedIssue : current,
+      );
+      toast({ description: "Default queries saved", variant: "success" });
+    } catch {
+      toast({ description: "Failed to save default queries", variant: "error" });
+      throw new Error("Failed to save default queries");
+    }
   }, [save, prDraft, issueDraft, toast]);
 
   const handleReset = useCallback(() => {
-    reset();
     setPrDraft(toStored(BUILTIN_PR_PRESETS));
     setIssueDraft(toStored(BUILTIN_ISSUE_PRESETS));
-    toast({ description: "Default queries reset to defaults", variant: "success" });
-  }, [reset, toast]);
+  }, []);
+  const discard = useCallback(() => {
+    setPrDraft(prBaseline);
+    setIssueDraft(issueBaseline);
+  }, [prBaseline, issueBaseline]);
+  const defaultPr = toStored(BUILTIN_PR_PRESETS);
+  const defaultIssue = toStored(BUILTIN_ISSUE_PRESETS);
+  const atDefaults =
+    JSON.stringify(prDraft) === JSON.stringify(defaultPr) &&
+    JSON.stringify(issueDraft) === JSON.stringify(defaultIssue);
+
+  useSettingsSaveContributor({
+    id: `github-default-queries:${workspaceId ?? "global"}`,
+    revision: JSON.stringify([prDraft, issueDraft]),
+    isDirty: dirty,
+    save: handleSave,
+    discard,
+  });
+
+  return {
+    prDraft,
+    issueDraft,
+    setPrDraft,
+    setIssueDraft,
+    reset: handleReset,
+    atDefaults,
+  };
+}
+
+export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string }) {
+  const drafts = useDefaultQueryDrafts(workspaceId);
 
   return (
     <SettingsSection
@@ -175,15 +220,12 @@ export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string })
           <Button
             size="sm"
             variant="outline"
-            onClick={handleReset}
-            disabled={!isCustomized}
+            onClick={drafts.reset}
+            disabled={drafts.atDefaults}
             className="cursor-pointer"
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
             Reset
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={!dirty} className="cursor-pointer">
-            Save changes
           </Button>
         </div>
       }
@@ -198,10 +240,18 @@ export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string })
           </TabsTrigger>
         </TabsList>
         <TabsContent value="pr">
-          <QueryEditor presets={prDraft} onChange={setPrDraft} addLabel="Add PR query" />
+          <QueryEditor
+            presets={drafts.prDraft}
+            onChange={drafts.setPrDraft}
+            addLabel="Add PR query"
+          />
         </TabsContent>
         <TabsContent value="issue">
-          <QueryEditor presets={issueDraft} onChange={setIssueDraft} addLabel="Add issue query" />
+          <QueryEditor
+            presets={drafts.issueDraft}
+            onChange={drafts.setIssueDraft}
+            addLabel="Add issue query"
+          />
         </TabsContent>
       </Tabs>
     </SettingsSection>

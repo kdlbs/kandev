@@ -17,6 +17,7 @@ import {
 } from "@tabler/icons-react";
 import { testSSHConnection } from "@/lib/api/domains/ssh-api";
 import { FingerprintTrustBlock } from "@/components/settings/ssh-fingerprint-trust-block";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type {
   SSHIdentitySource,
   SSHTestRequest,
@@ -44,6 +45,9 @@ export interface SSHConnectionCardProps {
   // Called when the user clicks Save after a successful test+trust. The
   // returned config carries the freshly pinned fingerprint.
   onSave: (config: SSHExecutorConfig) => Promise<void> | void;
+  // Existing executor routes opt into the shared settings save coordinator.
+  // Create flows omit this and retain their local Save button.
+  coordinatedSaveId?: string;
   // Existing running sessions for this executor. Triggers the
   // "this won't affect existing sessions" warning on save.
   runningSessionCount?: number;
@@ -101,8 +105,47 @@ function initialState(initial?: Partial<SSHExecutorConfig>): SSHConnectionState 
   };
 }
 
+function confirmRunningSessions(count?: number): boolean {
+  if (!count) return true;
+  return window.confirm(
+    `This executor has ${count} running session(s). ` +
+      "They will keep running on the current host. Only new sessions started " +
+      "after save will use the updated config. Continue?",
+  );
+}
+
+type CoordinatedSSHSaveOptions = {
+  id?: string;
+  form: SSHExecutorConfig;
+  baseline: SSHExecutorConfig;
+  canSave: boolean;
+  save: () => Promise<void>;
+  discard: () => void;
+};
+
+function useCoordinatedSSHSave({
+  id,
+  form,
+  baseline,
+  canSave,
+  save,
+  discard,
+}: CoordinatedSSHSaveOptions) {
+  const revision = JSON.stringify(form);
+  useSettingsSaveContributor({
+    id: id ?? "ssh-connection-create",
+    revision,
+    isDirty: Boolean(id) && revision !== JSON.stringify(baseline),
+    canSave,
+    invalidReason: canSave ? undefined : "Test the connection and trust its fingerprint to save.",
+    save,
+    discard,
+  });
+}
+
 function useSSHConnection(props: SSHConnectionCardProps) {
   const [state, setState] = useState<SSHConnectionState>(() => initialState(props.initial));
+  const [baseline, setBaseline] = useState(() => initialState(props.initial).form);
   const { form, testing, saving, result, resultStale, trust, error } = state;
 
   const update = useCallback(
@@ -175,30 +218,30 @@ function useSSHConnection(props: SSHConnectionCardProps) {
 
   const canSave = !!result?.success && !!result.fingerprint && trust && !resultStale && !saving;
 
-  const confirmRunningSessions = useCallback(
-    () =>
-      props.runningSessionCount
-        ? window.confirm(
-            `This executor has ${props.runningSessionCount} running session(s). ` +
-              `They will keep running on the current host. Only new sessions started ` +
-              `after save will use the updated config. Continue?`,
-          )
-        : true,
-    [props.runningSessionCount],
-  );
-
   const handleSave = useCallback(async () => {
-    if (!canSave || !result?.fingerprint) return;
-    if (!confirmRunningSessions()) return;
+    if (!canSave || !result?.fingerprint) throw new Error("Test and trust this host before saving");
+    if (!confirmRunningSessions(props.runningSessionCount)) throw new Error("Save cancelled");
+    const submitted = form;
     setState((prev) => ({ ...prev, saving: true, error: null }));
     try {
-      await props.onSave({ ...form, host_fingerprint: result.fingerprint });
+      await props.onSave({ ...submitted, host_fingerprint: result.fingerprint });
+      setBaseline(submitted);
       setState((prev) => ({ ...prev, saving: false }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Failed to save executor";
       setState((prev) => ({ ...prev, saving: false, error: msg }));
+      throw e;
     }
-  }, [canSave, confirmRunningSessions, form, props, result]);
+  }, [canSave, form, props, result]);
+
+  useCoordinatedSSHSave({
+    id: props.coordinatedSaveId,
+    form,
+    baseline,
+    canSave,
+    save: handleSave,
+    discard: () => setState(initialState(baseline)),
+  });
 
   return {
     form,
@@ -245,6 +288,7 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
           canSave={c.canSave}
           onTest={c.handleTest}
           onSave={c.handleSave}
+          showSave={!props.coordinatedSaveId}
         />
         {c.error && (
           <p data-testid="ssh-error" className="text-sm text-red-600">
@@ -452,6 +496,7 @@ function SSHConnectionActions({
   canSave,
   onTest,
   onSave,
+  showSave,
 }: {
   testing: boolean;
   saving: boolean;
@@ -459,6 +504,7 @@ function SSHConnectionActions({
   canSave: boolean;
   onTest: () => void;
   onSave: () => void;
+  showSave: boolean;
 }) {
   return (
     <div className="flex items-center gap-3">
@@ -477,16 +523,18 @@ function SSHConnectionActions({
         )}
         Test connection
       </Button>
-      <Button
-        size="sm"
-        onClick={onSave}
-        disabled={!canSave}
-        data-testid="ssh-save-button"
-        className="cursor-pointer"
-      >
-        {saving ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
-        Save
-      </Button>
+      {showSave && (
+        <Button
+          size="sm"
+          onClick={onSave}
+          disabled={!canSave}
+          data-testid="ssh-save-button"
+          className="cursor-pointer"
+        >
+          {saving ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
+          Save
+        </Button>
+      )}
     </div>
   );
 }

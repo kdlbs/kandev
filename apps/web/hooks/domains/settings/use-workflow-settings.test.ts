@@ -148,6 +148,32 @@ describe("useWorkflowSettings", () => {
     expect(result.current.workflowItems[0].name).toEqual("Renamed B1");
   });
 
+  it("does not overwrite a dirty name when the store refreshes", () => {
+    const initial = [wf("wf-b1", "ws-b", NAME_B1)];
+    const { result, rerender } = renderHook(
+      ({ store }: { store: StoreWorkflow[] }) => {
+        setStore(store);
+        return useWorkflowSettings(initial, "ws-b");
+      },
+      { initialProps: { store: [STORE_B1] } },
+    );
+
+    act(() => {
+      result.current.setWorkflowItems((items) =>
+        items.map((item) => ({ ...item, name: "Unsaved local name" })),
+      );
+    });
+    act(() => {
+      rerender({ store: [{ ...STORE_B1, name: "Remote name" }] });
+    });
+
+    expect(result.current.workflowItems[0].name).toBe("Unsaved local name");
+    expect(result.current.savedWorkflowItems[0].name).toBe("Remote name");
+    expect(result.current.isWorkflowDirty(result.current.workflowItems[0])).toBe(true);
+  });
+});
+
+describe("useWorkflowSettings visibility", () => {
   it("excludes hidden system workflows from the settings list", () => {
     // System workflows like "Improve Kandev" live in the global store with
     // hidden=true so the kanban can resolve task references, but they must

@@ -279,13 +279,11 @@ function CustomEditorRow({
           title={`Edit ${editor.name}`}
           initialState={formStateFromEditor(editor)}
           onCancel={close}
-          onSave={(state) => {
-            void updateRequest.run(editor.id, state).then(() => {
-              close();
-            });
-          }}
+          onSave={(state) => updateRequest.run(editor.id, state)}
+          onSaved={close}
           submitLabel="Save changes"
           isSaving={updateRequest.isLoading}
+          coordinatedSaveId={`custom-editor:${editor.id}`}
         />
       )}
       renderPreview={({ open }) => (
@@ -496,6 +494,15 @@ function useEditorsIsDirty(state: EditorsSettingsState) {
   );
 }
 
+function getEditorsSaveRevision(state: EditorsSettingsState): string {
+  return JSON.stringify({
+    defaultEditorId: state.defaultEditorId,
+    lspAutoStartLanguages: state.lspAutoStartLanguages,
+    lspAutoInstallLanguages: state.lspAutoInstallLanguages,
+    lspConfigStrings: state.lspConfigStrings,
+  });
+}
+
 export function EditorsSettings() {
   const state = useEditorsSettingsState();
   const {
@@ -511,6 +518,8 @@ export function EditorsSettings() {
   const { createRequest, updateRequest, deleteRequest } = useEditorRequests(state, applyEditors);
   const { updateLspConfigString } = useLspConfigActions(setLspConfigStrings, setLspConfigErrors);
   const isDirty = useEditorsIsDirty(state);
+  const saveRevision = getEditorsSaveRevision(state);
+  const hasInvalidConfig = Object.keys(state.lspConfigErrors).length > 0;
 
   const toggleAutoStart = useCallback(
     (langId: string, checked: boolean) => {
@@ -550,7 +559,12 @@ export function EditorsSettings() {
       description="Configure the included code editor and external editors"
       isDirty={isDirty}
       saveStatus={saveDefaultRequest.status}
-      onSave={() => void saveDefaultRequest.run()}
+      saveRevision={saveRevision}
+      canSave={!hasInvalidConfig}
+      invalidReason={
+        hasInvalidConfig ? "Fix invalid LSP server configuration before saving." : undefined
+      }
+      onSave={() => saveDefaultRequest.run()}
     >
       <div className="space-y-6">
         <div className="space-y-4">

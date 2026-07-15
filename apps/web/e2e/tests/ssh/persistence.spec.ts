@@ -21,6 +21,40 @@ test.describe("ssh executor — persistence + UI sweep", () => {
     await expect(page.pinnedFingerprint()).toHaveText(seedData.sshTarget.hostFingerprint);
   });
 
+  test("existing executor edits persist only after the floating Save", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const page = new SSHSettingsPage(testPage);
+    await page.gotoExisting(seedData.sshExecutorId);
+
+    const originalName = await page.nameInput.inputValue();
+    const renamed = `${originalName} renamed`;
+    await page.nameInput.fill(renamed);
+    await expect(page.floatingSaveButton).toBeVisible();
+    await expect(page.floatingSaveButton).toBeDisabled();
+
+    const beforeSave = (await apiClient.listExecutors()).executors.find(
+      (executor) => executor.id === seedData.sshExecutorId,
+    );
+    expect(beforeSave?.name).toBe(originalName);
+
+    await page.clickTest();
+    expect(await page.waitForTestResult()).toBe("true");
+    await page.tickTrust();
+    await expect(page.floatingSaveButton).toBeEnabled();
+    await page.floatingSaveButton.click();
+    await expect(page.floatingSaveButton).not.toBeVisible({ timeout: 15_000 });
+
+    const afterSave = (await apiClient.listExecutors()).executors.find(
+      (executor) => executor.id === seedData.sshExecutorId,
+    );
+    expect(afterSave?.name).toBe(renamed);
+    await testPage.reload();
+    await expect(page.nameInput).toHaveValue(renamed);
+  });
+
   test("opening the new-executor form does not leak state from a prior session", async ({
     testPage,
   }) => {

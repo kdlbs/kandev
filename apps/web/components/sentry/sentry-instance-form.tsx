@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -9,6 +9,7 @@ import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import {
   createSentryInstance,
   SENTRY_ERROR_CODES,
@@ -154,10 +155,9 @@ type UseInstanceFormArgs = {
   workspaceId: string;
   instance: SentryConfig | null;
   form: FormState;
-  onSaved: (cfg: SentryConfig) => void;
 };
 
-function useInstanceForm({ workspaceId, instance, form, onSaved }: UseInstanceFormArgs) {
+function useInstanceForm({ workspaceId, instance, form }: UseInstanceFormArgs) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -203,17 +203,18 @@ function useInstanceForm({ workspaceId, instance, form, onSaved }: UseInstanceFo
             secret: form.secret,
           });
       toast({ description: "Sentry instance saved", variant: "success" });
-      onSaved(saved);
+      return saved;
     } catch (err) {
       const message =
         sentryErrorCode(err) === SENTRY_ERROR_CODES.nameTaken
           ? `An instance named "${form.name.trim()}" already exists in this workspace.`
           : `Save failed: ${String(err)}`;
       toast({ description: message, variant: "error" });
+      throw err;
     } finally {
       setSaving(false);
     }
-  }, [workspaceId, instance, form, toast, onSaved]);
+  }, [workspaceId, instance, form, toast]);
 
   return { saving, testing, testResult, candidateTest, handleTest, handleSave };
 }
@@ -228,6 +229,114 @@ type SentryInstanceFormProps = {
   onSaved: (cfg: SentryConfig) => void;
   onCancel: () => void;
 };
+
+type CoordinatedSaveOptions = {
+  instance: SentryConfig | null;
+  form: FormState;
+  setForm: (form: FormState) => void;
+  handleSave: () => Promise<SentryConfig>;
+  onSaved: (cfg: SentryConfig) => void;
+  canSave: boolean;
+};
+
+function useCoordinatedInstanceSave({
+  instance,
+  form,
+  setForm,
+  handleSave,
+  onSaved,
+  canSave,
+}: CoordinatedSaveOptions) {
+  const [baseline, setBaseline] = useState<FormState>(() => instanceToForm(instance));
+  const revision = JSON.stringify(form);
+  const latestRevision = useRef(revision);
+  latestRevision.current = revision;
+
+  useSettingsSaveContributor({
+    id: `sentry-instance:${instance?.id ?? "new"}`,
+    revision,
+    isDirty: instance !== null && revision !== JSON.stringify(baseline),
+    canSave,
+    invalidReason: canSave ? undefined : "Enter an instance name and auth token before saving.",
+    save: async (submittedRevision) => {
+      const submitted = form;
+      const saved = await handleSave();
+      setBaseline(submitted);
+      if (latestRevision.current === submittedRevision) onSaved(saved);
+    },
+    discard: () => setForm(baseline),
+  });
+
+  return async () => {
+    try {
+      onSaved(await handleSave());
+    } catch {
+      // The form already reports the API error and remains open for correction.
+    }
+  };
+}
+
+type FormActionsProps = {
+  idPrefix: string;
+  isExisting: boolean;
+  saving: boolean;
+  testing: boolean;
+  disableSave: boolean;
+  disableTest: boolean;
+  requiresTestSecret: boolean;
+  onTest: () => void;
+  onCreate: () => Promise<void>;
+  onCancel: () => void;
+};
+
+function FormActions({
+  idPrefix,
+  isExisting,
+  saving,
+  testing,
+  disableSave,
+  disableTest,
+  requiresTestSecret,
+  onTest,
+  onCreate,
+  onCancel,
+}: FormActionsProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        onClick={onTest}
+        disabled={disableTest}
+        className="cursor-pointer"
+        title={requiresTestSecret ? "Paste an auth token to test the connection" : undefined}
+        data-testid={`${idPrefix}-test-button`}
+      >
+        {testing ? "Testing..." : "Test connection"}
+      </Button>
+      {!isExisting && (
+        <Button
+          type="button"
+          onClick={() => void onCreate()}
+          disabled={disableSave}
+          className="cursor-pointer"
+          data-testid={`${idPrefix}-save-button`}
+        >
+          {saving ? "Saving..." : "Save"}
+        </Button>
+      )}
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={onCancel}
+        className="ml-auto cursor-pointer"
+        data-testid={`${idPrefix}-cancel-button`}
+      >
+        Cancel
+      </Button>
+    </div>
+  );
+}
 
 export function SentryInstanceForm({
   workspaceId,
@@ -246,7 +355,6 @@ export function SentryInstanceForm({
     workspaceId,
     instance,
     form,
-    onSaved,
   });
 
   const hasSavedSecret = !!instance?.hasSecret;
@@ -254,8 +362,16 @@ export function SentryInstanceForm({
   const requiresTestSecret = !form.secret && (candidateTest || missingSecret);
   const disableSave = saving || !form.name.trim() || missingSecret;
   const disableTest = testing || requiresTestSecret;
-  let saveLabel = instance ? "Update" : "Save";
-  if (saving) saveLabel = "Saving...";
+  const isExisting = instance !== null;
+  const canSave = Boolean(form.name.trim()) && !missingSecret;
+  const handleCreate = useCoordinatedInstanceSave({
+    instance,
+    form,
+    setForm,
+    handleSave,
+    onSaved,
+    canSave,
+  });
 
   return (
     <div className="space-y-4 rounded-md border p-4" data-testid={`${idPrefix}-form`}>
@@ -275,37 +391,18 @@ export function SentryInstanceForm({
       />
       <TestResultAlert result={testResult} />
       <Separator />
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={handleTest}
-          disabled={disableTest}
-          className="cursor-pointer"
-          title={requiresTestSecret ? "Paste an auth token to test the connection" : undefined}
-          data-testid={`${idPrefix}-test-button`}
-        >
-          {testing ? "Testing..." : "Test connection"}
-        </Button>
-        <Button
-          type="button"
-          onClick={handleSave}
-          disabled={disableSave}
-          className="cursor-pointer"
-          data-testid={`${idPrefix}-save-button`}
-        >
-          {saveLabel}
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={onCancel}
-          className="ml-auto cursor-pointer"
-          data-testid={`${idPrefix}-cancel-button`}
-        >
-          Cancel
-        </Button>
-      </div>
+      <FormActions
+        idPrefix={idPrefix}
+        isExisting={isExisting}
+        saving={saving}
+        testing={testing}
+        disableSave={disableSave}
+        disableTest={disableTest}
+        requiresTestSecret={requiresTestSecret}
+        onTest={handleTest}
+        onCreate={handleCreate}
+        onCancel={onCancel}
+      />
     </div>
   );
 }

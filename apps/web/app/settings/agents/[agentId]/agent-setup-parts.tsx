@@ -14,7 +14,7 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { ProfileFormFields } from "@/components/settings/profile-form-fields";
 import { ProfileEnvVarsSection } from "@/components/settings/agent-profile-page";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
@@ -204,12 +204,9 @@ export function ProfilesCard({
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
-        <div className="flex items-center gap-2">
-          <CardTitle>
-            {isCreateMode ? `Create ${displayName} Profile` : `${displayName} Profiles`}
-          </CardTitle>
-          {isAgentDirty && <UnsavedChangesBadge />}
-        </div>
+        <CardTitle>
+          {isCreateMode ? `Create ${displayName} Profile` : `${displayName} Profiles`}
+        </CardTitle>
         <Button size="sm" variant="outline" onClick={onAddProfile} className="cursor-pointer">
           <IconPlus className="h-4 w-4 mr-2" />
           Add profile
@@ -232,15 +229,18 @@ export function ProfilesCard({
           />
         ))}
       </CardContent>
-      <div className="flex justify-end px-6 pb-6">
-        <UnsavedSaveButton
-          isDirty={isAgentDirty}
-          isLoading={saveStatus === "loading"}
-          status={saveStatus}
-          onClick={onSave}
-          disabled={hasInvalidMcpConfig}
-        />
-      </div>
+      {isCreateMode && (
+        <div className="flex justify-end px-6 pb-6">
+          <UnsavedSaveButton
+            isDirty={isAgentDirty}
+            isLoading={saveStatus === "loading"}
+            status={saveStatus}
+            onClick={onSave}
+            disabled={hasInvalidMcpConfig}
+            cleanLabel="Create agent"
+          />
+        </div>
+      )}
     </Card>
   );
 }

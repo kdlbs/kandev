@@ -54,15 +54,15 @@ export function useJiraTaskPresets() {
     };
   }, []);
 
-  const save = useCallback((next: JiraStoredPreset[]) => {
+  const save = useCallback(async (next: JiraStoredPreset[]) => {
     writeVersion.current += 1;
-    void syncServer(next);
+    await syncServer(next);
     setStored(next);
   }, []);
 
-  const reset = useCallback(() => {
+  const reset = useCallback(async () => {
     writeVersion.current += 1;
-    void syncServer(null);
+    await syncServer(null);
     setStored(null);
   }, []);
 

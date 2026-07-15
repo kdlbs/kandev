@@ -13,7 +13,9 @@ export class LinearSettingsPage {
   constructor(private page: Page) {
     this.secretInput = page.getByTestId("linear-secret-input");
     this.testButton = page.getByTestId("linear-test-button");
-    this.saveButton = page.getByTestId("linear-save-button");
+    this.saveButton = page
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: /save changes/i });
     this.deleteButton = page.getByTestId("linear-delete-button");
     this.statusBanner = page.getByTestId("integration-auth-status-banner");
     this.copyConfigTrigger = page.getByTestId("integration-copy-config-trigger");

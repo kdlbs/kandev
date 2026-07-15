@@ -475,13 +475,12 @@ export function NotificationsSettings() {
   } = state;
   const appriseProviders = providers.filter((provider) => provider.type === "apprise");
 
-  const handleSave = async () => {
-    try {
-      await saveRequest.run();
-    } catch (error) {
-      console.error("[NotificationsSettings] Failed to save notifications", error);
-    }
-  };
+  const saveRevision = JSON.stringify({
+    providers: state.providers,
+    appriseEdits: state.appriseEdits,
+    appriseNameEdits: state.appriseNameEdits,
+    pendingDeletes: [...state.pendingDeletes].sort(),
+  });
 
   return (
     <SettingsPageTemplate
@@ -489,7 +488,8 @@ export function NotificationsSettings() {
       description="Configure providers and choose which events should alert you."
       isDirty={isDirty}
       saveStatus={saveRequest.status}
-      onSave={handleSave}
+      saveRevision={saveRevision}
+      onSave={() => saveRequest.run()}
     >
       <DesktopNotificationsSection
         notificationPermission={notificationPermission}

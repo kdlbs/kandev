@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { agentProfileId as toAgentProfileId, type AgentProfile } from "@/lib/types/http";
-import { isProfileDirty, toAgentProfilePatch, type DraftProfile } from "./agent-save-helpers";
+import {
+  isProfileDirty,
+  mergeSavedAgentDraft,
+  toAgentProfilePatch,
+  type DraftAgent,
+  type DraftProfile,
+} from "./agent-save-helpers";
 import type { ProfileFormData } from "@/components/settings/profile-form-fields";
 
 const baseProfile: AgentProfile = {
@@ -120,3 +126,38 @@ describe("isProfileDirty", () => {
     expect(isProfileDirty(draft, baseProfile)).toBe(false);
   });
 });
+
+describe("mergeSavedAgentDraft", () => {
+  it("remaps created profile IDs while preserving edits made during save", () => {
+    const submittedProfile = draftFrom(baseProfile, {
+      id: toAgentProfileId("draft-profile"),
+      name: "Submitted name",
+    });
+    const submitted = agentWithProfiles([submittedProfile]);
+    const current = {
+      ...submitted,
+      workspace_id: "newer-workspace",
+      profiles: [{ ...submittedProfile, name: "Newer name" }],
+    };
+    const saved = agentWithProfiles([
+      { ...submittedProfile, id: toAgentProfileId("persisted-profile") },
+    ]);
+
+    const merged = mergeSavedAgentDraft(current, submitted, saved);
+
+    expect(merged.workspace_id).toBe("newer-workspace");
+    expect(merged.profiles[0].id).toBe(toAgentProfileId("persisted-profile"));
+    expect(merged.profiles[0].name).toBe("Newer name");
+  });
+});
+
+function agentWithProfiles(profiles: DraftProfile[]): DraftAgent {
+  return {
+    id: "agent-1",
+    name: "mock-agent",
+    supports_mcp: true,
+    profiles,
+    created_at: "",
+    updated_at: "",
+  };
+}

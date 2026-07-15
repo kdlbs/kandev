@@ -15,9 +15,6 @@ import {
   type ConfigurableShortcutId,
   type StoredShortcutOverrides,
 } from "@/lib/keyboard/shortcut-overrides";
-import { useAppStore } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
-import { updateUserSettings } from "@/lib/api/domains/settings-api";
 
 type ShortcutRecorderProps = {
   shortcutId: ConfigurableShortcutId;
@@ -140,48 +137,36 @@ function renderRecorderLabel({
   return <Kbd>{formatShortcut(current)}</Kbd>;
 }
 
-export function KeyboardShortcutsCard() {
-  const storeOverrides = useAppStore((s) => s.userSettings.keyboardShortcuts);
-  const setUserSettings = useAppStore((s) => s.setUserSettings);
-  const userSettings = useAppStore((s) => s.userSettings);
-  const shortcuts = resolveAllShortcuts(storeOverrides);
-  const { toast } = useToast();
-
-  const persistOverrides = useCallback(
-    (overrides: StoredShortcutOverrides) => {
-      const previous = userSettings.keyboardShortcuts;
-      setUserSettings({ ...userSettings, keyboardShortcuts: overrides });
-      updateUserSettings({ keyboard_shortcuts: overrides }).catch(() => {
-        setUserSettings({ ...userSettings, keyboardShortcuts: previous });
-        toast({ title: "Failed to save shortcut", variant: "error" });
-      });
-    },
-    [userSettings, setUserSettings, toast],
-  );
+export function KeyboardShortcutsCard({
+  overrides,
+  onChange,
+}: {
+  overrides: StoredShortcutOverrides;
+  onChange: (overrides: StoredShortcutOverrides) => void;
+}) {
+  const shortcuts = resolveAllShortcuts(overrides);
 
   const handleChange = useCallback(
     (id: ConfigurableShortcutId, shortcut: KeyboardShortcut) => {
-      const next = { ...storeOverrides, [id]: shortcut };
-      persistOverrides(next);
+      onChange({ ...overrides, [id]: shortcut });
     },
-    [storeOverrides, persistOverrides],
+    [onChange, overrides],
   );
 
   const handleReset = useCallback(
     (id: ConfigurableShortcutId) => {
-      const next = { ...storeOverrides };
+      const next = { ...overrides };
       delete next[id];
-      persistOverrides(next);
+      onChange(next);
     },
-    [storeOverrides, persistOverrides],
+    [onChange, overrides],
   );
 
   const handleClear = useCallback(
     (id: ConfigurableShortcutId) => {
-      const next = { ...storeOverrides, [id]: UNBOUND_SHORTCUT };
-      persistOverrides(next);
+      onChange({ ...overrides, [id]: UNBOUND_SHORTCUT });
     },
-    [storeOverrides, persistOverrides],
+    [onChange, overrides],
   );
 
   const ids = Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[];
@@ -205,7 +190,7 @@ export function KeyboardShortcutsCard() {
           ))}
         </div>
         <p className="text-xs text-muted-foreground mt-3">
-          Click a shortcut to record a new key combination. Changes are saved automatically.
+          Click a shortcut to record a new key combination.
         </p>
       </CardContent>
     </Card>

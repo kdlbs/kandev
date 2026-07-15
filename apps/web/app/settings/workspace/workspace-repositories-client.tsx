@@ -38,6 +38,7 @@ import {
   areRepositoryScriptsDirty,
   cloneRepository,
   isRepositoryDirty,
+  mergeSavedRepositoryDraft,
   type RepositoryWithScripts,
 } from "@/app/settings/workspace/workspace-repositories-dirty";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
@@ -127,7 +128,11 @@ async function saveNewRepository(
     ),
   );
   const nextRepo: RepositoryWithScripts = { ...created, scripts };
-  setRepositoryItems((prev) => prev.map((item) => (item.id === repoId ? nextRepo : item)));
+  setRepositoryItems((prev) =>
+    prev.map((item) =>
+      item.id === repoId ? mergeSavedRepositoryDraft(item, repo, nextRepo) : item,
+    ),
+  );
   setSavedRepositoryItems((prev) => [cloneRepository(nextRepo), ...prev]);
 }
 
@@ -189,7 +194,11 @@ async function saveExistingRepository({
     }),
   );
   const nextRepo: RepositoryWithScripts = { ...updated, scripts: nextScripts };
-  setRepositoryItems((prev) => prev.map((item) => (item.id === repoId ? nextRepo : item)));
+  setRepositoryItems((prev) =>
+    prev.map((item) =>
+      item.id === repoId ? mergeSavedRepositoryDraft(item, repo, nextRepo) : item,
+    ),
+  );
   setSavedRepositoryItems((prev) =>
     prev.some((item) => item.id === repoId)
       ? prev.map((item) => (item.id === repoId ? cloneRepository(nextRepo) : item))

@@ -15,7 +15,7 @@ test.describe("Linear settings on mobile", () => {
     await settings.gotoWorkspace(other.id);
 
     await expect(settings.secretInput).toHaveValue("");
-    await expect(settings.saveButton).toBeDisabled();
+    await expect(settings.saveButton).toHaveCount(0);
     await expect(testPage.getByText(/leave blank to keep the current value/i)).toHaveCount(0);
   });
 });

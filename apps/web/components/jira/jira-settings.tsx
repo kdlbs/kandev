@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { TaskPresetsSection } from "@/components/jira/task-presets-section";
 import { JiraIssueWatchersSection } from "@/components/jira/jira-issue-watchers-section";
 import { useJiraEnabled } from "@/hooks/domains/jira/use-jira-enabled";
@@ -20,6 +21,7 @@ import {
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { useDraftedIntegrationEnabled } from "@/components/integrations/use-drafted-integration-enabled";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getJiraConfig,
@@ -95,11 +97,6 @@ function authAllowedForInstance(auth: JiraAuthMethod, instance: JiraInstanceType
   if (auth === "pat") return instance === "server";
   if (auth === "session_cookie") return instance === "cloud";
   return false;
-}
-
-function saveLabel(saving: boolean, hasConfig: boolean): string {
-  if (saving) return "Saving...";
-  return hasConfig ? "Update" : "Save";
 }
 
 type FieldsRowProps = {
@@ -396,28 +393,15 @@ function configToHealth(config: JiraConfig | null): IntegrationAuthHealth | null
 }
 
 type ActionBarProps = {
-  saving: boolean;
   testing: boolean;
   loading: boolean;
   hasConfig: boolean;
-  disableSave: boolean;
   disableTest: boolean;
   onTest: () => void;
-  onSave: () => void;
   onDelete: () => void;
 };
 
-function ActionBar({
-  saving,
-  testing,
-  loading,
-  hasConfig,
-  disableSave,
-  disableTest,
-  onTest,
-  onSave,
-  onDelete,
-}: ActionBarProps) {
+function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete }: ActionBarProps) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
@@ -430,15 +414,6 @@ function ActionBar({
         data-testid="jira-test-button"
       >
         {testing ? "Testing..." : "Test connection"}
-      </Button>
-      <Button
-        type="button"
-        onClick={onSave}
-        disabled={disableSave}
-        className="cursor-pointer"
-        data-testid="jira-save-button"
-      >
-        {saveLabel(saving, hasConfig)}
       </Button>
       {hasConfig && (
         <Button
@@ -520,6 +495,7 @@ function useJiraSettings(workspaceId: string) {
   }, [workspaceId, form]);
 
   const handleSave = useCallback(async () => {
+    const submitted = form;
     setSaving(true);
     try {
       const saved = await setJiraConfig(
@@ -534,13 +510,16 @@ function useJiraSettings(workspaceId: string) {
         { workspaceId },
       );
       setConfig(saved);
-      setForm(configToForm(saved));
+      setForm((current) =>
+        JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
+      );
       // Clear any inline test result from the previous credentials so the
       // alert reflects only the currently-saved state.
       setTestResult(null);
       toast({ description: "Jira configuration saved", variant: "success" });
     } catch (err) {
       toast({ description: `Save failed: ${String(err)}`, variant: "error" });
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -558,6 +537,7 @@ function useJiraSettings(workspaceId: string) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
   }, [workspaceId, toast]);
+  const discard = useCallback(() => setForm(configToForm(config)), [config]);
 
   return {
     config,
@@ -572,21 +552,23 @@ function useJiraSettings(workspaceId: string) {
     handleTest,
     handleSave,
     handleDelete,
+    discard,
   };
 }
 
 function EnabledPill() {
   const { enabled, setEnabled } = useJiraEnabled();
+  const draft = useDraftedIntegrationEnabled({ id: "jira-enabled", enabled, persist: setEnabled });
   return (
     <div className="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1">
       <Switch
         id="jira-enabled"
-        checked={enabled}
-        onCheckedChange={setEnabled}
+        checked={draft.enabled}
+        onCheckedChange={draft.setEnabled}
         className="cursor-pointer"
       />
       <Label htmlFor="jira-enabled" className="text-xs cursor-pointer">
-        {enabled ? "Enabled" : "Disabled"}
+        {draft.enabled ? "Enabled" : "Disabled"}
       </Label>
     </div>
   );
@@ -630,6 +612,22 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
   const disableSave =
     s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || missingSecret;
   const disableTest = missingSecret;
+  const revision = JSON.stringify(s.form);
+  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
+  let invalidReason: string | undefined;
+  if (!s.form.siteUrl) invalidReason = "A Jira site URL is required.";
+  else if (emailRequired && !s.form.email) invalidReason = "An email address is required.";
+  else if (missingSecret) invalidReason = "A credential is required.";
+
+  useSettingsSaveContributor({
+    id: `jira-config:${workspaceId}`,
+    revision,
+    isDirty: dirty,
+    canSave: !disableSave,
+    invalidReason,
+    save: s.handleSave,
+    discard: s.discard,
+  });
 
   return (
     <SettingsSection
@@ -654,14 +652,11 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
           <TestResultAlert result={s.testResult} />
           <Separator />
           <ActionBar
-            saving={s.saving}
             testing={s.testing}
             loading={s.loading}
             hasConfig={!!s.config}
-            disableSave={disableSave}
             disableTest={disableTest}
             onTest={s.handleTest}
-            onSave={s.handleSave}
             onDelete={s.handleDelete}
           />
         </CardContent>

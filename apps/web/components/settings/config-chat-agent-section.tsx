@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useToast } from "@/components/toast-provider";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
+import { useSettingsSaveContributor } from "./settings-save-provider";
 
 export function ConfigChatAgentSection() {
   const workspace = useAppStore(
@@ -13,36 +13,39 @@ export function ConfigChatAgentSection() {
   );
   const profiles = useAppStore((s) => s.agentProfiles.items ?? []);
   const currentProfileId = workspace?.default_config_agent_profile_id ?? "";
-  const [saving, setSaving] = useState(false);
-  const { toast } = useToast();
+  const [savedProfileId, setSavedProfileId] = useState(currentProfileId);
+  const [draftProfileId, setDraftProfileId] = useState(currentProfileId);
 
   const storeApi = useAppStoreApi();
+  const isDirty = draftProfileId !== savedProfileId;
 
-  const handleChange = async (value: string) => {
-    const effectiveValue = value === "none" ? "" : value;
-    if (!workspace) return;
-    setSaving(true);
-    try {
+  useEffect(() => {
+    if (isDirty) return;
+    setSavedProfileId(currentProfileId);
+    setDraftProfileId(currentProfileId);
+  }, [currentProfileId, isDirty, workspace?.id]);
+
+  useSettingsSaveContributor({
+    id: "utility-config-chat-agent",
+    order: 20,
+    revision: draftProfileId,
+    isDirty: Boolean(workspace) && isDirty,
+    save: async () => {
+      if (!workspace) return;
+      const submitted = draftProfileId;
       await updateWorkspaceAction(workspace.id, {
-        default_config_agent_profile_id: effectiveValue,
+        default_config_agent_profile_id: submitted,
       });
       const { workspaces, setWorkspaces } = storeApi.getState();
       setWorkspaces(
         workspaces.items.map((w) =>
-          w.id === workspace.id ? { ...w, default_config_agent_profile_id: effectiveValue } : w,
+          w.id === workspace.id ? { ...w, default_config_agent_profile_id: submitted } : w,
         ),
       );
-      toast({ title: "Configuration agent updated", variant: "success" });
-    } catch (error) {
-      toast({
-        title: "Failed to update",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "error",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
+      setSavedProfileId(submitted);
+    },
+    discard: () => setDraftProfileId(savedProfileId),
+  });
 
   if (!workspace) return null;
 
@@ -58,7 +61,10 @@ export function ConfigChatAgentSection() {
           Choose which agent profile to use for the Configuration Chat. This agent can manage your
           workflows, agent profiles, and MCP configuration.
         </p>
-        <Select value={currentProfileId || "none"} onValueChange={handleChange} disabled={saving}>
+        <Select
+          value={draftProfileId || "none"}
+          onValueChange={(value) => setDraftProfileId(value === "none" ? "" : value)}
+        >
           <SelectTrigger className="w-full max-w-sm cursor-pointer">
             <SelectValue placeholder="Choose an agent profile..." />
           </SelectTrigger>

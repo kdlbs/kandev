@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { EditorOption } from "@/lib/types/http";
+import { useSettingsSaveContributor } from "./settings-save-provider";
 
 type CustomKind = "custom_command" | "custom_remote_ssh" | "custom_hosted_url";
 
@@ -143,9 +144,11 @@ type EditorFormProps = {
   title: string;
   initialState: EditorFormState;
   onCancel: () => void;
-  onSave: (state: EditorFormState) => void;
+  onSave: (state: EditorFormState) => Promise<unknown> | void;
+  onSaved?: () => void;
   submitLabel: string;
   isSaving: boolean;
+  coordinatedSaveId?: string;
 };
 
 function EditorKindFields({
@@ -209,14 +212,21 @@ export function EditorForm({
   initialState,
   onCancel,
   onSave,
+  onSaved,
   submitLabel,
   isSaving,
+  coordinatedSaveId,
 }: EditorFormProps) {
   const [state, setState] = useState<EditorFormState>(initialState);
+  const [baseline, setBaseline] = useState<EditorFormState>(initialState);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   useEffect(() => {
+    if (JSON.stringify(stateRef.current) !== JSON.stringify(baseline)) return;
     setState(initialState);
-  }, [initialState]);
+    setBaseline(initialState);
+  }, [baseline, initialState]);
 
   const setField = <K extends keyof EditorFormState>(key: K, value: EditorFormState[K]) => {
     setState((prev) => ({ ...prev, [key]: value }));
@@ -233,8 +243,25 @@ export function EditorForm({
 
   const handleSave = () => {
     const resolvedName = resolveEditorName(state);
-    onSave(resolvedName === state.name ? state : { ...state, name: resolvedName });
+    void onSave(resolvedName === state.name ? state : { ...state, name: resolvedName });
   };
+  const revision = JSON.stringify(state);
+  const normalizedState =
+    resolveEditorName(state) === state.name ? state : { ...state, name: resolveEditorName(state) };
+  useSettingsSaveContributor({
+    id: coordinatedSaveId ?? `editor-form-local:${title}`,
+    revision,
+    isDirty: Boolean(coordinatedSaveId) && revision !== JSON.stringify(baseline),
+    canSave: isValid,
+    invalidReason: isValid ? undefined : "Complete the required editor fields before saving.",
+    save: async () => {
+      const submitted = normalizedState;
+      await onSave(submitted);
+      setBaseline(submitted);
+      if (JSON.stringify(stateRef.current) === JSON.stringify(state)) onSaved?.();
+    },
+    discard: () => setState(baseline),
+  });
 
   return (
     <div className="rounded-lg border border-border/70 bg-background p-4 space-y-4">
@@ -262,9 +289,11 @@ export function EditorForm({
         <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>
           Cancel
         </Button>
-        <Button type="button" onClick={handleSave} disabled={isSaving || !isValid}>
-          {submitLabel}
-        </Button>
+        {!coordinatedSaveId && (
+          <Button type="button" onClick={handleSave} disabled={isSaving || !isValid}>
+            {submitLabel}
+          </Button>
+        )}
       </div>
     </div>
   );

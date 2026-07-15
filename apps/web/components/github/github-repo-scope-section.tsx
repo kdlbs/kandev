@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Button } from "@kandev/ui/button";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import {
   fetchGitHubWorkspaceSettings,
   updateGitHubWorkspaceSettings,
@@ -118,13 +118,17 @@ function RepositoryScopeFields({
   );
 }
 
-export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string }) {
+function useGitHubRepoScopeDraft(workspaceId: string) {
   const { toast } = useToast();
   const [mode, setMode] = useState<GitHubRepoScopeMode>("all");
   const [orgs, setOrgs] = useState("");
   const [repos, setRepos] = useState("");
+  const [baseline, setBaseline] = useState({
+    mode: "all" as GitHubRepoScopeMode,
+    orgs: "",
+    repos: "",
+  });
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const parsedRepos = useMemo(() => parseRepoFilters(repos), [repos]);
   const invalidRepos = useMemo(() => {
     const entries = splitCSV(repos);
@@ -137,9 +141,15 @@ export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string })
     void fetchGitHubWorkspaceSettings(workspaceId)
       .then((settings) => {
         if (cancelled) return;
-        setMode(settings.repo_scope_mode ?? "all");
-        setOrgs((settings.repo_scope_orgs ?? []).join(", "));
-        setRepos(repoFiltersToInput(settings.repo_scope_repos ?? []));
+        const next = {
+          mode: settings.repo_scope_mode ?? "all",
+          orgs: (settings.repo_scope_orgs ?? []).join(", "),
+          repos: repoFiltersToInput(settings.repo_scope_repos ?? []),
+        };
+        setBaseline(next);
+        setMode(next.mode);
+        setOrgs(next.orgs);
+        setRepos(next.repos);
       })
       .catch(() => {
         if (!cancelled)
@@ -153,12 +163,8 @@ export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string })
     };
   }, [toast, workspaceId]);
 
-  const save = async () => {
-    if (invalidRepos) {
-      toast({ description: "Repository filters must use owner/repo format", variant: "error" });
-      return;
-    }
-    setSaving(true);
+  const save = useCallback(async () => {
+    const submitted = { mode, orgs, repos };
     try {
       const payload: UpdateGitHubWorkspaceSettingsRequest = {
         workspace_id: workspaceId,
@@ -171,42 +177,68 @@ export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string })
         payload.repo_scope_repos = parsedRepos;
       }
       const updated = await updateGitHubWorkspaceSettings(payload);
-      setMode(updated.repo_scope_mode);
-      setOrgs((updated.repo_scope_orgs ?? []).join(", "));
-      setRepos(repoFiltersToInput(updated.repo_scope_repos ?? []));
+      const saved = {
+        mode: updated.repo_scope_mode,
+        orgs: (updated.repo_scope_orgs ?? []).join(", "),
+        repos: repoFiltersToInput(updated.repo_scope_repos ?? []),
+      };
+      setBaseline(saved);
+      setMode((current) => (current === submitted.mode ? saved.mode : current));
+      setOrgs((current) => (current === submitted.orgs ? saved.orgs : current));
+      setRepos((current) => (current === submitted.repos ? saved.repos : current));
       toast({ description: "GitHub workspace settings saved", variant: "success" });
     } catch {
       toast({ description: "Failed to save GitHub workspace settings", variant: "error" });
-    } finally {
-      setSaving(false);
+      throw new Error("Failed to save GitHub workspace settings");
     }
+  }, [mode, orgs, parsedRepos, repos, toast, workspaceId]);
+  const discard = useCallback(() => {
+    setMode(baseline.mode);
+    setOrgs(baseline.orgs);
+    setRepos(baseline.repos);
+  }, [baseline]);
+  const revision = JSON.stringify([mode, orgs, repos]);
+  const dirty = revision !== JSON.stringify([baseline.mode, baseline.orgs, baseline.repos]);
+
+  useSettingsSaveContributor({
+    id: `github-repo-scope:${workspaceId}`,
+    revision,
+    isDirty: dirty,
+    canSave: !loading && !invalidRepos,
+    invalidReason: invalidRepos ? "Use comma-separated owner/repo values." : undefined,
+    save,
+    discard,
+  });
+
+  return {
+    mode,
+    orgs,
+    repos,
+    loading,
+    invalidRepos,
+    setMode,
+    setOrgs,
+    setRepos,
   };
+}
+
+export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string }) {
+  const draft = useGitHubRepoScopeDraft(workspaceId);
 
   return (
     <SettingsSection
       title="Repository Scope"
       description="Choose which GitHub repositories belong to this workspace."
-      action={
-        <Button
-          size="sm"
-          onClick={save}
-          disabled={loading || saving}
-          data-testid="github-scope-save"
-          className="cursor-pointer"
-        >
-          {saving ? "Saving..." : "Save"}
-        </Button>
-      }
     >
       <RepositoryScopeFields
-        mode={mode}
-        orgs={orgs}
-        repos={repos}
-        loading={loading}
-        invalidRepos={invalidRepos}
-        onModeChange={setMode}
-        onOrgsChange={setOrgs}
-        onReposChange={setRepos}
+        mode={draft.mode}
+        orgs={draft.orgs}
+        repos={draft.repos}
+        loading={draft.loading}
+        invalidRepos={draft.invalidRepos}
+        onModeChange={draft.setMode}
+        onOrgsChange={draft.setOrgs}
+        onReposChange={draft.setRepos}
       />
     </SettingsSection>
   );

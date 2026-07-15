@@ -26,7 +26,7 @@ type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -102,7 +102,6 @@ function SelectField({
 }
 
 type WorkspaceSettingsCardProps = {
-  isDirty: boolean;
   workspaceNameDraft: string;
   onNameChange: (value: string) => void;
   defaultExecutorId: string;
@@ -112,13 +111,9 @@ type WorkspaceSettingsCardProps = {
   defaultAgentProfileId: string;
   onAgentProfileChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
-  isLoading: boolean;
-  saveStatus: "idle" | "loading" | "success" | "error";
-  onSave: () => void;
 };
 
 function WorkspaceSettingsCard({
-  isDirty,
   workspaceNameDraft,
   onNameChange,
   defaultExecutorId,
@@ -128,9 +123,6 @@ function WorkspaceSettingsCard({
   defaultAgentProfileId,
   onAgentProfileChange,
   agentProfiles,
-  isLoading,
-  saveStatus,
-  onSave,
 }: WorkspaceSettingsCardProps) {
   const executorOptions = activeExecutors.map((e: Executor) => ({ id: e.id, name: e.name }));
   const profileOptions = agentProfiles.map((p: AgentProfileOption) => ({
@@ -140,10 +132,7 @@ function WorkspaceSettingsCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <span>Workspace Settings</span>
-          {isDirty && <UnsavedChangesBadge />}
-        </CardTitle>
+        <CardTitle>Workspace Settings</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
@@ -171,14 +160,6 @@ function WorkspaceSettingsCard({
             emptyLabel="No agent profiles available"
             emptyValue="empty-agent-profiles"
           />
-          <div className="flex justify-end pt-2">
-            <UnsavedSaveButton
-              isDirty={isDirty}
-              isLoading={isLoading}
-              status={saveStatus}
-              onClick={onSave}
-            />
-          </div>
         </div>
       </CardContent>
     </Card>
@@ -391,6 +372,7 @@ function buildSaveHandler({
         description: error instanceof Error ? error.message : "Request failed",
         variant: "error",
       });
+      throw error;
     }
   };
 }
@@ -476,7 +458,6 @@ function useWorkspaceEditForm(workspace: Workspace) {
     executors,
     agentProfiles,
     isDirty,
-    saveWorkspaceRequest,
     handleSave,
     handleDeleteWorkspace,
   };
@@ -499,10 +480,23 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     executors,
     agentProfiles,
     isDirty,
-    saveWorkspaceRequest,
     handleSave,
     handleDeleteWorkspace,
   } = useWorkspaceEditForm(workspace);
+
+  useSettingsSaveContributor({
+    id: `workspace:${currentWorkspace.id}`,
+    revision: JSON.stringify({
+      workspaceNameDraft,
+      defaultExecutorId,
+      defaultAgentProfileId,
+    }),
+    isDirty,
+    canSave: Boolean(workspaceNameDraft.trim()),
+    invalidReason: workspaceNameDraft.trim() ? undefined : "Workspace name is required.",
+    save: handleSave,
+    discard: () => undefined,
+  });
 
   return (
     <div className="space-y-8">
@@ -514,7 +508,6 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       </div>
       <Separator />
       <WorkspaceSettingsCard
-        isDirty={isDirty}
         workspaceNameDraft={workspaceNameDraft}
         onNameChange={setWorkspaceNameDraft}
         defaultExecutorId={defaultExecutorId}
@@ -524,9 +517,6 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
         defaultAgentProfileId={defaultAgentProfileId}
         onAgentProfileChange={setDefaultAgentProfileId}
         agentProfiles={agentProfiles}
-        isLoading={saveWorkspaceRequest.isLoading}
-        saveStatus={saveWorkspaceRequest.status}
-        onSave={handleSave}
       />
       <WorkspaceLinksCard workspaceId={currentWorkspace.id} />
       <Separator />

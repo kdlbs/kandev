@@ -2,19 +2,14 @@
 
 import { useState } from "react";
 import {
-  createWorkflowAction,
-  createWorkflowStepAction,
-  deleteWorkflowAction,
-  listWorkflowStepsAction,
-} from "@/app/actions/workspaces";
-import type {
-  StepDefinition,
-  Workflow,
-  WorkflowStep,
-  WorkflowTemplate,
-  Workspace,
+  workflowId as toWorkflowId,
+  workspaceId as toWorkspaceId,
+  type StepDefinition,
+  type Workflow,
+  type WorkflowStep,
+  type WorkflowTemplate,
+  type Workspace,
 } from "@/lib/types/http";
-import type { useToast } from "@/components/toast-provider";
 
 export const DEFAULT_CUSTOM_STEPS: StepDefinition[] = [
   { name: "Todo", position: 0, color: "bg-slate-500" },
@@ -27,50 +22,40 @@ type WorkflowCreationArgs = {
   workspace: Workspace | null;
   workflowTemplates: WorkflowTemplate[];
   setWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
-  setSavedWorkflowItems: React.Dispatch<React.SetStateAction<Workflow[]>>;
-  toast: ReturnType<typeof useToast>["toast"];
 };
 
-async function createInitialWorkflowSteps(workflow: Workflow, templateId: string | null) {
-  if (templateId) {
-    return (await listWorkflowStepsAction(workflow.id)).steps ?? [];
-  }
-  return Promise.all(
-    DEFAULT_CUSTOM_STEPS.map((step) =>
-      createWorkflowStepAction({
-        workflow_id: workflow.id,
-        name: step.name,
-        position: step.position,
-        color: step.color ?? "bg-slate-500",
-      }),
-    ),
-  );
+function newClientId(prefix: string): string {
+  return `${prefix}-${crypto.randomUUID()}`;
 }
 
-function addCreatedWorkflow(
-  workflow: Workflow,
-  setWorkflowItems: WorkflowCreationArgs["setWorkflowItems"],
-  setSavedWorkflowItems: WorkflowCreationArgs["setSavedWorkflowItems"],
-) {
-  setWorkflowItems((prev) =>
-    prev.some((item) => item.id === workflow.id) ? prev : [workflow, ...prev],
-  );
-  setSavedWorkflowItems((prev) =>
-    prev.some((item) => item.id === workflow.id) ? prev : [{ ...workflow }, ...prev],
-  );
+function toDraftStep(tempWorkflowId: string, definition: StepDefinition): WorkflowStep {
+  return {
+    id: `temp-template-step-${tempWorkflowId}-${definition.position}`,
+    workflow_id: toWorkflowId(tempWorkflowId),
+    name: definition.name,
+    position: definition.position,
+    color: definition.color ?? "bg-slate-500",
+    prompt: definition.prompt,
+    events: definition.events,
+    is_start_step: definition.is_start_step,
+    show_in_command_panel: definition.show_in_command_panel,
+    agent_profile_id: definition.agent_profile_id,
+    wip_limit: definition.wip_limit,
+    pull_from_step_id: definition.pull_from_step_id,
+    allow_manual_move: true,
+    created_at: "",
+    updated_at: "",
+  };
 }
 
 export function useWorkflowCreation({
   workspace,
   workflowTemplates,
   setWorkflowItems,
-  setSavedWorkflowItems,
-  toast,
 }: WorkflowCreationArgs) {
   const [isAddWorkflowDialogOpen, setIsAddWorkflowDialogOpen] = useState(false);
   const [newWorkflowName, setNewWorkflowName] = useState("");
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  const [createWorkflowLoading, setCreateWorkflowLoading] = useState(false);
   const [initialStepsByWorkflowId, setInitialStepsByWorkflowId] = useState(
     () => new Map<string, WorkflowStep[]>(),
   );
@@ -81,57 +66,48 @@ export function useWorkflowCreation({
     setIsAddWorkflowDialogOpen(true);
   };
 
-  const handleCreateWorkflow = async () => {
+  const handleCreateWorkflow = () => {
     if (!workspace) return;
-    const templateName = selectedTemplateId
-      ? (workflowTemplates.find((template) => template.id === selectedTemplateId)?.name ??
-        "New Workflow")
-      : "New Workflow";
-    let createdWorkflow: Workflow | null = null;
-    setCreateWorkflowLoading(true);
-    try {
-      const created = await createWorkflowAction({
-        workspace_id: workspace.id,
-        name: newWorkflowName.trim() || templateName,
-        workflow_template_id: selectedTemplateId || undefined,
-      });
-      createdWorkflow = created;
-      const createdSteps = await createInitialWorkflowSteps(created, selectedTemplateId);
-      setInitialStepsByWorkflowId((prev) => new Map(prev).set(created.id, createdSteps));
-      addCreatedWorkflow(created, setWorkflowItems, setSavedWorkflowItems);
-      setIsAddWorkflowDialogOpen(false);
-    } catch (error) {
-      if (createdWorkflow) {
-        const workflowToRecover = createdWorkflow;
-        try {
-          await deleteWorkflowAction(workflowToRecover.id);
-        } catch (cleanupError) {
-          addCreatedWorkflow(workflowToRecover, setWorkflowItems, setSavedWorkflowItems);
-          setIsAddWorkflowDialogOpen(false);
-          toast({
-            title: "Workflow created with setup errors",
-            description: `Initial setup failed and cleanup also failed: ${
-              cleanupError instanceof Error ? cleanupError.message : "Request failed"
-            }. The workflow was kept so you can retry or delete it.`,
-            variant: "error",
-          });
-          return;
-        }
-      }
-      toast({
-        title: "Failed to create workflow",
-        description: error instanceof Error ? error.message : "Request failed",
-        variant: "error",
-      });
-    } finally {
-      setCreateWorkflowLoading(false);
-    }
+    const template = selectedTemplateId
+      ? workflowTemplates.find((item) => item.id === selectedTemplateId)
+      : undefined;
+    const tempId = newClientId("temp-workflow");
+    const workflow: Workflow = {
+      id: toWorkflowId(tempId),
+      workspace_id: toWorkspaceId(workspace.id),
+      name: newWorkflowName.trim() || template?.name || "New Workflow",
+      description: template?.description,
+      workflow_template_id: template?.id,
+      created_at: "",
+      updated_at: "",
+    };
+    const definitions = template?.default_steps?.length
+      ? template.default_steps
+      : DEFAULT_CUSTOM_STEPS;
+    const steps = definitions.map((definition) => toDraftStep(tempId, definition));
+
+    setInitialStepsByWorkflowId((previous) => new Map(previous).set(tempId, steps));
+    setWorkflowItems((previous) => [workflow, ...previous]);
+    setIsAddWorkflowDialogOpen(false);
   };
 
   const forgetInitialSteps = (workflowId: string) => {
-    setInitialStepsByWorkflowId((prev) => {
-      const next = new Map(prev);
+    setInitialStepsByWorkflowId((previous) => {
+      const next = new Map(previous);
       next.delete(workflowId);
+      return next;
+    });
+  };
+
+  const remapInitialSteps = (
+    clientWorkflowId: string,
+    persistedWorkflowId: string,
+    steps: WorkflowStep[],
+  ) => {
+    setInitialStepsByWorkflowId((previous) => {
+      const next = new Map(previous);
+      next.delete(clientWorkflowId);
+      next.set(persistedWorkflowId, steps);
       return next;
     });
   };
@@ -143,10 +119,11 @@ export function useWorkflowCreation({
     setNewWorkflowName,
     selectedTemplateId,
     setSelectedTemplateId,
-    createWorkflowLoading,
+    createWorkflowLoading: false,
     initialStepsByWorkflowId,
     handleOpenAddWorkflowDialog,
     handleCreateWorkflow,
     forgetInitialSteps,
+    remapInitialSteps,
   };
 }

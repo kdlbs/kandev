@@ -28,6 +28,31 @@ export function cloneRepository(repo: RepositoryWithScripts): RepositoryWithScri
   return { ...repo, scripts: repo.scripts.map((script) => ({ ...script })) };
 }
 
+export function mergeSavedRepositoryDraft(
+  current: RepositoryWithScripts,
+  submitted: RepositoryWithScripts,
+  saved: RepositoryWithScripts,
+): RepositoryWithScripts {
+  if (!isRepositoryDirty(current, submitted) && !areRepositoryScriptsDirty(current, submitted)) {
+    return saved;
+  }
+  const scripts = current.scripts.map((currentScript) => {
+    const submittedIndex = submitted.scripts.findIndex((script) => script.id === currentScript.id);
+    if (submittedIndex < 0) return currentScript;
+    const submittedScript = submitted.scripts[submittedIndex];
+    const savedScript = saved.scripts[submittedIndex];
+    if (!savedScript) return currentScript;
+    const unchanged =
+      currentScript.name === submittedScript.name &&
+      currentScript.command === submittedScript.command &&
+      currentScript.position === submittedScript.position;
+    return unchanged
+      ? savedScript
+      : { ...savedScript, ...currentScript, id: savedScript.id, repository_id: saved.id };
+  });
+  return { ...saved, ...current, id: saved.id, workspace_id: saved.workspace_id, scripts };
+}
+
 export function isRepositoryDirty(
   repo: RepositoryWithScripts,
   saved: RepositoryWithScripts | undefined,

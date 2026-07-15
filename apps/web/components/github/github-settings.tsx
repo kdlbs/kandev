@@ -20,6 +20,7 @@ import { PRStatsPanel } from "./pr-stats";
 import { useReviewWatches } from "@/hooks/domains/github/use-review-watches";
 import { useIssueWatches } from "@/hooks/domains/github/use-issue-watches";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { useWatcherEnabledDrafts } from "@/components/integrations/use-watcher-enabled-drafts";
 import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
 import { cleanupMergedReviewTasks, cleanupClosedIssueTasks } from "@/lib/api/domains/github-api";
 import type { ReviewWatch, IssueWatch } from "@/lib/types/github";
@@ -121,21 +122,6 @@ function useWatchActions(workspaceId?: string | null) {
     [trigger, toast, watches],
   );
 
-  const handleToggleEnabled = useCallback(
-    async (watch: ReviewWatch) => {
-      try {
-        await update(watch.id, watch.workspace_id, { enabled: !watch.enabled });
-        toast({
-          description: watch.enabled ? "Watch paused" : "Watch enabled",
-          variant: "success",
-        });
-      } catch {
-        toast({ description: "Failed to update watch", variant: "error" });
-      }
-    },
-    [update, toast],
-  );
-
   const handleReset = useCallback(
     async (id: string, workspaceId: string) => {
       try {
@@ -163,7 +149,6 @@ function useWatchActions(workspaceId?: string | null) {
     handleDelete,
     handleTrigger,
     handleReset,
-    handleToggleEnabled,
   };
 }
 
@@ -221,21 +206,6 @@ function useIssueWatchActions(workspaceId?: string | null) {
     [trigger, toast, watches],
   );
 
-  const handleToggleEnabled = useCallback(
-    async (watch: IssueWatch) => {
-      try {
-        await update(watch.id, watch.workspace_id, { enabled: !watch.enabled });
-        toast({
-          description: watch.enabled ? "Watch paused" : "Watch enabled",
-          variant: "success",
-        });
-      } catch {
-        toast({ description: "Failed to update watch", variant: "error" });
-      }
-    },
-    [update, toast],
-  );
-
   const handleReset = useCallback(
     async (id: string, workspaceId: string) => {
       try {
@@ -263,7 +233,6 @@ function useIssueWatchActions(workspaceId?: string | null) {
     handleDelete,
     handleTrigger,
     handleReset,
-    handleToggleEnabled,
   };
 }
 
@@ -328,19 +297,22 @@ export function GitHubIntegrationPage({ workspaceId }: GitHubIntegrationPageProp
 }
 
 function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
-  const {
-    watches,
-    create,
-    update,
-    previewReset,
-    handleDelete,
-    handleTrigger,
-    handleReset,
-    handleToggleEnabled,
-  } = useWatchActions(workspaceId);
+  const { watches, create, update, previewReset, handleDelete, handleTrigger, handleReset } =
+    useWatchActions(workspaceId);
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWatch, setEditingWatch] = useState<ReviewWatch | null>(null);
+  const saveEnabled = useCallback(
+    async (watch: ReviewWatch, enabled: boolean) => {
+      await update(watch.id, watch.workspace_id, { enabled });
+    },
+    [update],
+  );
+  const enabledDrafts = useWatcherEnabledDrafts({
+    id: `github-review-watch-enabled:${workspaceId}`,
+    items: watches,
+    saveEnabled,
+  });
   const resetCtrl = useWatchResetController<ReviewWatch>({
     preview: (w) => previewReset(w.id, w.workspace_id),
     reset: (w) => handleReset(w.id, w.workspace_id),
@@ -354,10 +326,10 @@ function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
   const { setResetting: setReviewResetting } = resetCtrl;
   const onResetClick = useCallback(
     (id: string) => {
-      const w = watches.find((item) => item.id === id);
+      const w = enabledDrafts.items.find((item) => item.id === id);
       if (w) setReviewResetting(w);
     },
-    [watches, setReviewResetting],
+    [enabledDrafts.items, setReviewResetting],
   );
 
   return (
@@ -388,12 +360,12 @@ function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
         <Card>
           <CardContent className="p-0">
             <ReviewWatchTable
-              watches={watches}
+              watches={enabledDrafts.items}
               onEdit={handleEdit}
               onDelete={handleDelete}
               onTrigger={handleTrigger}
               onReset={onResetClick}
-              onToggleEnabled={handleToggleEnabled}
+              onToggleEnabled={enabledDrafts.toggleEnabled}
             />
           </CardContent>
         </Card>
@@ -432,6 +404,17 @@ function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingWatch, setEditingIssueWatch] = useState<IssueWatch | null>(null);
+  const saveEnabled = useCallback(
+    async (watch: IssueWatch, enabled: boolean) => {
+      await issueActions.update(watch.id, watch.workspace_id, { enabled });
+    },
+    [issueActions.update],
+  );
+  const enabledDrafts = useWatcherEnabledDrafts({
+    id: `github-issue-watch-enabled:${workspaceId}`,
+    items: issueActions.watches,
+    saveEnabled,
+  });
   const resetCtrl = useWatchResetController<IssueWatch>({
     preview: (w) => issueActions.previewReset(w.id, w.workspace_id),
     reset: (w) => issueActions.handleReset(w.id, w.workspace_id),
@@ -445,10 +428,10 @@ function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
   const { setResetting: setIssueResetting } = resetCtrl;
   const onResetClick = useCallback(
     (id: string) => {
-      const w = issueActions.watches.find((item) => item.id === id);
+      const w = enabledDrafts.items.find((item) => item.id === id);
       if (w) setIssueResetting(w);
     },
-    [issueActions.watches, setIssueResetting],
+    [enabledDrafts.items, setIssueResetting],
   );
 
   return (
@@ -479,12 +462,12 @@ function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
         <Card>
           <CardContent className="p-0">
             <IssueWatchTable
-              watches={issueActions.watches}
+              watches={enabledDrafts.items}
               onEdit={handleEdit}
               onDelete={issueActions.handleDelete}
               onTrigger={issueActions.handleTrigger}
               onReset={onResetClick}
-              onToggleEnabled={issueActions.handleToggleEnabled}
+              onToggleEnabled={enabledDrafts.toggleEnabled}
             />
           </CardContent>
         </Card>

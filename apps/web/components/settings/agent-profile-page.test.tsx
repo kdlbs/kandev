@@ -1,8 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { useState } from "react";
-import { ProfileEnvVarsEditor } from "@/components/settings/agent-profile-page";
-import type { ProfileEnvVar } from "@/lib/types/http";
+import {
+  preserveNewerProfileDraft,
+  ProfileEnvVarsEditor,
+} from "@/components/settings/agent-profile-page";
+import type { AgentProfile, ProfileEnvVar } from "@/lib/types/http";
 
 afterEach(cleanup);
 
@@ -41,3 +44,30 @@ describe("ProfileEnvVarsEditor", () => {
     await waitFor(() => expect(screen.getByTestId("change-count").textContent).toBe("1"));
   });
 });
+
+describe("preserveNewerProfileDraft", () => {
+  it("keeps a profile edit made while save is in flight", () => {
+    const submitted = profile("submitted");
+    const current = { ...submitted, name: "newer" };
+    const saved = { ...submitted, updatedAt: "saved" };
+
+    expect(preserveNewerProfileDraft(current, submitted, saved)).toBe(current);
+    expect(preserveNewerProfileDraft(submitted, submitted, saved)).toBe(saved);
+  });
+});
+
+function profile(name: string): AgentProfile {
+  return {
+    id: "profile-1" as AgentProfile["id"],
+    agentId: "agent-1",
+    name,
+    agentDisplayName: "Agent",
+    model: "model",
+    allowIndexing: false,
+    autoApprove: false,
+    cliFlags: [],
+    cliPassthrough: false,
+    createdAt: "",
+    updatedAt: "",
+  };
+}

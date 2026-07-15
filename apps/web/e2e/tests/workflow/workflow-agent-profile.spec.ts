@@ -1,6 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
-import { waitForMutation } from "../../helpers/wait-for-mutation";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import { KanbanPage } from "../../pages/kanban-page";
 
@@ -8,7 +7,7 @@ import { KanbanPage } from "../../pages/kanban-page";
 useRegularMode();
 
 test.describe("Workflow agent profile", () => {
-  test("autosaves the workflow-level agent profile in settings", async ({
+  test("saves the workflow-level agent profile explicitly", async ({
     testPage,
     seedData,
     apiClient,
@@ -32,12 +31,14 @@ test.describe("Workflow agent profile", () => {
 
     // Open the select and pick the agent profile
     await profileSelect.click();
-    await Promise.all([
-      waitForMutation(testPage, "PATCH", /^\/api\/v1\/workflows\/[^/]+$/),
-      testPage.getByRole("option", { name: profileLabel }).click(),
-    ]);
+    await testPage.getByRole("option", { name: profileLabel }).click();
 
-    await expect(page.saveStatus(card)).toContainText("Saved");
+    expect(
+      (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
+        (workflow) => workflow.id === seedData.workflowId,
+      )?.agent_profile_id,
+    ).not.toBe(agentProfile.id);
+    await page.saveChanges();
 
     // Reload and verify the selection persists
     await page.goto(seedData.workspaceId);
@@ -80,12 +81,12 @@ test.describe("Workflow agent profile", () => {
       content: '[data-slot="tooltip-content"] { display: none !important; }',
     });
     await stepProfileSelect.click();
-    await Promise.all([
-      waitForMutation(testPage, "PUT", /^\/api\/v1\/workflow\/steps\/[^/]+$/),
-      testPage.getByRole("option", { name: profileLabel }).click(),
-    ]);
+    await testPage.getByRole("option", { name: profileLabel }).click();
 
-    await expect(page.saveStatus(card)).toContainText("Saved");
+    expect(
+      (await apiClient.listWorkflowSteps(seedData.workflowId)).steps[0]?.agent_profile_id,
+    ).not.toBe(agentProfile.id);
+    await page.saveChanges();
 
     // Reload and verify - the step should now show the agent profile icon (IconUserCog)
     await page.goto(seedData.workspaceId);

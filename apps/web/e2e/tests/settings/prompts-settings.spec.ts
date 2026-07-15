@@ -57,14 +57,18 @@ test.describe("Prompts settings — duplicate name handling", () => {
 
     const nameInput = betaRow.getByTestId("prompt-name-input");
     await nameInput.fill("alpha");
-    await betaRow.getByTestId("prompt-submit").click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
 
     const toast = testPage.getByTestId("toast-message");
     await expect(toast).toBeVisible({ timeout: 5_000 });
     await expect(toast).toContainText(/already exists/i);
 
-    // Backend rejected — the row must still exist under its original name.
-    await testPage.reload();
+    // Backend rejected. Cancel the dirty draft and confirm the original row
+    // remains visible without forcing a guarded page reload.
+    await betaRow.getByRole("button", { name: "Cancel" }).click();
     await expect(
       testPage.locator('[data-testid="prompt-list-item"][data-prompt-name="beta"]'),
     ).toBeVisible();

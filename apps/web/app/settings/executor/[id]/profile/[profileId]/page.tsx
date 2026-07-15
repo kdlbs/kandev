@@ -18,8 +18,8 @@ import {
 } from "@kandev/ui/dialog";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
-import { RequestIndicator } from "@/components/request-indicator";
 import { useToast } from "@/components/toast-provider";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   updateExecutorProfile,
@@ -28,7 +28,6 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 import {
-  getSaveButtonLabel,
   upsertExecutorProfile,
   type SaveStatus,
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
@@ -241,47 +240,25 @@ function EnvVarsCard({
 
 function ProfileActions({
   executorId,
-  saveStatus,
-  nameValid,
-  onSave,
   onRequestDelete,
 }: {
   executorId: string;
-  saveStatus: SaveStatus;
-  nameValid: boolean;
-  onSave: () => void;
   onRequestDelete: () => void;
 }) {
   const router = useRouter();
-  const isSaving = saveStatus === "loading";
-  const saveLabel = getSaveButtonLabel(saveStatus);
   return (
     <div className="flex items-center justify-between">
       <Button variant="destructive" size="sm" onClick={onRequestDelete} className="cursor-pointer">
         <IconTrash className="h-4 w-4 mr-1" />
         Delete Profile
       </Button>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          onClick={() => router.push(`/settings/executor/${executorId}`)}
-          className="cursor-pointer"
-        >
-          Cancel
-        </Button>
-        <Button
-          onClick={onSave}
-          disabled={!nameValid || isSaving}
-          className="min-w-36 cursor-pointer"
-        >
-          {saveLabel}
-          {saveStatus !== "idle" && (
-            <span className="ml-2">
-              <RequestIndicator status={saveStatus} />
-            </span>
-          )}
-        </Button>
-      </div>
+      <Button
+        variant="outline"
+        onClick={() => router.push(`/settings/executor/${executorId}`)}
+        className="cursor-pointer"
+      >
+        Cancel
+      </Button>
     </div>
   );
 }
@@ -349,6 +326,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         setError(message);
         setSaveStatus("error");
         toast({ title: "Failed to save profile", description: message, variant: "error" });
+        throw err;
       }
     },
     [executor, profile.id, executors, setExecutors, toast],
@@ -438,15 +416,27 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   const persistence = useProfilePersistence(executor, profile);
   const form = useProfileFormState(executor, profile);
 
-  const handleSave = () => {
-    if (!form.name.trim()) return;
-    void persistence.save({
-      name: form.name.trim(),
-      prepare_script: form.prepareScript,
-      cleanup_script: form.cleanupScript,
-      env_vars: rowsToEnvVars(form.envVarRows),
-    });
+  const savePayload = {
+    name: form.name.trim(),
+    prepare_script: form.prepareScript,
+    cleanup_script: form.cleanupScript,
+    env_vars: rowsToEnvVars(form.envVarRows),
   };
+  const saveRevision = JSON.stringify(savePayload);
+  const [savedRevision, setSavedRevision] = useState(saveRevision);
+  const handleSave = async () => {
+    await persistence.save(savePayload);
+    setSavedRevision(saveRevision);
+  };
+  useSettingsSaveContributor({
+    id: `legacy-executor-profile:${profile.id}`,
+    revision: saveRevision,
+    isDirty: saveRevision !== savedRevision,
+    canSave: Boolean(form.name.trim()),
+    invalidReason: form.name.trim() ? undefined : "Profile name is required.",
+    save: handleSave,
+    discard: () => undefined,
+  });
 
   return (
     <div className="space-y-8">
@@ -502,9 +492,6 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
       <ProfileActions
         executorId={executor.id}
-        saveStatus={persistence.saveStatus}
-        nameValid={Boolean(form.name.trim())}
-        onSave={handleSave}
         onRequestDelete={() => persistence.setDeleteDialogOpen(true)}
       />
       <DeleteProfileDialog

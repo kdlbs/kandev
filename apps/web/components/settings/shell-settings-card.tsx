@@ -3,14 +3,9 @@
 import { useState } from "react";
 import { IconCode } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { useShellSettings } from "@/hooks/domains/settings/use-shell-settings";
-import { updateUserSettings } from "@/lib/api";
-import { useRequest } from "@/lib/http/use-request";
 
 const AUTO_SHELL = "auto";
 const CUSTOM_SHELL = "custom";
@@ -93,39 +88,20 @@ function ShellSelect({
   );
 }
 
-export function ShellSettingsCard() {
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
-  const shellSettings = useShellSettings();
-  const initialShellValue = shellSettings.preferredShell ?? "";
-  const initialShellOptions = shellSettings.shellOptions ?? [];
-  const initialSelection = resolveShellSelection(initialShellValue, initialShellOptions);
-  const [preferredShell, setPreferredShell] = useState(initialShellValue);
-  const [baselineShell, setBaselineShell] = useState(initialShellValue);
+export function ShellSettingsCard({
+  preferredShell,
+  onPreferredShellChange,
+  shellLoaded,
+  shellOptions,
+}: {
+  preferredShell: string;
+  onPreferredShellChange: (value: string) => void;
+  shellLoaded: boolean;
+  shellOptions: ShellOption[];
+}) {
+  const initialSelection = resolveShellSelection(preferredShell, shellOptions);
   const [shellSelection, setShellSelection] = useState(initialSelection.selection);
   const [customShell, setCustomShell] = useState(initialSelection.customShell);
-  const [shellLoaded] = useState(shellSettings.loaded);
-  const [shellOptions] = useState<ShellOption[]>(initialShellOptions);
-
-  const saveShellRequest = useRequest(async () => {
-    const trimmed = preferredShell.trim();
-    const currentSettings = storeApi.getState().userSettings;
-    await updateUserSettings({
-      workspace_id: currentSettings.workspaceId ?? "",
-      repository_ids: currentSettings.repositoryIds,
-      preferred_shell: trimmed,
-    });
-    setBaselineShell(trimmed);
-    setUserSettings({
-      ...currentSettings,
-      preferredShell: trimmed || null,
-      loaded: true,
-    });
-  });
-
-  // Store data is SSR-hydrated for settings. Local state is initialized once.
-
-  const shellDirty = preferredShell.trim() !== baselineShell.trim();
 
   return (
     <SettingsSection
@@ -134,15 +110,8 @@ export function ShellSettingsCard() {
       description="Pick the default shell for task sessions"
     >
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4">
+        <CardHeader>
           <CardTitle className="text-base">Preferred Shell</CardTitle>
-          <Button
-            type="button"
-            onClick={() => saveShellRequest.run()}
-            disabled={!shellLoaded || !shellDirty || saveShellRequest.isLoading}
-          >
-            {saveShellRequest.isLoading ? "Saving..." : "Save"}
-          </Button>
         </CardHeader>
         <CardContent className="space-y-4">
           <ShellSelect
@@ -150,21 +119,21 @@ export function ShellSettingsCard() {
             onSelectionChange={(value) => {
               setShellSelection(value);
               if (value === AUTO_SHELL) {
-                setPreferredShell("");
+                onPreferredShellChange("");
                 setCustomShell("");
                 return;
               }
               if (value === CUSTOM_SHELL) {
-                setPreferredShell(customShell);
+                onPreferredShellChange(customShell);
                 return;
               }
-              setPreferredShell(value);
+              onPreferredShellChange(value);
               setCustomShell("");
             }}
             customShell={customShell}
             onCustomShellChange={(value) => {
               setCustomShell(value);
-              setPreferredShell(value);
+              onPreferredShellChange(value);
             }}
             shellLoaded={shellLoaded}
             shellOptions={shellOptions}

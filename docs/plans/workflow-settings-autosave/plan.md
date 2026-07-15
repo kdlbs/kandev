@@ -1,10 +1,13 @@
 ---
 spec: docs/specs/workflow-settings-autosave/spec.md
 created: 2026-07-14
-status: done
+status: superseded
+superseded_by: docs/plans/settings-manual-save/plan.md
 ---
 
 # Implementation Plan: Workflow Settings Autosave
+
+> Superseded by [Settings Manual Save](../settings-manual-save/plan.md). This completed plan remains as the implementation record for the former autosave behavior.
 
 ## Overview
 

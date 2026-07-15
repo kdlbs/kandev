@@ -20,6 +20,7 @@ import {
   USE_DEFAULT,
 } from "@/components/settings/utility-sections";
 import { useInferenceAgents } from "@/components/settings/use-inference-agents";
+import { useSettingsSaveContributor } from "./settings-save-provider";
 
 function buildAllModels(inferenceAgents: InferenceAgent[]) {
   return inferenceAgents.flatMap((ia) =>
@@ -32,31 +33,114 @@ function buildAllModels(inferenceAgents: InferenceAgent[]) {
   );
 }
 
-async function handleBuiltinChange(
+export function replaceCustomUtilityAgents(
+  current: UtilityAgent[],
+  customAgents: UtilityAgent[],
+): UtilityAgent[] {
+  return [...current.filter((agent) => agent.builtin), ...customAgents];
+}
+
+function updateBuiltinDraft(
   agent: UtilityAgent,
   value: string,
   setAgents: React.Dispatch<React.SetStateAction<UtilityAgent[]>>,
 ) {
   const isDefault = value === USE_DEFAULT;
   const [agentId, model] = isDefault ? ["", ""] : value.split("|");
-  await updateUtilityAgent(agent.id, { agent_id: agentId, model, enabled: true });
   setAgents((prev) =>
-    prev.map((a) => (a.id === agent.id ? { ...a, agent_id: agentId, model } : a)),
+    prev.map((a) => (a.id === agent.id ? { ...a, agent_id: agentId, model, enabled: true } : a)),
   );
 }
 
-export function UtilityAgentsSection() {
+type UtilityDraftRegistration = {
+  agents: UtilityAgent[];
+  savedAgents: UtilityAgent[];
+  defaultAgentId: string;
+  defaultModel: string;
+  savedDefault: { agentId: string; model: string };
+  loading: boolean;
+  setAgents: React.Dispatch<React.SetStateAction<UtilityAgent[]>>;
+  setSavedAgents: React.Dispatch<React.SetStateAction<UtilityAgent[]>>;
+  setDefaultAgentId: React.Dispatch<React.SetStateAction<string>>;
+  setDefaultModel: React.Dispatch<React.SetStateAction<string>>;
+  setSavedDefault: React.Dispatch<React.SetStateAction<{ agentId: string; model: string }>>;
+};
+
+function utilityDraftRevision(
+  agents: UtilityAgent[],
+  defaultAgentId: string,
+  defaultModel: string,
+) {
+  return JSON.stringify({
+    defaultAgentId,
+    defaultModel,
+    builtins: agents
+      .filter((agent) => agent.builtin)
+      .map(({ id, agent_id, model, enabled }) => ({ id, agent_id, model, enabled })),
+  });
+}
+
+function useUtilityDraftRegistration(state: UtilityDraftRegistration) {
+  const draftRevision = utilityDraftRevision(
+    state.agents,
+    state.defaultAgentId,
+    state.defaultModel,
+  );
+  const savedRevision = utilityDraftRevision(
+    state.savedAgents,
+    state.savedDefault.agentId,
+    state.savedDefault.model,
+  );
+
+  useSettingsSaveContributor({
+    id: "utility-agents",
+    revision: draftRevision,
+    isDirty: !state.loading && draftRevision !== savedRevision,
+    save: async () => {
+      const submittedAgents = state.agents;
+      const submittedDefault = { agentId: state.defaultAgentId, model: state.defaultModel };
+      const changedBuiltins = submittedAgents.filter((agent) => {
+        if (!agent.builtin) return false;
+        const previous = state.savedAgents.find((saved) => saved.id === agent.id);
+        return (
+          !previous ||
+          previous.agent_id !== agent.agent_id ||
+          previous.model !== agent.model ||
+          previous.enabled !== agent.enabled
+        );
+      });
+      await Promise.all([
+        updateUserSettings({
+          default_utility_agent_id: submittedDefault.agentId,
+          default_utility_model: submittedDefault.model,
+        }),
+        ...changedBuiltins.map((agent) =>
+          updateUtilityAgent(agent.id, {
+            agent_id: agent.agent_id,
+            model: agent.model,
+            enabled: agent.enabled,
+          }),
+        ),
+      ]);
+      state.setSavedDefault(submittedDefault);
+      state.setSavedAgents(submittedAgents);
+    },
+    discard: () => {
+      state.setDefaultAgentId(state.savedDefault.agentId);
+      state.setDefaultModel(state.savedDefault.model);
+      state.setAgents(state.savedAgents);
+    },
+  });
+}
+
+function useUtilityAgentsData() {
   const [agents, setAgents] = useState<UtilityAgent[]>([]);
+  const [savedAgents, setSavedAgents] = useState<UtilityAgent[]>([]);
   const { inferenceAgents, setInferenceAgents, refreshAgent } = useInferenceAgents();
   const [defaultAgentId, setDefaultAgentId] = useState("");
   const [defaultModel, setDefaultModel] = useState("");
+  const [savedDefault, setSavedDefault] = useState({ agentId: "", model: "" });
   const [loading, setLoading] = useState(true);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingAgent, setEditingAgent] = useState<UtilityAgent | null>(null);
-
-  const builtins = useMemo(() => agents.filter((a) => a.builtin), [agents]);
-  const customAgents = useMemo(() => agents.filter((a) => !a.builtin), [agents]);
-  const allModels = useMemo(() => buildAllModels(inferenceAgents), [inferenceAgents]);
 
   const fetchData = useCallback(async () => {
     try {
@@ -65,10 +149,16 @@ export function UtilityAgentsSection() {
         listInferenceAgents(),
         fetchUserSettings({ cache: "no-store" }),
       ]);
+      const defaultDraft = {
+        agentId: settingsRes.settings.default_utility_agent_id || "",
+        model: settingsRes.settings.default_utility_model || "",
+      };
       setAgents(agentsRes.agents);
+      setSavedAgents(agentsRes.agents);
       setInferenceAgents(inferenceRes.agents);
-      setDefaultAgentId(settingsRes.settings.default_utility_agent_id || "");
-      setDefaultModel(settingsRes.settings.default_utility_model || "");
+      setDefaultAgentId(defaultDraft.agentId);
+      setDefaultModel(defaultDraft.model);
+      setSavedDefault(defaultDraft);
     } catch {
       setAgents([]);
       setInferenceAgents([]);
@@ -77,18 +167,78 @@ export function UtilityAgentsSection() {
     }
   }, [setInferenceAgents]);
 
-  const handleDefaultChange = async (agentId: string, model: string) => {
-    const prevAgentId = defaultAgentId;
-    const prevModel = defaultModel;
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData]);
+
+  const refreshCustomAgents = useCallback(async () => {
+    const response = await listUtilityAgents({ cache: "no-store" });
+    const customAgents = response.agents.filter((agent) => !agent.builtin);
+    setAgents((current) => replaceCustomUtilityAgents(current, customAgents));
+    setSavedAgents((current) => replaceCustomUtilityAgents(current, customAgents));
+  }, []);
+
+  return {
+    agents,
+    savedAgents,
+    inferenceAgents,
+    defaultAgentId,
+    defaultModel,
+    savedDefault,
+    loading,
+    refreshAgent,
+    refreshCustomAgents,
+    setAgents,
+    setSavedAgents,
+    setDefaultAgentId,
+    setDefaultModel,
+    setSavedDefault,
+  };
+}
+
+export function UtilityAgentsSection() {
+  const data = useUtilityAgentsData();
+  const {
+    agents,
+    savedAgents,
+    inferenceAgents,
+    defaultAgentId,
+    defaultModel,
+    savedDefault,
+    loading,
+    refreshAgent,
+    refreshCustomAgents,
+    setAgents,
+    setSavedAgents,
+    setDefaultAgentId,
+    setDefaultModel,
+    setSavedDefault,
+  } = data;
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<UtilityAgent | null>(null);
+
+  const builtins = useMemo(() => agents.filter((a) => a.builtin), [agents]);
+  const customAgents = useMemo(() => agents.filter((a) => !a.builtin), [agents]);
+  const allModels = useMemo(() => buildAllModels(inferenceAgents), [inferenceAgents]);
+
+  const handleDefaultChange = (agentId: string, model: string) => {
     setDefaultAgentId(agentId);
     setDefaultModel(model);
-    try {
-      await updateUserSettings({ default_utility_agent_id: agentId, default_utility_model: model });
-    } catch {
-      setDefaultAgentId(prevAgentId);
-      setDefaultModel(prevModel);
-    }
   };
+
+  useUtilityDraftRegistration({
+    agents,
+    savedAgents,
+    defaultAgentId,
+    defaultModel,
+    savedDefault,
+    loading,
+    setAgents,
+    setSavedAgents,
+    setDefaultAgentId,
+    setDefaultModel,
+    setSavedDefault,
+  });
 
   const openEditDialog = (agent: UtilityAgent | null) => {
     setEditingAgent(agent);
@@ -98,12 +248,8 @@ export function UtilityAgentsSection() {
   const closeDialog = () => {
     setDialogOpen(false);
     setEditingAgent(null);
-    fetchData();
+    void refreshCustomAgents();
   };
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
 
   if (loading) return null;
 
@@ -126,7 +272,7 @@ export function UtilityAgentsSection() {
             builtins={builtins}
             allModels={allModels}
             defaultModel={defaultModel}
-            onModelChange={(agent, value) => handleBuiltinChange(agent, value, setAgents)}
+            onModelChange={(agent, value) => updateBuiltinDraft(agent, value, setAgents)}
             onEdit={openEditDialog}
           />
           <CustomAgentsSection
@@ -137,6 +283,7 @@ export function UtilityAgentsSection() {
               try {
                 await deleteUtilityAgent(agent.id);
                 setAgents((prev) => prev.filter((a) => a.id !== agent.id));
+                setSavedAgents((prev) => prev.filter((a) => a.id !== agent.id));
               } catch {
                 // Error already logged by API layer
               }

@@ -168,14 +168,11 @@ test.describe("Docker executor profile persistence", () => {
       const populatedTag = await imageTagInput.inputValue();
       expect(populatedTag).toMatch(/.+:.+/); // shape "name:tag"
 
-      // Save the profile.
-      await testPage.getByRole("button", { name: "Save Changes" }).click();
+      const floatingSave = testPage.getByTestId("settings-floating-save");
+      await floatingSave.getByRole("button", { name: "Save changes" }).click();
       await expect(testPage.getByText("Profile saved")).toBeVisible({ timeout: 10_000 });
 
-      // Wait for Save to complete: the stable status button returns to its ready label.
-      await expect(testPage.getByRole("button", { name: /Save Changes|Saved/ })).toBeVisible({
-        timeout: 10_000,
-      });
+      await expect(floatingSave).not.toBeVisible({ timeout: 10_000 });
 
       // Verify the values landed on profile.config.
       await expect

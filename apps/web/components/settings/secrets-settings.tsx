@@ -48,6 +48,7 @@ type SecretFormProps = {
   isValid: boolean;
   isBusy: boolean;
   submitLabel: string;
+  showSubmit?: boolean;
 };
 
 function SecretForm({
@@ -59,6 +60,7 @@ function SecretForm({
   isValid,
   isBusy,
   submitLabel,
+  showSubmit = true,
 }: SecretFormProps) {
   return (
     <div className="rounded-lg border border-border/70 bg-background p-4 space-y-3">
@@ -78,9 +80,11 @@ function SecretForm({
         />
       </div>
       <div className="flex items-center gap-2">
-        <Button onClick={onSubmit} disabled={!isValid || isBusy} className="cursor-pointer">
-          {submitLabel}
-        </Button>
+        {showSubmit && (
+          <Button onClick={onSubmit} disabled={!isValid || isBusy} className="cursor-pointer">
+            {submitLabel}
+          </Button>
+        )}
         <Button variant="ghost" onClick={onCancel} disabled={isBusy} className="cursor-pointer">
           Cancel
         </Button>
@@ -316,9 +320,9 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
       if (!isValid || isBusy) return;
       createRequest.run(formState).catch(() => undefined);
     },
-    handleUpdate: () => {
+    handleUpdate: async () => {
       if (!isValid || isBusy || !editingId) return;
-      updateRequest.run(editingId, formState).catch(() => undefined);
+      await updateRequest.run(editingId, formState);
     },
     startEditing: (secret: SecretListItem) => {
       setEditingId(secret.id);
@@ -348,11 +352,23 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
 /*  Main component                                                     */
 /* ------------------------------------------------------------------ */
 
+function getSecretEditState(
+  items: SecretListItem[],
+  editingId: string | null,
+  formState: SecretFormState,
+) {
+  const editingSecret = items.find((secret) => secret.id === editingId);
+  const revision = JSON.stringify(formState);
+  const savedRevision = JSON.stringify({ name: editingSecret?.name ?? "", value: "" });
+  return { revision, isDirty: Boolean(editingId) && revision !== savedRevision };
+}
+
 export function SecretsSettings() {
   const state = useSecretsState();
   const { loaded, editingId, showCreate, formState, setFormState, deleteTarget, items } = state;
   const actions = useSecretsActions(state);
   const { isValid, isBusy } = actions;
+  const edit = getSecretEditState(items, editingId, formState);
 
   const onFormChange = (patch: Partial<SecretFormState>) =>
     setFormState((prev) => ({ ...prev, ...patch }));
@@ -361,10 +377,14 @@ export function SecretsSettings() {
     <SettingsPageTemplate
       title="Secrets"
       description="Manage API keys and credentials. Secrets are encrypted at rest and injected into agent environments via executor profile env vars."
-      isDirty={false}
+      isDirty={edit.isDirty}
       saveStatus="idle"
-      onSave={() => undefined}
-      showSaveButton={false}
+      saveId="secrets-existing-item"
+      saveRevision={`${editingId ?? "none"}:${edit.revision}`}
+      canSave={!editingId || isValid}
+      invalidReason={editingId && !isValid ? "A secret name is required." : undefined}
+      onSave={actions.handleUpdate}
+      onDiscard={actions.resetForm}
     >
       <div className="space-y-6">
         <div className="flex items-center justify-between">
@@ -401,6 +421,7 @@ export function SecretsSettings() {
             isValid={isValid}
             isBusy={isBusy}
             submitLabel="Save changes"
+            showSubmit={false}
           />
         )}
 

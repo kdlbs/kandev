@@ -23,6 +23,7 @@ import { Spinner } from "@kandev/ui/spinner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import {
   clearGitLabToken,
   configureGitLabHost,
@@ -94,36 +95,46 @@ function AuthMethodBadge({ method }: { method: GitLabStatus["auth_method"] }) {
 
 function HostForm({ initial, onSaved }: { initial: string; onSaved: () => void }) {
   const [host, setHost] = useState(initial);
-  const [saving, setSaving] = useState(false);
+  const [baseline, setBaseline] = useState(initial);
+  const [syncedInitial, setSyncedInitial] = useState(initial);
   const { toast } = useToast();
 
-  useEffect(() => {
+  if (initial !== syncedInitial && host === baseline) {
+    setSyncedInitial(initial);
+    setBaseline(initial);
     setHost(initial);
-  }, [initial]);
+  }
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!host.trim()) return;
-      setSaving(true);
-      try {
-        await configureGitLabHost(host.trim());
-        toast({ description: "GitLab host updated", variant: "success" });
-        onSaved();
-      } catch (err) {
-        toast({
-          description: err instanceof Error ? err.message : "Failed to update host",
-          variant: "error",
-        });
-      } finally {
-        setSaving(false);
-      }
-    },
-    [host, toast, onSaved],
-  );
+  const save = useCallback(async () => {
+    const submitted = host.trim();
+    try {
+      await configureGitLabHost(submitted);
+      setBaseline(submitted);
+      setHost((current) => (current.trim() === submitted ? submitted : current));
+      toast({ description: "GitLab host updated", variant: "success" });
+      onSaved();
+    } catch (err) {
+      toast({
+        description: err instanceof Error ? err.message : "Failed to update host",
+        variant: "error",
+      });
+      throw err;
+    }
+  }, [host, toast, onSaved]);
+  const discard = useCallback(() => setHost(baseline), [baseline]);
+
+  useSettingsSaveContributor({
+    id: "gitlab-host",
+    revision: host,
+    isDirty: host !== baseline,
+    canSave: Boolean(host.trim()),
+    invalidReason: host.trim() ? undefined : "A GitLab host URL is required.",
+    save,
+    discard,
+  });
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 items-center">
+    <div className="flex gap-2 items-center">
       <IconWorld className="h-4 w-4 text-muted-foreground shrink-0" />
       <Input
         type="url"
@@ -131,45 +142,45 @@ function HostForm({ initial, onSaved }: { initial: string; onSaved: () => void }
         value={host}
         onChange={(e) => setHost(e.target.value)}
         className="font-mono text-sm"
-        disabled={saving}
       />
-      <Button type="submit" disabled={saving || !host.trim()} className="cursor-pointer">
-        {saving ? <Spinner className="h-3 w-3" /> : "Save host"}
-      </Button>
-    </form>
+    </div>
   );
 }
 
 function TokenForm({ onSuccess }: { onSuccess: () => void }) {
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
-  const [saving, setSaving] = useState(false);
   const { toast } = useToast();
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!token.trim()) return;
-      setSaving(true);
-      try {
-        await configureGitLabToken(token.trim());
-        toast({ description: "GitLab token configured", variant: "success" });
-        setToken("");
-        onSuccess();
-      } catch (err) {
-        toast({
-          description: err instanceof Error ? err.message : "Failed to save token",
-          variant: "error",
-        });
-      } finally {
-        setSaving(false);
-      }
-    },
-    [token, toast, onSuccess],
-  );
+  const save = useCallback(async () => {
+    const submitted = token.trim();
+    try {
+      await configureGitLabToken(submitted);
+      toast({ description: "GitLab token configured", variant: "success" });
+      setToken((current) => (current.trim() === submitted ? "" : current));
+      onSuccess();
+    } catch (err) {
+      toast({
+        description: err instanceof Error ? err.message : "Failed to save token",
+        variant: "error",
+      });
+      throw err;
+    }
+  }, [token, toast, onSuccess]);
+  const discard = useCallback(() => setToken(""), []);
+
+  useSettingsSaveContributor({
+    id: "gitlab-token",
+    revision: token,
+    isDirty: Boolean(token),
+    canSave: Boolean(token.trim()),
+    invalidReason: token && !token.trim() ? "A GitLab token is required." : undefined,
+    save,
+    discard,
+  });
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2 items-center">
+    <div className="flex gap-2 items-center">
       <IconKey className="h-4 w-4 text-muted-foreground shrink-0" />
       <div className="relative flex-1">
         <Input
@@ -178,7 +189,6 @@ function TokenForm({ onSuccess }: { onSuccess: () => void }) {
           value={token}
           onChange={(e) => setToken(e.target.value)}
           className="font-mono text-sm pr-9"
-          disabled={saving}
           autoComplete="off"
         />
         <button
@@ -190,10 +200,7 @@ function TokenForm({ onSuccess }: { onSuccess: () => void }) {
           {showToken ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
         </button>
       </div>
-      <Button type="submit" disabled={saving || !token.trim()} className="cursor-pointer">
-        {saving ? <Spinner className="h-3 w-3" /> : "Save token"}
-      </Button>
-    </form>
+    </div>
   );
 }
 

@@ -45,6 +45,7 @@ import {
   type SaveStatus,
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
 import { useToast } from "@/components/toast-provider";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { Executor, ExecutorProfile, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 
@@ -238,6 +239,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
         setError(message);
         setSaveStatus("error");
         toast({ title: "Failed to save profile", description: message, variant: "error" });
+        throw err;
       }
     },
     [executor, profile.id, executors, setExecutors, toast],
@@ -275,6 +277,7 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
   const [dockerfile, setDockerfile] = useState(profile.config?.dockerfile ?? "");
   const [imageTag, setImageTag] = useState(profile.config?.image_tag ?? "");
+  const [sshShell, setSshShell] = useState(profile.config?.ssh_shell ?? "");
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows(profile.env_vars);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(() =>
@@ -316,6 +319,8 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setDockerfile,
     imageTag,
     setImageTag,
+    sshShell,
+    setSshShell,
     envVarRows,
     addEnvVar,
     removeEnvVar,
@@ -339,6 +344,7 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     isRemote: flags.isRemote,
     isDocker: flags.isDocker,
     isSprites: flags.isSprites,
+    isSSH: executor.type === "ssh",
     mcpPolicyError,
     buildEnvVars,
     prepareDesc,
@@ -387,6 +393,8 @@ function buildSaveConfig(
     delete config.git_user_email;
   }
   applyDockerConfig(config, form);
+  if (form.isSSH && form.sshShell.trim()) config.ssh_shell = form.sshShell.trim();
+  else delete config.ssh_shell;
   return config;
 }
 
@@ -412,13 +420,11 @@ function ProfileEditSections({
   profile,
   form,
   secrets,
-  onShellChange,
 }: {
   executor: Executor;
   profile: ExecutorProfile;
   form: ReturnType<typeof useProfileFormState>;
   secrets: ReturnType<typeof useSecrets>["items"];
-  onShellChange?: (shell: string) => Promise<void>;
 }) {
   const isSSH = executor.type === "ssh";
   return (
@@ -431,8 +437,8 @@ function ProfileEditSections({
         // selector that governs every subsequent SSH command run by kandev.
         <SSHAgentReadinessCard
           executorId={executor.id}
-          shell={profile.config?.ssh_shell}
-          onShellChange={onShellChange}
+          shell={form.sshShell}
+          onShellChange={form.setSshShell}
         />
       )}
       {form.isSprites && (
@@ -529,39 +535,33 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       </Button>
     ) : undefined;
 
-  const handleSave = () => {
-    if (!form.name.trim() || form.mcpPolicyError || spritesTokenMissing) return;
-    void persistence.save({
-      name: form.name.trim(),
-      mcp_policy: form.mcpPolicy || undefined,
-      config: buildSaveConfig(form, profile.config),
-      prepare_script: form.prepareScript,
-      cleanup_script: form.cleanupScript,
-      env_vars: form.buildEnvVars(),
-    });
+  const savePayload = {
+    name: form.name.trim(),
+    mcp_policy: form.mcpPolicy || undefined,
+    config: buildSaveConfig(form, profile.config),
+    prepare_script: form.prepareScript,
+    cleanup_script: form.cleanupScript,
+    env_vars: form.buildEnvVars(),
   };
-
-  // Shell selector lives on the SSH readiness card and persists out-of-band
-  // from the main Save button — users twiddling the dropdown shouldn't have
-  // to remember to press Save afterwards. The PATCH carries the full
-  // (merged) config so the backend's config-replace semantics don't wipe
-  // adjacent keys (workdir_root, prepare_script env, etc.). Key name is
-  // ssh_shell to match MetadataKeySSHShell — buildLaunchMetadata copies
-  // profile.config keys verbatim into req.Metadata, so the same string
-  // has to identify the shell on both sides.
-  const handleShellChange = useCallback(
-    async (next: string) => {
-      const mergedConfig = { ...(profile.config ?? {}), ssh_shell: next };
-      await persistence.save({
-        name: profile.name,
-        config: mergedConfig,
-        prepare_script: profile.prepare_script ?? "",
-        cleanup_script: profile.cleanup_script ?? "",
-        env_vars: profile.env_vars ?? [],
-      });
-    },
-    [persistence, profile],
-  );
+  const saveRevision = JSON.stringify(savePayload);
+  const [savedRevision, setSavedRevision] = useState(saveRevision);
+  const handleSave = async () => {
+    await persistence.save(savePayload);
+    setSavedRevision(saveRevision);
+  };
+  let invalidReason: string | undefined;
+  if (!form.name.trim()) invalidReason = "Profile name is required.";
+  else if (form.mcpPolicyError) invalidReason = form.mcpPolicyError;
+  else if (spritesTokenMissing) invalidReason = "Sprites token is required.";
+  useSettingsSaveContributor({
+    id: `executor-profile:${profile.id}`,
+    revision: saveRevision,
+    isDirty: saveRevision !== savedRevision,
+    canSave: Boolean(form.name.trim()) && !form.mcpPolicyError && !spritesTokenMissing,
+    invalidReason,
+    save: handleSave,
+    discard: () => undefined,
+  });
 
   const handleDelete = (options?: { removeRelatedDockerContainers?: boolean }) => {
     const beforeDelete = options?.removeRelatedDockerContainers
@@ -583,28 +583,12 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         description={getExecutorDescription(executor.type)}
         actions={headerActions}
       />
-      <ProfileEditSections
-        executor={executor}
-        profile={profile}
-        form={form}
-        secrets={secrets}
-        onShellChange={handleShellChange}
-      />
+      <ProfileEditSections executor={executor} profile={profile} form={form} secrets={secrets} />
       {spritesTokenMissing && (
         <p className="text-sm text-destructive">Sprites API key is required.</p>
       )}
       {persistence.error && <p className="text-sm text-destructive">{persistence.error}</p>}
-      <ProfileFormActions
-        saveStatus={persistence.saveStatus}
-        saveDisabled={
-          !form.name.trim() ||
-          Boolean(form.mcpPolicyError) ||
-          spritesTokenMissing ||
-          persistence.saveStatus === "loading"
-        }
-        onSave={handleSave}
-        onDelete={() => persistence.setDeleteDialogOpen(true)}
-      />
+      <ProfileFormActions onDelete={() => persistence.setDeleteDialogOpen(true)} />
       <DeleteProfileDialog
         open={persistence.deleteDialogOpen}
         onOpenChange={persistence.setDeleteDialogOpen}

@@ -15,7 +15,11 @@ type ResolvedTheme = "light" | "dark";
 
 type ThemeContextValue = {
   theme: Theme;
+  savedTheme: Theme;
   setTheme: (theme: string) => void;
+  previewTheme: (theme: string) => void;
+  commitTheme: (theme: string) => void;
+  restoreTheme: () => void;
   resolvedTheme: ResolvedTheme;
   systemTheme: ResolvedTheme;
 };
@@ -75,6 +79,9 @@ export function AppThemeProvider({
   storageKey = "theme",
 }: AppThemeProviderProps) {
   const [theme, setThemeState] = useState<Theme>(() => readStoredTheme(storageKey, defaultTheme));
+  const [savedTheme, setSavedTheme] = useState<Theme>(() =>
+    readStoredTheme(storageKey, defaultTheme),
+  );
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() => getSystemTheme());
   const resolvedTheme = resolveTheme(theme, enableSystem, systemTheme);
 
@@ -95,18 +102,37 @@ export function AppThemeProvider({
     update();
   }, [attribute, disableTransitionOnChange, resolvedTheme]);
 
-  const setTheme = useCallback(
+  const commitTheme = useCallback(
     (nextTheme: string) => {
       if (nextTheme !== "light" && nextTheme !== "dark" && nextTheme !== "system") return;
       window.localStorage.setItem(storageKey, nextTheme);
+      setSavedTheme(nextTheme);
       setThemeState(nextTheme);
     },
     [storageKey],
   );
 
+  const previewTheme = useCallback((nextTheme: string) => {
+    if (nextTheme !== "light" && nextTheme !== "dark" && nextTheme !== "system") return;
+    setThemeState(nextTheme);
+  }, []);
+
+  const restoreTheme = useCallback(() => {
+    setThemeState(savedTheme);
+  }, [savedTheme]);
+
   const value = useMemo<ThemeContextValue>(
-    () => ({ theme, setTheme, resolvedTheme, systemTheme }),
-    [resolvedTheme, setTheme, systemTheme, theme],
+    () => ({
+      theme,
+      savedTheme,
+      setTheme: commitTheme,
+      previewTheme,
+      commitTheme,
+      restoreTheme,
+      resolvedTheme,
+      systemTheme,
+    }),
+    [commitTheme, previewTheme, resolvedTheme, restoreTheme, savedTheme, systemTheme, theme],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
@@ -117,7 +143,11 @@ export function useTheme(): ThemeContextValue {
   if (value) return value;
   return {
     theme: "system",
+    savedTheme: "system",
     setTheme: () => {},
+    previewTheme: () => {},
+    commitTheme: () => {},
+    restoreTheme: () => {},
     resolvedTheme: getSystemTheme(),
     systemTheme: getSystemTheme(),
   };

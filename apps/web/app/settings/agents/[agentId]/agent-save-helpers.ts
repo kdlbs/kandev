@@ -157,7 +157,7 @@ export type SaveAgentCallbacks = {
   permissionSettings: Record<string, PermissionSetting>;
   resolveDisplayName: (name: string) => string;
   upsertAgent: (agent: Agent) => void;
-  setDraftAgent: (agent: DraftAgent) => void;
+  setDraftAgent: (agent: DraftAgent | ((current: DraftAgent) => DraftAgent)) => void;
   ensureProfiles: EnsureProfilesFn;
   cloneAgent: CloneAgentFn;
   replaceRoute: (path: string) => void;
@@ -187,15 +187,15 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
     });
   }
   callbacks.upsertAgent(created);
-  callbacks.setDraftAgent(
-    callbacks.ensureProfiles(
-      callbacks.cloneAgent(created),
-      callbacks.resolveDisplayName(created.name),
-      callbacks.currentAgentModelConfig.default_model,
-      callbacks.permissionSettings,
-    ),
+  const savedDraft = callbacks.ensureProfiles(
+    callbacks.cloneAgent(created),
+    callbacks.resolveDisplayName(created.name),
+    callbacks.currentAgentModelConfig.default_model,
+    callbacks.permissionSettings,
   );
+  callbacks.setDraftAgent(savedDraft);
   callbacks.replaceRoute(`/settings/agents/${encodeURIComponent(created.name)}`);
+  return savedDraft;
 }
 
 async function saveExistingAgentPatch(draftAgent: DraftAgent, savedAgent: Agent) {
@@ -295,17 +295,37 @@ export async function saveExistingAgent(
     profiles: nextProfiles,
   };
   callbacks.upsertAgent(nextAgent);
-  callbacks.setDraftAgent(
-    callbacks.ensureProfiles(
-      callbacks.cloneAgent(nextAgent),
-      callbacks.resolveDisplayName(nextAgent.name),
-      callbacks.currentAgentModelConfig.default_model,
-      callbacks.permissionSettings,
-    ),
+  const savedDraft = callbacks.ensureProfiles(
+    callbacks.cloneAgent(nextAgent),
+    callbacks.resolveDisplayName(nextAgent.name),
+    callbacks.currentAgentModelConfig.default_model,
+    callbacks.permissionSettings,
   );
+  callbacks.setDraftAgent((current) => mergeSavedAgentDraft(current, draftAgent, savedDraft));
   if (isCreateMode) {
     callbacks.replaceRoute(`/settings/agents/${encodeURIComponent(savedAgent.name)}`);
   }
+  return savedDraft;
+}
+
+export function mergeSavedAgentDraft(
+  current: DraftAgent,
+  submitted: DraftAgent,
+  saved: DraftAgent,
+): DraftAgent {
+  if (JSON.stringify(current) === JSON.stringify(submitted)) return saved;
+  const profiles = current.profiles.map((currentProfile) => {
+    const submittedIndex = submitted.profiles.findIndex(
+      (profile) => profile.id === currentProfile.id,
+    );
+    if (submittedIndex < 0) return currentProfile;
+    const submittedProfile = submitted.profiles[submittedIndex];
+    const savedProfile = saved.profiles[submittedIndex];
+    if (!savedProfile) return currentProfile;
+    if (JSON.stringify(currentProfile) === JSON.stringify(submittedProfile)) return savedProfile;
+    return { ...savedProfile, ...currentProfile, id: savedProfile.id };
+  });
+  return { ...saved, ...current, profiles };
 }
 
 export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boolean {

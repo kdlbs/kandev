@@ -25,7 +25,16 @@ type WorkflowDeleteDialogProps = {
   deleteLoading: boolean;
   onDelete: () => Promise<void>;
   onMigrateAndDelete: () => Promise<void>;
+  hasUnsavedChanges: boolean;
 };
+
+function workflowDeleteDescription(taskCount: number | null, hasUnsavedChanges: boolean): string {
+  const hasTasks = taskCount !== null && taskCount > 0;
+  const base = hasTasks
+    ? `This workflow has ${taskCount} task${taskCount === 1 ? "" : "s"}. Choose where to migrate them, or delete the workflow and archive the tasks.`
+    : "This will permanently delete the workflow and all its steps.";
+  return `${base}${hasUnsavedChanges ? " Unsaved workflow changes will be discarded." : ""}`;
+}
 
 export function WorkflowDeleteDialog({
   open,
@@ -41,6 +50,7 @@ export function WorkflowDeleteDialog({
   deleteLoading,
   onDelete,
   onMigrateAndDelete,
+  hasUnsavedChanges,
 }: WorkflowDeleteDialogProps) {
   const hasTasks = workflowTaskCount !== null && workflowTaskCount > 0;
   return (
@@ -49,9 +59,7 @@ export function WorkflowDeleteDialog({
         <DialogHeader>
           <DialogTitle>Delete workflow</DialogTitle>
           <DialogDescription>
-            {hasTasks
-              ? `This workflow has ${workflowTaskCount} task${workflowTaskCount === 1 ? "" : "s"}. Choose where to migrate them, or delete the workflow and archive the tasks.`
-              : "This will permanently delete the workflow and all its steps."}
+            {workflowDeleteDescription(workflowTaskCount, hasUnsavedChanges)}
           </DialogDescription>
         </DialogHeader>
         {hasTasks && otherWorkflows.length > 0 && (
@@ -127,6 +135,7 @@ export function WorkflowDeleteDialog({
 type StepDeleteDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  stepName: string;
   stepTaskCount: number | null;
   stepsForMigration: WorkflowStep[];
   targetStep: string;
@@ -135,11 +144,13 @@ type StepDeleteDialogProps = {
   pending: boolean;
   onMigrateAndDelete: () => Promise<void>;
   onDeleteAndTasks: () => Promise<void>;
+  hasUnsavedChanges: boolean;
 };
 
 export function StepDeleteDialog({
   open,
   onOpenChange,
+  stepName,
   stepTaskCount,
   stepsForMigration,
   targetStep,
@@ -148,17 +159,19 @@ export function StepDeleteDialog({
   pending,
   onMigrateAndDelete,
   onDeleteAndTasks,
+  hasUnsavedChanges,
 }: StepDeleteDialogProps) {
+  const hasTasks = stepTaskCount !== null && stepTaskCount > 0;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Delete step</DialogTitle>
           <DialogDescription>
-            This step has {stepTaskCount} task{stepTaskCount === 1 ? "" : "s"}.
-            {stepsForMigration.length > 0
-              ? " Choose where to migrate them, or delete the step and its tasks."
-              : " Deleting this step will affect these tasks."}
+            {hasTasks
+              ? `${stepName} has ${stepTaskCount} task${stepTaskCount === 1 ? "" : "s"}. Choose where to migrate them, or delete the step and its tasks.`
+              : `This will permanently delete the ${stepName} workflow step.`}
+            {hasUnsavedChanges ? " Unsaved step changes will be discarded." : ""}
           </DialogDescription>
         </DialogHeader>
         {stepsForMigration.length > 0 && (
@@ -209,7 +222,7 @@ export function StepDeleteDialog({
             disabled={loading || pending}
             className="cursor-pointer"
           >
-            Delete Step & Tasks
+            {hasTasks ? "Delete Step & Tasks" : "Delete Step"}
           </Button>
         </DialogFooter>
       </DialogContent>

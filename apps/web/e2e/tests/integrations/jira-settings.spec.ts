@@ -11,7 +11,7 @@ test.describe("Jira settings", () => {
     await expect(settings.siteInput).toHaveValue("");
     await expect(settings.secretInput).toHaveValue("");
     await expect(settings.statusBanner).toHaveCount(0);
-    await expect(settings.saveButton).toBeDisabled();
+    await expect(settings.saveButton).toHaveCount(0);
     await expect(settings.testButton).toBeDisabled();
 
     await settings.siteInput.fill("https://acme.atlassian.net");
@@ -38,8 +38,7 @@ test.describe("Jira settings", () => {
     });
     await settings.saveButton.click();
 
-    // After save the button label flips from "Save" to "Update" (config exists).
-    await expect(settings.saveButton).toHaveText(/Update/i);
+    await expect(settings.saveButton).toHaveCount(0);
     // The post-save probe runs async; await it before reloading so the new
     // banner state is in the DB by the time the page re-fetches the config.
     await apiClient.waitForIntegrationAuthHealthy("jira");
@@ -141,7 +140,7 @@ test.describe("Jira settings", () => {
     await settings.secretInput.fill("pat-token-value");
     await expect(settings.saveButton).toBeEnabled();
     await settings.saveButton.click();
-    await expect(settings.saveButton).toHaveText(/Update/i);
+    await expect(settings.saveButton).toHaveCount(0);
     await apiClient.waitForIntegrationAuthHealthy("jira");
 
     await testPage.reload();
@@ -214,15 +213,15 @@ test.describe("Jira settings", () => {
       secret: "api-token-value",
     });
     await settings.saveButton.click();
-    await expect(settings.saveButton).toHaveText(/Update/i);
+    await expect(settings.saveButton).toHaveCount(0);
     await apiClient.waitForIntegrationAuthHealthy("jira");
 
     await testPage.reload();
     await settings.siteInput.waitFor();
-    // Saved secret reuse: placeholder shows the masked dots, Save stays
-    // enabled with the field left blank.
+    // Saved secret reuse: placeholder shows the masked dots. A clean form has
+    // no route-level save action until the user changes an identity field.
     await expect(settings.secretInput).toHaveAttribute("placeholder", /•/);
-    await expect(settings.saveButton).toBeEnabled();
+    await expect(settings.saveButton).toHaveCount(0);
 
     // Change the site URL — the saved secret no longer applies to this host.
     await settings.siteInput.fill("https://other.atlassian.net");

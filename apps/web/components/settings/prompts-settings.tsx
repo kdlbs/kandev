@@ -90,9 +90,7 @@ type PromptListItemProps = {
   onFormChange: (patch: Partial<PromptFormState>) => void;
   onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
-  onUpdate: () => void;
   onCancel: () => void;
-  isValid: boolean;
   isBusy: boolean;
   showCreate: boolean;
 };
@@ -105,9 +103,7 @@ function PromptListItem({
   onFormChange,
   onStartEditing,
   onOpenDelete,
-  onUpdate,
   onCancel,
-  isValid,
   isBusy,
   showCreate,
 }: PromptListItemProps) {
@@ -171,9 +167,6 @@ function PromptListItem({
             data-testid="prompt-content-input"
           />
           <div className="flex items-center gap-2">
-            <Button onClick={onUpdate} disabled={!isValid || isBusy} data-testid="prompt-submit">
-              Save changes
-            </Button>
             <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
               Cancel
             </Button>
@@ -197,9 +190,7 @@ type PromptListContentProps = {
   onFormChange: (patch: Partial<PromptFormState>) => void;
   onStartEditing: (prompt: CustomPrompt) => void;
   onOpenDelete: (prompt: CustomPrompt) => void;
-  onUpdate: () => void;
   onCancel: () => void;
-  isValid: boolean;
   isBusy: boolean;
   showCreate: boolean;
 };
@@ -213,9 +204,7 @@ function PromptListContent({
   onFormChange,
   onStartEditing,
   onOpenDelete,
-  onUpdate,
   onCancel,
-  isValid,
   isBusy,
   showCreate,
 }: PromptListContentProps) {
@@ -245,9 +234,7 @@ function PromptListContent({
           onFormChange={onFormChange}
           onStartEditing={onStartEditing}
           onOpenDelete={onOpenDelete}
-          onUpdate={onUpdate}
           onCancel={onCancel}
-          isValid={isValid}
           isBusy={isBusy}
           showCreate={showCreate}
         />
@@ -386,9 +373,14 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     if (!isValid || isBusy) return;
     createRequest.run(formState).catch(toastError("Couldn't create prompt"));
   };
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
     if (!isValid || isBusy || !editingId) return;
-    updateRequest.run(editingId, formState).catch(toastError("Couldn't save prompt"));
+    try {
+      await updateRequest.run(editingId, formState);
+    } catch (error) {
+      toastError("Couldn't save prompt")(error);
+      throw error;
+    }
   };
   const startEditing = (prompt: CustomPrompt) => {
     setEditingId(prompt.id);
@@ -451,6 +443,13 @@ export function PromptsSettings() {
     resetForm,
   } = usePromptsActions(state);
   const isEditing = Boolean(editingId);
+  const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
+  const editRevision = JSON.stringify(formState);
+  const savedEditRevision = JSON.stringify({
+    name: editingPrompt?.name ?? "",
+    content: editingPrompt?.content ?? "",
+  });
+  const editIsDirty = Boolean(editingId) && editRevision !== savedEditRevision;
 
   useEffect(() => {
     if (!editingId) return;
@@ -461,10 +460,14 @@ export function PromptsSettings() {
     <SettingsPageTemplate
       title="Prompts"
       description="Create reusable prompt snippets for the chat input."
-      isDirty={false}
+      isDirty={editIsDirty}
       saveStatus="idle"
-      onSave={() => undefined}
-      showSaveButton={false}
+      saveId="prompts-existing-item"
+      saveRevision={`${editingId ?? "none"}:${editRevision}`}
+      canSave={!editingId || isValid}
+      invalidReason={editingId && !isValid ? "Prompt name and content are required." : undefined}
+      onSave={handleUpdate}
+      onDiscard={resetForm}
     >
       <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
         Use <span className="font-medium text-foreground">@name</span> in the chat input to insert a
@@ -503,9 +506,7 @@ export function PromptsSettings() {
             onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
             onStartEditing={startEditing}
             onOpenDelete={openDeleteDialog}
-            onUpdate={handleUpdate}
             onCancel={resetForm}
-            isValid={isValid}
             isBusy={isBusy}
             showCreate={showCreate}
           />

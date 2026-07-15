@@ -41,7 +41,7 @@ test.describe("GitHub workspace settings", () => {
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Selected repositories" }).click();
     await testPage.getByTestId("github-scope-repos-input").fill("kdlbs/kandev");
-    await testPage.getByTestId("github-scope-save").click();
+    await testPage.getByTestId("settings-floating-save").getByRole("button").click();
     await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
       timeout: 10_000,
     });
@@ -87,7 +87,7 @@ test.describe("GitHub workspace settings", () => {
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
     await testPage.getByTestId("github-scope-orgs-input").fill("kdlbs");
-    await testPage.getByTestId("github-scope-save").click();
+    await testPage.getByTestId("settings-floating-save").getByRole("button").click();
     await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
       timeout: 10_000,
     });
@@ -111,7 +111,7 @@ test.describe("GitHub workspace settings", () => {
     await testPage.getByTestId("github-scope-repos-input").fill("not-a-repo");
     await testPage.getByTestId("github-scope-mode").click();
     await testPage.getByRole("option", { name: "Organizations" }).click();
-    await testPage.getByTestId("github-scope-save").click();
+    await testPage.getByTestId("settings-floating-save").getByRole("button").click();
     await expect(testPage.getByText("GitHub workspace settings saved").last()).toBeVisible({
       timeout: 10_000,
     });

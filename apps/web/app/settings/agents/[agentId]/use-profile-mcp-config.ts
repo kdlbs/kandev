@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getAgentProfileMcpConfigAction,
   updateAgentProfileMcpConfigAction,
@@ -125,6 +125,12 @@ function useFetchConfig(
   }, [profileId, supportsMcp, isEditableProfile, hasInitialConfig]);
 }
 
+function useLatestMcpDraft(enabled: boolean, servers: string) {
+  const ref = useRef({ enabled, servers });
+  ref.current = { enabled, servers };
+  return ref;
+}
+
 export function useProfileMcpConfig({
   profileId,
   supportsMcp,
@@ -139,6 +145,7 @@ export function useProfileMcpConfig({
   const [mcpDirty, setMcpDirty] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<McpStatus>("idle");
   const [hasInitialConfig] = useState(initialConfig !== undefined);
+  const latestDraftRef = useLatestMcpDraft(mcpEnabled, mcpServers);
 
   const isEditableProfile = Boolean(profileId) && !profileId.startsWith("draft-");
 
@@ -183,6 +190,8 @@ export function useProfileMcpConfig({
 
   const handleSaveMcp = async () => {
     if (!isEditableProfile) return;
+    const submittedEnabled = mcpEnabled;
+    const submittedServers = mcpServers;
     setMcpStatus("loading");
 
     let servers: Record<string, McpServerDef> = {};
@@ -193,7 +202,7 @@ export function useProfileMcpConfig({
     } catch (error) {
       setMcpStatus("error");
       setMcpError(error instanceof Error ? error.message : "Invalid MCP config");
-      return;
+      throw error;
     }
 
     try {
@@ -203,14 +212,20 @@ export function useProfileMcpConfig({
         meta: mcpConfig?.meta ?? {},
       });
       setMcpConfig(updated);
-      setMcpEnabledState(updated.enabled);
-      setMcpServers(serializeServers(updated));
-      setMcpDirty(false);
+      setMcpEnabledState((current) => (current === submittedEnabled ? updated.enabled : current));
+      setMcpServers((current) =>
+        current === submittedServers ? serializeServers(updated) : current,
+      );
+      setMcpDirty(
+        latestDraftRef.current.enabled !== submittedEnabled ||
+          latestDraftRef.current.servers !== submittedServers,
+      );
       setMcpError(null);
       setMcpStatus("success");
     } catch (error) {
       setMcpStatus("error");
       onToastError(error);
+      throw error;
     }
   };
 

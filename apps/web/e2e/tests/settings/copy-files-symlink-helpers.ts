@@ -24,7 +24,10 @@ export async function configureSymlinkAndCreateTask(options: {
       response.request().method() === "PATCH" &&
       response.ok(),
   );
-  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await page
+    .getByTestId("settings-floating-save")
+    .getByRole("button", { name: "Save changes" })
+    .click();
   await saved;
 
   const { executors } = await apiClient.listExecutors();

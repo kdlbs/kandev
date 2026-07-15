@@ -18,7 +18,6 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
-import { RequestIndicator } from "@/components/request-indicator";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
 
 const EXECUTORS_ROUTE = "/settings/executors";
@@ -100,42 +99,21 @@ export function ProfileHeader({
   );
 }
 
-export function ProfileFormActions({
-  saveStatus,
-  saveDisabled,
-  onSave,
-  onDelete,
-}: {
-  saveStatus: SaveStatus;
-  saveDisabled: boolean;
-  onSave: () => void;
-  onDelete: () => void;
-}) {
+export function ProfileFormActions({ onDelete }: { onDelete: () => void }) {
   const router = useRouter();
-  const saveLabel = getSaveButtonLabel(saveStatus);
   return (
     <div className="flex items-center justify-between">
       <Button variant="destructive" size="sm" onClick={onDelete} className="cursor-pointer">
         <IconTrash className="mr-1 h-4 w-4" />
         Delete Profile
       </Button>
-      <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="cursor-pointer"
-        >
-          Cancel
-        </Button>
-        <Button onClick={onSave} disabled={saveDisabled} className="min-w-36 cursor-pointer">
-          {saveLabel}
-          {saveStatus !== "idle" && (
-            <span className="ml-2">
-              <RequestIndicator status={saveStatus} />
-            </span>
-          )}
-        </Button>
-      </div>
+      <Button
+        variant="outline"
+        onClick={() => router.push(EXECUTORS_ROUTE)}
+        className="cursor-pointer"
+      >
+        Cancel
+      </Button>
     </div>
   );
 }

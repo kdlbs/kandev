@@ -10,13 +10,7 @@ import { Switch } from "@kandev/ui/switch";
 import { Separator } from "@kandev/ui/separator";
 import { IconTrash } from "@tabler/icons-react";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
-import {
-  addTrigger,
-  updateTrigger,
-  deleteTrigger,
-  getAutomation,
-  listTriggerTypes,
-} from "@/lib/api/domains/automation-api";
+import { getAutomation, listTriggerTypes } from "@/lib/api/domains/automation-api";
 import type {
   Automation,
   CreateAutomationResponse,
@@ -34,13 +28,13 @@ import { RequiredFieldLabel } from "./required-field-label";
 import {
   type CreatedWebhookDetails,
   type FormState,
-  type PendingTrigger,
   buildCreatePayload,
   buildUpdatePayload,
   buildWebhookUrl,
   resolveRepositoryId,
 } from "./automation-payload";
-import { generateUUID } from "@/lib/utils";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 
 type AutomationEditorProps = {
   workspaceId: string;
@@ -83,75 +77,6 @@ function formFromAutomation(a: Automation): FormState {
   };
 }
 
-function pendingToTrigger(p: PendingTrigger): AutomationTrigger {
-  return {
-    id: p.tempId,
-    automation_id: "",
-    type: p.type,
-    config: p.config,
-    enabled: p.enabled,
-    last_evaluated_at: null,
-    created_at: "",
-    updated_at: "",
-  };
-}
-
-function useTriggerActions(currentId: string | null) {
-  const [triggers, setTriggers] = useState<AutomationTrigger[]>([]);
-  const [pending, setPending] = useState<PendingTrigger[]>([]);
-
-  const handleAdd = async (type: TriggerType, config: Record<string, unknown>) => {
-    if (!currentId) {
-      setPending((prev) => [...prev, { tempId: generateUUID(), type, config, enabled: true }]);
-      return;
-    }
-    const trigger = await addTrigger({ automation_id: currentId, type, config, enabled: true });
-    setTriggers((prev) => [...prev, trigger]);
-  };
-
-  const handleUpdate = async (triggerId: string, config: Record<string, unknown>) => {
-    if (!currentId) {
-      setPending((prev) => prev.map((t) => (t.tempId === triggerId ? { ...t, config } : t)));
-      return;
-    }
-    await updateTrigger(triggerId, { config });
-    setTriggers((prev) => prev.map((t) => (t.id === triggerId ? { ...t, config } : t)));
-  };
-
-  const handleToggle = async (triggerId: string, enabled: boolean) => {
-    if (!currentId) {
-      setPending((prev) => prev.map((t) => (t.tempId === triggerId ? { ...t, enabled } : t)));
-      return;
-    }
-    await updateTrigger(triggerId, { enabled });
-    setTriggers((prev) => prev.map((t) => (t.id === triggerId ? { ...t, enabled } : t)));
-  };
-
-  const handleDelete = async (triggerId: string) => {
-    if (!currentId) {
-      setPending((prev) => prev.filter((t) => t.tempId !== triggerId));
-      return;
-    }
-    await deleteTrigger(triggerId);
-    setTriggers((prev) => prev.filter((t) => t.id !== triggerId));
-  };
-
-  const allTriggers = currentId ? triggers : pending.map(pendingToTrigger);
-  const clearPending = () => setPending([]);
-
-  return {
-    triggers,
-    setTriggers,
-    pending,
-    clearPending,
-    allTriggers,
-    handleAdd,
-    handleUpdate,
-    handleToggle,
-    handleDelete,
-  };
-}
-
 function useTriggerTypeMetadata() {
   const [triggerTypes, setTriggerTypes] = useState<TriggerTypeInfo[]>([]);
 
@@ -189,7 +114,8 @@ type SaveHandlerOpts = {
   // a webhook automation, then the user is redirected to the listings page.
   // Null when no webhook trigger was configured on the new automation.
   setCreatedWebhook: React.Dispatch<React.SetStateAction<CreatedWebhookDetails | null>>;
-  triggerActions: ReturnType<typeof useTriggerActions>;
+  onSaved: (form: FormState, triggers: AutomationTrigger[]) => void;
+  triggerActions: ReturnType<typeof useAutomationTriggerDrafts>;
   router: ReturnType<typeof useRouter>;
 };
 
@@ -199,7 +125,8 @@ type SaveHandlerOpts = {
 // registers discovered repos before persisting the automation.
 function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
   const { isNew, workspaceId, form, currentId, create, update } = opts;
-  const { setSaving, setCurrentId, setForm, setCreatedWebhook, triggerActions, router } = opts;
+  const { setSaving, setCurrentId, setForm, setCreatedWebhook, triggerActions, router, onSaved } =
+    opts;
   return async () => {
     setSaving(true);
     try {
@@ -222,9 +149,18 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
         // Everything else goes straight to the listings page with a toast.
         const hasWebhookTrigger = (a.triggers ?? []).some((t) => t.type === "webhook");
         if (hasWebhookTrigger && a.webhook_secret) {
-          setCurrentId(a.id);
-          triggerActions.setTriggers(a.triggers ?? []);
+          const savedForm =
+            form.repositorySelection.kind === "discovered" && repositoryId
+              ? {
+                  ...form,
+                  repositorySelection: { kind: "registered" as const, id: repositoryId },
+                }
+              : form;
+          const savedTriggers = a.triggers ?? [];
+          triggerActions.loadTriggers(savedTriggers);
           triggerActions.clearPending();
+          onSaved(savedForm, savedTriggers);
+          setCurrentId(a.id);
           setCreatedWebhook({ url: buildWebhookUrl(a.id), secret: a.webhook_secret });
         } else {
           toast.success("Automation created");
@@ -232,11 +168,18 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
         }
       } else if (currentId) {
         await update(currentId, buildUpdatePayload(form, repositoryId));
+        const persistedTriggers = await triggerActions.persistDrafts();
         promoteSelection();
+        const savedForm =
+          form.repositorySelection.kind === "discovered" && repositoryId
+            ? { ...form, repositorySelection: { kind: "registered" as const, id: repositoryId } }
+            : form;
+        onSaved(savedForm, persistedTriggers);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(`Failed to save automation: ${msg}`);
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -249,19 +192,26 @@ function getSaveLabel(saving: boolean, isNew: boolean): string {
 }
 
 /** Loads an existing automation on mount and populates form + trigger state. */
-function useLoadAutomation(
-  automationId: string | null,
-  workspaceId: string,
-  setForm: React.Dispatch<React.SetStateAction<FormState>>,
-  setTriggers: (triggers: AutomationTrigger[]) => void,
-  router: ReturnType<typeof useRouter>,
-) {
+type LoadAutomationOpts = {
+  automationId: string | null;
+  workspaceId: string;
+  setForm: React.Dispatch<React.SetStateAction<FormState>>;
+  loadTriggers: (triggers: AutomationTrigger[]) => void;
+  onLoaded: (form: FormState, triggers: AutomationTrigger[]) => void;
+  router: ReturnType<typeof useRouter>;
+};
+
+function useLoadAutomation(opts: LoadAutomationOpts) {
+  const { automationId, workspaceId, setForm, loadTriggers, onLoaded, router } = opts;
   useEffect(() => {
     if (!automationId) return;
     getAutomation(automationId)
       .then((a) => {
-        setForm(formFromAutomation(a));
-        setTriggers(a.triggers ?? []);
+        const loadedForm = formFromAutomation(a);
+        const loadedTriggers = a.triggers ?? [];
+        setForm(loadedForm);
+        loadTriggers(loadedTriggers);
+        onLoaded(loadedForm, loadedTriggers);
       })
       .catch(() => {
         router.push(`/settings/workspace/${workspaceId}/automations`);
@@ -301,18 +251,48 @@ function useAutoPromptUpdate(
   }, [conditionType, activeTriggerInfo, triggerTypes, setForm]);
 }
 
+function useAutomationSaveContributor(options: {
+  currentId: string | null;
+  revision: string;
+  savedRevision: string;
+  canSave: boolean;
+  save: () => Promise<void>;
+}) {
+  const { currentId, revision, savedRevision, canSave, save } = options;
+  useSettingsSaveContributor({
+    id: `automation:${currentId ?? "new"}`,
+    revision,
+    isDirty: currentId !== null && revision !== savedRevision,
+    canSave,
+    invalidReason: canSave ? undefined : "Complete the required automation fields before saving.",
+    save,
+    discard: () => undefined,
+  });
+}
+
+function useRemoveAutomation(
+  currentId: string | null,
+  workspaceId: string,
+  remove: (id: string) => Promise<unknown>,
+  router: ReturnType<typeof useRouter>,
+) {
+  return async () => {
+    if (!currentId) return;
+    await remove(currentId);
+    router.push(`/settings/workspace/${workspaceId}/automations`);
+  };
+}
+
 export function AutomationEditor({ workspaceId, automationId }: AutomationEditorProps) {
   const router = useRouter();
   const { create, update, remove } = useAutomations(workspaceId);
   const [form, setForm] = useState<FormState>(defaultForm);
   const [saving, setSaving] = useState(false);
   const [currentId, setCurrentId] = useState<string | null>(automationId);
-  // createdWebhook holds the URL + secret of a freshly-created webhook
-  // automation. Set in the save handler; cleared when the user dismisses
-  // the dialog, at which point we redirect to the listings page.
   const [createdWebhook, setCreatedWebhook] = useState<CreatedWebhookDetails | null>(null);
   const isNew = currentId === null;
-  const triggerActions = useTriggerActions(currentId);
+  const triggerActions = useAutomationTriggerDrafts(currentId);
+  const [savedRevision, setSavedRevision] = useState(() => automationRevision(defaultForm, []));
   const triggerTypes = useTriggerTypeMetadata();
 
   const { placeholders, defaultTaskTitle, activeTriggerInfo, conditionType } = useConditionMetadata(
@@ -320,7 +300,15 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     triggerTypes,
   );
   useAutoPromptUpdate(activeTriggerInfo, conditionType, triggerTypes, setForm);
-  useLoadAutomation(automationId, workspaceId, setForm, triggerActions.setTriggers, router);
+  useLoadAutomation({
+    automationId,
+    workspaceId,
+    setForm,
+    loadTriggers: triggerActions.loadTriggers,
+    onLoaded: (loadedForm, loadedTriggers) =>
+      setSavedRevision(automationRevision(loadedForm, loadedTriggers)),
+    router,
+  });
 
   const updateField = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -339,17 +327,23 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     setCreatedWebhook,
     triggerActions,
     router,
+    onSaved: (savedForm, savedTriggers) =>
+      setSavedRevision(automationRevision(savedForm, savedTriggers)),
   });
 
-  const handleRemove = async () => {
-    if (!currentId) return;
-    await remove(currentId);
-    router.push(`/settings/workspace/${workspaceId}/automations`);
-  };
+  const handleRemove = useRemoveAutomation(currentId, workspaceId, remove, router);
 
   const isRunMode = form.executionMode === "run";
   const canSave =
     form.name.trim().length > 0 && (isRunMode || (!!form.workflowId && !!form.workflowStepId));
+  const revision = automationRevision(form, triggerActions.allTriggers);
+  useAutomationSaveContributor({
+    currentId,
+    revision,
+    savedRevision,
+    canSave,
+    save: handleSave,
+  });
 
   return (
     <div className="max-w-3xl space-y-6" data-testid="automation-editor">
@@ -436,7 +430,7 @@ function CreatedWebhookDialogHost({
   );
 }
 
-type TriggerActionsResult = ReturnType<typeof useTriggerActions>;
+type TriggerActionsResult = ReturnType<typeof useAutomationTriggerDrafts>;
 
 function WhenSection({
   triggerActions,
@@ -585,14 +579,16 @@ function EditorFooter({
 }) {
   return (
     <div className="flex items-center gap-3 pt-4">
-      <Button
-        data-testid="automation-save-button"
-        className="cursor-pointer"
-        onClick={onSave}
-        disabled={!canSave || saving}
-      >
-        {getSaveLabel(saving, isNew)}
-      </Button>
+      {isNew && (
+        <Button
+          data-testid="automation-save-button"
+          className="cursor-pointer"
+          onClick={onSave}
+          disabled={!canSave || saving}
+        >
+          {getSaveLabel(saving, isNew)}
+        </Button>
+      )}
       {!isNew && (
         <Button
           data-testid="automation-delete-button"
@@ -606,4 +602,11 @@ function EditorFooter({
       )}
     </div>
   );
+}
+
+function automationRevision(form: FormState, triggers: AutomationTrigger[]): string {
+  return JSON.stringify({
+    form,
+    triggers: triggers.map(({ id, type, config, enabled }) => ({ id, type, config, enabled })),
+  });
 }

@@ -5,7 +5,7 @@ import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useProfileMcpConfig } from "./use-profile-mcp-config";
 import type { AgentProfileMcpConfig } from "@/lib/types/http";
 
@@ -357,13 +357,10 @@ export function ProfileMcpConfigCard({
     mcpServers,
     mcpError,
     mcpDirty,
-    mcpStatus,
     setMcpEnabled,
     handleMcpServersChange,
     handleSaveMcp,
   } = useProfileMcpConfig({ profileId, supportsMcp, initialConfig, onToastError });
-
-  if (!supportsMcp) return null;
 
   const state = resolveMcpConfigState({
     draftState,
@@ -373,14 +370,25 @@ export function ProfileMcpConfigCard({
     mcpError,
     mcpDirty,
   });
+  useSettingsSaveContributor({
+    id: `agent-profile-mcp:${profileId}`,
+    revision: JSON.stringify({
+      enabled: state.currentEnabled,
+      servers: state.currentServers,
+    }),
+    isDirty: supportsMcp && state.isEditableProfile && state.currentDirty,
+    canSave: !state.currentError,
+    invalidReason: state.currentError ?? undefined,
+    save: handleSaveMcp,
+    discard: () => undefined,
+  });
+
+  if (!supportsMcp) return null;
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div className="flex items-center gap-2">
-          <CardTitle>MCP Configuration</CardTitle>
-          {state.currentDirty && <UnsavedChangesBadge />}
-        </div>
+      <CardHeader>
+        <CardTitle>MCP Configuration</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <McpProfileHint isDraft={state.isDraft} isEditableProfile={state.isEditableProfile} />
@@ -403,16 +411,6 @@ export function ProfileMcpConfigCard({
           handleMcpServersChange={handleMcpServersChange}
         />
       </CardContent>
-      <div className="flex justify-end px-6 pb-6">
-        {state.isEditableProfile ? (
-          <UnsavedSaveButton
-            isDirty={state.currentDirty}
-            isLoading={mcpStatus === "loading"}
-            status={mcpStatus}
-            onClick={handleSaveMcp}
-          />
-        ) : null}
-      </div>
     </Card>
   );
 }

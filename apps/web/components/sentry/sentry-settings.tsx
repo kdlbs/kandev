@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSentryEnabled } from "@/hooks/domains/sentry/use-sentry-enabled";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
+import { useDraftedIntegrationEnabled } from "@/components/integrations/use-drafted-integration-enabled";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   deleteSentryInstance,
@@ -121,16 +122,21 @@ function InstanceList({
 
 function EnabledPill() {
   const { enabled, setEnabled } = useSentryEnabled();
+  const draft = useDraftedIntegrationEnabled({
+    id: "sentry-enabled",
+    enabled,
+    persist: setEnabled,
+  });
   return (
     <div className="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1">
       <Switch
         id="sentry-enabled"
-        checked={enabled}
-        onCheckedChange={setEnabled}
+        checked={draft.enabled}
+        onCheckedChange={draft.setEnabled}
         className="cursor-pointer"
       />
       <Label htmlFor="sentry-enabled" className="text-xs cursor-pointer">
-        {enabled ? "Enabled" : "Disabled"}
+        {draft.enabled ? "Enabled" : "Disabled"}
       </Label>
     </div>
   );

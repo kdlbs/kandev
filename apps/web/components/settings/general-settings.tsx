@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Link from "@/components/routing/app-link";
 import { useTheme } from "@/components/theme/app-theme";
 import {
@@ -23,11 +23,16 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
 import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 
-function ThemeSettingsCard() {
-  const { theme: currentTheme, setTheme } = useTheme();
-  const themeValue = currentTheme ?? "system";
-
+function ThemeSettingsCard({
+  theme,
+  onChange,
+}: {
+  theme: Theme;
+  onChange: (theme: Theme) => void;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -35,7 +40,7 @@ function ThemeSettingsCard() {
       </CardHeader>
       <CardContent>
         <div className="space-y-2">
-          <Select value={themeValue} onValueChange={(value) => setTheme(value as Theme)}>
+          <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
             <SelectTrigger id="theme">
               <SelectValue />
             </SelectTrigger>
@@ -51,29 +56,13 @@ function ThemeSettingsCard() {
   );
 }
 
-function ChatSubmitKeyCard() {
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const [isSavingSubmitKey, setIsSavingSubmitKey] = useState(false);
-
-  const handleChatSubmitKeyChange = async (value: "enter" | "cmd_enter") => {
-    if (isSavingSubmitKey) return;
-    setIsSavingSubmitKey(true);
-    const previousValue = userSettings.chatSubmitKey;
-    try {
-      setUserSettings({ ...userSettings, chatSubmitKey: value });
-      await updateUserSettings({
-        workspace_id: userSettings.workspaceId || "",
-        repository_ids: userSettings.repositoryIds || [],
-        chat_submit_key: value,
-      });
-    } catch {
-      setUserSettings({ ...userSettings, chatSubmitKey: previousValue });
-    } finally {
-      setIsSavingSubmitKey(false);
-    }
-  };
-
+function ChatSubmitKeyCard({
+  value,
+  onChange,
+}: {
+  value: "enter" | "cmd_enter";
+  onChange: (value: "enter" | "cmd_enter") => void;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -82,11 +71,7 @@ function ChatSubmitKeyCard() {
       <CardContent>
         <div className="space-y-2">
           <Label htmlFor="chat-submit-key">Message Submit Key</Label>
-          <Select
-            value={userSettings.chatSubmitKey}
-            onValueChange={(value) => handleChatSubmitKeyChange(value as "enter" | "cmd_enter")}
-            disabled={isSavingSubmitKey}
-          >
+          <Select value={value} onValueChange={(next) => onChange(next as "enter" | "cmd_enter")}>
             <SelectTrigger id="chat-submit-key">
               <SelectValue />
             </SelectTrigger>
@@ -96,7 +81,7 @@ function ChatSubmitKeyCard() {
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            {userSettings.chatSubmitKey === "cmd_enter"
+            {value === "cmd_enter"
               ? "Press Cmd/Ctrl+Enter to send messages. Press Enter for newlines."
               : "Press Enter to send messages. Press Shift+Enter for newlines."}
           </p>
@@ -106,31 +91,13 @@ function ChatSubmitKeyCard() {
   );
 }
 
-function ChangesPanelLayoutCard() {
-  const userSettings = useAppStore((state) => state.userSettings);
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
-  const [isSaving, setIsSaving] = useState(false);
-
-  const handleChange = async (value: "flat" | "tree") => {
-    if (isSaving) return;
-    setIsSaving(true);
-    const current = storeApi.getState().userSettings;
-    const previous = current.changesPanelLayout;
-    try {
-      setUserSettings({ ...current, changesPanelLayout: value });
-      await updateUserSettings({
-        workspace_id: current.workspaceId || "",
-        repository_ids: current.repositoryIds || [],
-        changes_panel_layout: value,
-      });
-    } catch {
-      setUserSettings({ ...storeApi.getState().userSettings, changesPanelLayout: previous });
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
+function ChangesPanelLayoutCard({
+  value,
+  onChange,
+}: {
+  value: "flat" | "tree";
+  onChange: (value: "flat" | "tree") => void;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -139,11 +106,7 @@ function ChangesPanelLayoutCard() {
       <CardContent>
         <div className="space-y-2">
           <Label htmlFor="changes-panel-layout">File list view</Label>
-          <Select
-            value={userSettings.changesPanelLayout}
-            onValueChange={(v) => handleChange(v as "flat" | "tree")}
-            disabled={isSaving}
-          >
+          <Select value={value} onValueChange={(next) => onChange(next as "flat" | "tree")}>
             <SelectTrigger
               id="changes-panel-layout"
               data-testid="changes-panel-layout-select"
@@ -204,6 +167,57 @@ export function TaskActionsSettings() {
 }
 
 export function AppearanceSettings() {
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const storeApi = useAppStoreApi();
+  const { savedTheme, previewTheme, commitTheme, restoreTheme } = useTheme();
+  const [saved, setSaved] = useState(() => ({
+    theme: savedTheme,
+    changesPanelLayout: userSettings.changesPanelLayout,
+    showMetrics: userSettings.systemMetricsDisplay.showInTopbar,
+  }));
+  const [draft, setDraft] = useState(saved);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const revision = JSON.stringify(draft);
+  const isDirty = revision !== JSON.stringify(saved);
+
+  useSettingsSaveContributor({
+    id: "general-appearance",
+    order: 10,
+    revision,
+    isDirty,
+    save: async () => {
+      const submitted = draft;
+      const current = storeApi.getState().userSettings;
+      await updateUserSettings({
+        workspace_id: current.workspaceId || "",
+        repository_ids: current.repositoryIds || [],
+        changes_panel_layout: submitted.changesPanelLayout,
+        system_metrics_display: { show_in_topbar: submitted.showMetrics },
+      });
+      commitTheme(submitted.theme);
+      if (draftRef.current.theme !== submitted.theme) {
+        previewTheme(draftRef.current.theme);
+      }
+      setSaved(submitted);
+      setUserSettings({
+        ...storeApi.getState().userSettings,
+        changesPanelLayout: submitted.changesPanelLayout,
+        systemMetricsDisplay: { showInTopbar: submitted.showMetrics },
+      });
+    },
+    discard: () => {
+      setDraft(saved);
+      restoreTheme();
+    },
+  });
+
+  const updateDraft = useCallback(
+    (patch: Partial<typeof draft>) => setDraft((current) => ({ ...current, ...patch })),
+    [],
+  );
+
   return (
     <div className="space-y-8">
       <SettingsSection
@@ -211,7 +225,13 @@ export function AppearanceSettings() {
         title="Appearance"
         description="Customize how the application looks"
       >
-        <ThemeSettingsCard />
+        <ThemeSettingsCard
+          theme={draft.theme}
+          onChange={(theme) => {
+            updateDraft({ theme });
+            previewTheme(theme);
+          }}
+        />
       </SettingsSection>
 
       <Separator />
@@ -221,7 +241,10 @@ export function AppearanceSettings() {
         title="Changes Panel"
         description="Customize how changed files are displayed"
       >
-        <ChangesPanelLayoutCard />
+        <ChangesPanelLayoutCard
+          value={draft.changesPanelLayout}
+          onChange={(changesPanelLayout) => updateDraft({ changesPanelLayout })}
+        />
       </SettingsSection>
 
       <Separator />
@@ -231,13 +254,45 @@ export function AppearanceSettings() {
         title="Resource Metrics"
         description="Configure backend and execution resource sampling"
       >
-        <SystemMetricsSettingsCard />
+        <SystemMetricsSettingsCard
+          showInTopbar={draft.showMetrics}
+          onShowInTopbarChange={(showMetrics) => updateDraft({ showMetrics })}
+        />
       </SettingsSection>
     </div>
   );
 }
 
 export function KeyboardShortcutsSettings() {
+  const userSettings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+  const storeApi = useAppStoreApi();
+  const [saved, setSaved] = useState(() => ({
+    chatSubmitKey: userSettings.chatSubmitKey,
+    keyboardShortcuts: userSettings.keyboardShortcuts as StoredShortcutOverrides,
+  }));
+  const [draft, setDraft] = useState(saved);
+  const revision = JSON.stringify(draft);
+
+  useSettingsSaveContributor({
+    id: "general-keyboard-shortcuts",
+    revision,
+    isDirty: revision !== JSON.stringify(saved),
+    save: async () => {
+      const submitted = draft;
+      const current = storeApi.getState().userSettings;
+      await updateUserSettings({
+        workspace_id: current.workspaceId || "",
+        repository_ids: current.repositoryIds || [],
+        chat_submit_key: submitted.chatSubmitKey,
+        keyboard_shortcuts: submitted.keyboardShortcuts,
+      });
+      setSaved(submitted);
+      setUserSettings({ ...storeApi.getState().userSettings, ...submitted });
+    },
+    discard: () => setDraft(saved),
+  });
+
   return (
     <div className="space-y-8">
       <SettingsSection
@@ -245,7 +300,10 @@ export function KeyboardShortcutsSettings() {
         title="Chat Input"
         description="Configure chat input behavior"
       >
-        <ChatSubmitKeyCard />
+        <ChatSubmitKeyCard
+          value={draft.chatSubmitKey}
+          onChange={(chatSubmitKey) => setDraft((current) => ({ ...current, chatSubmitKey }))}
+        />
       </SettingsSection>
 
       <Separator />
@@ -255,7 +313,12 @@ export function KeyboardShortcutsSettings() {
         title="Keyboard Shortcuts"
         description="Customize keyboard shortcuts for the command panel"
       >
-        <KeyboardShortcutsCard />
+        <KeyboardShortcutsCard
+          overrides={draft.keyboardShortcuts}
+          onChange={(keyboardShortcuts) =>
+            setDraft((current) => ({ ...current, keyboardShortcuts }))
+          }
+        />
       </SettingsSection>
     </div>
   );

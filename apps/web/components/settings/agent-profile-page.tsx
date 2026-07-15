@@ -11,7 +11,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
-import { UnsavedChangesBadge, UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import {
   arePermissionsDirty,
@@ -65,20 +65,12 @@ type ProfileEditorHeaderProps = {
   agentName: string;
   agentDisplayName: string;
   savedProfileName: string;
-  isDirty: boolean;
-  isLoading: boolean;
-  saveStatus: SaveStatus;
-  onSave: () => void;
 };
 
 function ProfileEditorHeader({
   agentName,
   agentDisplayName,
   savedProfileName,
-  isDirty,
-  isLoading,
-  saveStatus,
-  onSave,
 }: ProfileEditorHeaderProps) {
   return (
     <div className="flex items-start justify-between">
@@ -88,15 +80,6 @@ function ProfileEditorHeader({
           {agentDisplayName} • {savedProfileName}
         </h2>
         <p className="text-sm text-muted-foreground mt-1">{agentDisplayName} profile settings</p>
-      </div>
-      <div className="flex items-center gap-3">
-        {isDirty && <UnsavedChangesBadge />}
-        <UnsavedSaveButton
-          isDirty={isDirty}
-          isLoading={isLoading}
-          status={saveStatus}
-          onClick={onSave}
-        />
       </div>
     </div>
   );
@@ -234,7 +217,7 @@ type ProfileEditorActionsOptions = {
   agent: Agent;
   draft: AgentProfile;
   setSavedProfile: (p: AgentProfile) => void;
-  setDraft: (p: AgentProfile) => void;
+  setDraft: React.Dispatch<React.SetStateAction<AgentProfile>>;
   setSaveStatus: (s: SaveStatus) => void;
   settingsAgents: Agent[];
   syncAgentsToStore: (agents: Agent[]) => void;
@@ -275,7 +258,7 @@ function useProfileSave({
         env_vars: draft.envVars ?? [],
       });
       setSavedProfile(updated);
-      setDraft(updated);
+      setDraft((current) => preserveNewerProfileDraft(current, draft, updated));
       const nextAgents = settingsAgents.map((agentItem: Agent) =>
         agentItem.id === agent.id
           ? {
@@ -295,8 +278,17 @@ function useProfileSave({
         description: errorMessage(error),
         variant: "error",
       });
+      throw error;
     }
   };
+}
+
+export function preserveNewerProfileDraft(
+  current: AgentProfile,
+  submitted: AgentProfile,
+  saved: AgentProfile,
+): AgentProfile {
+  return current === submitted ? saved : current;
 }
 
 function useProfileDelete(
@@ -483,7 +475,7 @@ function ProfileEditor({
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const syncAgentsToStore = useSyncAgentsToStore();
   const { items: secrets } = useSecrets();
-  const { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty } =
+  const { draft, setDraft, savedProfile, setSavedProfile, setSaveStatus, isDirty } =
     useProfileEditorState(profile, permissionSettings);
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
@@ -509,6 +501,15 @@ function ProfileEditor({
     syncAgentsToStore,
     toast,
   });
+  useSettingsSaveContributor({
+    id: `agent-profile:${draft.id}`,
+    revision: JSON.stringify(draft),
+    isDirty,
+    canSave: Boolean(draft.name.trim()),
+    invalidReason: draft.name.trim() ? undefined : "Profile name is required.",
+    save: handleSave,
+    discard: () => undefined,
+  });
   const {
     requestDelete,
     showDeleteConfirm,
@@ -525,10 +526,6 @@ function ProfileEditor({
         agentName={agent.name}
         agentDisplayName={profile.agentDisplayName ?? ""}
         savedProfileName={savedProfile.name}
-        isDirty={isDirty}
-        isLoading={saveStatus === "loading"}
-        saveStatus={saveStatus}
-        onSave={handleSave}
       />
 
       <Separator />

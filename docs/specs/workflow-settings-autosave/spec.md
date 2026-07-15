@@ -1,10 +1,13 @@
 ---
-status: shipped
+status: archived
 created: 2026-07-14
 owner: kandev
+superseded_by: docs/specs/ui/settings-manual-save.md
 ---
 
 # Workflow Settings Autosave
+
+> Superseded by [Settings Manual Save](../ui/settings-manual-save.md). This file records the previously shipped autosave behavior and is no longer the product contract.
 
 ## Why
 

@@ -28,12 +28,22 @@ test.describe("Workflow settings on mobile", () => {
     await childCompletionSelect.click();
     await testPage.getByRole("option", { name: "Move to next step" }).click();
 
-    await expect
-      .poll(async () => {
-        const { steps } = await apiClient.listWorkflowSteps(workflow.id);
-        return steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed;
-      })
-      .toEqual([{ type: "move_to_next" }]);
+    const beforeSave = await apiClient.listWorkflowSteps(workflow.id);
+    expect(
+      beforeSave.steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed,
+    ).toBeUndefined();
+
+    const floatingSave = page.floatingSave;
+    await expect(floatingSave).toBeVisible();
+    const saveButton = floatingSave.getByRole("button", { name: "Save changes" });
+    const saveBox = await saveButton.boundingBox();
+    expect(saveBox).not.toBeNull();
+    expect(saveBox!.height).toBeGreaterThanOrEqual(44);
+    await page.saveChanges();
+    const afterSave = await apiClient.listWorkflowSteps(workflow.id);
+    expect(
+      afterSave.steps.find((step) => step.id === waitStep.id)?.events?.on_children_completed,
+    ).toEqual([{ type: "move_to_next" }]);
 
     const viewportWidth = await testPage.evaluate(() => window.innerWidth);
     const editorControls = [
@@ -57,8 +67,8 @@ test.describe("Workflow settings on mobile", () => {
     await page.goto(seedData.workspaceId);
 
     const card = await page.findWorkflowCard("E2E Workflow");
-    await expect(page.saveButton(card)).toHaveCount(0);
-    await expect(page.saveStatus(card)).toBeVisible();
+    await card.locator("input").first().fill("Mobile Workflow Draft");
+    await expect(page.floatingSave).toBeVisible();
 
     const viewportWidth = await testPage.evaluate(() => window.innerWidth);
     const controls = [
@@ -66,6 +76,7 @@ test.describe("Workflow settings on mobile", () => {
       card.locator("input").first(),
       page.workflowAgentProfileSelect(card),
       page.deleteWorkflowButton(card),
+      page.floatingSave.getByRole("button", { name: "Save changes" }),
     ];
     for (const control of controls) {
       const box = await control.boundingBox();
