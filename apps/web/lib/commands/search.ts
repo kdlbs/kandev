@@ -56,8 +56,38 @@ export function sortCommandsForSearch(commands: CommandItem[], search: string): 
 export function findFirstMatchingCommand(
   commands: CommandItem[],
   search: string,
+  preferredCommandId?: string,
 ): CommandItem | undefined {
+  const preferredCommand = preferredCommandId
+    ? commands.find((command) => command.id === preferredCommandId)
+    : undefined;
+  if (preferredCommand && commandSearchScore(preferredCommand, search) > 0) {
+    return preferredCommand;
+  }
   return sortCommandsForSearch(commands, search).find(
     (command) => commandSearchScore(command, search) > 0,
   );
+}
+
+export function selectCommandSearchResult(
+  commands: CommandItem[],
+  search: string,
+  leadingResultValues: string[],
+  preferredValue?: string,
+): string {
+  const normalizedSearch = search.trim();
+  if (preferredValue) {
+    if (leadingResultValues.includes(preferredValue)) return preferredValue;
+    const preferredCommand = commands.find((command) => command.id === preferredValue);
+    const preferredCommandStillVisible =
+      preferredCommand &&
+      (!normalizedSearch ||
+        findFirstMatchingCommand(commands, normalizedSearch, preferredValue)?.id ===
+          preferredValue);
+    if (preferredCommandStillVisible) return preferredValue;
+  }
+
+  const firstLeadingResult = leadingResultValues[0];
+  if (firstLeadingResult) return firstLeadingResult;
+  return normalizedSearch ? (findFirstMatchingCommand(commands, normalizedSearch)?.id ?? "") : "";
 }

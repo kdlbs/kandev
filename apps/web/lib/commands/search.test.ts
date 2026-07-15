@@ -4,8 +4,11 @@ import {
   findFirstMatchingCommand,
   getCommandSearchTerms,
   scoreCommandSearch,
+  selectCommandSearchResult,
   sortCommandsForSearch,
 } from "./search";
+
+const SHARED_TERM = "Shared term";
 
 function command(
   id: string,
@@ -72,10 +75,27 @@ describe("command search", () => {
   });
 
   it("uses command priority to break equal-score ties", () => {
-    const later = command("later", "Shared term", [], 10);
-    const earlier = command("earlier", "Shared term", [], 0);
+    const later = command("later", SHARED_TERM, [], 10);
+    const earlier = command("earlier", SHARED_TERM, [], 0);
 
     expect(sortCommandsForSearch([later, earlier], "shared")).toEqual([earlier, later]);
+  });
+
+  it("preserves a matching preferred command when registrations update", () => {
+    const first = command("first", SHARED_TERM, [], 0);
+    const selected = command("selected", SHARED_TERM, [], 10);
+
+    expect(findFirstMatchingCommand([first, selected], "shared", selected.id)).toBe(selected);
+  });
+
+  it("preserves a matching command when task results lead the palette", () => {
+    const first = command("first", SHARED_TERM, [], 0);
+    const selected = command("selected", SHARED_TERM, [], 10);
+    const taskValue = "__task:task-1 Shared task";
+
+    expect(selectCommandSearchResult([first, selected], "shared", [taskValue], selected.id)).toBe(
+      selected.id,
+    );
   });
 
   it("returns no command when nothing matches", () => {

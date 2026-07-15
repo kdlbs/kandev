@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { useCommands, useCommandPanelOpen } from "@/lib/commands/command-registry";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
-import { findFirstMatchingCommand } from "@/lib/commands/search";
+import { findFirstMatchingCommand, selectCommandSearchResult } from "@/lib/commands/search";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -302,13 +302,23 @@ function useFirstResultSelection(
   commands: CommandItemType[],
 ) {
   const { mode, search, taskResults, fileResults, setSelectedValue } = state;
+  const previousCommandsRef = useRef(commands);
 
   // `search` intentionally re-applies the first result while debounced results are loading.
   useEffect(() => {
+    const commandsChanged = previousCommandsRef.current !== commands;
+    previousCommandsRef.current = commands;
     if (!open) return;
 
     if (mode === MODE_COMMANDS) {
       const firstTask = taskResults[0];
+      if (commandsChanged) {
+        const taskValues = taskResults.map(getTaskResultValue);
+        setSelectedValue((current) =>
+          selectCommandSearchResult(commands, search, taskValues, current),
+        );
+        return;
+      }
       if (firstTask) {
         setSelectedValue(getTaskResultValue(firstTask));
         return;
