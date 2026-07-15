@@ -29,7 +29,10 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { WorkflowCard } from "@/components/settings/workflow-card";
-import { WorkflowSyncSection } from "@/components/settings/workflow-sync-section";
+import {
+  WorkflowSyncButton,
+  WorkflowSyncSection,
+} from "@/components/settings/workflow-sync-section";
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
 import { useToast } from "@/components/toast-provider";
 import { useWorkflowSettings } from "@/hooks/domains/settings/use-workflow-settings";
@@ -485,6 +488,7 @@ export function WorkspaceWorkflowsClient({
   workflowTemplates,
 }: WorkspaceWorkflowsClientProps) {
   const page = useWorkspaceWorkflowsPage(workspace, workflows, workflowTemplates);
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
 
   if (!workspace)
     return <WorkspaceNotFoundCard onBack={() => page.router.push("/settings/workspace")} />;
@@ -496,13 +500,19 @@ export function WorkspaceWorkflowsClient({
           <h2 className="text-2xl font-bold">{workspace.name}</h2>
           <p className="text-sm text-muted-foreground mt-1">Manage workflows for this workspace.</p>
         </div>
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/settings/workspace/${workspace.id}`}>Workspace settings</Link>
-        </Button>
+        <div className="flex flex-col items-end gap-2">
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/settings/workspace/${workspace.id}`}>Workspace settings</Link>
+          </Button>
+          <WorkflowSyncButton onClick={() => setSyncDialogOpen(true)} />
+        </div>
       </div>
       <Separator />
-      <WorkflowSyncSection workspaceId={workspace.id} />
-      <Separator />
+      <WorkflowSyncSection
+        workspaceId={workspace.id}
+        dialogOpen={syncDialogOpen}
+        onDialogOpenChange={setSyncDialogOpen}
+      />
       <SettingsSection
         icon={<IconArrowsShuffle className="h-5 w-5" />}
         title="Workflows"
