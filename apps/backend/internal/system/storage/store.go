@@ -498,16 +498,17 @@ func requireOneRow(result sql.Result) error {
 }
 
 func pruneTerminalRuns(ctx context.Context, tx *sqlx.Tx) error {
-	_, err := tx.ExecContext(ctx, `
+	query := tx.Rebind(`
 		DELETE FROM storage_maintenance_runs
 		WHERE state IN ('succeeded', 'failed', 'cancelled', 'skipped_busy')
 		  AND id NOT IN (
 			SELECT id FROM storage_maintenance_runs
 			WHERE state IN ('succeeded', 'failed', 'cancelled', 'skipped_busy')
 			ORDER BY completed_at DESC, started_at DESC, id DESC
-			LIMIT 20
+			LIMIT ?
 		  )
 	`)
+	_, err := tx.ExecContext(ctx, query, terminalRunRetention)
 	if err != nil {
 		return fmt.Errorf("prune storage maintenance runs: %w", err)
 	}

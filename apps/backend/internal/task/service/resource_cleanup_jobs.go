@@ -449,9 +449,12 @@ func (s *Service) cancelTaskResourceCleanupJob(ctx context.Context, job *models.
 	if job == nil || s.resourceCleanups == nil {
 		return
 	}
-	_ = s.resourceCleanups.CompleteTaskResourceCleanupJob(
+	if err := s.resourceCleanups.CompleteTaskResourceCleanupJob(
 		ctx, job.ID, models.TaskResourceCleanupStateCancelled, "", nil,
-	)
+	); err != nil {
+		s.logger.Warn("cancel task resource cleanup job failed",
+			zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
+	}
 }
 
 func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob, cleanupErr error) error {
