@@ -53,6 +53,30 @@ test("rejects published pages omitted from meta.json", async () => {
   );
 });
 
+test("rejects meta.json entries without a matching file", async () => {
+  const dir = await createDocs(
+    { "index.md": validPage },
+    { pages: ["index", "nonexistent"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /meta.json references unknown page: nonexistent/,
+  );
+});
+
+test("rejects duplicate entries in meta.json", async () => {
+  const dir = await createDocs(
+    { "index.md": validPage },
+    { pages: ["index", "index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /meta.json lists page more than once: index/,
+  );
+});
+
 test("rejects published pages without title and description frontmatter", async () => {
   const dir = await createDocs(
     { "index.md": "# Kandev\n" },
