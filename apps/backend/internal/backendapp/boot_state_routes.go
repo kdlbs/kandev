@@ -598,7 +598,7 @@ func mapSidebarTaskPrefs(prefs usermodels.SidebarTaskPrefs) map[string]any {
 	return map[string]any{
 		"pinnedTaskIds":          stringSlice(prefs.PinnedTaskIDs),
 		"orderedTaskIds":         stringSlice(prefs.OrderedTaskIDs),
-		"subtaskOrderByParentId": prefs.SubtaskOrderByParentID,
+		"subtaskOrderByParentId": stringSliceMap(prefs.SubtaskOrderByParentID),
 	}
 }
 
@@ -727,6 +727,13 @@ func nullInt(value int) any {
 func stringSlice(value []string) []string {
 	if value == nil {
 		return []string{}
+	}
+	return value
+}
+
+func stringSliceMap(value map[string][]string) map[string][]string {
+	if value == nil {
+		return map[string][]string{}
 	}
 	return value
 }

@@ -49,3 +49,12 @@ func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T
 		t.Fatalf("taskCreateLastUsed = %#v, want mapped settings", state["taskCreateLastUsed"])
 	}
 }
+
+func TestMapUserSettingsStateNormalizesNilSubtaskOrder(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{}, "workspace-1")
+	prefs := state["sidebarTaskPrefs"].(map[string]any)
+	order, ok := prefs["subtaskOrderByParentId"].(map[string][]string)
+	if !ok || order == nil || len(order) != 0 {
+		t.Fatalf("subtaskOrderByParentId = %#v, want empty map", prefs["subtaskOrderByParentId"])
+	}
+}
