@@ -59,7 +59,9 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
     refreshRegistry,
   );
   const pendingNavigationRef = useRef<NavigationIntent | null>(null);
+  const discardingRef = useRef(false);
   const [pendingNavigation, setPendingNavigation] = useState<NavigationIntent | null>(null);
+  const [isDiscarding, setIsDiscarding] = useState(false);
   const hasDirty = dirtyContributors.length > 0;
   const invalidReason = dirtyContributors.find(({ contributor }) => contributor.canSave === false)
     ?.contributor.invalidReason;
@@ -83,6 +85,9 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
   }, [saveAll]);
 
   const discardAndLeave = useCallback(async () => {
+    if (discardingRef.current) return;
+    discardingRef.current = true;
+    setIsDiscarding(true);
     try {
       for (const { contributor } of getDirtyContributors(contributors)) {
         await contributor.discard();
@@ -90,6 +95,9 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
     } catch {
       markError();
       return;
+    } finally {
+      discardingRef.current = false;
+      setIsDiscarding(false);
     }
     const intent = pendingNavigationRef.current;
     pendingNavigationRef.current = null;
@@ -132,6 +140,7 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
           dirtyContributorIds={dirtyContributors.map(({ contributor }) => contributor.id).join(",")}
           invalidReason={invalidReason}
           navigationIntent={pendingNavigation}
+          isDiscarding={isDiscarding}
           onSave={handleSave}
           onDiscardAndLeave={discardAndLeave}
           onContinueEditing={continueEditing}

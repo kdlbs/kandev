@@ -60,7 +60,15 @@ export function WorkflowCardHeaderActions({
             <Button
               type="button"
               variant="destructive"
-              onClick={onDeleteClick}
+              onClick={() => {
+                void onDeleteClick().catch((error) => {
+                  toast({
+                    title: "Failed to delete workflow",
+                    description: error instanceof Error ? error.message : "Request failed",
+                    variant: "error",
+                  });
+                });
+              }}
               disabled={deleteDisabled}
               className="cursor-pointer"
               data-testid="delete-workflow-button"

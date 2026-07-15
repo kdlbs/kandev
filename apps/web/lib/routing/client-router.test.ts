@@ -86,6 +86,7 @@ describe("client router adapter", () => {
     expect(attempts).toHaveLength(1);
     act(() => attempts.shift()?.());
     window.dispatchEvent(new PopStateEvent("popstate", { state: window.history.state }));
+    window.dispatchEvent(new PopStateEvent("popstate", { state: null }));
     expect(attempts).toHaveLength(0);
     expect(go).toHaveBeenCalledTimes(2);
   });

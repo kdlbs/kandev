@@ -34,12 +34,14 @@ function DraftContributor({
   initialRevision = 1,
   canSave = true,
   onSave,
+  onDiscard,
 }: {
   id: string;
   order?: number;
   initialRevision?: number;
   canSave?: boolean;
   onSave: (revision: SettingsSaveRevision) => Promise<void> | void;
+  onDiscard?: () => Promise<void> | void;
 }) {
   const [revision, setRevision] = useState(initialRevision);
   const [savedRevision, setSavedRevision] = useState(0);
@@ -55,7 +57,10 @@ function DraftContributor({
       await onSave(submittedRevision);
       setSavedRevision(submittedRevision as number);
     },
-    discard: () => setRevision(savedRevision),
+    discard: async () => {
+      await onDiscard?.();
+      setRevision(savedRevision);
+    },
   });
 
   return (
@@ -249,6 +254,32 @@ describe("SettingsSaveProvider navigation", () => {
     expect(unload.defaultPrevented).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Discard and leave" }));
+    await waitFor(() => expect(window.location.pathname).toBe(TERMINAL_PATH));
+  });
+
+  it("runs an asynchronous discard only once while leaving", async () => {
+    window.history.replaceState({}, "", APPEARANCE_PATH);
+    const pending = deferred();
+    const onDiscard = vi.fn(() => pending.promise);
+
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor id="appearance" onSave={vi.fn()} onDiscard={onDiscard} />
+        <Link href={TERMINAL_PATH}>Terminal</Link>
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Terminal" }));
+    const discard = await screen.findByRole("button", { name: "Discard and leave" });
+    fireEvent.click(discard);
+    fireEvent.click(discard);
+
+    expect(onDiscard).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Discarding..." }).hasAttribute("disabled")).toBe(
+      true,
+    );
+
+    await act(async () => pending.resolve());
     await waitFor(() => expect(window.location.pathname).toBe(TERMINAL_PATH));
   });
 

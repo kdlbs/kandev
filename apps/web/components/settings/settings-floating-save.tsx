@@ -22,6 +22,7 @@ type SettingsFloatingSaveProps = {
   dirtyContributorIds?: string;
   invalidReason?: string;
   navigationIntent: NavigationIntent | null;
+  isDiscarding: boolean;
   onSave: () => Promise<boolean>;
   onDiscardAndLeave: () => Promise<void> | void;
   onContinueEditing: () => void;
@@ -32,6 +33,7 @@ export function SettingsFloatingSave({
   dirtyContributorIds,
   invalidReason,
   navigationIntent,
+  isDiscarding,
   onSave,
   onDiscardAndLeave,
   onContinueEditing,
@@ -39,6 +41,7 @@ export function SettingsFloatingSave({
   const isSaving = status === "saving";
   const isSaved = status === "saved";
   const isInvalid = Boolean(invalidReason);
+  const isBusy = isSaving || isDiscarding;
   const buttonLabel = status === "error" ? "Retry save" : "Save changes";
   const accessibleLabel = getAccessibleLabel(status, buttonLabel);
 
@@ -65,7 +68,7 @@ export function SettingsFloatingSave({
             type="button"
             size="lg"
             className="min-h-11 cursor-pointer"
-            disabled={isSaving || isSaved || isInvalid}
+            disabled={isBusy || isSaved || isInvalid}
             aria-label={accessibleLabel}
             onClick={() => void onSave()}
           >
@@ -86,7 +89,7 @@ export function SettingsFloatingSave({
           <AlertDialogFooter>
             <AlertDialogCancel
               className="cursor-pointer"
-              disabled={isSaving}
+              disabled={isBusy}
               onClick={onContinueEditing}
             >
               Continue editing
@@ -95,15 +98,15 @@ export function SettingsFloatingSave({
               type="button"
               variant="outline"
               className="cursor-pointer"
-              disabled={isSaving}
+              disabled={isBusy}
               onClick={() => void onDiscardAndLeave()}
             >
-              Discard and leave
+              {isDiscarding ? "Discarding..." : "Discard and leave"}
             </Button>
             <AlertDialogAction
               className="cursor-pointer"
               data-dialog-default-action
-              disabled={isSaving || isInvalid}
+              disabled={isBusy || isInvalid}
               onClick={(event) => {
                 event.preventDefault();
                 void onSave();

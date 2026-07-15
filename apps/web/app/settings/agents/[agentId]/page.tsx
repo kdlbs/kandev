@@ -126,6 +126,7 @@ function useAgentFormState(
     if (draftAgent.profiles.length !== savedAgent.profiles.length) return true;
     const savedProfiles = new Map(savedAgent.profiles.map((p) => [p.id, p]));
     for (const profile of draftAgent.profiles) {
+      if (profile.mcp_config?.dirty) return true;
       if (!savedProfiles.has(profile.id) || isProfileDirty(profile, savedProfiles.get(profile.id)))
         return true;
     }
@@ -353,6 +354,13 @@ function areAgentProfilesValid(agent: DraftAgent): boolean {
   return agent.profiles.every((profile) => profile.name.trim() && profile.model.trim());
 }
 
+function useAgentSaveRevision(agent: DraftAgent) {
+  const revision = JSON.stringify(agent);
+  const initial = agent.profiles.some((profile) => profile.mcp_config?.dirty) ? "" : revision;
+  const [saved, setSaved] = useState(initial);
+  return { revision, saved, setSaved };
+}
+
 function AgentSetupForm({
   initialAgent,
   savedAgent,
@@ -404,11 +412,10 @@ function AgentSetupForm({
     onToastError,
     replaceRoute: (path: string) => router.replace(path),
   });
-  const saveRevision = JSON.stringify(draftAgent);
-  const [savedRevision, setSavedRevision] = useState(saveRevision);
+  const saveRevision = useAgentSaveRevision(draftAgent);
   const handleCoordinatedSave = async () => {
     const savedDraft = await handleSave();
-    if (savedDraft) setSavedRevision(JSON.stringify(savedDraft));
+    if (savedDraft) saveRevision.setSaved(JSON.stringify(savedDraft));
   };
   const profilesValid = areAgentProfilesValid(draftAgent);
   let saveInvalidReason: string | undefined;
@@ -416,8 +423,8 @@ function AgentSetupForm({
   else if (hasInvalidMcpConfig) saveInvalidReason = "Fix invalid MCP configuration before saving.";
   useSettingsSaveContributor({
     id: `agent:${draftAgent.id}`,
-    revision: saveRevision,
-    isDirty: !isCreateMode && saveRevision !== savedRevision,
+    revision: saveRevision.revision,
+    isDirty: !isCreateMode && saveRevision.revision !== saveRevision.saved,
     canSave: profilesValid && !hasInvalidMcpConfig,
     invalidReason: saveInvalidReason,
     save: handleCoordinatedSave,

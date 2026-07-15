@@ -120,6 +120,10 @@ function ensureHistoryTracking(): void {
 function handlePopState(event: PopStateEvent): void {
   const targetPosition = readPosition(event.state);
   if (targetPosition === null) {
+    if (allowedPop) {
+      allowedPop = false;
+      return;
+    }
     if (activeBlocker && currentPosition !== null) {
       // Entries created before tracking was installed are behind the current,
       // tagged settings entry. Restore the current entry before prompting.

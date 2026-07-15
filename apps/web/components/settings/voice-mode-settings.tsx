@@ -137,6 +137,16 @@ function VoiceDraftProvider({ children }: { children: ReactNode }) {
         keyboard_shortcuts: submitted.keyboardShortcuts,
       });
       setSaved(submitted);
+      setDraft((current) => ({
+        voiceMode:
+          JSON.stringify(current.voiceMode) === JSON.stringify(draft.voiceMode)
+            ? submitted.voiceMode
+            : current.voiceMode,
+        keyboardShortcuts:
+          JSON.stringify(current.keyboardShortcuts) === JSON.stringify(draft.keyboardShortcuts)
+            ? submitted.keyboardShortcuts
+            : current.keyboardShortcuts,
+      }));
       setUserSettings({ ...storeApi.getState().userSettings, ...submitted });
     },
     discard: () => setDraft(saved),

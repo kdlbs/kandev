@@ -159,6 +159,23 @@ async function saveMcpForCreatedProfiles(
   }
 }
 
+function preservePendingMcpDrafts(draftAgent: DraftAgent, created: Agent): Agent {
+  const submittedById = new Map<string, DraftProfile>(
+    draftAgent.profiles.map((profile) => [profile.id, profile]),
+  );
+  const profileIds = correlateCreatedProfiles(draftAgent.profiles, created.profiles);
+  const submittedByCreatedId = new Map(
+    [...profileIds].map(([submittedId, createdId]) => [createdId, submittedById.get(submittedId)]),
+  );
+  return {
+    ...created,
+    profiles: created.profiles.map((profile) => {
+      const pending = submittedByCreatedId.get(profile.id)?.mcp_config;
+      return pending ? { ...profile, mcp_config: pending } : profile;
+    }),
+  };
+}
+
 export type EnsureProfilesFn = (
   agent: DraftAgent,
   displayName: string,
@@ -196,7 +213,24 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
     })),
   });
 
-  await saveMcpForCreatedProfiles(draftAgent, created, callbacks.onToastError);
+  try {
+    await saveMcpForCreatedProfiles(draftAgent, created, callbacks.onToastError);
+  } catch (error) {
+    const reconciled = preservePendingMcpDrafts(draftAgent, created);
+    callbacks.upsertAgent(reconciled);
+    const savedDraft = callbacks.ensureProfiles(
+      callbacks.cloneAgent(reconciled),
+      callbacks.resolveDisplayName(reconciled.name),
+      callbacks.currentAgentModelConfig.default_model,
+      callbacks.permissionSettings,
+    );
+    const profileIds = correlateCreatedProfiles(draftAgent.profiles, reconciled.profiles);
+    callbacks.setDraftAgent((current) =>
+      mergeSavedAgentDraft(current, draftAgent, savedDraft, profileIds),
+    );
+    callbacks.replaceRoute(`/settings/agents/${encodeURIComponent(reconciled.name)}`);
+    throw error;
+  }
 
   if ((draftAgent.mcp_config_path ?? "") !== (created.mcp_config_path ?? "")) {
     created = await updateAgentAction(created.id, {
@@ -264,6 +298,11 @@ async function saveExistingProfiles(
       continue;
     }
     profileIds.set(profile.id, savedProfile.id);
+    await saveMcpForProfile({
+      draftProfile: profile,
+      targetProfileId: savedProfile.id,
+      onToastError,
+    });
     if (isProfileDirty(profile, savedProfile)) {
       const updatedProfile = await updateAgentProfileAction(profile.id, {
         name: profile.name,
@@ -278,7 +317,8 @@ async function saveExistingProfiles(
       nextProfiles.push(updatedProfile);
       continue;
     }
-    nextProfiles.push(savedProfile);
+    const { mcp_config: _pendingMcp, ...persistedProfile } = savedProfile as DraftProfile;
+    nextProfiles.push(persistedProfile);
   }
   return { profiles: nextProfiles, profileIds };
 }

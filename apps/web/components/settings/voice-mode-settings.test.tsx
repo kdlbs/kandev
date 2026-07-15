@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SettingsSaveContributor } from "./settings-save-provider";
@@ -82,10 +82,11 @@ describe("VoiceModeSettings", () => {
     };
     if (!saveContributor) throw new Error("Save contributor was not registered");
 
-    await saveContributor.save(saveContributor.revision);
+    await act(async () => saveContributor?.save(saveContributor.revision));
 
     expect(updateUserSettingsMock).toHaveBeenCalledWith(
       expect.objectContaining({ keyboard_shortcuts: { voice_toggle: { key: "v" } } }),
     );
+    expect(saveContributor?.isDirty).toBe(false);
   });
 });
