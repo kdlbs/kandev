@@ -185,6 +185,7 @@ function CommandsListContent({
       )}
       {search.trim() ? (
         <CommandGroup heading="Commands">
+          {/* cmdk preserves this priority pre-sort when filter scores tie. */}
           {sortCommandsForSearch(commands, search).map((cmd) => (
             <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
           ))}
