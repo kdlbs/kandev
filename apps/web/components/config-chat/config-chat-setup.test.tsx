@@ -2,17 +2,22 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfigChatSetup } from "./config-chat-setup";
 
-const profiles = [
+const defaultProfiles = [
   { id: "profile-config", label: "Config Agent", agent_name: "codex" },
   { id: "profile-other", label: "Other Agent", agent_name: "claude" },
 ];
+const profiles = [...defaultProfiles];
+const configPromptPlaceholder = "Ask anything about your configuration...";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({ agentProfiles: { items: profiles } }),
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  profiles.splice(0, profiles.length, ...defaultProfiles);
+});
 
 describe("ConfigChatSetup", () => {
   it("shows config-specific guidance and suggestions without repository controls", () => {
@@ -30,7 +35,7 @@ describe("ConfigChatSetup", () => {
     expect(
       screen.getByText(/manage workflows, agent profiles, and MCP configuration/i),
     ).toBeTruthy();
-    expect(screen.getByPlaceholderText("Ask anything about your configuration...")).toBeTruthy();
+    expect(screen.getByPlaceholderText(configPromptPlaceholder)).toBeTruthy();
     expect(screen.queryByText(/repositories/i)).toBeNull();
 
     fireEvent.click(
@@ -46,9 +51,23 @@ describe("ConfigChatSetup", () => {
       <ConfigChatSetup isStarting={false} error={null} onStart={vi.fn()} onCancel={vi.fn()} />,
     );
 
-    expect(screen.queryByPlaceholderText("Ask anything about your configuration...")).toBeNull();
+    expect(screen.queryByPlaceholderText(configPromptPlaceholder)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /Config Agent codex/i }));
-    expect(screen.getByPlaceholderText("Ask anything about your configuration...")).toBeTruthy();
+    expect(screen.getByPlaceholderText(configPromptPlaceholder)).toBeTruthy();
+  });
+
+  it("hides suggestions and the prompt composer when no profiles are available", () => {
+    profiles.splice(0, profiles.length);
+
+    render(
+      <ConfigChatSetup isStarting={false} error={null} onStart={vi.fn()} onCancel={vi.fn()} />,
+    );
+
+    expect(screen.getByText(/No agent profiles are available/i)).toBeTruthy();
+    expect(screen.queryByPlaceholderText(configPromptPlaceholder)).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Show me the current workflow configuration" }),
+    ).toBeNull();
   });
 
   it("ignores repeated and composing Enter keydowns", () => {

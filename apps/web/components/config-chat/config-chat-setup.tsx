@@ -134,9 +134,17 @@ export function ConfigChatSetup({
             </p>
           </header>
 
-          {needsProfileSelection ? (
+          {profiles.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              No agent profiles are available. Create one in Agent settings first.
+            </p>
+          )}
+
+          {profiles.length > 0 && needsProfileSelection && (
             <ProfileSelector onSelect={setSelectedProfileId} />
-          ) : (
+          )}
+
+          {profiles.length > 0 && !needsProfileSelection && (
             <>
               <Suggestions onSelect={(prompt) => setInputValue(prompt)} />
               <section className="space-y-2" aria-labelledby="config-chat-prompt-label">
@@ -181,12 +189,6 @@ export function ConfigChatSetup({
                 {error && <p className="text-sm text-destructive">{error}</p>}
               </section>
             </>
-          )}
-
-          {profiles.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No agent profiles are available. Create one in Agent settings first.
-            </p>
           )}
         </div>
       </div>
