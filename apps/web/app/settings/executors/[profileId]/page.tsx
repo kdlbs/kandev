@@ -47,6 +47,7 @@ import {
 } from "@/components/settings/profile-edit/profile-edit-page-chrome";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
 import type { Executor, ExecutorProfile, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 
@@ -552,7 +553,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
     cleanup_script: form.cleanupScript,
     env_vars: form.buildEnvVars(),
   };
-  const saveRevision = JSON.stringify(savePayload);
+  const saveRevision = serializeSettingsRevision(savePayload);
   const [savedRevision, setSavedRevision] = useState(saveRevision);
   const [baselineReady, setBaselineReady] = useState(!form.isRemote);
   useEffect(() => {

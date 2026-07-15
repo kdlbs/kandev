@@ -21,6 +21,7 @@ import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
   updateExecutorProfile,
@@ -423,7 +424,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
     cleanup_script: form.cleanupScript,
     env_vars: rowsToEnvVars(form.envVarRows),
   };
-  const saveRevision = JSON.stringify(savePayload);
+  const saveRevision = serializeSettingsRevision(savePayload);
   const [savedRevision, setSavedRevision] = useState(saveRevision);
   const handleSave = async () => {
     await persistence.save(savePayload);
