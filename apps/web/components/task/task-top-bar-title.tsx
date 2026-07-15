@@ -28,13 +28,14 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      // IME composition uses Enter to confirm a candidate; let the IME
-      // handle it instead of committing the rename.
-      if (e.nativeEvent.isComposing) return;
+      // IME composition uses Enter to confirm a candidate; let the IME handle
+      // it instead of committing the rename. keyCode 229 covers IMEs that
+      // report the accepting Enter after isComposing has flipped false.
+      if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229) return;
       if (e.key === "Enter") {
         e.preventDefault();
         const trimmed = draft.trim();
-        if (taskId && trimmed && trimmed !== taskTitle) {
+        if (taskId && !isArchived && trimmed && trimmed !== taskTitle) {
           renameTaskById(taskId, trimmed).catch((err) =>
             console.error("Failed to rename task:", err),
           );
@@ -46,7 +47,7 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
         setIsEditing(false);
       }
     },
-    [draft, taskId, taskTitle, renameTaskById],
+    [draft, taskId, isArchived, taskTitle, renameTaskById],
   );
 
   if (isEditing) {

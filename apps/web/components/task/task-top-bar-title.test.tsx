@@ -99,6 +99,29 @@ describe("TaskTopBarTitle", () => {
     expect(queryInput()).not.toBeNull();
   });
 
+  it("ignores the IME-accepting Enter reported as keyCode 229", () => {
+    render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
+
+    const input = startEditing();
+    fireEvent.change(input, { target: { value: "New title" } });
+    fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
+
+    expect(mockRename).not.toHaveBeenCalled();
+    expect(queryInput()).not.toBeNull();
+  });
+
+  it("does not rename on Enter when the task was archived mid-edit", () => {
+    const { rerender } = render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
+
+    const input = startEditing();
+    fireEvent.change(input, { target: { value: "New title" } });
+    rerender(<TaskTopBarTitle taskId="task-1" taskTitle="My task" isArchived />);
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(mockRename).not.toHaveBeenCalled();
+    expect(queryInput()).toBeNull();
+  });
+
   it("cancels on Escape without renaming", () => {
     render(<TaskTopBarTitle taskId="task-1" taskTitle="My task" />);
 
