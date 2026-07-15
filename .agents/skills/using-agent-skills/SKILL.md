@@ -29,6 +29,7 @@ Task arrives
 |-- Review code? ---------------------------> /code-review
 |-- Improve skills/agents/commands? --------> /harness-improvement
 |-- Record decisions/spec changes? ---------> /record
+|-- Public docs impact? --------------------> /docs-maintainer
 |-- Commit/push/PR? ------------------------> /commit -> /push or /pr
 `-- Release/versioning? --------------------> /release
 ```

@@ -14,7 +14,8 @@ You must understand the code you submit. You're welcome to use AI tools to help 
 
 1. **Fork and branch.** Create a feature branch from `main`.
 2. **Keep PRs focused.** One logical change per PR. Small PRs get reviewed faster.
-3. **Test your changes.** Run `make typecheck test lint` before submitting. Manually verify that your feature works end-to-end, and add screenshots or recordings to the PR if it has a UI component. **If your change touches any UI files (anything under `apps/web/`), you must add or update Playwright e2e tests in `apps/web/e2e/` to prevent regressions.** Run them with `make test-e2e`. See [docs/test_e2e_web.md](docs/test_e2e_web.md) for patterns and fixtures.
+3. **Update public docs when behavior changes.** User-facing docs live in `docs/public/**`. If your change affects CLI commands, config keys, install/deploy flows, workflows, executors, APIs, screenshots, or user-facing terminology, update the relevant public docs in the same PR.
+4. **Test your changes.** Run `make typecheck test lint` before submitting. Manually verify that your feature works end-to-end, and add screenshots or recordings to the PR if it has a UI component. **If your change touches any UI files (anything under `apps/web/`), you must add or update Playwright e2e tests in `apps/web/e2e/` to prevent regressions.** Run them with `make test-e2e`. See [docs/test_e2e_web.md](docs/test_e2e_web.md) for patterns and fixtures.
 
 ## Bug Reports
 
