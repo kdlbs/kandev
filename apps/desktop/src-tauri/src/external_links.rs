@@ -46,6 +46,7 @@ fn validate_web_url(parsed: Url) -> Result<Url, ExternalLinkError> {
     let host = parsed.host().ok_or(ExternalLinkError::MissingDestination)?;
     let is_local = match host {
         Host::Domain(domain) => {
+            let domain = domain.trim_end_matches('.');
             domain.eq_ignore_ascii_case("localhost")
                 || domain
                     .to_ascii_lowercase()
@@ -126,6 +127,8 @@ mod tests {
         for input in [
             "http://localhost:8080/task",
             "http://preview.localhost:3000",
+            "http://localhost.:8080",
+            "http://preview.localhost.:3000",
             "http://127.0.0.1:4242",
             "http://127.9.8.7",
             "http://[::1]:4000",

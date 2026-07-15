@@ -58,4 +58,29 @@ describe("desktop command actions", () => {
     stop();
     expect(unlisten).toHaveBeenCalledTimes(3);
   });
+
+  it("rolls back successful listeners when one registration fails", async () => {
+    const firstUnlisten = vi.fn();
+    const secondUnlisten = vi.fn();
+    const adapter: DesktopV1Adapter = {
+      isAvailable: () => true,
+      listen: vi
+        .fn()
+        .mockResolvedValueOnce(firstUnlisten)
+        .mockResolvedValueOnce(secondUnlisten)
+        .mockRejectedValueOnce(new Error("listener unavailable")),
+    };
+    const actions = createDesktopCommandActions({
+      closeContext: vi.fn(),
+      navigate: vi.fn(),
+      requestNewTask: vi.fn(),
+    });
+
+    await expect(subscribeDesktopCommandActions(adapter, actions)).rejects.toThrow(
+      "listener unavailable",
+    );
+
+    expect(firstUnlisten).toHaveBeenCalledOnce();
+    expect(secondUnlisten).toHaveBeenCalledOnce();
+  });
 });

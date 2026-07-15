@@ -108,7 +108,7 @@ Run formatting first, then focused and broad verification:
 
 ```bash
 cd apps && rtk pnpm --filter @kandev/desktop build
-cd apps/desktop/src-tauri && rtk cargo test
+cd apps/desktop/src-tauri && rtk cargo test --features desktop-runtime
 cd apps/web && rtk pnpm run typecheck
 cd apps && rtk pnpm --filter @kandev/web test
 rtk make -C apps/backend fmt

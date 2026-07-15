@@ -67,6 +67,11 @@ impl NativeNotificationState {
             .permission_prompt_attempted
             .swap(true, Ordering::SeqCst)
     }
+
+    fn allow_permission_prompt_retry(&self) {
+        self.permission_prompt_attempted
+            .store(false, Ordering::SeqCst);
+    }
 }
 
 fn validate_request(request: &NativeNotificationRequest) -> Result<(), String> {
@@ -110,10 +115,10 @@ pub fn show_native_notification(
         && permission != PermissionState::Denied
         && state.begin_permission_prompt()
     {
-        permission = app
-            .notification()
-            .request_permission()
-            .map_err(|err| err.to_string())?;
+        permission = app.notification().request_permission().map_err(|err| {
+            state.allow_permission_prompt_retry();
+            err.to_string()
+        })?;
     }
     let claim_result =
         state.claim_after_permission(&request, permission == PermissionState::Granted);
@@ -187,5 +192,14 @@ mod tests {
 
         assert!(state.begin_permission_prompt());
         assert!(!state.begin_permission_prompt());
+    }
+
+    #[test]
+    fn permission_prompt_can_retry_after_a_transient_error() {
+        let state = NativeNotificationState::default();
+
+        assert!(state.begin_permission_prompt());
+        state.allow_permission_prompt_retry();
+        assert!(state.begin_permission_prompt());
     }
 }

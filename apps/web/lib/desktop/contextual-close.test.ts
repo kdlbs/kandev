@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { closeDesktopContext, type ContextualDockApi } from "./contextual-close";
 
 const FILE_EDITOR_COMPONENT = "file-editor";
+const DIALOG_CONTENT_SLOT = "dialog-content";
 
 function addOverlay(slot: string, zIndex = 50): HTMLElement {
   const element = document.createElement("div");
@@ -26,7 +27,7 @@ afterEach(() => {
 
 describe("closeDesktopContext", () => {
   it("dismisses only the topmost overlay before considering a document", () => {
-    const first = addOverlay("dialog-content");
+    const first = addOverlay(DIALOG_CONTENT_SLOT);
     const top = addOverlay("popover-content");
     const firstEscape = vi.fn();
     const topEscape = vi.fn();
@@ -42,7 +43,7 @@ describe("closeDesktopContext", () => {
   });
 
   it("does not close an alert dialog, an underlying overlay, or a document", () => {
-    const underlying = addOverlay("dialog-content");
+    const underlying = addOverlay(DIALOG_CONTENT_SLOT);
     const alert = addOverlay("alert-dialog-content", 60);
     const underlyingEscape = vi.fn();
     const alertEscape = vi.fn();
@@ -78,7 +79,7 @@ describe("closeDesktopContext", () => {
   );
 
   it("ignores an overlay that is already closing", () => {
-    const overlay = addOverlay("dialog-content");
+    const overlay = addOverlay(DIALOG_CONTENT_SLOT);
     overlay.dataset.state = "closed";
     const dock = makeDockApi("commit-detail");
 
@@ -92,5 +93,20 @@ describe("closeDesktopContext", () => {
 
     expect(closeDesktopContext(document, dock.api)).toBe("document");
     expect(dock.close).toHaveBeenCalledOnce();
+  });
+
+  it("does not dismiss an overlay while an editable field has focus", () => {
+    const overlay = addOverlay(DIALOG_CONTENT_SLOT);
+    const escape = vi.fn();
+    overlay.addEventListener("keydown", escape);
+    const input = document.createElement("input");
+    overlay.append(input);
+    input.focus();
+    const dock = makeDockApi(FILE_EDITOR_COMPONENT);
+
+    expect(closeDesktopContext(document, dock.api)).toBe("none");
+
+    expect(escape).not.toHaveBeenCalled();
+    expect(dock.close).not.toHaveBeenCalled();
   });
 });

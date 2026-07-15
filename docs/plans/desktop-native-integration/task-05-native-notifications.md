@@ -37,7 +37,7 @@ spec: "../../specs/desktop-tauri-app/spec.md"
 ```bash
 rtk make -C apps/backend fmt
 rtk make -C apps/backend test
-cd apps/desktop/src-tauri && rtk cargo fmt --check && rtk cargo test
+cd apps/desktop/src-tauri && rtk cargo fmt --check && rtk cargo test --features desktop-runtime
 cd apps/web && rtk pnpm test notification
 cd apps/web && rtk pnpm run typecheck
 ```

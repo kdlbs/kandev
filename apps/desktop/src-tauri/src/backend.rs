@@ -95,6 +95,10 @@ impl BackendState {
 
     #[cfg(feature = "desktop-runtime")]
     pub fn require_owned_origin(&self, webview: &WebviewWindow) -> Result<(), String> {
+        if !self.has_live_child() {
+            self.clear_owned_origin();
+            return Err("desktop backend is no longer running".to_string());
+        }
         let url = webview
             .url()
             .map_err(|err| format!("could not read desktop WebView URL: {err}"))?;
@@ -110,6 +114,14 @@ impl BackendState {
             .owned_origin
             .lock()
             .expect("desktop origin mutex poisoned") = None;
+    }
+
+    fn has_live_child(&self) -> bool {
+        self.child
+            .lock()
+            .expect("backend child mutex poisoned")
+            .as_mut()
+            .is_some_and(|child| child.try_wait().ok().is_none())
     }
 
     fn set_child(&self, mut child: Child) -> bool {
@@ -232,7 +244,10 @@ pub fn start_desktop_backend(app: AppHandle, window: WebviewWindow) {
 
 fn loopback_origin(input: &str) -> Result<String, String> {
     let url = Url::parse(input).map_err(|err| format!("invalid desktop backend URL: {err}"))?;
-    if url.scheme() != "http" || url.host_str() != Some(LOOPBACK_HOST) || url.port().is_none() {
+    if url.scheme() != "http"
+        || url.host_str() != Some(LOOPBACK_HOST)
+        || url.port_or_known_default().is_none()
+    {
         return Err("desktop backend URL must use a loopback HTTP origin".to_string());
     }
     Ok(url.origin().ascii_serialization())

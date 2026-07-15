@@ -1,10 +1,19 @@
-const NEW_TASK_REQUEST_EVENT = "kandev-web-request-new-task";
+const listeners = new Set<() => void>();
+let pending = false;
 
 export function requestNewTaskCreation(): void {
-  window.dispatchEvent(new Event(NEW_TASK_REQUEST_EVENT));
+  if (listeners.size === 0) {
+    pending = true;
+    return;
+  }
+  for (const listener of listeners) listener();
 }
 
 export function subscribeNewTaskCreationRequests(listener: () => void): () => void {
-  window.addEventListener(NEW_TASK_REQUEST_EVENT, listener);
-  return () => window.removeEventListener(NEW_TASK_REQUEST_EVENT, listener);
+  listeners.add(listener);
+  if (pending) {
+    pending = false;
+    listener();
+  }
+  return () => listeners.delete(listener);
 }

@@ -71,10 +71,22 @@ function dismissOverlay(overlay: HTMLElement): void {
   );
 }
 
+function hasEditableFocus(root: Document): boolean {
+  const active = root.activeElement;
+  if (!(active instanceof HTMLElement)) return false;
+  return (
+    active.isContentEditable ||
+    active instanceof HTMLInputElement ||
+    active instanceof HTMLTextAreaElement ||
+    active instanceof HTMLSelectElement
+  );
+}
+
 export function closeDesktopContext(
   root: Document,
   dockApi: ContextualDockApi | null,
 ): ContextualCloseResult {
+  if (hasEditableFocus(root)) return "none";
   const overlay = findTopOverlay(root);
   if (overlay) {
     const slot = overlay.dataset.slot ?? "";

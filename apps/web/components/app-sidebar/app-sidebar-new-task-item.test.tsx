@@ -107,6 +107,14 @@ beforeEach(resetTestState);
 afterEach(() => cleanup());
 
 describe("AppSidebarNewTaskItem dialog routing", () => {
+  it("opens a queued New Task request after its listener remounts", () => {
+    act(() => requestNewTaskCreation());
+
+    renderItem(false);
+
+    expect(screen.getByTestId(REGULAR_DIALOG_TESTID).dataset.open).toBe("true");
+  });
+
   it("opens its existing task-create flow for a shared New Task request", () => {
     renderItem(false);
 

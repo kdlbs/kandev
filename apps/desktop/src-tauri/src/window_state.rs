@@ -184,6 +184,9 @@ impl WindowStateStore {
         if window.is_minimized().unwrap_or(false) {
             return Ok(None);
         }
+        if window.is_fullscreen().unwrap_or(false) {
+            return Ok(None);
+        }
 
         let maximized = window.is_maximized().unwrap_or(false);
         let bounds = if maximized {

@@ -31,7 +31,7 @@ spec: "../../specs/desktop-tauri-app/spec.md"
 ## Verification
 
 ```bash
-cd apps/desktop/src-tauri && rtk cargo fmt --check && rtk cargo test
+cd apps/desktop/src-tauri && rtk cargo fmt --check && rtk cargo test --features desktop-runtime
 cd apps/web && rtk pnpm run typecheck
 cd apps/web && rtk pnpm test external
 cd apps && rtk pnpm --filter @kandev/web lint
