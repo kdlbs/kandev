@@ -140,7 +140,7 @@ const [metricsBox, actionsBox] = await Promise.all([
 
 expect(metricsBox).not.toBeNull();
 expect(actionsBox).not.toBeNull();
-expect(metricsBox!.height).toBe(actionsBox!.height);
+expect(metricsBox!.height).toBeCloseTo(actionsBox!.height, 1);
 ```
 
 Run the assertion in the relevant desktop and mobile projects when responsive

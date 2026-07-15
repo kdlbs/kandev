@@ -70,14 +70,14 @@ LOG="${LOG}.log"
 "$@" > "$LOG" 2>&1
 RC=$?
 
-EXTRACT_ON_SUCCESS=false
+EXTRACT_LOG_ON_SUCCESS=false
 case "$TAG" in
   gh-run|ci|gh-run-view)
-    EXTRACT_ON_SUCCESS=true
+    EXTRACT_LOG_ON_SUCCESS=true
     ;;
 esac
 
-if [[ $RC -eq 0 && "$EXTRACT_ON_SUCCESS" != true ]]; then
+if [[ $RC -eq 0 && "$EXTRACT_LOG_ON_SUCCESS" != true ]]; then
   echo "exit=0 log=$LOG"
   exit 0
 fi
@@ -133,6 +133,10 @@ MATCHES="$(grep_for_tag | head -n "$TAIL_LINES")"
 if [[ -n "$MATCHES" ]]; then
   echo "--- failures ($(printf '%s\n' "$MATCHES" | wc -l | tr -d ' ') lines, of tag=$TAG) ---"
   printf '%s\n' "$MATCHES"
+elif [[ $RC -eq 0 ]]; then
+  # Successful GitHub commands with no failure markers remain compact.
+  rm -f "$PLAIN"
+  exit 0
 else
   # Fallback: grep found nothing useful; surface the last N lines verbatim.
   echo "--- no tag matches; tail $TAIL_LINES lines of $LOG ---"
