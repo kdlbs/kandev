@@ -1273,7 +1273,15 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 	eventType := events.AgentCompleted
 	if execution.Status == v1.AgentStatusFailed {
 		eventType = events.AgentFailed
-		m.classifyAndMaybeRemediate(execution, exitCode, errorMessage)
+		// Stamp the classification enums onto the execution so the
+		// AgentFailed payload published below carries them (opt-in
+		// telemetry forwards only these, never ErrorMessage).
+		if e := m.classifyAndMaybeRemediate(execution, exitCode, errorMessage); e != nil {
+			_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+				exec.ErrorCode = string(e.Code)
+				exec.ErrorPhase = string(e.Phase)
+			})
+		}
 	}
 	m.eventPublisher.PublishAgentEvent(context.Background(), eventType, execution)
 
@@ -1289,7 +1297,10 @@ func (m *Manager) MarkCompleted(executionID string, exitCode int, errorMessage s
 // The remediation hook is injectable via Manager.remediateNpxCache;
 // production wiring points it at routingerr.RemediateNpxCache. Tests
 // stub it to avoid touching the real filesystem.
-func (m *Manager) classifyAndMaybeRemediate(execution *AgentExecution, exitCode int, errorMessage string) {
+//
+// Returns the classified error (nil when classification produced
+// nothing) so the caller can persist the enums under the store lock.
+func (m *Manager) classifyAndMaybeRemediate(execution *AgentExecution, exitCode int, errorMessage string) *routingerr.Error {
 	phase := routingerr.PhaseSessionInit
 	if execution.sessionInitialized {
 		phase = routingerr.PhasePromptSend
@@ -1306,7 +1317,7 @@ func (m *Manager) classifyAndMaybeRemediate(execution *AgentExecution, exitCode 
 		Stderr:     errorMessage,
 	})
 	if e == nil {
-		return
+		return nil
 	}
 	m.logger.Info("agent failure classified for provider routing",
 		zap.String("execution_id", execution.ID),
@@ -1323,7 +1334,7 @@ func (m *Manager) classifyAndMaybeRemediate(execution *AgentExecution, exitCode 
 		zap.String("remediation_path", e.RemediationPath))
 
 	if e.Code != routingerr.CodeNpxCacheCorrupted || e.RemediationPath == "" {
-		return
+		return e
 	}
 	remediate := m.remediateNpxCache
 	path := e.RemediationPath
@@ -1340,6 +1351,7 @@ func (m *Manager) classifyAndMaybeRemediate(execution *AgentExecution, exitCode 
 				zap.Error(err))
 		}
 	}()
+	return e
 }
 
 // RespondToPermission sends a response to an agent's permission request.

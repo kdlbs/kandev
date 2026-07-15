@@ -28,6 +28,9 @@ Telemetry is **strictly opt-in** and lives in `internal/telemetry`:
 - **Collection:** a bus subscriber maps an allowlist of domain events
   (task/agent/turn/workspace/automation lifecycle) to name-only telemetry
   events — payloads are never forwarded, so titles/repos/paths cannot leak.
+  The only payload exception is a per-event key allowlist for closed enums
+  (currently `agent_run_failed` carries the routingerr classification
+  `error_code` + `error_phase`), with values still pattern-validated.
   Frontend UI events go through `POST /api/v1/telemetry/events`, validated
   server-side against a per-event property allowlist with enum-shaped
   values; the backend is the single enforcement point for every client and

@@ -18,8 +18,12 @@ type AgentEventPayload struct {
 	StartedAt        time.Time  `json:"started_at"`
 	FinishedAt       *time.Time `json:"finished_at,omitempty"`
 	ErrorMessage     string     `json:"error_message,omitempty"`
-	ExitCode         *int       `json:"exit_code,omitempty"`
-	PromptGeneration uint64     `json:"prompt_generation,omitempty"`
+	// ErrorCode / ErrorPhase are the routingerr classification enums for
+	// failed executions (e.g. "rate_limited" / "prompt_send").
+	ErrorCode        string `json:"error_code,omitempty"`
+	ErrorPhase       string `json:"error_phase,omitempty"`
+	ExitCode         *int   `json:"exit_code,omitempty"`
+	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
 }
 
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).

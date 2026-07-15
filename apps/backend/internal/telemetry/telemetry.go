@@ -16,6 +16,7 @@
 package telemetry
 
 import (
+	"encoding/json"
 	"os"
 	"regexp"
 	"runtime"
@@ -63,7 +64,8 @@ type Event struct {
 // event emitted when they fire. Deliberately name-only: the bus payloads
 // carry task titles, repository names, and branch names, none of which
 // may ever leave the machine, so the collector counts occurrences and
-// forwards nothing from the payload itself.
+// forwards nothing from the payload itself — except the specific
+// enum-shaped keys declared in busEventPropertyKeys.
 var busEventAllowlist = map[string]string{
 	events.TaskCreated:          EventTaskCreated,
 	events.TaskDeleted:          EventTaskDeleted,
@@ -73,6 +75,45 @@ var busEventAllowlist = map[string]string{
 	events.TurnCompleted:        EventTurnCompleted,
 	events.WorkspaceCreated:     EventWorkspaceCreated,
 	events.AutomationRunCreated: EventAutomationRun,
+}
+
+// busEventPropertyKeys lists, per subject, the only payload keys the
+// collector may forward. Values must additionally match safeValueRe, so
+// only closed-enum identifiers survive — free-text fields like
+// error_message are structurally unreachable. agent.failed carries the
+// routingerr classification (see docs/public/telemetry.md).
+var busEventPropertyKeys = map[string][]string{
+	events.AgentFailed: {"error_code", "error_phase"},
+}
+
+// extractAllowlistedProps pulls the per-subject allowlisted keys out of a
+// bus payload via a JSON round-trip (payload shapes vary by publisher and
+// the telemetry package must not import runtime-tier types).
+func extractAllowlistedProps(subject string, data any) map[string]string {
+	keys := busEventPropertyKeys[subject]
+	if len(keys) == 0 || data == nil {
+		return nil
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return nil
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil
+	}
+	var props map[string]string
+	for _, key := range keys {
+		value, ok := fields[key].(string)
+		if !ok || !safeValueRe.MatchString(value) {
+			continue
+		}
+		if props == nil {
+			props = map[string]string{}
+		}
+		props[key] = value
+	}
+	return props
 }
 
 // uiEventAllowlist declares which events the frontend may submit via

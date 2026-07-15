@@ -50,7 +50,8 @@ Every event carries only these context properties: Kandev version, OS
 | `telemetry_enabled` | You opt in | — |
 | `install_heartbeat` | Opt-in, then once per day while running | — |
 | `task_created` / `task_deleted` | A task is created/deleted | — |
-| `agent_run_started` / `agent_run_completed` / `agent_run_failed` | An agent execution starts/finishes/fails | — |
+| `agent_run_started` / `agent_run_completed` | An agent execution starts/finishes | — |
+| `agent_run_failed` | An agent execution fails | `error_code`: failure class from a closed enum (e.g. `auth_required`, `rate_limited`, `provider_overloaded`, `npx_cache_corrupted`); `error_phase`: lifecycle phase enum (e.g. `session_init`, `prompt_send`). Never the error message itself. |
 | `turn_completed` | An agent turn finishes | — |
 | `workspace_created` | A workspace is created | — |
 | `automation_run_created` | An automation run is recorded | — |
@@ -59,7 +60,10 @@ Every event carries only these context properties: Kandev version, OS
 | `feature_used` | An allowlisted feature is used | `feature`: short identifier |
 
 Domain events are counted by name only — the internal payloads (which contain
-titles, repository names, and similar) are never forwarded. UI events are
+titles, repository names, and similar) are never forwarded. The single
+exception is `agent_run_failed`, whose two classification enums are read from
+an explicit per-event key allowlist and must match the identifier pattern
+below; the raw error message is structurally unreachable. UI events are
 validated server-side against an allowlist; property values must be short
 identifiers (`^[a-z0-9][a-z0-9_.:-]{0,63}$`), so free text cannot ride along
 even from a modified client.

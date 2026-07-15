@@ -72,6 +72,20 @@ func TestManager_MarkCompleted_Failure(t *testing.T) {
 	if got.ExitCode == nil || *got.ExitCode != 1 {
 		t.Errorf("expected exit code 1, got %v", got.ExitCode)
 	}
+
+	// The failure boundary must stamp the routingerr classification enums so
+	// the AgentFailed payload (and opt-in telemetry) can report failure
+	// causes without the free-text message.
+	if got.ErrorCode == "" {
+		t.Error("expected ErrorCode to be stamped by classification")
+	}
+	if got.ErrorPhase != "session_init" {
+		t.Errorf("expected ErrorPhase 'session_init', got %q", got.ErrorPhase)
+	}
+	payload := newAgentEventPayload(got)
+	if payload.ErrorCode != got.ErrorCode || payload.ErrorPhase != got.ErrorPhase {
+		t.Errorf("payload must carry classification enums, got %+v", payload)
+	}
 }
 
 func TestManager_MarkCompleted_Idempotent(t *testing.T) {

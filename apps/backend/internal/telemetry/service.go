@@ -170,16 +170,21 @@ func (s *Service) Stop() {
 }
 
 // subscribeCollector attaches one bus subscription per allowlisted
-// domain event. The handlers forward nothing from the payload — the
-// event name is the entire signal.
+// domain event. The handlers forward nothing from the payload beyond the
+// per-subject enum keys in busEventPropertyKeys — for most events the
+// name is the entire signal.
 func (s *Service) subscribeCollector() {
 	if s.bus == nil {
 		return
 	}
 	var subs []bus.Subscription
 	for subject, name := range busEventAllowlist {
-		sub, err := s.bus.Subscribe(subject, func(context.Context, *bus.Event) error {
-			s.enqueue(Event{Name: name})
+		sub, err := s.bus.Subscribe(subject, func(_ context.Context, event *bus.Event) error {
+			var props map[string]string
+			if event != nil {
+				props = extractAllowlistedProps(subject, event.Data)
+			}
+			s.enqueue(Event{Name: name, Properties: props})
 			return nil
 		})
 		if err != nil {

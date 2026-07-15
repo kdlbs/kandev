@@ -42,6 +42,13 @@ type AgentExecution struct {
 	FinishedAt        *time.Time
 	ExitCode          *int
 	ErrorMessage      string
+	// ErrorCode / ErrorPhase carry the routingerr classification of a failed
+	// execution (closed enums, never free text). Set by
+	// classifyAndMaybeRemediate before the AgentFailed event publishes so
+	// downstream consumers (e.g. telemetry) can report failure causes
+	// without ever touching ErrorMessage.
+	ErrorCode         string
+	ErrorPhase        string
 	Metadata          map[string]interface{}
 	promptGeneration  uint64
 	promptLifecycleMu sync.Mutex

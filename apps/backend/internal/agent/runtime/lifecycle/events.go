@@ -65,6 +65,8 @@ func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 		StartedAt:        execution.StartedAt,
 		FinishedAt:       execution.FinishedAt,
 		ErrorMessage:     execution.ErrorMessage,
+		ErrorCode:        execution.ErrorCode,
+		ErrorPhase:       execution.ErrorPhase,
 		ExitCode:         execution.ExitCode,
 		PromptGeneration: execution.promptGeneration,
 	}

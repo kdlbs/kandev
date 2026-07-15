@@ -119,6 +119,72 @@ func TestCollectorForwardsNothingFromPayload(t *testing.T) {
 	}
 }
 
+// agent.failed is the one subject with allowlisted payload keys: the
+// routingerr classification enums come through, everything else —
+// including the free-text error message — must not.
+func TestCollectorForwardsOnlyClassifiedFailureEnums(t *testing.T) {
+	eventBus := bus.NewMemoryEventBus(newTestLogger())
+	svc, _, sink := newTestService(t, eventBus, Options{})
+	grantConsent(t, svc)
+	svc.drainQueue()
+	svc.subscribeCollector()
+
+	payload := map[string]any{
+		"error_code":    "rate_limited",
+		"error_phase":   "prompt_send",
+		"error_message": "secret /home/user/repo stack trace",
+		"task_id":       "some-task-uuid",
+	}
+	if err := eventBus.Publish(context.Background(), events.AgentFailed,
+		bus.NewEvent(events.AgentFailed, "test", payload)); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	svc.flushOnce(context.Background())
+
+	sent := sink.sent()
+	if len(sent) != 1 {
+		t.Fatalf("expected exactly one event, got %d", len(sent))
+	}
+	props := sent[0].Properties
+	if props["error_code"] != "rate_limited" || props["error_phase"] != "prompt_send" {
+		t.Fatalf("classification enums missing: %v", props)
+	}
+	for key, value := range props {
+		if key == "error_message" || key == "task_id" || value == payload["error_message"] {
+			t.Fatalf("non-allowlisted payload field leaked: %q=%q", key, value)
+		}
+	}
+}
+
+func TestCollectorDropsNonEnumFailureValues(t *testing.T) {
+	eventBus := bus.NewMemoryEventBus(newTestLogger())
+	svc, _, sink := newTestService(t, eventBus, Options{})
+	grantConsent(t, svc)
+	svc.drainQueue()
+	svc.subscribeCollector()
+
+	payload := map[string]any{
+		"error_code":  "Free Text With Spaces /and/paths",
+		"error_phase": 42, // not even a string
+	}
+	if err := eventBus.Publish(context.Background(), events.AgentFailed,
+		bus.NewEvent(events.AgentFailed, "test", payload)); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	svc.flushOnce(context.Background())
+
+	sent := sink.sent()
+	if len(sent) != 1 {
+		t.Fatalf("expected exactly one event, got %d", len(sent))
+	}
+	if _, ok := sent[0].Properties["error_code"]; ok {
+		t.Fatalf("non-enum error_code survived: %v", sent[0].Properties)
+	}
+	if _, ok := sent[0].Properties["error_phase"]; ok {
+		t.Fatalf("non-string error_phase survived: %v", sent[0].Properties)
+	}
+}
+
 func TestDenyDropsQueuedEvents(t *testing.T) {
 	svc, _, sink := newTestService(t, nil, Options{})
 	grantConsent(t, svc) // queues telemetry_enabled + install_heartbeat

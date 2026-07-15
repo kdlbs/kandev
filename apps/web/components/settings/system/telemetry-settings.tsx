@@ -15,7 +15,7 @@ const TELEMETRY_DOCS_URL = "https://github.com/kdlbs/kandev/blob/main/docs/publi
 
 const COLLECTED_ITEMS = [
   "A daily heartbeat with the Kandev version, OS, CPU architecture, and deploy mode (local, Docker, Kubernetes, or desktop)",
-  "Counts of product events: task created/deleted, agent run started/completed/failed, turn completed, workspace created, automation run",
+  "Counts of product events: task created/deleted, agent run started/completed/failed (failures carry a coarse error class, never the message), turn completed, workspace created, automation run",
   "Which UI pages and allowlisted actions are used (identifiers only)",
 ];
 
