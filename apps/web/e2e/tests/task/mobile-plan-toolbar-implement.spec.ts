@@ -68,7 +68,7 @@ test.describe("mobile: Plan toolbar implement", () => {
         };
       });
     expect(toolbarSpacing?.toolbarHeight).toBe(30);
-    expect(toolbarSpacing?.controlHeight).toBeLessThanOrEqual(26);
+    expect(toolbarSpacing?.controlHeight).toBe(22);
     expect(toolbarSpacing?.top).toBeGreaterThanOrEqual(1);
     expect(toolbarSpacing?.bottom).toBeGreaterThanOrEqual(1);
 

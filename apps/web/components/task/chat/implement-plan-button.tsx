@@ -67,7 +67,7 @@ export function ImplementPlanButton({
     menuTrigger: testIds?.menuTrigger ?? "implement-plan-menu-trigger",
     freshItem: testIds?.freshItem ?? "implement-fresh-menu-item",
   };
-  const controlHeightClass = framed ? "h-6" : "h-7";
+  const controlHeightClass = framed ? "h-5" : "h-7";
   const primaryButton = (
     <span className="inline-flex">
       <Button
