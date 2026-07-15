@@ -605,13 +605,7 @@ func TestRestoreTaskReconcilesFailedEntryFilesystemState(t *testing.T) {
 				t.Fatalf("entry state = %q, want %q", got, test.wantState)
 			}
 			if test.wantStatus == "restored" {
-				wantContents := "original"
-				if test.createQuarantine {
-					wantContents = "quarantine"
-				}
-				if data, err := os.ReadFile(filepath.Join(original, "artifact")); err != nil || string(data) != wantContents {
-					t.Fatalf("restored artifact: data=%q err=%v", data, err)
-				}
+				assertRestoredWorkspace(t, original, quarantined, test.createQuarantine)
 				return
 			}
 			if test.createOriginal {
@@ -625,6 +619,23 @@ func TestRestoreTaskReconcilesFailedEntryFilesystemState(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func assertRestoredWorkspace(t *testing.T, original, quarantined string, restoredFromQuarantine bool) {
+	t.Helper()
+	wantContents := "original"
+	if restoredFromQuarantine {
+		wantContents = "quarantine"
+	}
+	if data, err := os.ReadFile(filepath.Join(original, "artifact")); err != nil || string(data) != wantContents {
+		t.Fatalf("restored artifact: data=%q err=%v", data, err)
+	}
+	if !restoredFromQuarantine {
+		return
+	}
+	if _, err := os.Lstat(quarantined); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("quarantine path remains after restore: %v", err)
 	}
 }
 

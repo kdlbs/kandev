@@ -134,7 +134,7 @@ test.describe("Code walkthrough", () => {
     try {
       await session.clickTab("Changes");
 
-      await session.changes.getByRole("button", { name: "Review" }).click();
+      await session.changes.getByRole("button", { name: "Review", exact: true }).click();
       const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
       await expect(dialog).toBeVisible({ timeout: 15_000 });
 

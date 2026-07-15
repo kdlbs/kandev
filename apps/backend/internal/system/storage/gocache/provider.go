@@ -448,7 +448,7 @@ func probeAtomicRename(cachePath, trashRoot string) error {
 	if err := os.MkdirAll(trashRoot, 0o700); err != nil { // codeql[go/path-injection] validated by validateCacheAndTrash.
 		return fmt.Errorf("create Go-cache trash: %w", err)
 	}
-	probe, err := os.CreateTemp(cachePath, ".kandev-adoption-probe-")
+	probe, err := os.CreateTemp(cachePath, ".kandev-adoption-probe-") // codeql[go/path-injection] cachePath is validated by validateCacheAndTrash.
 	if err != nil {
 		return fmt.Errorf("create adoption probe: %w", err)
 	}
