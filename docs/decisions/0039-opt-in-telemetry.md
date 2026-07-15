@@ -20,7 +20,7 @@ Telemetry is **strictly opt-in** and lives in `internal/telemetry`:
 
 - **Sink:** PostHog Cloud EU (`eu.i.posthog.com`, write-only project key
   baked in, overridable via `KANDEV_TELEMETRY_ENDPOINT` / `_API_KEY`).
-  Events are sent in anonymous mode (`$process_person_profiles: false`)
+  Events are sent in anonymous mode (`$process_person_profile: false`)
   keyed by a random install UUID minted only after consent and deleted on
   opt-out. Chosen over Aptabase (weaker analysis), self-hosting (ops
   burden), and a custom endpoint (build cost) — 1M free events/month and an

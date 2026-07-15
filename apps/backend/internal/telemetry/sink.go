@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -18,7 +19,7 @@ type Sink interface {
 
 // postHogSink posts batches to the PostHog /batch/ endpoint using the
 // write-only project API key. Events are sent in anonymous mode
-// ($process_person_profiles: false) so no person profile is ever built.
+// ($process_person_profile: false) so no person profile is ever built.
 type postHogSink struct {
 	endpoint string
 	apiKey   string
@@ -44,8 +45,10 @@ func (p *postHogSink) Send(ctx context.Context, distinctID string, events []Even
 	items := make([]postHogItem, 0, len(events))
 	for _, event := range events {
 		properties := map[string]any{
-			"$process_person_profiles": false,
-			"$lib":                     "kandev",
+			// Singular per PostHog's capture API: $process_person_profile
+			// keeps events personless so no person profiles are created.
+			"$process_person_profile": false,
+			"$lib":                    "kandev",
 		}
 		for k, v := range event.Properties {
 			properties[k] = v
@@ -70,7 +73,11 @@ func (p *postHogSink) Send(ctx context.Context, distinctID string, events []Even
 	if err != nil {
 		return fmt.Errorf("post telemetry batch: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer func() {
+		// Drain (bounded) so the keep-alive connection is reusable.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode >= http.StatusMultipleChoices {
 		return fmt.Errorf("telemetry endpoint returned status %d", resp.StatusCode)
 	}

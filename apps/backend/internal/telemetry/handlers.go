@@ -36,12 +36,12 @@ func (h *Handler) putConsent(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid consent payload"})
 		return
 	}
+	if req.Status != ConsentGranted && req.Status != ConsentDenied {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "status must be granted or denied"})
+		return
+	}
 	state, err := h.svc.SetConsent(c.Request.Context(), req.Status)
 	if err != nil {
-		if req.Status != ConsentGranted && req.Status != ConsentDenied {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "status must be granted or denied"})
-			return
-		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save consent"})
 		return
 	}
@@ -52,11 +52,16 @@ type postEventsRequest struct {
 	Events []UIEventSubmission `json:"events"`
 }
 
+// maxEventsBodyBytes bounds the /events request body before JSON
+// decoding; legitimate payloads are a few hundred bytes.
+const maxEventsBodyBytes = 16 << 10
+
 // postEvents accepts allowlisted UI events. It always answers 202:
 // invalid entries are dropped server-side and consent gating happens at
 // enqueue time, so the response deliberately carries no consent signal
 // beyond the accepted count.
 func (h *Handler) postEvents(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxEventsBodyBytes)
 	var req postEventsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid events payload"})

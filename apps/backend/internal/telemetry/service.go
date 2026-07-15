@@ -57,6 +57,10 @@ type Service struct {
 	cancel    context.CancelFunc
 	subs      []bus.Subscription
 
+	// consentMu serializes SetConsent end-to-end (persist + memory +
+	// queue side effects); s.mu stays a short-hold field guard.
+	consentMu sync.Mutex
+
 	wg sync.WaitGroup
 }
 
@@ -285,7 +289,10 @@ func (s *Service) flushOnce(ctx context.Context) {
 		return
 	}
 	s.debugLogBatch(batch)
-	sendCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), sendTimeout)
+	// Derive from the caller's ctx so Stop's bounded final flush keeps its
+	// cap; a tick flush aborted by shutdown just drops the batch, which is
+	// the fail-silent contract anyway.
+	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
 	if err := s.opts.Sink.Send(sendCtx, state.InstallID, batch); err != nil {
 		s.log.Debug("telemetry: send failed, dropping batch",

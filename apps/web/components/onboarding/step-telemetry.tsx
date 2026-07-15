@@ -38,7 +38,7 @@ export function useTelemetryOnboarding(open: boolean): { showTelemetryStep: bool
 }
 
 const SHARED_ITEMS = [
-  "Version, OS, and deploy mode (daily heartbeat)",
+  "Version, OS, CPU architecture, and deploy mode (daily heartbeat)",
   "Counts of events like task created or agent run completed",
   "Which UI pages and features are used (identifiers only)",
 ];

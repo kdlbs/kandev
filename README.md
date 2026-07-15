@@ -17,7 +17,7 @@ Organize work across kanban and pipeline views with opinionated workflows and ex
 
 Run it locally or self-host it on your own infrastructure and access it from anywhere via [Tailscale](https://tailscale.com/) or any VPN.
 
-Open source, multi-provider, no telemetry, not tied to any cloud.
+Open source, multi-provider, telemetry strictly opt-in, not tied to any cloud.
 
 ## Vision
 
@@ -252,7 +252,7 @@ There are a few similar tools in this space, and new ones appearing everyday. He
 - **Remote runtimes** - Run agents on remote servers via SSH, Docker hosts, and cloud environments, not just your local machine.
 - **Multi-provider** - Use Claude Code, Codex, Copilot, Gemini, Amp, Auggie, OpenCode, Cursor, Devin, Qwen, Droid, iFlow, Kilocode, Pi, Kimi, Kiro, Qoder, Trae, Oh My Pi, and Grok side by side. Not locked to one vendor.
 - **CLI passthrough and chat** - Interact with agents through structured chat messages or, where supported, drop into raw CLI mode for full agent TUI capabilities.
-- **Open source and self-hostable** - No vendor lock-in, no telemetry, runs on your infrastructure.
+- **Open source and self-hostable** - No vendor lock-in, no telemetry unless you opt in, runs on your infrastructure.
 
 ## Contributing
 

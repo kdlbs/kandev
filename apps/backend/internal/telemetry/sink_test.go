@@ -48,8 +48,8 @@ func TestPostHogSinkPayloadShape(t *testing.T) {
 		t.Fatalf("unexpected timestamp: %v", item["timestamp"])
 	}
 	properties := item["properties"].(map[string]any)
-	if properties["$process_person_profiles"] != false {
-		t.Fatalf("events must be anonymous-mode: %v", properties)
+	if properties["$process_person_profile"] != false {
+		t.Fatalf("events must be anonymous-mode ($process_person_profile: false): %v", properties)
 	}
 	if properties["app_version"] != "1.0.0" || properties["$lib"] != "kandev" {
 		t.Fatalf("properties not merged: %v", properties)

@@ -75,7 +75,7 @@ See [docs/run-as-a-service.md](../../docs/run-as-a-service.md) for the full guid
 
 ## Learn More
 
-Open source, multi-provider, no telemetry, not tied to any cloud.
+Open source, multi-provider, telemetry strictly opt-in, not tied to any cloud.
 
 See the [GitHub repository](https://github.com/kdlbs/kandev) for architecture, vision, development setup, and contributing guidelines.
 

@@ -48,7 +48,7 @@ Every event carries only these context properties: Kandev version, OS
 | Event | Trigger | Extra properties |
 | --- | --- | --- |
 | `telemetry_enabled` | You opt in | — |
-| `install_heartbeat` | Opt-in, then once per day while running | — |
+| `install_heartbeat` | At opt-in, at backend start while opted in, then once per day | — |
 | `task_created` / `task_deleted` | A task is created/deleted | — |
 | `agent_run_started` / `agent_run_completed` | An agent execution starts/finishes | — |
 | `agent_run_failed` | An agent execution fails | `error_code`: failure class from a closed enum (e.g. `auth_required`, `rate_limited`, `provider_overloaded`, `npx_cache_corrupted`); `error_phase`: lifecycle phase enum (e.g. `session_init`, `prompt_send`). Never the error message itself. |

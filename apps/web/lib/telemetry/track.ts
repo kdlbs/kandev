@@ -55,7 +55,9 @@ export function normalizePathForTelemetry(pathname: string): string {
       return cleaned === "" || /^[0-9a-f]{16,}$/.test(cleaned) ? "id" : cleaned;
     });
   if (segments.length === 0) return "home";
-  return segments.join(".").slice(0, 64);
+  // The 64-char cap can land mid-separator; trim so the value stays a
+  // clean identifier (no trailing dot).
+  return segments.join(".").slice(0, 64).replace(/\.+$/, "");
 }
 
 export function trackPageView(page: string): void {

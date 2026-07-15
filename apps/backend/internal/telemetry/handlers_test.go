@@ -60,7 +60,9 @@ func TestPutConsentGrantAndDeny(t *testing.T) {
 		t.Fatalf("grant status %d: %s", rec.Code, rec.Body.String())
 	}
 	var state ConsentState
-	_ = json.Unmarshal(rec.Body.Bytes(), &state)
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatalf("unmarshal grant response: %v", err)
+	}
 	if state.Status != ConsentGranted || state.InstallID == "" {
 		t.Fatalf("unexpected grant state %+v", state)
 	}
@@ -70,7 +72,9 @@ func TestPutConsentGrantAndDeny(t *testing.T) {
 		t.Fatalf("deny status %d", rec.Code)
 	}
 	state = ConsentState{} // deny omits install_id; don't inherit the grant's value
-	_ = json.Unmarshal(rec.Body.Bytes(), &state)
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatalf("unmarshal deny response: %v", err)
+	}
 	if state.Status != ConsentDenied || state.InstallID != "" {
 		t.Fatalf("unexpected deny state %+v", state)
 	}
@@ -100,7 +104,9 @@ func TestPostEventsAcceptsAllowlistedOnly(t *testing.T) {
 		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 	}
 	var resp map[string]int
-	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal events response: %v", err)
+	}
 	if resp["accepted"] != 1 {
 		t.Fatalf("expected 1 accepted, got %d", resp["accepted"])
 	}
@@ -122,6 +128,16 @@ func TestPostEventsWithoutConsentAcceptsButSendsNothing(t *testing.T) {
 	svc.flushOnce(context.Background())
 	if got := len(sink.sent()); got != 0 {
 		t.Fatalf("expected 0 events sent without consent, got %d", got)
+	}
+}
+
+func TestPostEventsRejectsOversizedBody(t *testing.T) {
+	svc, _, _ := newTestService(t, nil, Options{})
+	router := newTestRouter(t, svc)
+	huge := `{"events":[{"name":"ui_page_viewed","properties":{"page":"` + strings.Repeat("a", maxEventsBodyBytes) + `"}}]}`
+	rec := doJSON(t, router, http.MethodPost, "/api/v1/telemetry/events", huge)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized body, got %d", rec.Code)
 	}
 }
 

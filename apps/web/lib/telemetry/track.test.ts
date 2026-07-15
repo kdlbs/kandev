@@ -19,6 +19,8 @@ import {
   updateTelemetryConsentCache,
 } from "./track";
 
+const SAMPLE_ACTION = "task.create";
+
 function flushAsync(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -40,11 +42,11 @@ describe("track gating", () => {
 
   it("sends nothing when denied or env-disabled", async () => {
     fetchTelemetryConsent.mockResolvedValue({ status: "denied", env_disabled: false });
-    trackAction("task.create");
+    trackAction(SAMPLE_ACTION);
     await flushAsync();
 
     updateTelemetryConsentCache({ status: "granted", env_disabled: true });
-    trackAction("task.create");
+    trackAction(SAMPLE_ACTION);
     await flushAsync();
 
     expect(sendTelemetryEvents).not.toHaveBeenCalled();
@@ -57,13 +59,16 @@ describe("track gating", () => {
       env_disabled: false,
     });
     trackPageView("settings.system.telemetry");
-    trackAction("task.create");
+    trackAction(SAMPLE_ACTION);
     await flushAsync();
 
     expect(fetchTelemetryConsent).toHaveBeenCalledTimes(1);
     expect(sendTelemetryEvents).toHaveBeenCalledTimes(2);
-    expect(sendTelemetryEvents).toHaveBeenCalledWith([
+    expect(sendTelemetryEvents).toHaveBeenNthCalledWith(1, [
       { name: "ui_page_viewed", properties: { page: "settings.system.telemetry" } },
+    ]);
+    expect(sendTelemetryEvents).toHaveBeenNthCalledWith(2, [
+      { name: "ui_action", properties: { action: SAMPLE_ACTION } },
     ]);
   });
 
@@ -105,5 +110,12 @@ describe("normalizePathForTelemetry", () => {
     expect(result.startsWith("settings.wrkspaces")).toBe(true);
     expect(result.length).toBeLessThanOrEqual(64);
     expect(/^[a-z0-9][a-z0-9_.:-]*$/.test(result)).toBe(true);
+  });
+
+  it("never ends with a separator when the cap lands on one", () => {
+    // 63 chars of segment + "/x" → the dot separator falls exactly at the cap
+    const result = normalizePathForTelemetry("/" + "a".repeat(63) + "/x");
+    expect(result.endsWith(".")).toBe(false);
+    expect(/^[a-z0-9][a-z0-9_.:-]*[a-z0-9]$|^[a-z0-9]$/.test(result)).toBe(true);
   });
 });

@@ -76,27 +76,65 @@ func (s *Service) Consent() ConsentState {
 // install UUID (only then — never before consent) and emits an immediate
 // heartbeat so opted-in installs register without waiting a day. Denying
 // clears the install ID and drops anything still queued.
+//
+// Serialized under consentMu so concurrent requests cannot interleave
+// (e.g. two grants minting different install IDs).
 func (s *Service) SetConsent(ctx context.Context, status ConsentStatus) (ConsentState, error) {
 	if status != ConsentGranted && status != ConsentDenied {
 		return ConsentState{}, fmt.Errorf("invalid consent status %q", status)
 	}
-	installID := ""
+	s.consentMu.Lock()
+	defer s.consentMu.Unlock()
 	if status == ConsentGranted {
-		installID = s.currentOrNewInstallID()
+		return s.grantLocked(ctx)
 	}
-	if err := s.persistConsent(ctx, status, installID); err != nil {
+	return s.denyLocked(ctx)
+}
+
+// grantLocked persists the install ID and timestamp before the consent
+// flag, so a mid-write failure can never leave a durable grant without an
+// install ID. In-memory state (which gates emission) flips only after
+// everything is on disk.
+func (s *Service) grantLocked(ctx context.Context) (ConsentState, error) {
+	installID := s.currentOrNewInstallID()
+	if err := s.store.Save(ctx, installIDKey, []byte(installID)); err != nil {
+		return ConsentState{}, fmt.Errorf("save telemetry install id: %w", err)
+	}
+	if err := s.saveConsentTimestamp(ctx); err != nil {
 		return ConsentState{}, err
 	}
+	if err := s.store.Save(ctx, consentKey, []byte(ConsentGranted)); err != nil {
+		return ConsentState{}, fmt.Errorf("save telemetry consent: %w", err)
+	}
 	s.mu.Lock()
-	s.consent = status
+	s.consent = ConsentGranted
 	s.installID = installID
 	s.mu.Unlock()
 
-	if status == ConsentGranted {
-		s.enqueue(Event{Name: EventTelemetryEnabled})
-		s.enqueue(Event{Name: EventInstallHeartbeat})
-	} else {
-		s.drainQueue()
+	s.enqueue(Event{Name: EventTelemetryEnabled})
+	s.enqueue(Event{Name: EventInstallHeartbeat})
+	return s.Consent(), nil
+}
+
+// denyLocked flips the in-memory gate and drops the queue BEFORE touching
+// the store: emission must stop immediately even if persistence fails
+// (the error still surfaces so the UI can tell the user the preference
+// may not survive a restart).
+func (s *Service) denyLocked(ctx context.Context) (ConsentState, error) {
+	s.mu.Lock()
+	s.consent = ConsentDenied
+	s.installID = ""
+	s.mu.Unlock()
+	s.drainQueue()
+
+	if err := s.store.Save(ctx, installIDKey, []byte("")); err != nil {
+		return ConsentState{}, fmt.Errorf("clear telemetry install id: %w", err)
+	}
+	if err := s.saveConsentTimestamp(ctx); err != nil {
+		return ConsentState{}, err
+	}
+	if err := s.store.Save(ctx, consentKey, []byte(ConsentDenied)); err != nil {
+		return ConsentState{}, fmt.Errorf("save telemetry consent: %w", err)
 	}
 	return s.Consent(), nil
 }
@@ -110,13 +148,7 @@ func (s *Service) currentOrNewInstallID() string {
 	return uuid.New().String()
 }
 
-func (s *Service) persistConsent(ctx context.Context, status ConsentStatus, installID string) error {
-	if err := s.store.Save(ctx, consentKey, []byte(status)); err != nil {
-		return fmt.Errorf("save telemetry consent: %w", err)
-	}
-	if err := s.store.Save(ctx, installIDKey, []byte(installID)); err != nil {
-		return fmt.Errorf("save telemetry install id: %w", err)
-	}
+func (s *Service) saveConsentTimestamp(ctx context.Context) error {
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	if err := s.store.Save(ctx, consentUpdatedAtKey, []byte(timestamp)); err != nil {
 		return fmt.Errorf("save telemetry consent timestamp: %w", err)
