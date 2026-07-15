@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -45,6 +46,46 @@ func TestErrSessionWorkspaceNotReady_UnrelatedError(t *testing.T) {
 
 	if errors.Is(unrelated, ErrSessionWorkspaceNotReady) {
 		t.Errorf("expected errors.Is to be false for unrelated error")
+	}
+}
+
+func TestGetOrEnsureExecutionLeaderCancellationDoesNotAbortLiveWaiter(t *testing.T) {
+	mgr, _ := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-shared": {
+				TaskID: "task-1", SessionID: "session-shared", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+			},
+		},
+	})
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaderCtx, cancelLeader := context.WithCancel(context.Background())
+	defer cancelLeader()
+	results := make(chan error, 2)
+	go func() {
+		_, err := mgr.GetOrEnsureExecution(leaderCtx, "session-shared")
+		results <- err
+	}()
+	select {
+	case <-maintenance.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("leader did not reach activity admission")
+	}
+	go func() {
+		_, err := mgr.GetOrEnsureExecution(context.Background(), "session-shared")
+		results <- err
+	}()
+	cancelLeader()
+	maintenance.Release()
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatalf("coalesced execution failed after leader cancellation: %v", err)
+		}
 	}
 }
 

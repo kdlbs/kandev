@@ -161,7 +161,9 @@ describe("useStorageMaintenance", () => {
     expect(result.current.cleanupJob).toBeUndefined();
     expect(result.current.error).toBe("storage maintenance is busy");
   });
+});
 
+describe("useStorageMaintenance terminal refresh", () => {
   it("surfaces and retries a failed refresh after a cleanup job finishes", async () => {
     mocks.fetchJob.mockResolvedValue({
       ...cleanupJob,
@@ -179,5 +181,109 @@ describe("useStorageMaintenance", () => {
     await waitFor(() => expect(String(result.current.error)).toContain("refresh unavailable"));
     await waitFor(() => expect(mocks.fetchOverview).toHaveBeenCalledTimes(3), { timeout: 2500 });
     await waitFor(() => expect(result.current.error).toBeNull());
+  });
+
+  it("backs off and stops after six terminal refresh attempts", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.fetchJob.mockResolvedValue({
+        ...cleanupJob,
+        state: "succeeded",
+        ended_at: "2026-07-15T00:01:00Z",
+      });
+      const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(result.current.overview).toEqual(overview);
+
+      mocks.fetchOverview.mockRejectedValue(new Error("refresh unavailable"));
+      await act(async () => {
+        await result.current.runNow();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(2);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(999);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(3);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1999);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(3);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(4);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3999);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(4);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(5);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(7999);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(5);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(6);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(7999);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(6);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(7);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60000);
+      });
+      expect(mocks.fetchOverview).toHaveBeenCalledTimes(7);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("useStorageMaintenance reload ordering", () => {
+  it("does not let an older reload overwrite a newer result", async () => {
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+    let resolveOlder!: (value: StorageOverviewResponse) => void;
+    const olderResponse = new Promise<StorageOverviewResponse>((resolve) => {
+      resolveOlder = resolve;
+    });
+    const newerOverview = {
+      ...overview,
+      settings: { ...overview.settings, idle_for_minutes: 22 },
+    };
+    mocks.fetchOverview.mockReturnValueOnce(olderResponse).mockResolvedValueOnce(newerOverview);
+
+    let olderReload!: Promise<void>;
+    await act(async () => {
+      olderReload = result.current.reload();
+      await result.current.reload();
+    });
+    await waitFor(() => expect(result.current.overview).toEqual(newerOverview));
+    await act(async () => {
+      resolveOlder(overview);
+      await olderReload;
+    });
+
+    expect(result.current.overview).toEqual(newerOverview);
   });
 });

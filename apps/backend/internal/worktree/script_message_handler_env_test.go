@@ -30,3 +30,20 @@ func TestRunCleanupScriptWithoutMessageUsesRequestEnvironment(t *testing.T) {
 		t.Fatalf("cleanup GOCACHE = %q, want %q", got, req.Env["GOCACHE"])
 	}
 }
+
+func TestScriptProcessEnvironmentAppendsOverrideAfterCaseVariant(t *testing.T) {
+	t.Setenv("gocache", "/inherited/cache")
+	env := scriptProcessEnvironment(map[string]string{"GOCACHE": "/managed/cache"})
+	inheritedIndex, managedIndex := -1, -1
+	for i, item := range env {
+		switch item {
+		case "gocache=/inherited/cache":
+			inheritedIndex = i
+		case "GOCACHE=/managed/cache":
+			managedIndex = i
+		}
+	}
+	if inheritedIndex < 0 || managedIndex < 0 || managedIndex <= inheritedIndex {
+		t.Fatalf("environment order does not put managed override last: %v", env)
+	}
+}

@@ -584,6 +584,9 @@ func TestPrepareManagedGoCacheEnvironmentOverridesLocalRequest(t *testing.T) {
 	if req.managedGoCachePath != managedPath {
 		t.Fatalf("managedGoCachePath = %q, want %q", req.managedGoCachePath, managedPath)
 	}
+	if got, _ := req.Metadata[managedGoCacheMetadataKey].(string); got != managedPath {
+		t.Fatalf("managed cache metadata = %q, want %q", got, managedPath)
+	}
 }
 
 func TestManagedGoCacheEnvironmentPropagatesToPrepareAndRuntime(t *testing.T) {
@@ -839,6 +842,19 @@ func TestLaunchResolveWorkspacePath_NonEphemeralWithoutWorkspaceIDReturnsEmpty(t
 
 	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
 	require.Empty(t, workspacePath)
+}
+
+func TestLaunchResolveWorkspacePathRejectsDotTaskID(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.dataDir = t.TempDir()
+	req := &LaunchRequest{
+		SessionID: "session-dot-task", TaskID: ".", WorkspaceID: "ws-1",
+	}
+
+	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
+	if workspacePath != "" {
+		t.Fatalf("workspace path = %q, want empty for dot task ID", workspacePath)
+	}
 }
 
 func TestLaunchResolveWorkspacePath_PickedFolderUsedDirectly(t *testing.T) {

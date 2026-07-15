@@ -140,6 +140,8 @@ type Manager struct {
 	activityCoordinator *activity.Coordinator
 	activityMu          sync.Mutex
 	activityLeases      map[string]*activity.TaskLease
+	activityPending     map[string]uint64
+	activityGeneration  uint64
 }
 
 // ManagedGoCacheEnvironmentProvider supplies the environment for one new
@@ -157,10 +159,23 @@ func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEn
 // It is optional so embedded and test configurations retain legacy behavior.
 func (m *Manager) SetActivityCoordinator(coordinator *activity.Coordinator) {
 	m.activityMu.Lock()
-	defer m.activityMu.Unlock()
 	m.activityCoordinator = coordinator
 	if m.activityLeases == nil {
 		m.activityLeases = make(map[string]*activity.TaskLease)
+	}
+	if m.activityPending == nil {
+		m.activityPending = make(map[string]uint64)
+	}
+	m.activityMu.Unlock()
+	if m.executorRegistry == nil {
+		return
+	}
+	backend, err := m.executorRegistry.GetBackend(executor.NameDocker)
+	if err != nil {
+		return
+	}
+	if dockerExecutor, ok := backend.(*DockerExecutor); ok {
+		dockerExecutor.SetActivityCoordinator(coordinator)
 	}
 }
 
@@ -230,10 +245,6 @@ func NewManager(
 		skillDeployer:            NoopSkillDeployer(),
 		remediateNpxCache:        routingerr.RemediateNpxCache,
 	}
-	sessionManager.SetInitialPromptFailureHandler(func(executionID string) {
-		mgr.releaseActivity(executionActivityKey(executionID))
-	})
-
 	// Initialize stream manager with callbacks that delegate to manager methods
 	// mcpHandler will be set later via SetMCPHandler.
 	// stopCh is shared with the manager so workspace-stream backoff drains on Stop.

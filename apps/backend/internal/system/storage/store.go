@@ -432,7 +432,8 @@ func normalizeAbsolutePath(field, path string) (string, error) {
 
 func validRunTransition(current, next RunState) bool {
 	if current == RunStateQueued {
-		return next == RunStateRunning || next == RunStateSkippedBusy
+		return next == RunStateRunning || next == RunStateSkippedBusy ||
+			next == RunStateCancelled || next == RunStateFailed
 	}
 	if current == RunStateRunning {
 		return next == RunStateSucceeded || next == RunStateFailed || next == RunStateCancelled

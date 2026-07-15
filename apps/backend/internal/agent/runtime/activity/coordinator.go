@@ -25,6 +25,7 @@ const (
 	KindCleanupScript      Kind = "cleanup_script"
 	KindDockerImageBuild   Kind = "docker_image_build"
 	KindQuietPeriod        Kind = "quiet_period"
+	KindMaintenanceRunning Kind = "maintenance_running"
 )
 
 type Options struct {
@@ -113,6 +114,9 @@ func (l *MaintenanceLease) Release() {
 
 func (c *Coordinator) AcquireTask(ctx context.Context, kind Kind) (*TaskLease, error) {
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		c.mu.Lock()
 		maintenance := c.maintenance
 		if maintenance == nil {
@@ -138,7 +142,7 @@ func (c *Coordinator) TryAcquireMaintenance(
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.maintenance != nil {
-		return nil, []Kind{KindQuietPeriod}, ErrBusy
+		return nil, []Kind{KindMaintenanceRunning}, ErrBusy
 	}
 	if busy := c.busyKindsLocked(); len(busy) > 0 {
 		return nil, busy, ErrBusy

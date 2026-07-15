@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { IconAlertTriangle, IconPlayerPlay, IconRefresh } from "@tabler/icons-react";
 import { useStorageMaintenance } from "@/hooks/domains/system/use-storage-maintenance";
@@ -15,8 +15,18 @@ import { StorageRunHistory } from "./storage-run-history";
 export function StorageMaintenanceSettings() {
   const controller = useStorageMaintenance();
   const [draft, setDraft] = useState<Settings | null>(null);
+  const previousServerSettings = useRef<Settings | null>(null);
   useEffect(() => {
-    if (controller.overview) setDraft(controller.overview.settings);
+    if (!controller.overview) return;
+    const nextSettings = controller.overview.settings;
+    setDraft((current) => {
+      const previous = previousServerSettings.current;
+      if (!current || !previous || JSON.stringify(current) === JSON.stringify(previous)) {
+        return nextSettings;
+      }
+      return current;
+    });
+    previousServerSettings.current = nextSettings;
   }, [controller.overview]);
   const pending = controller.pendingAction !== null;
   const disabledReason = pending ? "Wait for the current storage action to finish." : undefined;

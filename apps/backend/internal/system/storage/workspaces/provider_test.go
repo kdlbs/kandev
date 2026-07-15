@@ -23,6 +23,7 @@ func (s fakeInventorySource) LoadWorkspaceInventory(context.Context) (Inventory,
 
 type fakeQuarantineStore struct {
 	entries map[string]storage.QuarantineEntry
+	order   []string
 }
 
 func newFakeQuarantineStore() *fakeQuarantineStore {
@@ -33,7 +34,14 @@ func (s *fakeQuarantineStore) CreateQuarantineEntry(_ context.Context, entry *st
 	if _, exists := s.entries[entry.ID]; exists {
 		return errors.New("duplicate quarantine entry")
 	}
+	for _, existing := range s.entries {
+		if existing.OriginalPath == entry.OriginalPath &&
+			(existing.State == storage.QuarantineStateQuarantined || existing.State == storage.QuarantineStateFailed) {
+			return errors.New("duplicate active quarantine original path")
+		}
+	}
 	s.entries[entry.ID] = *entry
+	s.order = append(s.order, entry.ID)
 	return nil
 }
 
@@ -61,9 +69,17 @@ func (s *fakeQuarantineStore) TransitionQuarantineEntry(
 	return entry, nil
 }
 
-func (s *fakeQuarantineStore) ListQuarantineEntries(context.Context, bool) ([]storage.QuarantineEntry, error) {
+func (s *fakeQuarantineStore) ListQuarantineEntries(
+	_ context.Context,
+	includeTerminal bool,
+) ([]storage.QuarantineEntry, error) {
 	entries := make([]storage.QuarantineEntry, 0, len(s.entries))
-	for _, entry := range s.entries {
+	for _, id := range s.order {
+		entry := s.entries[id]
+		if !includeTerminal && entry.State != storage.QuarantineStateQuarantined &&
+			entry.State != storage.QuarantineStateFailed {
+			continue
+		}
 		entries = append(entries, entry)
 	}
 	return entries, nil
@@ -155,6 +171,60 @@ func TestCleanupQuarantinesOldOwnedOrphanAndRestoreIsConflictSafe(t *testing.T) 
 	}
 	if data, err := os.ReadFile(module); err != nil || string(data) != "large dependency" {
 		t.Fatalf("restored node_modules data = %q, %v", data, err)
+	}
+}
+
+func TestCleanupRetriesFailedWorkspaceIntentWhenMoveNeverHappened(t *testing.T) {
+	provider, tasksRoot, store := newProviderFixture(t, Inventory{Complete: true}, nil)
+	candidate := createOwnedCandidate(t, tasksRoot, "retry-task_abc", OwnershipMarker{
+		TaskID: "retry-task", TaskDirName: "retry-task_abc", LayoutVersion: LayoutVersionSemantic,
+	})
+	old := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(candidate, old, old); err != nil {
+		t.Fatalf("age candidate: %v", err)
+	}
+	blockedQuarantine := filepath.Join(provider.config.TrashRoot, "tasks", "entry-1")
+	if err := os.MkdirAll(blockedQuarantine, 0o700); err != nil {
+		t.Fatalf("create blocked quarantine: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(blockedQuarantine, "blocker"), []byte("block"), 0o600); err != nil {
+		t.Fatalf("write quarantine blocker: %v", err)
+	}
+
+	if _, err := provider.Cleanup(context.Background()); err == nil {
+		t.Fatal("first Cleanup succeeded despite blocked quarantine destination")
+	}
+	if got := store.entries["entry-1"].State; got != storage.QuarantineStateFailed {
+		t.Fatalf("first intent state = %q, want failed", got)
+	}
+	if err := os.Chtimes(candidate, old, old); err != nil {
+		t.Fatalf("re-age candidate for ambiguous retry: %v", err)
+	}
+	if _, err := provider.Cleanup(context.Background()); !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("ambiguous retry error = %v, want ErrConflict", err)
+	}
+	if got := store.entries["entry-1"].State; got != storage.QuarantineStateFailed {
+		t.Fatalf("ambiguous intent state = %q, want failed", got)
+	}
+	if err := os.RemoveAll(blockedQuarantine); err != nil {
+		t.Fatalf("remove quarantine blocker: %v", err)
+	}
+	if err := os.Chtimes(candidate, old, old); err != nil {
+		t.Fatalf("re-age candidate: %v", err)
+	}
+
+	result, err := provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("retry Cleanup: %v", err)
+	}
+	if result.Quarantined != 1 {
+		t.Fatalf("retry result = %#v, want one quarantined workspace", result)
+	}
+	if got := store.entries["entry-1"].State; got != storage.QuarantineStateRestored {
+		t.Fatalf("released intent state = %q, want restored", got)
+	}
+	if got := store.entries["entry-2"].State; got != storage.QuarantineStateQuarantined {
+		t.Fatalf("replacement intent state = %q, want quarantined", got)
 	}
 }
 
@@ -458,6 +528,38 @@ func TestRestoreTaskReportsRestoredNotFoundAndFailed(t *testing.T) {
 	store.entries[entry.ID] = entry
 	if got := provider.RestoreTask(context.Background(), "restore-task"); got.Status != "failed" {
 		t.Fatalf("conflicted recovery = %#v", got)
+	}
+}
+
+func TestRestoreTaskChoosesNewestQuarantinedEntry(t *testing.T) {
+	provider, root, store := newProviderFixture(t, Inventory{Complete: true}, nil)
+	original := filepath.Join(root, "restore-task_abc")
+	trashTasks := filepath.Join(filepath.Dir(root), "trash", "tasks")
+	oldFailed := storage.QuarantineEntry{
+		ID: "old-failed", ResourceType: storage.ResourceTypeTaskWorkspace, TaskID: "restore-task",
+		OriginalPath: original, QuarantinePath: filepath.Join(trashTasks, "old-failed"),
+		State: storage.QuarantineStateFailed, QuarantinedAt: time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC),
+	}
+	newest := storage.QuarantineEntry{
+		ID: "newest", ResourceType: storage.ResourceTypeTaskWorkspace, TaskID: "restore-task",
+		OriginalPath: original, QuarantinePath: filepath.Join(trashTasks, "newest"),
+		State: storage.QuarantineStateQuarantined, QuarantinedAt: time.Date(2026, time.July, 2, 0, 0, 0, 0, time.UTC),
+	}
+	store.entries[oldFailed.ID] = oldFailed
+	store.entries[newest.ID] = newest
+	store.order = append(store.order, oldFailed.ID, newest.ID)
+	if err := os.MkdirAll(newest.QuarantinePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(newest.QuarantinePath, "artifact"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := provider.RestoreTask(context.Background(), "restore-task"); got.Status != "restored" {
+		t.Fatalf("RestoreTask = %#v, want restored", got)
+	}
+	if _, err := os.Stat(filepath.Join(original, "artifact")); err != nil {
+		t.Fatalf("restored newest workspace: %v", err)
 	}
 }
 

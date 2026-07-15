@@ -237,7 +237,12 @@ func (h *Handler) patchSettings(c *gin.Context) {
 		SaveConfirmations{DedicatedDocker: request.Confirmations.DedicatedDocker == "DEDICATED"},
 	)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if errors.Is(err, ErrValidation) || errors.Is(err, ErrAdoptionRequired) ||
+			errors.Is(err, ErrDedicatedDockerConfirmation) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save storage settings"})
 		return
 	}
 	if h.config.OnSettingsChanged != nil {

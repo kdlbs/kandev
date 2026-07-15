@@ -2,9 +2,11 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	agentdocker "github.com/kandev/kandev/internal/agent/docker"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/db"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
@@ -210,6 +213,93 @@ func TestQuarantineControllerRestoresGoCache(t *testing.T) {
 	}
 }
 
+func TestQuarantineControllerRestoresGoCacheOverEmptyReplacement(t *testing.T) {
+	home := t.TempDir()
+	original := filepath.Join(home, "cache", "go-build")
+	quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
+	if err := os.MkdirAll(quarantined, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(quarantined, "artifact"), []byte("cache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, store := newStorageMaintenanceStores(t)
+	current, err := settings.GetSettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.GoCache.Enabled = true
+	if _, err := settings.SaveSettings(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+	provider := gocache.New(gocache.Config{
+		HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings,
+	})
+	if _, err := provider.ExecutionEnvironment(context.Background()); err != nil {
+		t.Fatalf("create managed replacement: %v", err)
+	}
+	entry := createGoCacheQuarantineEntry(t, store, original, quarantined, time.Now().UTC().Add(time.Hour))
+	controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
+
+	restored, err := controller.Restore(context.Background(), entry.ID)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if restored.State != storagepkg.QuarantineStateRestored {
+		t.Fatalf("state = %q, want restored", restored.State)
+	}
+	if data, err := os.ReadFile(filepath.Join(original, "artifact")); err != nil || string(data) != "cache" {
+		t.Fatalf("restored cache artifact: data=%q err=%v", data, err)
+	}
+}
+
+func TestQuarantineControllerRetainsGoCacheWhileTaskActivityIsRunning(t *testing.T) {
+	home := t.TempDir()
+	original := filepath.Join(home, "cache", "go-build")
+	quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
+	if err := os.MkdirAll(quarantined, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(quarantined, "artifact")
+	if err := os.WriteFile(artifact, []byte("cache"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, store := newStorageMaintenanceStores(t)
+	current, err := settings.GetSettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.GoCache.Enabled = true
+	if _, err := settings.SaveSettings(context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+	provider := gocache.New(gocache.Config{
+		HomeDir: home, TrashDir: filepath.Join(home, "trash"), Settings: settings,
+	})
+	if _, err := provider.ExecutionEnvironment(context.Background()); err != nil {
+		t.Fatalf("create managed replacement: %v", err)
+	}
+	entry := createGoCacheQuarantineEntry(t, store, original, quarantined, time.Now().UTC().Add(time.Hour))
+	coordinator := activity.NewCoordinator(activity.Options{})
+	taskLease, err := coordinator.AcquireTask(context.Background(), activity.KindExecutionRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer taskLease.Release()
+	controller := &workspaceQuarantineController{
+		settings: settings, store: store, homeDir: home, activity: coordinator,
+	}
+
+	_, err = controller.Restore(context.Background(), entry.ID)
+	var busy *storagepkg.BusyError
+	if !errors.As(err, &busy) {
+		t.Fatalf("Restore error = %v, want BusyError", err)
+	}
+	if _, err := os.Stat(artifact); err != nil {
+		t.Fatalf("quarantined cache changed while task active: %v", err)
+	}
+}
+
 func TestQuarantineControllerRestoresAdoptedExternalGoCache(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -338,6 +428,107 @@ func TestQuarantineControllerFailedGoCacheRetryRecognizesAlreadyRestoredData(t *
 	}
 }
 
+func TestQuarantineControllerQuarantinedGoCacheRetryRecognizesAlreadyRestoredData(t *testing.T) {
+	home := t.TempDir()
+	original := filepath.Join(home, "cache", "go-build")
+	quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
+	if err := os.MkdirAll(original, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	artifact := filepath.Join(original, "artifact")
+	if err := os.WriteFile(artifact, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, store := newStorageMaintenanceStores(t)
+	entry := createGoCacheQuarantineEntry(
+		t, store, original, quarantined, time.Now().UTC().Add(time.Hour),
+	)
+	controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
+
+	restored, err := controller.Restore(context.Background(), entry.ID)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if restored.State != storagepkg.QuarantineStateRestored {
+		t.Fatalf("state = %q, want restored", restored.State)
+	}
+	if data, err := os.ReadFile(artifact); err != nil || string(data) != "keep" {
+		t.Fatalf("original cache changed: data=%q err=%v", data, err)
+	}
+}
+
+func TestQuarantineControllerReportsPersistenceAndRollbackFailures(t *testing.T) {
+	home := t.TempDir()
+	original := filepath.Join(home, "cache", "go-build")
+	quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
+	if err := os.MkdirAll(quarantined, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entry := storagepkg.QuarantineEntry{
+		ID: "entry-cache", ResourceType: storagepkg.ResourceTypeGoCache,
+		OriginalPath: original, QuarantinePath: quarantined,
+		State: storagepkg.QuarantineStateQuarantined, Metadata: []byte(`{"ownership":"managed"}`),
+	}
+	store := &failingTransitionQuarantineStore{entry: entry, err: errors.New("database unavailable")}
+	renameCalls := 0
+	controller := &workspaceQuarantineController{
+		store: store, homeDir: home,
+		rename: func(oldPath, newPath string) error {
+			renameCalls++
+			if renameCalls == 2 {
+				return errors.New("rollback blocked")
+			}
+			return os.Rename(oldPath, newPath)
+		},
+	}
+
+	_, err := controller.Restore(context.Background(), entry.ID)
+	if err == nil || !strings.Contains(err.Error(), "database unavailable") ||
+		!strings.Contains(err.Error(), "rollback blocked") {
+		t.Fatalf("Restore error = %v, want persistence and rollback failures", err)
+	}
+	if _, err := os.Stat(original); err != nil {
+		t.Fatalf("restored data missing after failed rollback: %v", err)
+	}
+	if _, err := os.Stat(quarantined); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("quarantine path exists after failed rollback: %v", err)
+	}
+
+	store.err = nil
+	restored, err := controller.Restore(context.Background(), entry.ID)
+	if err != nil {
+		t.Fatalf("reconcile retry: %v", err)
+	}
+	if restored.State != storagepkg.QuarantineStateRestored {
+		t.Fatalf("retry state = %q, want restored", restored.State)
+	}
+}
+
+type failingTransitionQuarantineStore struct {
+	entry storagepkg.QuarantineEntry
+	err   error
+}
+
+func (s *failingTransitionQuarantineStore) GetQuarantineEntry(
+	context.Context, string,
+) (storagepkg.QuarantineEntry, error) {
+	return s.entry, nil
+}
+
+func (s *failingTransitionQuarantineStore) TransitionQuarantineEntry(
+	_ context.Context,
+	_ string,
+	next storagepkg.QuarantineState,
+	lastError string,
+) (storagepkg.QuarantineEntry, error) {
+	if s.err != nil {
+		return storagepkg.QuarantineEntry{}, s.err
+	}
+	s.entry.State = next
+	s.entry.LastError = lastError
+	return s.entry, nil
+}
+
 func TestQuarantineControllerFailedGoCacheRetryRejectsSymlinkedRestorePath(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -400,6 +591,44 @@ func TestQuarantineControllerPermanentlyDeletesGoCache(t *testing.T) {
 	}
 }
 
+func TestQuarantineControllerDeletesHistoricalAdoptedGoCacheAfterReadoption(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	original := filepath.Join(root, "first-cache")
+	current := filepath.Join(root, "second-cache")
+	quarantined := filepath.Join(home, "trash", "go-cache", "entry-cache")
+	if err := os.MkdirAll(quarantined, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	settings, store := newStorageMaintenanceStores(t)
+	if _, err := settings.AdoptGoCachePath(context.Background(), current); err != nil {
+		t.Fatalf("AdoptGoCachePath: %v", err)
+	}
+	entry := storagepkg.QuarantineEntry{
+		ID: "entry-cache", ResourceType: storagepkg.ResourceTypeGoCache,
+		OriginalPath: original, QuarantinePath: quarantined,
+		State:         storagepkg.QuarantineStateQuarantined,
+		QuarantinedAt: time.Now().UTC().Add(-2 * time.Hour),
+		DeleteAfter:   time.Now().UTC().Add(-time.Hour),
+		Metadata:      json.RawMessage(`{"ownership":"adopted"}`),
+	}
+	if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
+		t.Fatal(err)
+	}
+	controller := &workspaceQuarantineController{settings: settings, store: store, homeDir: home}
+
+	deleted, err := controller.PermanentDelete(context.Background(), entry.ID, "DELETE")
+	if err != nil {
+		t.Fatalf("PermanentDelete: %v", err)
+	}
+	if deleted.State != storagepkg.QuarantineStateDeleted {
+		t.Fatalf("state = %q, want deleted", deleted.State)
+	}
+	if _, err := os.Stat(quarantined); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("historical quarantine path still exists: %v", err)
+	}
+}
+
 func TestQuarantineControllerRejectsEarlyGoCacheDeleteAndKeepsQuarantine(t *testing.T) {
 	home := t.TempDir()
 	original := filepath.Join(home, "cache", "go-build")
@@ -437,11 +666,21 @@ func createGoCacheQuarantineEntry(
 	deleteAfter time.Time,
 ) storagepkg.QuarantineEntry {
 	t.Helper()
+	homeDir := filepath.Dir(filepath.Dir(filepath.Dir(quarantined)))
+	ownership := "adopted"
+	if filepath.Clean(original) == filepath.Join(homeDir, "cache", "go-build") {
+		ownership = "managed"
+	}
+	metadata, err := json.Marshal(map[string]string{"ownership": ownership})
+	if err != nil {
+		t.Fatal(err)
+	}
 	entry := storagepkg.QuarantineEntry{
 		ID: "entry-cache", ResourceType: storagepkg.ResourceTypeGoCache,
 		OriginalPath: original, QuarantinePath: quarantined,
 		State:         storagepkg.QuarantineStateQuarantined,
 		QuarantinedAt: time.Now().UTC().Add(-2 * time.Hour), DeleteAfter: deleteAfter,
+		Metadata: metadata,
 	}
 	if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
 		t.Fatal(err)

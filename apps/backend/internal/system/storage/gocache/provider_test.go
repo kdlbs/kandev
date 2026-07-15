@@ -39,25 +39,59 @@ type recordingStore struct {
 	created    *storage.QuarantineEntry
 	createErr  error
 	transition storage.QuarantineState
+	entries    map[string]storage.QuarantineEntry
+	onCreate   func(*storage.QuarantineEntry)
 }
 
 func (s *recordingStore) CreateQuarantineEntry(_ context.Context, entry *storage.QuarantineEntry) error {
 	if s.createErr != nil {
 		return s.createErr
 	}
+	if s.entries == nil {
+		s.entries = make(map[string]storage.QuarantineEntry)
+	}
+	for _, existing := range s.entries {
+		if existing.OriginalPath == entry.OriginalPath &&
+			(existing.State == storage.QuarantineStateQuarantined || existing.State == storage.QuarantineStateFailed) {
+			return errors.New("duplicate active quarantine original path")
+		}
+	}
 	copy := *entry
 	s.created = &copy
+	s.entries[entry.ID] = copy
+	if s.onCreate != nil {
+		s.onCreate(&copy)
+	}
 	return nil
 }
 
 func (s *recordingStore) TransitionQuarantineEntry(
 	_ context.Context,
-	_ string,
+	id string,
 	next storage.QuarantineState,
-	_ string,
+	lastError string,
 ) (storage.QuarantineEntry, error) {
 	s.transition = next
-	return storage.QuarantineEntry{}, nil
+	entry := s.entries[id]
+	entry.State = next
+	entry.LastError = lastError
+	s.entries[id] = entry
+	return entry, nil
+}
+
+func (s *recordingStore) ListQuarantineEntries(
+	_ context.Context,
+	includeTerminal bool,
+) ([]storage.QuarantineEntry, error) {
+	entries := make([]storage.QuarantineEntry, 0, len(s.entries))
+	for _, entry := range s.entries {
+		if !includeTerminal && entry.State != storage.QuarantineStateQuarantined &&
+			entry.State != storage.QuarantineStateFailed {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
 }
 
 type staticSettings struct {
@@ -90,7 +124,7 @@ func TestExecutionEnvironmentCreatesOwnedManagedCache(t *testing.T) {
 	if info, err := os.Stat(want); err != nil || !info.IsDir() {
 		t.Fatalf("managed cache directory was not created: info=%v err=%v", info, err)
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(want), ".go-build.kandev-owned")); err != nil {
+	if _, err := os.Stat(filepath.Join(want, markerName)); err != nil {
 		t.Fatalf("ownership marker was not created: %v", err)
 	}
 }
@@ -166,6 +200,44 @@ func TestCleanupNeverClaimsUnmarkedManagedPath(t *testing.T) {
 	}
 }
 
+func TestCleanupDoesNotClaimReplacementDirectoryFromStaleMarker(t *testing.T) {
+	home := t.TempDir()
+	settings := storage.DefaultSettings()
+	settings.GoCache.Enabled = true
+	settings.GoCache.MaxBytes = 1
+	store := &recordingStore{}
+	provider := New(Config{
+		HomeDir: home, TrashDir: filepath.Join(home, "trash"),
+		Settings: staticSettings{settings: settings}, Store: store,
+	})
+	env, err := provider.ExecutionEnvironment(context.Background())
+	if err != nil {
+		t.Fatalf("ExecutionEnvironment() error = %v", err)
+	}
+	cachePath := env["GOCACHE"]
+	if err := os.RemoveAll(cachePath); err != nil {
+		t.Fatalf("replace managed cache: %v", err)
+	}
+	if err := os.MkdirAll(cachePath, 0o755); err != nil {
+		t.Fatalf("create replacement cache: %v", err)
+	}
+	artifact := filepath.Join(cachePath, "unrelated")
+	if err := os.WriteFile(artifact, []byte("keep"), 0o600); err != nil {
+		t.Fatalf("seed replacement cache: %v", err)
+	}
+
+	_, err = provider.Cleanup(context.Background())
+	if !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("Cleanup() error = %v, want ErrNotOwned", err)
+	}
+	if data, err := os.ReadFile(artifact); err != nil || string(data) != "keep" {
+		t.Fatalf("replacement cache changed: data=%q err=%v", data, err)
+	}
+	if store.created != nil {
+		t.Fatalf("replacement cache was quarantined: %#v", store.created)
+	}
+}
+
 func TestCleanupRejectsSymlinkedManagedCacheAncestor(t *testing.T) {
 	home := t.TempDir()
 	external := t.TempDir()
@@ -177,7 +249,7 @@ func TestCleanupRejectsSymlinkedManagedCacheAncestor(t *testing.T) {
 	if err := os.WriteFile(artifact, []byte("leave external data"), 0o600); err != nil {
 		t.Fatalf("seed external cache: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(external, markerName), []byte(markerContent), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(externalCache, markerName), []byte(markerContent), 0o600); err != nil {
 		t.Fatalf("seed external marker: %v", err)
 	}
 	if err := os.Symlink(external, filepath.Join(home, "cache")); err != nil {
@@ -255,7 +327,7 @@ func TestCleanupRejectsSymlinkedOwnershipMarker(t *testing.T) {
 	if err := os.WriteFile(externalMarker, []byte(markerContent), 0o600); err != nil {
 		t.Fatalf("seed external marker: %v", err)
 	}
-	if err := os.Symlink(externalMarker, filepath.Join(filepath.Dir(cachePath), markerName)); err != nil {
+	if err := os.Symlink(externalMarker, filepath.Join(cachePath, markerName)); err != nil {
 		t.Fatalf("symlink ownership marker: %v", err)
 	}
 	settings := storage.DefaultSettings()
@@ -305,6 +377,69 @@ func TestCleanupPersistsIntentBeforeRename(t *testing.T) {
 	}
 	if _, err := os.Stat(artifact); err != nil {
 		t.Fatalf("cache moved before intent persisted: %v", err)
+	}
+}
+
+func TestCleanupRetriesFailedGoCacheIntentWhenMoveNeverHappened(t *testing.T) {
+	home := t.TempDir()
+	settings := storage.DefaultSettings()
+	settings.GoCache.Enabled = true
+	settings.GoCache.MaxBytes = 1
+	store := &recordingStore{}
+	var firstID string
+	store.onCreate = func(entry *storage.QuarantineEntry) {
+		if firstID != "" {
+			return
+		}
+		firstID = entry.ID
+		if err := os.MkdirAll(entry.QuarantinePath, 0o700); err != nil {
+			t.Fatalf("create blocked quarantine: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(entry.QuarantinePath, "blocker"), []byte("block"), 0o600); err != nil {
+			t.Fatalf("write quarantine blocker: %v", err)
+		}
+	}
+	provider := New(Config{
+		HomeDir: home, TrashDir: filepath.Join(home, "trash"),
+		Settings: staticSettings{settings: settings}, Store: store,
+	})
+	env, err := provider.ExecutionEnvironment(context.Background())
+	if err != nil {
+		t.Fatalf("ExecutionEnvironment() error = %v", err)
+	}
+	artifact := filepath.Join(env["GOCACHE"], "artifact")
+	if err := os.WriteFile(artifact, []byte("1234"), 0o600); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	if _, err := provider.Cleanup(context.Background()); err == nil {
+		t.Fatal("first Cleanup succeeded despite blocked quarantine destination")
+	}
+	if got := store.entries[firstID].State; got != storage.QuarantineStateFailed {
+		t.Fatalf("first intent state = %q, want failed", got)
+	}
+	if _, err := provider.Cleanup(context.Background()); !errors.Is(err, storage.ErrConflict) {
+		t.Fatalf("ambiguous retry error = %v, want ErrConflict", err)
+	}
+	if got := store.entries[firstID].State; got != storage.QuarantineStateFailed {
+		t.Fatalf("ambiguous intent state = %q, want failed", got)
+	}
+	if err := os.RemoveAll(store.entries[firstID].QuarantinePath); err != nil {
+		t.Fatalf("remove quarantine blocker: %v", err)
+	}
+
+	result, err := provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("retry Cleanup: %v", err)
+	}
+	if result.QuarantineEntry == nil || result.QuarantineEntry.ID == firstID {
+		t.Fatalf("retry result = %#v, want fresh quarantine intent", result)
+	}
+	if got := store.entries[firstID].State; got != storage.QuarantineStateRestored {
+		t.Fatalf("released intent state = %q, want restored", got)
+	}
+	if _, err := os.Stat(artifact); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("retry left original cache artifact: %v", err)
 	}
 }
 

@@ -384,7 +384,7 @@ func (m *Manager) scratchWorkspacePath(req *LaunchRequest) string {
 			zap.String("workspace_id", req.WorkspaceID))
 		return ""
 	}
-	if strings.ContainsAny(req.TaskID, `/\`) || strings.ContainsAny(req.WorkspaceID, `/\`) {
+	if invalidScratchPathID(req.TaskID) || invalidScratchPathID(req.WorkspaceID) {
 		m.logger.Warn("task or workspace ID contains path separator, rejecting",
 			zap.String("task_id", req.TaskID),
 			zap.String("workspace_id", req.WorkspaceID))
@@ -395,6 +395,10 @@ func (m *Manager) scratchWorkspacePath(req *LaunchRequest) string {
 	// workspaces live alongside the existing repo-bound worktree task dirs
 	// at <kandevHome>/tasks/<workspaceID>/<taskID>/.
 	return filepath.Join(m.dataDir, "tasks", req.WorkspaceID, req.TaskID)
+}
+
+func invalidScratchPathID(id string) bool {
+	return id == "." || id == ".." || strings.ContainsAny(id, `/\`)
 }
 
 // launchPrepareRequest copies the launch request, sets the resolved workspace path,

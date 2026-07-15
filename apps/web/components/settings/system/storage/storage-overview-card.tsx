@@ -49,6 +49,17 @@ function quarantineResource(summary: StorageQuarantineSummary): StorageResource 
   };
 }
 
+function dockerMeasurement(
+  available: boolean,
+  value: string,
+  detail: string,
+): Pick<StorageResource, "value" | "detail"> {
+  if (!available) {
+    return { value: "Unavailable", detail: "Docker usage could not be measured" };
+  }
+  return { value, detail };
+}
+
 function storageResources(overview: StorageOverviewResponse): StorageResource[] {
   const { summary } = overview;
   const dockerWarning = summary.docker.warnings?.join(" · ");
@@ -64,8 +75,11 @@ function storageResources(overview: StorageOverviewResponse): StorageResource[] 
     {
       id: "managed-containers",
       label: "Kandev containers",
-      value: formatBytes(summary.docker.managed_container_bytes ?? 0),
-      detail: `${summary.docker.managed_container_count ?? 0} managed containers`,
+      ...dockerMeasurement(
+        summary.docker.available,
+        formatBytes(summary.docker.managed_container_bytes ?? 0),
+        `${summary.docker.managed_container_count ?? 0} managed containers`,
+      ),
       warning: dockerWarning,
     },
     {
@@ -78,15 +92,21 @@ function storageResources(overview: StorageOverviewResponse): StorageResource[] 
     {
       id: "docker-build-cache",
       label: "Docker build cache",
-      value: formatBytes(summary.docker.build_cache_bytes),
-      detail: overview.capabilities.docker_host || "Default Docker host",
+      ...dockerMeasurement(
+        summary.docker.available,
+        formatBytes(summary.docker.build_cache_bytes),
+        overview.capabilities.docker_host || "Default Docker host",
+      ),
       warning: dockerWarning,
     },
     {
       id: "docker-unused-images",
       label: "Unused Docker images",
-      value: formatBytes(summary.docker.unused_image_bytes),
-      detail: "Unused by every container and older than the configured age",
+      ...dockerMeasurement(
+        summary.docker.available,
+        formatBytes(summary.docker.unused_image_bytes),
+        "Unused by every container and older than the configured age",
+      ),
       warning: dockerWarning,
     },
   ];

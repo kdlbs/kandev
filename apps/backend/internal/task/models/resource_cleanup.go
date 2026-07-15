@@ -17,6 +17,7 @@ const (
 type TaskResourceCleanupState string
 
 const (
+	TaskResourceCleanupStatePrepared  TaskResourceCleanupState = "prepared"
 	TaskResourceCleanupStatePending   TaskResourceCleanupState = "pending"
 	TaskResourceCleanupStateRunning   TaskResourceCleanupState = "running"
 	TaskResourceCleanupStateRetryWait TaskResourceCleanupState = "retry_wait"

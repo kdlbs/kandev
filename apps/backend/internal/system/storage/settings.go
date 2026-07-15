@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -57,7 +58,10 @@ func (s *SettingsStore) SaveSettingsWithConfirmations(
 	}
 	current, err := s.GetSettings(ctx)
 	if err != nil {
-		return StorageMaintenanceSettings{}, err
+		if !errors.Is(err, ErrInvalidPersistedSettings) {
+			return StorageMaintenanceSettings{}, err
+		}
+		current = DefaultSettings()
 	}
 	if normalized.GoCache.AdoptedPath != current.GoCache.AdoptedPath && !confirmations.adoptGoCache {
 		return StorageMaintenanceSettings{}, ErrAdoptionRequired
@@ -85,7 +89,10 @@ func (s *SettingsStore) AdoptGoCachePath(
 	}
 	settings, err := s.GetSettings(ctx)
 	if err != nil {
-		return StorageMaintenanceSettings{}, err
+		if !errors.Is(err, ErrInvalidPersistedSettings) {
+			return StorageMaintenanceSettings{}, err
+		}
+		settings = DefaultSettings()
 	}
 	settings.GoCache.AdoptedPath = path
 	return s.SaveSettingsWithConfirmations(ctx, settings, SaveConfirmations{adoptGoCache: true})

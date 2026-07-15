@@ -118,6 +118,9 @@ func NormalizeSettings(in StorageMaintenanceSettings) (StorageMaintenanceSetting
 			return StorageMaintenanceSettings{}, validationError("go_cache.adopted_path must be absolute")
 		}
 		in.GoCache.AdoptedPath = filepath.Clean(in.GoCache.AdoptedPath)
+		if in.GoCache.AdoptedPath == filepath.VolumeName(in.GoCache.AdoptedPath)+string(filepath.Separator) {
+			return StorageMaintenanceSettings{}, validationError("go_cache.adopted_path cannot be a filesystem root")
+		}
 	}
 	return in, nil
 }

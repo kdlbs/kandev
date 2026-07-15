@@ -61,3 +61,38 @@ func TestQuietPeriodUsesLastReleasedTaskActivity(t *testing.T) {
 	}
 	maintenance.Release()
 }
+
+func TestAcquireTaskRejectsAlreadyCancelledContext(t *testing.T) {
+	coordinator := NewCoordinator(Options{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	lease, err := coordinator.AcquireTask(ctx, KindExecutionStarting)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("AcquireTask error = %v, want context.Canceled", err)
+	}
+	if lease != nil {
+		t.Fatal("AcquireTask returned a lease for a cancelled context")
+	}
+	if busy := coordinator.BusyKinds(); len(busy) != 0 {
+		t.Fatalf("BusyKinds = %v, want empty", busy)
+	}
+}
+
+func TestMaintenanceAlreadyRunningReportsMaintenanceKind(t *testing.T) {
+	coordinator := NewCoordinator(Options{})
+	lease, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("TryAcquireMaintenance: %v", err)
+	}
+	defer lease.Release()
+
+	_, busy, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if !errors.Is(err, ErrBusy) {
+		t.Fatalf("second TryAcquireMaintenance error = %v, want ErrBusy", err)
+	}
+	want := Kind("maintenance_running")
+	if len(busy) != 1 || busy[0] != want {
+		t.Fatalf("busy kinds = %v, want [%s]", busy, want)
+	}
+}

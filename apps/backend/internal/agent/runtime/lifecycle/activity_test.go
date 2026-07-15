@@ -135,3 +135,55 @@ func TestStartAgentProcessFailureReleasesTrackedExecutionActivity(t *testing.T) 
 		t.Fatalf("maintenance after startup failure: %v", err)
 	}
 }
+
+func TestInitialPromptWaitFailureRetainsExecutionActivity(t *testing.T) {
+	manager := newTestManager(t)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	manager.SetActivityCoordinator(coordinator)
+	lease, err := coordinator.AcquireTask(context.Background(), activity.KindExecutionRunning)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.trackActivity(executionActivityKey("execution-prompt-wait"), lease)
+
+	if handler := manager.sessionManager.initialPromptFailure; handler != nil {
+		handler("execution-prompt-wait")
+	}
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if maintenance != nil {
+		maintenance.Release()
+	}
+	if !errors.Is(err, activity.ErrBusy) {
+		t.Fatalf("maintenance error = %v, want ErrBusy while execution may still run", err)
+	}
+	manager.releaseActivity(executionActivityKey("execution-prompt-wait"))
+}
+
+func TestReleaseInvalidatesPendingExecutionActivityAcquire(t *testing.T) {
+	manager := newTestManager(t)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	manager.SetActivityCoordinator(coordinator)
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("TryAcquireMaintenance: %v", err)
+	}
+
+	acquired := make(chan error, 1)
+	go func() {
+		acquired <- manager.ensureExecutionActivity(
+			context.Background(), "completed-while-acquiring", activity.KindExecutionStarting,
+		)
+	}()
+	<-maintenance.Context().Done()
+	manager.releaseActivity(executionActivityKey("completed-while-acquiring"))
+	maintenance.Release()
+	if err := <-acquired; err != nil {
+		t.Fatalf("ensureExecutionActivity: %v", err)
+	}
+
+	next, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("late execution lease remained active: %v", err)
+	}
+	next.Release()
+}

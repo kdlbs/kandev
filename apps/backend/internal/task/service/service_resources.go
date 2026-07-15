@@ -234,19 +234,25 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 		ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
 		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
 		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets,
-		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false},
+		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true,
 	)
 	return cleanup, err
 }
 
 func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, cleanups []workspaceDeleteTaskCleanup) {
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
 	for _, cleanup := range cleanups {
 		if cleanup.cleanupJob == nil || s.resourceCleanups == nil {
 			continue
 		}
-		_ = s.resourceCleanups.CompleteTaskResourceCleanupJob(
-			ctx, cleanup.cleanupJob.ID, models.TaskResourceCleanupStateCancelled, "", nil,
-		)
+		if err := s.resourceCleanups.CompleteTaskResourceCleanupJob(
+			transitionCtx, cleanup.cleanupJob.ID, models.TaskResourceCleanupStateCancelled, "", nil,
+		); err != nil {
+			s.logger.Warn("cancel workspace delete task cleanup job",
+				zap.String("job_id", cleanup.cleanupJob.ID),
+				zap.String("task_id", cleanup.cleanupJob.TaskID), zap.Error(err))
+		}
 	}
 }
 
@@ -326,9 +332,15 @@ func (s *Service) runWorkspaceDeleteTaskCleanupJobs(jobs []workspaceDeleteTaskCl
 
 func (s *Service) runWorkspaceDeleteTaskCleanup(cleanup workspaceDeleteTaskCleanup) {
 	if cleanup.cleanupJob != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		transitionCtx, cancel := detachedCleanupTransitionContext(context.Background())
 		defer cancel()
-		_ = s.processTaskResourceCleanupJob(ctx, cleanup.cleanupJob.ID)
+		if err := s.StartPreparedTaskResourceCleanup(
+			transitionCtx, cleanup.cleanupJob.OperationID,
+		); err != nil {
+			s.logger.Warn("start workspace delete task cleanup job",
+				zap.String("job_id", cleanup.cleanupJob.ID),
+				zap.String("task_id", cleanup.cleanupJob.TaskID), zap.Error(err))
+		}
 		return
 	}
 	envCleanup := taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}

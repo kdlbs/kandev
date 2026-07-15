@@ -35,6 +35,7 @@ type SettingsSource interface {
 type QuarantineStore interface {
 	CreateQuarantineEntry(ctx context.Context, entry *storage.QuarantineEntry) error
 	TransitionQuarantineEntry(ctx context.Context, id string, next storage.QuarantineState, lastError string) (storage.QuarantineEntry, error)
+	ListQuarantineEntries(ctx context.Context, includeTerminal bool) ([]storage.QuarantineEntry, error)
 }
 
 // Config contains the provider's install-owned paths and persistence dependencies.
@@ -242,6 +243,11 @@ func (p *Provider) rotate(
 	if err := os.MkdirAll(quarantineDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create Go-cache trash: %w", err)
 	}
+	if _, err := storage.ReleaseFailedQuarantineIntent(
+		ctx, p.config.Store, storage.ResourceTypeGoCache, cachePath,
+	); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	id := uuid.NewString()
 	ownership := "managed"
@@ -282,7 +288,7 @@ func (p *Provider) rotate(
 }
 
 func writeMarker(cachePath string) error {
-	marker := filepath.Join(filepath.Dir(cachePath), markerName)
+	marker := markerPath(cachePath)
 	info, err := os.Lstat(marker)
 	if err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
@@ -299,13 +305,50 @@ func writeMarker(cachePath string) error {
 }
 
 func hasValidMarker(cachePath string) bool {
-	path := filepath.Join(filepath.Dir(cachePath), markerName)
+	path := markerPath(cachePath)
 	info, err := os.Lstat(path)
 	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
 		return false
 	}
 	marker, err := os.ReadFile(path)
 	return err == nil && string(marker) == markerContent
+}
+
+func markerPath(cachePath string) string {
+	return filepath.Join(cachePath, markerName)
+}
+
+// RemoveRestorePlaceholder removes the empty cache directory recreated after
+// rotation. Managed caches must contain only their bound ownership marker;
+// adopted caches must be completely empty.
+func RemoveRestorePlaceholder(cachePath string, adopted bool) (bool, error) {
+	info, err := os.Lstat(cachePath)
+	if err != nil {
+		return false, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return false, nil
+	}
+	entries, err := os.ReadDir(cachePath)
+	if err != nil {
+		return false, fmt.Errorf("inspect Go-cache restore placeholder: %w", err)
+	}
+	if adopted {
+		if len(entries) != 0 {
+			return false, nil
+		}
+	} else if len(entries) != 1 || entries[0].Name() != markerName || !hasValidMarker(cachePath) {
+		return false, nil
+	}
+	if !adopted {
+		if err := os.Remove(markerPath(cachePath)); err != nil {
+			return false, fmt.Errorf("remove Go-cache restore marker: %w", err)
+		}
+	}
+	if err := os.Remove(cachePath); err != nil {
+		return false, fmt.Errorf("remove Go-cache restore placeholder: %w", err)
+	}
+	return true, nil
 }
 
 func (p *Provider) validateCachePath(cachePath string) error {
@@ -357,12 +400,15 @@ func directorySize(root string) (int64, error) {
 		return 0, fmt.Errorf("inspect Go-cache path: %w", err)
 	}
 	var total int64
-	err := filepath.WalkDir(root, func(_ string, entry fs.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("symlink found in Go cache: %s", entry.Name())
+		}
+		if path == markerPath(root) {
+			return nil
 		}
 		if entry.Type().IsRegular() {
 			info, err := entry.Info()

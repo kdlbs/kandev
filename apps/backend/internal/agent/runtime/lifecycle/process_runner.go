@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 )
 
 type StartProcessRequest struct {
@@ -35,19 +36,25 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*a
 	if err != nil {
 		return nil, err
 	}
-	process, err := client.StartProcess(ctx, agentctl.StartProcessRequest{
+	startCtx, cancelStart := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancelStart()
+	process, err := client.StartProcess(startCtx, agentctl.StartProcessRequest{
 		SessionID:  req.SessionID,
 		Kind:       agentctl.ProcessKind(req.Kind),
 		ScriptName: req.ScriptName,
 		Command:    req.Command,
 		WorkingDir: req.WorkingDir,
-		Env:        req.Env,
+		Env:        processEnvironment(execution, req.Env),
 	})
 	if err != nil {
 		lease.Release()
 		return nil, err
 	}
-	m.trackActivity(processActivityKey(process.ID), lease)
+	if isTerminalProcessStatus(process.Status) {
+		lease.Release()
+	} else {
+		m.trackActivity(processActivityKey(process.ID), lease)
+	}
 	return process, nil
 }
 
@@ -76,12 +83,37 @@ func (m *Manager) StopProcess(ctx context.Context, processID string) error {
 		if client == nil {
 			continue
 		}
+		if _, err := client.GetProcess(ctx, processID, false); err != nil {
+			continue
+		}
 		if err := client.StopProcess(ctx, processID); err == nil {
 			m.releaseActivity(processActivityKey(processID))
 			return nil
 		}
 	}
 	return fmt.Errorf("process not found: %s", processID)
+}
+
+func processEnvironment(execution *AgentExecution, requested map[string]string) map[string]string {
+	managedPath, _ := execution.Metadata[managedGoCacheMetadataKey].(string)
+	if managedPath == "" {
+		return requested
+	}
+	env := make(map[string]string, len(requested)+1)
+	for key, value := range requested {
+		env[key] = value
+	}
+	env["GOCACHE"] = managedPath
+	return env
+}
+
+func isTerminalProcessStatus(status agentctl.ProcessStatus) bool {
+	switch status {
+	case agentctltypes.ProcessStatusExited, agentctltypes.ProcessStatusFailed, agentctltypes.ProcessStatusStopped:
+		return true
+	default:
+		return false
+	}
 }
 
 // StopProcessForSession stops a running process by ID within a specific session.

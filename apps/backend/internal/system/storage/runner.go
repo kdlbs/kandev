@@ -79,7 +79,7 @@ func (r *Runner) Run(
 	lease, busy, err := r.activity.TryAcquireMaintenance(ctx, quietPeriod)
 	if errors.Is(err, activity.ErrBusy) {
 		result := marshalRunResult(map[string]any{"busy_resources": busy})
-		run, transitionErr := r.store.TransitionRun(ctx, run.ID, RunStateSkippedBusy, result, "host resources are busy")
+		run, transitionErr := r.transitionRun(ctx, run.ID, RunStateSkippedBusy, result, "host resources are busy")
 		if transitionErr != nil {
 			return MaintenanceRun{}, transitionErr
 		}
@@ -89,10 +89,18 @@ func (r *Runner) Run(
 		return run, nil
 	}
 	if err != nil {
-		return MaintenanceRun{}, err
+		state := RunStateFailed
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			state = RunStateCancelled
+		}
+		run, transitionErr := r.transitionRun(ctx, run.ID, state, nil, err.Error())
+		if transitionErr != nil {
+			return MaintenanceRun{}, transitionErr
+		}
+		return run, err
 	}
 	defer lease.Release()
-	if _, err := r.store.TransitionRun(ctx, run.ID, RunStateRunning, nil, ""); err != nil {
+	if _, err := r.transitionRun(ctx, run.ID, RunStateRunning, nil, ""); err != nil {
 		return MaintenanceRun{}, err
 	}
 	result, runErr := r.runProviders(lease.Context())
@@ -155,17 +163,30 @@ func (r *Runner) finishRun(
 	if maintenanceCtx.Err() != nil {
 		state = RunStateCancelled
 		message = "maintenance preempted by task activity"
+		if runErr == nil {
+			runErr = maintenanceCtx.Err()
+		}
 	} else if runErr != nil {
 		state = RunStateFailed
 		message = runErr.Error()
 	}
-	transitionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalTransitionTimeout)
-	defer cancel()
-	run, err := r.store.TransitionRun(transitionCtx, id, state, marshalRunResult(result), message)
+	run, err := r.transitionRun(ctx, id, state, marshalRunResult(result), message)
 	if err != nil {
 		return MaintenanceRun{}, err
 	}
 	return run, runErr
+}
+
+func (r *Runner) transitionRun(
+	ctx context.Context,
+	id string,
+	state RunState,
+	result json.RawMessage,
+	message string,
+) (MaintenanceRun, error) {
+	transitionCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), terminalTransitionTimeout)
+	defer cancel()
+	return r.store.TransitionRun(transitionCtx, id, state, result, message)
 }
 
 func marshalRunResult(result any) json.RawMessage {

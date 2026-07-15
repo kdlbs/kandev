@@ -217,6 +217,7 @@ type TaskResourceCleanupRepository interface {
 	GetTaskResourceCleanupJob(ctx context.Context, id string) (*models.TaskResourceCleanupJob, error)
 	GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error)
 	ListDueTaskResourceCleanupJobs(ctx context.Context, now time.Time, limit int) ([]*models.TaskResourceCleanupJob, error)
+	StartPreparedTaskResourceCleanupJob(ctx context.Context, id string) (bool, error)
 	MarkTaskResourceCleanupJobRunning(ctx context.Context, id string) (bool, error)
 	CompleteClaimedTaskResourceCleanupJob(ctx context.Context, id string, attempt int, state models.TaskResourceCleanupState, lastError string, nextAttemptAt *time.Time) (bool, error)
 	CompleteTaskResourceCleanupJob(ctx context.Context, id string, state models.TaskResourceCleanupState, lastError string, nextAttemptAt *time.Time) error

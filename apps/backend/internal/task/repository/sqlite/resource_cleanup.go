@@ -103,6 +103,20 @@ func (r *Repository) MarkTaskResourceCleanupJobRunning(ctx context.Context, id s
 	return count == 1, nil
 }
 
+func (r *Repository) StartPreparedTaskResourceCleanupJob(ctx context.Context, id string) (bool, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_resource_cleanup_jobs
+		SET state = ?, next_attempt_at = NULL, updated_at = ?
+		WHERE id = ? AND state = ?
+	`), models.TaskResourceCleanupStatePending, now, id, models.TaskResourceCleanupStatePrepared)
+	if err != nil {
+		return false, err
+	}
+	count, _ := result.RowsAffected()
+	return count == 1, nil
+}
+
 func (r *Repository) CompleteTaskResourceCleanupJob(ctx context.Context, id string, state models.TaskResourceCleanupState, lastError string, nextAttemptAt *time.Time) error {
 	now := time.Now().UTC()
 	var completedAt *time.Time
@@ -151,10 +165,11 @@ func (r *Repository) CancelArchiveTaskResourceCleanupJobs(ctx context.Context, t
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET state = ?, completed_at = ?, updated_at = ?
-		WHERE task_id = ? AND trigger IN (?, ?) AND state IN (?, ?, ?)
+		WHERE task_id = ? AND trigger IN (?, ?) AND state IN (?, ?, ?, ?)
 	`), models.TaskResourceCleanupStateCancelled, now, now, taskID,
 		models.TaskResourceCleanupTriggerArchive, models.TaskResourceCleanupTriggerCascadeArchive,
-		models.TaskResourceCleanupStatePending, models.TaskResourceCleanupStateRunning,
+		models.TaskResourceCleanupStatePrepared, models.TaskResourceCleanupStatePending,
+		models.TaskResourceCleanupStateRunning,
 		models.TaskResourceCleanupStateRetryWait)
 	return err
 }

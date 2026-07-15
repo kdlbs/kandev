@@ -40,7 +40,9 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 	// Use ensureWorkspaceExecutionLocked (not EnsureWorkspaceExecutionForSession)
 	// to avoid recursing into the same singleflight slot we already hold.
 	v, err, _ := m.ensureExecutionGroup.Do(sessionID, func() (interface{}, error) {
-		return m.ensureWorkspaceExecutionLocked(ctx, "", sessionID)
+		creationCtx, cancel := coalescedExecutionContext(ctx)
+		defer cancel()
+		return m.ensureWorkspaceExecutionLocked(creationCtx, "", sessionID)
 	})
 	if err != nil {
 		return nil, err
@@ -94,6 +96,8 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	// GetOrEnsureExecution(sessionID) / EnsureWorkspaceExecutionForSession for
 	// the same session.
 	v, err, _ := m.ensureExecutionGroup.Do(info.SessionID, func() (interface{}, error) {
+		creationCtx, cancel := coalescedExecutionContext(ctx)
+		defer cancel()
 		if execution, exists := m.executionStore.GetBySessionID(info.SessionID); exists {
 			return execution, nil
 		}
@@ -103,7 +107,7 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 		// createExecution publishes AgentctlStarting before spawning the
 		// waitForAgentctlReady goroutine, so frontend gates flip out of
 		// `undefined` even on this lazy-create path.
-		execution, err := m.createExecution(ctx, info.TaskID, info)
+		execution, err := m.createExecution(creationCtx, info.TaskID, info)
 		if err != nil {
 			return nil, err
 		}
@@ -135,12 +139,18 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 	}
 
 	v, err, _ := m.ensureExecutionGroup.Do(sessionID, func() (interface{}, error) {
-		return m.ensureWorkspaceExecutionLocked(ctx, taskID, sessionID)
+		creationCtx, cancel := coalescedExecutionContext(ctx)
+		defer cancel()
+		return m.ensureWorkspaceExecutionLocked(creationCtx, taskID, sessionID)
 	})
 	if err != nil {
 		return nil, err
 	}
 	return v.(*AgentExecution), nil
+}
+
+func coalescedExecutionContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 }
 
 // ensureWorkspaceExecutionLocked is the body of EnsureWorkspaceExecutionForSession
@@ -447,6 +457,13 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if len(env) == 0 {
 		env = nil
 	}
+	metadata := make(map[string]interface{}, len(info.Metadata)+1)
+	for key, value := range info.Metadata {
+		metadata[key] = value
+	}
+	if managedReq.managedGoCachePath != "" {
+		metadata[managedGoCacheMetadataKey] = managedReq.managedGoCachePath
+	}
 
 	req := &ExecutorCreateRequest{
 		InstanceID:                     executionID,
@@ -461,7 +478,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AutoApprovePermissions:         autoApprove,
 		AutoApprovePermissionsOverride: autoApproveOverride,
 		AgentConfig:                    agentConfig,
-		Metadata:                       info.Metadata,
+		Metadata:                       metadata,
 		PreviousExecutionID:            info.AgentExecutionID,
 		AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),

@@ -45,6 +45,7 @@ function NumberField({
   value,
   min,
   max,
+  disabled,
   onChange,
   testId,
 }: {
@@ -52,6 +53,7 @@ function NumberField({
   value: number;
   min: number;
   max?: number;
+  disabled?: boolean;
   onChange: (value: number) => void;
   testId: string;
 }) {
@@ -62,6 +64,7 @@ function NumberField({
         type="number"
         min={min}
         max={max}
+        disabled={disabled}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
         className="h-11"
@@ -71,9 +74,9 @@ function NumberField({
   );
 }
 
-type PolicySectionProps = Pick<Props, "settings" | "capabilities" | "onChange">;
+type PolicySectionProps = Pick<Props, "settings" | "capabilities" | "onChange" | "pending">;
 
-function PolicySwitches({ settings, capabilities, onChange }: PolicySectionProps) {
+function PolicySwitches({ settings, capabilities, pending, onChange }: PolicySectionProps) {
   return (
     <div>
       <SettingRow
@@ -82,6 +85,7 @@ function PolicySwitches({ settings, capabilities, onChange }: PolicySectionProps
         control={
           <Switch
             checked={settings.enabled}
+            disabled={pending}
             onCheckedChange={(enabled) => onChange({ ...settings, enabled })}
             aria-label="Scheduled maintenance"
             data-testid="storage-scheduling-enabled"
@@ -94,6 +98,7 @@ function PolicySwitches({ settings, capabilities, onChange }: PolicySectionProps
         control={
           <Switch
             checked={settings.workspaces.enabled}
+            disabled={pending}
             onCheckedChange={(enabled) => onChange({ ...settings, workspaces: { enabled } })}
             aria-label="Clean orphan task workspaces"
           />
@@ -105,6 +110,7 @@ function PolicySwitches({ settings, capabilities, onChange }: PolicySectionProps
         control={
           <Switch
             checked={settings.kandev_containers.enabled}
+            disabled={pending}
             onCheckedChange={(enabled) => onChange({ ...settings, kandev_containers: { enabled } })}
             aria-label="Clean Kandev containers"
           />
@@ -116,6 +122,7 @@ function PolicySwitches({ settings, capabilities, onChange }: PolicySectionProps
         control={
           <Switch
             checked={settings.go_cache.enabled}
+            disabled={pending}
             onCheckedChange={(enabled) =>
               onChange({ ...settings, go_cache: { ...settings.go_cache, enabled } })
             }
@@ -128,7 +135,7 @@ function PolicySwitches({ settings, capabilities, onChange }: PolicySectionProps
   );
 }
 
-function CorePolicySection({ settings, capabilities, onChange }: PolicySectionProps) {
+function CorePolicySection({ settings, capabilities, pending, onChange }: PolicySectionProps) {
   const setNumber = (
     key:
       | "check_interval_hours"
@@ -139,13 +146,19 @@ function CorePolicySection({ settings, capabilities, onChange }: PolicySectionPr
   ) => onChange({ ...settings, [key]: value });
   return (
     <>
-      <PolicySwitches settings={settings} capabilities={capabilities} onChange={onChange} />
+      <PolicySwitches
+        settings={settings}
+        capabilities={capabilities}
+        pending={pending}
+        onChange={onChange}
+      />
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <NumberField
           label="Check interval (hours)"
           value={settings.check_interval_hours}
           min={1}
           max={168}
+          disabled={pending}
           onChange={(value) => setNumber("check_interval_hours", value)}
           testId="storage-check-interval"
         />
@@ -154,6 +167,7 @@ function CorePolicySection({ settings, capabilities, onChange }: PolicySectionPr
           value={settings.idle_for_minutes}
           min={1}
           max={1440}
+          disabled={pending}
           onChange={(value) => setNumber("idle_for_minutes", value)}
           testId="storage-idle-period"
         />
@@ -162,6 +176,7 @@ function CorePolicySection({ settings, capabilities, onChange }: PolicySectionPr
           value={settings.orphan_grace_hours}
           min={24}
           max={2160}
+          disabled={pending}
           onChange={(value) => setNumber("orphan_grace_hours", value)}
           testId="storage-orphan-grace"
         />
@@ -170,6 +185,7 @@ function CorePolicySection({ settings, capabilities, onChange }: PolicySectionPr
           value={settings.quarantine_retention_hours}
           min={24}
           max={2160}
+          disabled={pending}
           onChange={(value) => setNumber("quarantine_retention_hours", value)}
           testId="storage-quarantine-retention"
         />
@@ -177,6 +193,7 @@ function CorePolicySection({ settings, capabilities, onChange }: PolicySectionPr
           label="Go cache maximum (bytes)"
           value={settings.go_cache.max_bytes}
           min={1073741824}
+          disabled={pending}
           onChange={(value) =>
             onChange({ ...settings, go_cache: { ...settings.go_cache, max_bytes: value } })
           }
@@ -191,11 +208,16 @@ function AdoptionSection({
   path,
   setPath,
   onOpen,
+  pending,
 }: {
   path: string;
   setPath: (path: string) => void;
   onOpen: () => void;
+  pending: boolean;
 }) {
+  let disabledReason: string | undefined;
+  if (pending) disabledReason = "Wait for the current storage action to finish.";
+  else if (!path.trim()) disabledReason = "Enter an absolute cache path first.";
   return (
     <div className="min-w-0 space-y-2 rounded-md border p-3">
       <Label htmlFor="storage-adoption-path">External Go-cache path</Label>
@@ -206,6 +228,7 @@ function AdoptionSection({
         <Input
           id="storage-adoption-path"
           value={path}
+          disabled={pending}
           onChange={(event) => setPath(event.target.value)}
           placeholder="/root/.cache/go-build"
           className="h-11 min-w-0 font-mono"
@@ -213,7 +236,7 @@ function AdoptionSection({
         />
         <StorageActionButton
           variant="outline"
-          disabledReason={!path.trim() ? "Enter an absolute cache path first." : undefined}
+          disabledReason={disabledReason}
           onClick={onOpen}
           data-testid="storage-go-cache-adopt"
         >
@@ -224,9 +247,51 @@ function AdoptionSection({
   );
 }
 
+function DockerThresholdFields({
+  settings,
+  pending,
+  onChange,
+}: Pick<PolicySectionProps, "settings" | "pending" | "onChange">) {
+  const setDockerNumber = (
+    key: "build_cache_keep_bytes" | "build_cache_unused_hours" | "unused_images_hours",
+    value: number,
+  ) => onChange({ ...settings, docker: { ...settings.docker, [key]: value } });
+  return (
+    <div className="grid min-w-0 grid-cols-1 gap-3 py-3 sm:grid-cols-2">
+      <NumberField
+        label="Build cache retained (bytes)"
+        value={settings.docker.build_cache_keep_bytes}
+        min={1073741824}
+        disabled={pending}
+        onChange={(value) => setDockerNumber("build_cache_keep_bytes", value)}
+        testId="storage-docker-build-cache-keep-bytes"
+      />
+      <NumberField
+        label="Build cache unused age (hours)"
+        value={settings.docker.build_cache_unused_hours}
+        min={24}
+        max={2562047}
+        disabled={pending}
+        onChange={(value) => setDockerNumber("build_cache_unused_hours", value)}
+        testId="storage-docker-build-cache-unused-hours"
+      />
+      <NumberField
+        label="Unused image age (hours)"
+        value={settings.docker.unused_images_hours}
+        min={24}
+        max={2562047}
+        disabled={pending}
+        onChange={(value) => setDockerNumber("unused_images_hours", value)}
+        testId="storage-docker-unused-images-hours"
+      />
+    </div>
+  );
+}
+
 function DockerPolicySection({
   settings,
   capabilities,
+  pending,
   onChange,
   onOpen,
 }: PolicySectionProps & { onOpen: () => void }) {
@@ -234,6 +299,7 @@ function DockerPolicySection({
     ? undefined
     : "Docker is unavailable on the configured host.";
   const disabledReason =
+    (pending ? "Wait for the current storage action to finish." : undefined) ??
     unavailable ??
     (!settings.docker.dedicated_daemon_acknowledged
       ? "Acknowledge a dedicated Docker daemon first."
@@ -246,7 +312,7 @@ function DockerPolicySection({
         control={
           <Switch
             checked={settings.docker.dedicated_daemon_acknowledged}
-            disabled={!capabilities.docker_available}
+            disabled={pending || !capabilities.docker_available}
             onCheckedChange={(checked) => {
               if (checked) onOpen();
               else onChange(settingsWithDockerAcknowledgement(settings, false));
@@ -297,6 +363,7 @@ function DockerPolicySection({
           />
         }
       />
+      <DockerThresholdFields settings={settings} pending={pending} onChange={onChange} />
       {disabledReason && <p className="text-xs text-muted-foreground">{disabledReason}</p>}
     </div>
   );
@@ -320,17 +387,24 @@ export function StoragePolicyCard({
         <CardTitle className="text-base">Maintenance policy</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
-        <CorePolicySection settings={settings} capabilities={capabilities} onChange={onChange} />
+        <CorePolicySection
+          settings={settings}
+          capabilities={capabilities}
+          pending={pending}
+          onChange={onChange}
+        />
         {capabilities.go_cache_adoption_available && (
           <AdoptionSection
             path={adoptionPath}
             setPath={setAdoptionPath}
+            pending={pending}
             onOpen={() => setAdoptionDialogOpen(true)}
           />
         )}
         <DockerPolicySection
           settings={settings}
           capabilities={capabilities}
+          pending={pending}
           onChange={onChange}
           onOpen={() => setDockerDialogOpen(true)}
         />

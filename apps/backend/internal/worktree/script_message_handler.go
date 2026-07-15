@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -340,24 +339,14 @@ func scriptProcessEnvironment(overrides map[string]string) []string {
 	if len(overrides) == 0 {
 		return nil
 	}
-	merged := make(map[string]string)
-	for _, item := range os.Environ() {
-		key, value, found := strings.Cut(item, "=")
-		if found {
-			merged[key] = value
-		}
-	}
-	for key, value := range overrides {
-		merged[key] = value
-	}
-	keys := make([]string, 0, len(merged))
-	for key := range merged {
+	env := os.Environ()
+	keys := make([]string, 0, len(overrides))
+	for key := range overrides {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	env := make([]string, 0, len(keys))
 	for _, key := range keys {
-		env = append(env, key+"="+merged[key])
+		env = append(env, key+"="+overrides[key])
 	}
 	return env
 }

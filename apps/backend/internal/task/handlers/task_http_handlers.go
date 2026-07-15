@@ -1233,15 +1233,15 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 		h.detachedRecoveryTimeout(),
 	)
 	defer cancelRecovery()
+	recovery := make([]service.BranchRecovery, 0)
+	for _, id := range outcome.ArchivedTaskIDs {
+		recovery = append(recovery, h.service.RecoverTaskBranches(recoveryCtx, id)...)
+	}
 	workspaceRecovery := make([]storageworkspaces.WorkspaceRecovery, 0, len(outcome.ArchivedTaskIDs))
 	if h.workspaceRestorer != nil {
 		for _, id := range outcome.ArchivedTaskIDs {
 			workspaceRecovery = append(workspaceRecovery, h.workspaceRestorer.RestoreTask(recoveryCtx, id))
 		}
-	}
-	recovery := make([]service.BranchRecovery, 0)
-	for _, id := range outcome.ArchivedTaskIDs {
-		recovery = append(recovery, h.service.RecoverTaskBranches(recoveryCtx, id)...)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":            true,

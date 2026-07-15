@@ -117,11 +117,12 @@ func (f *fakeWSGroupRepoCascade) ReleaseWorkspaceGroupMember(_ context.Context, 
 }
 
 type recordingCleanupCoordinator struct {
-	mu        sync.Mutex
-	prepared  []string
-	started   []string
-	cancelled []string
-	cleaned   []string
+	mu                    sync.Mutex
+	prepared              []string
+	deleteEnvironmentRows []bool
+	started               []string
+	cancelled             []string
+	cleaned               []string
 }
 
 func (c *recordingCleanupCoordinator) CleanupTaskResources(_ context.Context, taskID string, _ bool) {
@@ -135,12 +136,30 @@ func (c *recordingCleanupCoordinator) PrepareTaskResourceCleanup(
 	_ string,
 	_ models.TaskResourceCleanupTrigger,
 	operationID string,
-	_ bool,
+	deleteEnvironmentRow bool,
 ) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.prepared = append(c.prepared, operationID)
+	c.deleteEnvironmentRows = append(c.deleteEnvironmentRows, deleteEnvironmentRow)
 	return nil
+}
+
+func TestDeleteTaskTreePreparedCleanupDeletesEnvironmentRow(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	coordinator := &recordingCleanupCoordinator{}
+	svc := NewHandoffService(&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, nil, nil)
+	svc.SetTaskResourceCleaner(coordinator)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	if len(coordinator.deleteEnvironmentRows) != 1 || !coordinator.deleteEnvironmentRows[0] {
+		t.Fatalf("deleteEnvironmentRows = %v, want [true]", coordinator.deleteEnvironmentRows)
+	}
 }
 
 func (c *recordingCleanupCoordinator) StartPreparedTaskResourceCleanup(_ context.Context, operationID string) error {

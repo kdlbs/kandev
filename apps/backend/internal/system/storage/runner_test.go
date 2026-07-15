@@ -190,6 +190,42 @@ func TestRunnerPersistsCancelledRunAfterCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestRunnerPersistsCancellationBetweenCreateAndAcquire(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	store := &cancelAfterCreateRunStore{cancel: cancel}
+	runner := NewRunner(RunnerConfig{
+		Activity: activity.NewCoordinator(activity.Options{}), Store: store,
+		NewID: func() string { return "cancel-after-create" },
+	})
+
+	run, err := runner.Run(ctx, RunTriggerManual, DefaultSettings())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context cancellation", err)
+	}
+	if run.State != RunStateCancelled || store.terminalState() != RunStateCancelled {
+		t.Fatalf("cancelled run = %#v transitions=%v", run, store.transitions)
+	}
+}
+
+func TestRunnerReturnsCancellationWhenPreemptedBetweenProviders(t *testing.T) {
+	coordinator := activity.NewCoordinator(activity.Options{})
+	provider := &preemptingSuccessfulProvider{coordinator: coordinator, lease: make(chan *activity.TaskLease, 1)}
+	runner := NewRunner(RunnerConfig{
+		Activity: coordinator, Store: &recordingRunStore{}, Providers: []CleanupProvider{provider},
+		NewID: func() string { return "preempted-between-providers" },
+	})
+
+	run, err := runner.Run(context.Background(), RunTriggerManual, DefaultSettings())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run error = %v, want context cancellation", err)
+	}
+	if run.State != RunStateCancelled {
+		t.Fatalf("run state = %q, want cancelled", run.State)
+	}
+	lease := <-provider.lease
+	lease.Release()
+}
+
 type runnerResult struct {
 	run MaintenanceRun
 	err error
@@ -212,6 +248,58 @@ type cancellableProvider struct {
 
 type recordingCleanupProvider struct {
 	calls int
+}
+
+type cancelAfterCreateRunStore struct {
+	cancel      context.CancelFunc
+	transitions []RunState
+}
+
+func (s *cancelAfterCreateRunStore) CreateRun(_ context.Context, _ *MaintenanceRun) error {
+	s.cancel()
+	return nil
+}
+
+func (s *cancelAfterCreateRunStore) TransitionRun(
+	ctx context.Context,
+	id string,
+	state RunState,
+	result json.RawMessage,
+	message string,
+) (MaintenanceRun, error) {
+	if err := ctx.Err(); err != nil {
+		return MaintenanceRun{}, err
+	}
+	s.transitions = append(s.transitions, state)
+	completedAt := time.Now().UTC()
+	return MaintenanceRun{
+		ID: id, State: state, Result: result, Message: message, CompletedAt: &completedAt,
+	}, nil
+}
+
+func (s *cancelAfterCreateRunStore) terminalState() RunState {
+	if len(s.transitions) == 0 {
+		return ""
+	}
+	return s.transitions[len(s.transitions)-1]
+}
+
+type preemptingSuccessfulProvider struct {
+	coordinator *activity.Coordinator
+	lease       chan *activity.TaskLease
+}
+
+func (*preemptingSuccessfulProvider) Name() string { return "preempting" }
+
+func (p *preemptingSuccessfulProvider) Cleanup(ctx context.Context) (map[string]any, error) {
+	go func() {
+		lease, err := p.coordinator.AcquireTask(context.Background(), activity.KindExecutionStarting)
+		if err == nil {
+			p.lease <- lease
+		}
+	}()
+	<-ctx.Done()
+	return map[string]any{"stopped": true}, nil
 }
 
 func (p *recordingCleanupProvider) Name() string { return "recording" }

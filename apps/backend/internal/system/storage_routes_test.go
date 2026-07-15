@@ -142,6 +142,7 @@ func newStorageRoutesTestRouterWithMutations(t *testing.T, mutations storage.Mut
 	if err != nil {
 		t.Fatal(err)
 	}
+	connection.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = connection.Close() })
 	pool := db.NewPool(connection, connection)
 	rawSettings, err := systemsettings.NewStore(pool)

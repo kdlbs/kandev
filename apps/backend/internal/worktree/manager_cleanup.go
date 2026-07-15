@@ -24,20 +24,57 @@ func (m *Manager) PruneQuarantinedWorkspace(ctx context.Context, entry storage.Q
 	seen := make(map[string]struct{})
 	var errs []error
 	for _, wt := range worktrees {
-		if wt == nil || wt.RepositoryPath == "" {
+		if wt == nil || wt.RepositoryPath == "" || wt.Path == "" {
 			continue
 		}
-		if _, ok := seen[wt.RepositoryPath]; ok {
+		key := wt.RepositoryPath + "\x00" + filepath.Clean(wt.Path)
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seen[wt.RepositoryPath] = struct{}{}
-		cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
-		cmd.Dir = wt.RepositoryPath
-		if err := runGitCmd(ctx, cmd); err != nil {
-			errs = append(errs, fmt.Errorf("prune worktree registration for %s: %w", wt.RepositoryPath, err))
+		seen[key] = struct{}{}
+		if err := m.pruneQuarantinedWorktree(ctx, wt); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (m *Manager) pruneQuarantinedWorktree(ctx context.Context, wt *Worktree) error {
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+
+	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", wt.Path)
+	cmd.Dir = wt.RepositoryPath
+	if _, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
+		present, inspectErr := worktreeRegistrationExists(ctx, wt.RepositoryPath, wt.Path)
+		if inspectErr != nil {
+			return fmt.Errorf("verify worktree registration for %s: %w", wt.Path, inspectErr)
+		}
+		if present {
+			return fmt.Errorf("remove worktree registration for %s: %w", wt.Path, err)
+		}
+	}
+	return nil
+}
+
+func worktreeRegistrationExists(ctx context.Context, repoPath, worktreePath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain", "-z")
+	cmd.Dir = repoPath
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
+	if err != nil {
+		return false, err
+	}
+	want := filepath.Clean(worktreePath)
+	for _, field := range strings.Split(string(output), "\x00") {
+		if path, ok := strings.CutPrefix(field, "worktree "); ok && filepath.Clean(path) == want {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // RemoveByID removes a specific worktree by its ID and optionally its branch.

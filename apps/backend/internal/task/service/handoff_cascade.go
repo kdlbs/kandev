@@ -348,7 +348,8 @@ func (s *HandoffService) prepareCascadeResourceCleanup(
 	operations := make(map[string]string, len(taskIDs))
 	for _, taskID := range taskIDs {
 		operationID := string(trigger) + ":" + cascadeID + ":" + taskID
-		if err := coordinator.PrepareTaskResourceCleanup(ctx, taskID, trigger, operationID, false); err != nil {
+		deleteEnvironmentRow := trigger == models.TaskResourceCleanupTriggerCascadeDelete
+		if err := coordinator.PrepareTaskResourceCleanup(ctx, taskID, trigger, operationID, deleteEnvironmentRow); err != nil {
 			s.cancelCascadeResourceCleanupRange(ctx, taskIDs, operations)
 			return nil, fmt.Errorf("prepare cleanup %s: %w", taskID, err)
 		}

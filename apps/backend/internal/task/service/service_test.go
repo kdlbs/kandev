@@ -126,6 +126,10 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 		Reviews:          repo,
 		ResourceCleanups: repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
+	if err := svc.StartTaskResourceCleanupWorker(context.Background()); err != nil {
+		t.Fatalf("failed to start task resource cleanup worker: %v", err)
+	}
+	t.Cleanup(svc.StopTaskResourceCleanupWorker)
 	return svc, eventBus, repo
 }
 

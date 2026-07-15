@@ -202,11 +202,16 @@ func selectCleanupProviders(all []CleanupProvider, requested []string) ([]Cleanu
 		byName[provider.Name()] = provider
 	}
 	selected := make([]CleanupProvider, 0, len(requested))
+	seen := make(map[string]struct{}, len(requested))
 	for _, name := range requested {
 		provider, ok := byName[name]
 		if !ok {
 			return nil, validationError("unknown storage resource %q", name)
 		}
+		if _, duplicate := seen[name]; duplicate {
+			continue
+		}
+		seen[name] = struct{}{}
 		if explicit, ok := provider.(ExplicitCleanupProvider); ok {
 			provider = explicitCleanupSelection{CleanupProvider: provider, explicit: explicit}
 		}

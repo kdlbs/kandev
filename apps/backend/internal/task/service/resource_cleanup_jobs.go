@@ -51,6 +51,7 @@ func (s *Service) persistTaskResourceCleanup(
 	worktrees []*worktree.Worktree,
 	stopTargets []taskStopTarget,
 	envCleanup taskEnvironmentCleanup,
+	prepared bool,
 ) (*models.TaskResourceCleanupJob, error) {
 	if s.resourceCleanups == nil {
 		return nil, nil
@@ -69,9 +70,13 @@ func (s *Service) persistTaskResourceCleanup(
 	if err != nil {
 		return nil, fmt.Errorf("encode task resource cleanup snapshot: %w", err)
 	}
+	state := models.TaskResourceCleanupStatePending
+	if prepared {
+		state = models.TaskResourceCleanupStatePrepared
+	}
 	job := &models.TaskResourceCleanupJob{
 		OperationID: operationID, TaskID: taskID, Trigger: trigger,
-		State: models.TaskResourceCleanupStatePending, ResourceSnapshot: string(encoded),
+		State: state, ResourceSnapshot: string(encoded),
 	}
 	if err := s.resourceCleanups.CreateTaskResourceCleanupJob(ctx, job); err != nil {
 		return nil, fmt.Errorf("persist task resource cleanup intent: %w", err)
@@ -111,16 +116,7 @@ func (s *Service) startTaskResourceCleanup(job *models.TaskResourceCleanupJob) {
 		case wake <- struct{}{}:
 		default:
 		}
-		return
 	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		if err := s.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
-			s.logger.Warn("task resource cleanup job failed",
-				zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
-		}
-	}()
 }
 
 // StartTaskResourceCleanupWorker owns the install-wide durable task cleanup
@@ -138,12 +134,13 @@ func (s *Service) StartTaskResourceCleanupWorker(ctx context.Context) error {
 	wake := make(chan struct{}, 1)
 	s.cleanupWorkerCancel = cancel
 	s.cleanupWorkerWake = wake
+	s.cleanupWorkerWG.Add(1)
 	s.cleanupWorkerMu.Unlock()
 	if err := s.ResumeTaskResourceCleanupJobs(workerCtx); err != nil {
+		s.cleanupWorkerWG.Done()
 		s.StopTaskResourceCleanupWorker()
 		return err
 	}
-	s.cleanupWorkerWG.Add(1)
 	go s.runTaskResourceCleanupWorker(workerCtx, wake)
 	return nil
 }
@@ -196,7 +193,8 @@ func (s *Service) processDueTaskResourceCleanupJobs(ctx context.Context) error {
 	}
 	for _, job := range jobs {
 		if err := s.processTaskResourceCleanupJob(ctx, job.ID); err != nil {
-			s.logger.Warn("resumed task resource cleanup job failed")
+			s.logger.Warn("resumed task resource cleanup job failed",
+				zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
 		}
 	}
 	return nil
@@ -377,13 +375,19 @@ func (s *Service) cancelTaskResourceCleanupJob(ctx context.Context, job *models.
 
 func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob, cleanupErr error) error {
 	nextAttempt := time.Now().UTC().Add(taskResourceCleanupRetryDelay)
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
 	_, err := s.resourceCleanups.CompleteClaimedTaskResourceCleanupJob(
-		ctx, job.ID, job.Attempts, models.TaskResourceCleanupStateRetryWait, cleanupErr.Error(), &nextAttempt,
+		transitionCtx, job.ID, job.Attempts, models.TaskResourceCleanupStateRetryWait, cleanupErr.Error(), &nextAttempt,
 	)
 	if err != nil {
 		return errors.Join(cleanupErr, err)
 	}
 	return cleanupErr
+}
+
+func detachedCleanupTransitionContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 }
 
 // CancelArchiveTaskResourceCleanup cancels retryable archive cleanup before an
@@ -425,7 +429,7 @@ func (s *Service) PrepareTaskResourceCleanup(
 	}
 	_, err = s.persistTaskResourceCleanup(ctx, taskID, trigger, operationID,
 		sessions, worktrees, stopTargets,
-		taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvironmentRow})
+		taskEnvironmentCleanup{env: taskEnv, deleteRow: deleteEnvironmentRow}, true)
 	return err
 }
 
@@ -437,6 +441,14 @@ func (s *Service) StartPreparedTaskResourceCleanup(ctx context.Context, operatio
 	if err != nil {
 		return err
 	}
+	started, err := s.resourceCleanups.StartPreparedTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		return err
+	}
+	if !started {
+		return nil
+	}
+	job.State = models.TaskResourceCleanupStatePending
 	s.startTaskResourceCleanup(job)
 	return nil
 }

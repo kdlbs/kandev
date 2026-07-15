@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import {
@@ -53,6 +60,8 @@ export function settingsWithDockerAcknowledgement(
 type Reload = () => Promise<void>;
 type SetStorageError = Dispatch<SetStateAction<string | null>>;
 const TERMINAL_REFRESH_RETRY_MS = 1000;
+const TERMINAL_REFRESH_MAX_RETRY_MS = 8000;
+const MAX_TERMINAL_REFRESH_ATTEMPTS = 6;
 
 function useStorageActions(reload: Reload) {
   const { toast } = useToast();
@@ -168,6 +177,7 @@ function useTerminalJobRefresh(reload: Reload, setError: SetStorageError, job?: 
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let refreshError: string | null = null;
+    let attempts = 0;
     const refresh = async () => {
       try {
         await reload();
@@ -178,7 +188,13 @@ function useTerminalJobRefresh(reload: Reload, setError: SetStorageError, job?: 
         if (cancelled) return;
         refreshError = `Refresh storage data: ${messageFromError(requestError)}`;
         setError(refreshError);
-        retryTimer = setTimeout(() => void refresh(), TERMINAL_REFRESH_RETRY_MS);
+        attempts += 1;
+        if (attempts >= MAX_TERMINAL_REFRESH_ATTEMPTS) return;
+        const retryDelay = Math.min(
+          TERMINAL_REFRESH_RETRY_MS * 2 ** (attempts - 1),
+          TERMINAL_REFRESH_MAX_RETRY_MS,
+        );
+        retryTimer = setTimeout(() => void refresh(), retryDelay);
       }
     };
     void refresh();
@@ -206,12 +222,15 @@ export function useStorageMaintenance() {
   const setOverview = useAppStore((state) => state.setSystemStorageOverview);
   const setRuns = useAppStore((state) => state.setSystemStorageRuns);
   const setQuarantine = useAppStore((state) => state.setSystemStorageQuarantine);
+  const reloadGeneration = useRef(0);
   const reload = useCallback(async () => {
+    const generation = ++reloadGeneration.current;
     const [overview, runs, quarantine] = await Promise.all([
       fetchStorageOverview(),
       fetchStorageRuns(20),
       fetchStorageQuarantine(),
     ]);
+    if (generation !== reloadGeneration.current) return;
     setOverview(overview);
     setRuns(runs);
     setQuarantine(quarantine);

@@ -80,6 +80,7 @@ func provideStorageComposition(
 	})
 	quarantine := &workspaceQuarantineController{
 		settings: settings, store: store, factory: workspaceFactory, homeDir: cfg.ResolvedHomeDir(),
+		activity: coordinator,
 	}
 	operations := storagepkg.NewOperations(storagepkg.OperationsConfig{
 		Settings: settings, Store: store, Jobs: tracker, Activity: coordinator,
@@ -300,10 +301,24 @@ func (r *workspaceReconciler) Reconcile(ctx context.Context) error {
 
 type workspaceQuarantineController struct {
 	settings *storagepkg.SettingsStore
-	store    *storagepkg.Store
+	store    quarantineEntryStore
 	factory  workspaceFactory
 	homeDir  string
+	activity *activity.Coordinator
+	rename   func(string, string) error
 }
+
+type quarantineEntryStore interface {
+	GetQuarantineEntry(context.Context, string) (storagepkg.QuarantineEntry, error)
+	TransitionQuarantineEntry(
+		context.Context, string, storagepkg.QuarantineState, string,
+	) (storagepkg.QuarantineEntry, error)
+}
+
+const (
+	goCacheOwnershipManaged = "managed"
+	goCacheOwnershipAdopted = "adopted"
+)
 
 func (c *workspaceQuarantineController) RestoreTask(
 	ctx context.Context,
@@ -370,31 +385,91 @@ func (c *workspaceQuarantineController) restoreGoCache(
 	if err := c.validateGoCacheEntry(ctx, entry); err != nil {
 		return storagepkg.QuarantineEntry{}, err
 	}
+	lease, err := c.acquireGoCacheMaintenance(ctx)
+	if err != nil {
+		return storagepkg.QuarantineEntry{}, err
+	}
+	if lease != nil {
+		defer lease.Release()
+	}
 	if restored, resolved, err := c.resolveAlreadyRestoredGoCache(ctx, entry); resolved || err != nil {
 		return restored, err
 	}
-	if _, err := os.Lstat(entry.OriginalPath); err == nil {
-		return storagepkg.QuarantineEntry{}, fmt.Errorf("%w: Go-cache restore destination already exists", storagepkg.ErrConflict)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return storagepkg.QuarantineEntry{}, fmt.Errorf("inspect Go-cache restore destination: %w", err)
-	}
-	if err := c.validateGoCacheRestorePath(entry.OriginalPath); err != nil {
+	if err := c.prepareGoCacheRestoreDestination(entry); err != nil {
 		return storagepkg.QuarantineEntry{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(entry.OriginalPath), 0o700); err != nil {
-		return storagepkg.QuarantineEntry{}, fmt.Errorf("create Go-cache restore parent: %w", err)
-	}
-	if err := os.Rename(entry.QuarantinePath, entry.OriginalPath); err != nil {
+	if err := c.renamePath(entry.QuarantinePath, entry.OriginalPath); err != nil {
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("restore Go cache: %w", err)
 	}
+	return c.persistGoCacheRestore(ctx, entry)
+}
+
+func (c *workspaceQuarantineController) prepareGoCacheRestoreDestination(
+	entry storagepkg.QuarantineEntry,
+) error {
+	if err := c.validateGoCacheRestorePath(entry.OriginalPath); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(entry.OriginalPath); err == nil {
+		ownership, ownershipErr := goCacheEntryOwnership(entry)
+		if ownershipErr != nil {
+			return ownershipErr
+		}
+		removed, removeErr := gocache.RemoveRestorePlaceholder(
+			entry.OriginalPath, ownership == goCacheOwnershipAdopted,
+		)
+		if removeErr != nil {
+			return removeErr
+		}
+		if !removed {
+			return fmt.Errorf("%w: Go-cache restore destination already exists", storagepkg.ErrConflict)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect Go-cache restore destination: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(entry.OriginalPath), 0o700); err != nil {
+		return fmt.Errorf("create Go-cache restore parent: %w", err)
+	}
+	return nil
+}
+
+func (c *workspaceQuarantineController) persistGoCacheRestore(
+	ctx context.Context,
+	entry storagepkg.QuarantineEntry,
+) (storagepkg.QuarantineEntry, error) {
 	restored, err := c.store.TransitionQuarantineEntry(
 		ctx, entry.ID, storagepkg.QuarantineStateRestored, "",
 	)
 	if err != nil {
-		_ = os.Rename(entry.OriginalPath, entry.QuarantinePath)
-		return storagepkg.QuarantineEntry{}, fmt.Errorf("persist Go-cache restore: %w", err)
+		persistErr := fmt.Errorf("persist Go-cache restore: %w", err)
+		if rollbackErr := c.renamePath(entry.OriginalPath, entry.QuarantinePath); rollbackErr != nil {
+			return storagepkg.QuarantineEntry{}, errors.Join(
+				persistErr, fmt.Errorf("rollback Go-cache restore: %w", rollbackErr),
+			)
+		}
+		return storagepkg.QuarantineEntry{}, persistErr
 	}
 	return restored, nil
+}
+
+func (c *workspaceQuarantineController) renamePath(oldPath, newPath string) error {
+	if c.rename != nil {
+		return c.rename(oldPath, newPath)
+	}
+	return os.Rename(oldPath, newPath)
+}
+
+func (c *workspaceQuarantineController) acquireGoCacheMaintenance(
+	ctx context.Context,
+) (*activity.MaintenanceLease, error) {
+	if c.activity == nil {
+		return nil, nil
+	}
+	lease, busy, err := c.activity.TryAcquireMaintenance(ctx, 0)
+	if errors.Is(err, activity.ErrBusy) {
+		return nil, &storagepkg.BusyError{Resources: busy}
+	}
+	return lease, err
 }
 
 func (c *workspaceQuarantineController) deleteGoCache(
@@ -427,25 +502,34 @@ func (c *workspaceQuarantineController) deleteGoCache(
 }
 
 func (c *workspaceQuarantineController) validateGoCacheEntry(
-	ctx context.Context,
+	_ context.Context,
 	entry storagepkg.QuarantineEntry,
 ) error {
 	if entry.State != storagepkg.QuarantineStateQuarantined &&
 		entry.State != storagepkg.QuarantineStateFailed {
 		return fmt.Errorf("%w: Go-cache quarantine entry is %q", storagepkg.ErrConflict, entry.State)
 	}
-	settings, err := c.settings.GetSettings(ctx)
+	expectedQuarantine := filepath.Join(c.homeDir, "trash", "go-cache", entry.ID)
+	if filepath.Clean(entry.QuarantinePath) != filepath.Clean(expectedQuarantine) {
+		return fmt.Errorf("%w: Go-cache quarantine paths do not match managed storage", storagepkg.ErrValidation)
+	}
+	ownership, err := goCacheEntryOwnership(entry)
 	if err != nil {
 		return err
 	}
-	expectedOriginal := settings.GoCache.AdoptedPath
-	if expectedOriginal == "" {
-		expectedOriginal = filepath.Join(c.homeDir, "cache", "go-build")
-	}
-	expectedQuarantine := filepath.Join(c.homeDir, "trash", "go-cache", entry.ID)
-	if filepath.Clean(entry.OriginalPath) != filepath.Clean(expectedOriginal) ||
-		filepath.Clean(entry.QuarantinePath) != filepath.Clean(expectedQuarantine) {
-		return fmt.Errorf("%w: Go-cache quarantine paths do not match managed storage", storagepkg.ErrValidation)
+	switch ownership {
+	case goCacheOwnershipManaged:
+		expectedOriginal := filepath.Join(c.homeDir, "cache", "go-build")
+		if filepath.Clean(entry.OriginalPath) != filepath.Clean(expectedOriginal) {
+			return fmt.Errorf("%w: managed Go-cache original path does not match owned storage", storagepkg.ErrValidation)
+		}
+	case goCacheOwnershipAdopted:
+		original := filepath.Clean(entry.OriginalPath)
+		if !filepath.IsAbs(original) || original == filepath.VolumeName(original)+string(filepath.Separator) {
+			return fmt.Errorf("%w: adopted Go-cache original path is unsafe", storagepkg.ErrValidation)
+		}
+	default:
+		return fmt.Errorf("%w: unknown Go-cache ownership policy %q", storagepkg.ErrValidation, ownership)
 	}
 	if err := storagepkg.ValidateNoSymlinkPath(c.homeDir, entry.QuarantinePath); err != nil {
 		return fmt.Errorf("%w: validate Go-cache quarantine path: %v", storagepkg.ErrValidation, err)
@@ -453,11 +537,22 @@ func (c *workspaceQuarantineController) validateGoCacheEntry(
 	return nil
 }
 
+func goCacheEntryOwnership(entry storagepkg.QuarantineEntry) (string, error) {
+	var metadata struct {
+		Ownership string `json:"ownership"`
+	}
+	if err := json.Unmarshal(entry.Metadata, &metadata); err != nil || metadata.Ownership == "" {
+		return "", fmt.Errorf("%w: invalid Go-cache quarantine ownership metadata", storagepkg.ErrValidation)
+	}
+	return metadata.Ownership, nil
+}
+
 func (c *workspaceQuarantineController) resolveAlreadyRestoredGoCache(
 	ctx context.Context,
 	entry storagepkg.QuarantineEntry,
 ) (storagepkg.QuarantineEntry, bool, error) {
-	if entry.State != storagepkg.QuarantineStateFailed {
+	if entry.State != storagepkg.QuarantineStateFailed &&
+		entry.State != storagepkg.QuarantineStateQuarantined {
 		return storagepkg.QuarantineEntry{}, false, nil
 	}
 	if _, err := os.Lstat(entry.OriginalPath); errors.Is(err, os.ErrNotExist) {

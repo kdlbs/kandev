@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -58,6 +60,8 @@ func TestStoreAllowsEveryRunStateTransition(t *testing.T) {
 		steps []RunState
 	}{
 		{name: "busy before running", steps: []RunState{RunStateSkippedBusy}},
+		{name: "cancelled before running", steps: []RunState{RunStateCancelled}},
+		{name: "failed before running", steps: []RunState{RunStateFailed}},
 		{name: "succeeded", steps: []RunState{RunStateRunning, RunStateSucceeded}},
 		{name: "failed", steps: []RunState{RunStateRunning, RunStateFailed}},
 		{name: "cancelled", steps: []RunState{RunStateRunning, RunStateCancelled}},
@@ -202,6 +206,87 @@ func TestStoreQuarantineOriginalPathUniqueWhileActive(t *testing.T) {
 	}
 	if err := store.CreateQuarantineEntry(ctx, &duplicate); err != nil {
 		t.Fatalf("reuse terminal original path: %v", err)
+	}
+}
+
+func TestReleaseFailedQuarantineIntentRequiresProvenUnmovedState(t *testing.T) {
+	resourceTypes := []ResourceType{ResourceTypeTaskWorkspace, ResourceTypeGoCache}
+	states := []struct {
+		name             string
+		originalExists   bool
+		quarantineExists bool
+		wantReleased     bool
+	}{
+		{name: "original remains and quarantine is absent", originalExists: true, wantReleased: true},
+		{name: "quarantine exists", originalExists: true, quarantineExists: true},
+		{name: "original is absent", quarantineExists: true},
+		{name: "both paths are absent"},
+	}
+	for _, resourceType := range resourceTypes {
+		for _, state := range states {
+			t.Run(string(resourceType)+"/"+state.name, func(t *testing.T) {
+				conn := newSQLite(t)
+				store := newStorageStore(t, db.NewPool(conn, conn))
+				root := t.TempDir()
+				original := filepath.Join(root, "original")
+				quarantine := filepath.Join(root, "quarantine")
+				if state.originalExists {
+					if err := os.Mkdir(original, 0o700); err != nil {
+						t.Fatalf("create original: %v", err)
+					}
+				}
+				if state.quarantineExists {
+					if err := os.Mkdir(quarantine, 0o700); err != nil {
+						t.Fatalf("create quarantine: %v", err)
+					}
+				}
+				entry := testQuarantineEntry("failed-entry")
+				entry.ResourceType = resourceType
+				entry.OriginalPath = original
+				entry.QuarantinePath = quarantine
+				if err := store.CreateQuarantineEntry(context.Background(), &entry); err != nil {
+					t.Fatalf("create failed intent: %v", err)
+				}
+				if _, err := store.TransitionQuarantineEntry(
+					context.Background(), entry.ID, QuarantineStateFailed, "rename failed",
+				); err != nil {
+					t.Fatalf("mark intent failed: %v", err)
+				}
+
+				released, err := ReleaseFailedQuarantineIntent(
+					context.Background(), store, resourceType, original,
+				)
+				if state.wantReleased {
+					if err != nil || !released {
+						t.Fatalf("ReleaseFailedQuarantineIntent = %v, %v; want true, nil", released, err)
+					}
+				} else if !errors.Is(err, ErrConflict) || released {
+					t.Fatalf("ReleaseFailedQuarantineIntent = %v, %v; want false, ErrConflict", released, err)
+				}
+				stored, err := store.GetQuarantineEntry(context.Background(), entry.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantState := QuarantineStateFailed
+				if state.wantReleased {
+					wantState = QuarantineStateRestored
+				}
+				if stored.State != wantState {
+					t.Fatalf("failed intent state = %q, want %q", stored.State, wantState)
+				}
+				replacement := entry
+				replacement.ID = "replacement-entry"
+				replacement.QuarantinePath = filepath.Join(root, "replacement-quarantine")
+				replacement.State = QuarantineStateQuarantined
+				createErr := store.CreateQuarantineEntry(context.Background(), &replacement)
+				if state.wantReleased && createErr != nil {
+					t.Fatalf("create replacement intent: %v", createErr)
+				}
+				if !state.wantReleased && createErr == nil {
+					t.Fatal("ambiguous failed intent released unique original-path slot")
+				}
+			})
+		}
 	}
 }
 

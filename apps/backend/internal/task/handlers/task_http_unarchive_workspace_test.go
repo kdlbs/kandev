@@ -13,6 +13,7 @@ import (
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type unarchiveWorkspaceRepo struct {
@@ -41,6 +42,33 @@ type recordingWorkspaceRestorer struct {
 
 type blockingWorkspaceRestorer struct {
 	contextErr chan error
+}
+
+type branchFirstWorktreeCleanup struct {
+	called chan struct{}
+}
+
+func (c *branchFirstWorktreeCleanup) OnTaskDeleted(context.Context, string) error { return nil }
+func (c *branchFirstWorktreeCleanup) GetAllByTaskID(context.Context, string) ([]*worktree.Worktree, error) {
+	close(c.called)
+	return nil, nil
+}
+func (c *branchFirstWorktreeCleanup) BranchRecoveryStatus(context.Context, string, string) string {
+	return worktree.BranchStatusMissing
+}
+
+type orderingWorkspaceRestorer struct {
+	branchCalled <-chan struct{}
+	wrongOrder   bool
+}
+
+func (r *orderingWorkspaceRestorer) RestoreTask(_ context.Context, taskID string) storageworkspaces.WorkspaceRecovery {
+	select {
+	case <-r.branchCalled:
+	default:
+		r.wrongOrder = true
+	}
+	return storageworkspaces.WorkspaceRecovery{TaskID: taskID, Status: "restored"}
 }
 
 func (r *blockingWorkspaceRestorer) RestoreTask(ctx context.Context, taskID string) storageworkspaces.WorkspaceRecovery {
@@ -127,5 +155,29 @@ func TestHTTPUnarchiveBoundsDetachedWorkspaceRecovery(t *testing.T) {
 		}
 	default:
 		t.Fatal("blocking restorer did not observe bounded context cancellation")
+	}
+}
+
+func TestHTTPUnarchiveRecoversBranchesBeforeWorkspaceIO(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &unarchiveWorkspaceRepo{archived: true}
+	taskSvc := service.NewService(service.Repos{}, nil, newTestLogger(t), service.RepositoryDiscoveryConfig{})
+	branchCleanup := &branchFirstWorktreeCleanup{called: make(chan struct{})}
+	taskSvc.SetWorktreeCleanup(branchCleanup)
+	restorer := &orderingWorkspaceRestorer{branchCalled: branchCleanup.called}
+	handler := &TaskHandlers{
+		service: taskSvc, handoffSvc: service.NewHandoffService(repo, nil, nil, nil, nil, nil),
+		logger: newTestLogger(t),
+	}
+	handler.SetWorkspaceQuarantineRestorer(restorer)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest("POST", "/api/v1/tasks/task-1/unarchive", nil)
+	ctx.Params = gin.Params{{Key: "id", Value: "task-1"}}
+
+	handler.httpUnarchiveTask(ctx)
+
+	if restorer.wrongOrder {
+		t.Fatal("workspace recovery ran before branch recovery")
 	}
 }

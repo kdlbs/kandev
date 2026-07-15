@@ -160,6 +160,11 @@ func (p *Provider) quarantine(ctx context.Context, item candidate) (storage.Quar
 	if err := os.MkdirAll(trashTasks, 0o700); err != nil {
 		return storage.QuarantineEntry{}, fmt.Errorf("create workspace trash: %w", err)
 	}
+	if _, err := storage.ReleaseFailedQuarantineIntent(
+		ctx, p.config.Store, storage.ResourceTypeTaskWorkspace, item.path,
+	); err != nil {
+		return storage.QuarantineEntry{}, err
+	}
 	now := p.config.Now().UTC()
 	id := p.config.NewID()
 	metadata, _ := json.Marshal(item.owner)
@@ -235,17 +240,24 @@ func (p *Provider) RestoreTask(ctx context.Context, taskID string) WorkspaceReco
 		recovery.Message = err.Error()
 		return recovery
 	}
-	for _, entry := range entries {
-		if entry.ResourceType != storage.ResourceTypeTaskWorkspace || entry.TaskID != taskID {
+	var newest *storage.QuarantineEntry
+	for i := range entries {
+		entry := &entries[i]
+		if entry.ResourceType != storage.ResourceTypeTaskWorkspace || entry.TaskID != taskID ||
+			entry.State != storage.QuarantineStateQuarantined {
 			continue
 		}
-		if _, err := p.Restore(ctx, entry.ID); err != nil {
+		if newest == nil || entry.QuarantinedAt.After(newest.QuarantinedAt) {
+			newest = entry
+		}
+	}
+	if newest != nil {
+		if _, err := p.Restore(ctx, newest.ID); err != nil {
 			recovery.Status = "failed"
 			recovery.Message = err.Error()
 			return recovery
 		}
 		recovery.Status = "restored"
-		return recovery
 	}
 	return recovery
 }

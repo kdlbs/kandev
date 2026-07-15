@@ -85,6 +85,37 @@ func TestRunNowRejectsCurrentTaskActivity(t *testing.T) {
 	}
 }
 
+func TestRunNowMarksPreemptedTrackedJobFailed(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	coordinator := activity.NewCoordinator(activity.Options{})
+	provider := &preemptingSuccessfulProvider{
+		coordinator: coordinator,
+		lease:       make(chan *activity.TaskLease, 1),
+	}
+	tracker := jobs.NewTracker(nil, newOperationsTestLogger(t))
+	operations := NewOperations(OperationsConfig{
+		Settings: NewSettingsStore(rawSettings), Store: newStorageStore(t, pool),
+		Jobs: tracker, Activity: coordinator, Providers: []CleanupProvider{provider},
+	})
+
+	jobID, err := operations.RunNow(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("RunNow: %v", err)
+	}
+	waitForJobState(t, tracker, jobID, jobs.StateFailed)
+	select {
+	case lease := <-provider.lease:
+		lease.Release()
+	case <-time.After(time.Second):
+		t.Fatal("preempting task lease was not acquired")
+	}
+}
+
 func TestSelectCleanupProvidersUsesExplicitCleanupOnlyForNamedResources(t *testing.T) {
 	provider := &explicitRecordingCleanupProvider{}
 
@@ -99,9 +130,12 @@ func TestSelectCleanupProvidersUsesExplicitCleanupOnlyForNamedResources(t *testi
 		t.Fatalf("global cleanup calls = normal:%d explicit:%d", provider.normalCalls, provider.explicitCalls)
 	}
 
-	selected, err = selectCleanupProviders([]CleanupProvider{provider}, []string{"explicit"})
+	selected, err = selectCleanupProviders([]CleanupProvider{provider}, []string{"explicit", "explicit"})
 	if err != nil {
 		t.Fatalf("select named provider: %v", err)
+	}
+	if len(selected) != 1 {
+		t.Fatalf("selected providers = %d, want duplicate resource de-duplicated", len(selected))
 	}
 	if _, err := selected[0].Cleanup(context.Background()); err != nil {
 		t.Fatalf("explicit cleanup: %v", err)
@@ -131,6 +165,22 @@ func TestDeleteQuarantineRejectsBeforeRetentionWithoutStartingDelete(t *testing.
 	if jobID != "" || quarantine.deleteCalls != 0 {
 		t.Fatalf("early deletion started: job_id=%q delete_calls=%d", jobID, quarantine.deleteCalls)
 	}
+}
+
+func waitForJobState(t *testing.T, tracker *jobs.Tracker, id string, state jobs.State) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		job := tracker.Get(id)
+		if job != nil && (job.State == jobs.StateSucceeded || job.State == jobs.StateFailed) {
+			if job.State != state {
+				t.Fatalf("job state=%q message=%q, want %q", job.State, job.Message, state)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("job did not finish")
 }
 
 type recordingQuarantineController struct {

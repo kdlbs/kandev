@@ -305,6 +305,10 @@ func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *Lau
 		req.Env = make(map[string]string)
 	}
 	req.Env["GOCACHE"] = path
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]interface{})
+	}
+	req.Metadata[managedGoCacheMetadataKey] = path
 	req.managedGoCachePath = path
 	return nil
 }

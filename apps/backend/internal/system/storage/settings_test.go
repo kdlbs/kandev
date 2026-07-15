@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -138,6 +139,14 @@ func TestSettingsStoreRejectsRelativeAdoptedPath(t *testing.T) {
 	}
 }
 
+func TestNormalizeSettingsRejectsFilesystemRootAdoptedPath(t *testing.T) {
+	settings := DefaultSettings()
+	settings.GoCache.AdoptedPath = string(filepath.Separator)
+	if _, err := NormalizeSettings(settings); !errors.Is(err, ErrValidation) {
+		t.Fatalf("NormalizeSettings error = %v, want ErrValidation", err)
+	}
+}
+
 func TestSettingsStoreRequiresDedicatedAdoptionPath(t *testing.T) {
 	store, _ := newTestStores(t)
 	ctx := context.Background()
@@ -207,6 +216,28 @@ func TestSettingsStoreInvalidPersistedValuesFailSafeToDisabledDefaults(t *testin
 			}
 			if !reflect.DeepEqual(got, DefaultSettings()) {
 				t.Fatalf("settings = %#v, want exact disabled defaults %#v", got, DefaultSettings())
+			}
+		})
+	}
+}
+
+func TestSettingsStoreCanOverwriteInvalidPersistedSettings(t *testing.T) {
+	for _, operation := range []string{"save", "adopt"} {
+		t.Run(operation, func(t *testing.T) {
+			store, rawStore := newTestStores(t)
+			ctx := context.Background()
+			if err := rawStore.Save(ctx, settingsKey, []byte(`{"enabled":true`)); err != nil {
+				t.Fatalf("seed invalid settings: %v", err)
+			}
+			if operation == "adopt" {
+				if _, err := store.AdoptGoCachePath(ctx, filepath.Join(t.TempDir(), "go-build")); err != nil {
+					t.Fatalf("AdoptGoCachePath: %v", err)
+				}
+			} else if _, err := store.SaveSettings(ctx, DefaultSettings()); err != nil {
+				t.Fatalf("SaveSettings: %v", err)
+			}
+			if _, err := store.GetSettings(ctx); err != nil {
+				t.Fatalf("GetSettings after overwrite: %v", err)
 			}
 		})
 	}

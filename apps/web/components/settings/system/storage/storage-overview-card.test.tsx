@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StorageOverviewResponse } from "@/lib/types/system";
 import { StorageOverviewCard } from "./storage-overview-card";
 
@@ -44,6 +44,8 @@ const degradedOverview = {
   last_run: null,
 } satisfies StorageOverviewResponse;
 
+afterEach(cleanup);
+
 describe("StorageOverviewCard", () => {
   it("renders a degraded quarantine warning without inventing zero usage", () => {
     render(<StorageOverviewCard overview={degradedOverview} onRunGoCache={vi.fn()} />);
@@ -53,5 +55,16 @@ describe("StorageOverviewCard", () => {
     expect(trigger.textContent).not.toContain("0 B");
     fireEvent.click(trigger);
     expect(screen.getByText("quarantine database unavailable")).toBeTruthy();
+  });
+
+  it("renders unavailable Docker resources without inventing zero usage", () => {
+    render(<StorageOverviewCard overview={degradedOverview} onRunGoCache={vi.fn()} />);
+
+    const dockerResourceIds = ["managed-containers", "docker-build-cache", "docker-unused-images"];
+    for (const resourceId of dockerResourceIds) {
+      const trigger = screen.getByTestId(`storage-resource-${resourceId}-trigger`);
+      expect(trigger.textContent).toContain("Unavailable");
+      expect(trigger.textContent).not.toContain("0 B");
+    }
   });
 });

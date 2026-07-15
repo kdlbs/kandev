@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"go.uber.org/zap"
 
@@ -210,29 +211,9 @@ func (m *Manager) resolveBaseRefWithFallback(ctx context.Context, req *CreateReq
 // worktree one level below the task root and break agentctl's sibling-based
 // multi-repo detection.
 func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRef, fallbackWarning, fallbackDetail string) (*Worktree, error) {
-	repoDir := SanitizeRepoDirName(req.RepoName)
-	if repoDir == "" {
-		return nil, ErrInvalidRepoName
-	}
-	branchSlug := SanitizeBranchSlug(req.BranchSlug)
-	if req.BranchSlug != "" && branchSlug == "" {
-		return nil, ErrInvalidBranchSlug
-	}
-	worktreePath, err := m.config.TaskWorktreePath(req.TaskDirName, repoDir, branchSlug)
+	worktreePath, err := m.prepareTaskWorktreePath(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get task worktree path: %w", err)
-	}
-
-	// Ensure parent task directory exists
-	taskDir := filepath.Dir(worktreePath)
-	if err := os.MkdirAll(taskDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create task directory: %w", err)
-	}
-	if err := storageworkspaces.WriteOwnershipMarker(taskDir, storageworkspaces.OwnershipMarker{
-		TaskID: req.TaskID, WorkspaceID: req.WorkspaceID, TaskDirName: req.TaskDirName,
-		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
-	}); err != nil {
-		return nil, fmt.Errorf("mark task directory ownership: %w", err)
+		return nil, err
 	}
 
 	_, branchName := m.buildWorktreeNames(req)
@@ -318,6 +299,55 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 		zap.String("branch", wt.Branch))
 
 	return wt, nil
+}
+
+func (m *Manager) prepareTaskWorktreePath(req CreateRequest) (string, error) {
+	repoDir := SanitizeRepoDirName(req.RepoName)
+	if repoDir == "" {
+		return "", ErrInvalidRepoName
+	}
+	branchSlug := SanitizeBranchSlug(req.BranchSlug)
+	if req.BranchSlug != "" && branchSlug == "" {
+		return "", ErrInvalidBranchSlug
+	}
+	worktreePath, err := m.config.TaskWorktreePath(req.TaskDirName, repoDir, branchSlug)
+	if err != nil {
+		return "", fmt.Errorf("failed to get task worktree path: %w", err)
+	}
+
+	taskDir := filepath.Dir(worktreePath)
+	if err := m.validateTaskDir(taskDir); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(taskDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create task directory: %w", err)
+	}
+	if err := storageworkspaces.WriteOwnershipMarker(taskDir, storageworkspaces.OwnershipMarker{
+		TaskID: req.TaskID, WorkspaceID: req.WorkspaceID, TaskDirName: req.TaskDirName,
+		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		return "", fmt.Errorf("mark task directory ownership: %w", err)
+	}
+	return worktreePath, nil
+}
+
+func (m *Manager) validateTaskDir(taskDir string) error {
+	tasksBase, err := m.config.ExpandedTasksBasePath()
+	if err != nil {
+		return fmt.Errorf("failed to resolve tasks base path: %w", err)
+	}
+	absTasksBase, err := filepath.Abs(tasksBase)
+	if err != nil {
+		return fmt.Errorf("failed to resolve tasks base path: %w", err)
+	}
+	absTaskDir, err := filepath.Abs(taskDir)
+	if err != nil {
+		return fmt.Errorf("failed to resolve task directory: %w", err)
+	}
+	if err := storage.ValidateNoSymlinkPath(absTasksBase, absTaskDir); err != nil {
+		return fmt.Errorf("unsafe task directory: %w", err)
+	}
+	return nil
 }
 
 // addWorktreeForBranch creates the git worktree, trying the checkout branch directly first
