@@ -89,4 +89,32 @@ describe("VoiceModeSettings", () => {
     );
     expect(saveContributor?.isDirty).toBe(false);
   });
+
+  it("preserves a voice edit made while a save is in flight", async () => {
+    let resolveSave: () => void = () => undefined;
+    updateUserSettingsMock.mockReturnValue(
+      new Promise<void>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    render(<VoiceModeSettings />);
+    const toggle = screen.getByRole("switch", {
+      name: "Show the mic button on the chat composer",
+    });
+    fireEvent.click(toggle);
+    if (!saveContributor) throw new Error("Save contributor was not registered");
+    let savePromise!: Promise<void>;
+
+    act(() => {
+      savePromise = Promise.resolve(saveContributor?.save(saveContributor.revision));
+    });
+    fireEvent.click(toggle);
+    await act(async () => {
+      resolveSave();
+      await savePromise;
+    });
+
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(saveContributor?.isDirty).toBe(true);
+  });
 });
