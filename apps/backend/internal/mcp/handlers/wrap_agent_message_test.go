@@ -56,9 +56,14 @@ func TestWrapAgentMessage_DiscouragesClosureAcknowledgements(t *testing.T) {
 
 	wrapped, _ := wrapAgentMessage("Acknowledged; no further work is needed.", sender, "session-uuid-456")
 
-	want := "Do not reply merely to acknowledge receipt, thanks, completion, closure, or a request for no further replies."
-	if !strings.Contains(wrapped, want) {
-		t.Errorf("wrapper must terminate acknowledgement-only exchanges; missing %q in %q", want, wrapped)
+	wantReplyGate := "Reply only when the sender explicitly requests a response or when you have new actionable information to provide."
+	if !strings.Contains(wrapped, wantReplyGate) {
+		t.Errorf("wrapper missing reply-gate instruction; missing %q in %q", wantReplyGate, wrapped)
+	}
+
+	wantTermination := "Do not reply merely to acknowledge receipt, thanks, completion, closure, or a request for no further replies."
+	if !strings.Contains(wrapped, wantTermination) {
+		t.Errorf("wrapper must terminate acknowledgement-only exchanges; missing %q in %q", wantTermination, wrapped)
 	}
 }
 
