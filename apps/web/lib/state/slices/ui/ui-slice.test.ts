@@ -419,6 +419,23 @@ describe("appSidebar actions", () => {
     expect(store.getState().appSidebar.settingsMode).toBe(false);
   });
 
+  it("setAppSidebarSettingsMode applies the requested state idempotently", () => {
+    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify(true));
+    const store = makeStore();
+
+    store.getState().setAppSidebarSettingsMode(true);
+    store.getState().setAppSidebarSettingsMode(true);
+    expect(store.getState().appSidebar.settingsMode).toBe(true);
+    expect(store.getState().appSidebar.collapsed).toBe(false);
+    expect(JSON.parse(window.localStorage.getItem(COLLAPSED_KEY) ?? "null")).toBe(false);
+
+    store.getState().setAppSidebarSettingsMode(false);
+    store.getState().setAppSidebarSettingsMode(false);
+    expect(store.getState().appSidebar.settingsMode).toBe(false);
+    expect(store.getState().appSidebar.collapsed).toBe(false);
+    expect(window.localStorage.getItem("kandev.appSidebar.settingsMode")).toBeNull();
+  });
+
   it("entering settings mode while collapsed force-expands the rail", () => {
     window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify(true));
     const store = makeStore();

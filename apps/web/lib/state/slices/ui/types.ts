@@ -252,6 +252,7 @@ export type UISliceActions = {
   setAppSidebarCollapsed: (collapsed: boolean) => void;
   toggleAppSidebarSection: (sectionId: string, defaultExpanded?: boolean) => void;
   setAppSidebarWidth: (width: number) => void;
+  setAppSidebarSettingsMode: (settingsMode: boolean) => void;
   toggleAppSidebarSettingsMode: () => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;

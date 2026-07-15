@@ -103,7 +103,7 @@ export function AppSidebar() {
   const storedWidth = useAppStore((s) => s.appSidebar.width);
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
   const toggleCollapsed = useAppStore((s) => s.toggleAppSidebar);
-  const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
+  const setSettingsMode = useAppStore((s) => s.setAppSidebarSettingsMode);
   const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
   const inOffice = useInOffice();
@@ -150,13 +150,13 @@ export function AppSidebar() {
     if (!pathname || prevPathnameRef.current === pathname) return;
     prevPathnameRef.current = pathname;
     if (isSettingsRoute(pathname)) {
-      if (!settingsMode) toggleSettingsMode();
+      if (!settingsMode) setSettingsMode(true);
       return;
     }
     if (settingsMode) {
-      toggleSettingsMode();
+      setSettingsMode(false);
     }
-  }, [pathname, settingsMode, toggleSettingsMode]);
+  }, [pathname, settingsMode, setSettingsMode]);
 
   useEffect(() => {
     if (!pathname) return;

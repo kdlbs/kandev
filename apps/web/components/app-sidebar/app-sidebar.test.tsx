@@ -8,6 +8,9 @@ const navigationMock = vi.hoisted(() => ({
 const officeRouteMock = vi.hoisted(() => ({
   inOffice: false,
 }));
+const footerMock = vi.hoisted(() => ({
+  onLayout: null as (() => void) | null,
+}));
 
 // The AppSidebar pulls in a lot of children that touch the dockview / kanban
 // data layer. For unit testing the collapse + section toggle behaviour we stub
@@ -56,9 +59,16 @@ vi.mock("./sections/office-navigation-section", () => ({
     <div data-testid={`office-navigation-section-${section ?? "all"}`} />
   ),
 }));
-vi.mock("./app-sidebar-footer", () => ({
-  AppSidebarFooter: () => <div data-testid="footer" />,
-}));
+vi.mock("./app-sidebar-footer", async () => {
+  const { useLayoutEffect } = await vi.importActual<typeof import("react")>("react");
+
+  return {
+    AppSidebarFooter: () => {
+      useLayoutEffect(() => footerMock.onLayout?.(), []);
+      return <div data-testid="footer" />;
+    },
+  };
+});
 vi.mock("./app-sidebar-settings-mode", () => ({
   AppSidebarSettingsMode: () => <div data-testid="settings-mode" />,
 }));
@@ -95,6 +105,7 @@ const storeState = {
   toggleAppSidebarSection: vi.fn(),
   setAppSidebarWidth: vi.fn(),
   toggleAppSidebarSettingsMode: vi.fn(),
+  setAppSidebarSettingsMode: vi.fn((_settingsMode: boolean) => {}),
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -112,6 +123,8 @@ describe("AppSidebar", () => {
     storeState.toggleAppSidebar = vi.fn();
     storeState.toggleAppSidebarSection = vi.fn();
     storeState.toggleAppSidebarSettingsMode = vi.fn();
+    storeState.setAppSidebarSettingsMode = vi.fn((_settingsMode: boolean) => {});
+    footerMock.onLayout = null;
   });
 
   afterEach(() => {
@@ -180,8 +193,30 @@ describe("AppSidebar", () => {
     render(<AppSidebar />);
 
     await waitFor(() => {
-      expect(storeState.toggleAppSidebarSettingsMode).toHaveBeenCalledOnce();
+      expect(storeState.setAppSidebarSettingsMode).toHaveBeenCalledWith(true);
     });
+    expect(storeState.toggleAppSidebarSettingsMode).not.toHaveBeenCalled();
+  });
+
+  it("keeps settings open when the gear is clicked before route synchronization", async () => {
+    navigationMock.pathname = "/settings";
+    storeState.toggleAppSidebarSettingsMode = vi.fn(() => {
+      storeState.appSidebar.settingsMode = !storeState.appSidebar.settingsMode;
+    });
+    storeState.setAppSidebarSettingsMode = vi.fn((settingsMode: boolean) => {
+      storeState.appSidebar.settingsMode = settingsMode;
+    });
+    footerMock.onLayout = () => storeState.toggleAppSidebarSettingsMode();
+
+    render(<AppSidebar />);
+
+    await waitFor(() => {
+      expect(
+        storeState.toggleAppSidebarSettingsMode.mock.calls.length +
+          storeState.setAppSidebarSettingsMode.mock.calls.length,
+      ).toBe(2);
+    });
+    expect(storeState.appSidebar.settingsMode).toBe(true);
   });
 
   it("exits settings mode when navigating from a settings route to a non-settings route", async () => {
@@ -194,7 +229,8 @@ describe("AppSidebar", () => {
     rerender(<AppSidebar />);
 
     await waitFor(() => {
-      expect(storeState.toggleAppSidebarSettingsMode).toHaveBeenCalledOnce();
+      expect(storeState.setAppSidebarSettingsMode).toHaveBeenCalledWith(false);
     });
+    expect(storeState.toggleAppSidebarSettingsMode).not.toHaveBeenCalled();
   });
 });
