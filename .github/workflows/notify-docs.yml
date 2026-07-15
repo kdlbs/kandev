@@ -1,0 +1,37 @@
+name: Rebuild Published Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/public/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rebuild:
+    name: Trigger Cloudflare Pages rebuild
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Trigger Cloudflare Pages deploy hook
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK_KANDEV_AI }}
+        run: |
+          if [[ -z "$DEPLOY_HOOK_URL" ]]; then
+            echo "::error::CLOUDFLARE_PAGES_DEPLOY_HOOK_KANDEV_AI is not configured"
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            --max-time 30 \
+            --retry 3 \
+            --request POST \
+            "$DEPLOY_HOOK_URL"
