@@ -111,26 +111,51 @@ func TestNewHostServiceRegistersHostAgents(t *testing.T) {
 	}
 }
 
-func TestUsageCacheCoalescesConcurrentFetches(t *testing.T) {
-	cache := NewUsageCache()
-	var calls atomic.Int32
+// runCoalescedFetch launches n concurrent GetOrFetchWithin callers whose first
+// fetch blocks until every goroutine has been started, maximizing contention
+// without sleep-based synchronization. It returns the per-caller results.
+func runCoalescedFetch(
+	t *testing.T,
+	cache *UsageCache,
+	n int,
+	result *ProviderUsage,
+	fetchErr error,
+	calls *atomic.Int32,
+) {
+	t.Helper()
+	release := make(chan struct{})
 	fetch := func(_ context.Context) (*ProviderUsage, error) {
 		calls.Add(1)
-		time.Sleep(10 * time.Millisecond)
-		return &ProviderUsage{Provider: "anthropic", FetchedAt: time.Now()}, nil
+		<-release
+		return result, fetchErr
 	}
 
-	var wg sync.WaitGroup
-	for range 8 {
+	var started, wg sync.WaitGroup
+	for range n {
+		started.Add(1)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := cache.GetOrFetchWithin(context.Background(), "k", freshMaxAge, fetch); err != nil {
+			started.Done()
+			_, err := cache.GetOrFetchWithin(context.Background(), "k", freshMaxAge, fetch)
+			if fetchErr == nil && err != nil {
 				t.Errorf("GetOrFetchWithin: %v", err)
+			}
+			if fetchErr != nil && err == nil {
+				t.Error("expected error from coalesced failing fetch")
 			}
 		}()
 	}
+	started.Wait()
+	close(release)
 	wg.Wait()
+}
+
+func TestUsageCacheCoalescesConcurrentFetches(t *testing.T) {
+	cache := NewUsageCache()
+	var calls atomic.Int32
+
+	runCoalescedFetch(t, cache, 8, &ProviderUsage{Provider: "anthropic", FetchedAt: time.Now()}, nil, &calls)
 
 	if got := calls.Load(); got != 1 {
 		t.Errorf("concurrent misses fetched %d times, want 1", got)
@@ -140,25 +165,15 @@ func TestUsageCacheCoalescesConcurrentFetches(t *testing.T) {
 func TestUsageCacheCoalescesFailures(t *testing.T) {
 	cache := NewUsageCache()
 	var calls atomic.Int32
-	fetch := func(_ context.Context) (*ProviderUsage, error) {
-		calls.Add(1)
-		time.Sleep(10 * time.Millisecond)
-		return nil, errors.New("boom")
-	}
 
-	var wg sync.WaitGroup
-	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := cache.GetOrFetchWithin(context.Background(), "k", freshMaxAge, fetch); err == nil {
-				t.Error("expected error from coalesced failing fetch")
-			}
-		}()
-	}
-	wg.Wait()
+	runCoalescedFetch(t, cache, 8, nil, errors.New("boom"), &calls)
+
 	if got := calls.Load(); got != 1 {
 		t.Errorf("concurrent failing fetches called provider %d times, want 1", got)
+	}
+	fetch := func(_ context.Context) (*ProviderUsage, error) {
+		calls.Add(1)
+		return nil, errors.New("boom")
 	}
 
 	// Once the negative entry ages past failureCacheTTL, the provider is retried.
