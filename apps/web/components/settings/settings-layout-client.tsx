@@ -230,7 +230,7 @@ function SettingsShell({
               shrink below its content height so overflow-y-auto can take effect. */}
           <div
             data-testid="settings-scroll-container"
-            className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[calc(6rem+env(safe-area-inset-bottom))]"
+            className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[calc(6rem_+_env(safe-area-inset-bottom))]"
           >
             {children}
           </div>

@@ -231,3 +231,7 @@ function withPosition(state: unknown, position: number): Record<string, unknown>
   const source = state && typeof state === "object" ? state : {};
   return { ...source, [HISTORY_POSITION_KEY]: position };
 }
+
+// client-router imports this module before subscribing to popstate, so eager
+// installation lets the guard stop blocked traversals before route subscribers run.
+if (typeof window !== "undefined") ensureHistoryTracking();

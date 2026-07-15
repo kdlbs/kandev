@@ -102,6 +102,7 @@ export function SettingsFloatingSave({
             </Button>
             <AlertDialogAction
               className="cursor-pointer"
+              data-dialog-default-action
               disabled={isSaving || isInvalid}
               onClick={(event) => {
                 event.preventDefault();

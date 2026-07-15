@@ -7,16 +7,17 @@ import { VoiceModeSettings } from "./voice-mode-settings";
 const updateUserSettingsMock = vi.fn();
 const setUserSettingsMock = vi.fn();
 let saveContributor: SettingsSaveContributor | null = null;
+const initialVoiceMode = {
+  enabled: true,
+  engine: "auto" as const,
+  language: "auto",
+  mode: "toggle" as const,
+  autoSend: false,
+  whisperWebModel: "base" as const,
+};
 const state = {
   userSettings: {
-    voiceMode: {
-      enabled: true,
-      engine: "auto" as const,
-      language: "auto",
-      mode: "toggle" as const,
-      autoSend: false,
-      whisperWebModel: "base" as const,
-    },
+    voiceMode: initialVoiceMode,
     keyboardShortcuts: {},
   },
   setUserSettings: setUserSettingsMock,
@@ -45,6 +46,7 @@ afterEach(() => {
   cleanup();
   updateUserSettingsMock.mockReset();
   setUserSettingsMock.mockReset();
+  state.userSettings = { voiceMode: initialVoiceMode, keyboardShortcuts: {} };
   saveContributor = null;
 });
 
@@ -64,6 +66,26 @@ describe("VoiceModeSettings", () => {
 
     expect(updateUserSettingsMock).toHaveBeenCalledWith(
       expect.objectContaining({ voice_mode: expect.objectContaining({ enabled: false }) }),
+    );
+  });
+
+  it("rebases unchanged shortcuts before saving a voice draft", async () => {
+    updateUserSettingsMock.mockResolvedValue(undefined);
+    render(<VoiceModeSettings />);
+
+    fireEvent.click(
+      screen.getByRole("switch", { name: "Show the mic button on the chat composer" }),
+    );
+    state.userSettings = {
+      ...state.userSettings,
+      keyboardShortcuts: { voice_toggle: { key: "v" } },
+    };
+    if (!saveContributor) throw new Error("Save contributor was not registered");
+
+    await saveContributor.save(saveContributor.revision);
+
+    expect(updateUserSettingsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ keyboard_shortcuts: { voice_toggle: { key: "v" } } }),
     );
   });
 });

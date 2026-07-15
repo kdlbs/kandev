@@ -21,7 +21,7 @@ import { updateUserSettings } from "@/lib/api";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { ShortcutRecorder } from "@/components/settings/keyboard-shortcuts-card";
 import { detectVoiceCapabilities, type VoiceCapabilities } from "@/lib/voice/capabilities";
-import type { VoiceModeState } from "@/lib/state/slices/settings/types";
+import type { UserSettingsState, VoiceModeState } from "@/lib/state/slices/settings/types";
 import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 import {
   CONFIGURABLE_SHORTCUTS,
@@ -87,6 +87,13 @@ type VoiceDraftContextValue = VoiceDraft & {
 
 const VoiceDraftContext = createContext<VoiceDraftContextValue | null>(null);
 
+function voiceDraftFromSettings(settings: UserSettingsState): VoiceDraft {
+  return {
+    voiceMode: settings.voiceMode,
+    keyboardShortcuts: settings.keyboardShortcuts,
+  };
+}
+
 function useVoiceDraft() {
   const value = useContext(VoiceDraftContext);
   if (!value) throw new Error("Voice settings require VoiceDraftProvider");
@@ -97,19 +104,34 @@ function VoiceDraftProvider({ children }: { children: ReactNode }) {
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
-  const [saved, setSaved] = useState<VoiceDraft>(() => ({
-    voiceMode: userSettings.voiceMode,
-    keyboardShortcuts: userSettings.keyboardShortcuts,
-  }));
+  const currentSettingsDraft = voiceDraftFromSettings(userSettings);
+  const [saved, setSaved] = useState<VoiceDraft>(currentSettingsDraft);
   const [draft, setDraft] = useState(saved);
   const revision = JSON.stringify(draft);
+  const savedRevision = JSON.stringify(saved);
+  const currentSettingsRevision = JSON.stringify(currentSettingsDraft);
+
+  if (revision === savedRevision && currentSettingsRevision !== savedRevision) {
+    setSaved(currentSettingsDraft);
+    setDraft(currentSettingsDraft);
+  }
 
   useSettingsSaveContributor({
     id: "voice-mode",
     revision,
-    isDirty: revision !== JSON.stringify(saved),
+    isDirty: revision !== savedRevision,
     save: async () => {
-      const submitted = draft;
+      const latest = voiceDraftFromSettings(storeApi.getState().userSettings);
+      const submitted = {
+        voiceMode:
+          JSON.stringify(draft.voiceMode) === JSON.stringify(saved.voiceMode)
+            ? latest.voiceMode
+            : draft.voiceMode,
+        keyboardShortcuts:
+          JSON.stringify(draft.keyboardShortcuts) === JSON.stringify(saved.keyboardShortcuts)
+            ? latest.keyboardShortcuts
+            : draft.keyboardShortcuts,
+      };
       await updateUserSettings({
         voice_mode: toWire(submitted.voiceMode),
         keyboard_shortcuts: submitted.keyboardShortcuts,
