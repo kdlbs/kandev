@@ -7,6 +7,13 @@ const repoRoot = path.resolve(
   "..",
 );
 
+/**
+ * Validate that every published Markdown page has frontmatter and appears
+ * exactly once in the public navigation metadata.
+ *
+ * @param {string} [docsDir] Directory containing published docs and meta.json.
+ * @returns {Promise<{pageCount: number}>} Number of validated published pages.
+ */
 export async function validatePublicDocs(
   docsDir = path.join(repoRoot, "docs/public"),
 ) {
@@ -52,6 +59,7 @@ export async function validatePublicDocs(
   return { pageCount: pagesBySlug.size };
 }
 
+/** Read and validate the shape of public navigation metadata. */
 async function readMeta(docsDir) {
   const raw = await fs.readFile(path.join(docsDir, "meta.json"), "utf8");
   const meta = JSON.parse(raw);
@@ -68,6 +76,7 @@ async function readMeta(docsDir) {
   return meta;
 }
 
+/** Recursively collect Markdown paths relative to the published docs root. */
 async function collectMarkdownFiles(dir, relativeDir = "") {
   const entries = await fs.readdir(path.join(dir, relativeDir), {
     withFileTypes: true,
@@ -86,6 +95,7 @@ async function collectMarkdownFiles(dir, relativeDir = "") {
   return files.flat().sort();
 }
 
+/** Require non-empty title and description fields in leading frontmatter. */
 function assertFrontmatter(file, markdown) {
   const block = markdown.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1];
   if (
@@ -99,6 +109,7 @@ function assertFrontmatter(file, markdown) {
   }
 }
 
+/** Return whether a metadata entry is a heading or external-link decoration. */
 function isNavigationDecoration(entry) {
   return (
     /^---.*---$/.test(entry) ||
