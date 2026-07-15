@@ -38,6 +38,7 @@ import (
 	linearpkg "github.com/kandev/kandev/internal/linear"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
 	slackpkg "github.com/kandev/kandev/internal/slack"
+	workflowsyncpkg "github.com/kandev/kandev/internal/workflowsync"
 
 	// Agent infrastructure
 	"github.com/kandev/kandev/internal/agent/hostutility"
@@ -565,6 +566,16 @@ func startAgentInfrastructure(
 		slackTrigger := slackpkg.NewTrigger(services.Slack, log)
 		slackTrigger.Start(ctx)
 		addCleanup(func() error { slackTrigger.Stop(); return nil })
+	}
+
+	// Start workflow-sync poller: periodically pulls workflow definition
+	// files from each workspace's configured GitHub repo and reconciles the
+	// workspace's synced workflows with them.
+	if services.WorkflowSync != nil {
+		workflowSyncPoller := workflowsyncpkg.NewPoller(services.WorkflowSync, log)
+		workflowSyncPoller.Start(ctx)
+		addCleanup(func() error { workflowSyncPoller.Stop(); return nil })
+		log.Info("Workflow sync poller started")
 	}
 
 	// Wire automation service into orchestrator for trigger-based task creation.

@@ -64,6 +64,68 @@ func TestMockControllerAddIssuesInvalidPayload(t *testing.T) {
 	}
 }
 
+func TestMockControllerAddRepoFiles(t *testing.T) {
+	router, mock := setupMockControllerTestForAddIssues()
+	body := bytes.NewBufferString(`{
+		"owner":"o",
+		"repo":"r",
+		"ref":"main",
+		"files":[{"path":"workflows/deploy.yaml","content":"name: deploy"}]
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/mock/repo-files", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var got struct {
+		Added int `json:"added"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Added != 1 {
+		t.Fatalf("expected added=1, got %d", got.Added)
+	}
+	content, err := mock.GetRepoFileContent(context.Background(), "o", "r", "workflows/deploy.yaml", "main")
+	if err != nil {
+		t.Fatalf("get seeded repo file: %v", err)
+	}
+	if string(content) != "name: deploy" {
+		t.Fatalf("expected seeded content, got %q", content)
+	}
+}
+
+func TestMockControllerAddRepoFilesInvalidPayload(t *testing.T) {
+	router, _ := setupMockControllerTestForAddIssues()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/mock/repo-files", bytes.NewBufferString(`{`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMockControllerAddRepoFilesRequiresOwnerAndRepo(t *testing.T) {
+	router, _ := setupMockControllerTestForAddIssues()
+	body := bytes.NewBufferString(`{"files":[{"path":"a.yaml","content":"x"}]}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/mock/repo-files", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestEnsureMockPRForRequestCopiesMergeableState(t *testing.T) {
 	mock := NewMockClient()
 	controller := &MockController{mock: mock}

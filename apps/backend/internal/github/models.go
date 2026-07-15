@@ -392,6 +392,21 @@ type RepoBranch struct {
 	Name string `json:"name"`
 }
 
+// Repo content entry types, as reported by the GitHub contents API's "type" field.
+const (
+	RepoContentTypeFile = "file"
+	RepoContentTypeDir  = "dir"
+)
+
+// RepoContentEntry describes one entry returned when listing a repository directory.
+type RepoContentEntry struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	Type string `json:"type"` // "file" or "dir"
+	SHA  string `json:"sha"`
+	Size int    `json:"size"`
+}
+
 // RepoMergeMethods reports which merge methods a repository allows. Mirrors
 // the allow_*_merge booleans from GET /repos/{owner}/{repo}.
 type RepoMergeMethods struct {

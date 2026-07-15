@@ -14,6 +14,10 @@ Everything below is derived from the source of truth:
 > **Looking for the built-in workflows instead?** See [Workflows](workflow-tips.md)
 > for the default templates and when to use each.
 
+> **Want workflows managed from a git repo?** The same file format powers
+> [workflow sync from GitHub](workflow-sync.md), which polls a configured repo
+> and keeps workspace workflows up to date automatically.
+
 ---
 
 ## How import/export is exposed

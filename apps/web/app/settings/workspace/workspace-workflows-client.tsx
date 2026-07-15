@@ -29,6 +29,7 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { WorkflowCard } from "@/components/settings/workflow-card";
+import { WorkflowSyncSection } from "@/components/settings/workflow-sync-section";
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
 import { useToast } from "@/components/toast-provider";
 import { useWorkflowSettings } from "@/hooks/domains/settings/use-workflow-settings";
@@ -499,6 +500,8 @@ export function WorkspaceWorkflowsClient({
           <Link href={`/settings/workspace/${workspace.id}`}>Workspace settings</Link>
         </Button>
       </div>
+      <Separator />
+      <WorkflowSyncSection workspaceId={workspace.id} />
       <Separator />
       <SettingsSection
         icon={<IconArrowsShuffle className="h-5 w-5" />}

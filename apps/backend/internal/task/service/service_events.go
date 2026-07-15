@@ -299,6 +299,8 @@ func (s *Service) publishWorkflowEvent(ctx context.Context, eventType string, wo
 		"description":      workflow.Description,
 		"agent_profile_id": workflow.AgentProfileID,
 		"hidden":           workflow.Hidden,
+		"source":           workflow.Source,
+		"source_path":      workflow.SourcePath,
 		"created_at":       workflow.CreatedAt.Format(time.RFC3339),
 		"updated_at":       workflow.UpdatedAt.Format(time.RFC3339),
 	}

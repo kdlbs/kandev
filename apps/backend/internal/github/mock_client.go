@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -61,6 +62,15 @@ type repoKey struct {
 	Repo  string
 }
 
+// repoFileEntry is one seeded file for MockClient.ListRepoDirectory /
+// GetRepoFileContent. Ref "" is a wildcard that matches any requested ref;
+// a non-empty Ref only matches that exact ref.
+type repoFileEntry struct {
+	Ref     string
+	Path    string
+	Content []byte
+}
+
 // MockClient implements Client with in-memory configurable data for E2E testing.
 // All data is protected by a sync.RWMutex for thread safety.
 type MockClient struct {
@@ -92,6 +102,7 @@ type MockClient struct {
 	gists            map[string]mockGist
 	deletedGists     []string
 	nextGistID       int
+	repoFiles        map[repoKey][]repoFileEntry
 
 	// findPRByBranchCalls counts FindPRByBranch invocations so tests can
 	// assert that branch-detection probes are throttled. Atomic because
@@ -133,6 +144,7 @@ func NewMockClient() *MockClient {
 		commits:       make(map[prKey][]PRCommitInfo),
 		mergeMethods:  make(map[repoKey]RepoMergeMethods),
 		gists:         make(map[string]mockGist),
+		repoFiles:     make(map[repoKey][]repoFileEntry),
 	}
 }
 
@@ -426,6 +438,111 @@ func (m *MockClient) ListRepoBranches(_ context.Context, owner, repo string) ([]
 	return out, nil
 }
 
+// ListRepoDirectory returns the immediate children of dir, derived from the
+// paths seeded via SeedRepoFile for owner/repo. Entries seeded with a
+// specific ref are only visible when ref matches; entries seeded with ref ""
+// are visible for any requested ref. A directory with no matching seeded
+// descendants (including an entirely unseeded repo) returns a 404, mirroring
+// "missing directory" on the real API.
+func (m *MockClient) ListRepoDirectory(_ context.Context, owner, repo, dir, ref string) ([]RepoContentEntry, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	cleanDir := repoContentsPath(dir)
+	children := make(map[string]RepoContentEntry)
+	for _, e := range m.repoFiles[repoKey{owner, repo}] {
+		if e.Ref != "" && e.Ref != ref {
+			continue
+		}
+		name, isDir, ok := repoDirChild(cleanDir, e.Path)
+		if !ok {
+			continue
+		}
+		if _, exists := children[name]; exists {
+			continue
+		}
+		entryType, childPath := RepoContentTypeFile, name
+		if isDir {
+			entryType = RepoContentTypeDir
+		}
+		if cleanDir != "" {
+			childPath = cleanDir + "/" + name
+		}
+		children[name] = RepoContentEntry{Name: name, Path: childPath, Type: entryType}
+	}
+	if len(children) == 0 {
+		return nil, &GitHubAPIError{
+			StatusCode: 404,
+			Endpoint:   fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, cleanDir),
+			Body:       fmt.Sprintf("directory %q not found", dir),
+		}
+	}
+	out := make([]RepoContentEntry, 0, len(children))
+	for _, c := range children {
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// repoDirChild reports the immediate child name of path relative to dir
+// (""  meaning root), and whether that child is itself a directory (path has
+// further segments beyond the child name). ok is false when path does not
+// live under dir.
+func repoDirChild(dir, path string) (name string, isDir bool, ok bool) {
+	rest := path
+	if dir != "" {
+		prefix := dir + "/"
+		if !strings.HasPrefix(path, prefix) {
+			return "", false, false
+		}
+		rest = strings.TrimPrefix(path, prefix)
+	}
+	if rest == "" {
+		return "", false, false
+	}
+	if idx := strings.Index(rest, "/"); idx >= 0 {
+		return rest[:idx], true, true
+	}
+	return rest, false, true
+}
+
+// GetRepoFileContent returns the seeded content for owner/repo/path,
+// preferring an exact-ref seed over a wildcard (ref "") seed. Returns a 404
+// *GitHubAPIError when no seed matches.
+func (m *MockClient) GetRepoFileContent(_ context.Context, owner, repo, path, ref string) ([]byte, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	cleanPath := repoContentsPath(path)
+	var wildcard *repoFileEntry
+	entries := m.repoFiles[repoKey{owner, repo}]
+	for i := range entries {
+		e := &entries[i]
+		if e.Path != cleanPath {
+			continue
+		}
+		if ref != "" && e.Ref == ref {
+			return cloneBytes(e.Content), nil
+		}
+		if e.Ref == "" {
+			wildcard = e
+		}
+	}
+	if wildcard != nil {
+		return cloneBytes(wildcard.Content), nil
+	}
+	return nil, &GitHubAPIError{
+		StatusCode: 404,
+		Endpoint:   fmt.Sprintf("/repos/%s/%s/contents/%s", owner, repo, cleanPath),
+		Body:       fmt.Sprintf("file %q not found", path),
+	}
+}
+
+func cloneBytes(b []byte) []byte {
+	out := make([]byte, len(b))
+	copy(out, b)
+	return out
+}
+
 func (m *MockClient) SubmitReview(_ context.Context, owner, repo string, number int, event, body string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -589,6 +706,24 @@ func (m *MockClient) AddBranches(owner, repo string, branches []RepoBranch) {
 	m.branches[repoKey{owner, repo}] = cp
 }
 
+// SeedRepoFile stores file content for ListRepoDirectory/GetRepoFileContent.
+// ref "" matches any requested ref. Re-seeding the same owner/repo/ref/path
+// replaces the previous content.
+func (m *MockClient) SeedRepoFile(owner, repo, ref, path string, content []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cleanPath := repoContentsPath(path)
+	k := repoKey{owner, repo}
+	cp := cloneBytes(content)
+	for i, e := range m.repoFiles[k] {
+		if e.Ref == ref && e.Path == cleanPath {
+			m.repoFiles[k][i].Content = cp
+			return
+		}
+	}
+	m.repoFiles[k] = append(m.repoFiles[k], repoFileEntry{Ref: ref, Path: cleanPath, Content: cp})
+}
+
 // AddRepos adds repos under a key (an org login OR the authenticated user's
 // login). The mock's ListUserRepos reads m.repos[m.user], so the same store
 // backs both SearchOrgRepos and ListUserRepos in tests.
@@ -691,6 +826,7 @@ func (m *MockClient) Reset() {
 	m.gists = make(map[string]mockGist)
 	m.deletedGists = nil
 	m.nextGistID = 0
+	m.repoFiles = make(map[repoKey][]repoFileEntry)
 	m.findPRByBranchCalls.Store(0)
 	m.probeEntered = nil
 	m.probeRelease = nil

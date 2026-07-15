@@ -36,6 +36,7 @@ import (
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/workflowsync"
 )
 
 func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
@@ -106,6 +107,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
 	slackSvc := initSlackService(dbPool, repos.Secrets, log)
+	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
 	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
 
 	// Plumb GitHub branch listing into the task service so provider-backed
@@ -127,20 +129,21 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 
 	return &Services{
-		Task:       taskSvc,
-		User:       userSvc,
-		Editor:     editorSvc,
-		Prompts:    promptSvc,
-		Utility:    utilitySvc,
-		Workflow:   workflowSvc,
-		GitHub:     githubSvc,
-		GitLab:     gitlabSvc,
-		Jira:       jiraSvc,
-		Linear:     linearSvc,
-		Sentry:     sentrySvc,
-		Slack:      slackSvc,
-		Share:      shareHTTP,
-		Automation: automationComponents,
+		Task:         taskSvc,
+		User:         userSvc,
+		Editor:       editorSvc,
+		Prompts:      promptSvc,
+		Utility:      utilitySvc,
+		Workflow:     workflowSvc,
+		GitHub:       githubSvc,
+		GitLab:       gitlabSvc,
+		Jira:         jiraSvc,
+		Linear:       linearSvc,
+		Sentry:       sentrySvc,
+		Slack:        slackSvc,
+		WorkflowSync: workflowSyncSvc,
+		Share:        shareHTTP,
+		Automation:   automationComponents,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
 		Office: nil,
@@ -376,6 +379,22 @@ func initJiraService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secret
 	svc, _, err := jira.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), eventBus, log)
 	if err != nil {
 		log.Warn("JIRA service initialization failed (non-fatal)", zap.Error(err))
+	}
+	return svc
+}
+
+// initWorkflowSyncService wires the GitHub workflow-sync service. Failures
+// are non-fatal; the service is nil when GitHub is unavailable.
+func initWorkflowSyncService(dbPool *db.Pool, githubSvc *github.Service, workflowSvc *workflowservice.Service, taskSvc *taskservice.Service, log *logger.Logger) *workflowsync.Service {
+	if githubSvc == nil {
+		log.Warn("workflow sync disabled: GitHub service unavailable")
+		return nil
+	}
+	workflowSvc.SetSyncWorkflowOps(taskSvc)
+	svc, _, err := workflowsync.Provide(dbPool.Writer(), dbPool.Reader(), githubSvc, workflowSvc, log)
+	if err != nil {
+		log.Warn("workflow sync service initialization failed (non-fatal)", zap.Error(err))
+		return nil
 	}
 	return svc
 }

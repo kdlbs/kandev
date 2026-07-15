@@ -18,9 +18,13 @@ type WorkflowDTO struct {
 	Hidden         bool    `json:"hidden,omitempty"`
 	// Style is a Phase 2 (ADR-0004) UX hint read by the frontend ONLY.
 	// Allowed values: "kanban" | "office" | "custom".
-	Style     string    `json:"style,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Style string `json:"style,omitempty"`
+	// Source records where the workflow definition came from ("manual" |
+	// "github"); SourcePath is the repo-relative file for synced workflows.
+	Source     string    `json:"source,omitempty"`
+	SourcePath string    `json:"source_path,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type WorkspaceDTO struct {
@@ -407,6 +411,8 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 		SortOrder:      workflow.SortOrder,
 		Hidden:         workflow.Hidden,
 		Style:          workflow.Style,
+		Source:         workflow.Source,
+		SourcePath:     workflow.SourcePath,
 		CreatedAt:      workflow.CreatedAt,
 		UpdatedAt:      workflow.UpdatedAt,
 	}

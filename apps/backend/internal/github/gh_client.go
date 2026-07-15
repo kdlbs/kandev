@@ -3,6 +3,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -918,6 +919,75 @@ func (c *GHClient) DeleteGist(ctx context.Context, gistID string) error {
 		return fmt.Errorf("delete gist %s: %w", gistID, err)
 	}
 	return nil
+}
+
+// ListRepoDirectory lists the entries of a directory in a repository at the
+// given ref via `gh api repos/{owner}/{repo}/contents/{path}`. A 404 (missing
+// directory) is promoted to a *GitHubAPIError, mirroring PATClient.
+func (c *GHClient) ListRepoDirectory(ctx context.Context, owner, repo, dir, ref string) ([]RepoContentEntry, error) {
+	args := ghContentsArgs(owner, repo, dir, ref)
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		if isNotFoundErr(err) {
+			return nil, &GitHubAPIError{
+				StatusCode: http.StatusNotFound,
+				Endpoint:   fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(dir)),
+				Body:       err.Error(),
+			}
+		}
+		return nil, fmt.Errorf("list repo directory: %w", err)
+	}
+	var entries []RepoContentEntry
+	if err := json.Unmarshal([]byte(out), &entries); err != nil {
+		return nil, fmt.Errorf("list repo directory: decode: %w", err)
+	}
+	return entries, nil
+}
+
+// GetRepoFileContent fetches the raw decoded content of a single file via
+// `gh api repos/{owner}/{repo}/contents/{path}`. A 404 (missing file) is
+// promoted to a *GitHubAPIError, mirroring PATClient.
+func (c *GHClient) GetRepoFileContent(ctx context.Context, owner, repo, path, ref string) ([]byte, error) {
+	args := ghContentsArgs(owner, repo, path, ref)
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		if isNotFoundErr(err) {
+			return nil, &GitHubAPIError{
+				StatusCode: http.StatusNotFound,
+				Endpoint:   fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(path)),
+				Body:       err.Error(),
+			}
+		}
+		return nil, fmt.Errorf("get repo file content: %w", err)
+	}
+	var raw ghRepoFileContent
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil, fmt.Errorf("get repo file content: decode: %w", err)
+	}
+	if raw.Encoding != "base64" {
+		return nil, fmt.Errorf("get repo file content: unsupported encoding %q", raw.Encoding)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(stripBase64Whitespace(raw.Content))
+	if err != nil {
+		return nil, fmt.Errorf("get repo file content: decode base64: %w", err)
+	}
+	return decoded, nil
+}
+
+// ghContentsArgs builds the `gh api` argv for the repo contents endpoint,
+// shared by ListRepoDirectory and GetRepoFileContent. ref, when non-empty, is
+// passed as a `-f` field (requiring the explicit `-X GET`, since `gh api`
+// otherwise switches to POST once any `-f`/`-F` field is supplied).
+func ghContentsArgs(owner, repo, path, ref string) []string {
+	endpoint := "repos/" + owner + "/" + repo + "/contents"
+	if p := repoContentsPath(path); p != "" {
+		endpoint += "/" + p
+	}
+	args := []string{"api", endpoint, "-X", "GET"}
+	if ref != "" {
+		args = append(args, "-f", "ref="+ref)
+	}
+	return args
 }
 
 const ghCLITimeout = 30 * time.Second

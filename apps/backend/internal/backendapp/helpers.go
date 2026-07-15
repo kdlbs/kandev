@@ -79,6 +79,7 @@ import (
 	webembedded "github.com/kandev/kandev/internal/webapp/embedded"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
+	"github.com/kandev/kandev/internal/workflowsync"
 	"github.com/kandev/kandev/internal/worktree"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -924,6 +925,11 @@ func registerSecondaryRoutes(
 	if p.services.Slack != nil {
 		slack.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Slack, p.log)
 		p.log.Debug("Registered Slack handlers (HTTP + WebSocket)")
+	}
+
+	if p.services.WorkflowSync != nil {
+		workflowsync.RegisterRoutes(p.router, p.services.WorkflowSync, p.log)
+		p.log.Debug("Registered workflow sync handlers (HTTP)")
 	}
 
 	if p.services.Automation != nil {

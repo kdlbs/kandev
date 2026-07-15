@@ -113,4 +113,14 @@ type Client interface {
 	// DeleteGist deletes a gist by ID. A 404 is wrapped in *GitHubAPIError
 	// so callers can distinguish "already gone" from transport failures.
 	DeleteGist(ctx context.Context, gistID string) error
+
+	// ListRepoDirectory lists the entries of a directory in a repository at the
+	// given ref (branch, tag, or SHA). dir may be "" or "." for the repo root.
+	// A missing directory returns a *GitHubAPIError with status 404.
+	ListRepoDirectory(ctx context.Context, owner, repo, dir, ref string) ([]RepoContentEntry, error)
+
+	// GetRepoFileContent fetches the raw decoded content of a single file in a
+	// repository at the given ref. A missing file returns a *GitHubAPIError with
+	// status 404.
+	GetRepoFileContent(ctx context.Context, owner, repo, path, ref string) ([]byte, error)
 }

@@ -149,6 +149,12 @@ func (r *Repository) runMigrations() error {
 	// presentation for existing workflows.
 	r.migrate.Apply("workflows.style", `ALTER TABLE workflows ADD COLUMN style TEXT NOT NULL DEFAULT 'kanban'`)
 
+	// Workflow-sync provenance: which system owns the workflow definition
+	// ("manual" | "github") and, for synced workflows, the repo-relative
+	// file path it was synced from.
+	r.migrate.Apply("workflows.source", `ALTER TABLE workflows ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`)
+	r.migrate.Apply("workflows.source_path", `ALTER TABLE workflows ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`)
+
 	// ADR 0005 Wave F — ensure the runner-projection tables exist so
 	// task SELECTs that reference them via correlated subquery don't
 	// fail. Required for tests and any environment where the workflow

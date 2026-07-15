@@ -7,6 +7,7 @@ This page expands the short feature list in the README without turning the READM
 - **Parallel task execution:** run and review multiple agent tasks at once.
 - **Kanban and pipeline workflows:** define workflow steps, prompts, automations, and agent handoffs per step.
 - **Workflow import/export:** export one workflow or every workflow in a workspace as portable YAML, then import it into another workspace or Kandev install. See [workflow-import-export.md](workflow-import-export.md).
+- **Workflow sync from GitHub:** keep a workspace's workflows in sync with definition files in a GitHub repo — Kandev polls the repo on an interval, with a force-sync option and warnings when a change can't be applied. See [workflow-sync.md](workflow-sync.md).
 - **Subtasks:** split work into child tasks that inherit the parent task's workspace, workflow, agent profile, executor, and repositories by default.
 - **Multi-repository tasks:** attach several repositories to one task. Each repository gets its own worktree and is grouped separately in changes, review, and PR surfaces.
 - **Multi-branch tasks:** attach multiple branches from the same repository to one task when the work needs to produce several PRs.

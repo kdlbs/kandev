@@ -441,6 +441,28 @@ func (s *Service) SetWorkflowHidden(ctx context.Context, id string, hidden bool)
 	return nil
 }
 
+// SetWorkflowSource stamps a workflow's provenance ("manual" | "github") and
+// the repo-relative file path it was synced from. Used by workflow-sync to
+// mark workflows it owns.
+func (s *Service) SetWorkflowSource(ctx context.Context, id, source, sourcePath string) error {
+	workflow, err := s.workflows.GetWorkflow(ctx, id)
+	if err != nil {
+		return err
+	}
+	if workflow.Source == source && workflow.SourcePath == sourcePath {
+		return nil
+	}
+	workflow.Source = source
+	workflow.SourcePath = sourcePath
+	workflow.UpdatedAt = time.Now().UTC()
+	if err := s.workflows.UpdateWorkflow(ctx, workflow); err != nil {
+		s.logger.Error("failed to update workflow source", zap.String("workflow_id", id), zap.Error(err))
+		return err
+	}
+	s.publishWorkflowEvent(ctx, events.WorkflowUpdated, workflow)
+	return nil
+}
+
 // DeleteWorkflow deletes a workflow, archiving its remaining tasks first so
 // they do not linger as orphan rows pointing at a workflow_id that no longer
 // exists (the tasks.workflow_id FK was dropped to support empty workflow_id

@@ -399,6 +399,15 @@ const (
 	WorkflowStyleCustom = "custom"
 )
 
+// WorkflowSource values are persisted in workflows.source and record where a
+// workflow definition came from. Manual workflows are user-managed; GitHub
+// workflows are owned by the workflow-sync poller and may be overwritten or
+// removed on each sync.
+const (
+	WorkflowSourceManual = "manual"
+	WorkflowSourceGitHub = "github"
+)
+
 // Workflow represents a task workflow
 type Workflow struct {
 	ID                 string  `json:"id"`
@@ -408,6 +417,11 @@ type Workflow struct {
 	AgentProfileID     string  `json:"agent_profile_id,omitempty"`
 	WorkflowTemplateID *string `json:"workflow_template_id,omitempty"`
 	SortOrder          int     `json:"sort_order"`
+	// Source records where the workflow definition came from ("manual" or
+	// "github"). SourcePath is the repo-relative file path the definition
+	// was synced from; empty for manual workflows.
+	Source     string `json:"source,omitempty"`
+	SourcePath string `json:"source_path,omitempty"`
 	// Hidden workflows are excluded from management and picker UIs by default.
 	// Used by system-only flows like Improve Kandev.
 	Hidden bool `json:"hidden,omitempty"`

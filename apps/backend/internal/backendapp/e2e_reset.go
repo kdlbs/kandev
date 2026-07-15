@@ -92,6 +92,11 @@ func handleE2EReset(
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID); err != nil {
 			log.Warn("e2e reset: GitHub workspace settings cleanup failed", zap.Error(err))
 		}
+		// The workflow-sync poller reads these rows globally; delete before
+		// task/workflow deletion so a mid-reset tick can't resync workflows.
+		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM workflow_sync_configs WHERE workspace_id = ?`, workspaceID); err != nil {
+			log.Warn("e2e reset: workflow sync config cleanup failed", zap.Error(err))
+		}
 
 		// Reset every agent's routing override to the inherit-markers
 		// shape onboarding writes. Without this, an agent-override test

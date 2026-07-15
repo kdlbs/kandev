@@ -3,10 +3,12 @@
 import { useState, useEffect } from "react";
 import { IconDownload, IconTrash } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
+import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRequest } from "@/lib/http/use-request";
@@ -248,6 +250,29 @@ type WorkflowCardBodyProps = {
   };
 };
 
+// SyncedBadge marks workflows managed by workflow sync (workflow.source ===
+// "github"). Hovering / focusing shows which repo-relative file it came from
+// so users don't accidentally edit a workflow that the next poll will
+// overwrite.
+function SyncedBadge({ sourcePath }: { sourcePath?: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge
+          variant="outline"
+          className="text-xs cursor-default"
+          data-testid="workflow-synced-badge"
+        >
+          Synced
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>
+        Managed by workflow sync from {sourcePath || "a configured repository"}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function WorkflowCardBody({
   workflow,
   isWorkflowDirty,
@@ -267,6 +292,7 @@ function WorkflowCardBody({
           <Label className="flex items-center gap-2">
             <span>Workflow Name</span>
             {isWorkflowDirty && <UnsavedChangesBadge />}
+            {workflow.source === "github" && <SyncedBadge sourcePath={workflow.source_path} />}
           </Label>
           <Input
             value={workflow.name}
