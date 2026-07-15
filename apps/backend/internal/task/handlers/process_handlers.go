@@ -479,8 +479,13 @@ func resolveScriptCommand(
 	}
 }
 
-func (h *ProcessHandlers) applyIfSessionRunning(sessionID string, apply func() error) error {
-	if _, running := h.lifecycleMgr.GetExecutionBySessionID(sessionID); !running {
+func (h *ProcessHandlers) applyIfSessionReady(sessionID string, allowPassthrough bool, apply func() error) error {
+	execution, running := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
+	if !running {
+		return nil
+	}
+	if !h.lifecycleMgr.WasSessionInitialized(execution.ID) &&
+		(!allowPassthrough || execution.PassthroughProcessID == "") {
 		return nil
 	}
 	return apply()
@@ -496,7 +501,7 @@ func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.applyIfSessionRunning(sessionID, func() error {
+	if err := h.applyIfSessionReady(sessionID, false, func() error {
 		return h.lifecycleMgr.SetSessionModeBySessionID(c.Request.Context(), sessionID, req.ModeID)
 	}); err != nil {
 		h.logger.Error("failed to set session mode",
@@ -528,7 +533,7 @@ func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.applyIfSessionRunning(sessionID, func() error {
+	if err := h.applyIfSessionReady(sessionID, true, func() error {
 		return h.lifecycleMgr.SetSessionModelBySessionID(c.Request.Context(), sessionID, req.ModelID)
 	}); err != nil {
 		h.logger.Error("failed to set session model",
@@ -561,7 +566,7 @@ func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
 		c.JSON(400, gin.H{"error": "invalid request: " + err.Error()})
 		return
 	}
-	if err := h.applyIfSessionRunning(sessionID, func() error {
+	if err := h.applyIfSessionReady(sessionID, false, func() error {
 		return h.lifecycleMgr.SetSessionConfigOptionBySessionID(c.Request.Context(), sessionID, req.ConfigID, req.Value)
 	}); err != nil {
 		h.logger.Error("failed to set session config option",

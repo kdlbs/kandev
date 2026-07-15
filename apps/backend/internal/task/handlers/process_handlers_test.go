@@ -778,7 +778,21 @@ func TestSetSessionRuntimeConfigPersistsWithoutRunningAgent(t *testing.T) {
 				Reviews: repo,
 			}, nil, log, service.RepositoryDiscoveryConfig{})
 
-			router := newProcessStopRouter(t, svc, newLifecycleManager(t, log), log)
+			lifecycleMgr := newLifecycleManager(t, log)
+			workspaceOnlyExecution := (&lifecycle.ExecutorInstance{
+				InstanceID: "execution-workspace-only",
+				TaskID:     session.TaskID,
+				SessionID:  session.ID,
+			}).ToAgentExecution(&lifecycle.ExecutorCreateRequest{
+				InstanceID:     "execution-workspace-only",
+				TaskID:         session.TaskID,
+				SessionID:      session.ID,
+				AgentProfileID: "profile-1",
+				WorkspacePath:  "/tmp",
+			})
+			addExecution(t, lifecycleMgr, workspaceOnlyExecution)
+
+			router := newProcessStopRouter(t, svc, lifecycleMgr, log)
 			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")
 			resp := httptest.NewRecorder()
