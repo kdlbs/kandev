@@ -231,7 +231,7 @@ test.describe("Jira settings", () => {
     // Restoring the host re-enables reuse without re-typing the token.
     await settings.siteInput.fill("https://acme.atlassian.net");
     await expect(settings.secretInput).toHaveAttribute("placeholder", /•/);
-    await expect(settings.saveButton).toBeEnabled();
+    await expect(settings.saveButton).toHaveCount(0);
 
     // Switching instance type also invalidates reuse.
     await settings.selectInstance("server");
