@@ -48,7 +48,9 @@ export function WorkflowSyncSection({
   return (
     <>
       {sync.config && (
-        <div className="mb-4 space-y-4" data-testid="workflow-sync-section">
+        // pl-8 matches the workflow list's drag-handle gutter so the card's
+        // left edge lines up with the workflow cards below.
+        <div className="mb-4 space-y-4 pl-8" data-testid="workflow-sync-section">
           <WorkflowSyncStatusCard
             config={sync.config}
             syncing={sync.syncing}
