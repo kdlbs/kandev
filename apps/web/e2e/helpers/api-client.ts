@@ -657,6 +657,7 @@ export class ApiClient {
 
   async saveUserSettings(settings: {
     enable_preview_on_click?: boolean;
+    confirm_task_archive?: boolean;
     workspace_id?: string;
     workflow_filter_id?: string;
     repository_ids?: string[];

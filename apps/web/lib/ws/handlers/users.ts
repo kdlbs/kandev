@@ -75,6 +75,7 @@ function buildBehaviorSettings(payload: UserSettingsUpdatedPayload) {
     enablePreviewOnClick: payload.enable_preview_on_click ?? false,
     chatSubmitKey: (payload.chat_submit_key as "enter" | "cmd_enter") ?? "cmd_enter",
     reviewAutoMarkOnScroll: payload.review_auto_mark_on_scroll ?? true,
+    confirmTaskArchive: payload.confirm_task_archive ?? true,
     showReleaseNotification: payload.show_release_notification ?? true,
     releaseNotesLastSeenVersion: (payload.release_notes_last_seen_version as string) || null,
     terminalLinkBehavior:

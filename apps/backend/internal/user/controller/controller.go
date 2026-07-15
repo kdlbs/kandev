@@ -56,6 +56,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		EnablePreviewOnClick:        req.EnablePreviewOnClick,
 		ChatSubmitKey:               req.ChatSubmitKey,
 		ReviewAutoMarkOnScroll:      req.ReviewAutoMarkOnScroll,
+		ConfirmTaskArchive:          req.ConfirmTaskArchive,
 		ShowReleaseNotification:     req.ShowReleaseNotification,
 		ReleaseNotesLastSeenVersion: req.ReleaseNotesLastSeenVersion,
 		LspAutoStartLanguages:       req.LspAutoStartLanguages,

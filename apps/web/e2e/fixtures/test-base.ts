@@ -167,6 +167,7 @@ export const test = backendFixture.extend<
       workflow_filter_id: seedData.workflowId,
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
+      confirm_task_archive: true,
       sidebar_views: [],
       // Reset to default kanban view. Pipeline-view tests switch this to
       // "graph2", which persists per-workspace; without this reset the next
@@ -229,6 +230,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     workflow_filter_id: seedData.workflowId,
     keyboard_shortcuts: {},
     enable_preview_on_click: false,
+    confirm_task_archive: true,
     sidebar_views: [],
     kanban_view_mode: "",
   });

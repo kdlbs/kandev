@@ -25,6 +25,18 @@ function userSettingsMessage(
 }
 
 describe("user settings websocket handler", () => {
+  it("applies archive confirmation preferences and defaults missing values to enabled", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ confirm_task_archive: false }),
+    );
+    expect(store.getState().userSettings.confirmTaskArchive).toBe(false);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.confirmTaskArchive).toBe(true);
+  });
+
   it("preserves local collapsed groups when syncing sidebar views", () => {
     const store = makeStore();
     store.setState((state) => ({

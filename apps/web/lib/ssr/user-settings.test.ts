@@ -7,6 +7,8 @@ import {
 } from "./user-settings";
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
 
+const UPDATED_AT = "2026-01-01T00:00:00Z";
+
 describe("buildCoreFields", () => {
   it("maps terminal_font_family to terminalFontFamily", () => {
     const settings = {
@@ -27,7 +29,7 @@ describe("buildCoreFields", () => {
       keyboard_shortcuts: {},
       terminal_link_behavior: "new_tab",
       terminal_font_family: "JetBrains Mono",
-      updated_at: "2026-01-01T00:00:00Z",
+      updated_at: UPDATED_AT,
     } as unknown as Parameters<typeof buildCoreFields>[0];
 
     const result = buildCoreFields(settings);
@@ -53,7 +55,7 @@ describe("buildCoreFields", () => {
       keyboard_shortcuts: {},
       terminal_link_behavior: "new_tab",
       terminal_font_family: "",
-      updated_at: "2026-01-01T00:00:00Z",
+      updated_at: UPDATED_AT,
     } as unknown as Parameters<typeof buildCoreFields>[0];
 
     const result = buildCoreFields(settings);
@@ -115,6 +117,24 @@ describe("buildTerminalFields via buildCoreFields", () => {
 });
 
 describe("mapUserSettingsResponse", () => {
+  it("requires archive confirmation when settings are unavailable", () => {
+    expect(mapUserSettingsResponse(null).confirmTaskArchive).toBe(true);
+  });
+
+  it("preserves an explicitly disabled archive confirmation preference", () => {
+    const result = mapUserSettingsResponse({
+      settings: {
+        user_id: "default-user",
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        confirm_task_archive: false,
+        updated_at: UPDATED_AT,
+      },
+    });
+
+    expect(result.confirmTaskArchive).toBe(false);
+  });
+
   it("returns null terminalFontFamily when response is null", () => {
     const result = mapUserSettingsResponse(null);
     expect(result.terminalFontFamily).toBeNull();
@@ -148,7 +168,7 @@ describe("mapUserSettingsResponse", () => {
           sort: { key: "updatedAt", direction: "desc" },
           group: "workflow",
         },
-        updated_at: "2026-01-01T00:00:00Z",
+        updated_at: UPDATED_AT,
       },
     });
 

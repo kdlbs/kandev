@@ -104,6 +104,30 @@ func TestApplyBasicSettings_ReleaseNotes(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
+	t.Run("omitted value leaves confirmation enabled", func(t *testing.T) {
+		settings := &models.UserSettings{ConfirmTaskArchive: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !settings.ConfirmTaskArchive {
+			t.Fatal("expected archive confirmation to remain enabled")
+		}
+	})
+
+	t.Run("explicit false disables confirmation", func(t *testing.T) {
+		settings := &models.UserSettings{ConfirmTaskArchive: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+			ConfirmTaskArchive: ptr(false),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.ConfirmTaskArchive {
+			t.Fatal("expected archive confirmation to be disabled")
+		}
+	})
+}
+
 func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
 	t.Run("sets valid sort and group", func(t *testing.T) {
 		settings := &models.UserSettings{}
@@ -653,6 +677,13 @@ func TestUpdateUserSettingsCombinesSettingsAndTaskCreatePatch(t *testing.T) {
 	}
 	if len(eventBus.publishedEvents) != 1 {
 		t.Fatalf("expected one settings event, got %d", len(eventBus.publishedEvents))
+	}
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
+	}
+	if confirmTaskArchive, ok := eventData["confirm_task_archive"].(bool); !ok || confirmTaskArchive {
+		t.Fatalf("confirm_task_archive = %#v, want false", eventData["confirm_task_archive"])
 	}
 }
 

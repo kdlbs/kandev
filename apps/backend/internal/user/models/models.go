@@ -26,6 +26,7 @@ type UserSettings struct {
 	EnablePreviewOnClick        bool                              `json:"enable_preview_on_click"`
 	ChatSubmitKey               string                            `json:"chat_submit_key"` // "enter" | "cmd_enter"
 	ReviewAutoMarkOnScroll      bool                              `json:"review_auto_mark_on_scroll"`
+	ConfirmTaskArchive          bool                              `json:"confirm_task_archive"`
 	ShowReleaseNotification     bool                              `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion string                            `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages       []string                          `json:"lsp_auto_start_languages"`

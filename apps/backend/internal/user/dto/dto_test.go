@@ -3,7 +3,16 @@ package dto
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/kandev/kandev/internal/user/models"
 )
+
+func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
+	dto := FromUserSettings(&models.UserSettings{ConfirmTaskArchive: true})
+	if !dto.ConfirmTaskArchive {
+		t.Fatal("expected archive confirmation preference in DTO")
+	}
+}
 
 func TestNullableSidebarDraft(t *testing.T) {
 	t.Run("omitted field is not set", func(t *testing.T) {

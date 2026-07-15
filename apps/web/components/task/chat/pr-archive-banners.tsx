@@ -54,7 +54,7 @@ function useBannerArchiveConfirm(taskId: string) {
 // Presentational banner shared by PRMergedBanner / PRClosedBanner — an icon, a
 // message, and Archive + Dismiss controls. Colors/icon/testIds are supplied by
 // the caller so the two variants stay visually distinct. The Archive control
-// opens the shared archive confirmation dialog rather than archiving directly.
+// routes through the shared preference-aware archive flow.
 function ArchiveDismissBanner({
   testIdPrefix,
   icon,

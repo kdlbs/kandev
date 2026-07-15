@@ -454,6 +454,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"enablePreviewOnClick":        settings.EnablePreviewOnClick,
 		"chatSubmitKey":               defaultString(settings.ChatSubmitKey, "cmd_enter"),
 		"reviewAutoMarkOnScroll":      settings.ReviewAutoMarkOnScroll,
+		"confirmTaskArchive":          settings.ConfirmTaskArchive,
 		"showReleaseNotification":     settings.ShowReleaseNotification,
 		"releaseNotesLastSeenVersion": nullString(settings.ReleaseNotesLastSeenVersion),
 		"lspAutoStartLanguages":       stringSlice(settings.LspAutoStartLanguages),

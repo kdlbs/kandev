@@ -1,4 +1,11 @@
-import { IconBell, IconCommand, IconCode, IconPalette, IconTerminal2 } from "@tabler/icons-react";
+import {
+  IconArchive,
+  IconBell,
+  IconCommand,
+  IconCode,
+  IconPalette,
+  IconTerminal2,
+} from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 
 export type GeneralNavItem = {
@@ -38,5 +45,11 @@ export const GENERAL_NAV_ITEMS: GeneralNavItem[] = [
     label: "Keyboard Shortcuts",
     description: "Chat input and command shortcuts",
     icon: IconCommand,
+  },
+  {
+    href: "/settings/general/task-actions",
+    label: "Task Actions",
+    description: "Archive safeguards and task action preferences",
+    icon: IconArchive,
   },
 ];
