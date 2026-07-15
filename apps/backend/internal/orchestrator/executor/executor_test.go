@@ -1459,6 +1459,30 @@ func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsOfficeTask(t *testing.T) {
 	}
 }
 
+func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsArchivedTask(t *testing.T) {
+	repo := newMockRepository()
+	archivedAt := time.Now().UTC()
+	repo.tasks["task-123"] = &models.Task{
+		ID:         "task-123",
+		ArchivedAt: &archivedAt,
+	}
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateFailed,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	var taskStateUpdates []v1.TaskState
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateUpdates = append(taskStateUpdates, state)
+		return nil
+	})
+
+	exec.writeTaskReviewStateIfNoWorkingSessions(context.Background(), "task-123", "session-123")
+
+	if len(taskStateUpdates) != 0 {
+		t.Errorf("expected archived task to keep its frozen state, got %v", taskStateUpdates)
+	}
+}
+
 func TestStartAgentProcessOnResumePromotesTaskAfterSuccess(t *testing.T) {
 	repo := newMockRepository()
 	session := &models.TaskSession{

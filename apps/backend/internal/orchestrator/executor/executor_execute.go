@@ -170,6 +170,12 @@ func (e *Executor) shouldSkipFailedStartReviewForTask(ctx context.Context, taskI
 			zap.String("session_id", failedSessionID))
 		return true
 	}
+	if task != nil && task.ArchivedAt != nil {
+		e.logger.Debug("skipping failed-start task REVIEW state for archived task",
+			zap.String("task_id", taskID),
+			zap.String("session_id", failedSessionID))
+		return true
+	}
 	return false
 }
 

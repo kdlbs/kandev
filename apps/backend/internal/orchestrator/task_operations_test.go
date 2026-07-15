@@ -3595,6 +3595,78 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 			t.Fatalf("expected task state %q, got %q", v1.TaskStateReview, state)
 		}
 	})
+
+	t.Run("archived_task_active_session_state_preserved", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+		if err := repo.ArchiveTask(ctx, "task1"); err != nil {
+			t.Fatalf("failed to archive task: %v", err)
+		}
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:        "er1",
+			SessionID: "session1",
+			TaskID:    "task1",
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		taskRepo := newMockTaskRepo()
+		taskRepo.tasks["task1"] = &v1.Task{
+			ID:    "task1",
+			State: v1.TaskStateInProgress,
+		}
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+		svc.reconcileSessionsOnStartup(ctx)
+
+		if state, ok := taskRepo.updatedStates["task1"]; ok {
+			t.Fatalf("expected archived task state to be left untouched, got write to %q", state)
+		}
+	})
+
+	t.Run("archived_task_failed_session_state_preserved", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		ctx := context.Background()
+		now := time.Now().UTC()
+
+		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+		if err := repo.ArchiveTask(ctx, "task1"); err != nil {
+			t.Fatalf("failed to archive task: %v", err)
+		}
+
+		err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+			ID:          "er1",
+			SessionID:   "session1",
+			TaskID:      "task1",
+			ResumeToken: "acp-session-archived",
+			Resumable:   true,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		if err != nil {
+			t.Fatalf("failed to upsert executor running: %v", err)
+		}
+
+		taskRepo := newMockTaskRepo()
+		taskRepo.tasks["task1"] = &v1.Task{
+			ID:    "task1",
+			State: v1.TaskStateInProgress,
+		}
+
+		svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+		svc.reconcileSessionsOnStartup(ctx)
+
+		if state, ok := taskRepo.updatedStates["task1"]; ok {
+			t.Fatalf("expected archived task state to be left untouched, got write to %q", state)
+		}
+	})
 }
 
 // --- ensureSessionRunning: prepared workspace ---

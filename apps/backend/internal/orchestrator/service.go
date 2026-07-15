@@ -1311,8 +1311,8 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 
 	// Ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if running.TaskID != "" {
-		task, taskErr := s.taskRepo.GetTask(ctx, running.TaskID)
-		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress {
+		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
+		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			if updateErr := s.taskRepo.UpdateTaskState(ctx, running.TaskID, v1.TaskStateReview); updateErr != nil {
 				s.logger.Warn("failed to update task to REVIEW on startup",
 					zap.String("task_id", running.TaskID),
@@ -1422,8 +1422,8 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if session.TaskID != "" {
-		task, taskErr := s.taskRepo.GetTask(ctx, session.TaskID)
-		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress {
+		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
+		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
 				zap.String("task_id", session.TaskID),
 				zap.String("session_id", sessionID))

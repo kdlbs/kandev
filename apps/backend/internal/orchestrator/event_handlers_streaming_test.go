@@ -1204,6 +1204,46 @@ func TestWriteTaskInProgressForRuntimeSkipsArchivedTask(t *testing.T) {
 		"runtime reconciliation must not promote archived tasks to IN_PROGRESS")
 }
 
+func TestWriteTaskReviewStateSkipsArchivedTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.ArchiveTask(ctx, "t1"))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", State: v1.TaskStateInProgress}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskReviewState(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"REVIEW reconcile must not resurrect an archived task's state")
+}
+
+func TestWriteTaskReviewStateOnCancelSkipsArchivedTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	require.NoError(t, repo.ArchiveTask(ctx, "t1"))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t1"] = &v1.Task{ID: "t1", State: v1.TaskStateInProgress}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskReviewStateOnCancel(ctx, "t1", "s1")
+
+	require.Zero(t, taskRepo.stateWrites["t1"],
+		"cancel reconcile must not resurrect an archived task's state")
+}
+
 func TestWriteTaskReviewStateOnCancelSkipsWhenSessionActiveAgain(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

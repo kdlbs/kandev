@@ -819,6 +819,16 @@ func (s *Service) setSessionWaitingForInput(ctx context.Context, taskID, session
 	s.writeTaskReviewState(ctx, taskID, sessionID)
 }
 
+// taskArchived reports whether a task row has been archived. Runtime-state
+// writes (IN_PROGRESS on session start, REVIEW on turn completion/cancel/
+// startup reconciliation) must never resurrect an archived task's state —
+// once archived_at is set the row is frozen from the kanban's perspective,
+// so every write site here has to skip it instead of reviving stale runtime
+// state that raced the archive.
+func taskArchived(task *models.Task) bool {
+	return task != nil && task.ArchivedAt != nil
+}
+
 func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSessionID string) {
 	// Task lookup errors fail closed so office/archived guards cannot be bypassed
 	// by a transient repository failure.
@@ -829,6 +839,10 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 		return
 	} else if dbTask != nil && dbTask.AssigneeAgentProfileID != "" {
 		s.logger.Debug("skipping REVIEW transition for office task",
+			zap.String("task_id", taskID))
+		return
+	} else if taskArchived(dbTask) {
+		s.logger.Debug("skipping REVIEW transition for archived task",
 			zap.String("task_id", taskID))
 		return
 	}
@@ -919,6 +933,11 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 		return
 	}
 	if dbTask.AssigneeAgentProfileID != "" {
+		return
+	}
+	if taskArchived(dbTask) {
+		s.logger.Debug("skipping REVIEW transition after cancel for archived task",
+			zap.String("task_id", taskID))
 		return
 	}
 
@@ -1026,7 +1045,7 @@ func (s *Service) writeTaskInProgressForRuntime(ctx context.Context, taskID, ses
 			zap.Error(err))
 		return
 	}
-	if task != nil && task.ArchivedAt != nil {
+	if taskArchived(task) {
 		s.logger.Debug("skipping IN_PROGRESS transition for archived task",
 			zap.String("task_id", taskID))
 		return
