@@ -44,13 +44,13 @@ export function registerNotificationsHandlers(store: StoreApi<AppState>): WsHand
 
       // Sound is its own opt-in channel — it plays regardless of Notification permission.
       playWaitingForInputSound();
-      if (nativeNotifications.isAvailable()) {
+      if (nativeNotifications.isAvailable() && taskId) {
         void nativeNotifications
           .show({
             eventId: `${NOTIFICATION_EVENT_TASK_SESSION_WAITING_FOR_INPUT}:${message.id}`,
             title: message.payload.title || "Task needs your input",
             body: message.payload.body || "An agent is waiting for your input.",
-            taskId: taskId ?? "",
+            taskId,
             sessionId,
           })
           .catch(() => undefined);

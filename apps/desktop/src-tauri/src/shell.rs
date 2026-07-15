@@ -93,18 +93,6 @@ fn clamp_zoom(level: f64) -> f64 {
     level.clamp(MIN_ZOOM, MAX_ZOOM)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShutdownIntent {
-    ContextClose,
-    WindowClose,
-    Quit,
-    UpdaterRestart,
-}
-
-pub fn should_stop_backend(intent: ShutdownIntent) -> bool {
-    !matches!(intent, ShutdownIntent::ContextClose)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,7 +104,6 @@ mod tests {
             Some(MenuAction::Emit(CLOSE_CONTEXT_EVENT))
         );
         assert!(CLOSE_CONTEXT_EVENT.starts_with(DESKTOP_EVENT_PREFIX));
-        assert!(!should_stop_backend(ShutdownIntent::ContextClose));
     }
 
     #[test]
@@ -169,10 +156,4 @@ mod tests {
         assert_eq!(state.current(), DEFAULT_ZOOM);
     }
 
-    #[test]
-    fn close_quit_and_updater_restart_stop_the_backend() {
-        assert!(should_stop_backend(ShutdownIntent::WindowClose));
-        assert!(should_stop_backend(ShutdownIntent::Quit));
-        assert!(should_stop_backend(ShutdownIntent::UpdaterRestart));
-    }
 }

@@ -5,6 +5,7 @@ import { desktopUpdater } from "@/lib/desktop/updater-client";
 import type { DesktopUpdateState } from "@/lib/desktop/protocol";
 import type { DesktopUpdaterAdapter } from "@/lib/desktop/updater-adapter";
 
+// Tauri availability is fixed when the document loads, so it needs no subscription.
 const subscribeAvailability = () => () => undefined;
 const ACTIVE_POLL_INTERVAL_MS = 250;
 const STABLE_POLL_INTERVAL_MS = 5_000;
