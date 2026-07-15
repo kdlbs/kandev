@@ -136,9 +136,7 @@ export function useSavedViews() {
     try {
       await request;
     } finally {
-      if (hydrationRequest.current === request) {
-        hydrationRequest.current = null;
-      }
+      hydrationRequest.current = null;
     }
   }, []);
 
