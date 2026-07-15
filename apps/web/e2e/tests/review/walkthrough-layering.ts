@@ -20,6 +20,7 @@ export async function expectWalkthroughBehindDialog(
   surfaces: WalkthroughSurface[],
 ): Promise<void> {
   const backdrop = page.locator('[data-slot$="dialog-overlay"]:visible');
+  await expect(dialog).toBeVisible();
   await expect(backdrop).toBeVisible();
 
   const dialogZIndex = await zIndex(dialog, "dialog content");
