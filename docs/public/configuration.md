@@ -126,7 +126,7 @@ telemetry:
 ```
 
 Telemetry is strictly opt-in regardless of these keys — see [telemetry.md](telemetry.md)
-for the consent model and the `KANDEV_TELEMETRY=off` / `DO_NOT_TRACK=1` kill switches.
+for the consent model and the `DO_NOT_TRACK=1` convention.
 
 ## Required vs optional
 

@@ -35,9 +35,13 @@ Telemetry is **strictly opt-in** and lives in `internal/telemetry`:
 - **Consent:** tri-state (`unasked/granted/denied`) on the install-wide
   `settings` table, exposed via `GET/PUT /api/v1/telemetry/consent`, a
   one-time onboarding step, and `Settings → System → Telemetry`.
-- **Kill switches:** `DO_NOT_TRACK=1` and `KANDEV_TELEMETRY=off` win over
-  everything; with either set the service starts no goroutines and
-  subscribes to nothing. `profiles.yaml` forces `off` in dev and e2e.
+- **Hard-off conditions:** the stored opt-in is the single user-facing
+  control. Only two environment conditions override it: `DO_NOT_TRACK=1`
+  (convention) and e2e mode (the existing `KANDEV_E2E_MOCK` selector), so
+  CI backends can never emit real events. With either, the service starts
+  no goroutines and subscribes to nothing. A Kandev-specific
+  `KANDEV_TELEMETRY=off` switch existed briefly and was removed to keep
+  one control surface; dev-mode builds use the normal consent flow.
   `KANDEV_TELEMETRY_DEBUG=1` logs every outgoing payload.
 - **Delivery:** in-memory queue, batched flush, fail-silent, no disk
   persistence, drops on overflow — telemetry can never block product flows.

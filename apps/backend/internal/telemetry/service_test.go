@@ -234,16 +234,13 @@ func TestEnvDisabledDetection(t *testing.T) {
 		{"do_not_track_1", "DO_NOT_TRACK", "1", true},
 		{"do_not_track_true", "DO_NOT_TRACK", "true", true},
 		{"do_not_track_0", "DO_NOT_TRACK", "0", false},
-		{"kandev_off", "KANDEV_TELEMETRY", "off", true},
-		{"kandev_false", "KANDEV_TELEMETRY", "false", true},
-		{"kandev_0", "KANDEV_TELEMETRY", "0", true},
-		{"kandev_disabled", "KANDEV_TELEMETRY", "DISABLED", true},
-		{"kandev_on", "KANDEV_TELEMETRY", "on", false},
+		{"e2e_mode", "KANDEV_E2E_MOCK", "true", true},
+		{"e2e_selector_unset_value", "KANDEV_E2E_MOCK", "false", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("DO_NOT_TRACK", "")
-			t.Setenv("KANDEV_TELEMETRY", "")
+			t.Setenv("KANDEV_E2E_MOCK", "")
 			if tc.envVar != "" {
 				t.Setenv(tc.envVar, tc.value)
 			}

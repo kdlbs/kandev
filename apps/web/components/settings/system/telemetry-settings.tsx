@@ -143,9 +143,8 @@ function ConsentCard({
         )}
         <p>
           Set <span className="font-mono text-xs">KANDEV_TELEMETRY_DEBUG=1</span> to log every
-          outgoing payload locally, or{" "}
-          <span className="font-mono text-xs">KANDEV_TELEMETRY=off</span> /{" "}
-          <span className="font-mono text-xs">DO_NOT_TRACK=1</span> to hard-disable collection.
+          outgoing payload locally. The <span className="font-mono text-xs">DO_NOT_TRACK=1</span>{" "}
+          convention is honoured and hard-disables collection.
         </p>
       </CardContent>
     </Card>
@@ -197,8 +196,8 @@ function EnvDisabledAlert() {
       <IconShieldLock className="h-4 w-4 text-muted-foreground" />
       <AlertTitle>Disabled by environment</AlertTitle>
       <AlertDescription className="text-muted-foreground">
-        KANDEV_TELEMETRY=off or DO_NOT_TRACK is set for this install, so telemetry is hard-disabled
-        regardless of the preference below and no data is ever sent.
+        DO_NOT_TRACK is set (or this is a test-mode run), so telemetry is hard-disabled regardless
+        of the preference below and no data is ever sent.
       </AlertDescription>
     </Alert>
   );

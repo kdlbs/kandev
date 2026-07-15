@@ -4,7 +4,7 @@ export type TelemetryConsentState = {
   status: TelemetryConsentStatus;
   /** Anonymous install UUID; present only after consent is granted. */
   install_id?: string;
-  /** True when DO_NOT_TRACK / KANDEV_TELEMETRY=off hard-disable telemetry. */
+  /** True when DO_NOT_TRACK or e2e test mode hard-disables telemetry. */
   env_disabled: boolean;
 };
 

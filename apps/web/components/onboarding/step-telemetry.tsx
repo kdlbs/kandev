@@ -9,8 +9,8 @@ import type { TelemetryConsentState, TelemetryConsentStatus } from "@/lib/types/
 
 /**
  * Decides whether the onboarding dialog should show the telemetry consent
- * step: only when the install has never been asked and the env kill
- * switches (KANDEV_TELEMETRY=off / DO_NOT_TRACK) are not active.
+ * step: only when the install has never been asked and the environment
+ * does not hard-disable telemetry (DO_NOT_TRACK / e2e test mode).
  */
 export function useTelemetryOnboarding(open: boolean): { showTelemetryStep: boolean } {
   const [consent, setConsent] = useState<TelemetryConsentState | null>(null);

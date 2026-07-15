@@ -1,10 +1,10 @@
 # Telemetry
 
 Kandev includes **strictly opt-in** anonymous product telemetry. Nothing is
-ever collected or sent unless you explicitly enable it, and two environment
-kill switches disable it unconditionally. This page is the complete, exact
-list of what can be sent — if an event is not in the tables below, Kandev
-does not send it.
+ever collected or sent unless you explicitly enable it — the in-app opt-in
+is the single control (with the `DO_NOT_TRACK` convention honoured on top).
+This page is the complete, exact list of what can be sent — if an event is
+not in the tables below, Kandev does not send it.
 
 ## How consent works
 
@@ -18,19 +18,19 @@ does not send it.
 - Consent is stored per install in Kandev's local database
   (`telemetry.consent` in the `settings` table).
 
-## Kill switches
+## Hard-off conditions
 
 These are honoured unconditionally, before your stored preference is even
-read. With either set, Kandev starts no telemetry machinery at all and the
-consent prompt is hidden:
+read. When either applies, Kandev starts no telemetry machinery at all and
+the consent prompt is hidden:
 
-| Variable | Effect |
+| Condition | Effect |
 | --- | --- |
 | `DO_NOT_TRACK=1` | Disables all telemetry ([consoledonottrack.com](https://consoledonottrack.com) convention) |
-| `KANDEV_TELEMETRY=off` | Disables all telemetry (Kandev-specific; `false`, `0`, and `disabled` also work) |
+| E2E test mode (`KANDEV_E2E_MOCK=true`) | Playwright/CI backends never emit events, even if a test grants consent |
 
-Dev mode and e2e test runs force `KANDEV_TELEMETRY=off` via `profiles.yaml`,
-so local development and CI never emit events.
+There is no other environment switch — outside those two conditions, the
+opt-in toggle in `Settings → System → Telemetry` is the only control.
 
 ## Inspecting what would be sent
 
@@ -80,5 +80,5 @@ is dropped — telemetry never blocks or retries aggressively, and unsent
 events are not persisted to disk.
 
 Self-hosters can redirect or replace the sink with
-`KANDEV_TELEMETRY_ENDPOINT` and `KANDEV_TELEMETRY_API_KEY`, or disable
-everything with the kill switches above.
+`KANDEV_TELEMETRY_ENDPOINT` and `KANDEV_TELEMETRY_API_KEY`, simply never
+opt in, or set `DO_NOT_TRACK=1`.

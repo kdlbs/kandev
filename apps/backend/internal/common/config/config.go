@@ -164,9 +164,10 @@ type VoiceConfig struct {
 }
 
 // TelemetryConfig holds configuration for opt-in product telemetry.
-// Emission additionally requires the user's stored consent and is blocked
-// outright by the KANDEV_TELEMETRY=off / DO_NOT_TRACK=1 env kill switches,
-// which internal/telemetry reads directly from the process environment.
+// Emission additionally requires the user's stored consent — the single
+// user-facing control — and is blocked outright by DO_NOT_TRACK=1 and in
+// e2e mode (KANDEV_E2E_MOCK), which internal/telemetry reads directly
+// from the process environment.
 type TelemetryConfig struct {
 	// Endpoint overrides the analytics ingestion host. Empty means the
 	// built-in default (PostHog EU). Set via KANDEV_TELEMETRY_ENDPOINT.

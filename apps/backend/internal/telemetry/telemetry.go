@@ -1,10 +1,12 @@
 // Package telemetry implements strictly opt-in product telemetry.
 //
 // Nothing is ever collected or sent unless the user has explicitly granted
-// consent (stored install-wide via internal/system/settings). Two env kill
-// switches are honoured unconditionally, before consent is even consulted:
-// DO_NOT_TRACK=1 and KANDEV_TELEMETRY=off. When either is set the service
-// starts no goroutines, subscribes to nothing, and the HTTP surface reports
+// consent (stored install-wide via internal/system/settings). The stored
+// consent is the single user-facing control; two environment conditions
+// hard-disable collection before consent is even consulted: the
+// DO_NOT_TRACK=1 convention, and e2e test mode (KANDEV_E2E_MOCK), so CI
+// runs can never emit real events. When either applies the service starts
+// no goroutines, subscribes to nothing, and the HTTP surface reports
 // env_disabled so the frontend hides its consent prompts.
 //
 // Events are allowlisted by name and may only carry enum-like identifier
@@ -17,10 +19,10 @@ import (
 	"os"
 	"regexp"
 	"runtime"
-	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/profiles"
 )
 
 // Built-in PostHog EU ingestion defaults. The API key is a write-only
@@ -106,18 +108,15 @@ func sanitizeUIEvent(name string, properties map[string]string) (Event, bool) {
 // EnvDisabled reports whether telemetry is hard-disabled by environment.
 // Checked before consent: when true the service never starts and the UI
 // hides its consent prompts. DO_NOT_TRACK follows the consoledonottrack.com
-// convention; KANDEV_TELEMETRY is the Kandev-specific switch set to "off"
-// by the dev and e2e profiles in profiles.yaml.
+// convention; e2e mode piggybacks on the existing KANDEV_E2E_MOCK selector
+// so playwright-spawned backends can never emit real events even if a spec
+// grants consent. The stored opt-in is otherwise the only control.
 func EnvDisabled() bool {
 	switch os.Getenv("DO_NOT_TRACK") {
 	case "1", "true", "yes", "on":
 		return true
 	}
-	switch strings.ToLower(os.Getenv("KANDEV_TELEMETRY")) {
-	case "off", "false", "0", "disabled":
-		return true
-	}
-	return false
+	return profiles.DetectEnvironment() == profiles.EnvE2E
 }
 
 // detectDeployMode classifies how this install runs, as a coarse enum.
