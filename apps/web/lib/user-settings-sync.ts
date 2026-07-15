@@ -1,7 +1,9 @@
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
+import { ApiError } from "@/lib/api/client";
 import type { UserSettingsUpdatePayload } from "@/lib/types/http-user-settings";
 
 const MAX_SYNC_ATTEMPTS = 3;
+const BASE_SYNC_RETRY_DELAY_MS = 100;
 
 async function updateWithRetry(payload: UserSettingsUpdatePayload): Promise<void> {
   let lastError: unknown;
@@ -10,7 +12,13 @@ async function updateWithRetry(payload: UserSettingsUpdatePayload): Promise<void
       await updateUserSettings(payload);
       return;
     } catch (error) {
+      if (error instanceof ApiError) throw error;
       lastError = error;
+      if (attempt < MAX_SYNC_ATTEMPTS - 1) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, BASE_SYNC_RETRY_DELAY_MS * 2 ** attempt),
+        );
+      }
     }
   }
   throw lastError;

@@ -31,7 +31,9 @@ export const KNOWN_DIMENSIONS = new Set<string>([
   "executorType",
   "repository",
   "hasDiff",
+  "hasPR",
   "isPRReview",
+  "isIssueWatch",
   "titleMatch",
 ]);
 

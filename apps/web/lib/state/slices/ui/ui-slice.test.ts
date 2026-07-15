@@ -3,9 +3,9 @@ import { create, type StoreApi, type UseBoundStore } from "zustand";
 import { waitFor } from "@testing-library/react";
 import { immer } from "zustand/middleware/immer";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
-import { createUISlice } from "./ui-slice";
+import { createUISlice, migrateView } from "./ui-slice";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
-import type { SidebarViewDraft } from "./sidebar-view-types";
+import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import type { UISlice } from "./types";
 import {
   getStoredAcknowledgedAgentErrors,
@@ -32,7 +32,7 @@ const BACKEND_DOWN = "backend down";
 const PINNED_KEY = "kandev.sidebar.pinnedTaskIds";
 const ORDER_KEY = "kandev.sidebar.orderedTaskIds";
 
-function makeSidebarView(id: string, name: string) {
+function makeSidebarView(id: string, name: string): SidebarView {
   return {
     id,
     name,
@@ -42,6 +42,18 @@ function makeSidebarView(id: string, name: string) {
     collapsedGroups: [],
   };
 }
+
+describe("migrateView", () => {
+  it("retains all supported boolean filter dimensions", () => {
+    const view = makeSidebarView("view-a", "View A");
+    view.filters = [
+      { id: "has-pr", dimension: "hasPR", op: "is", value: true },
+      { id: "issue-watch", dimension: "isIssueWatch", op: "is", value: true },
+    ];
+
+    expect(migrateView(view).filters).toEqual(view.filters);
+  });
+});
 
 describe("toggleSubtaskCollapsed", () => {
   beforeEach(() => {

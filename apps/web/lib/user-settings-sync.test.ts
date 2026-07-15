@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { waitFor } from "@testing-library/react";
+import { ApiError } from "@/lib/api/client";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { createQueuedUserSettingsSync } from "./user-settings-sync";
 
@@ -63,5 +64,16 @@ describe("createQueuedUserSettingsSync", () => {
       expect(updateUserSettings).toHaveBeenNthCalledWith(2, { preferred_shell: "bash" });
       expect(updateUserSettings).toHaveBeenNthCalledWith(3, { preferred_shell: "zsh" });
     });
+  });
+
+  it("does not retry an API error", async () => {
+    vi.mocked(updateUserSettings).mockRejectedValueOnce(new ApiError("invalid settings", 400, {}));
+    const sync = createQueuedUserSettingsSync<string>((value) => ({
+      preferred_shell: value,
+    }));
+
+    await sync("bash");
+
+    expect(updateUserSettings).toHaveBeenCalledTimes(1);
   });
 });
