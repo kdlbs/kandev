@@ -2,6 +2,7 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 import {
   createAgentAction,
   createAgentProfileAction,
+  updateAgentProfileAction,
   updateAgentProfileMcpConfigAction,
 } from "@/app/actions/agents";
 import { agentProfileId as toAgentProfileId, type AgentProfile } from "@/lib/types/http";
@@ -286,11 +287,13 @@ describe("saveExistingAgent", () => {
         error: null,
       },
     });
+    const updatedExisting = { ...baseProfile, name: "Updated existing profile" };
     const savedAgent = agentWithProfiles([baseProfile]);
-    const draftAgent = agentWithProfiles([baseProfile, newProfile]);
+    const draftAgent = agentWithProfiles([updatedExisting, newProfile]);
     const createdProfile = { ...newProfile, id: PERSISTED_PROFILE_ID, mcp_config: undefined };
     const { callbacks, upsertAgent, getDraft } = createTestCallbacks(draftAgent);
     const failure = new Error("MCP unavailable");
+    vi.mocked(updateAgentProfileAction).mockResolvedValue(updatedExisting);
     vi.mocked(createAgentProfileAction).mockResolvedValue(createdProfile);
     vi.mocked(updateAgentProfileMcpConfigAction)
       .mockRejectedValueOnce(failure)
@@ -303,10 +306,12 @@ describe("saveExistingAgent", () => {
     await expect(saveExistingAgent(draftAgent, savedAgent, false, callbacks)).rejects.toBe(failure);
 
     const reconciled = upsertAgent.mock.calls[0][0];
+    expect(reconciled.profiles[0].name).toBe("Updated existing profile");
     expect(reconciled.profiles[1]).toMatchObject({
       id: PERSISTED_PROFILE_ID,
       mcp_config: { dirty: true },
     });
+    expect(getDraft().profiles[0].name).toBe("Updated existing profile");
     expect(getDraft().profiles[1]).toMatchObject({
       id: PERSISTED_PROFILE_ID,
       mcp_config: { dirty: true },
@@ -315,6 +320,7 @@ describe("saveExistingAgent", () => {
     const savedDraft = await saveExistingAgent(getDraft(), reconciled, false, callbacks);
 
     expect(createAgentProfileAction).toHaveBeenCalledOnce();
+    expect(updateAgentProfileAction).toHaveBeenCalledOnce();
     expect(updateAgentProfileMcpConfigAction).toHaveBeenCalledTimes(2);
     expect(savedDraft.profiles[1].mcp_config).toBeUndefined();
   });

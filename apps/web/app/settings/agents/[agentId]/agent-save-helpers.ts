@@ -300,7 +300,8 @@ async function saveExistingProfiles(
   const savedProfilesById = new Map(savedAgent.profiles.map((p) => [p.id, p]));
   const nextProfiles: AgentProfile[] = isCreateMode ? [...savedAgent.profiles] : [];
   const profileIds = new Map<string, string>();
-  const createdProfiles: DraftProfile[] = [];
+  const persistedProfiles: DraftProfile[] = [];
+  const persistedSubmittedIds = new Set<string>();
 
   try {
     for (const profile of draftAgent.profiles) {
@@ -317,7 +318,8 @@ async function saveExistingProfiles(
           env_vars: profile.envVars ?? [],
         });
         profileIds.set(profile.id, createdProfile.id);
-        createdProfiles.push(
+        persistedSubmittedIds.add(profile.id);
+        persistedProfiles.push(
           profile.mcp_config
             ? { ...createdProfile, mcp_config: profile.mcp_config }
             : createdProfile,
@@ -327,16 +329,24 @@ async function saveExistingProfiles(
           targetProfileId: createdProfile.id,
           onToastError,
         });
-        createdProfiles[createdProfiles.length - 1] = createdProfile;
+        persistedProfiles[persistedProfiles.length - 1] = createdProfile;
         nextProfiles.push(createdProfile);
         continue;
       }
       profileIds.set(profile.id, savedProfile.id);
-      nextProfiles.push(await savePersistedProfile(profile, savedProfile, onToastError));
+      const persistedProfile = await savePersistedProfile(profile, savedProfile, onToastError);
+      persistedSubmittedIds.add(profile.id);
+      persistedProfiles.push(persistedProfile);
+      nextProfiles.push(persistedProfile);
     }
   } catch (error) {
-    if (createdProfiles.length > 0) {
-      throw new PartialProfileSaveError(error, createdProfiles, profileIds);
+    if (persistedProfiles.length > 0) {
+      throw new PartialProfileSaveError(
+        error,
+        persistedProfiles,
+        persistedSubmittedIds,
+        profileIds,
+      );
     }
     throw error;
   }
@@ -346,7 +356,8 @@ async function saveExistingProfiles(
 class PartialProfileSaveError extends Error {
   constructor(
     readonly original: unknown,
-    readonly createdProfiles: DraftProfile[],
+    readonly persistedProfiles: DraftProfile[],
+    readonly persistedSubmittedIds: Set<string>,
     readonly profileIds: Map<string, string>,
   ) {
     super("Profile creation only partially completed");
@@ -359,25 +370,31 @@ function reconcilePartialProfileSave(
   partial: PartialProfileSaveError,
   callbacks: SaveAgentCallbacks,
 ) {
+  const profilesById = new Map(savedAgent.profiles.map((profile) => [profile.id, profile]));
+  for (const profile of partial.persistedProfiles) profilesById.set(profile.id, profile);
   const reconciled = {
     ...savedAgent,
-    profiles: [...savedAgent.profiles, ...partial.createdProfiles],
+    profiles: [...profilesById.values()],
   };
   callbacks.upsertAgent(reconciled);
-  const submittedIds = new Set(
-    draftAgent.profiles.map((profile) => partial.profileIds.get(profile.id) ?? profile.id),
-  );
+  const submitted = {
+    ...draftAgent,
+    profiles: draftAgent.profiles.filter((profile) =>
+      partial.persistedSubmittedIds.has(profile.id),
+    ),
+  };
+  const persistedIds = new Set(partial.persistedProfiles.map((profile) => profile.id));
   const savedDraft = callbacks.ensureProfiles(
     {
       ...callbacks.cloneAgent(reconciled),
-      profiles: reconciled.profiles.filter((profile) => submittedIds.has(profile.id)),
+      profiles: reconciled.profiles.filter((profile) => persistedIds.has(profile.id)),
     },
     callbacks.resolveDisplayName(reconciled.name),
     callbacks.currentAgentModelConfig.default_model,
     callbacks.permissionSettings,
   );
   callbacks.setDraftAgent((current) =>
-    mergeSavedAgentDraft(current, draftAgent, savedDraft, partial.profileIds),
+    mergeSavedAgentDraft(current, submitted, savedDraft, partial.profileIds),
   );
 }
 
