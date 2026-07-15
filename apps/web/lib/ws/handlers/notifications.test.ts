@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import { NOTIFICATION_EVENT_TASK_SESSION_WAITING_FOR_INPUT } from "@/lib/notifications/events";
 import type { BackendMessageMap } from "@/lib/types/backend";
 import { registerNotificationsHandlers } from "./notifications";
 
@@ -13,6 +14,9 @@ import { playWaitingForInputSound } from "@/lib/notifications/sound";
 const TASK_ID = "task-1";
 const SESSION_ID = "session-1";
 const OTHER_TASK_ID = "task-2";
+const MESSAGE_TITLE = "Task needs your input";
+const MESSAGE_BODY = "An agent is waiting for your input.";
+const notificationMock = vi.fn();
 
 function makeStore(overrides: Partial<AppState> = {}) {
   const state = {
@@ -24,16 +28,16 @@ function makeStore(overrides: Partial<AppState> = {}) {
   return { getState: () => state } as unknown as StoreApi<AppState>;
 }
 
-function makeMessage(): BackendMessageMap["session.waiting_for_input"] {
+function makeMessage(id = "message-1"): BackendMessageMap["session.waiting_for_input"] {
   return {
-    id: "message-1",
+    id,
     type: "notification",
     action: "session.waiting_for_input",
     payload: {
       task_id: TASK_ID,
       session_id: SESSION_ID,
-      title: "Task needs your input",
-      body: "An agent is waiting for your input.",
+      title: MESSAGE_TITLE,
+      body: MESSAGE_BODY,
     },
   };
 }
@@ -43,8 +47,6 @@ function getHandler(store: StoreApi<AppState>) {
 }
 
 describe("session.waiting_for_input handler", () => {
-  const notificationMock = vi.fn();
-
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubGlobal(
@@ -55,14 +57,59 @@ describe("session.waiting_for_input handler", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("delegates event deduplication to the native notification command", () => {
+    const invoke = vi.fn().mockResolvedValue("shown");
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke,
+      transformCallback: vi.fn(),
+    };
+
+    const handler = getHandler(makeStore());
+    handler(makeMessage());
+    handler(makeMessage());
+    handler(makeMessage("message-2"));
+
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(invoke).toHaveBeenNthCalledWith(1, "show_native_notification", {
+      request: {
+        eventId: "session.waiting_for_input:message-1",
+        title: MESSAGE_TITLE,
+        body: MESSAGE_BODY,
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+      },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "show_native_notification", {
+      request: {
+        eventId: "session.waiting_for_input:message-1",
+        title: MESSAGE_TITLE,
+        body: MESSAGE_BODY,
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+      },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, "show_native_notification", {
+      request: {
+        eventId: "session.waiting_for_input:message-2",
+        title: MESSAGE_TITLE,
+        body: MESSAGE_BODY,
+        taskId: TASK_ID,
+        sessionId: SESSION_ID,
+      },
+    });
+    expect(notificationMock).not.toHaveBeenCalled();
+    expect(playWaitingForInputSound).toHaveBeenCalledTimes(3);
   });
 
   it("plays the sound and shows a notification when not suppressed", () => {
     getHandler(makeStore())(makeMessage());
 
     expect(playWaitingForInputSound).toHaveBeenCalledTimes(1);
-    expect(notificationMock).toHaveBeenCalledWith("Task needs your input", {
-      body: "An agent is waiting for your input.",
+    expect(notificationMock).toHaveBeenCalledWith(MESSAGE_TITLE, {
+      body: MESSAGE_BODY,
     });
   });
 
@@ -103,5 +150,57 @@ describe("session.waiting_for_input handler", () => {
 
     expect(playWaitingForInputSound).not.toHaveBeenCalled();
     expect(notificationMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("session.waiting_for_input malformed payloads", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal(
+      "Notification",
+      Object.assign(notificationMock, { permission: "granted" as NotificationPermission }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  });
+
+  it("uses the browser notification fallback when an event lacks a task ID", () => {
+    const invoke = vi.fn().mockResolvedValue("shown");
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke,
+      transformCallback: vi.fn(),
+    };
+    const message = {
+      ...makeMessage(),
+      payload: { ...makeMessage().payload, task_id: undefined },
+    } as unknown as BackendMessageMap["session.waiting_for_input"];
+
+    getHandler(makeStore())(message);
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(notificationMock).toHaveBeenCalledWith(MESSAGE_TITLE, { body: MESSAGE_BODY });
+  });
+
+  it("uses the task and session as the native identity when the envelope ID is absent", () => {
+    const invoke = vi.fn().mockResolvedValue("shown");
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke,
+      transformCallback: vi.fn(),
+    };
+    const message = {
+      ...makeMessage(),
+      id: undefined,
+    } as unknown as BackendMessageMap["session.waiting_for_input"];
+
+    getHandler(makeStore())(message);
+
+    expect(invoke).toHaveBeenCalledWith("show_native_notification", {
+      request: expect.objectContaining({
+        eventId: `${NOTIFICATION_EVENT_TASK_SESSION_WAITING_FOR_INPUT}:${TASK_ID}:${SESSION_ID}`,
+      }),
+    });
   });
 });

@@ -19,6 +19,7 @@
         "minWidth": 960,
         "minHeight": 640,
         "resizable": true,
+        "visible": false,
         "fullscreen": false
       }
     ],
@@ -29,9 +30,18 @@
       "csp": "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; frame-ancestors 'none'"
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/kdlbs/kandev/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI0NzVGQ0MwODhDODM0OEMKUldTTU5NaUl3UHgxdENoYmIvRDR1Y3F1Tys2ZXN5MFNRbHRHSHpmeWhIdzIxVFJEVUJubDAwWmwK"
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": false,
     "publisher": "Kandev",
     "homepage": "https://github.com/kdlbs/kandev",
     "resources": {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/google/uuid"
@@ -21,6 +22,7 @@ import (
 const (
 	EventTaskSessionWaitingForInput = "session.waiting_for_input"
 	EventOfficeInboxItem            = "office.inbox_item"
+	desktopNativeNotificationsEnv   = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS"
 )
 
 var ErrProviderNotFound = errors.New("notification provider not found")
@@ -42,7 +44,9 @@ func NewService(repo notificationstore.Repository, taskRepo taskGetter, hub *gat
 	providerMap := map[models.ProviderType]providers.Provider{
 		models.ProviderTypeLocal:   providers.NewLocalProvider(hub),
 		models.ProviderTypeApprise: providers.NewAppriseProvider(),
-		models.ProviderTypeSystem:  providers.NewSystemProvider(),
+	}
+	if os.Getenv(desktopNativeNotificationsEnv) != "true" {
+		providerMap[models.ProviderTypeSystem] = providers.NewSystemProvider()
 	}
 	return &Service{
 		repo:      repo,
@@ -74,7 +78,12 @@ func (s *Service) ListProviders(ctx context.Context, userID string) ([]*models.P
 		return nil, nil, err
 	}
 	subscriptions := make(map[string][]string, len(providers))
+	availableProviders := make([]*models.Provider, 0, len(providers))
 	for _, provider := range providers {
+		if s.providers[provider.Type] == nil {
+			continue
+		}
+		availableProviders = append(availableProviders, provider)
 		subs, err := s.repo.ListSubscriptionsByProvider(ctx, provider.ID)
 		if err != nil {
 			return nil, nil, err
@@ -85,7 +94,7 @@ func (s *Service) ListProviders(ctx context.Context, userID string) ([]*models.P
 			}
 		}
 	}
-	return providers, subscriptions, nil
+	return availableProviders, subscriptions, nil
 }
 
 func (s *Service) CreateProvider(ctx context.Context, userID, name string, providerType models.ProviderType, config map[string]interface{}, enabled bool, events []string) (*models.Provider, error) {

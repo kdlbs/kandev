@@ -70,7 +70,14 @@ LOG="${LOG}.log"
 "$@" > "$LOG" 2>&1
 RC=$?
 
-if [[ $RC -eq 0 ]]; then
+EXTRACT_LOG_ON_SUCCESS=false
+case "$TAG" in
+  gh-run|ci|gh-run-view)
+    EXTRACT_LOG_ON_SUCCESS=true
+    ;;
+esac
+
+if [[ $RC -eq 0 && "$EXTRACT_LOG_ON_SUCCESS" != true ]]; then
   echo "exit=0 log=$LOG"
   exit 0
 fi
@@ -110,7 +117,10 @@ grep_for_tag() {
     gh-run|ci|gh-run-view)
       # GitHub Actions log lines: "JOB\tSTEP\t...". Pull anything that
       # mentions error/failed/FAIL, plus the surrounding job context line.
-      grep -nE '^\S+\s+\S+\s+.*(error|failed|FAIL|Error:|exit code|golangci-lint run|[A-Za-z0-9_./-]+\.go:[0-9]+:[0-9]+:|[0-9]+ issues?:|apps/backend/test-results\.json|Process completed with exit code 1)' "$PLAIN"
+      # `gh run view --log-failed` exits zero when it retrieved a log, even
+      # when that log contains failed tests. Include Go's JSON, test, and
+      # goleak markers so those failures are surfaced in that success case.
+      grep -nE '^\S+\s+\S+\s+.*(error|failed|FAIL|Error:|exit code|golangci-lint run|[A-Za-z0-9_./-]+\.go:[0-9]+:[0-9]+:|[0-9]+ issues?:|apps/backend/test-results\.json|Process completed with exit code 1)|"Action":"fail"|--- FAIL:|goleak:' "$PLAIN"
       ;;
     *)
       grep -nE '(error|Error|FAIL|panic:|Failed|✘|✗)' "$PLAIN"
@@ -123,6 +133,10 @@ MATCHES="$(grep_for_tag | head -n "$TAIL_LINES")"
 if [[ -n "$MATCHES" ]]; then
   echo "--- failures ($(printf '%s\n' "$MATCHES" | wc -l | tr -d ' ') lines, of tag=$TAG) ---"
   printf '%s\n' "$MATCHES"
+elif [[ $RC -eq 0 ]]; then
+  # Successful GitHub commands with no failure markers remain compact.
+  rm -f "$PLAIN"
+  exit 0
 else
   # Fallback: grep found nothing useful; surface the last N lines verbatim.
   echo "--- no tag matches; tail $TAIL_LINES lines of $LOG ---"

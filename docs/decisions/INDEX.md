@@ -31,9 +31,9 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0023 | [Active workspace cookie for boot state](0023-active-workspace-cookie.md)                                                           | accepted   | backend, frontend           | 2026-06-18 |
 | 0024 | [Go-fronted Vite dev mode](0024-go-fronted-vite-dev-mode.md)                                                                        | accepted   | backend, frontend, cli      | 2026-06-18 |
 | 0025 | [Runtime cleanup uses `executors_running`](0025-runtime-cleanup-uses-executors-running.md)                                          | accepted (amended 2026-07-06) | backend            | 2026-06-22 |
-| 0026 | [Tauri desktop shell over native runtime](0026-tauri-desktop-shell.md)                                                              | accepted   | frontend, backend, cli, infra | 2026-06-23 |
+| 0026 | [Tauri desktop shell over native runtime](0026-tauri-desktop-shell.md)                                                              | accepted (amended 2026-07-15) | frontend, backend, cli, infra | 2026-06-23 |
 | 0027 | [Replayable schema migrations across SQLite and Postgres](0027-replayable-schema-migrations.md)                                     | accepted   | backend                     | 2026-06-24 |
-| 0028 | [Backend-owned task-create last-used preferences](0028-task-create-last-used-source-of-truth.md)                                    | accepted (amended by 0039) | backend, frontend | 2026-06-29 |
+| 0028 | [Backend-owned task-create last-used preferences](0028-task-create-last-used-source-of-truth.md)                                    | accepted (amended by 0041) | backend, frontend | 2026-06-29 |
 | 0029 | [Release backfill and desktop diagnostics](0029-release-backfill-and-desktop-diagnostics.md)                                        | accepted   | infra, workflow             | 2026-07-01 |
 | 0030 | [Workspace-scoped integration settings](0030-workspace-scoped-integration-settings.md)                                             | accepted   | backend, frontend           | 2026-07-01 |
 | 0031 | [Office skill reference files](0031-office-skill-reference-files.md)                                                                | accepted   | backend                     | 2026-07-06 |
@@ -44,4 +44,6 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0036 | [Normalize ACP shell output at the adapter boundary](0036-normalize-acp-shell-output-at-adapter-boundary.md)                        | accepted   | backend, frontend, protocol | 2026-07-14 |
 | 0037 | [Resource-aware frontend unit tests](0037-resource-aware-frontend-unit-tests.md)                                                     | accepted   | frontend, infra             | 2026-07-14 |
 | 0038 | [Quick Chat Repository Isolation](0038-quick-chat-repository-isolation.md)                                                           | accepted   | backend, frontend           | 2026-07-14 |
-| 0039 | [Backend-owned portable user settings](0039-backend-owned-portable-user-settings.md)                                               | accepted   | backend, frontend           | 2026-07-15 |
+| 0039 | [Native desktop integration boundary](0039-native-desktop-integration-boundary.md)                                                  | accepted   | desktop, frontend, backend, infra | 2026-07-15 |
+| 0040 | [Separate updater integrity from OS publisher identity](0040-separate-updater-integrity-from-os-publisher-identity.md)                  | accepted   | desktop, infra, workflow    | 2026-07-15 |
+| 0041 | [Backend-owned portable user settings](0041-backend-owned-portable-user-settings.md)                                               | accepted   | backend, frontend           | 2026-07-15 |

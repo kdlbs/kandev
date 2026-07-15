@@ -1,4 +1,4 @@
-# 0039: Backend-Owned Portable User Settings
+# 0041: Backend-Owned Portable User Settings
 
 **Status:** accepted
 **Date:** 2026-07-15

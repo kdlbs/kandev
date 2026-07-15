@@ -11,7 +11,9 @@ Checks that each required platform has at least one desktop artifact named:
   kandev-desktop-<platform>-*
 
 and that every matching artifact has a sibling .sha256 file. If no platform is
-given, all supported desktop platforms are required.
+given, all supported desktop platforms are required. Signed Tauri updater
+artifacts (`*.app.tar.gz`, `*.AppImage.tar.gz`, and `*.nsis.zip`) must have a
+matching `*.sig` file, and signatures without their updater bundle are rejected.
 EOF
 }
 
@@ -50,6 +52,15 @@ verify_checksum() {
 
 shopt -s nullglob
 
+updater_suffix_for_platform() {
+  case "$1" in
+    macos-*) printf '%s\n' '*.app.tar.gz' ;;
+    linux-*) printf '%s\n' '*.AppImage.tar.gz' ;;
+    windows-*) printf '%s\n' '*.nsis.zip' ;;
+    *) return 1 ;;
+  esac
+}
+
 for platform in "${REQUIRED_PLATFORMS[@]}"; do
   artifacts=("$ASSETS_DIR"/kandev-desktop-"$platform"-*)
   found=0
@@ -74,6 +85,23 @@ for platform in "${REQUIRED_PLATFORMS[@]}"; do
     echo "Missing desktop artifact for platform: $platform" >&2
     exit 1
   fi
+
+  updater_suffix="$(updater_suffix_for_platform "$platform")"
+  updater_bundles=("$ASSETS_DIR"/kandev-desktop-"$platform"-$updater_suffix)
+  updater_signatures=("$ASSETS_DIR"/kandev-desktop-"$platform"-$updater_suffix.sig)
+  for updater_bundle in "${updater_bundles[@]}"; do
+    if [ ! -f "$updater_bundle.sig" ]; then
+      echo "Missing updater signature: $updater_bundle.sig" >&2
+      exit 1
+    fi
+  done
+  for updater_signature in "${updater_signatures[@]}"; do
+    updater_bundle="${updater_signature%.sig}"
+    if [ ! -f "$updater_bundle" ]; then
+      echo "Missing updater bundle for signature: $updater_signature" >&2
+      exit 1
+    fi
+  done
 done
 
 echo "Desktop release assets verified in $ASSETS_DIR"

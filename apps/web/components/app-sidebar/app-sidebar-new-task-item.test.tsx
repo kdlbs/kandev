@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const mocks = vi.hoisted(() => ({
@@ -51,8 +51,10 @@ vi.mock("@/app/office/components/new-task-dialog", () => ({
 }));
 vi.mock("@/components/task-create-dialog", () => ({
   TaskCreateDialog: ({
+    open,
     onSuccess,
   }: {
+    open?: boolean;
     onSuccess?: (
       task: { id: string },
       mode: "create" | "edit",
@@ -62,6 +64,7 @@ vi.mock("@/components/task-create-dialog", () => ({
     <button
       type="button"
       data-testid="regular-task-create-dialog"
+      data-open={open ? "true" : "false"}
       onClick={() =>
         onSuccess?.({ id: "t-new" }, "create", {
           taskSessionId: mocks.dialogTaskSessionId,
@@ -78,6 +81,7 @@ vi.mock("@/components/task/new-subtask-dialog", () => ({
 }));
 
 import { AppSidebarNewTaskItem } from "./app-sidebar-new-task-item";
+import { requestNewTaskCreation } from "@/lib/desktop/new-task-request";
 
 const SUBTASK_TESTID = "sidebar-new-subtask";
 const OFFICE_DIALOG_TESTID = "office-new-task-dialog";
@@ -103,6 +107,22 @@ beforeEach(resetTestState);
 afterEach(() => cleanup());
 
 describe("AppSidebarNewTaskItem dialog routing", () => {
+  it("opens a queued New Task request after its listener remounts", () => {
+    act(() => requestNewTaskCreation());
+
+    renderItem(false);
+
+    expect(screen.getByTestId(REGULAR_DIALOG_TESTID).dataset.open).toBe("true");
+  });
+
+  it("opens its existing task-create flow for a shared New Task request", () => {
+    renderItem(false);
+
+    act(() => requestNewTaskCreation());
+
+    expect(screen.getByTestId(REGULAR_DIALOG_TESTID).dataset.open).toBe("true");
+  });
+
   it("uses the regular task-create dialog when office is disabled", () => {
     officeEnabled = false;
     renderItem(false);

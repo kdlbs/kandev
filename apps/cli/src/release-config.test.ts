@@ -312,7 +312,66 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain(`- platform: linux-x64
             os: ubuntu-22.04
             rust_target: x86_64-unknown-linux-gnu
-            tauri_bundles: deb,rpm`);
+            tauri_bundles: appimage,deb,rpm`);
+  });
+
+  it("builds and publishes a complete signed Tauri updater feed", () => {
+    const workflow = releaseWorkflow();
+    const tauriConfig = JSON.parse(readRepoFile("apps/desktop/src-tauri/tauri.conf.json"));
+    const manifestScript = readRepoFile("scripts/release/updater-manifest.mjs");
+    const verifyAssetsScript = readRepoFile("scripts/release/verify-desktop-assets.sh");
+
+    expect(tauriConfig.bundle.createUpdaterArtifacts).toBe(false);
+    expect(workflow).toContain(
+      "TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
+    );
+    expect(workflow).toContain(
+      "TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}",
+    );
+    expect(workflow).toContain('createUpdaterArtifacts":"v1Compatible"');
+    expect(workflow).toContain("scripts/release/updater-manifest.mjs generate");
+    expect(workflow).toContain("scripts/release/updater-manifest.mjs verify");
+    expect(workflow).toContain("dist/release-assets/latest.json");
+
+    for (const target of [
+      "darwin-aarch64",
+      "darwin-x86_64",
+      "linux-aarch64",
+      "linux-x86_64",
+      "windows-x86_64",
+    ]) {
+      expect(manifestScript, `updater manifest must include ${target}`).toContain(`"${target}"`);
+    }
+
+    for (const extension of ["*.app.tar.gz", "*.AppImage.tar.gz", "*.nsis.zip", "*.sig"]) {
+      expect(workflow, `desktop collector must retain ${extension}`).toContain(
+        `-name '${extension}'`,
+      );
+      expect(verifyAssetsScript, `asset verification must recognize ${extension}`).toContain(
+        extension,
+      );
+    }
+  });
+
+  it("keeps updater signing independent from platform identity signing", () => {
+    const workflow = releaseWorkflow();
+    const signingDocs = readRepoFile("docs/desktop-tauri-signing.md");
+    const updaterSigningScript = readRepoFile("scripts/release/updater-signing-ready.sh");
+
+    for (const key of ["TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"]) {
+      expect(workflow).toContain(key);
+      expect(signingDocs).toContain(key);
+    }
+    expect(signingDocs).toContain("distinct from macOS and Windows code-signing credentials");
+    expect(signingDocs).toContain("Installers remain available");
+    expect(signingDocs).toContain("`latest.json` is not");
+    expect(workflow).toContain('scripts/release/updater-signing-ready.sh "${{ matrix.platform }}"');
+    expect(updaterSigningScript).not.toContain("MACOS_SIGNING_ENABLED");
+    expect(updaterSigningScript).not.toContain("WINDOWS_SIGNING_ENABLED");
+    expect(signingDocs).toContain("Missing OS credentials do not block Tauri-signed updater");
+    expect(workflow).not.toContain(
+      "Refusing to build an updater artifact that is not also signed for its operating system.",
+    );
   });
 
   it("builds unsigned desktop releases when signing inputs are incomplete", () => {

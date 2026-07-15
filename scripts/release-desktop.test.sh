@@ -224,3 +224,5 @@ if "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" "$assets_dir" linux-x64 
 fi
 grep -q "Checksum verification failed" "$ERR_FILE" || fail "verify-desktop-assets did not explain checksum mismatch"
 pass "verify-desktop-assets rejects checksum mismatches"
+
+bash "$ROOT_DIR/scripts/release/updater-manifest.test.sh"
