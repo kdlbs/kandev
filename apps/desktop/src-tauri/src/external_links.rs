@@ -80,7 +80,13 @@ pub fn open_validated_external_url(app: &tauri::AppHandle, input: &str) -> Resul
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command]
-pub fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+pub fn open_external_url(
+    app: tauri::AppHandle,
+    backend: tauri::State<'_, crate::backend::BackendState>,
+    webview: tauri::WebviewWindow,
+    url: String,
+) -> Result<(), String> {
+    backend.require_owned_origin(&webview)?;
     open_validated_external_url(&app, &url)
 }
 

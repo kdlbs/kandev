@@ -13,6 +13,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use url::Url;
 
 #[cfg(feature = "desktop-runtime")]
 use tauri::{AppHandle, Manager, WebviewWindow};
@@ -38,6 +39,7 @@ pub struct BackendState {
     child: Arc<Mutex<Option<Child>>>,
     startup_output: Arc<Mutex<StartupOutput>>,
     shutdown_started: Arc<AtomicBool>,
+    owned_origin: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for BackendState {
@@ -46,6 +48,7 @@ impl Default for BackendState {
             child: Arc::new(Mutex::new(None)),
             startup_output: Arc::new(Mutex::new(StartupOutput::default())),
             shutdown_started: Arc::new(AtomicBool::new(false)),
+            owned_origin: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -57,6 +60,7 @@ impl BackendState {
 
     pub fn stop(&self) {
         self.shutdown_started.store(true, Ordering::SeqCst);
+        self.clear_owned_origin();
         let child = self
             .child
             .lock()
@@ -69,6 +73,43 @@ impl BackendState {
 
     fn is_shutdown_started(&self) -> bool {
         self.shutdown_started.load(Ordering::SeqCst)
+    }
+
+    pub fn set_owned_origin(&self, backend_url: &str) -> Result<(), String> {
+        let origin = loopback_origin(backend_url)?;
+        *self
+            .owned_origin
+            .lock()
+            .expect("desktop origin mutex poisoned") = Some(origin);
+        Ok(())
+    }
+
+    pub fn accepts_url(&self, url: &str) -> bool {
+        let expected = self
+            .owned_origin
+            .lock()
+            .expect("desktop origin mutex poisoned")
+            .clone();
+        expected.is_some_and(|origin| same_origin(&origin, url))
+    }
+
+    #[cfg(feature = "desktop-runtime")]
+    pub fn require_owned_origin(&self, webview: &WebviewWindow) -> Result<(), String> {
+        let url = webview
+            .url()
+            .map_err(|err| format!("could not read desktop WebView URL: {err}"))?;
+        if self.accepts_url(url.as_str()) {
+            Ok(())
+        } else {
+            Err("desktop command is only available from the Kandev backend".to_string())
+        }
+    }
+
+    fn clear_owned_origin(&self) {
+        *self
+            .owned_origin
+            .lock()
+            .expect("desktop origin mutex poisoned") = None;
     }
 
     fn set_child(&self, mut child: Child) -> bool {
@@ -165,7 +206,11 @@ pub fn start_desktop_backend(app: AppHandle, window: WebviewWindow) {
         );
         match launch_and_wait(&app, &state) {
             Ok(url) => {
-                if let Err(err) = navigate_to_backend(&window, &url) {
+                if let Err(err) = state
+                    .set_owned_origin(&url)
+                    .and_then(|_| navigate_to_backend(&window, &url))
+                {
+                    state.clear_owned_origin();
                     state.stop();
                     set_status(
                         &window,
@@ -183,6 +228,20 @@ pub fn start_desktop_backend(app: AppHandle, window: WebviewWindow) {
             }
         }
     });
+}
+
+fn loopback_origin(input: &str) -> Result<String, String> {
+    let url = Url::parse(input).map_err(|err| format!("invalid desktop backend URL: {err}"))?;
+    if url.scheme() != "http" || url.host_str() != Some(LOOPBACK_HOST) || url.port().is_none() {
+        return Err("desktop backend URL must use a loopback HTTP origin".to_string());
+    }
+    Ok(url.origin().ascii_serialization())
+}
+
+fn same_origin(expected: &str, input: &str) -> bool {
+    Url::parse(input)
+        .map(|url| url.origin().ascii_serialization() == expected)
+        .unwrap_or(false)
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -858,6 +917,24 @@ mod tests {
         state.stop();
 
         assert!(state.is_shutdown_started());
+    }
+
+    #[test]
+    fn desktop_commands_require_the_exact_owned_backend_origin() {
+        let state = BackendState::default();
+        state
+            .set_owned_origin("http://127.0.0.1:38430")
+            .expect("set owned backend origin");
+
+        assert!(state.accepts_url("http://127.0.0.1:38430/settings"));
+        assert!(!state.accepts_url("http://127.0.0.1:38431/settings"));
+        assert!(!state.accepts_url("http://localhost:38430/settings"));
+        assert!(!state.accepts_url("https://127.0.0.1:38430/settings"));
+    }
+
+    #[test]
+    fn desktop_commands_are_denied_before_backend_origin_is_set() {
+        assert!(!BackendState::default().accepts_url("http://127.0.0.1:38430"));
     }
 
     #[test]

@@ -26,6 +26,12 @@ desktop-owned loopback origin. Menu actions are typed events; updater and native
 commands accept bounded structured inputs. The bridge does not expose arbitrary shell execution,
 filesystem access, unrestricted URL schemes, or a generic plugin pass-through.
 
+Tauri capabilities must allow `http://127.0.0.1:*` because the owned backend port is selected at
+launch. That static wildcard does not establish trust by itself: before each privileged updater,
+native-notification, or external-link command, Rust verifies that the invoking WebView is at the
+exact loopback origin recorded after the health-token-verified backend startup. The local bootstrap
+page has no desktop capability, and other loopback services are denied.
+
 `Cmd/Ctrl+W` is a Close Context command, not a native window-close accelerator. The SPA closes one
 topmost dismissible overlay, otherwise one closable document tab using its normal dirty-state
 guard, otherwise nothing. The macOS red close control and Quit both stop the owned backend and exit

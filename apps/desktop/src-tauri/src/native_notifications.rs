@@ -93,11 +93,14 @@ fn validate_request(request: &NativeNotificationRequest) -> Result<(), String> {
 pub fn show_native_notification(
     app: tauri::AppHandle,
     state: tauri::State<'_, NativeNotificationState>,
+    backend: tauri::State<'_, crate::backend::BackendState>,
+    webview: tauri::WebviewWindow,
     request: NativeNotificationRequest,
 ) -> Result<NativeNotificationResult, String> {
     use tauri::plugin::PermissionState;
     use tauri_plugin_notification::NotificationExt;
 
+    backend.require_owned_origin(&webview)?;
     validate_request(&request)?;
     let mut permission = app
         .notification()

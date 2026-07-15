@@ -150,8 +150,9 @@ identity is deduplicated.
 
 The Go-served SPA may receive a small versioned set of desktop events and commands for menu
 actions, updater state/actions, native notification delivery, focus, and safe external links. The
-bridge is available only to the app's loopback origin and exposes no arbitrary shell command,
-filesystem access, or unrestricted URL opening.
+capability schema allows loopback ports because the port is selected at launch, but every
+privileged command verifies the exact health-verified backend origin before executing. The bridge
+exposes no arbitrary shell command, filesystem access, or unrestricted URL opening.
 
 External `http`, `https`, and `mailto` links open in the system browser/client. Internal loopback
 navigation, downloads, and blob URLs remain in the WebView unless an existing workflow specifies

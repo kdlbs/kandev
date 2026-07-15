@@ -6,7 +6,7 @@ use crate::backend::BackendState;
 #[cfg(feature = "desktop-runtime")]
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 #[cfg(feature = "desktop-runtime")]
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
 #[cfg(feature = "desktop-runtime")]
 use tauri_plugin_updater::{Update, UpdaterExt};
 
@@ -338,8 +338,13 @@ impl BackendShutdown for BackendState {
 
 #[cfg(feature = "desktop-runtime")]
 #[tauri::command]
-pub fn get_update_state(state: State<'_, UpdaterState>) -> UpdateSnapshot {
-    state.snapshot()
+pub fn get_update_state(
+    state: State<'_, UpdaterState>,
+    backend: State<'_, BackendState>,
+    webview: WebviewWindow,
+) -> Result<UpdateSnapshot, String> {
+    backend.require_owned_origin(&webview)?;
+    Ok(state.snapshot())
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -347,7 +352,10 @@ pub fn get_update_state(state: State<'_, UpdaterState>) -> UpdateSnapshot {
 pub async fn check_for_updates(
     app: AppHandle,
     state: State<'_, UpdaterState>,
+    backend: State<'_, BackendState>,
+    webview: WebviewWindow,
 ) -> Result<UpdateSnapshot, String> {
+    backend.require_owned_origin(&webview)?;
     run_check(&app, &state).await
 }
 
@@ -356,7 +364,10 @@ pub async fn check_for_updates(
 pub async fn install_update(
     app: AppHandle,
     state: State<'_, UpdaterState>,
+    backend: State<'_, BackendState>,
+    webview: WebviewWindow,
 ) -> Result<UpdateSnapshot, String> {
+    backend.require_owned_origin(&webview)?;
     let update = state
         .pending()
         .ok_or_else(|| "No desktop update is ready to install.".to_string())?;

@@ -155,5 +155,4 @@ mod tests {
         assert_eq!(state.preview(MenuAction::ZoomIn), Some(1.1));
         assert_eq!(state.current(), DEFAULT_ZOOM);
     }
-
 }

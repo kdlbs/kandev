@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import { NOTIFICATION_EVENT_TASK_SESSION_WAITING_FOR_INPUT } from "@/lib/notifications/events";
 import type { BackendMessageMap } from "@/lib/types/backend";
 import { registerNotificationsHandlers } from "./notifications";
 
@@ -181,5 +182,25 @@ describe("session.waiting_for_input malformed payloads", () => {
 
     expect(invoke).not.toHaveBeenCalled();
     expect(notificationMock).toHaveBeenCalledWith(MESSAGE_TITLE, { body: MESSAGE_BODY });
+  });
+
+  it("uses the task and session as the native identity when the envelope ID is absent", () => {
+    const invoke = vi.fn().mockResolvedValue("shown");
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
+      invoke,
+      transformCallback: vi.fn(),
+    };
+    const message = {
+      ...makeMessage(),
+      id: undefined,
+    } as unknown as BackendMessageMap["session.waiting_for_input"];
+
+    getHandler(makeStore())(message);
+
+    expect(invoke).toHaveBeenCalledWith("show_native_notification", {
+      request: expect.objectContaining({
+        eventId: `${NOTIFICATION_EVENT_TASK_SESSION_WAITING_FOR_INPUT}:${TASK_ID}:${SESSION_ID}`,
+      }),
+    });
   });
 });

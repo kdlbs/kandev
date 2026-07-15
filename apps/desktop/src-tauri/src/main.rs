@@ -71,13 +71,9 @@ fn main() {
                 }
             }
             WindowEvent::CloseRequested { api, .. } => {
-                api.prevent_close();
-                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
-                    if let Some(state) = window.try_state::<WindowStateStore>() {
-                        let _ = state.save(&webview);
-                    }
+                if shutdown_and_exit(window.app_handle()) {
+                    api.prevent_close();
                 }
-                shutdown_and_exit(window.app_handle());
             }
             _ => {}
         })
@@ -267,7 +263,9 @@ fn handle_menu_event(app: &tauri::AppHandle, event: tauri::menu::MenuEvent) {
                 }
             }
         }
-        MenuAction::Quit => shutdown_and_exit(app),
+        MenuAction::Quit => {
+            let _ = shutdown_and_exit(app);
+        }
         MenuAction::HelpDocs => open_help_url(app, "https://github.com/kdlbs/kandev#readme"),
         MenuAction::HelpRepository => open_help_url(app, "https://github.com/kdlbs/kandev"),
         MenuAction::HelpReleases => open_help_url(app, "https://github.com/kdlbs/kandev/releases"),
@@ -305,14 +303,20 @@ fn activate_main_window(app: &tauri::AppHandle) {
     focus_main_window(app);
 }
 
-fn shutdown_and_exit(app: &tauri::AppHandle) {
+fn shutdown_and_exit(app: &tauri::AppHandle) -> bool {
     let state = app.state::<backend::BackendState>().inner().clone();
     if !state.begin_shutdown() {
-        return;
+        return false;
+    }
+    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+        if let Some(window_state) = app.try_state::<WindowStateStore>() {
+            let _ = window_state.save(&window);
+        }
     }
     let app = app.clone();
     thread::spawn(move || {
         state.stop();
         app.exit(0);
     });
+    true
 }
