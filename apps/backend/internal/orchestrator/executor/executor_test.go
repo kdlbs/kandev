@@ -1410,6 +1410,58 @@ func TestRunAgentProcessAsync_ResumeFailureUsesRawCASWithoutCallbacks(t *testing
 	}
 }
 
+// TestRunAgentProcessAsync_ResumeFailureSkipsArchivedTaskRacingCAS is the
+// TOCTOU companion to TestRunAgentProcessAsync_ResumeFailureUsesRawCASWithoutCallbacks
+// (cubic review finding on PR #1706): the task is NOT archived when
+// shouldSkipFailedStartReviewForTask's earlier (non-transactional) guard
+// runs — that guard passes — and only archives via preCASHook right as
+// UpdateTaskStateIfCurrentIn is invoked, modeling ArchiveTask committing in
+// the exact gap between the guard read and the atomic write. Without the
+// archived_at check inside the CAS itself (not just the earlier guard),
+// this write would still land and resurrect the task to REVIEW.
+func TestRunAgentProcessAsync_ResumeFailureSkipsArchivedTaskRacingCAS(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateInProgress}
+	repo.preCASHook = func(taskID string) {
+		if task, ok := repo.tasks[taskID]; ok {
+			archivedAt := time.Now().UTC()
+			task.ArchivedAt = &archivedAt
+		}
+	}
+	stopCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
+		},
+		stopAgentFunc: func(ctx context.Context, agentExecutionID string, force bool) error {
+			close(stopCh)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	// Deliberately no SetOnTaskStateChange / SetOnTaskReviewStateReconcile.
+
+	exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		false, true) // resume path: no escalation, fromResume=true
+
+	select {
+	case <-stopCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for StopAgent to be called")
+	}
+
+	if got := repo.tasks["task-123"].State; got != v1.TaskStateInProgress {
+		t.Errorf("expected archive racing the CAS to leave state untouched, got %q", got)
+	}
+	if len(repo.updateTaskStateIfCurrentInCalls) != 1 {
+		t.Fatalf("expected the CAS to still be called (guard passed pre-archive), got %+v", repo.updateTaskStateIfCurrentInCalls)
+	}
+}
+
 func TestRunAgentProcessAsync_ResumeFailureDoesNotReviewWhileSiblingWorks(t *testing.T) {
 	f := newRunAgentProcessAsyncFailureFixture(t)
 	f.repo.sessions["session-456"] = &models.TaskSession{

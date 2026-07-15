@@ -258,6 +258,13 @@ type mockRepository struct {
 	// transient DB error); if nil, the default map lookup is used.
 	getTaskSessionFunc    func(ctx context.Context, id string) (*models.TaskSession, error)
 	createTaskSessionFunc func(ctx context.Context, session *models.TaskSession) error
+	// Optional hook invoked at the top of UpdateTaskStateIfCurrentIn, before
+	// it reads task state/archived_at. Lets tests simulate the exact TOCTOU
+	// window this CAS closes: an earlier (non-transactional) archived-state
+	// guard already passed, then an archive commits in the gap before this
+	// call — the hook mutates the task here to model that gap. If nil, the
+	// CAS runs immediately against the task as currently seeded.
+	preCASHook func(taskID string)
 
 	// Track calls for verification
 	createTaskSessionCalls          []*models.TaskSession
@@ -406,6 +413,9 @@ func (m *mockRepository) UpdateTaskState(ctx context.Context, taskID string, sta
 func (m *mockRepository) UpdateTaskStateIfCurrentIn(
 	ctx context.Context, taskID string, state v1.TaskState, allowed []v1.TaskState,
 ) (v1.TaskState, bool, error) {
+	if m.preCASHook != nil {
+		m.preCASHook(taskID)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.updateTaskStateIfCurrentInCalls = append(m.updateTaskStateIfCurrentInCalls, updateTaskStateIfCurrentInCall{
