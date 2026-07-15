@@ -45,4 +45,23 @@ describe("createQueuedUserSettingsSync", () => {
       expect(updateUserSettings).toHaveBeenLastCalledWith({ preferred_shell: "zsh" });
     });
   });
+
+  it("retries a transient settings write before processing the next payload", async () => {
+    vi.mocked(updateUserSettings)
+      .mockRejectedValueOnce(new Error("temporary failure"))
+      .mockResolvedValueOnce({ settings: {} } as Awaited<ReturnType<typeof updateUserSettings>>)
+      .mockResolvedValueOnce({ settings: {} } as Awaited<ReturnType<typeof updateUserSettings>>);
+    const sync = createQueuedUserSettingsSync<string>((value) => ({
+      preferred_shell: value,
+    }));
+
+    void sync("bash");
+    void sync("zsh");
+
+    await waitFor(() => {
+      expect(updateUserSettings).toHaveBeenNthCalledWith(1, { preferred_shell: "bash" });
+      expect(updateUserSettings).toHaveBeenNthCalledWith(2, { preferred_shell: "bash" });
+      expect(updateUserSettings).toHaveBeenNthCalledWith(3, { preferred_shell: "zsh" });
+    });
+  });
 });

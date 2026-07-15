@@ -7,6 +7,9 @@ const PROFILE_DOCKER = "profile-docker";
 const PROFILE_LOCAL = "profile-local";
 const PROFILE_WORKTREE = "profile-worktree";
 const PROFILE_WORKTREE_B = "profile-worktree-b";
+const EXECUTOR_DOCKER = "exec-docker";
+const REMOTE_URL_A = "github.com/acme/a";
+const REMOTE_URL_B = "github.com/acme/b";
 
 type DefaultSelFake = Pick<
   DialogFormState,
@@ -63,7 +66,7 @@ function localExecutor(): StoreSelections["executors"][number] {
 
 function dockerExecutor(): StoreSelections["executors"][number] {
   return {
-    id: "exec-docker",
+    id: EXECUTOR_DOCKER,
     type: "local_docker",
     profiles: [{ id: PROFILE_DOCKER, executor_type: "local_docker" }],
   } as unknown as StoreSelections["executors"][number];
@@ -245,16 +248,36 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
 });
 
 describe("useDefaultSelectionsEffect - multi-repo guard counts Remote rows", () => {
+  it("prefers the saved worktree profile when multi-repo mode needs a switch", async () => {
+    const fs = makeDefaultSelFs({
+      executorId: EXECUTOR_DOCKER,
+      executorProfileId: PROFILE_DOCKER,
+      useRemote: true,
+      remoteRepos: [
+        { key: "remote-0", url: REMOTE_URL_A, branch: "", source: "paste" },
+        { key: "remote-1", url: REMOTE_URL_B, branch: "", source: "paste" },
+      ] as DialogFormState["remoteRepos"],
+    });
+    const sel = makeSel({
+      executors: [dockerExecutor(), worktreeExecutor()],
+      lastUsedExecutorProfileId: PROFILE_WORKTREE_B,
+    });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
+
+    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE_B));
+  });
+
   it("swaps a non-worktree profile to worktree when 2+ Remote URL rows are set", async () => {
     // Regression: the guard used to count only workspace/local rows, so 2
     // Remote rows slipped past it with an already-selected non-worktree profile.
     const fs = makeDefaultSelFs({
-      executorId: "exec-docker",
+      executorId: EXECUTOR_DOCKER,
       executorProfileId: PROFILE_DOCKER,
       useRemote: true,
       remoteRepos: [
-        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
-        { key: "remote-1", url: "github.com/acme/b", branch: "", source: "paste" },
+        { key: "remote-0", url: REMOTE_URL_A, branch: "", source: "paste" },
+        { key: "remote-1", url: REMOTE_URL_B, branch: "", source: "paste" },
       ] as DialogFormState["remoteRepos"],
     });
     const sel = makeSel({ executors: [dockerExecutor(), worktreeExecutor()] });
@@ -270,8 +293,8 @@ describe("useDefaultSelectionsEffect - multi-repo guard counts Remote rows", () 
       executorProfileId: PROFILE_WORKTREE,
       useRemote: true,
       remoteRepos: [
-        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
-        { key: "remote-1", url: "github.com/acme/b", branch: "", source: "paste" },
+        { key: "remote-0", url: REMOTE_URL_A, branch: "", source: "paste" },
+        { key: "remote-1", url: REMOTE_URL_B, branch: "", source: "paste" },
       ] as DialogFormState["remoteRepos"],
     });
     const sel = makeSel({ executors: [worktreeExecutor()] });
@@ -284,11 +307,11 @@ describe("useDefaultSelectionsEffect - multi-repo guard counts Remote rows", () 
 
   it("does not swap when only a single Remote row is filled", async () => {
     const fs = makeDefaultSelFs({
-      executorId: "exec-docker",
+      executorId: EXECUTOR_DOCKER,
       executorProfileId: PROFILE_DOCKER,
       useRemote: true,
       remoteRepos: [
-        { key: "remote-0", url: "github.com/acme/a", branch: "", source: "paste" },
+        { key: "remote-0", url: REMOTE_URL_A, branch: "", source: "paste" },
         { key: "remote-1", url: "", branch: "", source: "paste" },
       ] as DialogFormState["remoteRepos"],
     });

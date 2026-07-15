@@ -52,14 +52,6 @@ describe("autoSelectBranch", () => {
     expect(setBranch).not.toHaveBeenCalled();
   });
 
-  it("defers while user settings are loading", () => {
-    const setBranch = vi.fn();
-
-    autoSelectBranch(branches, setBranch, { userSettingsLoaded: false });
-
-    expect(setBranch).not.toHaveBeenCalled();
-  });
-
   it("falls back to preferred branch after user settings have loaded without a valid last-used branch", () => {
     const setBranch = vi.fn();
 

@@ -127,6 +127,39 @@ describe("mergeInitialState — quick chat name overlay", () => {
   });
 });
 
+describe("mergeInitialState — sidebar views from boot settings", () => {
+  it("bridges backend sidebar settings into the UI slice before the store is created", () => {
+    const result = mergeInitialState({
+      userSettings: {
+        sidebarViews: [
+          {
+            id: "server",
+            name: "Server",
+            filters: [],
+            sort: { key: "state", direction: "asc" },
+            group: "none",
+            collapsedGroups: [],
+          },
+        ],
+        sidebarActiveViewId: "server",
+        sidebarDraft: {
+          baseViewId: "server",
+          filters: [],
+          sort: { key: "updatedAt", direction: "desc" },
+          group: "workflow",
+        },
+        loaded: true,
+      },
+    } as unknown as Partial<AppState>);
+
+    expect(result.sidebarViews).toMatchObject({
+      views: [{ id: "server", name: "Server" }],
+      activeViewId: "server",
+      draft: { baseViewId: "server", group: "workflow" },
+    });
+  });
+});
+
 describe("hydrateState — sidebar views from user settings", () => {
   it("hydrates active view and draft from backend user settings", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {

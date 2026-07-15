@@ -169,6 +169,11 @@ export const test = backendFixture.extend<
       enable_preview_on_click: false,
       confirm_task_archive: true,
       sidebar_views: [],
+      task_create_last_used: {
+        repository_id: seedData.repositoryId,
+        branch: "main",
+        agent_profile_id: seedData.agentProfileId,
+      },
       // Reset to default kanban view. Pipeline-view tests switch this to
       // "graph2", which persists per-workspace; without this reset the next
       // test renders cards with data-testid="pipeline-task-<id>" instead of

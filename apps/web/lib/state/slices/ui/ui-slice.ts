@@ -19,7 +19,7 @@ import type { SidebarView, SortSpec } from "./sidebar-view-types";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 
-function loadSidebarState(): UISliceState["sidebarViews"] {
+function createDefaultSidebarState(): UISliceState["sidebarViews"] {
   return { views: [DEFAULT_VIEW], activeViewId: DEFAULT_VIEW.id, draft: null, syncError: null };
 }
 
@@ -78,7 +78,7 @@ export const defaultUIState: UISliceState = {
   sessionFailureNotification: null,
   taskDeletedNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
-  sidebarViews: loadSidebarState(),
+  sidebarViews: createDefaultSidebarState(),
   collapsedSubtaskParents: [],
   kanbanPreviewedTaskId: null,
   sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },

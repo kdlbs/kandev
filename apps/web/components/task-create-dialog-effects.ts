@@ -511,13 +511,14 @@ export function useDefaultSelectionsEffect(
       } as DialogFormState),
     [noRepository, useRemote, remoteRepos, repositories],
   );
-  useMultiRepoGuardEffect(
+  useMultiRepoGuardEffect({
     open,
     executorProfileId,
     setExecutorProfileId,
     executors,
     selectedRepoCount,
-  );
+    lastUsedExecutorProfileId: sel.lastUsedExecutorProfileId ?? null,
+  });
 }
 
 /**
