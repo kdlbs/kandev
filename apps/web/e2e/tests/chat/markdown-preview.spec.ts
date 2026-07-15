@@ -30,6 +30,10 @@ const HTML_MARKDOWN_CONTENT = `<div align="center">
   <br>
   <h1>Embedded HTML</h1>
   <p>Rendered from a README.</p>
+  <details open>
+    <summary>More information</summary>
+    <p>Collapsible README content.</p>
+  </details>
   <a href="javascript:alert('xss')">Unsafe link</a>
   <script>window.markdownXss = true</script>
 </div>`;
@@ -184,6 +188,9 @@ test.describe("Markdown preview", () => {
     await expect(image).toHaveAttribute("src", "./logo.svg");
     await expect(image).toHaveAttribute("width", "120");
     await expect(image).not.toHaveAttribute("onerror");
+    await expect(centeredContent.locator("p").first()).toHaveAttribute("data-md-source-start", "7");
+    await expect(centeredContent.locator("details")).toContainText("Collapsible README content.");
+    await expect(centeredContent.locator("summary")).toHaveText("More information");
     await expect(centeredContent.locator("a", { hasText: "Unsafe link" })).not.toHaveAttribute(
       "href",
     );

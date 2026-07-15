@@ -15,7 +15,7 @@ import {
 import { createPortal } from "react-dom";
 import ReactMarkdown, { type ExtraProps, type Components } from "react-markdown";
 import rehypeRaw from "rehype-raw";
-import rehypeSanitize from "rehype-sanitize";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconCode, IconMessagePlus } from "@tabler/icons-react";
@@ -359,7 +359,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
           <PreviewCommentContext.Provider value={previewCommentContextValue}>
             <ReactMarkdown
               remarkPlugins={remarkPlugins}
-              rehypePlugins={[rehypeRaw, rehypeSanitize]}
+              rehypePlugins={[rehypeRaw, [rehypeSanitize, defaultSchema]]}
               components={markdownPreviewComponents}
             >
               {content}
