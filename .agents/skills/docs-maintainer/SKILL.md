@@ -14,7 +14,8 @@ Use this skill to decide whether public docs need updates and to make those upda
 - Implementation plans stay under `docs/plans/**`.
 - Architecture decisions stay under `docs/decisions/**`.
 - Raw supporting notes can remain under `docs/**` outside `docs/public/**`, but do not publish them unless rewritten for users.
-- The landing/docs website consumes public docs through its manifest and generated content. Do not hand-edit generated website docs.
+- `docs/public/meta.json` owns published-page order and navigation groups. Page paths own routes, and page frontmatter owns titles and descriptions.
+- The landing/docs website generates its content from this directory. Do not hand-edit generated files in the landing repository.
 
 ## When Docs Need Updates
 
@@ -39,6 +40,7 @@ Skip public docs when the change is:
 2. Search `docs/public/**` first for affected terms and commands.
 3. If public docs exist, update them with the same PR as the behavior change.
 4. If no public docs exist but the behavior is user-facing, add or propose the smallest useful public page/section.
+   When adding a page, include `title` and `description` frontmatter and list its filename in `docs/public/meta.json` exactly once. See `docs/public/README.md`.
 5. If the change only updates implementation intent or architectural history, update specs/plans/ADRs instead.
 6. Keep public docs task-oriented: prerequisites, commands, expected result, troubleshooting, and links to reference.
 7. Preserve internal links inside `docs/public/**` where possible. Link to source-only raw docs only when the raw note is intentionally not published.
@@ -51,13 +53,15 @@ Run the checks relevant to your change:
 ```bash
 # Replace SEARCH_TERM with the command, config key, or terminology that changed.
 rg -n "SEARCH_TERM" docs/public docs/specs docs/decisions
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
 ```
 
 For website docs publishing changes, also run from the landing repo:
 
 ```bash
 pnpm --filter @kandev/docs fetch-docs
-pnpm exec vitest run apps/docs/lib/docs-processing.test.ts
+pnpm exec vitest run apps/docs/lib/docs-processing.test.ts apps/docs/lib/public-docs.test.ts
 pnpm --filter @kandev/docs build
 ```
 
