@@ -147,6 +147,19 @@ type StepDeleteDialogProps = {
   hasUnsavedChanges: boolean;
 };
 
+function stepDeleteDescription(
+  stepName: string,
+  stepTaskCount: number | null,
+  hasMigrationTarget: boolean,
+) {
+  if (!stepTaskCount) return `This will permanently delete the ${stepName} workflow step.`;
+  const taskLabel = `${stepTaskCount} task${stepTaskCount === 1 ? "" : "s"}`;
+  if (hasMigrationTarget) {
+    return `${stepName} has ${taskLabel}. Choose where to migrate them, or delete the step and its tasks.`;
+  }
+  return `Deleting ${stepName} will also affect its ${taskLabel}.`;
+}
+
 export function StepDeleteDialog({
   open,
   onOpenChange,
@@ -162,15 +175,14 @@ export function StepDeleteDialog({
   hasUnsavedChanges,
 }: StepDeleteDialogProps) {
   const hasTasks = stepTaskCount !== null && stepTaskCount > 0;
+  const description = stepDeleteDescription(stepName, stepTaskCount, stepsForMigration.length > 0);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Delete step</DialogTitle>
           <DialogDescription>
-            {hasTasks
-              ? `${stepName} has ${stepTaskCount} task${stepTaskCount === 1 ? "" : "s"}. Choose where to migrate them, or delete the step and its tasks.`
-              : `This will permanently delete the ${stepName} workflow step.`}
+            {description}
             {hasUnsavedChanges ? " Unsaved step changes will be discarded." : ""}
           </DialogDescription>
         </DialogHeader>

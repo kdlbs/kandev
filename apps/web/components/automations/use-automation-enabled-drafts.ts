@@ -20,10 +20,12 @@ export function useAutomationEnabledDrafts({
   const [overrides, setOverrides] = useState<EnabledOverrides>({});
   const dirtyEntries = useMemo(
     () =>
-      Object.entries(overrides).filter(([id, enabled]) => {
-        const saved = automations.find((automation) => automation.id === id);
-        return saved && saved.enabled !== enabled;
-      }),
+      Object.entries(overrides)
+        .filter(([id, enabled]) => {
+          const saved = automations.find((automation) => automation.id === id);
+          return saved && saved.enabled !== enabled;
+        })
+        .sort(([left], [right]) => left.localeCompare(right)),
     [automations, overrides],
   );
   const revision = JSON.stringify(dirtyEntries);

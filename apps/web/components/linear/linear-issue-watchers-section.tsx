@@ -138,10 +138,13 @@ export function LinearIssueWatchersSection() {
     setEditing(null);
     setDialogOpen(true);
   }, []);
-  const openEdit = useCallback((w: LinearIssueWatch) => {
-    setEditing(w);
-    setDialogOpen(true);
-  }, []);
+  const openEdit = useCallback(
+    (w: LinearIssueWatch) => {
+      setEditing(items.find((item) => item.id === w.id) ?? w);
+      setDialogOpen(true);
+    },
+    [items],
+  );
 
   // Adapt the watch-aware actions back to id-keyed callbacks the table expects;
   // the table looks up the watch by id when it needs to forward the per-row

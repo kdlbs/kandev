@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
+import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { IconShieldLock } from "@tabler/icons-react";
@@ -143,9 +144,14 @@ function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
   const [gitIdentityMode, setGitIdentityMode] = useState<GitIdentityMode>("override");
   const [gitUserName, setGitUserName] = useState(profile.config?.git_user_name ?? "");
   const [gitUserEmail, setGitUserEmail] = useState(profile.config?.git_user_email ?? "");
+  const [loaded, setLoaded] = useState(!isRemote);
 
   useEffect(() => {
-    if (!isRemote) return;
+    if (!isRemote) {
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
     fetchLocalGitIdentity()
       .then((identity) => {
         const local: GitIdentityState = {
@@ -170,7 +176,8 @@ function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
         }
         setGitIdentityMode("override");
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setLoaded(true));
   }, [isRemote, profile.config?.git_user_email, profile.config?.git_user_name]);
 
   return {
@@ -181,6 +188,7 @@ function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
     setGitUserName,
     gitUserEmail,
     setGitUserEmail,
+    loaded,
   };
 }
 
@@ -258,7 +266,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
               : e,
           ),
         );
-        router.push(EXECUTORS_ROUTE);
+        runWithNavigationBlockerBypassed(() => router.push(EXECUTORS_ROUTE));
       } catch {
         setDeleting(false);
         setDeleteDialogOpen(false);
@@ -335,6 +343,7 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     agentEnvVars: remoteAuth.agentEnvVars,
     handleAgentEnvVarChange: remoteAuth.handleAgentEnvVarChange,
     localGitIdentity: gitIdentity.localGitIdentity,
+    gitIdentityLoaded: gitIdentity.loaded,
     gitIdentityMode: gitIdentity.gitIdentityMode,
     setGitIdentityMode: gitIdentity.setGitIdentityMode,
     gitUserName: gitIdentity.gitUserName,
@@ -545,9 +554,18 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   };
   const saveRevision = JSON.stringify(savePayload);
   const [savedRevision, setSavedRevision] = useState(saveRevision);
+  const [baselineReady, setBaselineReady] = useState(!form.isRemote);
+  useEffect(() => {
+    if (!baselineReady && form.gitIdentityLoaded) {
+      setSavedRevision(saveRevision);
+      setBaselineReady(true);
+    }
+  }, [baselineReady, form.gitIdentityLoaded, saveRevision]);
   const handleSave = async () => {
-    await persistence.save(savePayload);
-    setSavedRevision(saveRevision);
+    const submittedPayload = savePayload;
+    const submittedRevision = saveRevision;
+    await persistence.save(submittedPayload);
+    setSavedRevision(submittedRevision);
   };
   let invalidReason: string | undefined;
   if (!form.name.trim()) invalidReason = "Profile name is required.";
@@ -556,8 +574,9 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
   useSettingsSaveContributor({
     id: `executor-profile:${profile.id}`,
     revision: saveRevision,
-    isDirty: saveRevision !== savedRevision,
-    canSave: Boolean(form.name.trim()) && !form.mcpPolicyError && !spritesTokenMissing,
+    isDirty: baselineReady && saveRevision !== savedRevision,
+    canSave:
+      baselineReady && Boolean(form.name.trim()) && !form.mcpPolicyError && !spritesTokenMissing,
     invalidReason,
     save: handleSave,
     discard: () => undefined,
@@ -583,7 +602,12 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         description={getExecutorDescription(executor.type)}
         actions={headerActions}
       />
-      <ProfileEditSections executor={executor} profile={profile} form={form} secrets={secrets} />
+      <fieldset
+        disabled={!baselineReady || persistence.saveStatus === "loading"}
+        className="contents"
+      >
+        <ProfileEditSections executor={executor} profile={profile} form={form} secrets={secrets} />
+      </fieldset>
       {spritesTokenMissing && (
         <p className="text-sm text-destructive">Sprites API key is required.</p>
       )}

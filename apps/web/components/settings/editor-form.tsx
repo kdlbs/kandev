@@ -241,9 +241,13 @@ export function EditorForm({
     return false;
   }, [state]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const resolvedName = resolveEditorName(state);
-    void onSave(resolvedName === state.name ? state : { ...state, name: resolvedName });
+    const submitted = resolvedName === state.name ? state : { ...state, name: resolvedName };
+    await onSave(submitted);
+    setBaseline(submitted);
+    setState(submitted);
+    onSaved?.();
   };
   const revision = JSON.stringify(state);
   const normalizedState =
@@ -290,7 +294,12 @@ export function EditorForm({
           Cancel
         </Button>
         {!coordinatedSaveId && (
-          <Button type="button" onClick={handleSave} disabled={isSaving || !isValid}>
+          <Button
+            type="button"
+            onClick={() => void handleSave()}
+            disabled={isSaving || !isValid}
+            className="cursor-pointer"
+          >
             {submitLabel}
           </Button>
         )}

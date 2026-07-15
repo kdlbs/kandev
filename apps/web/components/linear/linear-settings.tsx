@@ -182,6 +182,7 @@ type SettingsActionsArgs = {
   workspaceId: string;
   form: FormState;
   setConfig: (cfg: LinearConfig | null) => void;
+  setBaselineConfig: (cfg: LinearConfig | null) => void;
   setForm: Dispatch<SetStateAction<FormState>>;
   setTestResult: (r: TestLinearConnectionResult | null) => void;
 };
@@ -190,6 +191,7 @@ function useSettingsActions({
   workspaceId,
   form,
   setConfig,
+  setBaselineConfig,
   setForm,
   setTestResult,
 }: SettingsActionsArgs) {
@@ -229,6 +231,7 @@ function useSettingsActions({
         { workspaceId },
       );
       setConfig(saved);
+      setBaselineConfig(saved);
       setForm((current) =>
         JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
       );
@@ -240,20 +243,21 @@ function useSettingsActions({
     } finally {
       setSaving(false);
     }
-  }, [workspaceId, form, toast, setConfig, setForm, setTestResult]);
+  }, [workspaceId, form, toast, setConfig, setBaselineConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
     if (!confirm("Remove Linear configuration?")) return;
     try {
       await deleteLinearConfig({ workspaceId });
       setConfig(null);
+      setBaselineConfig(null);
       setForm(emptyForm);
       setTestResult(null);
       toast({ description: "Linear configuration removed", variant: "success" });
     } catch (err) {
       toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
     }
-  }, [workspaceId, toast, setConfig, setForm, setTestResult]);
+  }, [workspaceId, toast, setConfig, setBaselineConfig, setForm, setTestResult]);
 
   return { saving, testing, handleTest, handleSave, handleDelete };
 }
@@ -292,6 +296,7 @@ function useTeamsLoader(
 function useLinearSettings(workspaceId: string) {
   const { toast } = useToast();
   const [config, setConfig] = useState<LinearConfig | null>(null);
+  const [baselineConfig, setBaselineConfig] = useState<LinearConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [testResult, setTestResult] = useState<TestLinearConnectionResult | null>(null);
@@ -303,6 +308,7 @@ function useLinearSettings(workspaceId: string) {
     try {
       const cfg = await getLinearConfig({ workspaceId });
       setConfig(cfg);
+      setBaselineConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
       toast({ description: `Failed to load Linear config: ${String(err)}`, variant: "error" });
@@ -332,18 +338,20 @@ function useLinearSettings(workspaceId: string) {
       setForm((prev) => ({ ...prev, [key]: value })),
     [],
   );
-  const discard = useCallback(() => setForm(configToForm(config)), [config]);
+  const discard = useCallback(() => setForm(configToForm(baselineConfig)), [baselineConfig]);
 
   const { saving, testing, handleTest, handleSave, handleDelete } = useSettingsActions({
     workspaceId,
     form,
     setConfig,
+    setBaselineConfig,
     setForm,
     setTestResult,
   });
 
   return {
     config,
+    baselineConfig,
     form,
     loading,
     saving,
@@ -388,7 +396,7 @@ export function LinearConnectionSection({ workspaceId }: { workspaceId: string }
   const disableSave = s.saving || missingSecret;
   const disableTest = missingSecret;
   const revision = JSON.stringify(s.form);
-  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
+  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.baselineConfig));
 
   useSettingsSaveContributor({
     id: `linear-config:${workspaceId}`,

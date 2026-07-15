@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { IconCode } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -102,6 +102,12 @@ export function ShellSettingsCard({
   const initialSelection = resolveShellSelection(preferredShell, shellOptions);
   const [shellSelection, setShellSelection] = useState(initialSelection.selection);
   const [customShell, setCustomShell] = useState(initialSelection.customShell);
+
+  useEffect(() => {
+    const next = resolveShellSelection(preferredShell, shellOptions);
+    setShellSelection(next.selection);
+    setCustomShell(next.customShell);
+  }, [preferredShell, shellOptions]);
 
   return (
     <SettingsSection

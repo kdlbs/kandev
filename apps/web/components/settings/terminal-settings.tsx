@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -128,6 +128,14 @@ function TerminalFontCard({
     return !TERMINAL_FONT_PRESETS.some((p) => p.value === current);
   });
   const [customValue, setCustomValue] = useState(() => (isCustom ? fontFamily : "") ?? "");
+
+  useEffect(() => {
+    const nextIsCustom = Boolean(
+      fontFamily && !TERMINAL_FONT_PRESETS.some((preset) => preset.value === fontFamily),
+    );
+    setIsCustom(nextIsCustom);
+    setCustomValue(nextIsCustom ? (fontFamily ?? "") : "");
+  }, [fontFamily]);
 
   const handleSelectChange = (value: string) => {
     if (value === CUSTOM_VALUE) {

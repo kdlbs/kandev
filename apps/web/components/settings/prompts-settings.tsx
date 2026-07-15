@@ -61,6 +61,7 @@ function PromptCreateForm({
         onChange={(event) => onFormChange({ name: event.target.value })}
         placeholder="Prompt name"
         data-testid="prompt-name-input"
+        disabled={isBusy}
       />
       <Textarea
         value={formState.content}
@@ -69,6 +70,7 @@ function PromptCreateForm({
         rows={5}
         className="resize-y max-h-60 overflow-auto"
         data-testid="prompt-content-input"
+        disabled={isBusy}
       />
       <div className="flex items-center gap-2">
         <Button onClick={onSubmit} disabled={!isValid || isBusy} data-testid="prompt-submit">
@@ -157,6 +159,7 @@ function PromptListItem({
             onChange={(event) => onFormChange({ name: event.target.value })}
             placeholder="Prompt name"
             data-testid="prompt-name-input"
+            disabled={isBusy}
           />
           <Textarea
             value={formState.content}
@@ -165,6 +168,7 @@ function PromptListItem({
             rows={5}
             className="resize-y max-h-60 overflow-auto"
             data-testid="prompt-content-input"
+            disabled={isBusy}
           />
           <div className="flex items-center gap-2">
             <Button variant="ghost" onClick={onCancel} disabled={isBusy}>

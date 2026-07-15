@@ -82,8 +82,9 @@ describe("FeatureTogglesSettings", () => {
 
     expect(updateRuntimeFlagMock).not.toHaveBeenCalled();
     expect(saveContributor?.isDirty).toBe(true);
+    if (!saveContributor) throw new Error("Save contributor was not registered");
 
-    await saveContributor?.save(saveContributor.revision);
+    await saveContributor.save(saveContributor.revision);
 
     expect(updateRuntimeFlagMock).toHaveBeenCalledWith(initial.key, true);
   });

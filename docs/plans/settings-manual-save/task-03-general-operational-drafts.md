@@ -19,7 +19,7 @@ spec: "../../specs/ui/settings-manual-save.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run components/settings/general-settings.test.tsx components/settings/terminal-settings.test.ts components/settings/keyboard-shortcuts-card.test.tsx components/settings/voice-mode-settings.test.tsx components/settings/system-metrics-settings-card.test.tsx components/settings/system/feature-toggles-settings.test.tsx
+cd apps && pnpm --filter @kandev/web test -- --run components/settings/terminal-settings.test.ts components/settings/keyboard-shortcuts-card.test.tsx components/settings/voice-mode-settings.test.tsx components/settings/system-metrics-settings-card.test.tsx components/settings/system/feature-toggles-settings.test.tsx
 cd apps/web && pnpm run typecheck
 ```
 

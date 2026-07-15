@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
+import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { IconGitBranch, IconLayoutColumns, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -426,7 +427,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     try {
       await deleteWorkspaceRequest.run(currentWorkspace.id, currentWorkspace.name);
       setWorkspaces(workspaces.filter((ws: Workspace) => ws.id !== currentWorkspace.id));
-      router.push("/settings/workspace");
+      runWithNavigationBlockerBypassed(() => router.push("/settings/workspace"));
     } catch (error) {
       toast({
         title: "Failed to delete workspace",
@@ -440,6 +441,12 @@ function useWorkspaceEditForm(workspace: Workspace) {
   const handleDeleteDialogOpenChange = (open: boolean) => {
     setDeleteDialogOpen(open);
     if (!open) setDeleteConfirmText("");
+  };
+
+  const handleDiscard = () => {
+    setWorkspaceNameDraft(savedState.name);
+    setDefaultExecutorId(savedState.executorId);
+    setDefaultAgentProfileId(savedState.agentProfileId);
   };
 
   return {
@@ -459,6 +466,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     agentProfiles,
     isDirty,
     handleSave,
+    handleDiscard,
     handleDeleteWorkspace,
   };
 }
@@ -481,6 +489,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     agentProfiles,
     isDirty,
     handleSave,
+    handleDiscard,
     handleDeleteWorkspace,
   } = useWorkspaceEditForm(workspace);
 
@@ -495,7 +504,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     canSave: Boolean(workspaceNameDraft.trim()),
     invalidReason: workspaceNameDraft.trim() ? undefined : "Workspace name is required.",
     save: handleSave,
-    discard: () => undefined,
+    discard: handleDiscard,
   });
 
   return (

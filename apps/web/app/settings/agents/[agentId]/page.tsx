@@ -452,7 +452,7 @@ function AgentSetupForm({
         onProfileMcpChange={handleProfileMcpChange}
         onRemoveProfile={handleRemoveProfile}
         onToastError={onToastError}
-        onSave={handleSave}
+        onSave={() => void handleSave().catch(() => undefined)}
       />
     </div>
   );

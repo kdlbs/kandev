@@ -32,10 +32,7 @@ export function createQueuedUserSettingsSync<T>(
   let queue = Promise.resolve();
   return (value: T) => {
     const payload = buildPayload(value);
-    queue = queue
-      .catch(() => undefined)
-      .then(() => updateUserSettingsWithRetry(payload))
-      .catch(() => undefined);
+    queue = queue.catch(() => undefined).then(() => updateUserSettingsWithRetry(payload));
     return queue;
   };
 }

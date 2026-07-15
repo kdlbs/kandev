@@ -130,17 +130,21 @@ function QueryEditor({
 
 function useDefaultQueryDrafts(workspaceId?: string) {
   const { toast } = useToast();
-  const { prPresets, issuePresets, save } = useDefaultQueryPresets(workspaceId ?? null);
+  const { prPresets, issuePresets, save, reset, isCustomized, isReady } = useDefaultQueryPresets(
+    workspaceId ?? null,
+  );
   const [prDraft, setPrDraft] = useState<StoredQueryPreset[]>(prPresets);
   const [issueDraft, setIssueDraft] = useState<StoredQueryPreset[]>(issuePresets);
   const [prBaseline, setPrBaseline] = useState(prPresets);
   const [issueBaseline, setIssueBaseline] = useState(issuePresets);
+  const [resetRequested, setResetRequested] = useState(false);
 
   const dirty = useMemo(
     () =>
+      resetRequested ||
       JSON.stringify(prBaseline) !== JSON.stringify(prDraft) ||
       JSON.stringify(issueBaseline) !== JSON.stringify(issueDraft),
-    [prBaseline, issueBaseline, prDraft, issueDraft],
+    [prBaseline, issueBaseline, prDraft, issueDraft, resetRequested],
   );
 
   const [syncedPr, setSyncedPr] = useState(prPresets);
@@ -149,18 +153,21 @@ function useDefaultQueryDrafts(workspaceId?: string) {
     setSyncedPr(prPresets);
     setPrBaseline(prPresets);
     setPrDraft(prPresets);
+    setResetRequested(false);
   }
   if (issuePresets !== syncedIssue && !dirty) {
     setSyncedIssue(issuePresets);
     setIssueBaseline(issuePresets);
     setIssueDraft(issuePresets);
+    setResetRequested(false);
   }
 
   const handleSave = useCallback(async () => {
     const submittedPr = prDraft;
     const submittedIssue = issueDraft;
     try {
-      await save({ pr: submittedPr, issue: submittedIssue });
+      if (resetRequested) await reset();
+      else await save({ pr: submittedPr, issue: submittedIssue });
       setPrBaseline(submittedPr);
       setIssueBaseline(submittedIssue);
       setPrDraft((current) =>
@@ -169,20 +176,23 @@ function useDefaultQueryDrafts(workspaceId?: string) {
       setIssueDraft((current) =>
         JSON.stringify(current) === JSON.stringify(submittedIssue) ? submittedIssue : current,
       );
+      setResetRequested(false);
       toast({ description: "Default queries saved", variant: "success" });
     } catch {
       toast({ description: "Failed to save default queries", variant: "error" });
       throw new Error("Failed to save default queries");
     }
-  }, [save, prDraft, issueDraft, toast]);
+  }, [issueDraft, prDraft, reset, resetRequested, save, toast]);
 
   const handleReset = useCallback(() => {
     setPrDraft(toStored(BUILTIN_PR_PRESETS));
     setIssueDraft(toStored(BUILTIN_ISSUE_PRESETS));
+    setResetRequested(true);
   }, []);
   const discard = useCallback(() => {
     setPrDraft(prBaseline);
     setIssueDraft(issueBaseline);
+    setResetRequested(false);
   }, [prBaseline, issueBaseline]);
   const defaultPr = toStored(BUILTIN_PR_PRESETS);
   const defaultIssue = toStored(BUILTIN_ISSUE_PRESETS);
@@ -194,6 +204,8 @@ function useDefaultQueryDrafts(workspaceId?: string) {
     id: `github-default-queries:${workspaceId ?? "global"}`,
     revision: JSON.stringify([prDraft, issueDraft]),
     isDirty: dirty,
+    canSave: isReady,
+    invalidReason: isReady ? undefined : "Default queries are still loading.",
     save: handleSave,
     discard,
   });
@@ -201,10 +213,17 @@ function useDefaultQueryDrafts(workspaceId?: string) {
   return {
     prDraft,
     issueDraft,
-    setPrDraft,
-    setIssueDraft,
+    setPrDraft: (next: StoredQueryPreset[]) => {
+      setResetRequested(false);
+      setPrDraft(next);
+    },
+    setIssueDraft: (next: StoredQueryPreset[]) => {
+      setResetRequested(false);
+      setIssueDraft(next);
+    },
     reset: handleReset,
     atDefaults,
+    resetDisabled: atDefaults && !isCustomized,
   };
 }
 
@@ -221,7 +240,7 @@ export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string })
             size="sm"
             variant="outline"
             onClick={drafts.reset}
-            disabled={drafts.atDefaults}
+            disabled={drafts.resetDisabled}
             className="cursor-pointer"
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />

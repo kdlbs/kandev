@@ -40,6 +40,25 @@ export function replaceCustomUtilityAgents(
   return [...current.filter((agent) => agent.builtin), ...customAgents];
 }
 
+export function mergeRefreshedUtilityAgents(
+  current: UtilityAgent[],
+  saved: UtilityAgent[],
+  refreshed: UtilityAgent[],
+): UtilityAgent[] {
+  return refreshed.map((agent) => {
+    if (!agent.builtin) return agent;
+    const draft = current.find((item) => item.id === agent.id);
+    const baseline = saved.find((item) => item.id === agent.id);
+    if (!draft || !baseline) return agent;
+    return {
+      ...agent,
+      agent_id: draft.agent_id !== baseline.agent_id ? draft.agent_id : agent.agent_id,
+      model: draft.model !== baseline.model ? draft.model : agent.model,
+      enabled: draft.enabled !== baseline.enabled ? draft.enabled : agent.enabled,
+    };
+  });
+}
+
 function updateBuiltinDraft(
   agent: UtilityAgent,
   value: string,
@@ -172,11 +191,14 @@ function useUtilityAgentsData() {
   }, [fetchData]);
 
   const refreshCustomAgents = useCallback(async () => {
-    const response = await listUtilityAgents({ cache: "no-store" });
-    const customAgents = response.agents.filter((agent) => !agent.builtin);
-    setAgents((current) => replaceCustomUtilityAgents(current, customAgents));
-    setSavedAgents((current) => replaceCustomUtilityAgents(current, customAgents));
-  }, []);
+    try {
+      const response = await listUtilityAgents({ cache: "no-store" });
+      setAgents((current) => mergeRefreshedUtilityAgents(current, savedAgents, response.agents));
+      setSavedAgents(response.agents);
+    } catch {
+      // The dialog save already succeeded; keep the current list until the next refresh.
+    }
+  }, [savedAgents]);
 
   return {
     agents,

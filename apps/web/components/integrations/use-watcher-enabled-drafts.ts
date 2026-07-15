@@ -31,7 +31,10 @@ export function useWatcherEnabledDrafts<T extends EnabledItem>({
   );
 
   const toggleEnabled = useCallback((item: T) => {
-    setDrafts((current) => ({ ...current, [item.id]: !item.enabled }));
+    setDrafts((current) => ({
+      ...current,
+      [item.id]: !(current[item.id] ?? item.enabled),
+    }));
   }, []);
   const discard = useCallback(() => setDrafts({}), []);
   const save = useCallback(async () => {

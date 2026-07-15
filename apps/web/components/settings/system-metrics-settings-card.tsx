@@ -48,7 +48,7 @@ export function SystemMetricsSettingsCard({
         }
       })
       .catch(() => {
-        if (!cancelled) setLoaded(true);
+        if (!cancelled) setLoaded(false);
       });
     return () => {
       cancelled = true;

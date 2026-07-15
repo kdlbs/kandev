@@ -294,6 +294,8 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
     id: `github-action-presets:${workspaceId}`,
     revision: JSON.stringify([prDraft, issueDraft]),
     isDirty: dirty,
+    canSave: !loading,
+    invalidReason: loading ? "Quick actions are still loading." : undefined,
     save: handleSave,
     discard,
   });
@@ -317,22 +319,28 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
         </div>
       }
     >
-      <Tabs defaultValue="pr">
-        <TabsList>
-          <TabsTrigger value="pr" className="cursor-pointer">
-            Pull requests
-          </TabsTrigger>
-          <TabsTrigger value="issue" className="cursor-pointer">
-            Issues
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="pr">
-          <PresetEditor presets={prDraft} onChange={setPrDraft} addLabel="Add PR action" />
-        </TabsContent>
-        <TabsContent value="issue">
-          <PresetEditor presets={issueDraft} onChange={setIssueDraft} addLabel="Add issue action" />
-        </TabsContent>
-      </Tabs>
+      <fieldset disabled={loading} className="contents">
+        <Tabs defaultValue="pr">
+          <TabsList>
+            <TabsTrigger value="pr" className="cursor-pointer">
+              Pull requests
+            </TabsTrigger>
+            <TabsTrigger value="issue" className="cursor-pointer">
+              Issues
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="pr">
+            <PresetEditor presets={prDraft} onChange={setPrDraft} addLabel="Add PR action" />
+          </TabsContent>
+          <TabsContent value="issue">
+            <PresetEditor
+              presets={issueDraft}
+              onChange={setIssueDraft}
+              addLabel="Add issue action"
+            />
+          </TabsContent>
+        </Tabs>
+      </fieldset>
     </SettingsSection>
   );
 }

@@ -28,24 +28,59 @@ function newClientId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-function toDraftStep(tempWorkflowId: string, definition: StepDefinition): WorkflowStep {
+function remapStepReferences<T>(value: T, mappings: Map<string, string>): T {
+  if (Array.isArray(value)) return value.map((item) => remapStepReferences(item, mappings)) as T;
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, item]) => [
+      key,
+      key === "step_id" && typeof item === "string"
+        ? (mappings.get(item) ?? item)
+        : remapStepReferences(item, mappings),
+    ]),
+  ) as T;
+}
+
+function toDraftStep(
+  tempWorkflowId: string,
+  definition: StepDefinition,
+  definitionIds: Map<string, string>,
+): WorkflowStep {
   return {
-    id: `temp-template-step-${tempWorkflowId}-${definition.position}`,
+    id:
+      definitionIds.get(definition.id ?? "") ??
+      `temp-template-step-${tempWorkflowId}-${definition.position}`,
     workflow_id: toWorkflowId(tempWorkflowId),
     name: definition.name,
     position: definition.position,
     color: definition.color ?? "bg-slate-500",
     prompt: definition.prompt,
-    events: definition.events,
+    events: remapStepReferences(definition.events, definitionIds),
     is_start_step: definition.is_start_step,
     show_in_command_panel: definition.show_in_command_panel,
     agent_profile_id: definition.agent_profile_id,
     wip_limit: definition.wip_limit,
-    pull_from_step_id: definition.pull_from_step_id,
+    pull_from_step_id: definition.pull_from_step_id
+      ? (definitionIds.get(definition.pull_from_step_id) ?? definition.pull_from_step_id)
+      : definition.pull_from_step_id,
     allow_manual_move: true,
     created_at: "",
     updated_at: "",
   };
+}
+
+export function createDraftWorkflowSteps(
+  tempWorkflowId: string,
+  definitions: StepDefinition[],
+): WorkflowStep[] {
+  const definitionIds = new Map(
+    definitions.flatMap((definition) =>
+      definition.id
+        ? [[definition.id, `temp-template-step-${tempWorkflowId}-${definition.position}`] as const]
+        : [],
+    ),
+  );
+  return definitions.map((definition) => toDraftStep(tempWorkflowId, definition, definitionIds));
 }
 
 export function useWorkflowCreation({
@@ -84,7 +119,7 @@ export function useWorkflowCreation({
     const definitions = template?.default_steps?.length
       ? template.default_steps
       : DEFAULT_CUSTOM_STEPS;
-    const steps = definitions.map((definition) => toDraftStep(tempId, definition));
+    const steps = createDraftWorkflowSteps(tempId, definitions);
 
     setInitialStepsByWorkflowId((previous) => new Map(previous).set(tempId, steps));
     setWorkflowItems((previous) => [workflow, ...previous]);

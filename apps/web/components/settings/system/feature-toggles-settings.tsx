@@ -24,7 +24,8 @@ type Props = {
 let bootstrapRuntimeFlagsRequest: ReturnType<typeof fetchRuntimeFlags> | null = null;
 
 export function FeatureTogglesSettings({ initialFlags, restartCapability }: Props) {
-  const { flags, isLoadingFlags, reload, setOverride } = useRuntimeFlagsDraft(initialFlags);
+  const { flags, isLoadingFlags, isDirty, reload, setOverride } =
+    useRuntimeFlagsDraft(initialFlags);
   const pendingRestart = useMemo(
     () => flags.some((flag) => flag.requires_restart_to_apply),
     [flags],
@@ -37,7 +38,7 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
       {pendingRestart && (
         <RestartRequiredAlert
           capability={restartCapability}
-          restarting={restart.isRestarting}
+          restarting={restart.isRestarting || isDirty}
           onRestart={() => void restart.start()}
         />
       )}
@@ -120,10 +121,11 @@ function useRuntimeFlagsDraft(initialFlags: RuntimeFlagState[]) {
   const savedRevision = JSON.stringify(
     savedFlags.map(({ key, override_value }) => [key, override_value]),
   );
+  const isDirty = revision !== savedRevision;
   useSettingsSaveContributor({
     id: "system-feature-toggles",
     revision,
-    isDirty: revision !== savedRevision,
+    isDirty,
     save: async () => {
       const submitted = flags;
       const changed = submitted.filter((flag) => {
@@ -142,7 +144,7 @@ function useRuntimeFlagsDraft(initialFlags: RuntimeFlagState[]) {
     discard: () => setFlags(savedFlags),
   });
 
-  return { flags, isLoadingFlags, reload, setOverride };
+  return { flags, isLoadingFlags, isDirty, reload, setOverride };
 }
 
 function fetchRuntimeFlagsForReload(bootstrap: boolean): ReturnType<typeof fetchRuntimeFlags> {

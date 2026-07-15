@@ -475,12 +475,16 @@ export function NotificationsSettings() {
   } = state;
   const appriseProviders = providers.filter((provider) => provider.type === "apprise");
 
-  const saveRevision = JSON.stringify({
-    providers: state.providers,
-    appriseEdits: state.appriseEdits,
-    appriseNameEdits: state.appriseNameEdits,
-    pendingDeletes: [...state.pendingDeletes].sort(),
-  });
+  const saveRevision = useMemo(
+    () =>
+      JSON.stringify({
+        providers: state.providers,
+        appriseEdits: state.appriseEdits,
+        appriseNameEdits: state.appriseNameEdits,
+        pendingDeletes: [...state.pendingDeletes].sort(),
+      }),
+    [state.providers, state.appriseEdits, state.appriseNameEdits, state.pendingDeletes],
+  );
 
   return (
     <SettingsPageTemplate

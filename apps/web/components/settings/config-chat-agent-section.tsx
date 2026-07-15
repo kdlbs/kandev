@@ -13,6 +13,8 @@ export function ConfigChatAgentSection() {
   );
   const profiles = useAppStore((s) => s.agentProfiles.items ?? []);
   const currentProfileId = workspace?.default_config_agent_profile_id ?? "";
+  const workspaceId = workspace?.id ?? null;
+  const [syncedWorkspaceId, setSyncedWorkspaceId] = useState(workspaceId);
   const [savedProfileId, setSavedProfileId] = useState(currentProfileId);
   const [draftProfileId, setDraftProfileId] = useState(currentProfileId);
 
@@ -20,10 +22,16 @@ export function ConfigChatAgentSection() {
   const isDirty = draftProfileId !== savedProfileId;
 
   useEffect(() => {
+    if (workspaceId !== syncedWorkspaceId) {
+      setSyncedWorkspaceId(workspaceId);
+      setSavedProfileId(currentProfileId);
+      setDraftProfileId(currentProfileId);
+      return;
+    }
     if (isDirty) return;
     setSavedProfileId(currentProfileId);
     setDraftProfileId(currentProfileId);
-  }, [currentProfileId, isDirty, workspace?.id]);
+  }, [currentProfileId, isDirty, syncedWorkspaceId, workspaceId]);
 
   useSettingsSaveContributor({
     id: "utility-config-chat-agent",

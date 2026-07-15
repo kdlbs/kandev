@@ -17,6 +17,13 @@ import { SettingsFloatingSave, type SettingsSaveStatus } from "./settings-floati
 
 export type SettingsSaveRevision = string | number;
 
+export class SettingsSaveCancelledError extends Error {
+  constructor(message = "Save cancelled") {
+    super(message);
+    this.name = "SettingsSaveCancelledError";
+  }
+}
+
 export type SettingsSaveContributor = {
   id: string;
   order?: number;
@@ -25,7 +32,7 @@ export type SettingsSaveContributor = {
   canSave?: boolean;
   invalidReason?: string;
   save: (revision: SettingsSaveRevision) => Promise<void> | void;
-  discard: () => void;
+  discard: () => Promise<void> | void;
 };
 
 type RegisteredContributor = {
@@ -47,7 +54,10 @@ const SettingsSaveRegistryContext = createContext<Registry | null>(null);
 
 export function SettingsSaveProvider({ children }: { children: ReactNode }) {
   const { contributors, registry, dirtyContributors, refreshRegistry } = useContributorRegistry();
-  const { status, saveAll, clearSavedStatus } = useSaveCoordinator(contributors, refreshRegistry);
+  const { status, saveAll, clearSavedStatus, markError } = useSaveCoordinator(
+    contributors,
+    refreshRegistry,
+  );
   const pendingNavigationRef = useRef<NavigationIntent | null>(null);
   const [pendingNavigation, setPendingNavigation] = useState<NavigationIntent | null>(null);
   const hasDirty = dirtyContributors.length > 0;
@@ -72,15 +82,20 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
     return true;
   }, [saveAll]);
 
-  const discardAndLeave = useCallback(() => {
-    for (const { contributor } of getDirtyContributors(contributors)) {
-      contributor.discard();
+  const discardAndLeave = useCallback(async () => {
+    try {
+      for (const { contributor } of getDirtyContributors(contributors)) {
+        await contributor.discard();
+      }
+    } catch {
+      markError();
+      return;
     }
     const intent = pendingNavigationRef.current;
     pendingNavigationRef.current = null;
     setPendingNavigation(null);
     intent?.proceed();
-  }, [contributors]);
+  }, [contributors, markError]);
 
   const continueEditing = useCallback(() => {
     const intent = pendingNavigationRef.current;
@@ -170,6 +185,7 @@ function useSaveCoordinator(
   const savingRef = useRef(false);
   const [status, setStatus] = useState<SettingsSaveStatus>("dirty");
   const clearSavedStatus = useCallback(() => setStatus("dirty"), []);
+  const markError = useCallback(() => setStatus("error"), []);
   const saveAll = useCallback(async (): Promise<SaveResult> => {
     if (savingRef.current) return { canLeave: false, failedIds: new Set() };
     const submitted = snapshotDirtyContributors(contributors);
@@ -185,7 +201,11 @@ function useSaveCoordinator(
       try {
         await contributor.save(contributor.revision);
         hasNewerChanges ||= hasNewerRevision(contributors, contributor);
-      } catch {
+      } catch (error) {
+        if (error instanceof SettingsSaveCancelledError) {
+          hasNewerChanges = true;
+          break;
+        }
         failedIds.add(contributor.id);
       }
     }
@@ -196,7 +216,7 @@ function useSaveCoordinator(
     return { canLeave: failedIds.size === 0 && !hasNewerChanges, failedIds };
   }, [contributors, refreshRegistry]);
 
-  return { status, saveAll, clearSavedStatus };
+  return { status, saveAll, clearSavedStatus, markError };
 }
 
 function saveCompletionStatus(
@@ -242,7 +262,7 @@ function hasNewerRevision(
   submitted: SettingsSaveContributor,
 ): boolean {
   const current = contributors.get(submitted.id)?.contributor;
-  return Boolean(current && current.isDirty && !Object.is(current.revision, submitted.revision));
+  return Boolean(current && !Object.is(current.revision, submitted.revision));
 }
 
 function compareContributors(left: RegisteredContributor, right: RegisteredContributor): number {

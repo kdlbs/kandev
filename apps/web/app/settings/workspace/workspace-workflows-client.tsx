@@ -180,6 +180,7 @@ function useWorkflowActions({
   setWorkflowItems,
   setSavedWorkflowItems,
 }: WorkflowActionsArgs) {
+  const finalizedWorkflowIdsRef = useRef(new Map<string, string>());
   const creation = useWorkflowCreation({
     workspace,
     workflowTemplates,
@@ -209,6 +210,7 @@ function useWorkflowActions({
   const handleDeleteWorkflow = async (workflowId: string) => {
     if (!workflowId.startsWith(TEMP_WORKFLOW_PREFIX)) await deleteWorkflowAction(workflowId);
     creation.forgetInitialSteps(workflowId);
+    finalizedWorkflowIdsRef.current.delete(workflowId);
     setWorkflowItems((prev) => prev.filter((wf) => wf.id !== workflowId));
     setSavedWorkflowItems((prev) => prev.filter((wf) => wf.id !== workflowId));
   };
@@ -222,6 +224,7 @@ function useWorkflowActions({
   }: WorkflowSavedParams) => {
     const isNew = clientWorkflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
     if (isNew && !finalizeIdentity) return;
+    if (isNew) finalizedWorkflowIdsRef.current.set(clientWorkflow.id, savedWorkflow.id);
     setWorkflowItems((prev) =>
       prev.map((item) =>
         item.id === clientWorkflow.id
@@ -230,7 +233,11 @@ function useWorkflowActions({
       ),
     );
     setSavedWorkflowItems((previous) =>
-      alignSavedWorkflowsToDraftOrder(workflowItems, previous, clientWorkflow.id, savedWorkflow),
+      alignSavedWorkflowsToDraftOrder(
+        workflowItems,
+        [...previous.filter((item) => item.id !== savedWorkflow.id), savedWorkflow],
+        finalizedWorkflowIdsRef.current,
+      ),
     );
     if (isNew) {
       creation.remapInitialSteps(clientWorkflow.id, savedWorkflow.id, currentSteps);
@@ -239,6 +246,7 @@ function useWorkflowActions({
 
   const handleDiscardWorkflow = (workflowId: string) => {
     creation.forgetInitialSteps(workflowId);
+    finalizedWorkflowIdsRef.current.delete(workflowId);
     if (workflowId.startsWith(TEMP_WORKFLOW_PREFIX)) {
       setWorkflowItems((previous) => previous.filter((item) => item.id !== workflowId));
       return;
@@ -263,14 +271,12 @@ function useWorkflowActions({
 export function alignSavedWorkflowsToDraftOrder(
   drafts: Workflow[],
   saved: Workflow[],
-  clientWorkflowId: string,
-  savedWorkflow: Workflow,
+  finalizedWorkflowIds: ReadonlyMap<string, string>,
 ): Workflow[] {
-  const savedById = new Map(saved.map((workflow) => [workflow.id, workflow]));
-  savedById.set(savedWorkflow.id, savedWorkflow);
+  const savedById = new Map<string, Workflow>(saved.map((workflow) => [workflow.id, workflow]));
   return drafts.flatMap((draft) => {
-    if (draft.id === clientWorkflowId) return [savedWorkflow];
-    const baseline = savedById.get(draft.id);
+    const persistedId = finalizedWorkflowIds.get(draft.id) ?? draft.id;
+    const baseline = savedById.get(persistedId);
     return baseline ? [baseline] : [];
   });
 }

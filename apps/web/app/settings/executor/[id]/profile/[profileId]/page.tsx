@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
+import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -343,7 +344,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
             : e,
         ),
       );
-      router.push(`/settings/executor/${executor.id}`);
+      runWithNavigationBlockerBypassed(() => router.push(`/settings/executor/${executor.id}`));
     } catch {
       setDeleting(false);
       setDeleteDialogOpen(false);

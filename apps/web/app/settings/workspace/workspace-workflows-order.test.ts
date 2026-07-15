@@ -19,9 +19,29 @@ describe("alignSavedWorkflowsToDraftOrder", () => {
     const persisted = workflow("persisted", "Draft");
 
     expect(
-      alignSavedWorkflowsToDraftOrder([draft, existing], [existing], draft.id, persisted).map(
-        ({ id }) => id,
-      ),
+      alignSavedWorkflowsToDraftOrder(
+        [draft, existing],
+        [existing, persisted],
+        new Map([[draft.id, persisted.id]]),
+      ).map(({ id }) => id),
     ).toEqual([persisted.id, existing.id]);
+  });
+
+  it("preserves workflows finalized by earlier save contributors", () => {
+    const firstDraft = workflow("temp-workflow-1", "First");
+    const secondDraft = workflow("temp-workflow-2", "Second");
+    const firstSaved = workflow("persisted-1", "First");
+    const secondSaved = workflow("persisted-2", "Second");
+
+    expect(
+      alignSavedWorkflowsToDraftOrder(
+        [firstDraft, secondDraft],
+        [firstSaved, secondSaved],
+        new Map([
+          [firstDraft.id, firstSaved.id],
+          [secondDraft.id, secondSaved.id],
+        ]),
+      ).map(({ id }) => id),
+    ).toEqual([firstSaved.id, secondSaved.id]);
   });
 });

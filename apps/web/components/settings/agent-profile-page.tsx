@@ -508,7 +508,7 @@ function ProfileEditor({
     canSave: Boolean(draft.name.trim()),
     invalidReason: draft.name.trim() ? undefined : "Profile name is required.",
     save: handleSave,
-    discard: () => undefined,
+    discard: () => setDraft(savedProfile),
   });
   const {
     requestDelete,

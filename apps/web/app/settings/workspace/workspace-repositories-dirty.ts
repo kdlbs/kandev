@@ -34,7 +34,7 @@ export function mergeSavedRepositoryDraft(
   saved: RepositoryWithScripts,
 ): RepositoryWithScripts {
   if (!isRepositoryDirty(current, submitted) && !areRepositoryScriptsDirty(current, submitted)) {
-    return saved;
+    return { ...current, ...saved };
   }
   const scripts = current.scripts.map((currentScript) => {
     const submittedIndex = submitted.scripts.findIndex((script) => script.id === currentScript.id);

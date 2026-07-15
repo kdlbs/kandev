@@ -24,12 +24,6 @@ const EXECUTORS_ROUTE = "/settings/executors";
 const DefaultIcon = EXECUTOR_ICON_MAP.local;
 export type SaveStatus = "idle" | "loading" | "success" | "error";
 
-export function getSaveButtonLabel(status: SaveStatus) {
-  if (status === "success") return "Saved";
-  if (status === "loading") return "Saving";
-  return "Save Changes";
-}
-
 export function upsertExecutorProfile(
   executors: Executor[],
   executor: Executor,

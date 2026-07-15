@@ -77,6 +77,16 @@ describe("isRepositoryDirty", () => {
 });
 
 describe("mergeSavedRepositoryDraft", () => {
+  it("preserves client-only row state when the submitted draft is unchanged", () => {
+    const current = { ...makeRepo(), __autoOpen: true };
+    const saved = makeRepo({ name: "saved name" });
+
+    const merged = mergeSavedRepositoryDraft(current, current, saved);
+
+    expect((merged as RepositoryWithScripts & { __autoOpen?: boolean }).__autoOpen).toBe(true);
+    expect(merged.name).toBe("saved name");
+  });
+
   it("remaps created script IDs while preserving edits made during save", () => {
     const submittedScript = makeScript("temp-script-1", "submitted");
     const submitted = makeRepo({ scripts: [submittedScript] });

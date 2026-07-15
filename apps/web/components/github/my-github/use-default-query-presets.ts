@@ -160,7 +160,9 @@ export function useDefaultQueryPresets(workspaceId: string | null = null) {
 
   const save = useCallback(
     async (defaults: StoredDefaults) => {
-      if (workspaceId && workspaceDefaults === undefined) return;
+      if (workspaceId && workspaceDefaults === undefined) {
+        throw new Error("Default queries are still loading");
+      }
       if (workspaceId) {
         await syncWorkspaceDefaultQueryPresets(workspaceId, defaults);
         setWorkspaceDefaults(defaults);
@@ -173,7 +175,9 @@ export function useDefaultQueryPresets(workspaceId: string | null = null) {
   );
 
   const reset = useCallback(async () => {
-    if (workspaceId && workspaceDefaults === undefined) return;
+    if (workspaceId && workspaceDefaults === undefined) {
+      throw new Error("Default queries are still loading");
+    }
     if (workspaceId) {
       await syncWorkspaceDefaultQueryPresets(workspaceId, null);
       setWorkspaceDefaults(null);
@@ -184,8 +188,9 @@ export function useDefaultQueryPresets(workspaceId: string | null = null) {
   }, [workspaceId, workspaceDefaults, setWorkspaceDefaults]);
 
   const isCustomized = effectiveStored !== null && effectiveStored !== undefined;
+  const isReady = !workspaceId || workspaceDefaults !== undefined;
 
-  return { prPresets, issuePresets, save, reset, isCustomized };
+  return { prPresets, issuePresets, save, reset, isCustomized, isReady };
 }
 
 /** Resolve full PresetOption[] by merging stored presets with icon lookups from builtins. */

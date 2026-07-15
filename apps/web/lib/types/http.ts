@@ -67,6 +67,7 @@ export type WorkflowTemplate = {
 
 // Step Definition - template step configuration
 export type StepDefinition = {
+  id?: string;
   name: string;
   position: number;
   color?: string;

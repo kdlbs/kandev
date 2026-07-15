@@ -17,7 +17,10 @@ import {
 } from "@tabler/icons-react";
 import { testSSHConnection } from "@/lib/api/domains/ssh-api";
 import { FingerprintTrustBlock } from "@/components/settings/ssh-fingerprint-trust-block";
-import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import {
+  SettingsSaveCancelledError,
+  useSettingsSaveContributor,
+} from "@/components/settings/settings-save-provider";
 import type {
   SSHIdentitySource,
   SSHTestRequest,
@@ -220,7 +223,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
 
   const handleSave = useCallback(async () => {
     if (!canSave || !result?.fingerprint) throw new Error("Test and trust this host before saving");
-    if (!confirmRunningSessions(props.runningSessionCount)) throw new Error("Save cancelled");
+    if (!confirmRunningSessions(props.runningSessionCount)) throw new SettingsSaveCancelledError();
     const submitted = form;
     setState((prev) => ({ ...prev, saving: true, error: null }));
     try {
@@ -636,12 +639,7 @@ function StepRow({ step }: { step: SSHTestStep }) {
           <span className="text-muted-foreground text-xs">({step.duration_ms}ms)</span>
         </div>
         {step.output && (
-          <p
-            data-testid={`ssh-test-step-${slug}-output`}
-            className="text-xs text-muted-foreground truncate font-mono"
-          >
-            {step.output}
-          </p>
+          <p className="text-xs text-muted-foreground truncate font-mono">{step.output}</p>
         )}
         {step.error && (
           <p data-testid={`ssh-test-step-${slug}-error`} className="text-xs text-red-600 truncate">

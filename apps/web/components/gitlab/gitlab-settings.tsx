@@ -122,13 +122,23 @@ function HostForm({ initial, onSaved }: { initial: string; onSaved: () => void }
     }
   }, [host, toast, onSaved]);
   const discard = useCallback(() => setHost(baseline), [baseline]);
+  const validHost = (() => {
+    try {
+      const url = new URL(host.trim());
+      return (
+        (url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password
+      );
+    } catch {
+      return false;
+    }
+  })();
 
   useSettingsSaveContributor({
     id: "gitlab-host",
     revision: host,
     isDirty: host !== baseline,
-    canSave: Boolean(host.trim()),
-    invalidReason: host.trim() ? undefined : "A GitLab host URL is required.",
+    canSave: validHost,
+    invalidReason: validHost ? undefined : "Enter a valid HTTP or HTTPS GitLab host URL.",
     save,
     discard,
   });

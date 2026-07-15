@@ -360,6 +360,7 @@ export function ProfileMcpConfigCard({
     setMcpEnabled,
     handleMcpServersChange,
     handleSaveMcp,
+    resetMcpDraft,
   } = useProfileMcpConfig({ profileId, supportsMcp, initialConfig, onToastError });
 
   const state = resolveMcpConfigState({
@@ -380,7 +381,7 @@ export function ProfileMcpConfigCard({
     canSave: !state.currentError,
     invalidReason: state.currentError ?? undefined,
     save: handleSaveMcp,
-    discard: () => undefined,
+    discard: resetMcpDraft,
   });
 
   if (!supportsMcp) return null;

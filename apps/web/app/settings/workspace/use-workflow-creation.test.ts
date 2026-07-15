@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Workflow, WorkflowTemplate, Workspace } from "@/lib/types/http";
-import { useWorkflowCreation } from "./use-workflow-creation";
+import { createDraftWorkflowSteps, useWorkflowCreation } from "./use-workflow-creation";
 
 const workspace = { id: "workspace-1", name: "Workspace" } as Workspace;
 const template = {
@@ -28,6 +28,30 @@ beforeEach(() => {
 });
 
 describe("useWorkflowCreation", () => {
+  it("remaps template transition references to client step identities", () => {
+    const steps = createDraftWorkflowSteps("temp-workflow-1", [
+      {
+        id: "todo",
+        name: "Todo",
+        position: 0,
+        events: {
+          on_turn_complete: [{ type: "move_to_step", config: { step_id: "done" } }],
+        },
+      },
+      { id: "done", name: "Done", position: 1, pull_from_step_id: "todo" },
+    ]);
+
+    expect(steps[0].events).toEqual({
+      on_turn_complete: [
+        {
+          type: "move_to_step",
+          config: { step_id: "temp-template-step-temp-workflow-1-1" },
+        },
+      ],
+    });
+    expect(steps[1].pull_from_step_id).toBe("temp-template-step-temp-workflow-1-0");
+  });
+
   it("creates a custom workflow and default steps locally", () => {
     const { result, getWorkflows } = renderCreationHook();
 

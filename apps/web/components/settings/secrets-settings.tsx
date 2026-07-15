@@ -70,6 +70,7 @@ function SecretForm({
           value={formState.name}
           onChange={(e) => onFormChange({ name: e.target.value })}
           placeholder="Name (e.g. OpenAI Production Key)"
+          disabled={isBusy}
         />
         <Textarea
           value={formState.value}
@@ -77,6 +78,7 @@ function SecretForm({
           placeholder="Secret value"
           rows={2}
           className="resize-y font-mono text-sm"
+          disabled={isBusy}
         />
       </div>
       <div className="flex items-center gap-2">
@@ -358,7 +360,7 @@ function getSecretEditState(
   formState: SecretFormState,
 ) {
   const editingSecret = items.find((secret) => secret.id === editingId);
-  const revision = JSON.stringify(formState);
+  const revision = JSON.stringify({ ...formState, name: formState.name.trim() });
   const savedRevision = JSON.stringify({ name: editingSecret?.name ?? "", value: "" });
   return { revision, isDirty: Boolean(editingId) && revision !== savedRevision };
 }

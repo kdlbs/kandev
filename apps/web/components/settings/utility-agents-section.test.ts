@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { UtilityAgent } from "@/lib/api/domains/utility-api";
-import { replaceCustomUtilityAgents } from "./utility-agents-section";
+import { mergeRefreshedUtilityAgents, replaceCustomUtilityAgents } from "./utility-agents-section";
 
 function agent(id: string, builtin: boolean, model: string): UtilityAgent {
   return {
@@ -28,5 +28,15 @@ describe("replaceCustomUtilityAgents", () => {
         [refreshedCustom],
       ),
     ).toEqual([builtinDraft, refreshedCustom]);
+  });
+
+  it("refreshes saved builtins while preserving unsaved model overrides", () => {
+    const baseline = agent("commit", true, "saved-model");
+    const draft = { ...baseline, model: "draft-model" };
+    const refreshed = { ...baseline, prompt: "updated in dialog", model: "dialog-model" };
+
+    expect(mergeRefreshedUtilityAgents([draft], [baseline], [refreshed])).toEqual([
+      { ...refreshed, model: "draft-model" },
+    ]);
   });
 });

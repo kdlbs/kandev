@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "@/lib/routing/client-router";
+import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { toast } from "sonner";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -275,12 +276,51 @@ function useRemoveAutomation(
   workspaceId: string,
   remove: (id: string) => Promise<unknown>,
   router: ReturnType<typeof useRouter>,
+  onError: (error: unknown) => void,
 ) {
   return async () => {
     if (!currentId) return;
-    await remove(currentId);
-    router.push(`/settings/workspace/${workspaceId}/automations`);
+    try {
+      await remove(currentId);
+      runWithNavigationBlockerBypassed(() =>
+        router.push(`/settings/workspace/${workspaceId}/automations`),
+      );
+    } catch (error) {
+      onError(error);
+      throw error;
+    }
   };
+}
+
+type AutomationPersistenceOptions = SaveHandlerOpts & {
+  savedRevision: string;
+  remove: (id: string) => Promise<unknown>;
+};
+
+function useAutomationPersistence(options: AutomationPersistenceOptions) {
+  const handleSave = useSaveHandler(options);
+  const handleRemove = useRemoveAutomation(
+    options.currentId,
+    options.workspaceId,
+    options.remove,
+    options.router,
+    (error) =>
+      toast.error("Failed to delete automation", {
+        description: error instanceof Error ? error.message : "Request failed",
+      }),
+  );
+  const isRunMode = options.form.executionMode === "run";
+  const canSave =
+    options.form.name.trim().length > 0 &&
+    (isRunMode || (!!options.form.workflowId && !!options.form.workflowStepId));
+  useAutomationSaveContributor({
+    currentId: options.currentId,
+    revision: automationRevision(options.form, options.triggerActions.allTriggers),
+    savedRevision: options.savedRevision,
+    canSave,
+    save: handleSave,
+  });
+  return { handleSave, handleRemove, canSave };
 }
 
 export function AutomationEditor({ workspaceId, automationId }: AutomationEditorProps) {
@@ -314,7 +354,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     setForm((prev) => ({ ...prev, [key]: value }));
   }, []);
 
-  const handleSave = useSaveHandler({
+  const { handleSave, handleRemove, canSave } = useAutomationPersistence({
     isNew,
     workspaceId,
     form,
@@ -327,22 +367,10 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     setCreatedWebhook,
     triggerActions,
     router,
+    savedRevision,
+    remove,
     onSaved: (savedForm, savedTriggers) =>
       setSavedRevision(automationRevision(savedForm, savedTriggers)),
-  });
-
-  const handleRemove = useRemoveAutomation(currentId, workspaceId, remove, router);
-
-  const isRunMode = form.executionMode === "run";
-  const canSave =
-    form.name.trim().length > 0 && (isRunMode || (!!form.workflowId && !!form.workflowStepId));
-  const revision = automationRevision(form, triggerActions.allTriggers);
-  useAutomationSaveContributor({
-    currentId,
-    revision,
-    savedRevision,
-    canSave,
-    save: handleSave,
   });
 
   return (

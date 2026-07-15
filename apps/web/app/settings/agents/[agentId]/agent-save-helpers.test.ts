@@ -128,6 +128,8 @@ describe("isProfileDirty", () => {
 });
 
 describe("mergeSavedAgentDraft", () => {
+  const persistedProfileId = toAgentProfileId("persisted-profile");
+
   it("remaps created profile IDs while preserving edits made during save", () => {
     const submittedProfile = draftFrom(baseProfile, {
       id: toAgentProfileId("draft-profile"),
@@ -139,15 +141,40 @@ describe("mergeSavedAgentDraft", () => {
       workspace_id: "newer-workspace",
       profiles: [{ ...submittedProfile, name: "Newer name" }],
     };
-    const saved = agentWithProfiles([
-      { ...submittedProfile, id: toAgentProfileId("persisted-profile") },
-    ]);
+    const saved = agentWithProfiles([{ ...submittedProfile, id: persistedProfileId }]);
 
-    const merged = mergeSavedAgentDraft(current, submitted, saved);
+    const merged = mergeSavedAgentDraft(
+      current,
+      submitted,
+      saved,
+      new Map([[submittedProfile.id, persistedProfileId]]),
+    );
 
     expect(merged.workspace_id).toBe("newer-workspace");
-    expect(merged.profiles[0].id).toBe(toAgentProfileId("persisted-profile"));
+    expect(merged.profiles[0].id).toBe(persistedProfileId);
     expect(merged.profiles[0].name).toBe("Newer name");
+  });
+
+  it("keeps existing profiles while remapping a newly created profile", () => {
+    const existing = draftFrom(baseProfile, { id: toAgentProfileId("existing") });
+    const submittedProfile = draftFrom(baseProfile, {
+      id: toAgentProfileId("draft-profile"),
+      name: "Submitted",
+    });
+    const persisted = { ...submittedProfile, id: persistedProfileId };
+    const submitted = agentWithProfiles([submittedProfile]);
+    const current = agentWithProfiles([{ ...submittedProfile, name: "Newer" }]);
+    const saved = agentWithProfiles([existing, persisted]);
+
+    const merged = mergeSavedAgentDraft(
+      current,
+      submitted,
+      saved,
+      new Map([[submittedProfile.id, persisted.id]]),
+    );
+
+    expect(merged.profiles.map((profile) => profile.id)).toEqual([existing.id, persisted.id]);
+    expect(merged.profiles[1].name).toBe("Newer");
   });
 });
 

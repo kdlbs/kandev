@@ -113,7 +113,24 @@ async function saveMcpForProfile({
     });
   } catch (error) {
     onToastError(error);
+    throw error;
   }
+}
+
+function correlateCreatedProfiles(
+  submitted: DraftProfile[],
+  created: AgentProfile[],
+): Map<string, string> {
+  const mappings = new Map<string, string>();
+  if (submitted.length === created.length) {
+    submitted.forEach((profile, index) => mappings.set(profile.id, created[index].id));
+    return mappings;
+  }
+  for (const profile of submitted) {
+    const match = created.find((candidate) => candidate.name === profile.name);
+    if (match) mappings.set(profile.id, match.id);
+  }
+  return mappings;
 }
 
 async function saveMcpForCreatedProfiles(
@@ -193,7 +210,10 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
     callbacks.currentAgentModelConfig.default_model,
     callbacks.permissionSettings,
   );
-  callbacks.setDraftAgent(savedDraft);
+  const profileIds = correlateCreatedProfiles(draftAgent.profiles, created.profiles);
+  callbacks.setDraftAgent((current) =>
+    mergeSavedAgentDraft(current, draftAgent, savedDraft, profileIds),
+  );
   callbacks.replaceRoute(`/settings/agents/${encodeURIComponent(created.name)}`);
   return savedDraft;
 }
@@ -216,9 +236,10 @@ async function saveExistingProfiles(
   savedAgent: Agent,
   isCreateMode: boolean,
   onToastError: (error: unknown) => void,
-): Promise<AgentProfile[]> {
+): Promise<{ profiles: AgentProfile[]; profileIds: Map<string, string> }> {
   const savedProfilesById = new Map(savedAgent.profiles.map((p) => [p.id, p]));
   const nextProfiles: AgentProfile[] = isCreateMode ? [...savedAgent.profiles] : [];
+  const profileIds = new Map<string, string>();
 
   for (const profile of draftAgent.profiles) {
     const savedProfile = savedProfilesById.get(profile.id);
@@ -238,9 +259,11 @@ async function saveExistingProfiles(
         targetProfileId: createdProfile.id,
         onToastError,
       });
+      profileIds.set(profile.id, createdProfile.id);
       nextProfiles.push(createdProfile);
       continue;
     }
+    profileIds.set(profile.id, savedProfile.id);
     if (isProfileDirty(profile, savedProfile)) {
       const updatedProfile = await updateAgentProfileAction(profile.id, {
         name: profile.name,
@@ -257,7 +280,7 @@ async function saveExistingProfiles(
     }
     nextProfiles.push(savedProfile);
   }
-  return nextProfiles;
+  return { profiles: nextProfiles, profileIds };
 }
 
 async function deleteRemovedProfiles(draftAgent: DraftAgent, savedAgent: Agent) {
@@ -277,7 +300,7 @@ export async function saveExistingAgent(
 ) {
   await saveExistingAgentPatch(draftAgent, savedAgent);
 
-  const nextProfiles = await saveExistingProfiles(
+  const savedProfiles = await saveExistingProfiles(
     draftAgent,
     savedAgent,
     isCreateMode,
@@ -292,7 +315,7 @@ export async function saveExistingAgent(
     ...savedAgent,
     workspace_id: draftAgent.workspace_id ?? null,
     mcp_config_path: draftAgent.mcp_config_path ?? "",
-    profiles: nextProfiles,
+    profiles: savedProfiles.profiles,
   };
   callbacks.upsertAgent(nextAgent);
   const savedDraft = callbacks.ensureProfiles(
@@ -301,7 +324,9 @@ export async function saveExistingAgent(
     callbacks.currentAgentModelConfig.default_model,
     callbacks.permissionSettings,
   );
-  callbacks.setDraftAgent((current) => mergeSavedAgentDraft(current, draftAgent, savedDraft));
+  callbacks.setDraftAgent((current) =>
+    mergeSavedAgentDraft(current, draftAgent, savedDraft, savedProfiles.profileIds),
+  );
   if (isCreateMode) {
     callbacks.replaceRoute(`/settings/agents/${encodeURIComponent(savedAgent.name)}`);
   }
@@ -312,20 +337,24 @@ export function mergeSavedAgentDraft(
   current: DraftAgent,
   submitted: DraftAgent,
   saved: DraftAgent,
+  profileIds: ReadonlyMap<string, string> = new Map(),
 ): DraftAgent {
-  if (JSON.stringify(current) === JSON.stringify(submitted)) return saved;
-  const profiles = current.profiles.map((currentProfile) => {
-    const submittedIndex = submitted.profiles.findIndex(
-      (profile) => profile.id === currentProfile.id,
-    );
-    if (submittedIndex < 0) return currentProfile;
-    const submittedProfile = submitted.profiles[submittedIndex];
-    const savedProfile = saved.profiles[submittedIndex];
-    if (!savedProfile) return currentProfile;
-    if (JSON.stringify(currentProfile) === JSON.stringify(submittedProfile)) return savedProfile;
+  const currentById = new Map(current.profiles.map((profile) => [profile.id, profile]));
+  const submittedBySavedId = new Map(
+    submitted.profiles.map((profile) => [profileIds.get(profile.id) ?? profile.id, profile]),
+  );
+  const profiles = saved.profiles.map((savedProfile) => {
+    const submittedProfile = submittedBySavedId.get(savedProfile.id);
+    if (!submittedProfile) return savedProfile;
+    const currentProfile = currentById.get(submittedProfile.id);
+    if (!currentProfile || JSON.stringify(currentProfile) === JSON.stringify(submittedProfile)) {
+      return savedProfile;
+    }
     return { ...savedProfile, ...currentProfile, id: savedProfile.id };
   });
-  return { ...saved, ...current, profiles };
+  const submittedIds = new Set(submitted.profiles.map((profile) => profile.id));
+  profiles.push(...current.profiles.filter((profile) => !submittedIds.has(profile.id)));
+  return { ...saved, ...current, id: saved.id, name: saved.name, profiles };
 }
 
 export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boolean {

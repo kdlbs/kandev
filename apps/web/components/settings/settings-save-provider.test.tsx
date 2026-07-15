@@ -6,6 +6,7 @@ import Link from "@/components/routing/app-link";
 import { clearNavigationBlockerForTests } from "@/lib/routing/navigation-guard";
 import {
   SettingsSaveProvider,
+  SettingsSaveCancelledError,
   useSettingsSaveContributor,
   type SettingsSaveRevision,
 } from "./settings-save-provider";
@@ -60,6 +61,28 @@ function DraftContributor({
   return (
     <button type="button" onClick={() => setRevision((current) => current + 1)}>
       Edit {id}
+    </button>
+  );
+}
+
+function BooleanDraftContributor({ pending }: { pending: Deferred }) {
+  const [draft, setDraft] = useState(true);
+  const [baseline, setBaseline] = useState(false);
+
+  useSettingsSaveContributor({
+    id: "toggle",
+    revision: Number(draft),
+    isDirty: draft !== baseline,
+    save: async (revision) => {
+      await pending.promise;
+      setBaseline(Boolean(revision));
+    },
+    discard: () => setDraft(baseline),
+  });
+
+  return (
+    <button type="button" onClick={() => setDraft((current) => !current)}>
+      Toggle
     </button>
   );
 }
@@ -143,6 +166,42 @@ describe("SettingsSaveProvider", () => {
     expect(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL })).toBeTruthy();
     expect(revisions).toEqual([1]);
   });
+});
+
+describe("SettingsSaveProvider save state", () => {
+  it("keeps a cancelled save pending without reporting an error", async () => {
+    render(
+      <SettingsSaveProvider>
+        <DraftContributor
+          id="ssh"
+          onSave={() => {
+            throw new SettingsSaveCancelledError();
+          }}
+        />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+
+    expect(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL })).toBeTruthy();
+    expect(screen.queryByText("Couldn't save")).toBeNull();
+  });
+
+  it("keeps a toggle dirty when it returns to the old baseline during an in-flight save", async () => {
+    const pending = deferred();
+
+    render(
+      <SettingsSaveProvider>
+        <BooleanDraftContributor pending={pending} />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL }));
+    fireEvent.click(screen.getByRole("button", { name: "Toggle" }));
+    await act(async () => pending.resolve());
+
+    expect(await screen.findByRole("button", { name: SAVE_CHANGES_LABEL })).toBeTruthy();
+  });
 
   it("disables saving while a dirty contributor is invalid", async () => {
     render(
@@ -190,7 +249,7 @@ describe("SettingsSaveProvider navigation", () => {
     expect(unload.defaultPrevented).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "Discard and leave" }));
-    expect(window.location.pathname).toBe(TERMINAL_PATH);
+    await waitFor(() => expect(window.location.pathname).toBe(TERMINAL_PATH));
   });
 
   it("saves before approved navigation and stays put when saving fails", async () => {
