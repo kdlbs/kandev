@@ -32,7 +32,11 @@ type MockStore = Parameters<typeof useAgentSelection>[1];
 
 function makeAppState() {
   return {
-    quickChat: { isOpen: true, sessions: [] as Array<{ sessionId: string }>, activeSessionId: "" },
+    quickChat: {
+      isOpen: true,
+      sessions: [] as Array<{ sessionId: string; workspaceId: string }>,
+      activeSessionId: "",
+    },
     closeQuickChat: vi.fn(),
     closeQuickChatSession: vi.fn(),
     setActiveQuickChatSession: vi.fn(),
@@ -73,7 +77,10 @@ beforeEach(() => {
 
 describe("useQuickChatModal — setup lifecycle", () => {
   it("removes a blank placeholder when dismissed from an active session", () => {
-    mockAppState.quickChat.sessions = [{ sessionId: "" }, { sessionId: "session-1" }];
+    mockAppState.quickChat.sessions = [
+      { sessionId: "", workspaceId: WORKSPACE_ID },
+      { sessionId: "session-1", workspaceId: WORKSPACE_ID },
+    ];
     mockAppState.quickChat.activeSessionId = "session-1";
     const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
 
@@ -91,6 +98,19 @@ describe("useQuickChatModal — setup lifecycle", () => {
 
     expect(result.current.setupKey).toBe(1);
     expect(mockAppState.openQuickChat).toHaveBeenCalledWith("", WORKSPACE_ID);
+  });
+
+  it("exposes only sessions from the hydrated workspace", () => {
+    mockAppState.quickChat.sessions = [
+      { sessionId: "session-a", workspaceId: WORKSPACE_ID },
+      { sessionId: "session-b", workspaceId: "ws-2" },
+    ];
+
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    expect(result.current.sessions).toEqual([
+      { sessionId: "session-a", workspaceId: WORKSPACE_ID },
+    ]);
   });
 });
 

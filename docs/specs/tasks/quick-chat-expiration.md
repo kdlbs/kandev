@@ -1,5 +1,5 @@
 ---
-status: draft
+status: shipped
 created: 2026-07-02
 owner: José Almeida
 ---
@@ -7,6 +7,7 @@ owner: José Almeida
 # Quick Chat Persistence & Expiration
 
 ## Why
+
 A user reported her quick chats "disappearing much faster." Quick chats are
 ephemeral tasks whose open-tab list lives only in the in-memory frontend store,
 so a page reload drops every tab even though the underlying task, session, and
@@ -16,8 +17,12 @@ recent quick chats to survive a reload, and the system needs a bound so
 abandoned quick chats don't accumulate forever.
 
 ## What
+
 - Open quick-chat tabs SHALL be restored after a full page reload, reconstructed
   from backend state rather than client-only memory.
+- Hydration SHALL resolve the workspace represented by the current route. On a
+  task-detail route, the task's workspace is authoritative over a stale active-workspace
+  cookie or user setting.
 - A quick chat that has been idle longer than the retention window SHALL be
   deleted automatically (task row, its sessions, and its workspace directory),
   the same as an explicit close.
@@ -33,6 +38,7 @@ abandoned quick chats don't accumulate forever.
   SHALL NOT expire, regardless of how old it is.
 
 ## Data model
+
 No new tables. This feature operates on existing `tasks` and `task_sessions`
 rows. A **quick chat** is precisely the set of tasks matching:
 
@@ -62,12 +68,13 @@ robust to whichever row a message/turn bumps. A quick chat expires when
 `now - last_activity > 7 days`.
 
 ## API surface
+
 - **Hydration (read):** reuse the existing workspace task listing rather than a
-  new endpoint. The frontend fetches quick chats via
+  new endpoint. The backend boot payload fetches quick chats via
   `ListTasksByWorkspace(workspaceId, workflowID="", …, onlyEphemeral=true,
   excludeConfig=true)` and filters out `origin == "automation_run"`, then
   rebuilds the `quickChat.sessions` store slice (one tab per returned task, in
-  most-recently-active-first order). Each restored tab needs
+  creation order). Each restored tab needs
   `{ sessionId, workspaceId, agentProfileId }`, all resolvable from the task and
   its primary session. The persisted display name is already available via
   `getStoredQuickChatName` / `setStoredQuickChatName`.
@@ -78,20 +85,22 @@ robust to whichever row a message/turn bumps. A quick chat expires when
   client through the existing `task.deleted` WS handler.
 
 ## State machine
+
 A quick chat task is created `active`, and reaches a terminal `deleted` state via
 one of these triggers (this feature adds only the last one):
 
-| Trigger | Actor | Existing? |
-|---|---|---|
-| User closes a tab (confirm) | user | yes (`use-quick-chat-modal.ts` `handleConfirmClose`) |
-| Rapid re-pick supersedes an in-flight start | frontend | yes (`useAgentSelection` orphan cleanup) |
-| Agent profile deleted | user | yes (`DeleteEphemeralTasksByAgentProfile`) |
-| **Idle longer than retention window** | **background sweep** | **new** |
+| Trigger                                     | Actor                | Existing?                                            |
+| ------------------------------------------- | -------------------- | ---------------------------------------------------- |
+| User closes a tab (confirm)                 | user                 | yes (`use-quick-chat-modal.ts` `handleConfirmClose`) |
+| Rapid re-pick supersedes an in-flight start | frontend             | yes (`useAgentSelection` orphan cleanup)             |
+| Agent profile deleted                       | user                 | yes (`DeleteEphemeralTasksByAgentProfile`)           |
+| **Idle longer than retention window**       | **background sweep** | **new**                                              |
 
 All four converge on `Service.DeleteTask`, so directory cleanup and event
 publishing are identical.
 
 ## Failure modes
+
 - **Last-activity query fails / returns error:** the sweep fails closed — it
   deletes nothing that pass and logs a warning. A transient DB error must never
   cause an over-broad delete.
@@ -109,6 +118,7 @@ publishing are identical.
   `now`; it does not assume monotonic wall clock beyond the 7-day granularity.
 
 ## Persistence guarantees
+
 - **Survives reload:** open quick-chat tabs (restored from backend), quick-chat
   task rows, sessions, and workspace directories — until they expire or are
   closed.
@@ -125,9 +135,13 @@ publishing are identical.
   a day of the window elapsing.
 
 ## Scenarios
+
 - **GIVEN** an open quick chat with one or more tabs, **WHEN** the user reloads
-  the page, **THEN** the same tabs reappear, ordered most-recently-active first,
+  the page, **THEN** the same tabs reappear in creation order,
   each showing its prior chat history and persisted name.
+- **GIVEN** Quick Chats created from a task whose workspace differs from the
+  persisted active-workspace setting, **WHEN** the user reloads the task route,
+  **THEN** the task workspace's tabs restore without tabs from another workspace.
 - **GIVEN** a quick-chat task whose `last_activity` is 8 days ago, **WHEN** the
   expiration sweep runs, **THEN** the task, its sessions, and its workspace
   directory are deleted, a `task.deleted` event is published, and the tab
@@ -151,6 +165,7 @@ publishing are identical.
   iteration).
 
 ## Out of scope
+
 - A user-configurable retention window (per-workspace or global setting). Ships
   as a hardcoded 7-day constant; revisit only if requested.
 - A hard count cap on number of quick chats (idle TTL only). If clutter becomes
@@ -162,6 +177,7 @@ publishing are identical.
 - Changing config-mode chat, automation-run, or kanban/office task lifecycles.
 
 ## Open questions
+
 - Does a message/turn in a quick chat currently bump `tasks.updated_at`, or only
   `task_sessions.updated_at` / turn rows? The `MAX(task, session)` definition is
   chosen to be correct either way, but the implementation should confirm which

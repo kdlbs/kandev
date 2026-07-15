@@ -52,7 +52,7 @@ func bootInitialState(
 	if route.Route == webapp.RouteOffice {
 		builder.addOfficeRouteState(ctx, req, state)
 	}
-	builder.addQuickChatState(ctx, req, state)
+	builder.addQuickChatState(ctx, req, state, route)
 	return state
 }
 
@@ -266,8 +266,13 @@ func (b bootStateBuilder) addRepositoriesState(ctx context.Context, state map[st
 	}
 }
 
-func (b bootStateBuilder) addQuickChatState(ctx context.Context, req *http.Request, state map[string]any) {
-	workspaceID := b.resolveQuickChatWorkspaceID(ctx, req, state)
+func (b bootStateBuilder) addQuickChatState(
+	ctx context.Context,
+	req *http.Request,
+	state map[string]any,
+	route webapp.RouteClassification,
+) {
+	workspaceID := b.resolveQuickChatWorkspaceID(ctx, req, state, route)
 	if workspaceID == "" {
 		return
 	}
@@ -284,7 +289,15 @@ func (b bootStateBuilder) addQuickChatState(ctx context.Context, req *http.Reque
 	mergeBootTaskSessionItems(state, quickChat.taskSessions)
 }
 
-func (b bootStateBuilder) resolveQuickChatWorkspaceID(ctx context.Context, req *http.Request, state map[string]any) string {
+func (b bootStateBuilder) resolveQuickChatWorkspaceID(
+	ctx context.Context,
+	req *http.Request,
+	state map[string]any,
+	route webapp.RouteClassification,
+) string {
+	if workspaceID := b.quickChatTaskRouteWorkspaceID(ctx, route); workspaceID != "" {
+		return workspaceID
+	}
 	if active := activeWorkspaceIDFromState(state); active != "" {
 		return active
 	}
@@ -308,6 +321,28 @@ func (b bootStateBuilder) resolveQuickChatWorkspaceID(ctx context.Context, req *
 		settingsWorkspaceID,
 		firstWorkspaceID(workspaces),
 	)
+}
+
+func (b bootStateBuilder) quickChatTaskRouteWorkspaceID(
+	ctx context.Context,
+	route webapp.RouteClassification,
+) string {
+	if route.Route != webapp.RouteTaskDetail || b.p.taskSvc == nil {
+		return ""
+	}
+	taskID := route.Params["taskId"]
+	if taskID == "" {
+		return ""
+	}
+	task, err := b.p.taskSvc.GetTask(ctx, taskID)
+	if err != nil {
+		b.logBootError("get quick-chat task route workspace", err)
+		return ""
+	}
+	if task == nil {
+		return ""
+	}
+	return task.WorkspaceID
 }
 
 func activeWorkspaceIDFromState(state map[string]any) string {

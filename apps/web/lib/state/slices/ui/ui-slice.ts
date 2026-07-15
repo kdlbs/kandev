@@ -307,6 +307,70 @@ function buildNotificationActions(set: ImmerSet) {
   };
 }
 
+function buildQuickChatActions(set: ImmerSet) {
+  return {
+    openQuickChat: (sessionId: string, workspaceId: string, agentProfileId?: string) =>
+      set((draft) => {
+        draft.quickChat.isOpen = true;
+        if (!sessionId) {
+          // Blank tabs have no stable ID, so keep one scoped to the workspace being opened.
+          draft.quickChat.sessions = draft.quickChat.sessions.filter(
+            (session) => session.sessionId !== "" || session.workspaceId === workspaceId,
+          );
+          const emptyTabExists = draft.quickChat.sessions.some(
+            (session) => session.sessionId === "" && session.workspaceId === workspaceId,
+          );
+          if (!emptyTabExists) draft.quickChat.sessions.push({ sessionId: "", workspaceId });
+          draft.quickChat.activeSessionId = "";
+          return;
+        }
+        const existing = draft.quickChat.sessions.find(
+          (session) => session.sessionId === sessionId,
+        );
+        if (existing) {
+          if (agentProfileId) existing.agentProfileId = agentProfileId;
+        } else {
+          draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId });
+        }
+        draft.quickChat.activeSessionId = sessionId;
+      }),
+    closeQuickChat: () =>
+      set((draft) => {
+        draft.quickChat.isOpen = false;
+      }),
+    closeQuickChatSession: (sessionId: string) =>
+      set((draft) => {
+        const closedSession = draft.quickChat.sessions.find(
+          (session) => session.sessionId === sessionId,
+        );
+        draft.quickChat.sessions = draft.quickChat.sessions.filter(
+          (session) => session.sessionId !== sessionId,
+        );
+        if (draft.quickChat.activeSessionId !== sessionId) return;
+        const nextSession = draft.quickChat.sessions.find(
+          (session) => session.workspaceId === closedSession?.workspaceId,
+        );
+        draft.quickChat.activeSessionId = nextSession?.sessionId ?? null;
+        if (!nextSession) draft.quickChat.isOpen = false;
+      }),
+    setActiveQuickChatSession: (sessionId: string) =>
+      set((draft) => {
+        draft.quickChat.activeSessionId = sessionId;
+      }),
+    renameQuickChatSession: (sessionId: string, name: string) => {
+      let renamed = false;
+      set((draft) => {
+        const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
+        if (session) {
+          session.name = name;
+          renamed = true;
+        }
+      });
+      if (renamed) setStoredQuickChatName(sessionId, name);
+    },
+  };
+}
+
 export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], [], UISlice> = (
   set,
   get,
@@ -332,6 +396,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildSystemHealthActions(set),
   ...buildDismissedAgentErrors(set),
   ...buildNotificationActions(set),
+  ...buildQuickChatActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;
@@ -355,58 +420,4 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
       if (draft.kanbanPreviewedTaskId === taskId) return;
       draft.kanbanPreviewedTaskId = taskId;
     }),
-  openQuickChat: (sessionId, workspaceId, agentProfileId) =>
-    set((draft) => {
-      draft.quickChat.isOpen = true;
-      // If sessionId is empty, create a placeholder tab for agent selection
-      if (!sessionId) {
-        // Check if there's already an empty tab
-        const emptyTabExists = draft.quickChat.sessions.some((s) => s.sessionId === "");
-        if (!emptyTabExists) {
-          draft.quickChat.sessions.push({ sessionId: "", workspaceId });
-        }
-        draft.quickChat.activeSessionId = "";
-        return;
-      }
-      const existing = draft.quickChat.sessions.find((s) => s.sessionId === sessionId);
-      if (existing) {
-        if (agentProfileId) existing.agentProfileId = agentProfileId;
-      } else {
-        draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId });
-      }
-      draft.quickChat.activeSessionId = sessionId;
-    }),
-  closeQuickChat: () =>
-    set((draft) => {
-      draft.quickChat.isOpen = false;
-    }),
-  closeQuickChatSession: (sessionId) =>
-    set((draft) => {
-      // Remove session from list
-      draft.quickChat.sessions = draft.quickChat.sessions.filter((s) => s.sessionId !== sessionId);
-      // If closing active session, switch to another or close modal
-      if (draft.quickChat.activeSessionId === sessionId) {
-        if (draft.quickChat.sessions.length > 0) {
-          draft.quickChat.activeSessionId = draft.quickChat.sessions[0].sessionId;
-        } else {
-          draft.quickChat.activeSessionId = null;
-          draft.quickChat.isOpen = false;
-        }
-      }
-    }),
-  setActiveQuickChatSession: (sessionId) =>
-    set((draft) => {
-      draft.quickChat.activeSessionId = sessionId;
-    }),
-  renameQuickChatSession: (sessionId, name) => {
-    let renamed = false;
-    set((draft) => {
-      const session = draft.quickChat.sessions.find((s) => s.sessionId === sessionId);
-      if (session) {
-        session.name = name;
-        renamed = true;
-      }
-    });
-    if (renamed) setStoredQuickChatName(sessionId, name);
-  },
 });

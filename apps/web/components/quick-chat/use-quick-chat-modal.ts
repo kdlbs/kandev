@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
@@ -11,8 +11,8 @@ async function deleteQuickChatTask(taskId: string) {
   await deleteTask(taskId);
 }
 
-function useQuickChatStore() {
-  return useAppStore(
+function useQuickChatStore(workspaceId: string) {
+  const store = useAppStore(
     useShallow((s) => ({
       isOpen: s.quickChat.isOpen,
       sessions: s.quickChat.sessions,
@@ -25,6 +25,13 @@ function useQuickChatStore() {
       agentProfiles: s.agentProfiles.items ?? [],
       taskSessions: s.taskSessions.items || {},
     })),
+  );
+  return useMemo(
+    () => ({
+      ...store,
+      sessions: store.sessions.filter((session) => session.workspaceId === workspaceId),
+    }),
+    [store, workspaceId],
   );
 }
 
@@ -108,7 +115,7 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
 
 export function useQuickChatModal(workspaceId: string) {
   const { toast } = useToast();
-  const store = useQuickChatStore();
+  const store = useQuickChatStore(workspaceId);
   const [setupKey, setSetupKey] = useState(0);
   const [sessionToClose, setSessionToClose] = useState<string | null>(null);
   const {
