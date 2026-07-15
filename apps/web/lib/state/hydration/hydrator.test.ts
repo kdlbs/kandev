@@ -158,6 +158,25 @@ describe("mergeInitialState — sidebar views from boot settings", () => {
       draft: { baseViewId: "server", group: "workflow" },
     });
   });
+
+  it("bridges backend task preferences into the UI slice before the store is created", () => {
+    const result = mergeInitialState({
+      userSettings: {
+        sidebarTaskPrefs: {
+          pinnedTaskIds: ["task-1"],
+          orderedTaskIds: ["task-2", "task-1"],
+          subtaskOrderByParentId: { "task-1": ["subtask-1"] },
+        },
+        loaded: true,
+      },
+    } as unknown as Partial<AppState>);
+
+    expect(result.sidebarTaskPrefs).toMatchObject({
+      pinnedTaskIds: ["task-1"],
+      orderedTaskIds: ["task-2", "task-1"],
+      subtaskOrderByParentId: { "task-1": ["subtask-1"] },
+    });
+  });
 });
 
 describe("hydrateState — sidebar views from user settings", () => {

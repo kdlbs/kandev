@@ -164,6 +164,29 @@ function mergeSidebarViewState(initialState: Partial<DefaultState>): DefaultStat
   return sidebarViews;
 }
 
+function mergeSidebarTaskPrefsState(
+  initialState: Partial<DefaultState>,
+): DefaultState["sidebarTaskPrefs"] {
+  const sidebarTaskPrefs = {
+    ...defaultState.sidebarTaskPrefs,
+    ...initialState.sidebarTaskPrefs,
+  };
+  const serverPrefs = initialState.userSettings?.sidebarTaskPrefs;
+  if (!serverPrefs) return sidebarTaskPrefs;
+
+  return {
+    ...sidebarTaskPrefs,
+    pinnedTaskIds: [...serverPrefs.pinnedTaskIds],
+    orderedTaskIds: [...serverPrefs.orderedTaskIds],
+    subtaskOrderByParentId: Object.fromEntries(
+      Object.entries(serverPrefs.subtaskOrderByParentId).map(([parentId, taskIds]) => [
+        parentId,
+        [...taskIds],
+      ]),
+    ),
+  };
+}
+
 export function mergeInitialState(initialState?: Partial<DefaultState>): DefaultState {
   if (!initialState) return defaultState;
 
@@ -261,6 +284,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
       initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification,
     bottomTerminal: { ...defaultState.bottomTerminal, ...initialState.bottomTerminal },
     sidebarViews: mergeSidebarViewState(initialState),
+    sidebarTaskPrefs: mergeSidebarTaskPrefsState(initialState),
     collapsedSubtaskParents:
       initialState.collapsedSubtaskParents ?? defaultState.collapsedSubtaskParents,
   };
