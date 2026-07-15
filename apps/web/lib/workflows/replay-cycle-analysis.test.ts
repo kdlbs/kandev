@@ -43,6 +43,12 @@ function moveToStep(target: string, config: TransitionConfig = {}): OnTurnComple
   return { type: "move_to_step", config: { ...config, step_id: target } };
 }
 
+function guardedMoveToStep(target: string): OnTurnCompleteAction {
+  return moveToStep(target, {
+    if: { wait_for_quorum: { role: "reviewer", threshold: "all_approve" } },
+  });
+}
+
 describe("replay cycle detection", () => {
   it("reports a fully automatic next/previous replay cycle as blocking", () => {
     const diagnostics = analyzeWorkflowReplayCycles([
@@ -172,6 +178,38 @@ describe("replay cycle severity", () => {
 });
 
 describe("replay transition resolution", () => {
+  it("ignores lower-priority moves after an unconditional transition", () => {
+    const diagnostics = analyzeWorkflowReplayCycles([
+      step("work", 0, {
+        autoStart: true,
+        onTurnComplete: [{ type: "move_to_next" }, moveToStep("work")],
+      }),
+      step("done", 1),
+    ]);
+
+    expect(diagnostics).toEqual([]);
+  });
+
+  it("keeps fallback moves after a guarded transition", () => {
+    const [diagnostic] = analyzeWorkflowReplayCycles([
+      step("work", 0, {
+        autoStart: true,
+        onTurnComplete: [
+          {
+            type: "move_to_next",
+            config: { if: { wait_for_quorum: { role: "reviewer", threshold: "all_approve" } } },
+          },
+          moveToStep("work"),
+        ],
+      }),
+      step("done", 1),
+    ]);
+
+    expect(diagnostic.severity).toBe("blocking");
+    expect(diagnostic.trace).toHaveLength(1);
+    expect(diagnostic.trace[0].actionKind).toBe("move_to_step");
+  });
+
   it("resolves explicit targets and ignores dangling targets", () => {
     const valid = analyzeWorkflowReplayCycles([
       step("work", 0, { autoStart: true, onTurnComplete: [moveToStep("review")] }),
@@ -253,7 +291,7 @@ describe("replay cycle search bounds", () => {
     const denseSteps = [
       step("work", 0, {
         autoStart: true,
-        onTurnComplete: [...layers[0]].reverse().map((target) => moveToStep(target)),
+        onTurnComplete: [...layers[0]].reverse().map(guardedMoveToStep),
       }),
       ...layers.flatMap((layer, layerIndex) =>
         layer.map((id, branchIndex) =>
@@ -261,7 +299,7 @@ describe("replay cycle search bounds", () => {
             onTurnComplete:
               layerIndex === layerCount - 1
                 ? [moveToStep("work")]
-                : [...layers[layerIndex + 1]].reverse().map((target) => moveToStep(target)),
+                : [...layers[layerIndex + 1]].reverse().map(guardedMoveToStep),
           }),
         ),
       ),

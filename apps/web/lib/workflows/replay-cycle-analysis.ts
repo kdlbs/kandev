@@ -124,13 +124,12 @@ function resolveTriggerEdges(
   actions: TransitionAction[],
   resolution: StepResolutionContext,
 ): ReplayGraphEdge[] {
-  return actions.flatMap((action) => {
-    if (!isMoveAction(action)) return [];
+  const edges: ReplayGraphEdge[] = [];
+  for (const action of actions) {
+    if (!isMoveAction(action)) continue;
     const destination = resolveDestination(action, sourceIndex, resolution);
-    if (!destination) return [];
-
-    return [
-      {
+    if (destination) {
+      edges.push({
         source,
         destination,
         trigger,
@@ -139,15 +138,40 @@ function resolveTriggerEdges(
           trigger === "on_turn_start" ||
           !hasAutoStart(source) ||
           action.config?.requires_approval === true,
-      },
-    ];
-  });
+      });
+    }
+    if (isAlwaysEligibleTransition(action)) break;
+  }
+  return edges;
 }
 
 function isMoveAction(
   action: TransitionAction,
 ): action is Extract<TransitionAction, { type: WorkflowReplayCycleActionKind }> {
   return ["move_to_next", "move_to_previous", "move_to_step"].includes(action.type);
+}
+
+function isAlwaysEligibleTransition(
+  action: Extract<TransitionAction, { type: WorkflowReplayCycleActionKind }>,
+): boolean {
+  return action.config?.requires_approval !== true && !hasValidTransitionGuard(action.config);
+}
+
+function hasValidTransitionGuard(
+  config: Extract<TransitionAction, { type: WorkflowReplayCycleActionKind }>["config"],
+): boolean {
+  const legacyConfig = config as
+    | (typeof config & {
+        wait_for_quorum?: { role?: unknown; threshold?: unknown };
+      })
+    | undefined;
+  const quorum = legacyConfig?.wait_for_quorum ?? config?.if?.wait_for_quorum;
+  return (
+    typeof quorum?.role === "string" &&
+    quorum.role !== "" &&
+    typeof quorum.threshold === "string" &&
+    quorum.threshold !== ""
+  );
 }
 
 function resolveDestination(
