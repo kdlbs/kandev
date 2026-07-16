@@ -1,6 +1,6 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { UsageWindowRows, usageStatus } from "@/components/usage/usage-window-rows";
@@ -54,16 +54,16 @@ function SessionUsageRows({ sessionId }: { sessionId: string | null }) {
 
   return (
     <div
-      className="pb-2 mb-2 border-b border-border/60 space-y-2 min-w-56"
+      className="pt-2 mt-2 border-t border-border/60 space-y-2 min-w-64 opacity-80"
       data-testid="doughnut-subscription-usage"
     >
       <div className="flex items-center justify-between gap-4">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-          Subscription usage{usage.plan ? ` · ${usage.plan}` : ""}
+        <span className="text-[10px] font-medium uppercase text-muted-foreground">
+          Subscription{usage.plan ? ` · ${usage.plan}` : ""}
         </span>
-        <span className={cn("text-[10px] font-semibold", status.className)}>{status.label}</span>
+        <span className={cn("text-[10px] font-medium", status.className)}>{status.label}</span>
       </div>
-      <UsageWindowRows usage={usage} />
+      <UsageWindowRows usage={usage} className="text-[11px]" />
     </div>
   );
 }
@@ -72,6 +72,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   sessionId,
   className,
 }: TokenUsageDisplayProps) {
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const contextWindow = useSessionContextWindow(sessionId);
 
   if (!contextWindow) return null;
@@ -92,44 +93,71 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   const strokeDashoffset = circumference * (1 - progress);
 
   return (
-    <Tooltip>
+    <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
       <TooltipTrigger asChild>
-        <div className={cn("flex items-center gap-2 cursor-help", className)}>
-          <div className="relative flex items-center justify-center">
-            <svg viewBox="0 0 24 24" className="w-5 h-5 -rotate-90" aria-hidden="true">
-              {/* Background circle */}
-              <circle
-                cx="12"
-                cy="12"
-                r={radius}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={strokeWidth}
-                className="text-muted"
-              />
-              {/* Progress circle */}
-              <circle
-                cx="12"
-                cy="12"
-                r={radius}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={strokeWidth}
-                strokeLinecap="round"
-                strokeDasharray={circumference}
-                strokeDashoffset={strokeDashoffset}
-                className={cn(getCircleColor(usagePercent), "transition-all duration-300 ease-out")}
-              />
-            </svg>
-          </div>
-        </div>
+        <button
+          type="button"
+          aria-label={`Context window: ${usagePercent.toFixed(0)}% used`}
+          onClick={() => setTooltipOpen(true)}
+          className={cn(
+            "flex size-7 cursor-help items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:size-5",
+            className,
+          )}
+        >
+          <svg viewBox="0 0 24 24" className="size-5 -rotate-90" aria-hidden="true">
+            {/* Background circle */}
+            <circle
+              cx="12"
+              cy="12"
+              r={radius}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={strokeWidth}
+              className="text-muted"
+            />
+            {/* Progress circle */}
+            <circle
+              cx="12"
+              cy="12"
+              r={radius}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={strokeWidth}
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={strokeDashoffset}
+              className={cn(getCircleColor(usagePercent), "transition-all duration-300 ease-out")}
+            />
+          </svg>
+        </button>
       </TooltipTrigger>
       <TooltipContent side="top">
-        <div className="text-xs">
-          <SessionUsageRows sessionId={sessionId} />
-          <div className="text-[11px] text-muted-foreground">
-            {usagePercent.toFixed(0)}% ({formatNumber(used)} / {formatNumber(size)})
+        <div className="min-w-64 text-xs">
+          <div className="space-y-2" data-testid="context-window-usage">
+            <div className="flex items-baseline justify-between gap-6">
+              <span className="text-[10px] font-medium uppercase text-muted-foreground">
+                Context window
+              </span>
+              <span className="text-base font-semibold tabular-nums text-foreground">
+                {usagePercent.toFixed(0)}%
+              </span>
+            </div>
+            <div
+              className={cn(
+                "h-1.5 overflow-hidden rounded-full bg-muted",
+                getCircleColor(usagePercent),
+              )}
+            >
+              <div
+                className="h-full rounded-full bg-current transition-all duration-300 ease-out"
+                style={{ width: `${usagePercent}%` }}
+              />
+            </div>
+            <div className="text-[11px] tabular-nums text-muted-foreground">
+              {formatNumber(used)} of {formatNumber(size)} tokens
+            </div>
           </div>
+          <SessionUsageRows sessionId={sessionId} />
         </div>
       </TooltipContent>
     </Tooltip>

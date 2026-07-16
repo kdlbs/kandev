@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { useSessionContextWindow } from "@/hooks/domains/session/use-session-context-window";
 import { useSessionAgentUsage } from "@/hooks/domains/session/use-session-agent-usage";
 import { isContextWindowReliable, TokenUsageDisplay } from "./token-usage-display";
@@ -13,7 +13,11 @@ vi.mock("@/hooks/domains/session/use-session-agent-usage", () => ({
 }));
 
 vi.mock("@kandev/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  Tooltip: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
+    <div data-testid="tooltip-root" data-open={open}>
+      {children}
+    </div>
+  ),
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -73,6 +77,21 @@ describe("TokenUsageDisplay", () => {
     expect(container.querySelector("svg")).not.toBeNull();
   });
 
+  it("opens the tooltip when the context ring is tapped", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+    });
+
+    const { getByRole, getByTestId } = render(<TokenUsageDisplay sessionId="sess-1" />);
+
+    fireEvent.click(getByRole("button", { name: "Context window: 28% used" }));
+
+    expect(getByTestId("tooltip-root").getAttribute("data-open")).toBe("true");
+  });
+
   it("shows subscription usage rows in the tooltip when the agent has them", () => {
     vi.mocked(useSessionContextWindow).mockReturnValue({
       size: 200_000,
@@ -102,13 +121,19 @@ describe("TokenUsageDisplay", () => {
       },
     });
 
-    const { container, getByTestId, getByText } = render(<TokenUsageDisplay sessionId="sess-1" />);
+    const { container, getByRole, getByTestId, getByText } = render(
+      <TokenUsageDisplay sessionId="sess-1" />,
+    );
 
     expect(container.querySelector('[data-testid="doughnut-subscription-usage"]')).not.toBeNull();
-    expect(getByText(/Subscription usage · max/i)).toBeDefined();
+    expect(getByRole("button", { name: "Context window: 28% used" })).toBeDefined();
+    expect(getByText("Context window")).toBeDefined();
+    expect(getByText("56.0K of 200.0K tokens")).toBeDefined();
+    expect(getByText(/Subscription · max/i)).toBeDefined();
     expect(
-      getByTestId("doughnut-subscription-usage").compareDocumentPosition(getByText(/^28%/)) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
+      getByTestId("context-window-usage").compareDocumentPosition(
+        getByTestId("doughnut-subscription-usage"),
+      ) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     // Worst window is 86% → provider status "High".
     expect(getByText("High")).toBeDefined();
