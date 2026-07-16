@@ -109,8 +109,9 @@ export function triggerLabel(
     .filter(
       (option) =>
         !options ||
-        (baseline !== undefined &&
-          (!Object.hasOwn(baseline, option.id) || baseline[option.id] !== option.currentValue)),
+        baseline === undefined ||
+        !Object.hasOwn(baseline, option.id) ||
+        baseline[option.id] !== option.currentValue,
     )
     .map(currentOptionName)
     .filter(Boolean);

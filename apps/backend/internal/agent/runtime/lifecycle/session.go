@@ -355,11 +355,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 	// mechanism (best-effort). ACP is the only surface for model selection now;
 	// no --model CLI flag.
 	if profileModel != "" && execution.agentctl != nil {
-		if !profileModelIsAdvertised(execution.GetModelState(), profileModel) {
-			sm.logger.Warn("profile model is not advertised by ACP session; keeping provider model",
-				zap.String("execution_id", execution.ID),
-				zap.String("model", profileModel))
-		} else if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
+		if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
 			sm.logger.Warn("failed to set profile model via ACP",
 				zap.String("execution_id", execution.ID),
 				zap.String("model", profileModel),
@@ -440,35 +436,6 @@ func (sm *SessionManager) publishSettledConfigOptions(
 		ConfigBaselineCandidate: baselineCandidate.ConfigOptions,
 		Data:                    map[string]any{"config_options_settled": true},
 	})
-}
-
-func profileModelIsAdvertised(state *CachedModelState, modelID string) bool {
-	if state == nil {
-		return true
-	}
-	for _, option := range state.ConfigOptions {
-		if option.ID != modelConfigOptionID && option.Category != modelConfigOptionID {
-			continue
-		}
-		if len(option.Options) == 0 {
-			return true
-		}
-		for _, value := range option.Options {
-			if value.Value == modelID {
-				return true
-			}
-		}
-		return false
-	}
-	if len(state.Models) == 0 {
-		return true
-	}
-	for _, model := range state.Models {
-		if model.ModelID == modelID {
-			return true
-		}
-	}
-	return false
 }
 
 func modelConfigIDFromState(state *CachedModelState) string {

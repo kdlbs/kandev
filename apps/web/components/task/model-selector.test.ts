@@ -123,14 +123,14 @@ describe("model selector config options", () => {
     expect(label).toBe(providerModelName);
   });
 
-  it("shows only the model while the task baseline is unavailable", () => {
+  it("shows all current values while the task baseline is unavailable", () => {
     const label = compactTriggerLabel(
       modelOptions,
       providerModelId,
       sessionConfigOptions("low", "on"),
     );
 
-    expect(label).toBe(providerModelName);
+    expect(label).toBe(`${providerModelName} / Low / On`);
   });
 
   it("shows every changed value in ACP option order", () => {

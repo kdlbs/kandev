@@ -341,7 +341,10 @@ func TestInitializeAndPrompt_AppliesProfileConfigOptions(t *testing.T) {
 	execution.SetModelState(&CachedModelState{
 		CurrentModelID: "default-model",
 		ConfigOptions: []streams.ConfigOption{
-			{ID: "model", Category: "model", CurrentValue: "default-model"},
+			{
+				ID: "model", Category: "model", CurrentValue: "default-model",
+				Options: []streams.ConfigOptionValue{{Value: "stale-cached-model"}},
+			},
 			{ID: "effort", CurrentValue: "medium"},
 			{ID: "fast_mode", CurrentValue: "off"},
 		},
@@ -401,27 +404,6 @@ func configValueByID(options []streams.ConfigOption, id string) string {
 		}
 	}
 	return ""
-}
-
-func TestProfileModelIsAdvertised(t *testing.T) {
-	state := &CachedModelState{ConfigOptions: []streams.ConfigOption{{
-		ID:       "model",
-		Category: "model",
-		Options: []streams.ConfigOptionValue{
-			{Value: "mock-fast"},
-			{Value: "mock-smart"},
-		},
-	}}}
-
-	if !profileModelIsAdvertised(state, "mock-smart") {
-		t.Fatal("advertised model was rejected")
-	}
-	if profileModelIsAdvertised(state, "mock-default") {
-		t.Fatal("stale unadvertised model was accepted")
-	}
-	if !profileModelIsAdvertised(nil, "unknown-until-session-state-arrives") {
-		t.Fatal("missing model state must preserve the existing best-effort attempt")
-	}
 }
 
 func TestPublishSettledConfigOptionsAppliesToDelayedModelState(t *testing.T) {
