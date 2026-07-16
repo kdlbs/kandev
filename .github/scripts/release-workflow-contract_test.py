@@ -93,6 +93,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "scripts/release/updater-signing-ready.sh?ref=${{ github.workflow_sha }}",
             detect,
         )
+        self.assertIn('if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]', detect)
         self.assertLess(
             detect.index('if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]'),
             detect.index("gh api"),
