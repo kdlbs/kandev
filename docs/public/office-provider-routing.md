@@ -1,3 +1,8 @@
+---
+title: "Office Provider Routing"
+description: "Route persistent Office agent identities through interchangeable provider execution profiles."
+---
+
 # Office Provider Routing
 
 Office provider routing separates an agent's persistent role from the CLI profile used to run it. This lets a CTO, reviewer, or other custom Office agent keep the same instructions, skills, permissions, budget, task ownership, and history while Kandev selects a Codex, Claude Code, or another configured execution profile for each launch.
