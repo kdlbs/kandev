@@ -70,7 +70,12 @@ export function ProjectReposSection({ project }: ProjectReposSectionProps) {
             onRemove={() => handleRemove(repo)}
           />
         ))}
-        <ProjectRepositoryPicker workspaceId={workspaceId} exclude={repos} onSelect={handleAdd} />
+        <ProjectRepositoryPicker
+          workspaceId={workspaceId}
+          repositories={repositories}
+          exclude={repos}
+          onSelect={handleAdd}
+        />
       </div>
       {repos.length === 0 && (
         <p className="text-xs text-muted-foreground">No repositories added yet.</p>

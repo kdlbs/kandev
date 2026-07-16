@@ -80,7 +80,12 @@ function ReposField({
             onRemove={() => onRemoveRepo(repo)}
           />
         ))}
-        <ProjectRepositoryPicker workspaceId={workspaceId} exclude={repos} onSelect={onAddRepo} />
+        <ProjectRepositoryPicker
+          workspaceId={workspaceId}
+          repositories={repositories}
+          exclude={repos}
+          onSelect={onAddRepo}
+        />
       </div>
     </div>
   );

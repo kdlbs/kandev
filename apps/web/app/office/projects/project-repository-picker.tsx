@@ -14,13 +14,18 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { discoverRepositoriesAction } from "@/app/actions/workspaces";
-import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { cn, formatUserHomePath } from "@/lib/utils";
-import type { LocalRepository } from "@/lib/types/http";
+import type { LocalRepository, Repository } from "@/lib/types/http";
 import { normalizeRepoValue, shouldShowCustomEntry } from "./repo-entry";
 
 type Props = {
   workspaceId: string | null;
+  /**
+   * The workspace's registered repositories. Supplied by the caller —
+   * which already loads them for chip labels — so mounting the picker
+   * does not issue a second repository-list fetch.
+   */
+  repositories: Repository[];
   /** Already-attached entries (raw stored values) — excluded from suggestions. */
   exclude: string[];
   onSelect: (value: string) => void;
@@ -43,14 +48,14 @@ type RepoOption = { key: string; value: string; name: string; path: string };
  *
  * On-disk discovery runs lazily the first time the popover opens.
  */
-export function ProjectRepositoryPicker({ workspaceId, exclude, onSelect, triggerLabel }: Props) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const { repositories } = useRepositories(workspaceId);
-  // `null` means "discovery not yet attempted" — used to drive the
-  // "Searching your machine…" empty-state copy without an extra
-  // loading flag (the lint rule discourages synchronous setState in
-  // an effect body).
+/**
+ * Lazily discovers on-disk repositories the first time the popover
+ * opens. Returns `null` until discovery has been attempted — used to
+ * drive the "Searching your machine…" empty-state copy without an
+ * extra loading flag (the lint rule discourages synchronous setState
+ * in an effect body).
+ */
+function useDiscoveredRepositories(open: boolean, workspaceId: string | null) {
   const [discovered, setDiscovered] = useState<LocalRepository[] | null>(null);
   const discoveredOnce = useRef(false);
 
@@ -69,6 +74,20 @@ export function ProjectRepositoryPicker({ workspaceId, exclude, onSelect, trigge
       cancelled = true;
     };
   }, [open, workspaceId]);
+
+  return discovered;
+}
+
+export function ProjectRepositoryPicker({
+  workspaceId,
+  repositories,
+  exclude,
+  onSelect,
+  triggerLabel,
+}: Props) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const discovered = useDiscoveredRepositories(open, workspaceId);
 
   const excludeSet = useMemo(() => new Set(exclude.map(normalizeRepoValue)), [exclude]);
   const workspaceOptions = useMemo<RepoOption[]>(
