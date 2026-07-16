@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { IconCode, IconPlus, IconWorld } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import {
@@ -13,13 +13,19 @@ import {
 } from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { discoverRepositoriesAction } from "@/app/actions/workspaces";
-import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { cn, formatUserHomePath } from "@/lib/utils";
-import type { LocalRepository } from "@/lib/types/http";
+import type { Repository } from "@/lib/types/http";
+import { normalizeRepoValue, shouldShowCustomEntry } from "./repo-entry";
+import { useDiscoveredRepositories } from "./use-discovered-repositories";
 
 type Props = {
   workspaceId: string | null;
+  /**
+   * The workspace's registered repositories. Supplied by the caller —
+   * which already loads them for chip labels — so mounting the picker
+   * does not issue a second repository-list fetch.
+   */
+  repositories: Repository[];
   /** Already-attached entries (raw stored values) — excluded from suggestions. */
   exclude: string[];
   onSelect: (value: string) => void;
@@ -36,43 +42,28 @@ type RepoOption = { key: string; value: string; name: string; path: string };
  *
  *   - selecting a workspace repo stores its `local_path`;
  *   - selecting a discovered on-disk repo stores its absolute path;
- *   - typing a URL or path that doesn't match anything offers an
- *     "Add custom" row which stores the literal input.
+ *   - typing a URL or path offers an "Add custom" row storing the
+ *     literal input, hidden only when the value exactly matches an
+ *     existing entry (see `shouldShowCustomEntry`).
  *
  * On-disk discovery runs lazily the first time the popover opens.
  */
-export function ProjectRepositoryPicker({ workspaceId, exclude, onSelect, triggerLabel }: Props) {
+export function ProjectRepositoryPicker({
+  workspaceId,
+  repositories,
+  exclude,
+  onSelect,
+  triggerLabel,
+}: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const { repositories } = useRepositories(workspaceId);
-  // `null` means "discovery not yet attempted" — used to drive the
-  // "Searching your machine…" empty-state copy without an extra
-  // loading flag (the lint rule discourages synchronous setState in
-  // an effect body).
-  const [discovered, setDiscovered] = useState<LocalRepository[] | null>(null);
-  const discoveredOnce = useRef(false);
+  const discovered = useDiscoveredRepositories(open, workspaceId);
 
-  useEffect(() => {
-    if (!open || !workspaceId || discoveredOnce.current) return;
-    discoveredOnce.current = true;
-    let cancelled = false;
-    discoverRepositoriesAction(workspaceId)
-      .then((res) => {
-        if (!cancelled) setDiscovered(res.repositories ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setDiscovered([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, workspaceId]);
-
-  const excludeSet = useMemo(() => new Set(exclude.map(normalize)), [exclude]);
+  const excludeSet = useMemo(() => new Set(exclude.map(normalizeRepoValue)), [exclude]);
   const workspaceOptions = useMemo<RepoOption[]>(
     () =>
       repositories
-        .filter((r) => r.local_path && !excludeSet.has(normalize(r.local_path)))
+        .filter((r) => r.local_path && !excludeSet.has(normalizeRepoValue(r.local_path)))
         .map((r) => ({
           key: `ws-${r.id}`,
           value: r.local_path,
@@ -83,9 +74,12 @@ export function ProjectRepositoryPicker({ workspaceId, exclude, onSelect, trigge
   );
   const discoveredOptions = useMemo<RepoOption[]>(() => {
     if (!discovered) return [];
-    const wsPaths = new Set(workspaceOptions.map((o) => normalize(o.path)));
+    const wsPaths = new Set(workspaceOptions.map((o) => normalizeRepoValue(o.path)));
     return discovered
-      .filter((r) => !wsPaths.has(normalize(r.path)) && !excludeSet.has(normalize(r.path)))
+      .filter(
+        (r) =>
+          !wsPaths.has(normalizeRepoValue(r.path)) && !excludeSet.has(normalizeRepoValue(r.path)),
+      )
       .map((r) => ({
         key: `disc-${r.path}`,
         value: r.path,
@@ -104,11 +98,11 @@ export function ProjectRepositoryPicker({ workspaceId, exclude, onSelect, trigge
   );
 
   const trimmed = query.trim();
-  const showCustom =
-    trimmed.length > 0 &&
-    !excludeSet.has(normalize(trimmed)) &&
-    !workspaceOptions.some((o) => matches(o, trimmed)) &&
-    !discoveredOptions.some((o) => matches(o, trimmed));
+  const showCustom = shouldShowCustomEntry(
+    trimmed,
+    [...workspaceOptions, ...discoveredOptions].map((o) => o.value),
+    exclude,
+  );
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -251,19 +245,10 @@ function RepoGroup({
   );
 }
 
-function normalize(value: string): string {
-  return value.trim().replace(/\\/g, "/").replace(/\/+$/g, "").toLowerCase();
-}
-
 function leafSegment(path: string): string {
   const cleaned = path.replace(/\\/g, "/").replace(/\/+$/g, "");
   const idx = cleaned.lastIndexOf("/");
   return idx >= 0 ? cleaned.slice(idx + 1) : cleaned;
-}
-
-function matches(option: { name: string; path: string }, query: string): boolean {
-  const q = query.toLowerCase();
-  return option.name.toLowerCase().includes(q) || option.path.toLowerCase().includes(q);
 }
 
 function looksLikeUrl(value: string): boolean {
