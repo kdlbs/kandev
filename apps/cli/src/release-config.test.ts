@@ -365,7 +365,7 @@ describe("release desktop artifacts", () => {
     expect(signingDocs).toContain("distinct from macOS and Windows code-signing credentials");
     expect(signingDocs).toContain("Installers remain available");
     expect(signingDocs).toContain("`latest.json` is not");
-    expect(workflow).toContain('scripts/release/updater-signing-ready.sh "${{ matrix.platform }}"');
+    expect(workflow).toContain('bash "$helper" "${{ matrix.platform }}"');
     expect(updaterSigningScript).not.toContain("MACOS_SIGNING_ENABLED");
     expect(updaterSigningScript).not.toContain("WINDOWS_SIGNING_ENABLED");
     expect(signingDocs).toContain("Missing OS credentials do not block Tauri-signed updater");
