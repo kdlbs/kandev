@@ -60,9 +60,9 @@ test.describe("Editors menu worktree picker", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    // Let the chat composer finish its delayed autofocus — a focus steal
-    // after the menu opens would dismiss the Radix dropdown.
-    await testPage.waitForTimeout(750);
+    // Park focus on the idle chat composer before opening the menu so a late
+    // composer autofocus can't steal focus and dismiss the Radix dropdown.
+    await session.idleInput().click();
 
     // The IDE button now opens a worktree picker instead of launching directly.
     await testPage.getByTestId("editors-menu-open").click();
