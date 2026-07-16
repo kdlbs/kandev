@@ -28,9 +28,9 @@ unsupported_platforms=(
   linux-x86_64
   linux-aarch64
   windows-x86_64
-  linux-x65
 )
-for platform in "${unsupported_platforms[@]}"; do
+misspelled_platforms=(linux-x65)
+for platform in "${unsupported_platforms[@]}" "${misspelled_platforms[@]}"; do
   if TAURI_SIGNING_PRIVATE_KEY=test-key bash "$SCRIPT" "$platform" \
     >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
     fail "updater signing readiness accepted unsupported platform $platform"
