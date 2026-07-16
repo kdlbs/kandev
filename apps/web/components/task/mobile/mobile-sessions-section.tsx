@@ -61,7 +61,9 @@ function buildSessionRows(
     return {
       id: s.id,
       agentName: profile?.agent_name ?? null,
-      agentLabel: labelParts[1] || labelParts[0] || profile?.label || "Agent",
+      // User-supplied session name wins over the derived profile label,
+      // matching the desktop session tab title precedence.
+      agentLabel: s.name || labelParts[1] || labelParts[0] || profile?.label || "Agent",
       state: (s.state as TaskSessionState | undefined) ?? null,
       isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
       index: idx + 1,

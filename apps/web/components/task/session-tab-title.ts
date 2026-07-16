@@ -6,6 +6,8 @@ import {
 } from "@/components/model-config-selector";
 
 type ResolveSessionTabTitleArgs = {
+  /** User-supplied session name; wins over every derived title when set. */
+  customName?: string | null;
   agentLabel: string | null;
   activeModelId: string | null;
   currentModelId: string | null;
@@ -39,6 +41,7 @@ function resolveModelTitle(
 }
 
 export function resolveSessionTabTitle(args: ResolveSessionTabTitleArgs): string | null {
+  if (args.customName) return args.customName;
   const liveModelId = args.activeModelId || args.currentModelId;
   return (
     args.agentLabel ??

@@ -229,6 +229,8 @@ export type TaskSessionStateChangedPayload = {
   session_metadata?: Record<string, unknown>;
   is_passthrough?: boolean;
   error_message?: string;
+  /** User-supplied session tab label; present (possibly "") on rename broadcasts. */
+  name?: string;
   /** When true, the frontend should not show an error toast for this state change. */
   suppress_toast?: boolean;
   // Workflow-related fields (sent during workflow transitions)

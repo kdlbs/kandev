@@ -1,18 +1,19 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { IconPlus, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore } from "@/components/state-provider";
+import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { createProject } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
+import { ProjectRepositoryPicker } from "./project-repository-picker";
+import { RepoChip } from "./repo-chip";
 
 const COLOR_OPTIONS = [
   "#ef4444",
@@ -53,66 +54,39 @@ function ColorPicker({ color, onChange }: { color: string; onChange: (c: string)
 }
 
 function ReposField({
+  workspaceId,
   repos,
-  repoInput,
-  onRepoInputChange,
   onAddRepo,
   onRemoveRepo,
 }: {
+  workspaceId: string;
   repos: string[];
-  repoInput: string;
-  onRepoInputChange: (v: string) => void;
-  onAddRepo: () => void;
+  onAddRepo: (repo: string) => void;
   onRemoveRepo: (r: string) => void;
 }) {
+  const { repositories } = useRepositories(workspaceId);
   return (
     <div className="space-y-2">
       <Label>Repositories</Label>
       <p className="text-xs text-muted-foreground">
         Git URLs or local paths where agents will work
       </p>
-      <div className="flex gap-2">
-        <Input
-          placeholder="URL or path"
-          value={repoInput}
-          onChange={(e) => onRepoInputChange(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), onAddRepo())}
-          className="flex-1"
+      <div className="flex flex-wrap items-center gap-2" data-testid="project-repo-chips">
+        {repos.map((repo) => (
+          <RepoChip
+            key={repo}
+            value={repo}
+            workspaceRepos={repositories}
+            onRemove={() => onRemoveRepo(repo)}
+          />
+        ))}
+        <ProjectRepositoryPicker
+          workspaceId={workspaceId}
+          repositories={repositories}
+          exclude={repos}
+          onSelect={onAddRepo}
         />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={onAddRepo}
-              className="cursor-pointer shrink-0"
-            >
-              <IconPlus className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Add repository</TooltipContent>
-        </Tooltip>
       </div>
-      {repos.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 mt-1">
-          {repos.map((repo) => (
-            <span
-              key={repo}
-              className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs"
-            >
-              {repo}
-              <button
-                type="button"
-                onClick={() => onRemoveRepo(repo)}
-                className="cursor-pointer hover:text-destructive"
-              >
-                <IconX className="h-3 w-3" />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -175,7 +149,6 @@ type ProjectFormState = {
   description: string;
   color: string;
   repos: string[];
-  repoInput: string;
   leadAgentId: string;
   executorType: string;
   dockerImage: string;
@@ -186,7 +159,6 @@ const INITIAL_PROJECT_STATE: ProjectFormState = {
   description: "",
   color: COLOR_OPTIONS[5],
   repos: [],
-  repoInput: "",
   leadAgentId: "",
   executorType: "",
   dockerImage: "",
@@ -202,12 +174,15 @@ function useProjectForm(workspaceId: string, onClose: () => void) {
     [],
   );
 
-  const handleAddRepo = useCallback(() => {
-    const trimmed = form.repoInput.trim();
-    if (trimmed && !form.repos.includes(trimmed)) {
-      update({ repos: [...form.repos, trimmed], repoInput: "" });
-    }
-  }, [form.repoInput, form.repos, update]);
+  const handleAddRepo = useCallback(
+    (repo: string) => {
+      const trimmed = repo.trim();
+      if (trimmed && !form.repos.includes(trimmed)) {
+        update({ repos: [...form.repos, trimmed] });
+      }
+    },
+    [form.repos, update],
+  );
 
   const handleRemoveRepo = useCallback(
     (repo: string) => update({ repos: form.repos.filter((r) => r !== repo) }),
@@ -246,6 +221,7 @@ function ProjectFormBody({
   form,
   agents,
   executorTypes,
+  workspaceId,
   onUpdate,
   onAddRepo,
   onRemoveRepo,
@@ -253,8 +229,9 @@ function ProjectFormBody({
   form: ProjectFormState;
   agents: AgentProfile[];
   executorTypes: Array<{ id: string; label: string }>;
+  workspaceId: string;
   onUpdate: (patch: Partial<ProjectFormState>) => void;
-  onAddRepo: () => void;
+  onAddRepo: (repo: string) => void;
   onRemoveRepo: (r: string) => void;
 }) {
   return (
@@ -281,9 +258,8 @@ function ProjectFormBody({
       </div>
       <ColorPicker color={form.color} onChange={(c) => onUpdate({ color: c })} />
       <ReposField
+        workspaceId={workspaceId}
         repos={form.repos}
-        repoInput={form.repoInput}
-        onRepoInputChange={(v) => onUpdate({ repoInput: v })}
         onAddRepo={onAddRepo}
         onRemoveRepo={onRemoveRepo}
       />
@@ -338,6 +314,7 @@ export function CreateProjectDialog({ open, onOpenChange, workspaceId }: CreateP
           form={form}
           agents={agents}
           executorTypes={executorTypes}
+          workspaceId={workspaceId}
           onUpdate={update}
           onAddRepo={handleAddRepo}
           onRemoveRepo={handleRemoveRepo}

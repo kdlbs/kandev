@@ -13,6 +13,7 @@ import { useAppStore } from "@/components/state-provider";
 import { destroyUserShell, renameUserShell } from "@/lib/api/domains/user-shell-api";
 import { shouldConfirmTerminalClose } from "@/lib/terminal/terminal-busy-registry";
 import { CloseTerminalConfirmDialog } from "./close-terminal-confirm-dialog";
+import { TabRenameInput } from "./tab-rename-input";
 import { markTerminalPanelTerminateClose } from "./dockview-layout-setup";
 
 /**
@@ -184,11 +185,12 @@ export function TerminalTab(props: IDockviewPanelHeaderProps) {
           data-testid={`terminal-tab-${terminalId}`}
         >
           {isRenaming ? (
-            <TerminalTabRenameInput
+            <TabRenameInput
               initial={renameInitial}
               seqBadge={seqBadgeForInput}
               onCommit={handleCommitRename}
               onCancel={() => setIsRenaming(false)}
+              testId="terminal-tab-rename-input"
             />
           ) : (
             <TerminalTabBody
@@ -323,60 +325,6 @@ function TerminalTabClosingSpinner({ terminalId }: { terminalId: string }) {
     >
       <span className="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
     </span>
-  );
-}
-
-function TerminalTabRenameInput({
-  initial,
-  seqBadge,
-  onCommit,
-  onCancel,
-}: {
-  initial: string;
-  seqBadge: number | null;
-  onCommit: (next: string) => void;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(initial);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
-
-  return (
-    <div
-      className="flex h-full items-center gap-1 px-2"
-      // Stop the click from selecting the tab while we type.
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-    >
-      {seqBadge != null && (
-        <span className="text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5">
-          {seqBadge}
-        </span>
-      )}
-      <input
-        ref={inputRef}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            onCommit(value);
-          } else if (e.key === "Escape") {
-            e.preventDefault();
-            onCancel();
-          }
-          // Don't let dockview see typed keys as shortcuts.
-          e.stopPropagation();
-        }}
-        onBlur={() => onCommit(value)}
-        data-testid="terminal-tab-rename-input"
-        className="h-5 min-w-[6rem] max-w-[14rem] rounded border border-input bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
-      />
-    </div>
   );
 }
 

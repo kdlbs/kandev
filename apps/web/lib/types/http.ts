@@ -379,6 +379,8 @@ export type TaskSessionWorktree = {
 export type TaskSession = {
   id: SessionId;
   task_id: TaskId;
+  /** Optional user-supplied label shown on the session tab. */
+  name?: string;
   agent_profile_id?: AgentProfileId;
   container_id?: string;
   executor_id?: string;

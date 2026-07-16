@@ -87,6 +87,7 @@ const (
 	ActionSessionDelete       = "session.delete"
 	ActionSessionSetPrimary   = "session.set_primary"
 	ActionSessionSetPlanMode  = "session.set_plan_mode"
+	ActionSessionRename       = "session.rename"
 
 	// Agent actions
 	ActionAgentList   = "agent.list"
@@ -387,6 +388,7 @@ const (
 	ActionMCPArchiveTask         = "mcp.archive_task"
 	ActionMCPUpdateTaskState     = "mcp.update_task_state"
 	ActionMCPMessageTask         = "mcp.message_task"
+	ActionMCPSpawnSession        = "mcp.spawn_session"
 	ActionMCPGetTaskConversation = "mcp.get_task_conversation"
 )
 
