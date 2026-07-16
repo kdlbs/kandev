@@ -1,5 +1,6 @@
 import { isValidElement, type ReactElement } from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { renderSettingsRoute } from "./settings-routes";
 
@@ -25,7 +26,7 @@ describe("renderSettingsRoute — plugin fallthrough", () => {
 
   it("renders the plugin-registered settings route once a plugin registers it", () => {
     function PluginSettingsPage() {
-      return null;
+      return "PluginSettingsPage:rendered";
     }
     pluginRegistry
       .forPlugin(PLUGIN_ID)
@@ -34,7 +35,26 @@ describe("renderSettingsRoute — plugin fallthrough", () => {
     const route = renderSettingsRoute(PLUGIN_SETTINGS_PATH);
 
     expect(isValidElement(route)).toBe(true);
-    expect((route as ReactElement).type).toBe(PluginSettingsPage);
+    render(route as ReactElement);
+    expect(screen.getByText("PluginSettingsPage:rendered")).not.toBeNull();
+    cleanup();
+  });
+
+  it("renders a fallback instead of throwing when the plugin settings route component throws", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    function ThrowingSettingsPage(): never {
+      throw new Error("boom");
+    }
+    pluginRegistry
+      .forPlugin(PLUGIN_ID)
+      .registerSettingsRoute(PLUGIN_SETTINGS_PATH, ThrowingSettingsPage);
+
+    const route = renderSettingsRoute(PLUGIN_SETTINGS_PATH);
+
+    render(route as ReactElement);
+    expect(screen.getByText(/this plugin page failed to load/i)).not.toBeNull();
+    cleanup();
+    errorSpy.mockRestore();
   });
 
   it("does not consult the registry for a path outside /settings/plugins/", () => {

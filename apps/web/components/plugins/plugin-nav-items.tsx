@@ -2,6 +2,7 @@
 
 import { IconPuzzle } from "@tabler/icons-react";
 import { AppSidebarNavItem } from "@/components/app-sidebar/app-sidebar-nav-item";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 
 type PluginNavItemsProps = {
@@ -13,11 +14,17 @@ type PluginNavItemsProps = {
  * (`registry.registerNavItem(item)`) in the app sidebar, styled and behaving
  * like a first-party `AppSidebarNavItem`. Plugin nav items don't carry a
  * host icon component (only an opaque `icon` name string in the frozen
- * contract), so every entry uses a generic puzzle-piece glyph.
+ * contract), so every entry uses a generic puzzle-piece glyph. Gated on the
+ * "plugins" feature flag for consistency with the other plugin surfaces
+ * (settings nav entry, /settings/plugins page) even though the registry is
+ * empty and this already renders nothing when the flag is off.
  */
 export function PluginNavItems({ collapsed }: PluginNavItemsProps) {
+  const pluginsEnabled = useFeature("plugins");
   const registry = usePluginRegistry();
   const items = registry.getNavItems().filter((item) => (item.section ?? "main") === "main");
+
+  if (!pluginsEnabled) return null;
 
   return (
     <>

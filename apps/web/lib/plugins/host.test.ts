@@ -4,6 +4,20 @@ import { loadPlugins, unloadPlugin } from "./host";
 import { pluginRegistry } from "./registry";
 import type { ActivePlugin, PluginHostApi, PluginRegistry } from "./types";
 
+let mockApiBaseUrl = "";
+vi.mock("@/lib/config", () => ({
+  getBackendConfig: () => ({ apiBaseUrl: mockApiBaseUrl }),
+}));
+
+const PLUGIN_SCOPE_A_ID = "plugin-scope-a";
+const BUNDLE_JS_URL = "/bundle.js";
+const PLUGIN_UNLOAD_A_ID = "plugin-unload-a";
+const PLUGIN_UNLOAD_THROW_A_ID = "plugin-unload-throw-a";
+const PLUGIN_UNLOAD_STYLE_A_ID = "plugin-unload-style-a";
+const PLUGIN_REENABLE_A_ID = "plugin-reenable-a";
+const PLUGIN_REENABLE_A_PATH = "/plugin-reenable-a";
+const NAV_REENABLE_A_ID = "nav-reenable-a";
+
 function makeHostFactory(pluginId: string): PluginHostApi {
   return {
     pluginId,
@@ -19,6 +33,10 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     theme: "light",
   };
 }
+
+type FakeWindow = Window & {
+  registerKandevPlugin: (id: string, plugin: unknown) => void;
+};
 
 /** Fake importer that synchronously invokes window.registerKandevPlugin, no real dynamic import. */
 function fakeImporterFor(
@@ -41,34 +59,46 @@ function activePlugin(overrides: Partial<ActivePlugin> = {}): ActivePlugin {
   };
 }
 
+function registerFake(id: string, plugin: unknown) {
+  (window as unknown as FakeWindow).registerKandevPlugin(id, plugin);
+}
+
+afterEach(() => {
+  mockApiBaseUrl = "";
+});
+
 describe("loadPlugins", () => {
   afterEach(() => {
-    pluginRegistry.unregisterPlugin("plugin-a");
-    pluginRegistry.unregisterPlugin("plugin-b");
+    pluginRegistry.unregisterPlugin(PLUGIN_SCOPE_A_ID);
+    pluginRegistry.unregisterPlugin("plugin-style-a");
+    pluginRegistry.unregisterPlugin("plugin-throw-a");
+    pluginRegistry.unregisterPlugin("plugin-throw-b");
+    pluginRegistry.unregisterPlugin("plugin-silent-a");
     document.head.querySelectorAll("link[rel='stylesheet']").forEach((el) => el.remove());
   });
 
   it("imports the bundle, then calls initialize(registry, host) with a registry scoped to the plugin", async () => {
     const initialize = vi.fn((registry: PluginRegistry, _host: PluginHostApi) => {
-      registry.registerNavItem({ id: "nav-a", label: "A", path: "/plugin-a" });
+      registry.registerNavItem({ id: "nav-scope-a", label: "A", path: "/plugin-scope-a" });
     });
     const importer = fakeImporterFor({
-      "/api/plugins/plugin-a/bundle": (win) => {
-        (
-          win as unknown as { registerKandevPlugin: (id: string, plugin: unknown) => void }
-        ).registerKandevPlugin("plugin-a", { initialize });
-      },
+      "/api/plugins/plugin-scope-a/bundle": (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_SCOPE_A_ID, { initialize }),
     });
 
-    await loadPlugins([activePlugin()], makeHostFactory, importer);
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_SCOPE_A_ID, bundleUrl: "/api/plugins/plugin-scope-a/bundle" })],
+      makeHostFactory,
+      importer,
+    );
 
     expect(initialize).toHaveBeenCalledTimes(1);
     const [, host] = initialize.mock.calls[0];
-    expect(host.pluginId).toBe("plugin-a");
+    expect(host.pluginId).toBe(PLUGIN_SCOPE_A_ID);
     expect(pluginRegistry.getNavItems()).toContainEqual({
-      id: "nav-a",
+      id: "nav-scope-a",
       label: "A",
-      path: "/plugin-a",
+      path: "/plugin-scope-a",
     });
   });
 
@@ -78,15 +108,20 @@ describe("loadPlugins", () => {
     const happyDOMWindow = window as unknown as HappyDOMWindow;
     happyDOMWindow.happyDOM.settings.disableCSSFileLoading = true;
     const importer = fakeImporterFor({
-      "/bundle.js": (win) => {
-        (
-          win as unknown as { registerKandevPlugin: (id: string, plugin: unknown) => void }
-        ).registerKandevPlugin("plugin-a", { initialize: () => {} });
-      },
+      [BUNDLE_JS_URL]: (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin("plugin-style-a", {
+          initialize: () => {},
+        }),
     });
 
     await loadPlugins(
-      [activePlugin({ bundleUrl: "/bundle.js", styleUrls: ["/plugin-a.css"] })],
+      [
+        activePlugin({
+          id: "plugin-style-a",
+          bundleUrl: BUNDLE_JS_URL,
+          styleUrls: ["/plugin-a.css"],
+        }),
+      ],
       makeHostFactory,
       importer,
     );
@@ -100,26 +135,22 @@ describe("loadPlugins", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const goodInitialize = vi.fn();
     const importer = fakeImporterFor({
-      "/bad-bundle.js": (win) => {
-        (
-          win as unknown as { registerKandevPlugin: (id: string, plugin: unknown) => void }
-        ).registerKandevPlugin("plugin-a", {
+      "/bad-bundle.js": (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin("plugin-throw-a", {
           initialize: () => {
             throw new Error("boom");
           },
-        });
-      },
-      "/good-bundle.js": (win) => {
-        (
-          win as unknown as { registerKandevPlugin: (id: string, plugin: unknown) => void }
-        ).registerKandevPlugin("plugin-b", { initialize: goodInitialize });
-      },
+        }),
+      "/good-bundle.js": (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin("plugin-throw-b", {
+          initialize: goodInitialize,
+        }),
     });
 
     await loadPlugins(
       [
-        activePlugin({ id: "plugin-a", bundleUrl: "/bad-bundle.js" }),
-        activePlugin({ id: "plugin-b", bundleUrl: "/good-bundle.js" }),
+        activePlugin({ id: "plugin-throw-a", bundleUrl: "/bad-bundle.js" }),
+        activePlugin({ id: "plugin-throw-b", bundleUrl: "/good-bundle.js" }),
       ],
       makeHostFactory,
       importer,
@@ -135,7 +166,7 @@ describe("loadPlugins", () => {
     const importer = fakeImporterFor({ "/silent-bundle.js": () => {} });
 
     await loadPlugins(
-      [activePlugin({ bundleUrl: "/silent-bundle.js" })],
+      [activePlugin({ id: "plugin-silent-a", bundleUrl: "/silent-bundle.js" })],
       makeHostFactory,
       importer,
     );
@@ -145,33 +176,99 @@ describe("loadPlugins", () => {
   });
 });
 
+describe("loadPlugins — asset URL prefixing", () => {
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin("plugin-prefix-a");
+    pluginRegistry.unregisterPlugin("plugin-bare-a");
+    document.head.querySelectorAll("link[rel='stylesheet']").forEach((el) => el.remove());
+  });
+
+  it("prefixes a root-relative bundleUrl and style href with the backend apiBaseUrl when set (split-origin dev, Tauri)", async () => {
+    mockApiBaseUrl = "http://localhost:38429";
+    const happyDOMWindow = window as unknown as HappyDOMWindow;
+    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = true;
+    const importedUrls: string[] = [];
+    const importer = async (url: string) => {
+      importedUrls.push(url);
+      registerFake("plugin-prefix-a", { initialize: () => {} });
+      return {};
+    };
+
+    await loadPlugins(
+      [
+        activePlugin({
+          id: "plugin-prefix-a",
+          bundleUrl: "/api/plugins/plugin-prefix-a/bundle",
+          styleUrls: ["/api/plugins/plugin-prefix-a/ui/style.css"],
+        }),
+      ],
+      makeHostFactory,
+      importer,
+    );
+
+    expect(importedUrls).toEqual(["http://localhost:38429/api/plugins/plugin-prefix-a/bundle"]);
+    const link = document.head.querySelector(
+      "link[href='http://localhost:38429/api/plugins/plugin-prefix-a/ui/style.css']",
+    );
+    expect(link).not.toBeNull();
+    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = false;
+  });
+
+  it("leaves a root-relative bundleUrl unprefixed when apiBaseUrl is empty (same-origin production)", async () => {
+    mockApiBaseUrl = "";
+    const importedUrls: string[] = [];
+    const importer = async (url: string) => {
+      importedUrls.push(url);
+      registerFake("plugin-bare-a", { initialize: () => {} });
+      return {};
+    };
+
+    await loadPlugins(
+      [
+        activePlugin({
+          id: "plugin-bare-a",
+          bundleUrl: "/api/plugins/plugin-bare-a/bundle",
+        }),
+      ],
+      makeHostFactory,
+      importer,
+    );
+
+    expect(importedUrls).toEqual(["/api/plugins/plugin-bare-a/bundle"]);
+  });
+});
+
 describe("unloadPlugin", () => {
   afterEach(() => {
-    pluginRegistry.unregisterPlugin("plugin-a");
+    pluginRegistry.unregisterPlugin(PLUGIN_UNLOAD_A_ID);
+    pluginRegistry.unregisterPlugin(PLUGIN_UNLOAD_THROW_A_ID);
+    pluginRegistry.unregisterPlugin(PLUGIN_UNLOAD_STYLE_A_ID);
+    document.head.querySelectorAll("link[rel='stylesheet']").forEach((el) => el.remove());
   });
 
   it("calls destroy() and bulk-revokes the plugin's registrations", async () => {
     const destroy = vi.fn();
     const importer = fakeImporterFor({
-      "/bundle.js": (win) => {
-        (
-          win as unknown as { registerKandevPlugin: (id: string, plugin: unknown) => void }
-        ).registerKandevPlugin("plugin-a", {
+      [BUNDLE_JS_URL]: (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_UNLOAD_A_ID, {
           initialize: (registry: { registerNavItem: (item: unknown) => void }) => {
             registry.registerNavItem({ id: "nav-a", label: "A", path: "/plugin-a" });
           },
           destroy,
-        });
-      },
+        }),
     });
-    await loadPlugins([activePlugin({ bundleUrl: "/bundle.js" })], makeHostFactory, importer);
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_UNLOAD_A_ID, bundleUrl: BUNDLE_JS_URL })],
+      makeHostFactory,
+      importer,
+    );
     expect(pluginRegistry.getNavItems()).toContainEqual({
       id: "nav-a",
       label: "A",
       path: "/plugin-a",
     });
 
-    unloadPlugin("plugin-a");
+    unloadPlugin(PLUGIN_UNLOAD_A_ID);
 
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(pluginRegistry.getNavItems().find((item) => item.id === "nav-a")).toBeUndefined();
@@ -180,24 +277,99 @@ describe("unloadPlugin", () => {
   it("swallows a throwing destroy() and still bulk-revokes registrations", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const importer = fakeImporterFor({
-      "/bundle.js": (win) => {
-        (
-          win as unknown as { registerKandevPlugin: (id: string, plugin: unknown) => void }
-        ).registerKandevPlugin("plugin-a", {
+      [BUNDLE_JS_URL]: (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_UNLOAD_THROW_A_ID, {
           initialize: (registry: { registerNavItem: (item: unknown) => void }) => {
             registry.registerNavItem({ id: "nav-a", label: "A", path: "/plugin-a" });
           },
           destroy: () => {
             throw new Error("destroy boom");
           },
-        });
-      },
+        }),
     });
-    await loadPlugins([activePlugin({ bundleUrl: "/bundle.js" })], makeHostFactory, importer);
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_UNLOAD_THROW_A_ID, bundleUrl: BUNDLE_JS_URL })],
+      makeHostFactory,
+      importer,
+    );
 
-    expect(() => unloadPlugin("plugin-a")).not.toThrow();
+    expect(() => unloadPlugin(PLUGIN_UNLOAD_THROW_A_ID)).not.toThrow();
     expect(errorSpy).toHaveBeenCalled();
     expect(pluginRegistry.getNavItems().find((item) => item.id === "nav-a")).toBeUndefined();
     errorSpy.mockRestore();
+  });
+
+  it("removes the plugin's injected <link> stylesheet tags so disable/enable cycles don't accumulate duplicates", async () => {
+    const happyDOMWindow = window as unknown as HappyDOMWindow;
+    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = true;
+    const importer = fakeImporterFor({
+      [BUNDLE_JS_URL]: (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_UNLOAD_STYLE_A_ID, {
+          initialize: () => {},
+        }),
+    });
+    await loadPlugins(
+      [
+        activePlugin({
+          id: PLUGIN_UNLOAD_STYLE_A_ID,
+          bundleUrl: BUNDLE_JS_URL,
+          styleUrls: ["/plugin-unload-style-a.css"],
+        }),
+      ],
+      makeHostFactory,
+      importer,
+    );
+    expect(document.head.querySelector("link[href='/plugin-unload-style-a.css']")).not.toBeNull();
+
+    unloadPlugin(PLUGIN_UNLOAD_STYLE_A_ID);
+
+    expect(document.head.querySelector("link[href='/plugin-unload-style-a.css']")).toBeNull();
+    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = false;
+  });
+});
+
+describe("disable then re-enable in the same session", () => {
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_REENABLE_A_ID);
+  });
+
+  it("re-initializes from the cached registration when the bundle's module-eval side effect only fires once (ESM import caching)", async () => {
+    const initialize = vi.fn((registry: PluginRegistry) => {
+      registry.registerNavItem({ id: NAV_REENABLE_A_ID, label: "A", path: PLUGIN_REENABLE_A_PATH });
+    });
+    let importCount = 0;
+    const importer = vi.fn(async (_url: string) => {
+      importCount += 1;
+      // The real browser only runs a module's top-level side effect on the
+      // *first* resolution of a given specifier — a second `import(url)`
+      // resolves from the module cache without re-executing
+      // `window.registerKandevPlugin(...)`.
+      if (importCount === 1) {
+        registerFake(PLUGIN_REENABLE_A_ID, { initialize });
+      }
+      return {};
+    });
+
+    await loadPlugins([activePlugin({ id: PLUGIN_REENABLE_A_ID })], makeHostFactory, importer);
+    expect(initialize).toHaveBeenCalledTimes(1);
+    expect(pluginRegistry.getNavItems()).toContainEqual({
+      id: NAV_REENABLE_A_ID,
+      label: "A",
+      path: PLUGIN_REENABLE_A_PATH,
+    });
+
+    unloadPlugin(PLUGIN_REENABLE_A_ID);
+    expect(
+      pluginRegistry.getNavItems().find((item) => item.id === NAV_REENABLE_A_ID),
+    ).toBeUndefined();
+
+    await loadPlugins([activePlugin({ id: PLUGIN_REENABLE_A_ID })], makeHostFactory, importer);
+
+    expect(initialize).toHaveBeenCalledTimes(2);
+    expect(pluginRegistry.getNavItems()).toContainEqual({
+      id: NAV_REENABLE_A_ID,
+      label: "A",
+      path: PLUGIN_REENABLE_A_PATH,
+    });
   });
 });

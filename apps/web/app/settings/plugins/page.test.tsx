@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import type { PluginRecord, SyncResult } from "@/lib/types/plugins";
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
 
 const {
   enablePluginSpy,
@@ -86,6 +86,8 @@ import PluginsSettingsPage from "./page";
 const PLUGIN_ID = "acme-tools";
 const NEW_PLUGIN_ID = "new-plugin";
 const SYNC_BUTTON_TESTID = "plugins-sync-button";
+const INSTALL_TRIGGER_TESTID = "install-plugin-trigger";
+const NEW_PLUGIN_URL = "https://example.test/new-plugin-1.0.0.tar.gz";
 
 function activePlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
   return {
@@ -132,8 +134,8 @@ function emptySyncResult(overrides: Partial<SyncResult> = {}): SyncResult {
 }
 
 beforeEach(() => {
-  installPluginFromUrlSpy.mockResolvedValue(installedPlugin());
-  installPluginUploadSpy.mockResolvedValue(installedPlugin());
+  installPluginFromUrlSpy.mockResolvedValue({ plugin: installedPlugin() });
+  installPluginUploadSpy.mockResolvedValue({ plugin: installedPlugin() });
   syncPluginsSpy.mockResolvedValue(emptySyncResult());
 });
 
@@ -238,17 +240,13 @@ describe("PluginsSettingsPage install dialog", () => {
     setStoreState([]);
 
     render(<PluginsSettingsPage />);
-    fireEvent.click(screen.getByTestId("install-plugin-trigger"));
+    fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
     fireEvent.change(screen.getByTestId("install-plugin-url-input"), {
-      target: { value: "https://example.test/new-plugin-1.0.0.tar.gz" },
+      target: { value: NEW_PLUGIN_URL },
     });
     fireEvent.click(screen.getByTestId("install-plugin-url-submit"));
 
-    await vi.waitFor(() =>
-      expect(installPluginFromUrlSpy).toHaveBeenCalledWith(
-        "https://example.test/new-plugin-1.0.0.tar.gz",
-      ),
-    );
+    await vi.waitFor(() => expect(installPluginFromUrlSpy).toHaveBeenCalledWith(NEW_PLUGIN_URL));
     const upsertPlugin = storeState.upsertPlugin as ReturnType<typeof vi.fn>;
     expect(upsertPlugin).toHaveBeenCalledWith(expect.objectContaining({ id: NEW_PLUGIN_ID }));
     await vi.waitFor(() =>
@@ -271,7 +269,7 @@ describe("PluginsSettingsPage install dialog", () => {
     });
 
     render(<PluginsSettingsPage />);
-    fireEvent.click(screen.getByTestId("install-plugin-trigger"));
+    fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
     // Radix TabsTrigger switches tabs on mousedown, not click (see
     // @radix-ui/react-tabs) — fireEvent.click alone never fires it.
     fireEvent.mouseDown(screen.getByTestId("install-plugin-tab-upload"));
@@ -285,6 +283,32 @@ describe("PluginsSettingsPage install dialog", () => {
     expect(upsertPlugin).toHaveBeenCalledWith(expect.objectContaining({ id: NEW_PLUGIN_ID }));
   });
 
+  it("shows a warning toast (not a bare success toast) when the package installed but failed to start", async () => {
+    installPluginFromUrlSpy.mockResolvedValueOnce({
+      plugin: installedPlugin({ status: "error" }),
+      warning: "plugin installed but failed to start: handshake timed out",
+    });
+    setStoreState([]);
+
+    render(<PluginsSettingsPage />);
+    fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
+    fireEvent.change(screen.getByTestId("install-plugin-url-input"), {
+      target: { value: NEW_PLUGIN_URL },
+    });
+    fireEvent.click(screen.getByTestId("install-plugin-url-submit"));
+
+    await vi.waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        "plugin installed but failed to start: handshake timed out",
+      ),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+    const upsertPlugin = storeState.upsertPlugin as ReturnType<typeof vi.fn>;
+    expect(upsertPlugin).toHaveBeenCalledWith(
+      expect.objectContaining({ id: NEW_PLUGIN_ID, status: "error" }),
+    );
+  });
+
   it("shows the backend's error message inline when install fails", async () => {
     installPluginFromUrlSpy.mockRejectedValueOnce(
       new Error("bad checksum for server/plugin-linux-amd64"),
@@ -292,7 +316,7 @@ describe("PluginsSettingsPage install dialog", () => {
     setStoreState([]);
 
     render(<PluginsSettingsPage />);
-    fireEvent.click(screen.getByTestId("install-plugin-trigger"));
+    fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
     fireEvent.change(screen.getByTestId("install-plugin-url-input"), {
       target: { value: "https://example.test/bad.tar.gz" },
     });

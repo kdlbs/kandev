@@ -18,6 +18,7 @@ import { toActivePlugin } from "@/lib/plugins/active-plugin";
 import { buildHostApi } from "@/lib/plugins/host-api";
 import { loadPlugins, unloadPlugin } from "@/lib/plugins/host";
 import { summarizeSyncResult } from "@/lib/plugins/sync-summary";
+import type { InstallResult } from "@/lib/api/domains/plugins-api";
 import type { PluginRecord, PluginStatus, SyncError } from "@/lib/types/plugins";
 import type { AppState } from "@/lib/state/store";
 
@@ -128,19 +129,26 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
     setInstallError(null);
   };
 
-  const afterInstall = async (record: PluginRecord) => {
-    upsertPlugin(record);
-    await loadIfActive(record, storeApi, resolvedTheme);
-    toast.success(`${record.display_name} installed`);
+  // A partial-install warning (package installed but failed to spawn — the
+  // backend leaves Plugin.Status "error") must not be masked by a green
+  // "installed" toast, so it takes priority over the success toast.
+  const afterInstall = async ({ plugin, warning }: InstallResult) => {
+    upsertPlugin(plugin);
+    await loadIfActive(plugin, storeApi, resolvedTheme);
+    if (warning) {
+      toast.warning(warning);
+    } else {
+      toast.success(`${plugin.display_name} installed`);
+    }
     closeInstallDialog();
   };
 
-  const runInstall = async (install: () => Promise<PluginRecord>) => {
+  const runInstall = async (install: () => Promise<InstallResult>) => {
     setInstallBusy(true);
     setInstallError(null);
     try {
-      const record = await install();
-      await afterInstall(record);
+      const result = await install();
+      await afterInstall(result);
     } catch (err) {
       setInstallError(err instanceof Error ? err.message : "Failed to install plugin");
     } finally {

@@ -57,6 +57,10 @@ import { TerminalSettings } from "@/components/settings/terminal-settings";
 import { VoiceModeSettings } from "@/components/settings/voice-mode-settings";
 import licenses from "@/generated/licenses.json";
 import { fetchJson } from "@/lib/api/client";
+import {
+  PluginErrorBoundary,
+  PluginRouteFallback,
+} from "@/components/plugins/plugin-error-boundary";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import {
@@ -244,7 +248,15 @@ export function renderSettingsRoute(pathname: string) {
 function renderPluginSettingsRoute(pathname: string) {
   if (!pathname.startsWith("/settings/plugins/")) return null;
   const match = pluginRegistry.getSettingsRoutes().find((route) => route.path === pathname);
-  return match ? <match.Component /> : null;
+  if (!match) return null;
+  return (
+    <PluginErrorBoundary
+      context={`settings route "${pathname}"`}
+      fallback={<PluginRouteFallback />}
+    >
+      <match.Component />
+    </PluginErrorBoundary>
+  );
 }
 
 function renderDynamicSettingsRoute(pathname: string) {

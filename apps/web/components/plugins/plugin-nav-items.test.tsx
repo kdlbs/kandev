@@ -5,6 +5,8 @@ import { pluginRegistry } from "@/lib/plugins/registry";
 import { PluginNavItems } from "./plugin-nav-items";
 
 let pathname = "/";
+let pluginsEnabled = true;
+const HELLO_PATH = "/plugins/hello";
 
 function cleanupPlugins(...pluginIds: string[]) {
   pluginIds.forEach((id) => pluginRegistry.unregisterPlugin(id));
@@ -12,6 +14,10 @@ function cleanupPlugins(...pluginIds: string[]) {
 
 vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => pathname,
+}));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => pluginsEnabled,
 }));
 
 function renderNavItems(collapsed = false) {
@@ -27,6 +33,7 @@ describe("PluginNavItems", () => {
     cleanup();
     cleanupPlugins("plugin-a", "plugin-b");
     pathname = "/";
+    pluginsEnabled = true;
     window.history.pushState({}, "", "/");
   });
 
@@ -38,7 +45,7 @@ describe("PluginNavItems", () => {
   it("renders a registered main-section nav item", () => {
     pluginRegistry
       .forPlugin("plugin-a")
-      .registerNavItem({ id: "hello", label: "Hello", path: "/plugins/hello" });
+      .registerNavItem({ id: "hello", label: "Hello", path: HELLO_PATH });
 
     renderNavItems();
 
@@ -59,14 +66,25 @@ describe("PluginNavItems", () => {
     expect(screen.queryByTestId("plugin-nav-item-settings-item")).toBeNull();
   });
 
+  it("renders nothing when the plugins feature flag is off, even with a registered nav item", () => {
+    pluginsEnabled = false;
+    pluginRegistry
+      .forPlugin("plugin-a")
+      .registerNavItem({ id: "hello", label: "Hello", path: HELLO_PATH });
+
+    const { container } = renderNavItems();
+
+    expect(container.innerHTML).toBe("");
+  });
+
   it("navigates to item.path when clicked", () => {
     pluginRegistry
       .forPlugin("plugin-a")
-      .registerNavItem({ id: "hello", label: "Hello", path: "/plugins/hello" });
+      .registerNavItem({ id: "hello", label: "Hello", path: HELLO_PATH });
 
     renderNavItems();
     screen.getByTestId("plugin-nav-item-hello").click();
 
-    expect(window.location.pathname).toBe("/plugins/hello");
+    expect(window.location.pathname).toBe(HELLO_PATH);
   });
 });

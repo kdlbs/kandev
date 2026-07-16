@@ -16,26 +16,28 @@ export async function getPlugin(id: string, options?: ApiRequestOptions) {
   return fetchJson<PluginRecord>(`${BASE}/${encodeURIComponent(id)}`, options);
 }
 
-// InstallResponse mirrors the backend's InstallResponse
+// InstallResult mirrors the backend's InstallResponse
 // (internal/plugins/dto.go): the install endpoint always wraps the stored
 // record under "plugin" (plus an optional "warning" when the package
 // installed but its initial spawn/handshake failed — Plugin.Status is left
-// as "error" in that case).
-type InstallResponse = {
+// as "error" in that case). Callers must surface `warning` — a plugin can
+// install successfully yet still fail to come up.
+export type InstallResult = {
   plugin: PluginRecord;
   warning?: string;
 };
 
 // installPluginFromUrl asks the backend to download, verify, and install a
 // plugin package from a remote URL (POST /api/plugins/install, JSON body).
-// Returns the stored plugin record. Throws ApiError on 400 (invalid
-// package/manifest — message names the problem, e.g. bad checksum or
-// missing platform executable) or 409 (that version is already installed).
+// Returns the stored plugin record plus an optional partial-install warning.
+// Throws ApiError on 400 (invalid package/manifest — message names the
+// problem, e.g. bad checksum or missing platform executable) or 409 (that
+// version is already installed).
 export async function installPluginFromUrl(
   url: string,
   options?: ApiRequestOptions,
-): Promise<PluginRecord> {
-  const res = await fetchJson<InstallResponse>(`${BASE}/install`, {
+): Promise<InstallResult> {
+  return fetchJson<InstallResult>(`${BASE}/install`, {
     ...options,
     init: {
       ...(options?.init ?? {}),
@@ -43,18 +45,17 @@ export async function installPluginFromUrl(
       body: JSON.stringify({ url }),
     },
   });
-  return res.plugin;
 }
 
 // installPluginUpload uploads a plugin package (.tar.gz) directly as
 // multipart/form-data under the "package" field (POST /api/plugins/install).
 // Bypasses fetchJson, which always forces a JSON Content-Type header — that
 // would stop the browser from setting the multipart boundary itself. Same
-// error semantics as installPluginFromUrl.
+// return shape and error semantics as installPluginFromUrl.
 export async function installPluginUpload(
   file: File,
   options?: ApiRequestOptions,
-): Promise<PluginRecord> {
+): Promise<InstallResult> {
   const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
   const formData = new FormData();
   formData.append("package", file);
@@ -68,8 +69,7 @@ export async function installPluginUpload(
   });
 
   if (!response.ok) await throwInstallError(response);
-  const body = (await response.json()) as InstallResponse;
-  return body.plugin;
+  return (await response.json()) as InstallResult;
 }
 
 async function throwInstallError(response: Response): Promise<never> {

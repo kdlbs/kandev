@@ -23,6 +23,10 @@ import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { hasHydratedKanbanRouteState } from "@/lib/routing/kanban-route-hydration";
 import { usePathname, useSearchParams } from "@/lib/routing/client-router";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
+import {
+  PluginErrorBoundary,
+  PluginRouteFallback,
+} from "@/components/plugins/plugin-error-boundary";
 import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
@@ -200,12 +204,21 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   return <DataBackedRoute route={route} routeData={routeData} />;
 }
 
-/** Renders the plugin-registered component for a `kind: "plugin"` route, inside the normal app shell. */
+/**
+ * Renders the plugin-registered component for a `kind: "plugin"` route,
+ * inside the normal app shell. Wrapped in a `PluginErrorBoundary` so a
+ * throwing plugin route renders a fallback instead of white-screening the
+ * rest of the SPA.
+ */
 function PluginRoute({ path }: { path: string }) {
   const match = pluginRegistry.getRoutes().find((route) => route.path === path);
   if (!match) return null;
   const Component = match.Component;
-  return <Component />;
+  return (
+    <PluginErrorBoundary context={`route "${path}"`} fallback={<PluginRouteFallback />}>
+      <Component />
+    </PluginErrorBoundary>
+  );
 }
 
 function KanbanRoute({ route }: { route: Extract<SpaRoute, { kind: "kanban" }> }) {

@@ -1,5 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { resolveSpaRoute, SpaRoutes } from "./spa-routes";
@@ -67,5 +67,23 @@ describe("SpaRoutes — plugin route rendering", () => {
     );
 
     expect(screen.getByTestId("plugin-hello-page")).not.toBeNull();
+  });
+
+  it("renders a fallback instead of white-screening when the plugin route component throws", () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    function ThrowingPage(): never {
+      throw new Error("boom");
+    }
+    pluginRegistry.forPlugin(PLUGIN_ID).registerRoute(PLUGIN_PATH, ThrowingPage);
+    window.history.pushState({}, "", PLUGIN_PATH);
+
+    render(
+      <StateProvider>
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    expect(screen.getByText(/this plugin page failed to load/i)).not.toBeNull();
+    errorSpy.mockRestore();
   });
 });

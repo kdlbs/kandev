@@ -34,6 +34,7 @@ afterEach(() => {
 
 const PLUGIN_ID = "acme-tools";
 const PLUGIN_URL = "http://api.test/api/plugins/acme-tools";
+const PARTIAL_INSTALL_WARNING = "plugin installed but failed to start: handshake timed out";
 
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -115,8 +116,28 @@ describe("installPluginFromUrl", () => {
       url: "https://example.test/acme-tools-1.0.0.tar.gz",
     });
     expect((init?.headers as Record<string, string>)?.["Content-Type"]).toBe("application/json");
-    expect(result.id).toBe(PLUGIN_ID);
-    expect(result.status).toBe("active");
+    expect(result.plugin.id).toBe(PLUGIN_ID);
+    expect(result.plugin.status).toBe("active");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("surfaces a partial-install warning alongside the stored plugin record", async () => {
+    // Package installed but its initial spawn/handshake failed — backend
+    // leaves Plugin.Status as "error" and adds a "warning" alongside "plugin".
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse(
+        {
+          plugin: plugin({ status: "error" }),
+          warning: PARTIAL_INSTALL_WARNING,
+        },
+        201,
+      ),
+    );
+
+    const result = await installPluginFromUrl("https://example.test/acme-tools-1.0.0.tar.gz");
+
+    expect(result.plugin.status).toBe("error");
+    expect(result.warning).toBe(PARTIAL_INSTALL_WARNING);
   });
 
   it("propagates a 400 invalid-package error as an ApiError", async () => {
@@ -165,8 +186,29 @@ describe("installPluginUpload", () => {
     expect(captured.method).toBe("POST");
     expect(captured.isFormData).toBe(true);
     expect(captured.hasPackageField).toBe(true);
-    expect(result.id).toBe(PLUGIN_ID);
-    expect(result.status).toBe("active");
+    expect(result.plugin.id).toBe(PLUGIN_ID);
+    expect(result.plugin.status).toBe("active");
+    expect(result.warning).toBeUndefined();
+  });
+
+  it("surfaces a partial-install warning alongside the stored plugin record", async () => {
+    fetchSpy.mockImplementationOnce(async () =>
+      jsonResponse(
+        {
+          plugin: plugin({ status: "error" }),
+          warning: PARTIAL_INSTALL_WARNING,
+        },
+        201,
+      ),
+    );
+    const file = new File([new Uint8Array([1, 2, 3])], "acme-tools-1.0.0.tar.gz", {
+      type: "application/gzip",
+    });
+
+    const result = await installPluginUpload(file);
+
+    expect(result.plugin.status).toBe("error");
+    expect(result.warning).toBe(PARTIAL_INSTALL_WARNING);
   });
 
   it("does not set a Content-Type header, so the browser sets the multipart boundary", async () => {
