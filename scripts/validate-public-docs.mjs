@@ -22,9 +22,11 @@ export async function validatePublicDocs(
   const pagesBySlug = new Map();
 
   for (const file of files) {
+    const markdown = await fs.readFile(path.join(docsDir, file), "utf8");
+    await assertLocalLinks(docsDir, file, markdown);
+
     if (path.posix.basename(file).toLowerCase() === "readme.md") continue;
 
-    const markdown = await fs.readFile(path.join(docsDir, file), "utf8");
     assertFrontmatter(file, markdown);
 
     const slug = file.replace(/\.mdx?$/, "").replace(/\/index$/, "");
@@ -124,6 +126,100 @@ function assertFrontmatter(file, markdown) {
       `${file} must start with YAML frontmatter containing title and description`,
     );
   }
+}
+
+/**
+ * Require every relative Markdown link or image to resolve on disk.
+ *
+ * @param {string} docsDir Published docs root.
+ * @param {string} file Relative source path used in validation errors.
+ * @param {string} markdown Page source.
+ * @returns {Promise<void>}
+ */
+async function assertLocalLinks(docsDir, file, markdown) {
+  const source = stripMarkdownCode(markdown);
+  const linkPattern = /!?\[[^\]\n]*\]\(([^)\n]+)\)/g;
+
+  for (const match of source.matchAll(linkPattern)) {
+    const href = parseMarkdownDestination(match[1]);
+    if (!href || href.startsWith("#") || isExternalDestination(href)) {
+      continue;
+    }
+    if (href.startsWith("/")) {
+      throw new Error(
+        `${file} uses a site-root link instead of a relative source link: ${href}`,
+      );
+    }
+
+    const pathOnly = href.split(/[?#]/, 1)[0];
+    if (!pathOnly) continue;
+
+    let decoded;
+    try {
+      decoded = decodeURIComponent(pathOnly);
+    } catch {
+      throw new Error(`${file} contains an invalid encoded local link: ${href}`);
+    }
+
+    const target = path.resolve(
+      path.dirname(path.join(docsDir, file)),
+      decoded.replace(/\\([\\() ])/g, "$1"),
+    );
+    try {
+      await fs.access(target);
+    } catch {
+      throw new Error(`${file} links to missing local target: ${href}`);
+    }
+  }
+}
+
+/**
+ * Remove fenced and inline code so examples are not treated as live links.
+ *
+ * @param {string} markdown Page source.
+ * @returns {string} Markdown with code regions removed.
+ */
+function stripMarkdownCode(markdown) {
+  let fence = null;
+  const lines = markdown.split(/\r?\n/).map((line) => {
+    const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1];
+    if (marker) {
+      if (!fence) {
+        fence = marker[0];
+      } else if (marker[0] === fence) {
+        fence = null;
+      }
+      return "";
+    }
+    return fence ? "" : line;
+  });
+
+  return lines.join("\n").replace(/`+[^`\n]*`+/g, "");
+}
+
+/**
+ * Read the destination portion before an optional Markdown link title.
+ *
+ * @param {string} raw Raw content inside link parentheses.
+ * @returns {string} Link destination.
+ */
+function parseMarkdownDestination(raw) {
+  const value = raw.trim();
+  if (value.startsWith("<")) {
+    const end = value.indexOf(">");
+    return end === -1 ? value : value.slice(1, end);
+  }
+  return value.split(/\s+/, 1)[0];
+}
+
+/**
+ * Return whether a destination has a URL scheme or protocol-relative host.
+ *
+ * @param {string} href Link destination.
+ * @returns {boolean} Whether the destination is external.
+ */
+function isExternalDestination(href) {
+  return href.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(href);
 }
 
 /**

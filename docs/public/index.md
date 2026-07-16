@@ -1,85 +1,49 @@
 ---
-title: "Overview"
-description: "Start building with Kandev agentic development workflows."
+title: "Kandev Documentation"
+description: "Choose a guide for running agentic development work or contributing to Kandev itself."
 ---
 
-# Kandev Feature Guide
+# Kandev Documentation
 
-This page expands the short feature list in the README without turning the README into a catalog.
+Kandev is an open-source workbench for planning, running, coordinating, and reviewing software work with coding agents. It runs on infrastructure you control, works with multiple agent providers, and keeps the human review surface close to the repository state.
 
-## Agent And Task Workflows
+Choose the path that matches what you are doing now.
 
-- **Parallel task execution:** run and review multiple agent tasks at once.
-- **Kanban and pipeline workflows:** define workflow steps, prompts, automations, and agent handoffs per step.
-- **Workflow import/export:** export one workflow or every workflow in a workspace as portable YAML, then import it into another workspace or Kandev install. See [workflow-import-export.md](workflow-import-export.md).
-- **Workflow sync from GitHub:** keep a workspace's workflows in sync with definition files in a GitHub repo — Kandev polls the repo on an interval, with a force-sync option and warnings when a change can't be applied. See [workflow-sync.md](workflow-sync.md).
-- **Subtasks:** split work into child tasks that inherit the parent task's workspace, workflow, agent profile, executor, and repositories by default.
-- **Multi-repository tasks:** attach several repositories to one task. Each repository gets its own worktree and is grouped separately in changes, review, and PR surfaces.
-- **Multi-branch tasks:** attach multiple branches from the same repository to one task when the work needs to produce several PRs.
-- **Task documents:** tasks can hold multiple markdown documents with revision history, including plans, specs, notes, reviews, and custom documents.
-- **Task labels:** workspace labels are reusable, filterable, and visible on task cards and task detail.
-- **Public share links:** publish a redacted task conversation snapshot as a secret GitHub Gist after previewing exactly what will be shared. Existing shares can be revoked.
+## Use Kandev
 
-## Agent Interfaces
+Start here when you want to install Kandev, connect repositories and tools, run agents, or design a team workflow.
 
-- **ACP agents:** Kandev supports ACP-native and ACP-adapter agents such as Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode, Cursor, Qwen, Factory Droid, iFlow, Kilocode, Pi, Kimi, Kiro, Qoder, Trae, Oh My Pi, and Grok.
-- **Bring-your-own TUI agents:** any agent CLI can run in a PTY terminal through CLI passthrough, even without ACP support.
-- **Voice mode:** dictate chat prompts from the composer. Supported engines include browser Web Speech, local in-browser Whisper Web, and server-side Whisper. Settings include language, click-to-toggle or hold-to-talk activation, auto-send, Whisper model size, and keyboard shortcut.
-- **Utility agents:** one-shot helpers can generate or improve prompt text, branch names, commit messages, commit descriptions, PR titles, PR descriptions, and session summaries. Users can choose a default model, override models per action, and add custom utility agents.
-- **Custom prompts:** reusable prompts can be created in settings and invoked from chat.
-- **Secrets:** named secrets can be stored once and reused by profiles or integrations without pasting values into every task.
+- [Get started](use-kandev.md): install Kandev and complete a first task.
+- [Tasks and workflows](tasks-and-workflows.md): choose a workflow, create tasks, and move work through gates.
+- [Sessions and review](sessions-and-review.md): use chat, files, terminal, changes, plans, pull requests, and code walkthroughs.
+- [Coordinate work](coordination.md): use subtasks, dependencies, multiple repositories, multiple branches, plans, and handoffs.
+- [Agents and profiles](agents-and-profiles.md): select models and modes, configure CLI flags and environment, and understand permission controls.
+- [Executors](executors.md): choose local, worktree, Docker, SSH, or Sprites execution.
+- [Integrations](integrations.md): connect GitHub, GitLab, Jira, Linear, Sentry, and Slack.
+- [Developer tools](developer-tools.md): quick chat, prompts, utility agents, voice, editors, terminal, shortcuts, and notifications.
+- [Automation and MCP](automation-and-mcp.md): automate workflow transitions and let agents coordinate Kandev tasks.
+- [Feature status](feature-status.md): see what is supported, optional, experimental, or still in progress.
 
-## Executors And Runtime
+For installation and deployment details, use the [CLI reference](cli.md), [desktop guide](desktop-app.md), [configuration reference](configuration.md), or one of the runtime guides under **Run and Operate**.
 
-- **Desktop app:** install Kandev as a Tauri desktop app that starts the local backend and shows the existing Kandev UI without requiring Node.js at runtime. See [desktop-app.md](desktop-app.md).
-- **Executor types:** run agents as local host processes, git worktrees, Docker containers, remote SSH sessions, or Sprites cloud environments.
-- **Executor profiles:** save per-runtime configuration, including prepare scripts, environment variables, credentials, and profile-specific settings.
-- **Worktree isolation:** concurrent agents work in isolated git worktrees so their changes do not collide.
-- **Per-task repository setup:** repositories can copy selected ignored files, such as `.env` files, into newly created worktrees.
-- **Resource monitor:** optionally show CPU, memory, disk, CPU temperature, and load metrics in desktop task and kanban topbars. Kandev can also collect execution-environment metrics for Docker, SSH, Sprites, and other remote runtimes.
+## Contribute to Kandev
 
-## Integrations And MCP
+Start here when you are changing Kandev, extending an integration, or maintaining its public documentation.
 
-- **Integrations:** GitHub, GitLab, Jira, Linear, Sentry, and Slack connect external work back into Kandev tasks.
-- **External MCP:** Kandev exposes streamable HTTP and SSE MCP endpoints so external coding agents can manage Kandev from outside the app. Settings include copyable snippets for Claude Code, Cursor, Codex, Auggie CLI, OpenCode, and GitHub Copilot CLI.
-- **Automatic session MCP:** agents launched normally inside Kandev receive the Kandev task MCP automatically.
-- **Passthrough MCP:** passthrough agents can also use the Kandev MCP endpoint while keeping their native CLI interface.
+- [Contribution workflow](contributing.md): prepare a development environment and open a focused pull request.
+- [Architecture](architecture.md): understand the unified Go backend, embedded web app, persistence, events, agent runtime, and external boundaries.
+- [Backend development](backend-development.md): follow handler, service, repository, event, migration, and WebSocket conventions.
+- [Web development](web-development.md): work with the Vite/React app, state slices, API clients, WebSocket handlers, responsive task UI, and design system.
+- [Testing](testing.md): choose targeted Go, Vitest, CLI, desktop, or Playwright coverage and use isolated fixtures.
+- [Extension guides](extending-kandev.md): add agents, executors, integrations, settings, MCP tools, prompts, and workflow behavior.
+- [Adding an agent CLI](add-agent-cli.md): implement a new ACP or TUI integration end to end.
+- [Release process](release-process.md): understand versioning, release automation, runtime bundles, desktop artifacts, npm, Homebrew, and containers.
+- [Public docs guide](README.md): update a page or add a new entry to this navigation.
 
-## What Task Agents Can Do Through Kandev MCP
+## Product Boundary
 
-Agents running on regular kanban tasks receive a task-scoped MCP surface. The available tools let agents coordinate work without leaving Kandev:
+The regular task workbench and task-scoped Kandev MCP are shipped features. **Office mode is separate and remains feature-flagged and in progress.** Internal plans, ADRs, and experiments can explain direction, but they are not promises that a feature is generally available. The [feature status page](feature-status.md) records that boundary explicitly.
 
-- **Discover workspace context:** list workspaces, workflows, workflow steps, repositories, agents, executor profiles, and tasks.
-- **Work with multi-repo tasks:** task responses include attached repositories, base branches, checkout branches, and positions so agents can reason about each worktree separately.
-- **Create tasks and subtasks:** create top-level tasks or child tasks, optionally auto-starting an agent. Subtasks inherit the parent workspace, workflow, agent profile, executor, and repositories unless the agent supplies an override.
-- **Target sibling repositories:** create a subtask in a different repository while keeping it under the same parent task and workspace.
-- **Coordinate dependencies:** create tasks with blocker relationships and inspect related parent, child, sibling, blocker, and blocked-by tasks.
-- **Attach more branches:** add another `(repository, branch)` worktree to an existing worktree task. Use this for multiple PRs from one task, either in the same repository or across repositories.
-- **Adjust diff bases:** update a task repository's base branch so changes, ahead/behind counts, and review context compare against the right target branch.
-- **Move, archive, or delete tasks:** move tasks across workflow steps, including optional handoff prompts for the next agent, or clean up tasks when appropriate.
-- **Message other tasks:** send a prompt to another task's primary session. Running tasks queue the message for the next turn; idle tasks receive it immediately; created sessions start with it.
-- **Read conversations:** fetch a task's conversation history, with pagination and message-type filters.
-- **Record structured plans:** create, read, update, and delete task plans.
-- **Signal completion:** explicitly tell Kandev that a workflow step is complete, with summary, handoff notes, and blockers.
-- **See associated PRs:** task-listing and related-task responses include associated GitHub pull requests when available, including PR number, URL, title, state, and merge time.
+## Current Version
 
-## In Progress: Office Mode
-
-Office mode is currently feature-flagged and not documented as a live supported feature yet. The planned direction is a higher-level autonomy workspace with:
-
-- Persistent agent instances with roles, permissions, skills, instructions, memory, status, and executor preferences.
-- Agent dashboards, run history, inbox items, approvals, and human review gates.
-- Task delegation across agent teams, including parent/child task coordination.
-- Routines and scheduler-driven recurring work.
-- Cost tracking, model usage visibility, and budget guardrails.
-- Workspace configuration import/export and sync for agent/team setup.
-
-We'll move Office into the live feature inventory after it ships.
-
-## System Management
-
-- **Feature toggles:** runtime feature flags can be viewed and overridden from Settings > System, with restart prompts when required.
-- **Updates:** Kandev can check for newer releases and apply signed, confirmed updates from the desktop app or supported service installs.
-- **Backups and restore:** Kandev creates snapshots before version upgrades and supports manual snapshots, download, restore, and deletion from the system settings page.
-- **Disk usage:** inspect storage used by worktrees, repositories, sessions, tasks, quick chat, and backups.
-- **Logs, database status, about, and licenses:** system settings include operational views useful for self-hosted installs.
+These docs describe the current `main` branch and are not versioned yet. Commands and configuration are verified against source, but a released build can lag `main`. Check the version in **Settings > System > About** or run `kandev --version`, then consult the corresponding GitHub tag when exact historical behavior matters.

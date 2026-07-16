@@ -145,3 +145,80 @@ test("rejects published pages without title and description frontmatter", async 
     /index.md must start with YAML frontmatter containing title and description/,
   );
 });
+
+test("accepts existing relative page and asset links", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        "[Guide](guide.md)\n\n![Diagram](assets/diagram.png)",
+      ),
+      "guide.md": validPage,
+      "assets/diagram.png": "not-a-real-png",
+    },
+    { pages: ["index", "guide"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("rejects a broken local page link", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace("Page body.", "[Missing](missing.md)"),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md links to missing local target: missing.md/,
+  );
+});
+
+test("rejects a broken local image", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        "![Missing](assets/missing.png)",
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md links to missing local target: assets\/missing.png/,
+  );
+});
+
+test("ignores external, anchor-only, and fenced-code links", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        `[External](https://example.com/docs)\n\n[Section](#section)\n\n\`\`\`md
+[Example only](does-not-exist.md)
+\`\`\``,
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("rejects site-root links because public docs use relative sources", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace("Page body.", "[Guide](/docs/guide)"),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md uses a site-root link instead of a relative source link: \/docs\/guide/,
+  );
+});

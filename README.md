@@ -151,7 +151,7 @@ cd kandev
 make start
 ```
 
-**Prerequisites:** Go 1.26+, Node.js 18+, pnpm, Docker (optional - needed for container runtimes)
+**Prerequisites:** Go 1.26, Node.js 24, and pnpm 9.15.9 (pinned in `mise.toml`). Docker is optional and needed only for container runtimes.
 
 ## High level architecture
 
@@ -193,9 +193,9 @@ We also want to add support for this remote runtime:
 ```
 apps/
 ├── backend/    # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
-├── web/        # Next.js frontend (SSR, Zustand, real-time subscriptions)
+├── web/        # Vite/React frontend (SPA, Zustand, real-time subscriptions)
 ├── cli/        # CLI tool (npx kandev launcher)
-├── landing/    # Landing page
+├── desktop/    # Tauri desktop shell
 └── packages/   # Shared UI components & types
 ```
 

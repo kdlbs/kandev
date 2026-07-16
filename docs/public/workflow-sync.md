@@ -1,4 +1,9 @@
-# Workflow Sync — Manage Workflows from a GitHub Repo
+---
+title: "Workflow Sync"
+description: "Keep workspace workflows synchronized with reviewed definitions in a GitHub repository."
+---
+
+# Workflow Sync - Manage Workflows from a GitHub Repo
 
 Kandev can keep a workspace's workflows in sync with definition files stored
 in a GitHub repository. Point a workspace at a repo directory, commit workflow
