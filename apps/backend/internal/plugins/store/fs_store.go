@@ -45,16 +45,14 @@ func NewFSStore(dir string) *FSStore {
 }
 
 // recordPath returns the on-disk path for a plugin's installation record.
-// The id is validated (safePluginID) by every public method before it
-// reaches here; filepath.Base is an additional single-segment barrier at the
-// path sink so no id can ever escape s.dir.
+// Every public method validates id with safePluginID before reaching here.
 func (s *FSStore) recordPath(id string) string {
-	return filepath.Join(s.dir, filepath.Base(id)+".yml")
+	return filepath.Join(s.dir, id+".yml")
 }
 
 // configPath returns the on-disk path for a plugin's operator config.
 func (s *FSStore) configPath(id string) string {
-	return filepath.Join(s.dir, filepath.Base(id)+".config.yml")
+	return filepath.Join(s.dir, id+".config.yml")
 }
 
 // writeRecord marshals record to YAML and writes it to disk, creating the
@@ -138,6 +136,9 @@ func (s *FSStore) Save(record *Record) error {
 
 // Delete removes the record and its operator config for id.
 func (s *FSStore) Delete(id string) error {
+	if err := safePluginID(id); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -157,6 +158,9 @@ func (s *FSStore) Delete(id string) error {
 // GetConfig returns the operator-editable config for id, or an empty map if
 // no config has been set yet.
 func (s *FSStore) GetConfig(id string) (map[string]any, error) {
+	if err := safePluginID(id); err != nil {
+		return nil, err
+	}
 	if _, err := s.Get(id); err != nil {
 		return nil, err
 	}
@@ -179,6 +183,9 @@ func (s *FSStore) GetConfig(id string) (map[string]any, error) {
 
 // SetConfig replaces the operator-editable config for id.
 func (s *FSStore) SetConfig(id string, config map[string]any) error {
+	if err := safePluginID(id); err != nil {
+		return err
+	}
 	if _, err := s.Get(id); err != nil {
 		return err
 	}

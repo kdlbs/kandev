@@ -20,11 +20,17 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
 	"github.com/kandev/kandev/internal/plugins/manifest"
 )
+
+// pluginIDPattern mirrors the manifest id rule: a single clean path segment
+// of lowercase alphanumerics, dots, underscores, and hyphens. Used as an
+// inline barrier before any id is joined into a filesystem path.
+var pluginIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
 const (
 	manifestFileName     = "manifest.yaml"
@@ -363,12 +369,10 @@ func executablePaths(m *manifest.Manifest) map[string]bool {
 // Remove deletes destRoot/<id>/ entirely: every installed version plus the
 // plugin's data directory.
 func Remove(destRoot, id string) error {
-	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\") {
+	if !pluginIDPattern.MatchString(id) {
 		return fmt.Errorf("pkgtar: invalid plugin id %q", id)
 	}
-	// filepath.Base pins id to a single path segment (a barrier the taint
-	// analysis recognizes); securejoin then re-verifies containment.
-	dir, err := securejoin(destRoot, filepath.Base(id))
+	dir, err := securejoin(destRoot, id)
 	if err != nil {
 		return err
 	}
