@@ -20,7 +20,9 @@ export function WorkflowSectionActions({
   onGitHubSync,
 }: WorkflowSectionActionsProps) {
   return (
-    <div className="flex flex-wrap gap-2">
+    // sm:justify-end keeps wrapped rows right-aligned next to the section
+    // title; below sm the toolbar sits under the title, left-aligned.
+    <div className="flex flex-wrap gap-2 sm:justify-end">
       <WorkflowSyncButton onClick={onGitHubSync} />
       <Button
         type="button"
