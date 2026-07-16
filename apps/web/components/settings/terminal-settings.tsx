@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { IconTerminal2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import {
@@ -18,6 +18,7 @@ import {
 } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { ShellSettingsCard } from "@/components/settings/shell-settings-card";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
@@ -84,7 +85,7 @@ function TerminalFontSizeCard({
   };
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="terminal-font-size-card">
       <CardHeader>
         <CardTitle className="text-base">Terminal Font Size</CardTitle>
       </CardHeader>
@@ -114,7 +115,7 @@ function TerminalFontSizeCard({
           </p>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -160,7 +161,7 @@ function TerminalFontCard({
   const selectValue = isCustom ? CUSTOM_VALUE : fontFamily || "default";
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="terminal-font-card">
       <CardHeader>
         <CardTitle className="text-base">Terminal Font</CardTitle>
       </CardHeader>
@@ -200,7 +201,7 @@ function TerminalFontCard({
           </p>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -214,7 +215,7 @@ function TerminalLinksCard({
   onChange: (value: "new_tab" | "browser_panel") => void;
 }) {
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="terminal-links-card">
       <CardHeader>
         <CardTitle className="text-base">Terminal Links</CardTitle>
       </CardHeader>
@@ -236,7 +237,7 @@ function TerminalLinksCard({
           <p className="text-xs text-muted-foreground">Click a URL in the terminal to open it.</p>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

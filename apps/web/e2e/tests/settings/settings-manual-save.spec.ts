@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 
 const APPEARANCE_PATH = "/settings/general/appearance";
 const TERMINAL_PATH = "/settings/general/terminal";
+const NOTIFICATIONS_PATH = "/settings/general/notifications";
 
 test.describe("Settings manual save", () => {
   test("keeps Appearance changes local and guards dirty navigation", async ({
@@ -26,6 +27,10 @@ test.describe("Settings manual save", () => {
 
       const floatingSave = testPage.getByTestId("settings-floating-save");
       await expect(floatingSave).toBeVisible();
+      await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "true",
+      );
       expect((await apiClient.getUserSettings()).settings.changes_panel_layout).toBe(
         initial.settings.changes_panel_layout,
       );
@@ -69,6 +74,10 @@ test.describe("Settings manual save", () => {
       );
       const floatingSave = testPage.getByTestId("settings-floating-save");
       await expect(floatingSave).toBeVisible();
+      await expect(testPage.getByTestId("terminal-font-size-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "true",
+      );
       await floatingSave.getByRole("button", { name: "Save changes" }).click();
       await expect(floatingSave).not.toBeVisible({ timeout: 15_000 });
       expect((await apiClient.getUserSettings()).settings.terminal_font_size).toBe(nextSize);
@@ -78,5 +87,40 @@ test.describe("Settings manual save", () => {
     } finally {
       await apiClient.saveUserSettings({ terminal_font_size: initialSize });
     }
+  });
+
+  test("keeps notification sound changes local until Save", async ({ testPage }) => {
+    await testPage.addInitScript(() => {
+      window.localStorage.setItem(
+        "kandev.notifications.sound",
+        JSON.stringify({ enabled: false, presetId: "plim" }),
+      );
+    });
+    await testPage.goto(NOTIFICATIONS_PATH);
+
+    const soundToggle = testPage.getByRole("switch", { name: "Enable notification sound" });
+    await soundToggle.click();
+
+    await expect(soundToggle).toHaveAttribute("data-settings-dirty", "true");
+    await expect(testPage.getByTestId("notification-sound-group")).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
+    expect(
+      await testPage.evaluate(() =>
+        JSON.parse(window.localStorage.getItem("kandev.notifications.sound") ?? "null"),
+      ),
+    ).toEqual({ enabled: false, presetId: "plim" });
+
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
+    await expect(soundToggle).toHaveAttribute("data-settings-dirty", "false");
+    expect(
+      await testPage.evaluate(() =>
+        JSON.parse(window.localStorage.getItem("kandev.notifications.sound") ?? "null"),
+      ),
+    ).toEqual({ enabled: true, presetId: "plim" });
   });
 });

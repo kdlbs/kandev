@@ -22,6 +22,10 @@ test.describe("Mobile general settings", () => {
       const saveButton = floating.getByRole("button", { name: "Save changes" });
       await expect(saveButton).toBeVisible();
       await expect(layout).toHaveAttribute("data-settings-dirty", "true");
+      await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "true",
+      );
       const saveBox = await saveButton.boundingBox();
       expect(saveBox).not.toBeNull();
       expect(saveBox!.height).toBeGreaterThanOrEqual(44);
@@ -40,6 +44,10 @@ test.describe("Mobile general settings", () => {
       await saveButton.click();
       await expect(floating).not.toBeVisible({ timeout: 15_000 });
       await expect(layout).toHaveAttribute("data-settings-dirty", "false");
+      await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "false",
+      );
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         changes_panel_layout: initialLayout,

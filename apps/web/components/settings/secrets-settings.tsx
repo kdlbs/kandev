@@ -49,6 +49,7 @@ type SecretFormProps = {
   isBusy: boolean;
   submitLabel: string;
   showSubmit?: boolean;
+  baselineState?: SecretFormState;
 };
 
 function SecretForm({
@@ -61,9 +62,15 @@ function SecretForm({
   isBusy,
   submitLabel,
   showSubmit = true,
+  baselineState,
 }: SecretFormProps) {
+  const nameIsDirty = Boolean(baselineState) && formState.name.trim() !== baselineState?.name;
+  const valueIsDirty = Boolean(baselineState) && formState.value !== baselineState?.value;
   return (
-    <div className="rounded-lg border border-border/70 bg-background p-4 space-y-3">
+    <div
+      className="rounded-lg border border-border/70 bg-background p-4 space-y-3"
+      data-settings-dirty={nameIsDirty || valueIsDirty}
+    >
       <div className="text-sm font-medium text-foreground">{title}</div>
       <div className="space-y-2">
         <Input
@@ -71,6 +78,7 @@ function SecretForm({
           onChange={(e) => onFormChange({ name: e.target.value })}
           placeholder="Name (e.g. OpenAI Production Key)"
           disabled={isBusy}
+          data-settings-dirty={nameIsDirty}
         />
         <Textarea
           value={formState.value}
@@ -79,6 +87,7 @@ function SecretForm({
           rows={2}
           className="resize-y font-mono text-sm"
           disabled={isBusy}
+          data-settings-dirty={valueIsDirty}
         />
       </div>
       <div className="flex items-center gap-2">
@@ -362,7 +371,11 @@ function getSecretEditState(
   const editingSecret = items.find((secret) => secret.id === editingId);
   const revision = JSON.stringify({ ...formState, name: formState.name.trim() });
   const savedRevision = JSON.stringify({ name: editingSecret?.name ?? "", value: "" });
-  return { revision, isDirty: Boolean(editingId) && revision !== savedRevision };
+  return {
+    revision,
+    isDirty: Boolean(editingId) && revision !== savedRevision,
+    baseline: { name: editingSecret?.name ?? "", value: "" },
+  };
 }
 
 export function SecretsSettings() {
@@ -424,6 +437,7 @@ export function SecretsSettings() {
             isBusy={isBusy}
             submitLabel="Save changes"
             showSubmit={false}
+            baselineState={edit.baseline}
           />
         )}
 

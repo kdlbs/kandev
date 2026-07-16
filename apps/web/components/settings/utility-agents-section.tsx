@@ -21,6 +21,7 @@ import {
 } from "@/components/settings/utility-sections";
 import { useInferenceAgents } from "@/components/settings/use-inference-agents";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+export { isUtilityAgentDirty } from "./utility-dirty";
 
 function buildAllModels(inferenceAgents: InferenceAgent[]) {
   return inferenceAgents.flatMap((ia) =>
@@ -289,6 +290,7 @@ export function UtilityAgentsSection() {
             defaultModel={defaultModel}
             onDefaultChange={handleDefaultChange}
             onRefreshAgent={refreshAgent}
+            isDirty={defaultAgentId !== savedDefault.agentId || defaultModel !== savedDefault.model}
           />
           <PerActionOverridesSection
             builtins={builtins}
@@ -296,6 +298,7 @@ export function UtilityAgentsSection() {
             defaultModel={defaultModel}
             onModelChange={(agent, value) => updateBuiltinDraft(agent, value, setAgents)}
             onEdit={openEditDialog}
+            savedBuiltins={savedAgents.filter((agent) => agent.builtin)}
           />
           <CustomAgentsSection
             agents={customAgents}

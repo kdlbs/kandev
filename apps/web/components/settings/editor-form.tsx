@@ -257,12 +257,13 @@ export function EditorForm({
     onSaved?.();
   };
   const revision = JSON.stringify(state);
+  const isCoordinatedDirty = Boolean(coordinatedSaveId) && revision !== JSON.stringify(baseline);
   const normalizedState =
     resolveEditorName(state) === state.name ? state : { ...state, name: resolveEditorName(state) };
   useSettingsSaveContributor({
     id: coordinatedSaveId ?? `editor-form-local:${title}`,
     revision,
-    isDirty: Boolean(coordinatedSaveId) && revision !== JSON.stringify(baseline),
+    isDirty: isCoordinatedDirty,
     canSave: isValid,
     invalidReason: isValid ? undefined : "Complete the required editor fields before saving.",
     save: async () => {
@@ -275,7 +276,10 @@ export function EditorForm({
   });
 
   return (
-    <div className="rounded-lg border border-border/70 bg-background p-4 space-y-4">
+    <div
+      className="rounded-lg border border-border/70 bg-background p-4 space-y-4"
+      data-settings-dirty={isCoordinatedDirty}
+    >
       <div className="text-sm font-medium text-foreground">{title}</div>
       <Input
         value={state.name}

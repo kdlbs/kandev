@@ -43,6 +43,9 @@ test.describe("Workflow settings", () => {
     // Verify the new card appears
     const card = await page.findWorkflowCard("Template Test Workflow");
     await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card.locator("input").first()).toHaveAttribute("data-settings-dirty", "true");
+    await expect(page.stepNodeByName(card, "Todo")).toHaveAttribute("data-settings-dirty", "true");
 
     const beforeSave = await apiClient.listWorkflows(seedData.workspaceId);
     expect(
@@ -50,6 +53,13 @@ test.describe("Workflow settings", () => {
     ).toBe(false);
     await expect(page.floatingSave).toBeVisible();
     await page.saveChanges();
+
+    const savedCard = await page.findWorkflowCard("Template Test Workflow");
+    await expect(savedCard).toHaveAttribute("data-settings-dirty", "false");
+    await expect(page.stepNodeByName(savedCard, "Todo")).toHaveAttribute(
+      "data-settings-dirty",
+      "false",
+    );
 
     await page.goto(seedData.workspaceId);
     const reloadedCard = await page.findWorkflowCard("Template Test Workflow");
@@ -210,10 +220,24 @@ test.describe("Workflow settings", () => {
     const nameInput = card.getByPlaceholder("Step name");
     await nameInput.fill("Renamed Step");
 
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card.getByTestId(`workflow-step-panel-${seedData.steps[0].id}`)).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
+    await expect(card.getByTestId(`workflow-step-node-${seedData.steps[0].id}`)).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
+
     expect((await apiClient.listWorkflowSteps(seedData.workflowId)).steps[0]?.name).toBe(
       firstStepName,
     );
     await page.saveChanges();
+
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "false");
+    await expect(card).toHaveAttribute("data-settings-dirty", "false");
 
     await page.goto(seedData.workspaceId);
     const reloadedCard = await page.findWorkflowCard("E2E Workflow");
@@ -296,6 +320,9 @@ test.describe("Workflow settings", () => {
     const nameInput = card.locator("input").first();
     await nameInput.fill("Manually Saved Workflow Name");
 
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card).toHaveAttribute("data-settings-dirty", "true");
+
     expect(
       (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
         (workflow) => workflow.id === seedData.workflowId,
@@ -303,6 +330,9 @@ test.describe("Workflow settings", () => {
     ).toBe("E2E Workflow");
     await expect(page.floatingSave).toBeVisible();
     await page.saveChanges();
+
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "false");
+    await expect(card).toHaveAttribute("data-settings-dirty", "false");
 
     await page.goto(seedData.workspaceId);
     await expect(await page.findWorkflowCard("Manually Saved Workflow Name")).toBeVisible();

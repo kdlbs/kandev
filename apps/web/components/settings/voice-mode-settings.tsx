@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { IconAlertTriangle, IconMicrophone } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import {
@@ -35,6 +35,7 @@ import type {
   WhisperWebModelSize,
 } from "@/lib/types/http-voice";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsCard } from "./settings-card";
 
 // Single source of truth for the language options. Web Speech reads `lang`,
 // Whisper engines treat it as a hint. "auto" defers to the browser locale.
@@ -81,6 +82,8 @@ type VoiceDraft = {
 };
 
 type VoiceDraftContextValue = VoiceDraft & {
+  savedVoiceMode: VoiceModeState;
+  savedKeyboardShortcuts: StoredShortcutOverrides;
   updateVoiceMode: (patch: Partial<VoiceModeState>) => void;
   updateShortcuts: (shortcuts: StoredShortcutOverrides) => void;
 };
@@ -155,6 +158,8 @@ function VoiceDraftProvider({ children }: { children: ReactNode }) {
   const value = useMemo<VoiceDraftContextValue>(
     () => ({
       ...draft,
+      savedVoiceMode: saved.voiceMode,
+      savedKeyboardShortcuts: saved.keyboardShortcuts,
       updateVoiceMode: (patch) =>
         setDraft((current) => ({
           ...current,
@@ -163,7 +168,7 @@ function VoiceDraftProvider({ children }: { children: ReactNode }) {
       updateShortcuts: (keyboardShortcuts) =>
         setDraft((current) => ({ ...current, keyboardShortcuts })),
     }),
-    [draft],
+    [draft, saved],
   );
 
   return <VoiceDraftContext.Provider value={value}>{children}</VoiceDraftContext.Provider>;
@@ -223,12 +228,12 @@ function buildEngineOptions(caps: VoiceCapabilities): EngineOption[] {
 }
 
 function EngineCard({ caps }: { caps: VoiceCapabilities }) {
-  const { voiceMode } = useVoiceDraft();
+  const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   const options = useMemo(() => buildEngineOptions(caps), [caps]);
 
   return (
-    <Card>
+    <SettingsCard isDirty={voiceMode.engine !== savedVoiceMode.engine}>
       <CardHeader>
         <CardTitle className="text-base">Transcription Engine</CardTitle>
       </CardHeader>
@@ -246,6 +251,9 @@ function EngineCard({ caps }: { caps: VoiceCapabilities }) {
               className={`flex items-start gap-3 rounded-md border p-3 ${
                 opt.disabled ? "opacity-50" : "cursor-pointer hover:bg-muted/30"
               }`}
+              data-settings-dirty={
+                voiceMode.engine !== savedVoiceMode.engine && opt.value === voiceMode.engine
+              }
             >
               <RadioGroupItem
                 id={`voice-engine-${opt.value}`}
@@ -264,14 +272,14 @@ function EngineCard({ caps }: { caps: VoiceCapabilities }) {
           ))}
         </RadioGroup>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
 // ── Behavior card (language + mode + auto-send) ──────────────────────────
 
 function LanguageRow() {
-  const { voiceMode } = useVoiceDraft();
+  const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="space-y-2">
@@ -281,7 +289,10 @@ function LanguageRow() {
         onValueChange={(v) => save({ language: v })}
         disabled={saving}
       >
-        <SelectTrigger id="voice-language">
+        <SelectTrigger
+          id="voice-language"
+          data-settings-dirty={voiceMode.language !== savedVoiceMode.language}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -304,7 +315,7 @@ function LanguageRow() {
 }
 
 function ModeRow() {
-  const { voiceMode } = useVoiceDraft();
+  const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="space-y-2">
@@ -314,6 +325,7 @@ function ModeRow() {
         onValueChange={(v) => save({ mode: v as VoiceInputActivationMode })}
         disabled={saving}
         className="flex gap-4"
+        data-settings-dirty={voiceMode.mode !== savedVoiceMode.mode}
       >
         <Label htmlFor="voice-mode-toggle" className="flex items-center gap-2 cursor-pointer">
           <RadioGroupItem id="voice-mode-toggle" value="toggle" />
@@ -329,7 +341,7 @@ function ModeRow() {
 }
 
 function AutoSendRow() {
-  const { voiceMode } = useVoiceDraft();
+  const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="flex items-center justify-between">
@@ -346,14 +358,20 @@ function AutoSendRow() {
         checked={voiceMode.autoSend}
         onCheckedChange={(checked) => save({ autoSend: checked })}
         disabled={saving}
+        data-settings-dirty={voiceMode.autoSend !== savedVoiceMode.autoSend}
       />
     </div>
   );
 }
 
 function BehaviorCard() {
+  const { voiceMode, savedVoiceMode } = useVoiceDraft();
+  const isDirty =
+    voiceMode.language !== savedVoiceMode.language ||
+    voiceMode.mode !== savedVoiceMode.mode ||
+    voiceMode.autoSend !== savedVoiceMode.autoSend;
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle className="text-base">Behavior</CardTitle>
       </CardHeader>
@@ -362,18 +380,18 @@ function BehaviorCard() {
         <ModeRow />
         <AutoSendRow />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
 // ── Whisper Web model card ───────────────────────────────────────────────
 
 function WhisperModelCard() {
-  const { voiceMode } = useVoiceDraft();
+  const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
 
   return (
-    <Card>
+    <SettingsCard isDirty={voiceMode.whisperWebModel !== savedVoiceMode.whisperWebModel}>
       <CardHeader>
         <CardTitle className="text-base">Whisper Web Model</CardTitle>
       </CardHeader>
@@ -389,6 +407,10 @@ function WhisperModelCard() {
               key={m.value}
               htmlFor={`whisper-model-${m.value}`}
               className="flex items-start gap-3 rounded-md border p-3 cursor-pointer hover:bg-muted/30"
+              data-settings-dirty={
+                voiceMode.whisperWebModel !== savedVoiceMode.whisperWebModel &&
+                m.value === voiceMode.whisperWebModel
+              }
             >
               <RadioGroupItem id={`whisper-model-${m.value}`} value={m.value} className="mt-0.5" />
               <div>
@@ -405,17 +427,20 @@ function WhisperModelCard() {
           another download next time you record.
         </p>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
 // ── Enable card (top-level on/off) ───────────────────────────────────────
 
 function EnableCard() {
-  const { voiceMode } = useVoiceDraft();
+  const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
-    <Card>
+    <SettingsCard
+      isDirty={voiceMode.enabled !== savedVoiceMode.enabled}
+      data-testid="voice-enable-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">Enable Voice Input</CardTitle>
       </CardHeader>
@@ -435,10 +460,11 @@ function EnableCard() {
             checked={voiceMode.enabled}
             onCheckedChange={(checked) => save({ enabled: checked })}
             disabled={saving}
+            data-settings-dirty={voiceMode.enabled !== savedVoiceMode.enabled}
           />
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -472,9 +498,11 @@ function useShortcutSaver() {
 }
 
 function VoiceShortcutCard() {
-  const { keyboardShortcuts: overrides } = useVoiceDraft();
+  const { keyboardShortcuts: overrides, savedKeyboardShortcuts } = useVoiceDraft();
   const persist = useShortcutSaver();
   const current = getShortcut("VOICE_INPUT_TOGGLE", overrides);
+  const savedCurrent = getShortcut("VOICE_INPUT_TOGGLE", savedKeyboardShortcuts);
+  const isDirty = JSON.stringify(current) !== JSON.stringify(savedCurrent);
 
   const handleChange = useCallback(
     (_id: string, shortcut: KeyboardShortcut) =>
@@ -488,7 +516,7 @@ function VoiceShortcutCard() {
   }, [overrides, persist]);
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle className="text-base">
           {CONFIGURABLE_SHORTCUTS.VOICE_INPUT_TOGGLE.label} Shortcut
@@ -500,13 +528,14 @@ function VoiceShortcutCard() {
           current={current}
           onChange={handleChange}
           onReset={handleReset}
+          isDirty={isDirty}
         />
         <p className="text-xs text-muted-foreground mt-2">
           Click the shortcut to record a new key combination. All keyboard shortcuts can also be
           edited in General Settings.
         </p>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

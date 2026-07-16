@@ -23,6 +23,8 @@ import {
 } from "@/components/model-config-selector";
 import { InferenceAgentStatusNote } from "@/components/settings/inference-agent-status";
 import type { UtilityAgent, InferenceAgent } from "@/lib/api/domains/utility-api";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { isUtilityAgentDirty } from "@/components/settings/utility-dirty";
 
 const USE_DEFAULT = "__USE_DEFAULT__";
 
@@ -60,6 +62,7 @@ type DefaultModelSectionProps = {
   defaultModel: string;
   onDefaultChange: (agentId: string, model: string) => void;
   onRefreshAgent: (agentId: string) => Promise<unknown> | void;
+  isDirty: boolean;
 };
 
 export function DefaultModelSection({
@@ -68,6 +71,7 @@ export function DefaultModelSection({
   defaultModel,
   onDefaultChange,
   onRefreshAgent,
+  isDirty,
 }: DefaultModelSectionProps) {
   const selectedAgent = inferenceAgents.find((a) => a.id === defaultAgentId);
   const modelOptions = selectedAgent?.models ?? [];
@@ -91,7 +95,7 @@ export function DefaultModelSection({
   }));
 
   return (
-    <Card data-testid="utility-default-model-card">
+    <SettingsCard isDirty={isDirty} data-testid="utility-default-model-card">
       <CardHeader>
         <CardTitle className="text-base">
           <h3>Default utility agent model</h3>
@@ -105,7 +109,7 @@ export function DefaultModelSection({
           <div className="w-full sm:w-[180px]">
             <Label className="text-xs text-muted-foreground mb-1 block">Agent</Label>
             <Select value={defaultAgentId} onValueChange={(v) => onDefaultChange(v, "")}>
-              <SelectTrigger className="cursor-pointer">
+              <SelectTrigger className="cursor-pointer" data-settings-dirty={isDirty}>
                 <SelectValue placeholder="Select agent..." />
               </SelectTrigger>
               <SelectContent>
@@ -117,7 +121,10 @@ export function DefaultModelSection({
               </SelectContent>
             </Select>
           </div>
-          <div className="w-full sm:w-[280px]">
+          <div
+            className="w-full rounded-md border border-transparent sm:w-[280px]"
+            data-settings-dirty={isDirty}
+          >
             <Label className="text-xs text-muted-foreground mb-1 block">Model</Label>
             <ModelConfigSelector
               modelOptions={selectorModels}
@@ -138,7 +145,7 @@ export function DefaultModelSection({
           />
         )}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -149,6 +156,7 @@ type BuiltinActionRowProps = {
   defaultLabel: string;
   onModelChange: (agent: UtilityAgent, value: string) => void;
   onEdit: (agent: UtilityAgent) => void;
+  isDirty: boolean;
 };
 
 export function BuiltinActionRow({
@@ -157,6 +165,7 @@ export function BuiltinActionRow({
   defaultLabel,
   onModelChange,
   onEdit,
+  isDirty,
 }: BuiltinActionRowProps) {
   const currentValue =
     agent.agent_id && agent.model ? `${agent.agent_id}|${agent.model}` : USE_DEFAULT;
@@ -165,6 +174,7 @@ export function BuiltinActionRow({
     <div
       className="flex flex-col gap-2 py-2 px-2 rounded hover:bg-muted/50 md:flex-row md:items-center md:gap-4"
       data-testid={`utility-action-row-${agent.id}`}
+      data-settings-dirty={isDirty}
     >
       <div className="min-w-0 md:flex-1">
         <div className="text-sm font-medium truncate">{agent.name}</div>
@@ -172,7 +182,10 @@ export function BuiltinActionRow({
       </div>
       <div className="flex items-center gap-2">
         <Select value={currentValue} onValueChange={(v) => onModelChange(agent, v)}>
-          <SelectTrigger className="min-w-0 flex-1 cursor-pointer md:w-[240px] md:flex-none">
+          <SelectTrigger
+            className="min-w-0 flex-1 cursor-pointer md:w-[240px] md:flex-none"
+            data-settings-dirty={isDirty}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -245,6 +258,7 @@ export function CustomAgentRow({ agent, onEdit, onDelete }: CustomAgentRowProps)
 // Per-action overrides section
 type PerActionOverridesSectionProps = {
   builtins: UtilityAgent[];
+  savedBuiltins: UtilityAgent[];
   allModels: ModelOption[];
   defaultModel: string;
   onModelChange: (agent: UtilityAgent, value: string) => void;
@@ -257,13 +271,22 @@ export function PerActionOverridesSection({
   defaultModel,
   onModelChange,
   onEdit,
+  savedBuiltins,
 }: PerActionOverridesSectionProps) {
   if (builtins.length === 0) return null;
 
   const defaultLabel = defaultModel ? `Default (${defaultModel})` : "Default";
 
   return (
-    <Card data-testid="utility-actions-card">
+    <SettingsCard
+      isDirty={builtins.some((agent) =>
+        isUtilityAgentDirty(
+          agent,
+          savedBuiltins.find((saved) => saved.id === agent.id),
+        ),
+      )}
+      data-testid="utility-actions-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">
           <h3>Actions</h3>
@@ -278,10 +301,14 @@ export function PerActionOverridesSection({
             defaultLabel={defaultLabel}
             onModelChange={onModelChange}
             onEdit={onEdit}
+            isDirty={isUtilityAgentDirty(
+              agent,
+              savedBuiltins.find((saved) => saved.id === agent.id),
+            )}
           />
         ))}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

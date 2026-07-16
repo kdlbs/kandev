@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
+import { SettingsSaveProvider } from "./settings-save-provider";
 
 const updateUserSettings = vi.fn();
 const CONFIRMATION_LABEL = "Confirm before archiving tasks";
@@ -23,7 +24,9 @@ function renderSettings(confirmTaskArchive = true, children?: ReactNode) {
         userSettings: { ...defaultState.userSettings, confirmTaskArchive },
       }}
     >
-      <ArchiveConfirmationSettings />
+      <SettingsSaveProvider>
+        <ArchiveConfirmationSettings />
+      </SettingsSaveProvider>
       {children}
     </StateProvider>,
   );
@@ -52,17 +55,26 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("ArchiveConfirmationSettings", () => {
-  it("is enabled by default and persists an explicit false value", async () => {
+  it("keeps an explicit false value local until Save changes is pressed", async () => {
     renderSettings();
     const toggle = screen.getByRole("switch", { name: CONFIRMATION_LABEL });
 
     expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE);
     fireEvent.click(toggle);
 
+    expect(updateUserSettings).not.toHaveBeenCalled();
+    expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(UNCHECKED_STATE);
+    expect(toggle.getAttribute("data-settings-dirty")).toBe("true");
+    expect(
+      screen.getByTestId("archive-confirmation-card").getAttribute("data-settings-dirty"),
+    ).toBe("true");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+
     await waitFor(() =>
       expect(updateUserSettings).toHaveBeenCalledWith({ confirm_task_archive: false }),
     );
-    expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(UNCHECKED_STATE);
+    await waitFor(() => expect(toggle.getAttribute("data-settings-dirty")).toBe("false"));
   });
 
   it("rolls back when saving fails", async () => {
@@ -71,9 +83,11 @@ describe("ArchiveConfirmationSettings", () => {
     const toggle = screen.getByRole("switch", { name: CONFIRMATION_LABEL });
 
     fireEvent.click(toggle);
+    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(UNCHECKED_STATE));
-    await waitFor(() => expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(CHECKED_STATE));
+    await waitFor(() => expect(screen.getByText("Couldn't save")).toBeTruthy());
+    expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(UNCHECKED_STATE);
   });
 
   it("does not overwrite a newer settings update when saving fails", async () => {
@@ -88,6 +102,7 @@ describe("ArchiveConfirmationSettings", () => {
     const toggle = screen.getByRole("switch", { name: CONFIRMATION_LABEL });
 
     fireEvent.click(toggle);
+    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(toggle.getAttribute(DATA_STATE_ATTRIBUTE)).toBe(UNCHECKED_STATE));
     fireEvent.click(screen.getByRole("button", { name: "Apply remote settings" }));
     rejectSave(new Error("save failed"));

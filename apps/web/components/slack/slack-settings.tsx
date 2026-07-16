@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } 
 import Link from "@/components/routing/app-link";
 import { IconBrandSlack } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
@@ -14,6 +14,7 @@ import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { useSlackEnabled } from "@/hooks/domains/slack/use-slack-enabled";
 import {
   IntegrationAuthStatusBanner,
@@ -572,7 +573,7 @@ export function SlackConnectionSection({ workspaceId }: { workspaceId: string })
       description="Capture Slack threads as tasks for the selected workspace. Type !kandev <instruction> in any thread you can see and the configured utility agent creates the task."
       action={<EnabledPill />}
     >
-      <Card>
+      <SettingsCard isDirty={dirty}>
         <CardContent className="space-y-4 pt-6">
           <UnsupportedWarning />
           <IntegrationAuthStatusBanner health={s.health} />
@@ -605,7 +606,7 @@ export function SlackConnectionSection({ workspaceId }: { workspaceId: string })
             onDelete={s.handleDelete}
           />
         </CardContent>
-      </Card>
+      </SettingsCard>
     </SettingsSection>
   );
 }

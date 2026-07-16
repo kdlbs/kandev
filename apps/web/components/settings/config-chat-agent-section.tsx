@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsCard } from "./settings-card";
 
 export function ConfigChatAgentSection() {
   const workspace = useAppStore(
@@ -58,7 +59,7 @@ export function ConfigChatAgentSection() {
   if (!workspace) return null;
 
   return (
-    <Card data-testid="config-chat-agent-card">
+    <SettingsCard isDirty={isDirty} data-testid="config-chat-agent-card">
       <CardHeader>
         <CardTitle className="text-base">
           <h3>Configuration Chat Agent</h3>
@@ -86,6 +87,6 @@ export function ConfigChatAgentSection() {
           </SelectContent>
         </Select>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

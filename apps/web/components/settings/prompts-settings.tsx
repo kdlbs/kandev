@@ -112,6 +112,8 @@ function PromptListItem({
   const getPromptPreview = (content: string) => {
     return content.split(/\r?\n/)[0] ?? "";
   };
+  const nameIsDirty = isEditing && formState.name !== prompt.name;
+  const contentIsDirty = isEditing && formState.content !== prompt.content;
 
   return (
     <div
@@ -119,6 +121,7 @@ function PromptListItem({
       ref={isEditing ? editingRef : null}
       data-testid="prompt-list-item"
       data-prompt-name={prompt.name}
+      data-settings-dirty={nameIsDirty || contentIsDirty}
     >
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -146,6 +149,7 @@ function PromptListItem({
             size="icon"
             onClick={() => onOpenDelete(prompt)}
             disabled={isBusy}
+            data-settings-dirty={nameIsDirty}
             className="cursor-pointer"
           >
             <IconTrash className="h-4 w-4" />
@@ -160,6 +164,7 @@ function PromptListItem({
             placeholder="Prompt name"
             data-testid="prompt-name-input"
             disabled={isBusy}
+            data-settings-dirty={contentIsDirty}
           />
           <Textarea
             value={formState.content}

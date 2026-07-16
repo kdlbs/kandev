@@ -67,8 +67,11 @@ test.describe("Workflow settings on mobile", () => {
     await page.goto(seedData.workspaceId);
 
     const card = await page.findWorkflowCard("E2E Workflow");
-    await card.locator("input").first().fill("Mobile Workflow Draft");
+    const nameInput = card.locator("input").first();
+    await nameInput.fill("Mobile Workflow Draft");
     await expect(page.floatingSave).toBeVisible();
+    await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card).toHaveAttribute("data-settings-dirty", "true");
 
     const viewportWidth = await testPage.evaluate(() => window.innerWidth);
     const controls = [

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { IconTicket, IconCode } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
@@ -13,6 +13,7 @@ import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { TaskPresetsSection } from "@/components/jira/task-presets-section";
 import { JiraIssueWatchersSection } from "@/components/jira/jira-issue-watchers-section";
 import { useJiraEnabled } from "@/hooks/domains/jira/use-jira-enabled";
@@ -636,7 +637,7 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
       description="Connect this workspace to Atlassian Cloud or a self-hosted Jira Server / Data Center instance. Credentials are stored encrypted server-side for the selected workspace."
       action={<EnabledPill />}
     >
-      <Card>
+      <SettingsCard isDirty={dirty}>
         <CardContent className="space-y-4 pt-6">
           <IntegrationAuthStatusBanner health={s.health} />
           <InstanceFields form={s.form} loading={s.loading} update={s.update} setForm={s.setForm} />
@@ -660,7 +661,7 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
             onDelete={s.handleDelete}
           />
         </CardContent>
-      </Card>
+      </SettingsCard>
     </SettingsSection>
   );
 }

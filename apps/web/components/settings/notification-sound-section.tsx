@@ -14,17 +14,32 @@ import {
   SOUND_PRESETS,
   type SoundPreferences,
 } from "@/lib/notifications/sound";
+import { useSettingsSaveContributor } from "./settings-save-provider";
 
 export function NotificationSoundSection() {
-  const [prefs, setPrefs] = useState<SoundPreferences>(getSoundPreferences);
+  const [saved, setSaved] = useState<SoundPreferences>(getSoundPreferences);
+  const [prefs, setPrefs] = useState<SoundPreferences>(saved);
+  const revision = JSON.stringify(prefs);
+  const isDirty = revision !== JSON.stringify(saved);
 
-  const update = (next: SoundPreferences) => {
-    setPrefs(next);
-    setSoundPreferences(next);
-  };
+  useSettingsSaveContributor({
+    id: "general-notification-sound",
+    revision,
+    isDirty,
+    save: () => {
+      const submitted = prefs;
+      setSoundPreferences(submitted);
+      setSaved(submitted);
+    },
+    discard: () => setPrefs(saved),
+  });
 
   return (
-    <div className="space-y-4">
+    <div
+      className="space-y-4 rounded-md border p-4"
+      data-settings-dirty={isDirty}
+      data-testid="notification-sound-group"
+    >
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="text-base font-medium">Notification Sound</div>
@@ -34,7 +49,8 @@ export function NotificationSoundSection() {
         </div>
         <Switch
           checked={prefs.enabled}
-          onCheckedChange={(enabled) => update({ ...prefs, enabled })}
+          data-settings-dirty={prefs.enabled !== saved.enabled}
+          onCheckedChange={(enabled) => setPrefs({ ...prefs, enabled })}
           aria-label="Enable notification sound"
           className="cursor-pointer"
         />
@@ -45,11 +61,15 @@ export function NotificationSoundSection() {
             value={prefs.presetId}
             onValueChange={(presetId) => {
               if (!isSoundPresetId(presetId)) return;
-              update({ ...prefs, presetId });
+              setPrefs({ ...prefs, presetId });
               playSoundPreset(presetId);
             }}
           >
-            <SelectTrigger className="w-44 cursor-pointer" aria-label="Notification sound">
+            <SelectTrigger
+              className="w-44 cursor-pointer"
+              aria-label="Notification sound"
+              data-settings-dirty={prefs.presetId !== saved.presetId}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import {
   arePermissionsDirty,
@@ -112,6 +113,7 @@ function DeleteProfileCard({ onDelete }: DeleteProfileCardProps) {
 type ProfileSettingsCardProps = {
   agent: Agent;
   draft: AgentProfile;
+  isDirty: boolean;
   onDraftChange: (patch: Partial<AgentProfile>) => void;
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
@@ -121,6 +123,7 @@ type ProfileSettingsCardProps = {
 function ProfileSettingsCard({
   agent,
   draft,
+  isDirty,
   onDraftChange,
   modelConfig,
   permissionSettings,
@@ -132,7 +135,7 @@ function ProfileSettingsCard({
   const permissionValues = profilePermissionValues(draft, permissionSettings);
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <span>Profile settings</span>
@@ -160,7 +163,7 @@ function ProfileSettingsCard({
           hideCustomCLIFlags
         />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -402,6 +405,7 @@ function ProfileDeleteDialogs({
 type ProfileEditorBodyProps = {
   agent: Agent;
   draft: AgentProfile;
+  isDirty: boolean;
   updateDraft: (patch: Partial<AgentProfile>) => void;
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
@@ -414,6 +418,7 @@ type ProfileEditorBodyProps = {
 function ProfileEditorBody({
   agent,
   draft,
+  isDirty,
   updateDraft,
   modelConfig,
   permissionSettings,
@@ -427,6 +432,7 @@ function ProfileEditorBody({
       <ProfileSettingsCard
         agent={agent}
         draft={draft}
+        isDirty={isDirty}
         onDraftChange={updateDraft}
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}
@@ -533,6 +539,7 @@ function ProfileEditor({
       <ProfileEditorBody
         agent={agent}
         draft={draft}
+        isDirty={isDirty}
         updateDraft={updateDraft}
         modelConfig={modelConfig}
         permissionSettings={permissionSettings}

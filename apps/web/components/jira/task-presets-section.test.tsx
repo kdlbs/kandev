@@ -47,8 +47,21 @@ describe("TaskPresetsSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reset" }));
     expect(mocks.save).not.toHaveBeenCalled();
     expect(mocks.reset).not.toHaveBeenCalled();
+    expect(screen.getByTestId("jira-task-presets-card").getAttribute("data-settings-dirty")).toBe(
+      "true",
+    );
+    expect(
+      screen
+        .getByTestId(`jira-task-preset-${DEFAULT_JIRA_PRESETS[0].id}`)
+        .getAttribute("data-settings-dirty"),
+    ).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(mocks.save).toHaveBeenCalledWith(DEFAULT_JIRA_PRESETS));
+    await waitFor(() =>
+      expect(screen.getByTestId("jira-task-presets-card").getAttribute("data-settings-dirty")).toBe(
+        "false",
+      ),
+    );
   });
 });

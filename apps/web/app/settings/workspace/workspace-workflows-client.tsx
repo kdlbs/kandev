@@ -283,6 +283,7 @@ export function alignSavedWorkflowsToDraftOrder(
 
 type WorkflowListProps = {
   workflowItems: Workflow[];
+  savedWorkflowItems: Workflow[];
   initialStepsByWorkflowId: Map<string, WorkflowStep[]>;
   isWorkflowDirty: (wf: Workflow) => boolean;
   onUpdate: (
@@ -327,6 +328,7 @@ function SortableWorkflowItem({
 
 function WorkflowList({
   workflowItems,
+  savedWorkflowItems,
   initialStepsByWorkflowId,
   isWorkflowDirty,
   onUpdate,
@@ -336,6 +338,10 @@ function WorkflowList({
   onReorder,
 }: WorkflowListProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const savedWorkflowsById = useMemo(
+    () => new Map(savedWorkflowItems.map((workflow) => [workflow.id, workflow])),
+    [savedWorkflowItems],
+  );
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -358,6 +364,7 @@ function WorkflowList({
             <SortableWorkflowItem key={workflow.id} workflow={workflow}>
               <WorkflowCard
                 workflow={workflow}
+                savedWorkflow={savedWorkflowsById.get(workflow.id)}
                 isWorkflowDirty={isWorkflowDirty(workflow)}
                 initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
                 otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
@@ -453,6 +460,7 @@ export function WorkspaceWorkflowsClient({
         />
         <WorkflowList
           workflowItems={page.workflowItems}
+          savedWorkflowItems={page.savedWorkflowItems}
           initialStepsByWorkflowId={page.initialStepsByWorkflowId}
           isWorkflowDirty={page.isWorkflowDirty}
           onUpdate={page.handleUpdateWorkflow}

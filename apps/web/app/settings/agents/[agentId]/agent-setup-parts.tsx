@@ -13,8 +13,9 @@ import {
   AlertDialogTrigger,
 } from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { ProfileFormFields } from "@/components/settings/profile-form-fields";
 import { ProfileEnvVarsSection } from "@/components/settings/agent-profile-page";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
@@ -112,10 +113,7 @@ export function ProfileCardItem({
 }: ProfileCardItemProps) {
   const permissionValues = profilePermissionValues(profile, permissionSettings);
   return (
-    <Card
-      id={`profile-card-${profile.id}`}
-      className={isNew ? "border-amber-400/70 shadow-sm" : "border-muted"}
-    >
+    <SettingsCard id={`profile-card-${profile.id}`} isDirty={isNew}>
       <CardContent className="pt-6 space-y-4">
         <ProfileFormFields
           profile={{
@@ -157,7 +155,7 @@ export function ProfileCardItem({
           onToastError={onToastError}
         />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -202,7 +200,7 @@ export function ProfilesCard({
   onSave,
 }: ProfilesCardProps) {
   return (
-    <Card>
+    <SettingsCard isDirty={isAgentDirty}>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>
           {isCreateMode ? `Create ${displayName} Profile` : `${displayName} Profiles`}
@@ -241,6 +239,6 @@ export function ProfilesCard({
           />
         </div>
       )}
-    </Card>
+    </SettingsCard>
   );
 }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { IconRotate, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Kbd } from "@kandev/ui/kbd";
 import type { Key, KeyboardShortcut } from "@/lib/keyboard/constants";
 import { formatShortcut } from "@/lib/keyboard/utils";
@@ -15,6 +15,7 @@ import {
   type ConfigurableShortcutId,
   type StoredShortcutOverrides,
 } from "@/lib/keyboard/shortcut-overrides";
+import { SettingsCard } from "./settings-card";
 
 type ShortcutRecorderProps = {
   shortcutId: ConfigurableShortcutId;
@@ -24,6 +25,7 @@ type ShortcutRecorderProps = {
   // Optional: callers that don't support an explicit "unbind" (e.g. the voice
   // settings recorder) omit this, and the Clear button is hidden for them.
   onClear?: (id: ConfigurableShortcutId) => void;
+  isDirty?: boolean;
 };
 
 export function ShortcutRecorder({
@@ -32,6 +34,7 @@ export function ShortcutRecorder({
   onChange,
   onReset,
   onClear,
+  isDirty = false,
 }: ShortcutRecorderProps) {
   const [recording, setRecording] = useState(false);
   const defaultShortcut = CONFIGURABLE_SHORTCUTS[shortcutId].default;
@@ -85,6 +88,7 @@ export function ShortcutRecorder({
       <div className="flex items-center gap-2">
         <button
           data-testid={`shortcut-recorder-${shortcutId}`}
+          data-settings-dirty={isDirty}
           onClick={() => setRecording(!recording)}
           className={`px-3 py-1.5 rounded-md border text-sm cursor-pointer transition-colors ${
             recording
@@ -139,12 +143,15 @@ function renderRecorderLabel({
 
 export function KeyboardShortcutsCard({
   overrides,
+  baselineOverrides = {},
   onChange,
 }: {
   overrides: StoredShortcutOverrides;
+  baselineOverrides?: StoredShortcutOverrides;
   onChange: (overrides: StoredShortcutOverrides) => void;
 }) {
   const shortcuts = resolveAllShortcuts(overrides);
+  const baselineShortcuts = resolveAllShortcuts(baselineOverrides);
 
   const handleChange = useCallback(
     (id: ConfigurableShortcutId, shortcut: KeyboardShortcut) => {
@@ -172,7 +179,7 @@ export function KeyboardShortcutsCard({
   const ids = Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[];
 
   return (
-    <Card>
+    <SettingsCard isDirty={JSON.stringify(overrides) !== JSON.stringify(baselineOverrides)}>
       <CardHeader>
         <CardTitle className="text-base">Keyboard Shortcuts</CardTitle>
       </CardHeader>
@@ -186,6 +193,7 @@ export function KeyboardShortcutsCard({
               onChange={handleChange}
               onReset={handleReset}
               onClear={handleClear}
+              isDirty={JSON.stringify(shortcuts[id]) !== JSON.stringify(baselineShortcuts[id])}
             />
           ))}
         </div>
@@ -193,6 +201,6 @@ export function KeyboardShortcutsCard({
           Click a shortcut to record a new key combination.
         </p>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

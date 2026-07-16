@@ -2,10 +2,11 @@
 
 import { useLayoutEffect, useState } from "react";
 import { IconCode } from "@tabler/icons-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
 
 const AUTO_SHELL = "auto";
 const CUSTOM_SHELL = "custom";
@@ -120,7 +121,7 @@ export function ShellSettingsCard({
       title="Shell"
       description="Pick the default shell for task sessions"
     >
-      <Card>
+      <SettingsCard isDirty={isDirty}>
         <CardHeader>
           <CardTitle className="text-base">Preferred Shell</CardTitle>
         </CardHeader>
@@ -154,7 +155,7 @@ export function ShellSettingsCard({
             New task sessions will use this shell. Existing sessions keep their current shell.
           </p>
         </CardContent>
-      </Card>
+      </SettingsCard>
     </SettingsSection>
   );
 }

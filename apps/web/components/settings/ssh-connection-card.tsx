@@ -1,12 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
-import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import {
   IconCheck,
   IconLoader2,
@@ -17,6 +14,8 @@ import {
 } from "@tabler/icons-react";
 import { testSSHConnection } from "@/lib/api/domains/ssh-api";
 import { FingerprintTrustBlock } from "@/components/settings/ssh-fingerprint-trust-block";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { SSHConnectionForm } from "@/components/settings/ssh-connection-form";
 import {
   SettingsSaveCancelledError,
   useSettingsSaveContributor,
@@ -146,10 +145,17 @@ function useCoordinatedSSHSave({
   });
 }
 
+function canTestConnection(form: SSHExecutorConfig, testing: boolean): boolean {
+  if (testing || form.name.trim() === "") return false;
+  return (form.host ?? "").trim() !== "" || (form.host_alias ?? "").trim() !== "";
+}
+
 function useSSHConnection(props: SSHConnectionCardProps) {
   const [state, setState] = useState<SSHConnectionState>(() => initialState(props.initial));
   const [baseline, setBaseline] = useState(() => initialState(props.initial).form);
   const { form, testing, saving, result, resultStale, trust, error } = state;
+  const isDirty =
+    Boolean(props.coordinatedSaveId) && JSON.stringify(form) !== JSON.stringify(baseline);
 
   const update = useCallback(
     <K extends keyof SSHExecutorConfig>(key: K, value: SSHExecutorConfig[K]) => {
@@ -177,12 +183,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
 
   const setTrust = useCallback((v: boolean) => setState((prev) => ({ ...prev, trust: v })), []);
 
-  const canTest = useMemo(() => {
-    if (testing) return false;
-    if (form.name.trim() === "") return false;
-    if ((form.host ?? "").trim() === "" && (form.host_alias ?? "").trim() === "") return false;
-    return true;
-  }, [form, testing]);
+  const canTest = canTestConnection(form, testing);
 
   const handleTest = useCallback(async () => {
     setState((prev) => ({
@@ -260,13 +261,15 @@ function useSSHConnection(props: SSHConnectionCardProps) {
     setTrust,
     handleTest,
     handleSave,
+    baseline,
+    isDirty,
   };
 }
 
 export function SSHConnectionCard(props: SSHConnectionCardProps) {
   const c = useSSHConnection(props);
   return (
-    <Card data-testid="ssh-connection-card">
+    <SettingsCard isDirty={c.isDirty} data-testid="ssh-connection-card">
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -282,7 +285,7 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <SSHConnectionForm form={c.form} onChange={c.update} />
+        <SSHConnectionForm form={c.form} baseline={c.baseline} onChange={c.update} />
         {c.form.host_fingerprint && <PinnedFingerprintRow fingerprint={c.form.host_fingerprint} />}
         <SSHConnectionActions
           testing={c.testing}
@@ -308,170 +311,7 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
           />
         )}
       </CardContent>
-    </Card>
-  );
-}
-
-type FieldOnChange = <K extends keyof SSHExecutorConfig>(
-  key: K,
-  value: SSHExecutorConfig[K],
-) => void;
-
-function SSHConnectionForm({
-  form,
-  onChange,
-}: {
-  form: SSHExecutorConfig;
-  onChange: FieldOnChange;
-}) {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <TextField
-        id="ssh-name"
-        testId="ssh-input-name"
-        label="Name"
-        placeholder="My VPS"
-        value={form.name}
-        onChange={(v) => onChange("name", v)}
-      />
-      <TextField
-        id="ssh-host-alias"
-        testId="ssh-input-host-alias"
-        label="Host alias from ~/.ssh/config (optional)"
-        hint="If set, inherits HostName / Port / User / IdentityFile / ProxyJump from your config."
-        placeholder="prod"
-        value={form.host_alias ?? ""}
-        onChange={(v) => onChange("host_alias", v)}
-      />
-      <TextField
-        id="ssh-host"
-        testId="ssh-input-host"
-        label="Host"
-        placeholder="dev.example.com"
-        value={form.host ?? ""}
-        onChange={(v) => onChange("host", v)}
-      />
-      <TextField
-        id="ssh-port"
-        testId="ssh-input-port"
-        label="Port"
-        type="number"
-        placeholder="22"
-        value={String(form.port ?? 22)}
-        onChange={(v) => onChange("port", parseInt(v, 10) || 22)}
-      />
-      <TextField
-        id="ssh-user"
-        testId="ssh-input-user"
-        label="User"
-        placeholder="ubuntu"
-        value={form.user ?? ""}
-        onChange={(v) => onChange("user", v)}
-      />
-      <IdentitySourceField
-        value={form.identity_source}
-        onChange={(v) => onChange("identity_source", v)}
-      />
-      {form.identity_source === "file" && (
-        <TextField
-          id="ssh-identity-file"
-          testId="ssh-input-identity-file"
-          label="Identity file path"
-          hint="Passphrase-protected keys must be loaded into ssh-agent first."
-          placeholder="~/.ssh/id_ed25519"
-          value={form.identity_file ?? ""}
-          onChange={(v) => onChange("identity_file", v)}
-        />
-      )}
-      <TextField
-        id="ssh-proxy-jump"
-        testId="ssh-input-proxy-jump"
-        label="ProxyJump (optional)"
-        hint="Single bastion hop. Chained jumps are not supported."
-        placeholder="bastion.example.com"
-        value={form.proxy_jump ?? ""}
-        onChange={(v) => onChange("proxy_jump", v)}
-      />
-    </div>
-  );
-}
-
-function TextField({
-  id,
-  testId,
-  label,
-  hint,
-  placeholder,
-  type,
-  value,
-  onChange,
-}: {
-  id: string;
-  testId: string;
-  label: string;
-  hint?: string;
-  placeholder?: string;
-  type?: string;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <FieldShell id={id} label={label} hint={hint}>
-      <Input
-        id={id}
-        data-testid={testId}
-        type={type}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value)}
-      />
-    </FieldShell>
-  );
-}
-
-function IdentitySourceField({
-  value,
-  onChange,
-}: {
-  value: SSHIdentitySource;
-  onChange: (v: SSHIdentitySource) => void;
-}) {
-  return (
-    <FieldShell id="ssh-identity-source" label="Identity source">
-      <Select value={value} onValueChange={(v) => onChange(v as SSHIdentitySource)}>
-        <SelectTrigger id="ssh-identity-source" data-testid="ssh-input-identity-source">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="agent" data-testid="ssh-input-identity-source-agent">
-            ssh-agent (SSH_AUTH_SOCK)
-          </SelectItem>
-          <SelectItem value="file" data-testid="ssh-input-identity-source-file">
-            Identity file (private key path)
-          </SelectItem>
-        </SelectContent>
-      </Select>
-    </FieldShell>
-  );
-}
-
-function FieldShell({
-  id,
-  label,
-  hint,
-  children,
-}: {
-  id: string;
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
-      {children}
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
+    </SettingsCard>
   );
 }
 

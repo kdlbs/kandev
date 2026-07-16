@@ -82,6 +82,9 @@ describe("FeatureTogglesSettings", () => {
 
     expect(updateRuntimeFlagMock).not.toHaveBeenCalled();
     expect(saveContributor?.isDirty).toBe(true);
+    expect(
+      screen.getByTestId(`feature-toggle-${initial.key}`).getAttribute("data-settings-dirty"),
+    ).toBe("true");
     if (!saveContributor) throw new Error("Save contributor was not registered");
 
     await saveContributor.save(saveContributor.revision);

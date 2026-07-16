@@ -16,6 +16,7 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
 import { GENERAL_NAV_ITEMS } from "@/components/settings/general-nav";
@@ -36,7 +37,7 @@ function ThemeSettingsCard({
   onChange: (theme: Theme) => void;
 }) {
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="theme-settings-card">
       <CardHeader>
         <CardTitle className="text-base">Color Theme</CardTitle>
       </CardHeader>
@@ -54,7 +55,7 @@ function ThemeSettingsCard({
           </Select>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -68,7 +69,7 @@ function ChatSubmitKeyCard({
   onChange: (value: "enter" | "cmd_enter") => void;
 }) {
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="chat-submit-key-card">
       <CardHeader>
         <CardTitle className="text-base">Submit Shortcut</CardTitle>
       </CardHeader>
@@ -91,7 +92,7 @@ function ChatSubmitKeyCard({
           </p>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -105,7 +106,7 @@ function ChangesPanelLayoutCard({
   onChange: (value: "flat" | "tree") => void;
 }) {
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="changes-panel-layout-card">
       <CardHeader>
         <CardTitle className="text-base">Changes Panel Layout</CardTitle>
       </CardHeader>
@@ -131,7 +132,7 @@ function ChangesPanelLayoutCard({
           </p>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -326,6 +327,7 @@ export function KeyboardShortcutsSettings() {
       >
         <KeyboardShortcutsCard
           overrides={draft.keyboardShortcuts}
+          baselineOverrides={saved.keyboardShortcuts}
           onChange={(keyboardShortcuts) =>
             setDraft((current) => ({ ...current, keyboardShortcuts }))
           }

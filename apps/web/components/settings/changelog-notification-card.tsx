@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsCard } from "./settings-card";
 
 export function ChangelogNotificationCard() {
   const userSettings = useAppStore((state) => state.userSettings);
@@ -47,7 +48,7 @@ export function ChangelogNotificationCard() {
   };
 
   return (
-    <Card>
+    <SettingsCard isDirty={draft !== saved}>
       <CardHeader>
         <CardTitle className="text-base">Topbar Release Notification</CardTitle>
       </CardHeader>
@@ -86,6 +87,6 @@ export function ChangelogNotificationCard() {
           </Button>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }

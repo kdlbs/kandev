@@ -11,6 +11,7 @@ const settings: SystemMetricsGlobalSettings = {
   collect_execution: false,
 };
 const updateSystemMetricsSettingsMock = vi.fn();
+const DIRTY_ATTRIBUTE = "data-settings-dirty";
 
 vi.mock("@/lib/api", () => ({
   fetchSystemMetricsSettings: vi.fn(async () => ({ settings })),
@@ -36,12 +37,14 @@ describe("SystemMetricsSettingsCard", () => {
     fireEvent.click(cpuMetric);
 
     expect(updateSystemMetricsSettingsMock).not.toHaveBeenCalled();
-    expect(cpuMetric.getAttribute("data-settings-dirty")).toBe("true");
+    expect(cpuMetric.getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
+    expect(cpuMetric.closest('[data-slot="card"]')?.getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
 
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSystemMetricsSettingsMock).toHaveBeenCalledTimes(1));
     expect(updateSystemMetricsSettingsMock.mock.calls[0]?.[0].metrics).not.toContain("cpu_percent");
-    await waitFor(() => expect(cpuMetric.getAttribute("data-settings-dirty")).toBe("false"));
+    await waitFor(() => expect(cpuMetric.getAttribute(DIRTY_ATTRIBUTE)).toBe("false"));
+    expect(cpuMetric.closest('[data-slot="card"]')?.getAttribute(DIRTY_ATTRIBUTE)).toBe("false");
   });
 });

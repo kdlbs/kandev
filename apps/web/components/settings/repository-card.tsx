@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { IconEdit, IconGitBranch, IconPlus, IconTrash, IconX } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import { Card, CardContent } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Input } from "@kandev/ui/input";
@@ -13,6 +13,7 @@ import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { UnsavedChangesBadge } from "@/components/settings/unsaved-indicator";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { EditableCard } from "@/components/settings/editable-card";
 import { RepositoryBranchTemplateHelp } from "@/components/settings/repository-branch-template-help";
 import { DeleteRepositoryDialog } from "@/components/settings/repository-delete-dialog";
@@ -264,7 +265,7 @@ function RepositoryEditView({
   close,
 }: RepositoryEditViewProps) {
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardContent className="pt-6">
         <div className="space-y-5">
           <div className="flex items-start justify-between gap-3">
@@ -330,7 +331,7 @@ function RepositoryEditView({
           </div>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -402,7 +403,7 @@ function RepositoryPreview({
   } = buildRepoPreviewData(repository);
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardContent className="py-4 cursor-pointer" onClick={open}>
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3 min-w-0">
@@ -459,7 +460,7 @@ function RepositoryPreview({
           </div>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

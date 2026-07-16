@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { Checkbox } from "@kandev/ui/checkbox";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { fetchSystemMetricsSettings, updateSystemMetricsSettings } from "@/lib/api";
 import type { SystemMetricId, SystemMetricsGlobalSettings } from "@/lib/types/system";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { SettingsCard } from "./settings-card";
 
 const METRIC_OPTIONS: Array<{ id: SystemMetricId; label: string }> = [
   { id: "cpu_percent", label: "CPU %" },
@@ -58,11 +59,12 @@ export function SystemMetricsSettingsCard({
   }, []);
 
   const revision = JSON.stringify(settings);
+  const isDirty = loaded && revision !== JSON.stringify(savedSettings);
   useSettingsSaveContributor({
     id: "general-appearance-metrics",
     order: 20,
     revision,
-    isDirty: loaded && revision !== JSON.stringify(savedSettings),
+    isDirty,
     save: async () => {
       const submitted = settings;
       const response = await updateSystemMetricsSettings(submitted);
@@ -80,7 +82,7 @@ export function SystemMetricsSettingsCard({
   };
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty || Boolean(isShowInTopbarDirty)}>
       <CardHeader>
         <CardTitle className="text-base">Resource Metrics</CardTitle>
       </CardHeader>
@@ -109,7 +111,7 @@ export function SystemMetricsSettingsCard({
           onCheckedChange={(checked) => setSettings({ ...settings, collect_execution: checked })}
         />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

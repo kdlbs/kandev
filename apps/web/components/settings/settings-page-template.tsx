@@ -1,7 +1,8 @@
 "use client";
 
-import { Card, CardContent } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
+import { SettingsCard } from "@/components/settings/settings-card";
 import {
   useSettingsSaveContributor,
   type SettingsSaveRevision,
@@ -60,9 +61,9 @@ export function SettingsPageTemplate({
 
       <Separator />
 
-      <Card className={isDirty ? "border border-yellow-500/60" : "border"}>
+      <SettingsCard isDirty={isDirty}>
         <CardContent className="">{children}</CardContent>
-      </Card>
+      </SettingsCard>
 
       {deleteSection}
     </div>

@@ -35,6 +35,10 @@ describe("SSHConnectionCard", () => {
     fireEvent.change(screen.getByTestId("ssh-input-name"), {
       target: { value: "Renamed host" },
     });
+    expect(screen.getByTestId("ssh-input-name").getAttribute("data-settings-dirty")).toBe("true");
+    expect(screen.getByTestId("ssh-connection-card").getAttribute("data-settings-dirty")).toBe(
+      "true",
+    );
     expect(screen.queryByTestId("ssh-save-button")).toBeNull();
     expect(onSave).not.toHaveBeenCalled();
 
@@ -46,6 +50,11 @@ describe("SSHConnectionCard", () => {
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith(
         expect.objectContaining({ name: "Renamed host", host_fingerprint: "SHA256:old" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("ssh-connection-card").getAttribute("data-settings-dirty")).toBe(
+        "false",
       ),
     );
   });

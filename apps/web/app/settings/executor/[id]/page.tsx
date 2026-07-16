@@ -21,6 +21,7 @@ import { updateExecutorAction, deleteExecutorAction } from "@/app/actions/execut
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import { ExecutorProfilesCard } from "@/components/settings/executor-profiles-card";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { Executor, ExecutorType } from "@/lib/types/http";
 import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
@@ -103,7 +104,7 @@ function McpPolicyCard({
   };
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           MCP Policy
@@ -172,7 +173,7 @@ function McpPolicyCard({
           />
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

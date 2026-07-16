@@ -7,6 +7,7 @@ import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useJiraTaskPresets } from "@/components/jira/my-jira/use-task-presets";
 import {
@@ -85,29 +86,45 @@ function IconSelect({ value, onChange }: { value: string; onChange: (v: string) 
 
 function PresetRow({
   preset,
+  savedPreset,
   expanded,
   onToggle,
   onPatch,
   onRemove,
 }: {
   preset: JiraStoredPreset;
+  savedPreset?: JiraStoredPreset;
   expanded: boolean;
   onToggle: () => void;
   onPatch: (patch: Partial<JiraStoredPreset>) => void;
   onRemove: () => void;
 }) {
+  const fieldIsDirty = <K extends keyof JiraStoredPreset>(field: K) =>
+    !savedPreset || preset[field] !== savedPreset[field];
+  const isDirty = !savedPreset || JSON.stringify(preset) !== JSON.stringify(savedPreset);
+
   return (
-    <div className="rounded-md border">
+    <div
+      className="rounded-md border"
+      data-settings-dirty={isDirty}
+      data-testid={`jira-task-preset-${preset.id}`}
+    >
       <div className="flex items-end gap-2 p-2">
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] text-muted-foreground">Icon</span>
-          <IconSelect value={preset.icon} onChange={(v) => onPatch({ icon: v })} />
+          <div
+            data-settings-dirty={fieldIsDirty("icon")}
+            className="rounded-md border border-transparent"
+          >
+            <IconSelect value={preset.icon} onChange={(v) => onPatch({ icon: v })} />
+          </div>
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] text-muted-foreground">Label</span>
           <Input
             className="h-8 w-40"
             value={preset.label}
+            data-settings-dirty={fieldIsDirty("label")}
             placeholder="Label"
             onChange={(e) => onPatch({ label: e.target.value })}
           />
@@ -117,6 +134,7 @@ function PresetRow({
           <Input
             className="h-8"
             value={preset.hint}
+            data-settings-dirty={fieldIsDirty("hint")}
             placeholder="Hint (optional)"
             onChange={(e) => onPatch({ hint: e.target.value })}
           />
@@ -141,7 +159,10 @@ function PresetRow({
       </div>
       {expanded && (
         <div className="px-2 pb-2 space-y-1">
-          <div className="rounded-md border overflow-hidden">
+          <div
+            className="rounded-md border overflow-hidden"
+            data-settings-dirty={fieldIsDirty("prompt_template")}
+          >
             <ScriptEditor
               value={preset.prompt_template}
               onChange={(v) => onPatch({ prompt_template: v })}
@@ -195,12 +216,12 @@ function usePresetDraft() {
     setDraft(DEFAULT_JIRA_PRESETS);
   }, []);
   const discard = useCallback(() => setDraft(baseline), [baseline]);
-  return { draft, setDraft, dirty, save, reset, discard, loaded };
+  return { draft, baseline, setDraft, dirty, save, reset, discard, loaded };
 }
 
 export function TaskPresetsSection() {
   const { toast } = useToast();
-  const { draft, setDraft, dirty, save, reset, discard, loaded } = usePresetDraft();
+  const { draft, baseline, setDraft, dirty, save, reset, discard, loaded } = usePresetDraft();
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const patch = useCallback(
@@ -257,11 +278,12 @@ export function TaskPresetsSection() {
         </div>
       }
     >
-      <div className="space-y-2">
+      <SettingsCard isDirty={dirty} className="space-y-2 p-4" data-testid="jira-task-presets-card">
         {draft.map((preset, index) => (
           <PresetRow
             key={preset.id}
             preset={preset}
+            savedPreset={baseline.find((saved) => saved.id === preset.id)}
             expanded={expandedId === preset.id}
             onToggle={() => setExpandedId((id) => (id === preset.id ? null : preset.id))}
             onPatch={(p) => patch(index, p)}
@@ -272,7 +294,7 @@ export function TaskPresetsSection() {
           <IconPlus className="h-3.5 w-3.5 mr-1" />
           Add preset
         </Button>
-      </div>
+      </SettingsCard>
     </SettingsSection>
   );
 }

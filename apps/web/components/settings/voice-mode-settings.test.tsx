@@ -6,6 +6,7 @@ import { VoiceModeSettings } from "./voice-mode-settings";
 
 const updateUserSettingsMock = vi.fn();
 const setUserSettingsMock = vi.fn();
+const MIC_BUTTON_LABEL = "Show the mic button on the chat composer";
 let saveContributor: SettingsSaveContributor | null = null;
 const initialVoiceMode = {
   enabled: true,
@@ -55,12 +56,16 @@ describe("VoiceModeSettings", () => {
     updateUserSettingsMock.mockResolvedValue(undefined);
     render(<VoiceModeSettings />);
 
-    fireEvent.click(
-      screen.getByRole("switch", { name: "Show the mic button on the chat composer" }),
-    );
+    fireEvent.click(screen.getByRole("switch", { name: MIC_BUTTON_LABEL }));
 
     expect(updateUserSettingsMock).not.toHaveBeenCalled();
     expect(saveContributor?.isDirty).toBe(true);
+    expect(
+      screen.getByRole("switch", { name: MIC_BUTTON_LABEL }).getAttribute("data-settings-dirty"),
+    ).toBe("true");
+    expect(screen.getByTestId("voice-enable-card").getAttribute("data-settings-dirty")).toBe(
+      "true",
+    );
 
     await saveContributor?.save(saveContributor.revision);
 
@@ -73,9 +78,7 @@ describe("VoiceModeSettings", () => {
     updateUserSettingsMock.mockResolvedValue(undefined);
     render(<VoiceModeSettings />);
 
-    fireEvent.click(
-      screen.getByRole("switch", { name: "Show the mic button on the chat composer" }),
-    );
+    fireEvent.click(screen.getByRole("switch", { name: MIC_BUTTON_LABEL }));
     state.userSettings = {
       ...state.userSettings,
       keyboardShortcuts: { voice_toggle: { key: "v" } },
@@ -99,7 +102,7 @@ describe("VoiceModeSettings", () => {
     );
     render(<VoiceModeSettings />);
     const toggle = screen.getByRole("switch", {
-      name: "Show the mic button on the chat composer",
+      name: MIC_BUTTON_LABEL,
     });
     fireEvent.click(toggle);
     if (!saveContributor) throw new Error("Save contributor was not registered");

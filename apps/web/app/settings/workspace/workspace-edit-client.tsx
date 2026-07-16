@@ -27,6 +27,7 @@ type Workspace = WorkspaceState["items"][number];
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 
 type WorkspaceEditClientProps = {
@@ -139,7 +140,7 @@ function WorkspaceSettingsCard({
     name: p.label,
   }));
   return (
-    <Card>
+    <SettingsCard isDirty={nameIsDirty || executorIsDirty || agentProfileIsDirty}>
       <CardHeader>
         <CardTitle>Workspace Settings</CardTitle>
       </CardHeader>
@@ -174,7 +175,7 @@ function WorkspaceSettingsCard({
           />
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

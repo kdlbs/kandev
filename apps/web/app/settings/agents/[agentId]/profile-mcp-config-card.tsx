@@ -1,11 +1,12 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { useProfileMcpConfig } from "./use-profile-mcp-config";
 import type { AgentProfileMcpConfig } from "@/lib/types/http";
 
@@ -387,7 +388,7 @@ export function ProfileMcpConfigCard({
   if (!supportsMcp) return null;
 
   return (
-    <Card>
+    <SettingsCard isDirty={state.currentDirty}>
       <CardHeader>
         <CardTitle>MCP Configuration</CardTitle>
       </CardHeader>
@@ -412,6 +413,6 @@ export function ProfileMcpConfigCard({
           handleMcpServersChange={handleMcpServersChange}
         />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
