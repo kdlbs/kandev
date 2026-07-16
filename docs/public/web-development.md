@@ -75,7 +75,7 @@ make lint-web
 make test-e2e
 ```
 
-Component/unit tests use Vitest. User-visible changes under `apps/web/` require an updated Playwright E2E scenario. Use established E2E seeding APIs and isolated test data rather than an operator's local database.
+Component/unit tests use Vitest. Any change under `apps/web/` must add or update a Playwright E2E scenario. Use established E2E seeding APIs and isolated test data rather than an operator's local database.
 
 ## Review checklist
 
