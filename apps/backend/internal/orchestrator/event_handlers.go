@@ -69,6 +69,12 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 			zap.String("expected_exec_id", expectedExecID),
 			zap.String("resume_token", acpSessionID),
 			zap.String("last_message_uuid", lastMessageUUID))
+		// The CAS above proved the token belongs to the session's current
+		// execution — mirror it into the session's durable "acp" metadata
+		// too. executors_running rows are operational state and get pruned;
+		// without this, the ACP session id only survives for agents that
+		// happen to emit a session_info frame (handleSessionInfoEvent).
+		s.persistACPSessionID(ctx, sessionID, acpSessionID)
 	case errors.Is(err, models.ErrExecutionRotated):
 		// The row's agent_execution_id has rotated since the event was emitted —
 		// the token belongs to a defunct execution and must be dropped. The new
@@ -93,6 +99,38 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 		s.logger.Warn("failed to persist resume token for session",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+// persistACPSessionID mirrors the agent's ACP session id into the session's
+// "acp" metadata map (merging with whatever session_info already wrote, and
+// skipping the write when the stored id is already current). Best-effort:
+// resume correctness never depends on this copy — it exists so the id
+// survives executors_running cleanup for consumers that join sessions to
+// agent-CLI artifacts (e.g. transcript-based usage stats).
+func (s *Service) persistACPSessionID(ctx context.Context, sessionID, acpSessionID string) {
+	if sessionID == "" || acpSessionID == "" || s.repo == nil {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return
+	}
+	info := map[string]interface{}{}
+	if existing, ok := session.Metadata["acp"].(map[string]interface{}); ok {
+		if existing["session_id"] == acpSessionID {
+			return
+		}
+		for key, value := range existing {
+			info[key] = value
+		}
+	}
+	info["session_id"] = acpSessionID
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, "acp", info); err != nil {
+		s.logger.Warn("failed to persist ACP session id to session metadata",
+			zap.String("session_id", sessionID),
+			zap.String("acp_session_id", acpSessionID),
 			zap.Error(err))
 	}
 }
