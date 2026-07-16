@@ -341,6 +341,37 @@ func TestBundleHandlerInactivePluginReturns503(t *testing.T) {
 	}
 }
 
+// webhookPackage builds a valid runtime-managed package that declares
+// exactly one webhook with the given key, for POST/GET
+// /api/plugins/:id/webhooks/:key tests.
+func webhookPackage(t *testing.T, id, key string) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: "1.0.0"
+display_name: Test Plugin
+webhooks:
+  - key: %s
+    method: POST
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+`, id, key, platformKey)
+
+	var buf bytes.Buffer
+	files := map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}
+	if err := pkgtartest.WritePackage(&buf, files); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
 func TestWebhookHandlerUnknownPluginReturns404(t *testing.T) {
 	router, _ := newTestRouter(t)
 	rec := doRequest(router, http.MethodPost, "/api/plugins/missing/webhooks/key1", "{}", nil)
@@ -349,9 +380,43 @@ func TestWebhookHandlerUnknownPluginReturns404(t *testing.T) {
 	}
 }
 
+// TestWebhookHandlerUndeclaredKeyReturns404 pins the fix that the webhook
+// relay validates :key against the plugin's manifest-declared webhooks
+// before ever reaching the live subprocess: a key the plugin never
+// registered must 404, not be blindly forwarded.
+func TestWebhookHandlerUndeclaredKeyReturns404(t *testing.T) {
+	router, svc := newTestRouter(t)
+	if _, err := svc.Install(t.Context(), webhookPackage(t, "kandev-plugin-slack", "declared-key")); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/undeclared-key", "{}", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestWebhookHandlerOversizedBodyReturns413 pins the fix that the webhook
+// relay caps the request body instead of an unbounded io.ReadAll (an
+// external-caller-triggerable OOM DoS otherwise).
+func TestWebhookHandlerOversizedBodyReturns413(t *testing.T) {
+	router, svc := newTestRouter(t)
+	if _, err := svc.Install(t.Context(), webhookPackage(t, "kandev-plugin-slack", "key1")); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	oversized := strings.Repeat("a", maxWebhookBodyBytes+1)
+	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", oversized, nil)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestWebhookHandlerNotRunningReturns503(t *testing.T) {
 	router, svc := newTestRouter(t)
-	installTestPlugin(t, svc, "kandev-plugin-slack")
+	if _, err := svc.Install(t.Context(), webhookPackage(t, "kandev-plugin-slack", "key1")); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
 	if err := svc.Disable("kandev-plugin-slack"); err != nil {
 		t.Fatalf("Disable: %v", err)
 	}

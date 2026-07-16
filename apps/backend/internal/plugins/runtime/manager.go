@@ -64,6 +64,23 @@ func WithMaxRestartAttempts(n int) Option {
 	return func(m *Manager) { m.maxRestartAttempts = n }
 }
 
+// defaultStartTimeout bounds how long a single spawn attempt (process start
+// + go-plugin gRPC handshake) may take before hcplugin.Client.Client() gives
+// up and returns an error. hashicorp/go-plugin defaults StartTimeout to a
+// full minute when left unset; that default let a hung plugin binary block
+// Service.activate (Enable/Install) for up to a minute per call. 30s is a
+// generous bound for a well-behaved plugin's startup while still failing a
+// hung binary fast with a clear error.
+const defaultStartTimeout = 30 * time.Second
+
+// WithStartTimeout overrides how long a single spawn attempt (process start
+// + go-plugin gRPC handshake) may take before it is aborted as failed
+// (default 30s). Passed through to hcplugin.ClientConfig.StartTimeout on
+// every spawn, so it also bounds each individual restart attempt.
+func WithStartTimeout(d time.Duration) Option {
+	return func(m *Manager) { m.startTimeout = d }
+}
+
 // Manager owns the set of currently-spawned plugin subprocesses. One
 // Manager is constructed for the whole backend process (see
 // internal/plugins.Provide); Start/Stop are called per plugin as it is
@@ -77,9 +94,19 @@ type Manager struct {
 	maxConsecutiveFailures int
 	restartBackoff         []time.Duration
 	maxRestartAttempts     int
+	startTimeout           time.Duration
 
 	mu        sync.Mutex
 	processes map[string]*process
+	// starting tracks plugin ids currently mid-Start (spawnFuncFor resolved,
+	// process.start() spawning, not yet inserted into processes). Guards the
+	// TOCTOU window between the "already running" check and the map
+	// insertion: a concurrent Start for the same id sees the reservation and
+	// fails fast instead of racing a second spawn. Held only across the fast
+	// check-and-reserve/release bookkeeping in claimStart/releaseStart, never
+	// across the slow spawn itself, so concurrent Starts for *different* ids
+	// are never serialized against each other.
+	starting map[string]struct{}
 }
 
 // NewManager returns a Manager rooted at pluginsDir (the same directory
@@ -97,6 +124,7 @@ func NewManager(pluginsDir string, onStatusChange func(id string, healthy bool),
 		maxConsecutiveFailures: defaultMaxConsecutiveFailures,
 		restartBackoff:         defaultRestartBackoff(),
 		maxRestartAttempts:     defaultMaxRestartAttempts,
+		startTimeout:           defaultStartTimeout,
 		processes:              make(map[string]*process),
 	}
 	for _, opt := range opts {
@@ -116,9 +144,11 @@ func NewManager(pluginsDir string, onStatusChange func(id string, healthy bool),
 // runtime-managed, a process is already tracked for rec.ID, the host
 // platform has no declared executable, or the initial spawn/handshake
 // fails. ctx is checked for early cancellation before spawning; the
-// subprocess handshake itself is bounded by go-plugin's own StartTimeout
-// (not ctx), since hashicorp/go-plugin's Client() call is not
-// context-aware.
+// subprocess handshake itself is not context-aware (hashicorp/go-plugin's
+// Client() call does not accept a context) — it is instead bounded by
+// m.startTimeout (default 30s, see WithStartTimeout), passed through as
+// hcplugin.ClientConfig.StartTimeout, so a hung plugin binary still fails
+// fast rather than blocking the caller for go-plugin's own 1-minute default.
 func (m *Manager) Start(ctx context.Context, rec *store.Record, hostFactory func(pluginID string) pluginsdk.Host) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -127,33 +157,81 @@ func (m *Manager) Start(ctx context.Context, rec *store.Record, hostFactory func
 		return fmt.Errorf("plugins/runtime: plugin %q is not runtime-managed", rec.ID)
 	}
 
-	m.mu.Lock()
-	if _, exists := m.processes[rec.ID]; exists {
-		m.mu.Unlock()
-		return fmt.Errorf("plugins/runtime: plugin %q is already running", rec.ID)
-	}
-	m.mu.Unlock()
-
 	recCopy := rec.Manifest
 	spawnFn, err := m.spawnFuncFor(rec.ID, &recCopy, rec.InstallPath, hostFactory)
 	if err != nil {
 		return err
 	}
+	return m.startProcess(rec.ID, spawnFn)
+}
 
-	p := newProcess(rec.ID, m.log, spawnFn, m.onStatusChange)
+// startProcess serializes start-up for a single plugin id and performs the
+// actual spawn+supervise: claimStart reserves id (rejecting a concurrent
+// Start for the same id, and clearing out any exhausted/gave-up previous
+// entry so a fresh Start can respawn) before the slow spawn runs, closing
+// the TOCTOU window between the "already running" check and the map
+// insertion that let two concurrent Start calls for the same id both spawn
+// a subprocess. claimStart/releaseStart only hold m.mu for fast bookkeeping
+// — the spawn itself (p.start()) runs unlocked, so concurrent Starts for
+// different ids are never serialized against each other.
+func (m *Manager) startProcess(id string, spawnFn func() (spawnedProcess, error)) error {
+	if err := m.claimStart(id); err != nil {
+		return err
+	}
+	defer m.releaseStart(id)
+
+	p := newProcess(id, m.log, spawnFn, m.onStatusChange)
 	p.pingInterval = m.pingInterval
 	p.maxConsecutiveFails = m.maxConsecutiveFailures
 	p.restartBackoff = m.restartBackoff
 	p.maxRestartAttempts = m.maxRestartAttempts
 
 	if err := p.start(); err != nil {
-		return fmt.Errorf("plugins/runtime: start plugin %q: %w", rec.ID, err)
+		return fmt.Errorf("plugins/runtime: start plugin %q: %w", id, err)
 	}
 
 	m.mu.Lock()
-	m.processes[rec.ID] = p
+	m.processes[id] = p
 	m.mu.Unlock()
 	return nil
+}
+
+// claimStart atomically checks that id has no live process and no Start
+// already in flight, then reserves id in m.starting so a concurrent Start
+// for the same id fails fast instead of racing a second spawn. If the
+// tracked entry for id has already permanently given up (exhausted its
+// restart attempts — current==nil, gaveUp==true), it is dropped so a fresh
+// Start can respawn cleanly rather than being rejected as "already
+// running" against a dead entry. p.stop() on a gave-up process is a fast,
+// safe no-op (its supervision loop has already exited), so this is safe to
+// do while holding m.mu.
+func (m *Manager) claimStart(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, inFlight := m.starting[id]; inFlight {
+		return fmt.Errorf("plugins/runtime: plugin %q is already starting", id)
+	}
+	if p, exists := m.processes[id]; exists {
+		if !p.isGaveUp() {
+			return fmt.Errorf("plugins/runtime: plugin %q is already running", id)
+		}
+		delete(m.processes, id)
+		p.stop()
+	}
+	if m.starting == nil {
+		m.starting = make(map[string]struct{})
+	}
+	m.starting[id] = struct{}{}
+	return nil
+}
+
+// releaseStart clears id's reservation in m.starting, whether startProcess
+// succeeded or failed.
+func (m *Manager) releaseStart(id string) {
+	m.mu.Lock()
+	delete(m.starting, id)
+	m.mu.Unlock()
 }
 
 // Stop kills and stops supervising the process for id, if any. A no-op if
@@ -240,6 +318,7 @@ func (m *Manager) spawnFuncFor(id string, mf *manifest.Manifest, installPath str
 	}
 	execPath := filepath.Join(installPath, execRelPath)
 	dataDir := filepath.Join(m.pluginsDir, id, "data")
+	startTimeout := m.startTimeout
 
 	return func() (spawnedProcess, error) {
 		if err := os.MkdirAll(dataDir, 0o755); err != nil {
@@ -256,6 +335,7 @@ func (m *Manager) spawnFuncFor(id string, mf *manifest.Manifest, installPath str
 			AllowedProtocols: []hcplugin.Protocol{hcplugin.ProtocolGRPC},
 			AutoMTLS:         true,
 			Cmd:              cmd,
+			StartTimeout:     startTimeout,
 		})
 
 		rpcClient, err := client.Client()

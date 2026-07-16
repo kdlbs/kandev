@@ -131,27 +131,81 @@ func TestInstall_ChmodsExecutableTo0755(t *testing.T) {
 	}
 }
 
-func TestInstall_SignedTrueWhenSigPresent(t *testing.T) {
-	destRoot := t.TempDir()
-	files := buildValidFiles("1.0.0")
-
-	// checksums.txt.sig is unverified by default (VerifySignature is nil,
-	// meaning verification is skipped) — its bytes don't need to be a real
-	// signature for this test.
+// packageWithFakeSig returns buildValidFiles(version) plus an unverifiable
+// checksums.txt.sig entry (its bytes don't need to be a real signature
+// unless the test also wires a VerifySignature that inspects them).
+func packageWithFakeSig(version string) map[string][]byte {
+	files := buildValidFiles(version)
 	withSig := make(map[string][]byte, len(files)+1)
 	for name, data := range files {
 		withSig[name] = data
 	}
 	withSig["checksums.txt.sig"] = []byte("fake-signature-bytes")
-	pkg := buildRawPackageWithChecksums(t, withSig)
+	return withSig
+}
+
+// TestInstall_SignedFalseWhenSigPresentButUnverified pins the fix for
+// Install claiming Signed=true just because a checksums.txt.sig entry
+// exists, even with no VerifySignature verifier configured (the default).
+// Signed must only be true once a verifier actually ran and succeeded — a
+// present-but-unverified signature is not a "signed" guarantee.
+func TestInstall_SignedFalseWhenSigPresentButUnverified(t *testing.T) {
+	destRoot := t.TempDir()
+	pkg := buildRawPackageWithChecksums(t, packageWithFakeSig("1.0.0"))
+
+	result, err := Install(bytes.NewReader(pkg), destRoot)
+	if err != nil {
+		t.Fatalf("Install() unexpected error: %v", err)
+	}
+	if result.Signed {
+		t.Fatal("Signed = true, want false: checksums.txt.sig is present but no VerifySignature verifier is configured")
+	}
+}
+
+// TestInstall_SignedTrueWhenSignatureVerifies pins that Signed=true only
+// once a configured VerifySignature verifier actually ran and succeeded.
+func TestInstall_SignedTrueWhenSignatureVerifies(t *testing.T) {
+	destRoot := t.TempDir()
+	pkg := buildRawPackageWithChecksums(t, packageWithFakeSig("1.0.0"))
+
+	var gotSig, gotChecksums []byte
+	VerifySignature = func(sig, checksums []byte) error {
+		gotSig, gotChecksums = sig, checksums
+		return nil
+	}
+	t.Cleanup(func() { VerifySignature = nil })
 
 	result, err := Install(bytes.NewReader(pkg), destRoot)
 	if err != nil {
 		t.Fatalf("Install() unexpected error: %v", err)
 	}
 	if !result.Signed {
-		t.Fatal("Signed = false, want true (checksums.txt.sig present)")
+		t.Fatal("Signed = false, want true: a configured VerifySignature verifier succeeded")
 	}
+	if string(gotSig) != "fake-signature-bytes" {
+		t.Fatalf("VerifySignature sig arg = %q, want the checksums.txt.sig bytes", gotSig)
+	}
+	if len(gotChecksums) == 0 {
+		t.Fatal("VerifySignature checksums arg was empty, want the checksums.txt bytes")
+	}
+}
+
+// TestInstall_ErrorsWhenSignatureVerificationFails pins that Install fails
+// outright (package not extracted) when a configured VerifySignature
+// verifier rejects the signature — this is a "signed but tampered/invalid"
+// package, not merely "unsigned".
+func TestInstall_ErrorsWhenSignatureVerificationFails(t *testing.T) {
+	destRoot := t.TempDir()
+	pkg := buildRawPackageWithChecksums(t, packageWithFakeSig("1.0.0"))
+
+	VerifySignature = func(_, _ []byte) error { return errors.New("bad signature") }
+	t.Cleanup(func() { VerifySignature = nil })
+
+	_, err := Install(bytes.NewReader(pkg), destRoot)
+	if err == nil {
+		t.Fatal("Install() expected error when signature verification fails, got nil")
+	}
+	assertNoPartialInstall(t, destRoot, "kandev-plugin-hello")
 }
 
 func TestInspect_ReturnsManifestWithoutSideEffects(t *testing.T) {
@@ -280,6 +334,96 @@ func TestInstall_AbsolutePathRejected(t *testing.T) {
 	}
 	if !errors.Is(err, ErrPathTraversal) {
 		t.Fatalf("Install() error = %v, want ErrPathTraversal", err)
+	}
+}
+
+// TestInstall_BackslashTraversalRejected pins the fix for a Windows-style
+// traversal entry: cleanArchivePath previously only treated "/" as a path
+// separator, so "server/..\\..\\escape.exe" passed path.Clean unchanged (it
+// has no leading ".." segment under POSIX splitting) and would later be
+// interpreted by filepath.Join/filepath.Clean on Windows as an actual
+// escape via the backslash-delimited "..\\.." segments.
+func TestInstall_BackslashTraversalRejected(t *testing.T) {
+	destRoot := t.TempDir()
+	files := buildValidFiles("1.0.0")
+	files[`server/..\..\escape.exe`] = []byte("pwned")
+	pkg := buildRawPackageWithChecksums(t, files)
+
+	_, err := Install(bytes.NewReader(pkg), destRoot)
+	if err == nil {
+		t.Fatal("Install() expected error for a backslash-traversal entry, got nil")
+	}
+	if !errors.Is(err, ErrPathTraversal) {
+		t.Fatalf("Install() error = %v, want ErrPathTraversal", err)
+	}
+}
+
+func TestCleanArchivePath_RejectsBackslash(t *testing.T) {
+	for _, name := range []string{
+		`server\evil.exe`,
+		`server/..\..\escape.exe`,
+		`..\evil.exe`,
+	} {
+		if _, err := cleanArchivePath(name); err == nil {
+			t.Fatalf("cleanArchivePath(%q) expected error, got nil", name)
+		} else if !errors.Is(err, ErrPathTraversal) {
+			t.Fatalf("cleanArchivePath(%q) error = %v, want ErrPathTraversal", name, err)
+		}
+	}
+}
+
+// withSmallSizeCaps temporarily overrides maxPackageFileSize/
+// maxPackageTotalSize (test-only vars, see pkgtar.go) so cap-enforcement
+// tests can use small fixtures instead of allocating real 200MB payloads.
+func withSmallSizeCaps(t *testing.T, perFile, total int64) {
+	t.Helper()
+	origFile, origTotal := maxPackageFileSize, maxPackageTotalSize
+	maxPackageFileSize, maxPackageTotalSize = perFile, total
+	t.Cleanup(func() { maxPackageFileSize, maxPackageTotalSize = origFile, origTotal })
+}
+
+func TestInstall_SingleFileExceedingPerFileCapRejected(t *testing.T) {
+	withSmallSizeCaps(t, 100, 10_000)
+	destRoot := t.TempDir()
+
+	files := buildValidFiles("1.0.0")
+	files["assets/icon.svg"] = bytes.Repeat([]byte("A"), 200) // exceeds the 100-byte per-file cap
+	pkg := buildRawPackageWithChecksums(t, files)
+
+	_, err := Install(bytes.NewReader(pkg), destRoot)
+	if err == nil {
+		t.Fatal("Install() expected error for a file exceeding the per-file size cap, got nil")
+	}
+}
+
+// TestReadArchive_TotalSizeCapUsesActualBytesCopied pins the fix that the
+// running total is accumulated from bytes actually copied out of the
+// decompressed stream (readCapped's return value), not the archive-declared
+// hdr.Size: three files that individually fit under the per-file cap but
+// whose combined ACTUAL bytes exceed the total cap must still be rejected.
+func TestReadArchive_TotalSizeCapUsesActualBytesCopied(t *testing.T) {
+	withSmallSizeCaps(t, 1000, 2000)
+	destRoot := t.TempDir()
+
+	files := buildValidFiles("1.0.0")
+	files["assets/a"] = bytes.Repeat([]byte("A"), 900)
+	files["assets/b"] = bytes.Repeat([]byte("B"), 900)
+	files["assets/c"] = bytes.Repeat([]byte("C"), 900) // pushes the real total past the 2000-byte cap
+	pkg := buildRawPackageWithChecksums(t, files)
+
+	_, err := Install(bytes.NewReader(pkg), destRoot)
+	if err == nil {
+		t.Fatal("Install() expected error once actual bytes copied exceed the total size cap, got nil")
+	}
+}
+
+func TestReadArchive_UnderTotalCapSucceeds(t *testing.T) {
+	withSmallSizeCaps(t, 1000, 100_000)
+	destRoot := t.TempDir()
+
+	pkg := writeValidPackage(t, "1.0.0") // well under 100_000 bytes total
+	if _, err := Install(bytes.NewReader(pkg), destRoot); err != nil {
+		t.Fatalf("Install() unexpected error under the total size cap: %v", err)
 	}
 }
 

@@ -3,6 +3,7 @@ package plugins
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -39,8 +40,9 @@ type fakeRuntime struct {
 	startErr      map[string]error
 	restartCounts map[string]int
 
-	startCalls []string
-	stopCalls  []string
+	startCalls   []string
+	stopCalls    []string
+	lastStartCtx context.Context
 
 	// blockStarted/blockProceed, when set via blockNextStart, make the very
 	// next Start call signal blockStarted and then wait on blockProceed
@@ -71,9 +73,10 @@ func (r *fakeRuntime) blockNextStart() (started <-chan struct{}, release func())
 	return s, func() { close(p) }
 }
 
-func (r *fakeRuntime) Start(_ context.Context, rec *store.Record, hostFactory func(string) pluginsdk.Host) error {
+func (r *fakeRuntime) Start(ctx context.Context, rec *store.Record, hostFactory func(string) pluginsdk.Host) error {
 	r.mu.Lock()
 	r.startCalls = append(r.startCalls, rec.ID)
+	r.lastStartCtx = ctx
 	started, proceed := r.blockStarted, r.blockProceed
 	r.blockStarted, r.blockProceed = nil, nil
 	r.mu.Unlock()
@@ -154,6 +157,12 @@ func (r *fakeRuntime) startCallCount(id string) int {
 		}
 	}
 	return n
+}
+
+func (r *fakeRuntime) startCtx() context.Context {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lastStartCtx
 }
 
 func (r *fakeRuntime) stopped(id string) bool {
@@ -316,6 +325,44 @@ func TestServiceInstallSpawnFailureLeavesRecordInErrorStatus(t *testing.T) {
 	}
 }
 
+// TestServiceInstallOverActivePluginRestartsWithNewVersion pins the fix for
+// installing a new version over an already-active plugin: activate's
+// "already running" short-circuit previously skipped spawning entirely, so
+// the live subprocess kept running the OLD version's binary even though the
+// record/install_path now pointed at the new one. Install must stop the old
+// process and start the new install_path so the running process matches the
+// installed version.
+func TestServiceInstallOverActivePluginRestartsWithNewVersion(t *testing.T) {
+	svc, _, rt := newTestService(t)
+	rec1 := installTestPlugin(t, svc, "kandev-plugin-slack") // v1.0.0, active + running
+	if !rt.Running("kandev-plugin-slack") {
+		t.Fatal("sanity check: plugin not running after first install")
+	}
+
+	rec2, err := svc.Install(context.Background(), testPackage(t, "kandev-plugin-slack", "1.1.0", false))
+	if err != nil {
+		t.Fatalf("second Install() unexpected error: %v", err)
+	}
+	if rec2.Version != "1.1.0" {
+		t.Fatalf("rec2.Version = %q, want %q", rec2.Version, "1.1.0")
+	}
+	if rec2.InstallPath == rec1.InstallPath {
+		t.Fatal("rec2.InstallPath == rec1.InstallPath, want the new version's own install dir")
+	}
+	if !rt.stopped("kandev-plugin-slack") {
+		t.Fatal("Install() over an active plugin did not stop the old runtime process")
+	}
+	if got := rt.startCallCount("kandev-plugin-slack"); got != 2 {
+		t.Fatalf("runtime Start called %d times, want 2 (initial install + restart on reinstall)", got)
+	}
+	if !rt.Running("kandev-plugin-slack") {
+		t.Fatal("plugin not running after reinstalling over an already-active version")
+	}
+	if rec2.Status != StatusActive {
+		t.Fatalf("rec2.Status = %q, want %q", rec2.Status, StatusActive)
+	}
+}
+
 func TestServiceListReturnsInstalledPlugins(t *testing.T) {
 	svc, _, _ := newTestService(t)
 	installTestPlugin(t, svc, "kandev-plugin-slack")
@@ -379,6 +426,33 @@ func TestServiceUninstallStopsRuntimeRemovesPackageAndRecord(t *testing.T) {
 	}
 	if _, err := os.Stat(installDir); !os.IsNotExist(err) {
 		t.Fatalf("expected the extracted package dir to be removed, stat err = %v", err)
+	}
+}
+
+// TestServiceUninstallDeletesPluginState pins the fix for the plugin_state
+// leak on Uninstall: removing a plugin previously deleted its file tree and
+// registry record but never its plugin_state rows, so a reinstalled (or
+// id-reused) plugin silently inherited stale state from a previous install.
+func TestServiceUninstallDeletesPluginState(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	svc.SetState(newTestStateStore(t))
+	installTestPlugin(t, svc, "kandev-plugin-slack")
+
+	ctx := context.Background()
+	if err := svc.StateStore().Set(ctx, "kandev-plugin-slack", "instance", "", "install_id", json.RawMessage(`"abc"`)); err != nil {
+		t.Fatalf("seed plugin_state: %v", err)
+	}
+
+	if err := svc.Uninstall("kandev-plugin-slack"); err != nil {
+		t.Fatalf("Uninstall() unexpected error: %v", err)
+	}
+
+	entries, err := svc.StateStore().List(ctx, "kandev-plugin-slack", "instance", "")
+	if err != nil {
+		t.Fatalf("List() after Uninstall(): %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("plugin_state entries after Uninstall() = %d, want 0 (state should be deleted)", len(entries))
 	}
 }
 
@@ -469,6 +543,25 @@ func TestServiceDisabledCanReEnableAndRespawns(t *testing.T) {
 	}
 	if want := 2; rt.startCallCount("kandev-plugin-slack") != want {
 		t.Fatalf("runtime Start called %d times, want %d (install + re-enable)", rt.startCallCount("kandev-plugin-slack"), want)
+	}
+}
+
+// TestServiceActivatePassesABoundedStartContext pins the fix for bounded
+// startup: activate previously passed context.Background() straight through
+// to runtime.Start, so a hung plugin binary could block Enable/Install
+// indefinitely (up to go-plugin's own default). activate must instead pass a
+// context with a deadline, so a caller can observe/rely on the bound even if
+// a future runtime.Manager becomes context-aware for the handshake itself.
+func TestServiceActivatePassesABoundedStartContext(t *testing.T) {
+	svc, _, rt := newTestService(t)
+	installTestPlugin(t, svc, "kandev-plugin-slack")
+
+	ctx := rt.startCtx()
+	if ctx == nil {
+		t.Fatal("runtime.Start() was never called")
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		t.Fatal("activate() passed a context with no deadline to runtime.Start(), want a bounded context.WithTimeout")
 	}
 }
 

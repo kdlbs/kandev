@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -207,4 +209,156 @@ func TestManager_CrashTriggersAutomaticRestart(t *testing.T) {
 		return len(transitions) >= 2 && !transitions[0] && transitions[1]
 	}, 10*time.Second, 20*time.Millisecond,
 		"onStatusChange should observe degraded (false) then recovered (true) after the crash")
+}
+
+// TestManager_ConcurrentStartOnlySpawnsOnce pins the fix for the TOCTOU
+// double-spawn race: two Start calls for the same plugin id racing the
+// "already running" check must not both reach spawnFn. The first goroutine
+// is deliberately paused *inside* its (slow) spawn — the exact window the
+// old code released the manager lock across — before the second goroutine's
+// startProcess call is allowed to race in.
+func TestManager_ConcurrentStartOnlySpawnsOnce(t *testing.T) {
+	m := NewManager(t.TempDir(), nil, testLogger(t))
+	t.Cleanup(m.StopAll)
+
+	var spawnCalls int32
+	firstEntered := make(chan struct{})
+	release := make(chan struct{})
+	var closeOnce sync.Once
+
+	spawnFn := func() (spawnedProcess, error) {
+		if atomic.AddInt32(&spawnCalls, 1) == 1 {
+			closeOnce.Do(func() { close(firstEntered) })
+			<-release // hold the first spawn open so the second Start can race in
+		}
+		return &fakeSpawnedProcess{}, nil
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errs[0] = m.startProcess("race-plugin", spawnFn)
+	}()
+
+	<-firstEntered // the first Start is now mid-spawn, before it has registered anything
+
+	errs[1] = m.startProcess("race-plugin", spawnFn)
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&spawnCalls); got != 1 {
+		t.Fatalf("spawnFn called %d times for a concurrent Start of the same id, want exactly 1 (no double-spawn)", got)
+	}
+	if errs[0] != nil {
+		t.Fatalf("first startProcess() unexpected error: %v", errs[0])
+	}
+	if errs[1] == nil {
+		t.Fatal("second concurrent startProcess() for the same id succeeded, want an error (already starting)")
+	}
+	if !m.Running("race-plugin") {
+		t.Fatal("Running() = false after the winning Start() completed")
+	}
+}
+
+// TestManager_StartAfterExhaustionRespawns pins the fix that lets a fresh
+// Start cleanly replace an entry whose restart attempts were exhausted
+// (gaveUp==true, current==nil): before the fix, Start saw the stale map
+// entry and always errored "already running" instead of respawning.
+func TestManager_StartAfterExhaustionRespawns(t *testing.T) {
+	m := NewManager(t.TempDir(), nil, testLogger(t),
+		WithPingInterval(5*time.Millisecond),
+		WithMaxConsecutiveFailures(1),
+		WithRestartBackoff([]time.Duration{0}),
+		WithMaxRestartAttempts(1),
+	)
+	t.Cleanup(m.StopAll)
+
+	var mu sync.Mutex
+	firstSpawnDone := false
+	spawnFn := func() (spawnedProcess, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !firstSpawnDone {
+			firstSpawnDone = true
+			return &fakeSpawnedProcess{exited: true}, nil // dies immediately, forcing an exhausting restart loop
+		}
+		return nil, errors.New("respawn always fails") // every restart attempt fails too
+	}
+
+	if err := m.startProcess("exhaust-plugin", spawnFn); err != nil {
+		t.Fatalf("startProcess() unexpected error: %v", err)
+	}
+
+	// Wait for the supervision loop to actually finish giving up (gaveUp),
+	// not just for current to go nil — current is cleared at the start of
+	// handleFailureAndRestart, before the (failing) respawn attempt(s) run,
+	// so polling only Running()==false races the loop's own completion.
+	require.Eventually(t, func() bool {
+		m.mu.Lock()
+		p, ok := m.processes["exhaust-plugin"]
+		m.mu.Unlock()
+		return ok && p.isGaveUp()
+	}, 2*time.Second, 5*time.Millisecond,
+		"plugin's process should have given up once restart attempts are exhausted")
+
+	healthy := &fakeSpawnedProcess{}
+	respawnCalls := 0
+	freshSpawnFn := func() (spawnedProcess, error) {
+		respawnCalls++
+		return healthy, nil
+	}
+	if err := m.startProcess("exhaust-plugin", freshSpawnFn); err != nil {
+		t.Fatalf("startProcess() after exhaustion unexpected error: %v", err)
+	}
+	if respawnCalls != 1 {
+		t.Fatalf("respawn spawnFn called %d times, want 1", respawnCalls)
+	}
+	if !m.Running("exhaust-plugin") {
+		t.Fatal("Running() = false after a fresh Start() following exhaustion")
+	}
+}
+
+// TestManager_DefaultStartTimeoutIs30s pins the fix for bounded startup:
+// Manager.Start previously spawned via a hcplugin.Client with no configured
+// StartTimeout, defaulting to go-plugin's own 1-minute handshake timeout, so
+// a hung plugin binary could block Enable/Install for up to a minute. A
+// fresh Manager must default to a much shorter, explicit bound.
+func TestManager_DefaultStartTimeoutIs30s(t *testing.T) {
+	m := NewManager(t.TempDir(), nil, testLogger(t))
+	if m.startTimeout != 30*time.Second {
+		t.Fatalf("default startTimeout = %v, want 30s", m.startTimeout)
+	}
+}
+
+// TestManager_WithStartTimeoutOverridesDefault pins the escape hatch for
+// callers (and this test file) that need a different bound.
+func TestManager_WithStartTimeoutOverridesDefault(t *testing.T) {
+	m := NewManager(t.TempDir(), nil, testLogger(t), WithStartTimeout(5*time.Second))
+	if m.startTimeout != 5*time.Second {
+		t.Fatalf("startTimeout = %v, want 5s (WithStartTimeout override)", m.startTimeout)
+	}
+}
+
+// TestManager_StartFailsFastOnHandshakeTimeout proves the configured
+// startTimeout actually reaches the underlying hcplugin.Client: an
+// unreasonably short timeout must make Start() return an error quickly
+// instead of ever completing the handshake, even against a real, working
+// fixture binary.
+func TestManager_StartFailsFastOnHandshakeTimeout(t *testing.T) {
+	rec := buildFixtureRecord(t, "kandev-fixture-plugin-timeout")
+	m := NewManager(t.TempDir(), nil, testLogger(t), WithStartTimeout(1*time.Nanosecond))
+	t.Cleanup(m.StopAll)
+
+	started := time.Now()
+	err := m.Start(context.Background(), rec, func(string) pluginsdk.Host { return newFakeHost() })
+	elapsed := time.Since(started)
+
+	if err == nil {
+		t.Fatal("Start() with a 1ns startTimeout unexpectedly succeeded")
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("Start() took %v to fail, want well under go-plugin's 1-minute default handshake timeout", elapsed)
+	}
 }

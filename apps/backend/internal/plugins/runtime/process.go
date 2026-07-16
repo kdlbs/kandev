@@ -185,6 +185,16 @@ func (p *process) restartCount() int {
 	return p.restarts
 }
 
+// isGaveUp reports whether this process has permanently exhausted its
+// restart attempts (its supervision loop has already exited and current is
+// nil). Manager.claimStart uses this to distinguish a genuinely live entry
+// from a dead one that a fresh Start should be allowed to replace.
+func (p *process) isGaveUp() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.gaveUp
+}
+
 // run is the supervision loop: on every tick (pingInterval, or immediately
 // if stopped) it health-checks the current process, driving restart on
 // failure. It returns either when stopCh fires or the process permanently

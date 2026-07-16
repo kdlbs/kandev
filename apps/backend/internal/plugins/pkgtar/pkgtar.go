@@ -34,12 +34,18 @@ const (
 	// maxManifestSize caps how much of manifest.yaml Inspect will read into
 	// memory before giving up.
 	maxManifestSize = 1 << 20 // 1 MiB
+)
 
-	// maxPackageFileSize caps any single file's size during Install.
-	maxPackageFileSize = 200 << 20 // 200 MiB
-
-	// maxPackageTotalSize caps the sum of all file sizes during Install.
-	maxPackageTotalSize = 200 << 20 // 200 MiB
+// maxPackageFileSize caps any single file's size during Install, and
+// maxPackageTotalSize caps the sum of all files' ACTUAL (decompressed)
+// bytes copied during Install — see readArchive. Declared as vars (not
+// consts), mirroring VerifySignature below, purely so this package's own
+// tests can override them to exercise the cap logic against small fixtures
+// instead of allocating real 200MB payloads; production defaults are
+// unchanged.
+var (
+	maxPackageFileSize  int64 = 200 << 20 // 200 MiB
+	maxPackageTotalSize int64 = 200 << 20 // 200 MiB
 )
 
 // Sentinel errors returned (wrapped) by Install. Use errors.Is to check for
@@ -69,10 +75,12 @@ var (
 
 // VerifySignature is an injectable hook for verifying checksums.txt.sig
 // against the checksums.txt bytes it signs. It is nil by default, meaning
-// signature verification is currently a stub: a present checksums.txt.sig
-// entry only sets InstallResult.Signed=true, it is not cryptographically
-// verified. Set this (e.g. to an ed25519 verifier) to enable real
-// verification; a non-nil error from it fails Install.
+// signature verification is not performed: a present checksums.txt.sig
+// entry with no VerifySignature configured leaves InstallResult.Signed
+// false (unverified, not merely "present") — Install still succeeds since
+// signing is optional. Set this (e.g. to an ed25519 verifier) to enable
+// real verification; a non-nil error from it fails Install outright, and a
+// nil error sets InstallResult.Signed=true.
 var VerifySignature func(sig, checksums []byte) error
 
 // InstallResult describes the outcome of a successful Install.
@@ -86,7 +94,9 @@ type InstallResult struct {
 	// Version is Manifest.Version, duplicated here for convenience.
 	Version string
 	// Signed reports whether the package included a checksums.txt.sig
-	// entry. See VerifySignature for what "signed" currently guarantees.
+	// entry AND a configured VerifySignature verifier successfully
+	// verified it. A present-but-unverified signature (no verifier wired)
+	// or a missing signature both leave this false. See VerifySignature.
 	Signed bool
 }
 
@@ -183,8 +193,14 @@ func Install(r io.Reader, destRoot string) (*InstallResult, error) {
 }
 
 // verifyPackageIntegrity requires checksums.txt, verifies every listed
-// file's hash, rejects unlisted files, and (when present) notes
-// checksums.txt.sig and runs VerifySignature.
+// file's hash, rejects unlisted files, and (when present) runs
+// checksums.txt.sig through VerifySignature. signed is true only when a
+// VerifySignature verifier is configured AND it actually succeeded — a
+// present-but-unverified signature (no verifier wired, the default) is
+// reported as unsigned rather than claiming a guarantee nothing checked. A
+// present signature that fails verification fails Install outright (a
+// tampered/invalid signature is worse than no signature at all); signing
+// otherwise remains optional and never blocks an unsigned install.
 func verifyPackageIntegrity(files map[string][]byte) (signed bool, err error) {
 	checksumsData, ok := files[checksumsFileName]
 	if !ok {
@@ -199,13 +215,11 @@ func verifyPackageIntegrity(files map[string][]byte) (signed bool, err error) {
 	}
 
 	sigData, hasSig := files[checksumsSigFileName]
-	if !hasSig {
+	if !hasSig || VerifySignature == nil {
 		return false, nil
 	}
-	if VerifySignature != nil {
-		if err := VerifySignature(sigData, checksumsData); err != nil {
-			return true, fmt.Errorf("pkgtar: signature verification failed: %w", err)
-		}
+	if err := VerifySignature(sigData, checksumsData); err != nil {
+		return false, fmt.Errorf("pkgtar: signature verification failed: %w", err)
 	}
 	return true, nil
 }
@@ -366,6 +380,16 @@ func Remove(destRoot, id string) error {
 // enforcing per-file and total size caps and rejecting any entry that is
 // not a plain file at a clean, package-relative path (no symlinks,
 // hardlinks, absolute paths, or "..").
+//
+// Both caps are enforced against bytes ACTUALLY copied out of the
+// decompressed stream, not the archive-declared hdr.Size: hdr.Size comes
+// from the (attacker-controlled) tar header, and a gzip stream can be
+// crafted to decompress to far more data than a small compressed payload
+// suggests. Every entry's read is independently bounded by
+// io.LimitReader inside readCapped regardless of what hdr.Size claims, and
+// the running `total` is accumulated from len(data) — the real byte count
+// — after that bounded read, so a mismatched/lied Size cannot smuggle more
+// decompressed data past either cap.
 func readArchive(r io.Reader) (map[string][]byte, error) {
 	tr, closeReader, err := openTarGz(r)
 	if err != nil {
@@ -398,15 +422,17 @@ func readArchive(r io.Reader) (map[string][]byte, error) {
 			return nil, err
 		}
 		if hdr.Size > maxPackageFileSize {
+			// Fast pre-check: reject an implausible declared size before
+			// even attempting the (still independently bounded) read.
 			return nil, fmt.Errorf("pkgtar: file %s exceeds max size of %d bytes", name, maxPackageFileSize)
-		}
-		total += hdr.Size
-		if total > maxPackageTotalSize {
-			return nil, fmt.Errorf("pkgtar: package exceeds max total size of %d bytes", maxPackageTotalSize)
 		}
 		data, err := readCapped(tr, maxPackageFileSize)
 		if err != nil {
 			return nil, fmt.Errorf("pkgtar: reading %s: %w", name, err)
+		}
+		total += int64(len(data))
+		if total > maxPackageTotalSize {
+			return nil, fmt.Errorf("pkgtar: package exceeds max total size of %d bytes", maxPackageTotalSize)
 		}
 		files[name] = data
 	}
@@ -437,10 +463,20 @@ func readCapped(r io.Reader, maxSize int64) ([]byte, error) {
 }
 
 // cleanArchivePath cleans and validates a tar entry name: it must not be
-// empty, absolute, or escape the package root via "..".
+// empty, absolute, contain a backslash, or escape the package root via
+// "..". Backslashes are rejected outright rather than treated as a path
+// separator: path.Clean/path.IsAbs only understand "/", so an entry like
+// "server/..\\..\\escape.exe" would pass through unchanged (no leading ".."
+// segment under "/"-only splitting) and could then be reinterpreted as an
+// actual traversal by filepath.Join/filepath.Clean on a host where "\\" is
+// a separator (Windows) — securejoin (the write-sink guard) runs
+// filepath.Join too, so the same risk applies there.
 func cleanArchivePath(name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("%w: empty entry name", ErrPathTraversal)
+	}
+	if strings.ContainsRune(name, '\\') {
+		return "", fmt.Errorf("%w: backslash in entry name %q", ErrPathTraversal, name)
 	}
 	if path.IsAbs(name) {
 		return "", fmt.Errorf("%w: absolute path %q", ErrPathTraversal, name)

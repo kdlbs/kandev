@@ -134,6 +134,77 @@ func TestStoreDeleteRemovesEntry(t *testing.T) {
 	}
 }
 
+// TestStoreDeleteAllRemovesEveryRowForPlugin pins the Uninstall cleanup
+// contract (docs/specs/plugins/spec.md "plugin_state"): a plugin's entire
+// state footprint — across every scope and scope_id — must be removable in
+// one call, so a reinstalled or id-reused plugin never inherits stale state.
+func TestStoreDeleteAllRemovesEveryRowForPlugin(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.Set(ctx, "kandev-plugin-jira", "instance", "", "install_id", json.RawMessage(`"abc"`)); err != nil {
+		t.Fatalf("set instance-scoped: %v", err)
+	}
+	if err := store.Set(ctx, "kandev-plugin-jira", "task", "task_1", "sync_status", json.RawMessage(`"PROJ-1"`)); err != nil {
+		t.Fatalf("set task_1-scoped: %v", err)
+	}
+	if err := store.Set(ctx, "kandev-plugin-jira", "task", "task_2", "sync_status", json.RawMessage(`"PROJ-2"`)); err != nil {
+		t.Fatalf("set task_2-scoped: %v", err)
+	}
+
+	if err := store.DeleteAll(ctx, "kandev-plugin-jira"); err != nil {
+		t.Fatalf("DeleteAll: %v", err)
+	}
+
+	if entries, err := store.List(ctx, "kandev-plugin-jira", "instance", ""); err != nil || len(entries) != 0 {
+		t.Fatalf("instance-scoped entries after DeleteAll = %v (err=%v), want none", entries, err)
+	}
+	if entries, err := store.List(ctx, "kandev-plugin-jira", "task", "task_1"); err != nil || len(entries) != 0 {
+		t.Fatalf("task_1-scoped entries after DeleteAll = %v (err=%v), want none", entries, err)
+	}
+	if entries, err := store.List(ctx, "kandev-plugin-jira", "task", "task_2"); err != nil || len(entries) != 0 {
+		t.Fatalf("task_2-scoped entries after DeleteAll = %v (err=%v), want none", entries, err)
+	}
+}
+
+// TestStoreDeleteAllDoesNotTouchOtherPlugins pins the plugin-isolation
+// invariant: DeleteAll for one plugin must never remove another plugin's
+// state.
+func TestStoreDeleteAllDoesNotTouchOtherPlugins(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.Set(ctx, "kandev-plugin-jira", "task", "task_1", "sync_status", json.RawMessage(`"PROJ-1"`)); err != nil {
+		t.Fatalf("set jira: %v", err)
+	}
+	if err := store.Set(ctx, "kandev-plugin-slack", "task", "task_1", "channel", json.RawMessage(`"#dev"`)); err != nil {
+		t.Fatalf("set slack: %v", err)
+	}
+
+	if err := store.DeleteAll(ctx, "kandev-plugin-jira"); err != nil {
+		t.Fatalf("DeleteAll: %v", err)
+	}
+
+	entries, err := store.List(ctx, "kandev-plugin-slack", "task", "task_1")
+	if err != nil {
+		t.Fatalf("list slack: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("kandev-plugin-slack entries after deleting kandev-plugin-jira = %d, want 1 (untouched)", len(entries))
+	}
+}
+
+// TestStoreDeleteAllMissingPluginIsNotAnError pins that DeleteAll on a
+// plugin with no stored state is a safe no-op.
+func TestStoreDeleteAllMissingPluginIsNotAnError(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	if err := store.DeleteAll(ctx, "kandev-plugin-never-had-state"); err != nil {
+		t.Fatalf("DeleteAll on a plugin with no state: %v", err)
+	}
+}
+
 func TestStoreDeleteMissingIsNotAnError(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

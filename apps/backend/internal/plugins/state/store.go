@@ -106,6 +106,19 @@ func (s *Store) Delete(ctx context.Context, pluginID, scope, scopeID, key string
 	return err
 }
 
+// DeleteAll removes every row for pluginID, across every scope and
+// scope_id. Called by Service.Uninstall so a plugin's entire plugin_state
+// footprint is removed alongside its extracted package and registry
+// record — otherwise a reinstalled (or id-reused) plugin would silently
+// inherit stale state from a previous install. Not an error if pluginID has
+// no stored state.
+func (s *Store) DeleteAll(ctx context.Context, pluginID string) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		DELETE FROM plugin_state WHERE plugin_id = ?
+	`), pluginID)
+	return err
+}
+
 // List returns all state entries for the given plugin/scope/scopeID.
 func (s *Store) List(ctx context.Context, pluginID, scope, scopeID string) ([]StateEntry, error) {
 	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`

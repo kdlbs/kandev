@@ -243,10 +243,20 @@ func (s *Service) UpdateConfig(id string, config map[string]any) error {
 // package is valid but the initial spawn fails, the record is still
 // persisted (status "error") and returned alongside the spawn error, so an
 // operator can fix the issue and retry via Enable.
+//
+// Installing a new version of a plugin id that is currently active/running
+// stops the old process first (activate's own "already running" idempotency
+// check would otherwise skip spawning entirely, leaving the live subprocess
+// running the OLD version's binary even though the record/install_path now
+// point at the new one).
 func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, error) {
 	result, err := pkgtar.Install(r, s.pluginsDir)
 	if err != nil {
 		return nil, err
+	}
+
+	if s.runtime != nil && s.runtime.Running(result.Manifest.ID) {
+		s.runtime.Stop(result.Manifest.ID)
 	}
 
 	rec := &store.Record{
@@ -336,8 +346,13 @@ func validateInstallURL(raw string) error {
 }
 
 // Uninstall stops id's process (if running), removes its extracted package
-// tree from disk, and deletes its record from both the store and the
-// in-memory registry, then notifies the attached Deliverer.
+// tree from disk, deletes its record from both the store and the in-memory
+// registry, and deletes every plugin_state row scoped to id (best-effort —
+// a failure here is logged but does not fail the overall Uninstall, since
+// the package/record are already gone by that point), then notifies the
+// attached Deliverer. Clearing plugin_state matters so a plugin reinstalled
+// under the same id (or an id later reused by a different plugin) never
+// silently inherits stale state from this install.
 func (s *Service) Uninstall(id string) error {
 	if _, err := s.Get(id); err != nil {
 		return err
@@ -352,8 +367,21 @@ func (s *Service) Uninstall(id string) error {
 		return err
 	}
 	s.registry.Remove(id)
+	s.deletePluginState(id)
 	s.notifyDeliverer()
 	return nil
+}
+
+// deletePluginState best-effort removes every plugin_state row for id. A
+// nil state store (e.g. a Service constructed without SetState in tests, or
+// before backendapp finishes wiring) is a silent no-op.
+func (s *Service) deletePluginState(id string) {
+	if s.state == nil {
+		return
+	}
+	if err := s.state.DeleteAll(context.Background(), id); err != nil {
+		s.log.Warn("plugins: failed to delete plugin_state on uninstall", zap.String("plugin_id", id), zap.Error(err))
+	}
 }
 
 // Enable transitions id to StatusActive, spawning its process first if it
@@ -395,13 +423,23 @@ func (s *Service) Disable(id string) error {
 	return nil
 }
 
+// activateStartTimeout bounds the context activate hands to runtime.Start,
+// so a hung plugin binary cannot block Enable/Install indefinitely. The
+// runtime.Manager itself also enforces a startTimeout on the underlying
+// go-plugin handshake (the actual blocking call is not context-aware); this
+// context bound is defense-in-depth and gives Start a chance to short-circuit
+// on ctx.Err() before ever spawning.
+const activateStartTimeout = 30 * time.Second
+
 // activate spawns rec's process (if not already running) and transitions it
 // to StatusActive. If the spawn fails, it best-effort transitions the
 // record to StatusError (ignoring an invalid-transition failure, e.g. from
 // "disabled") and returns the spawn error.
 func (s *Service) activate(rec *store.Record) error {
 	if s.runtime != nil && !s.runtime.Running(rec.ID) {
-		if err := s.runtime.Start(context.Background(), rec, s.hostForPlugin); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
+		defer cancel()
+		if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
 			_ = s.SetStatus(rec.ID, StatusError)
 			return fmt.Errorf("plugins: start %q: %w", rec.ID, err)
 		}

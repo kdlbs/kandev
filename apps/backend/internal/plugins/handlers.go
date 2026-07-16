@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -14,6 +15,15 @@ import (
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
+
+// maxWebhookBodyBytes caps the request body the webhook relay
+// (POST/GET /api/plugins/:id/webhooks/:key) will read before relaying it to
+// a plugin's live subprocess. Without a cap, io.ReadAll(ctx.Request.Body)
+// is an unbounded read an external, unauthenticated webhook caller could
+// use to exhaust backend memory. 4 MiB comfortably covers realistic webhook
+// payloads (GitHub/Slack/Jira event bodies are KB-sized) while bounding
+// worst-case memory use per request.
+const maxWebhookBodyBytes = 4 << 20 // 4 MiB
 
 // Controller holds the plugin HTTP handlers: operator-facing management
 // (install/list/get/config/uninstall/enable/disable), the tools listing,
@@ -295,25 +305,35 @@ func serveInstalledFile(ctx *gin.Context, root, relPath, contentType string) {
 
 // --- External webhook relay ---
 
-// webhook serves POST/GET /api/plugins/:id/webhooks/:key: builds a
-// pluginsdk.WebhookRequest from the inbound HTTP request and relays it to
-// the plugin's live subprocess via Service.InvokeWebhook, then writes back
-// the plugin's WebhookResponse verbatim.
+// webhook serves POST/GET /api/plugins/:id/webhooks/:key: validates :key
+// against the plugin's manifest-declared webhooks (404 for an undeclared
+// key — this endpoint must not blindly relay an arbitrary caller-supplied
+// key to the subprocess), reads the body capped at maxWebhookBodyBytes (413
+// if exceeded), builds a pluginsdk.WebhookRequest from the inbound HTTP
+// request, relays it to the plugin's live subprocess via
+// Service.InvokeWebhook, then writes back the plugin's WebhookResponse
+// verbatim.
 func (c *Controller) webhook(ctx *gin.Context) {
 	id := ctx.Param("id")
-	if _, err := c.svc.Get(id); err != nil {
+	record, err := c.svc.Get(id)
+	if err != nil {
 		c.writeLookupError(ctx, err)
 		return
 	}
 
-	body, err := io.ReadAll(ctx.Request.Body)
-	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+	key := ctx.Param("key")
+	if !manifestDeclaresWebhookKey(record, key) {
+		ctx.JSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("plugin %q has no webhook %q", id, key)})
 		return
 	}
 
+	body, err := readCappedWebhookBody(ctx)
+	if err != nil {
+		return // readCappedWebhookBody already wrote the error response
+	}
+
 	req := &pluginsdk.WebhookRequest{
-		WebhookKey: ctx.Param("key"),
+		WebhookKey: key,
 		Method:     ctx.Request.Method,
 		Query:      ctx.Request.URL.RawQuery,
 		Headers:    flattenHeaders(ctx.Request.Header),
@@ -331,6 +351,39 @@ func (c *Controller) webhook(ctx *gin.Context) {
 	}
 	ctx.Writer.WriteHeader(int(resp.Status))
 	_, _ = ctx.Writer.Write(resp.Body)
+}
+
+// manifestDeclaresWebhookKey reports whether record's manifest declares a
+// webhooks[] entry with the given key.
+func manifestDeclaresWebhookKey(record *store.Record, key string) bool {
+	for _, wh := range record.Webhooks {
+		if wh.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+// readCappedWebhookBody reads ctx.Request.Body bounded at
+// maxWebhookBodyBytes via http.MaxBytesReader, writing the 413 response
+// itself (and returning a non-nil error as a sentinel to the caller) when
+// the body exceeds the cap, so a single external webhook POST cannot
+// exhaust backend memory via an unbounded io.ReadAll.
+func readCappedWebhookBody(ctx *gin.Context) ([]byte, error) {
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxWebhookBodyBytes)
+	body, err := io.ReadAll(ctx.Request.Body)
+	if err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			ctx.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error": fmt.Sprintf("webhook body exceeds max size of %d bytes", maxWebhookBodyBytes),
+			})
+			return nil, err
+		}
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "failed to read request body"})
+		return nil, err
+	}
+	return body, nil
 }
 
 // flattenHeaders converts a net/http.Header (map[string][]string) into the
