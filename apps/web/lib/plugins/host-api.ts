@@ -17,6 +17,7 @@ import {
 } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { Skeleton } from "@kandev/ui/skeleton";
+import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { getBackendConfig } from "@/lib/config";
 import type { AppState } from "@/lib/state/store";
 import type { PluginHostApi } from "./types";
@@ -34,6 +35,11 @@ const PLUGIN_UI: Record<string, unknown> = {
   CardTitle,
   Separator,
   Skeleton,
+  // First-party dialog: lets a plugin open kandev's real create-task modal,
+  // prefilled via initialValues. Unlike the primitives above this is app UI,
+  // not a shadcn primitive — exposed so plugins hand off task creation to the
+  // native flow instead of POSTing directly.
+  TaskCreateDialog,
 };
 
 export function buildHostApi(
