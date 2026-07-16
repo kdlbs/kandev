@@ -138,10 +138,28 @@ function assertFrontmatter(file, markdown) {
  */
 async function assertLocalLinks(docsDir, file, markdown) {
   const source = stripMarkdownCode(markdown);
-  const linkPattern = /!?\[[^\]\n]*\]\(([^)\n]+)\)/g;
+  const linkPattern = /!?\[[^\]\n]*\]\(((?:[^)\n\\]|\\.)+)\)/g;
+  const definitionPattern = /^\s{0,3}\[([^\]\n]+)\]:\s*(\S.*)$/gm;
+  const referencePattern = /!?\[([^\]\n]+)\]\[([^\]\n]*)\]/g;
+  const destinations = [...source.matchAll(linkPattern)].map((match) => match[1]);
+  const definitions = new Map();
 
-  for (const match of source.matchAll(linkPattern)) {
-    const href = parseMarkdownDestination(match[1]);
+  for (const match of source.matchAll(definitionPattern)) {
+    if (match[1].startsWith("^")) continue;
+    const label = normalizeReferenceLabel(match[1]);
+    definitions.set(label, match[2]);
+    destinations.push(match[2]);
+  }
+
+  for (const match of source.matchAll(referencePattern)) {
+    const label = normalizeReferenceLabel(match[2] || match[1]);
+    if (!definitions.has(label)) {
+      throw new Error(`${file} uses undefined Markdown reference: ${label}`);
+    }
+  }
+
+  for (const destination of destinations) {
+    const href = parseMarkdownDestination(destination);
     if (!href || href.startsWith("#") || isExternalDestination(href)) {
       continue;
     }
@@ -185,8 +203,8 @@ function stripMarkdownCode(markdown) {
     const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1];
     if (marker) {
       if (!fence) {
-        fence = marker[0];
-      } else if (marker[0] === fence) {
+        fence = marker;
+      } else if (marker[0] === fence[0] && marker.length >= fence.length) {
         fence = null;
       }
       return "";
@@ -195,6 +213,16 @@ function stripMarkdownCode(markdown) {
   });
 
   return lines.join("\n").replace(/`+[^`\n]*`+/g, "");
+}
+
+/**
+ * Apply CommonMark's case-insensitive, whitespace-collapsing reference label rules.
+ *
+ * @param {string} label Raw reference label.
+ * @returns {string} Normalized reference label.
+ */
+function normalizeReferenceLabel(label) {
+  return label.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 /**

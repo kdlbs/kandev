@@ -44,6 +44,16 @@ Agent adapter E2E tests under `internal/agentctl/server/adapter/e2e` exercise pr
 
 Web tests run with Vitest:
 
+From a fresh worktree, install the locked workspace dependencies first:
+
+```bash
+cd apps
+pnpm install --frozen-lockfile
+cd ..
+```
+
+Then run the full web test target or a focused test from the repository root:
+
 ```bash
 make test-web
 cd apps && pnpm --filter @kandev/web test -- path/to/file.test.tsx

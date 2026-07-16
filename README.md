@@ -151,7 +151,7 @@ cd kandev
 make start
 ```
 
-**Prerequisites:** Go 1.26, Node.js 24, and pnpm 9.15.9 (pinned in `mise.toml`). Docker is optional and needed only for container runtimes.
+**Prerequisites:** Go 1.26.0, Node.js 24, and pnpm 9.15.9 (pinned in `mise.toml`). Docker is optional and needed only for container runtimes.
 
 ## High level architecture
 
@@ -202,7 +202,7 @@ apps/
 ### Prerequisites
 
 - [mise](https://mise.jdx.dev/) for the pinned toolchain in `mise.toml` (`make bootstrap` installs it when missing)
-- Go 1.26, Node.js 24, pnpm 9.15.9 (installed by `make bootstrap`)
+- Go 1.26.0, Node.js 24, pnpm 9.15.9 (installed by `make bootstrap`)
 - Docker (optional)
 
 ### Environment Setup

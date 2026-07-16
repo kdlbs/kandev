@@ -10,7 +10,6 @@ apps/
 ├── web/              # Vite/React SPA frontend (Go boot payload + WS + Zustand)
 ├── desktop/          # Tauri desktop shell around the native runtime
 ├── cli/              # CLI tool (TypeScript)
-├── landing/          # Landing page
 └── packages/         # Shared packages/types
 ```
 

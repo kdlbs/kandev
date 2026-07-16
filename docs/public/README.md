@@ -56,11 +56,16 @@ Pages omitted from `meta.json`, duplicate entries, unknown entries, broken local
 
 ## Validate
 
-Run the dependency-free checks from the Kandev repository root:
+Run the focused dependency-free docs checks from the Kandev repository root:
 
 ```bash
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
+```
+
+The broader repository script suite requires the pinned repository toolchain and installed dependencies:
+
+```bash
 make test-scripts
 ```
 

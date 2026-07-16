@@ -63,10 +63,16 @@ Passthrough agents load MCP differently. Kandev may pass command-line configurat
 
 ## External MCP
 
-The Kandev backend exposes a streamable HTTP endpoint at:
+For a local backend bound to loopback, use:
 
 ```text
-http://<kandev-host>:<backend-port>/mcp
+http://127.0.0.1:<backend-port>/mcp
+```
+
+For a remote deployment, terminate TLS and authentication at a secure reverse proxy and use:
+
+```text
+https://<kandev-host>/mcp
 ```
 
 SSE compatibility endpoints are available at `/mcp/sse` and `/mcp/message`. **Settings > External MCP** provides client-specific configuration snippets.

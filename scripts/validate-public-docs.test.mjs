@@ -209,6 +209,84 @@ test("ignores external, anchor-only, and fenced-code links", async () => {
   await assert.doesNotReject(validatePublicDocs(dir));
 });
 
+test("ignores links inside inline code and nested shorter fences", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        `Use \`[example](inline-missing.md)\` in prose.
+
+\`\`\`\`md
+\`\`\`md
+[Example only](fenced-missing.md)
+\`\`\`
+\`\`\`\``,
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("accepts escaped parentheses in local link destinations", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace("Page body.", "[Guide](guide\\(1\\).md)"),
+      "guide(1).md": validPage,
+    },
+    { pages: ["index", "guide(1)"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("validates reference-style link definitions", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        "[Guide][user guide]\n\n[user guide]: missing.md",
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md links to missing local target: missing.md/,
+  );
+});
+
+test("rejects undefined full reference-style links", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace("Page body.", "[Guide][missing guide]"),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md uses undefined Markdown reference: missing guide/,
+  );
+});
+
+test("checks local links in README files", async () => {
+  const dir = await createDocs(
+    {
+      "README.md": "# Contributing\n\n[Missing](missing.md)",
+      "index.md": validPage,
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /README.md links to missing local target: missing.md/,
+  );
+});
+
 test("rejects site-root links because public docs use relative sources", async () => {
   const dir = await createDocs(
     {
