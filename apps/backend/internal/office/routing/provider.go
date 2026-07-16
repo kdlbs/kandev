@@ -291,12 +291,6 @@ func executionProfileCatalog(
 	return out, nil
 }
 
-func (p *Provider) executionProfilesForAgent(
-	ctx context.Context, workspaceID string, agent *settingsmodels.Agent,
-) ([]ExecutionProfileSummary, error) {
-	return executionProfilesForAgent(ctx, workspaceID, p.profiles, p.registry, agent)
-}
-
 func executionProfilesForAgent(
 	ctx context.Context, workspaceID string,
 	profiles ExecutionProfileStore, reg *registry.Registry,
