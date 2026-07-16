@@ -5,8 +5,8 @@ type AppSidebarResizeHandleProps = {
 };
 
 /**
- * Hairline drag handle on the right edge of the expanded AppSidebar.
- * Hover-visible only; widens slightly when active for affordance.
+ * Drag handle centered over the right edge of the expanded AppSidebar.
+ * The full hit area highlights to match the dockview resize sashes.
  */
 export function AppSidebarResizeHandle({ onMouseDown }: AppSidebarResizeHandleProps) {
   return (
@@ -15,11 +15,7 @@ export function AppSidebarResizeHandle({ onMouseDown }: AppSidebarResizeHandlePr
       aria-label="Resize sidebar"
       onMouseDown={onMouseDown}
       tabIndex={-1}
-      className="absolute right-0 top-0 h-full w-1.5 cursor-ew-resize group flex items-center justify-center"
-    >
-      {/* Transparent at rest — the aside's own border-r is the visible edge.
-          Colouring this too would double the hairline. Highlights on hover. */}
-      <div className="h-full w-px bg-transparent group-hover:bg-primary/60 transition-colors" />
-    </button>
+      className="absolute -right-px top-0 z-10 h-full w-1.5 translate-x-1/2 cursor-ew-resize bg-transparent transition-colors hover:bg-primary active:bg-primary"
+    />
   );
 }
