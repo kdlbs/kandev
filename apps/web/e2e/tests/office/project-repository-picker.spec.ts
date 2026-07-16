@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/office-fixture";
 
 /**
@@ -95,6 +97,38 @@ test.describe("Project repository picker", () => {
     await searchInput.fill("/Users/example/some-project");
     await expect(testPage.getByTestId("project-add-custom")).toBeVisible({ timeout: 5_000 });
     await expect(testPage.getByTestId("project-add-custom")).toContainText(/Add as local path/i);
+  });
+
+  test("a near-miss workspace suggestion does not block adding the literal path", async ({
+    apiClient,
+    testPage,
+    officeSeed,
+    backend,
+  }) => {
+    const projectId = await createProject(apiClient, officeSeed.workspaceId, "Repo Picker Overlap");
+    // Register a workspace repo whose path is a superstring of the one
+    // we'll type — the classic /work/app vs /work/app-old overlap.
+    const oldPath = path.join(backend.tmpDir, "repos", "app-old");
+    fs.mkdirSync(oldPath, { recursive: true });
+    await apiClient.createRepository(officeSeed.workspaceId, oldPath, "main", { name: "app-old" });
+
+    await testPage.goto(`/office/projects/${projectId}`);
+    await testPage.getByTestId("project-add-repository").click();
+    const searchInput = testPage.getByPlaceholder(/Search or paste a URL/i);
+    await expect(searchInput).toBeVisible();
+
+    const newPath = path.join(backend.tmpDir, "repos", "app");
+    await searchInput.fill(newPath);
+
+    // Both the near-miss suggestion and the free-form row must be offered.
+    await expect(testPage.getByRole("option", { name: /app-old/ })).toBeVisible();
+    const customRow = testPage.getByTestId("project-add-custom");
+    await expect(customRow).toBeVisible();
+    await customRow.click();
+
+    // The literal path is attached — not the near-miss suggestion.
+    const chip = testPage.getByTestId("project-repo-chip");
+    await expect(chip).toHaveAttribute("data-repository-value", newPath, { timeout: 10_000 });
   });
 
   // The create-project dialog embeds the same picker as the detail page.
