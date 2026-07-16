@@ -114,7 +114,33 @@ func TestServiceSync_MultipleVersionDirsPicksGreatestAndSkipsOthers(t *testing.T
 		t.Fatalf("Get(): %v", err)
 	}
 	if rec.Version != "2.0.0" {
-		t.Fatalf("registered Version = %q, want %q (lexically greatest)", rec.Version, "2.0.0")
+		t.Fatalf("registered Version = %q, want %q (semver-greatest)", rec.Version, "2.0.0")
+	}
+}
+
+// TestServiceSync_MultipleVersionDirsPicksSemverGreatestNotLexical pins the
+// fix for a plain lexical sort picking the wrong "latest" version: "9.0.0"
+// sorts after "10.0.0" as a string, but 10.0.0 is the actually-newer
+// semver.
+func TestServiceSync_MultipleVersionDirsPicksSemverGreatestNotLexical(t *testing.T) {
+	svc, dir, _, _ := newTestServiceWithDir(t)
+	writeManifestOnly(t, dir, "kandev-plugin-semver", "9.0.0")
+	writeManifestOnly(t, dir, "kandev-plugin-semver", "10.0.0")
+
+	result, err := svc.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("Sync() unexpected error: %v", err)
+	}
+	if len(result.Added) != 1 || result.Added[0] != "kandev-plugin-semver" {
+		t.Fatalf("Sync().Added = %v, want [kandev-plugin-semver]", result.Added)
+	}
+
+	rec, err := svc.Get("kandev-plugin-semver")
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	if rec.Version != "10.0.0" {
+		t.Fatalf("registered Version = %q, want %q (semver-greatest, not lexically greatest)", rec.Version, "10.0.0")
 	}
 }
 

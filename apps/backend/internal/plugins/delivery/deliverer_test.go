@@ -21,12 +21,21 @@ import (
 type fakeTransport struct {
 	mu      sync.Mutex
 	handler func(pluginID string, e *pluginsdk.Event) error
+	// ctxHandler, when set, takes priority over handler and additionally
+	// receives DeliverEvent's ctx — for tests that need to observe/react to
+	// ctx cancellation (e.g. proving an in-flight attempt is interrupted by
+	// worker stop()).
+	ctxHandler func(ctx context.Context, pluginID string, e *pluginsdk.Event) error
 }
 
-func (f *fakeTransport) DeliverEvent(_ context.Context, pluginID string, e *pluginsdk.Event) error {
+func (f *fakeTransport) DeliverEvent(ctx context.Context, pluginID string, e *pluginsdk.Event) error {
 	f.mu.Lock()
+	ch := f.ctxHandler
 	h := f.handler
 	f.mu.Unlock()
+	if ch != nil {
+		return ch(ctx, pluginID, e)
+	}
 	if h == nil {
 		return nil
 	}
@@ -37,6 +46,12 @@ func (f *fakeTransport) setHandler(h func(pluginID string, e *pluginsdk.Event) e
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.handler = h
+}
+
+func (f *fakeTransport) setCtxHandler(h func(ctx context.Context, pluginID string, e *pluginsdk.Event) error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ctxHandler = h
 }
 
 // fakeLister is a mutable, concurrency-safe PluginLister for tests.
@@ -361,4 +376,68 @@ func TestDeliverer_RefreshStopsDeliveryWhenPluginRemoved(t *testing.T) {
 
 	_ = eventBus.Publish(context.Background(), "task.updated", bus.NewEvent("task.updated", "test", map[string]interface{}{}))
 	requireTimeout(t, arrivedCh, 150*time.Millisecond, "delivery after plugin removed from active set")
+}
+
+// TestDeliverer_RefreshReturnsPromptlyDuringInFlightDelivery pins the fix
+// for Refresh blocking on a worker's in-flight delivery attempt: before the
+// fix, attemptDeliver's ctx was context.Background() (only bounded by
+// requestTimeout, here deliberately set far longer than the test's
+// timeout), and stop() waited on that same attempt to finish before
+// returning — so Refresh (which calls stop() for a removed worker) could
+// block for the full requestTimeout. Service.handleStatusChange calls
+// Refresh from the runtime supervision goroutine, which must never block
+// (runtime.NewManager's contract). The fix derives attemptDeliver's ctx
+// from a per-worker context canceled by stop(), so the in-flight attempt
+// is interrupted immediately instead.
+func TestDeliverer_RefreshReturnsPromptlyDuringInFlightDelivery(t *testing.T) {
+	entered := make(chan struct{})
+	released := make(chan struct{})
+	var sawCancel int32
+
+	transport := &fakeTransport{}
+	transport.setCtxHandler(func(ctx context.Context, _ string, _ *pluginsdk.Event) error {
+		close(entered)
+		select {
+		case <-ctx.Done():
+			atomic.AddInt32(&sawCancel, 1)
+			return ctx.Err()
+		case <-released:
+			return nil
+		}
+	})
+
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	lister := &fakeLister{}
+	lister.set(PluginRecord{ID: "plug1", EventSubjects: []string{"task.*"}, Status: store.StatusActive})
+
+	d := newTestDeliverer(t, eventBus, transport, lister, WithRequestTimeout(30*time.Second))
+	d.Refresh()
+
+	_ = eventBus.Publish(context.Background(), "task.created", bus.NewEvent("task.created", "test", map[string]interface{}{}))
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the delivery attempt to start")
+	}
+
+	// Remove the plugin so Refresh must tear its worker down while the
+	// delivery attempt above is still blocked inside the transport call.
+	lister.set()
+
+	done := make(chan struct{})
+	go func() {
+		d.Refresh()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Refresh() did not return promptly while a delivery was in flight (requestTimeout was 30s)")
+	}
+
+	if atomic.LoadInt32(&sawCancel) != 1 {
+		t.Fatal("in-flight delivery attempt was never canceled by worker stop()")
+	}
+	close(released)
 }

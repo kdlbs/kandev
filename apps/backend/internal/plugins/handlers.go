@@ -345,11 +345,40 @@ func (c *Controller) webhook(ctx *gin.Context) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
+	writeWebhookResponse(ctx, resp)
+}
 
+// webhookStatusForResponse validates a plugin-supplied WebhookResponse.Status
+// against the HTTP status code range net/http's WriteHeader accepts
+// ([100, 599] — RFC 9110 informational/success/redirection/client
+// error/server error classes). ok is false for anything outside that range,
+// which gin's ResponseWriter.WriteHeader panics on (recovered into a bare
+// 500 with no useful body by gin's recovery middleware) — a single
+// misbehaving plugin should get a clear 502 instead of taking down the
+// whole request with a panic.
+func webhookStatusForResponse(status int32) (int, bool) {
+	if status < 100 || status > 599 {
+		return 0, false
+	}
+	return int(status), true
+}
+
+// writeWebhookResponse turns a plugin's WebhookResponse into the outbound
+// HTTP response: an out-of-range Status is rejected as 502 (see
+// webhookStatusForResponse) before ever reaching ctx.Writer.WriteHeader;
+// otherwise headers, status, and body are relayed verbatim.
+func writeWebhookResponse(ctx *gin.Context, resp *pluginsdk.WebhookResponse) {
+	status, ok := webhookStatusForResponse(resp.Status)
+	if !ok {
+		ctx.JSON(http.StatusBadGateway, gin.H{
+			"error": fmt.Sprintf("plugin returned invalid webhook status %d", resp.Status),
+		})
+		return
+	}
 	for k, v := range resp.Headers {
 		ctx.Writer.Header().Set(k, v)
 	}
-	ctx.Writer.WriteHeader(int(resp.Status))
+	ctx.Writer.WriteHeader(status)
 	_, _ = ctx.Writer.Write(resp.Body)
 }
 

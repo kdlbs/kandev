@@ -262,6 +262,93 @@ func TestManager_ConcurrentStartOnlySpawnsOnce(t *testing.T) {
 	}
 }
 
+// TestManager_StopDuringStartAbortsAndLeavesNoOrphanProcess pins the fix for
+// the Stop-during-Start orphan race: Stop previously only consulted
+// m.processes, so a Disable/Uninstall racing an in-flight Start was a
+// silent no-op — the spawn then completed and inserted a live supervised
+// process for a plugin whose record/files may already be gone by the time
+// the spawn finished. claimStart's "starting" reservation now doubles as
+// the hook Stop uses to request an abort: startProcess checks it right
+// after the (slow) spawn succeeds and, if set, kills the freshly spawned
+// process and never inserts it into m.processes.
+func TestManager_StopDuringStartAbortsAndLeavesNoOrphanProcess(t *testing.T) {
+	m := NewManager(t.TempDir(), nil, testLogger(t))
+	t.Cleanup(m.StopAll)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var closeOnce sync.Once
+	spawned := &fakeSpawnedProcess{}
+
+	spawnFn := func() (spawnedProcess, error) {
+		closeOnce.Do(func() { close(entered) })
+		<-release // hold the spawn open until the test has called Stop
+		return spawned, nil
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- m.startProcess("racing-plugin", spawnFn)
+	}()
+
+	<-entered // the spawn is in flight, before startProcess has registered anything
+
+	m.Stop("racing-plugin") // races the in-flight Start: must not be a no-op
+	close(release)          // let the spawn finish
+
+	err := <-errCh
+	if err == nil {
+		t.Fatal("startProcess() expected an error when Stop() raced an in-flight Start, got nil")
+	}
+	if m.Running("racing-plugin") {
+		t.Fatal("Running() = true after Stop() raced an in-flight Start; an orphan process was left registered")
+	}
+	if !spawned.isKilled() {
+		t.Fatal("the spawned process was never killed after Stop() raced an in-flight Start (orphan subprocess)")
+	}
+}
+
+// TestManager_StopAllDuringStartAbortsAndLeavesNoOrphanProcess is the same
+// race as TestManager_StopDuringStartAbortsAndLeavesNoOrphanProcess, but
+// through StopAll (graceful shutdown), which previously only iterated
+// m.processes too.
+func TestManager_StopAllDuringStartAbortsAndLeavesNoOrphanProcess(t *testing.T) {
+	m := NewManager(t.TempDir(), nil, testLogger(t))
+	t.Cleanup(m.StopAll)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var closeOnce sync.Once
+	spawned := &fakeSpawnedProcess{}
+
+	spawnFn := func() (spawnedProcess, error) {
+		closeOnce.Do(func() { close(entered) })
+		<-release
+		return spawned, nil
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- m.startProcess("racing-plugin-2", spawnFn)
+	}()
+
+	<-entered
+
+	m.StopAll()
+	close(release)
+
+	err := <-errCh
+	if err == nil {
+		t.Fatal("startProcess() expected an error when StopAll() raced an in-flight Start, got nil")
+	}
+	if m.Running("racing-plugin-2") {
+		t.Fatal("Running() = true after StopAll() raced an in-flight Start; an orphan process was left registered")
+	}
+	if !spawned.isKilled() {
+		t.Fatal("the spawned process was never killed after StopAll() raced an in-flight Start (orphan subprocess)")
+	}
+}
+
 // TestManager_StartAfterExhaustionRespawns pins the fix that lets a fresh
 // Start cleanly replace an entry whose restart attempts were exhausted
 // (gaveUp==true, current==nil): before the fix, Start saw the stale map

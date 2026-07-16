@@ -8,7 +8,10 @@ import (
 	"strings"
 	"sync"
 
+	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 // idPattern mirrors internal/plugins/manifest's plugin id pattern:
@@ -20,12 +23,23 @@ import (
 // I/O regardless of how it got here.
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
 
+// dotConfigSuffix is the suffix a plugin id must never end with: id+".yml"
+// would then collide with the "<id>.config.yml" naming convention
+// isRecordFile uses to distinguish a plugin's own record from another
+// plugin's operator config, silently hiding the record from List() (see
+// isRecordFile).
+const dotConfigSuffix = ".config"
+
 // safePluginID rejects any id that is not a single, clean path segment
-// matching idPattern. It is the guard called by every FSStore method
-// before recordPath/configPath build a path from id.
+// matching idPattern, or that ends in ".config" (see dotConfigSuffix). It is
+// the guard called by every FSStore method before recordPath/configPath
+// build a path from id.
 func safePluginID(id string) error {
 	if !idPattern.MatchString(id) {
 		return fmt.Errorf("plugins: invalid plugin id %q", id)
+	}
+	if strings.HasSuffix(id, dotConfigSuffix) {
+		return fmt.Errorf("plugins: invalid plugin id %q: must not end in %q", id, dotConfigSuffix)
 	}
 	return nil
 }
@@ -35,6 +49,7 @@ func safePluginID(id string) error {
 // implements Store.
 type FSStore struct {
 	dir string
+	log *logger.Logger
 
 	mu sync.Mutex
 }
@@ -42,6 +57,13 @@ type FSStore struct {
 // NewFSStore returns a store that persists records under dir.
 func NewFSStore(dir string) *FSStore {
 	return &FSStore{dir: dir}
+}
+
+// SetLogger wires a logger List uses to warn about a corrupt/unreadable
+// record file it has to skip. Optional: a nil (default, unset) logger makes
+// List silently skip instead of warning.
+func (s *FSStore) SetLogger(log *logger.Logger) {
+	s.log = log
 }
 
 // recordPath returns the on-disk path for a plugin's installation record.
@@ -57,7 +79,9 @@ func (s *FSStore) configPath(id string) string {
 
 // writeRecord marshals record to YAML and writes it to disk, creating the
 // store directory if needed. Used both to create a fresh record (Install)
-// and to persist updates to an existing one (Save).
+// and to persist updates to an existing one (Save). The write is atomic
+// (tmp file + rename within the same directory) so a crash mid-write can
+// never leave a half-written "<id>.yml" for List()/Get() to trip over.
 func (s *FSStore) writeRecord(record *Record) error {
 	if err := safePluginID(record.ID); err != nil {
 		return err
@@ -69,9 +93,48 @@ func (s *FSStore) writeRecord(record *Record) error {
 	if err != nil {
 		return fmt.Errorf("marshal plugin record: %w", err)
 	}
-	if err := os.WriteFile(s.recordPath(record.ID), data, 0o600); err != nil {
+	if err := writeFileAtomic(s.dir, s.recordPath(record.ID), data, 0o600); err != nil {
 		return fmt.Errorf("write plugin record: %w", err)
 	}
+	return nil
+}
+
+// writeFileAtomic writes data to path via a temp file created in dir (the
+// same filesystem/directory as path, so the final os.Rename is atomic) and
+// an fsync-then-rename, so a reader (List/Get) never observes a
+// partially-written file. The temp file is removed on any failure before
+// the rename.
+func writeFileAtomic(dir, path string, data []byte, mode os.FileMode) error {
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	succeeded := false
+	defer func() {
+		if !succeeded {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("sync temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+	succeeded = true
 	return nil
 }
 
@@ -94,7 +157,12 @@ func (s *FSStore) Get(id string) (*Record, error) {
 	return &record, nil
 }
 
-// List returns every installed plugin's record.
+// List returns every installed plugin's record. A record file that fails to
+// read or parse (corrupt, stray, or written by a future incompatible
+// version) is skipped and warned about rather than failing List
+// wholesale — the whole plugin subsystem's boot path depends on List()
+// succeeding (Registry.Load), so one bad file must not disable every other
+// installed plugin.
 func (s *FSStore) List() ([]*Record, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
@@ -112,11 +180,22 @@ func (s *FSStore) List() ([]*Record, error) {
 		id := strings.TrimSuffix(entry.Name(), ".yml")
 		record, err := s.Get(id)
 		if err != nil {
-			return nil, err
+			s.warnSkippedRecord(id, err)
+			continue
 		}
 		records = append(records, record)
 	}
 	return records, nil
+}
+
+// warnSkippedRecord logs (if a logger is wired via SetLogger) that List
+// skipped id's record file rather than failing outright.
+func (s *FSStore) warnSkippedRecord(id string, err error) {
+	if s.log == nil {
+		return
+	}
+	s.log.Warn("plugins: skipping unreadable plugin record",
+		zap.String("plugin_id", id), zap.Error(err))
 }
 
 // isRecordFile reports whether name is a plugin record file ("{id}.yml"),

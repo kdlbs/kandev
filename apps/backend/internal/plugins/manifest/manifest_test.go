@@ -99,6 +99,24 @@ func TestValidate_RejectsBadIDPattern(t *testing.T) {
 	}
 }
 
+// TestValidate_RejectsIDEndingInDotConfig pins the fix for an id whose
+// "<id>.yml" record filename would collide with FSStore's
+// "<id>.config.yml" operator-config naming convention (see
+// store.isRecordFile): registration must reject this shape up front rather
+// than let it silently vanish from FSStore.List() after install.
+func TestValidate_RejectsIDEndingInDotConfig(t *testing.T) {
+	m := validManifest(t)
+	m.ID = "foo.config"
+
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("Validate() expected error for an id ending in \".config\", got nil")
+	}
+	if !strings.Contains(err.Error(), "id") {
+		t.Fatalf("Validate() error = %q, want it to mention the id", err.Error())
+	}
+}
+
 func TestValidate_RejectsInvalidManifests(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -160,6 +178,31 @@ func TestValidate_RejectsInvalidManifests(t *testing.T) {
 			name:    "unsupported api_version",
 			mutate:  func(m *Manifest) { m.APIVersion = 2 },
 			wantErr: "api_version",
+		},
+		{
+			name:    "empty version",
+			mutate:  func(m *Manifest) { m.Version = "" },
+			wantErr: "version",
+		},
+		{
+			name:    "version is a single dot",
+			mutate:  func(m *Manifest) { m.Version = "." },
+			wantErr: "version",
+		},
+		{
+			name:    "version contains a path separator",
+			mutate:  func(m *Manifest) { m.Version = "1.0/0" },
+			wantErr: "version",
+		},
+		{
+			name:    "version contains a traversal segment",
+			mutate:  func(m *Manifest) { m.Version = "../../etc" },
+			wantErr: "version",
+		},
+		{
+			name:    "version contains whitespace",
+			mutate:  func(m *Manifest) { m.Version = "1.0.0 " },
+			wantErr: "version",
 		},
 	}
 

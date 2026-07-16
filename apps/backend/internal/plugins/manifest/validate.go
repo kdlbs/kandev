@@ -36,6 +36,7 @@ var validUISurfaces = map[string]bool{
 func (m *Manifest) Validate() error {
 	var errs []error
 	errs = append(errs, m.validateIdentity()...)
+	errs = append(errs, m.validateVersion()...)
 	errs = append(errs, m.validateRuntimeType()...)
 	if m.IsManaged() {
 		errs = append(errs, m.validateManagedRuntime()...)
@@ -50,16 +51,50 @@ func (m *Manifest) Validate() error {
 	return errors.Join(errs...)
 }
 
+// dotConfigSuffix mirrors store.dotConfigSuffix: an id ending in ".config"
+// would make its "<id>.yml" record filename collide with FSStore's
+// "<id>.config.yml" operator-config naming convention (store.isRecordFile),
+// silently hiding the record from FSStore.List(). Rejected here too so
+// registration fails fast instead of relying solely on the store-level
+// guard.
+const dotConfigSuffix = ".config"
+
 // validateIdentity checks id pattern and api_version.
 func (m *Manifest) validateIdentity() []error {
 	var errs []error
 	if !idPattern.MatchString(m.ID) {
 		errs = append(errs, fmt.Errorf("invalid plugin id %q: must match %s", m.ID, idPattern.String()))
+	} else if strings.HasSuffix(m.ID, dotConfigSuffix) {
+		errs = append(errs, fmt.Errorf("invalid plugin id %q: must not end in %q", m.ID, dotConfigSuffix))
 	}
 	if m.APIVersion != supportedAPIVersion {
 		errs = append(errs, fmt.Errorf("unsupported api_version %d: only %d is supported", m.APIVersion, supportedAPIVersion))
 	}
 	return errs
+}
+
+// validateVersion checks that version is a non-empty, path-safe single path
+// segment: it is used as a filesystem directory name both at install time
+// (pkgtar.extractPackage joins destRoot/<id>/<version>) and to resolve an
+// already-installed plugin's data on disk, so an empty, "."/".."-only, or
+// separator-containing value would either produce a confusing deep failure
+// (securejoin does reject traversal, but only after a misleading top-level
+// error) or silently collide with another version's directory.
+func (m *Manifest) validateVersion() []error {
+	v := m.Version
+	if v == "" {
+		return []error{errors.New("version must not be empty")}
+	}
+	if strings.TrimSpace(v) != v || strings.ContainsAny(v, " \t\n\r") {
+		return []error{fmt.Errorf("version %q must not contain whitespace", v)}
+	}
+	if strings.ContainsAny(v, "/\\") {
+		return []error{fmt.Errorf("version %q must be a single path segment (no \"/\" or \"\\\")", v)}
+	}
+	if v == "." || v == ".." {
+		return []error{fmt.Errorf("version %q must not be %q or %q", v, ".", "..")}
+	}
+	return nil
 }
 
 // validateRuntimeType checks that runtime.type, when set, is the only

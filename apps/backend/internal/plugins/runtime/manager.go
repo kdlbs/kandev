@@ -107,6 +107,17 @@ type Manager struct {
 	// across the slow spawn itself, so concurrent Starts for *different* ids
 	// are never serialized against each other.
 	starting map[string]struct{}
+	// stopRequested tracks plugin ids Stop/StopAll was asked to stop while
+	// they were still mid-Start (present in starting, not yet in
+	// processes) — the Stop-during-Start orphan-process race: without this,
+	// Stop/StopAll only consult processes, so a Disable/Uninstall racing an
+	// in-flight spawn is a silent no-op, and the spawn then completes and
+	// inserts a live supervised process for a plugin whose record/files may
+	// already be gone. startProcess checks and consumes this flag
+	// (consumeStopRequested) right after a successful spawn, before
+	// inserting into processes; releaseStart always clears it afterward so
+	// it never leaks onto a later, unrelated Start for the same id.
+	stopRequested map[string]struct{}
 }
 
 // NewManager returns a Manager rooted at pluginsDir (the same directory
@@ -190,10 +201,33 @@ func (m *Manager) startProcess(id string, spawnFn func() (spawnedProcess, error)
 		return fmt.Errorf("plugins/runtime: start plugin %q: %w", id, err)
 	}
 
+	// A Stop/StopAll racing this Start (see stopRequested's doc comment)
+	// only had a chance to record the request while id was still in
+	// m.starting — which it still is here, since releaseStart hasn't run
+	// yet. Check and consume it before ever inserting into m.processes, so
+	// the caller that asked to stop id is never silently ignored.
+	if m.consumeStopRequested(id) {
+		p.stop()
+		return fmt.Errorf("plugins/runtime: plugin %q was stopped while starting, aborting", id)
+	}
+
 	m.mu.Lock()
 	m.processes[id] = p
 	m.mu.Unlock()
 	return nil
+}
+
+// consumeStopRequested reports whether Stop/StopAll requested id be
+// stopped while it was still starting, clearing the flag either way so it
+// never leaks onto a later Start for the same id.
+func (m *Manager) consumeStopRequested(id string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.stopRequested[id]; ok {
+		delete(m.stopRequested, id)
+		return true
+	}
+	return false
 }
 
 // claimStart atomically checks that id has no live process and no Start
@@ -227,20 +261,36 @@ func (m *Manager) claimStart(id string) error {
 }
 
 // releaseStart clears id's reservation in m.starting, whether startProcess
-// succeeded or failed.
+// succeeded or failed. Also clears any stopRequested entry for id: if
+// startProcess's own consumeStopRequested call didn't already consume one
+// (e.g. Stop raced in just after m.processes[id] was set, so it took the
+// normal already-running stop path instead), it must not leak onto a
+// later, unrelated Start for the same id.
 func (m *Manager) releaseStart(id string) {
 	m.mu.Lock()
 	delete(m.starting, id)
+	delete(m.stopRequested, id)
 	m.mu.Unlock()
 }
 
 // Stop kills and stops supervising the process for id, if any. A no-op if
-// id is not currently running.
+// id is not currently running AND not currently starting. If id is
+// currently mid-Start (spawnFuncFor resolved, spawning, not yet inserted
+// into processes — see the starting/stopRequested doc comments), the
+// request is recorded so startProcess aborts and kills the just-spawned
+// process itself once the spawn completes, instead of silently leaving an
+// orphan process registered.
 func (m *Manager) Stop(id string) {
 	m.mu.Lock()
 	p, ok := m.processes[id]
 	if ok {
 		delete(m.processes, id)
+	}
+	if _, starting := m.starting[id]; starting {
+		if m.stopRequested == nil {
+			m.stopRequested = make(map[string]struct{})
+		}
+		m.stopRequested[id] = struct{}{}
 	}
 	m.mu.Unlock()
 	if !ok {
@@ -249,16 +299,19 @@ func (m *Manager) Stop(id string) {
 	p.stop()
 }
 
-// StopAll stops every currently-running plugin. Intended for graceful
-// backend shutdown (addCleanup).
+// StopAll stops every currently-running or currently-starting plugin.
+// Intended for graceful backend shutdown (addCleanup).
 func (m *Manager) StopAll() {
 	m.mu.Lock()
-	ids := make([]string, 0, len(m.processes))
+	ids := make(map[string]struct{}, len(m.processes)+len(m.starting))
 	for id := range m.processes {
-		ids = append(ids, id)
+		ids[id] = struct{}{}
+	}
+	for id := range m.starting {
+		ids[id] = struct{}{}
 	}
 	m.mu.Unlock()
-	for _, id := range ids {
+	for id := range ids {
 		m.Stop(id)
 	}
 }

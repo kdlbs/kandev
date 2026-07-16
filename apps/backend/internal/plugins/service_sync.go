@@ -127,8 +127,9 @@ func (s *Service) scanDirSideloads() (added []string, errs []SyncError) {
 }
 
 // chooseSideloadVersion lists id's version directories under pluginsDir and
-// returns the lexically greatest one containing a manifest.yaml, plus every
-// other candidate (to be reported as skipped by the caller).
+// returns the semver-greatest one (manifest.CompareVersions) containing a
+// manifest.yaml, plus every other candidate (to be reported as skipped by
+// the caller).
 func (s *Service) chooseSideloadVersion(id string) (version string, skipped []string, err error) {
 	versionEntries, err := os.ReadDir(filepath.Join(s.pluginsDir, id))
 	if err != nil {
@@ -152,7 +153,9 @@ func (s *Service) chooseSideloadVersion(id string) (version string, skipped []st
 	if len(candidates) == 0 {
 		return "", nil, nil
 	}
-	sort.Strings(candidates)
+	sort.Slice(candidates, func(i, j int) bool {
+		return manifest.CompareVersions(candidates[i], candidates[j]) < 0
+	})
 	chosen := candidates[len(candidates)-1]
 	return chosen, candidates[:len(candidates)-1], nil
 }

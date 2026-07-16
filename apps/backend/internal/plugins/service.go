@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -68,6 +70,13 @@ type Service struct {
 	runtime   PluginRuntime
 	secrets   SecretRevealer
 
+	// kandevVersion is the currently running kandev build version, used to
+	// enforce a package's manifest.min_kandev_version at Install (see
+	// SetKandevVersion / checkMinKandevVersion). Empty (the default) means
+	// no enforcement — no caller currently wires this in production; see
+	// SetKandevVersion's doc comment.
+	kandevVersion string
+
 	httpClient *http.Client
 }
 
@@ -118,6 +127,18 @@ func (s *Service) StateStore() *state.Store {
 // SetSecrets wires the secret revealer Provide was constructed with.
 func (s *Service) SetSecrets(v SecretRevealer) {
 	s.secrets = v
+}
+
+// SetKandevVersion wires the currently running kandev build version,
+// enabling Install to enforce a package's manifest.min_kandev_version
+// (checkMinKandevVersion): a package requiring a newer kandev is rejected
+// rather than installed and left to fail confusingly at spawn time. Not
+// currently called by Provide — the running build version needs to be
+// threaded down from internal/backendapp's ldflags-injected Version, which
+// is outside this package; until a caller wires it, min_kandev_version
+// remains parsed and stored but unenforced (the pre-existing behavior).
+func (s *Service) SetKandevVersion(v string) {
+	s.kandevVersion = v
 }
 
 // SetRuntime wires the runtime.Manager Provide constructed.
@@ -248,14 +269,24 @@ func (s *Service) UpdateConfig(id string, config map[string]any) error {
 // stops the old process first (activate's own "already running" idempotency
 // check would otherwise skip spawning entirely, leaving the live subprocess
 // running the OLD version's binary even though the record/install_path now
-// point at the new one).
+// point at the new one). If persisting the fresh record then fails,
+// rollbackFailedInstall removes only the just-extracted version directory
+// (every other installed version, and the plugin's writable data directory,
+// survive) and restarts the previous version's process, so a failed upgrade
+// attempt never destroys a previously working install.
 func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, error) {
 	result, err := pkgtar.Install(r, s.pluginsDir)
 	if err != nil {
 		return nil, err
 	}
+	if err := s.checkMinKandevVersion(result.Manifest.MinKandevVersion); err != nil {
+		_ = os.RemoveAll(result.InstallPath)
+		return nil, err
+	}
 
-	if s.runtime != nil && s.runtime.Running(result.Manifest.ID) {
+	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
+	wasRunning := s.runtime != nil && s.runtime.Running(result.Manifest.ID)
+	if wasRunning {
 		s.runtime.Stop(result.Manifest.ID)
 	}
 
@@ -267,7 +298,7 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		InstalledAt: time.Now().UTC(),
 	}
 	if err := s.store.Save(rec); err != nil {
-		_ = pkgtar.Remove(s.pluginsDir, rec.ID)
+		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)
 		return nil, fmt.Errorf("plugins: persist installed record: %w", err)
 	}
 	s.registry.Add(rec)
@@ -280,6 +311,48 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		return rec, activateErr
 	}
 	return installed, activateErr
+}
+
+// checkMinKandevVersion rejects a package whose manifest declares a
+// min_kandev_version newer than the currently running kandev build
+// (manifest.CompareVersions). A no-op (nil error) when either side is
+// unset: minVersion == "" (the manifest doesn't declare one, the common
+// case today) or s.kandevVersion == "" (no running version wired via
+// SetKandevVersion).
+func (s *Service) checkMinKandevVersion(minVersion string) error {
+	if minVersion == "" || s.kandevVersion == "" {
+		return nil
+	}
+	if manifest.CompareVersions(s.kandevVersion, minVersion) < 0 {
+		return fmt.Errorf("plugins: requires kandev >= %s, running %s", minVersion, s.kandevVersion)
+	}
+	return nil
+}
+
+// rollbackFailedInstall cleans up after a store.Save failure partway
+// through Install: it removes only freshInstallPath (the version directory
+// pkgtar.Install just extracted), never the whole destRoot/<id>/ tree —
+// other installed versions and the plugin's writable data directory
+// (destRoot/<id>/data) must survive. If restartOld is true (an existing
+// record was running and got stopped to make way for this install),
+// oldRec's process is best-effort restarted so the failed upgrade attempt
+// doesn't also take down the previously working version; a restart failure
+// is logged, not returned, since Install is already returning the original
+// Save error.
+func (s *Service) rollbackFailedInstall(freshInstallPath string, oldRec *store.Record, restartOld bool) {
+	if err := os.RemoveAll(freshInstallPath); err != nil {
+		s.log.Warn("plugins: failed to remove extracted package after a persist failure",
+			zap.String("install_path", freshInstallPath), zap.Error(err))
+	}
+	if !restartOld || s.runtime == nil || oldRec == nil {
+		return
+	}
+	startCtx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
+	defer cancel()
+	if err := s.runtime.Start(startCtx, oldRec, s.hostForPlugin); err != nil {
+		s.log.Warn("plugins: failed to restart previous version after a failed upgrade",
+			zap.String("plugin_id", oldRec.ID), zap.Error(err))
+	}
 }
 
 // InstallFromURL downloads url (capped at maxDownloadSize, bounded by

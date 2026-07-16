@@ -46,6 +46,7 @@ const pluginsSubdir = "plugins"
 func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretRevealer, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error) {
 	dir := filepath.Join(cfg.ResolvedHomeDir(), pluginsSubdir)
 	pluginStore := store.NewFSStore(dir)
+	pluginStore.SetLogger(log)
 
 	stateStore, err := state.NewStore(dbPool)
 	if err != nil {

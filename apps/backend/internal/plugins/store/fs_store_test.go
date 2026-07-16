@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -126,6 +127,31 @@ func TestFSStore_List_ReturnsAllInstalledPlugins(t *testing.T) {
 	}
 }
 
+// TestFSStore_List_SkipsCorruptRecordAndReturnsRest pins the fix that one
+// unparseable ".yml" (a stray/corrupt file, or one written by a future
+// incompatible version) never aborts List() wholesale — the whole plugin
+// subsystem depends on List() succeeding at boot (Registry.Load), so a
+// single bad record must be skipped (and logged), not fatal.
+func TestFSStore_List_SkipsCorruptRecordAndReturnsRest(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	if err := s.Save(testRecord("kandev-plugin-slack")); err != nil {
+		t.Fatalf("Save(slack) unexpected error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "kandev-plugin-broken.yml"), []byte("not: [valid yaml"), 0o600); err != nil {
+		t.Fatalf("write corrupt record: %v", err)
+	}
+
+	records, err := s.List()
+	if err != nil {
+		t.Fatalf("List() unexpected error (a corrupt record must be skipped, not fatal): %v", err)
+	}
+	if len(records) != 1 || records[0].ID != "kandev-plugin-slack" {
+		t.Fatalf("List() = %v, want only the valid kandev-plugin-slack record", records)
+	}
+}
+
 func TestFSStore_List_EmptyDirReturnsNoRecords(t *testing.T) {
 	dir := t.TempDir()
 	s := NewFSStore(dir)
@@ -136,6 +162,28 @@ func TestFSStore_List_EmptyDirReturnsNoRecords(t *testing.T) {
 	}
 	if len(records) != 0 {
 		t.Fatalf("List() returned %d records, want 0", len(records))
+	}
+}
+
+// TestFSStore_Save_LeavesNoTempFilesBehind pins the fix that writeRecord
+// writes via a tmp-file + rename instead of a plain os.WriteFile, so a
+// process crash mid-write can never leave a half-written "<id>.yml" for
+// List()/Get() to trip over. A successful Save must not leave any stray
+// tmp artifact in the store directory.
+func TestFSStore_Save_LeavesNoTempFilesBehind(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	if err := s.Save(testRecord("kandev-plugin-slack")); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir() unexpected error: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "kandev-plugin-slack.yml" {
+		t.Fatalf("store dir entries = %v, want exactly [kandev-plugin-slack.yml] (no leaked tmp file)", entries)
 	}
 }
 
@@ -279,5 +327,37 @@ func TestFSStore_Get_RejectsEmptyID(t *testing.T) {
 
 	if _, err := s.Get(""); err == nil {
 		t.Fatal("Get() expected error for empty id, got nil")
+	}
+}
+
+// TestFSStore_Save_RejectsIDEndingInDotConfig pins the fix for an id whose
+// record filename ("<id>.yml") would alias another plugin's config
+// filename convention: an id like "foo.config" writes "foo.config.yml",
+// which isRecordFile classifies as plugin "foo"'s config file, not a
+// record — so the "foo.config" record silently vanishes from List() and
+// collides with "foo"'s config storage. safePluginID must reject this
+// shape before any FSStore method reaches disk.
+func TestFSStore_Save_RejectsIDEndingInDotConfig(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	err := s.Save(testRecord("foo.config"))
+	if err == nil {
+		t.Fatal("Save() expected error for an id ending in \".config\", got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid plugin id") {
+		t.Fatalf("Save() error = %q, want it to come from the id guard (\"invalid plugin id\")", err.Error())
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "foo.config.yml")); !os.IsNotExist(statErr) {
+		t.Fatalf("Save() wrote foo.config.yml despite rejecting the id: stat err = %v", statErr)
+	}
+}
+
+func TestFSStore_Get_RejectsIDEndingInDotConfig(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	if _, err := s.Get("foo.config"); err == nil {
+		t.Fatal("Get() expected error for an id ending in \".config\", got nil")
 	}
 }

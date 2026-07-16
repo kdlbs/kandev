@@ -184,14 +184,19 @@ func New(eventBus bus.EventBus, transport Transport, lister PluginLister, log *l
 // error<->active transition is picked up without recreating the worker or
 // its buffer), and tears down workers/subscriptions for plugins no longer
 // returned (disabled, uninstalled). Called by Service after Install,
-// Enable, Disable, and any successful SetStatus transition.
+// Enable, Disable, and any successful SetStatus transition — including from
+// Service.handleStatusChange, invoked directly on runtime.Manager's
+// supervision-loop goroutine, whose contract (see runtime.NewManager)
+// requires the callback never block. Tearing down a removed worker calls
+// w.stop() (which waits for its run loop to drain, including any in-flight
+// delivery attempt — see pluginWorker's per-worker cancelable context) OUTSIDE
+// d.mu, so a slow stop() never blocks a concurrent Refresh/Flush for a
+// different plugin id that only needs the lock briefly.
 func (d *Deliverer) Refresh() {
 	records := d.lister.ActivePlugins()
 	seen := make(map[string]bool, len(records))
 
 	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	for _, rec := range records {
 		seen[rec.ID] = true
 		w, ok := d.workers[rec.ID]
@@ -204,13 +209,19 @@ func (d *Deliverer) Refresh() {
 		d.resubscribe(w, rec)
 	}
 
+	var toStop []*pluginWorker
 	for id, w := range d.workers {
 		if seen[id] {
 			continue
 		}
 		w.unsubscribeAll()
-		w.stop()
 		delete(d.workers, id)
+		toStop = append(toStop, w)
+	}
+	d.mu.Unlock()
+
+	for _, w := range toStop {
+		w.stop()
 	}
 }
 
@@ -252,6 +263,7 @@ func (d *Deliverer) Stop() {
 // newWorker builds (but does not start) a worker for pluginID, wired with
 // this Deliverer's current tuning options.
 func (d *Deliverer) newWorker(id string) *pluginWorker {
+	deliverCtx, cancelDeliver := context.WithCancel(context.Background())
 	return &pluginWorker{
 		id: id,
 		deps: &workerDeps{
@@ -261,10 +273,12 @@ func (d *Deliverer) newWorker(id string) *pluginWorker {
 			log:            d.log,
 			onProcessed:    d.onProcessed,
 		},
-		queue:  make(chan Delivery, d.queueSize),
-		buffer: newRingBuffer(d.ringBufferCap, d.ringBufferTTL, d.nowFn),
-		stopCh: make(chan struct{}),
-		doneCh: make(chan struct{}),
+		queue:         make(chan Delivery, d.queueSize),
+		buffer:        newRingBuffer(d.ringBufferCap, d.ringBufferTTL, d.nowFn),
+		stopCh:        make(chan struct{}),
+		doneCh:        make(chan struct{}),
+		deliverCtx:    deliverCtx,
+		cancelDeliver: cancelDeliver,
 	}
 }
 
@@ -348,6 +362,16 @@ type pluginWorker struct {
 	stopCh chan struct{}
 	doneCh chan struct{}
 
+	// deliverCtx is the parent context every delivery attempt's per-request
+	// timeout (attemptDeliver) is derived from, canceled by stop() via
+	// cancelDeliver. Without this, an in-flight attempt is bounded only by
+	// its own requestTimeout (default 10s, operator-configurable higher),
+	// so stop() — and therefore Refresh(), which calls stop() on a removed
+	// worker — could block for that entire duration instead of returning as
+	// soon as the worker is asked to stop.
+	deliverCtx    context.Context
+	cancelDeliver context.CancelFunc
+
 	mu     sync.Mutex
 	subs   []bus.Subscription
 	status string
@@ -358,9 +382,11 @@ func (w *pluginWorker) start() {
 	go w.run()
 }
 
-// stop signals the run loop to exit and waits for it to drain. Idempotent
-// only if called once (Deliverer never stops the same worker twice).
+// stop cancels any in-flight delivery attempt, signals the run loop to
+// exit, and waits for it to drain. Idempotent only if called once
+// (Deliverer never stops the same worker twice).
 func (w *pluginWorker) stop() {
+	w.cancelDeliver()
 	close(w.stopCh)
 	<-w.doneCh
 }
@@ -441,7 +467,7 @@ func (w *pluginWorker) process(d Delivery) {
 				zap.String("plugin_id", w.id), zap.String("dropped_delivery_id", dropped))
 		}
 	} else {
-		w.deliverWithRetry(context.Background(), d)
+		w.deliverWithRetry(w.deliverCtx, d)
 	}
 	if w.deps.onProcessed != nil {
 		w.deps.onProcessed(w.id, d)

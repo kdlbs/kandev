@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
 // newTestStateStore returns an in-memory-sqlite-backed *state.Store, for
@@ -424,6 +425,76 @@ func TestWebhookHandlerNotRunningReturns503(t *testing.T) {
 	rec := doRequest(router, http.MethodPost, "/api/plugins/kandev-plugin-slack/webhooks/key1", "{}", nil)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestWebhookStatusForResponse_ValidStatusesPassThrough pins that any
+// syntactically valid HTTP status code a plugin returns is relayed
+// unchanged.
+func TestWebhookStatusForResponse_ValidStatusesPassThrough(t *testing.T) {
+	for _, status := range []int32{100, 200, 204, 302, 404, 500, 599} {
+		got, ok := webhookStatusForResponse(status)
+		if !ok {
+			t.Fatalf("webhookStatusForResponse(%d) ok = false, want true", status)
+		}
+		if got != int(status) {
+			t.Fatalf("webhookStatusForResponse(%d) = %d, want %d", status, got, status)
+		}
+	}
+}
+
+// TestWebhookStatusForResponse_OutOfRangeStatusesAreRejected pins the fix
+// for a plugin returning a status outside [100, 599]: gin's WriteHeader
+// panics (-> 500) on such a code, so the webhook relay must reject it
+// before ever calling WriteHeader.
+func TestWebhookStatusForResponse_OutOfRangeStatusesAreRejected(t *testing.T) {
+	for _, status := range []int32{0, -1, 99, 600, 1000} {
+		if _, ok := webhookStatusForResponse(status); ok {
+			t.Fatalf("webhookStatusForResponse(%d) ok = true, want false (out of [100,599])", status)
+		}
+	}
+}
+
+// TestWriteWebhookResponse_OutOfRangePluginStatusReturns502 exercises the
+// exact code path the webhook handler uses to turn a plugin's
+// WebhookResponse into the outbound HTTP response: given an out-of-range
+// plugin status, it must write 502 instead of ever calling
+// ctx.Writer.WriteHeader with the invalid code (gin panics -> bare 500 on
+// an out-of-range WriteHeader call).
+func TestWriteWebhookResponse_OutOfRangePluginStatusReturns502(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+
+	writeWebhookResponse(ctx, &pluginsdk.WebhookResponse{Status: 0, Body: []byte("boom")})
+
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestWriteWebhookResponse_ValidStatusRelaysHeadersAndBody proves the
+// normal (in-range) path still relays the plugin's status, headers, and
+// body verbatim.
+func TestWriteWebhookResponse_ValidStatusRelaysHeadersAndBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(rec)
+
+	writeWebhookResponse(ctx, &pluginsdk.WebhookResponse{
+		Status:  201,
+		Headers: map[string]string{"X-Plugin": "slack"},
+		Body:    []byte(`{"ok":true}`),
+	})
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", rec.Code)
+	}
+	if got := rec.Header().Get("X-Plugin"); got != "slack" {
+		t.Fatalf("X-Plugin header = %q, want %q", got, "slack")
+	}
+	if rec.Body.String() != `{"ok":true}` {
+		t.Fatalf("body = %q, want %q", rec.Body.String(), `{"ok":true}`)
 	}
 }
 
