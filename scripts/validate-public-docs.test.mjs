@@ -272,6 +272,23 @@ test("rejects undefined full reference-style links", async () => {
   );
 });
 
+test("validates collapsed reference-style links", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        "[Guide][]\n\n[guide]: missing.md",
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md links to missing local target: missing.md/,
+  );
+});
+
 test("checks local links in README files", async () => {
   const dir = await createDocs(
     {

@@ -193,6 +193,8 @@ async function assertLocalLinks(docsDir, file, markdown) {
 
 /**
  * Remove fenced and inline code so examples are not treated as live links.
+ * Note: 4-space indented code blocks are not stripped; use fenced blocks in
+ * published pages.
  *
  * @param {string} markdown Page source.
  * @returns {string} Markdown with code regions removed.
