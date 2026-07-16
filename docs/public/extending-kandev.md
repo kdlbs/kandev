@@ -5,7 +5,7 @@ description: "Add an agent, executor, integration, workflow capability, MCP tool
 
 # Extending Kandev
 
-Kandev has extension seams for agents, executors, integrations, workflow behavior, MCP tools, and UI settings. An extension is complete only when discovery/configuration, runtime behavior, failure handling, tests, and public documentation agree.
+Kandev has extension seams for agents, executors, integrations, workflow behavior, MCP tools, plugins, and UI settings. An extension is complete only when discovery/configuration, runtime behavior, failure handling, tests, and public documentation agree.
 
 ## Add an agent CLI
 
@@ -47,6 +47,29 @@ New events/actions need durable semantics, import/export representation when app
 Task/config MCP handlers and server registration live under `internal/mcp/handlers` and `internal/mcp/server`. Define a strict schema, enforce caller/task/workspace policy, return actionable structured errors, and test over the actual MCP transport.
 
 Do not trust caller-supplied task identity when the server can inject it. Consider destructive-action confirmation, relationship reachability, pagination, and concurrent task state. Update [Automation and MCP](automation-and-mcp.md) when user capability changes.
+
+## Build a plugin
+
+Plugins are a peer extension mechanism to the seams above, aimed at
+extensions that should ship and version independently of a kandev release.
+A plugin backend is a Go binary that kandev spawns and supervises as a
+subprocess, communicating over a strict typed gRPC protocol
+(`internal/plugins/`, `pkg/pluginsdk`) — it receives bus events, serves
+agent-invocable tools, and relays external webhooks, calling back into
+kandev through a capability-gated Host RPC service (state, secrets,
+cross-plugin events). A plugin may additionally ship an optional **native
+frontend bundle** that the SPA loads at boot to register real routes, nav
+items, slot components, and WebSocket handlers, sharing kandev's own React
+instance and app store.
+
+Plugins are distributed as a signed-or-unsigned tarball and installed by URL,
+manual upload, or filesystem sideload/sync — there is no manifest-paste
+registration step and no credentials to issue. The whole system sits behind
+the `plugins` feature flag (Settings > System > Feature Toggles), off by
+default in production. See [Plugins](plugins.md) for the operator-facing
+install/operate flow, [Authoring a plugin](plugins-authoring.md) for the
+build tutorial and SDK reference, and the [Plugin manifest
+reference](plugins-manifest.md) for the complete `manifest.yaml` schema.
 
 ## Add a settings or workbench surface
 
