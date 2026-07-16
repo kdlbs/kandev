@@ -55,13 +55,14 @@ Before removing a stale worktree or environment:
 
 ## Updates
 
-**Settings > System > Updates** reports the current and latest release and shows changelog information. The install channel owns the actual update:
+**Settings > System > Updates** reports the current and latest release and shows changelog information. For persistent installations, update through the install channel:
 
 ```bash
 brew upgrade kandev
 npm install -g kandev@latest
-npx kandev@latest
 ```
+
+If you run Kandev transiently with npx, invoke the latest release with `npx kandev@latest`; this does not update a persistent installation.
 
 For a service or container, follow that deployment's replacement and restart process. Read release notes, create a backup, drain or stop active sessions, update the runtime, and check status before resuming automation.
 

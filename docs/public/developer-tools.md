@@ -1,6 +1,6 @@
 ---
 title: "Developer Tools"
-description: "Use quick chat, utility agents, voice input, editors, terminals, prompts, notifications, and workbench preferences."
+description: "Use quick chat, utility agents, voice input, editors, terminals, prompts, notifications, and personal settings."
 ---
 
 # Developer Tools

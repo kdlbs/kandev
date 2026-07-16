@@ -193,6 +193,24 @@ test("rejects a broken local image", async () => {
   );
 });
 
+test("rejects a broken local image nested inside a link", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        "[![Missing](assets/missing.png)](guide.md)",
+      ),
+      "guide.md": validPage,
+    },
+    { pages: ["index", "guide"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md links to missing local target: assets\/missing.png/,
+  );
+});
+
 test("ignores external, anchor-only, and fenced-code links", async () => {
   const dir = await createDocs(
     {
@@ -233,6 +251,18 @@ test("accepts escaped parentheses in local link destinations", async () => {
   const dir = await createDocs(
     {
       "index.md": validPage.replace("Page body.", "[Guide](guide\\(1\\).md)"),
+      "guide(1).md": validPage,
+    },
+    { pages: ["index", "guide(1)"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("accepts balanced parentheses in local link destinations", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace("Page body.", "[Guide](guide(1).md)"),
       "guide(1).md": validPage,
     },
     { pages: ["index", "guide(1)"] },

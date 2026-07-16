@@ -138,11 +138,10 @@ function assertFrontmatter(file, markdown) {
  */
 async function assertLocalLinks(docsDir, file, markdown) {
   const source = stripMarkdownCode(markdown);
-  const linkPattern = /!?\[[^\]\n]*\]\(((?:[^)\n\\]|\\.)+)\)/g;
   const definitionPattern = /^\s{0,3}\[([^\]\n]+)\]:\s*(\S.*)$/gm;
   const referencePattern = /!?\[([^\]\n]+)\]\[([^\]\n]*)\]/g;
   const shortcutReferencePattern = /(?<![!\\\[\]])\[([^\]\n]+)\](?![\[(:])/g;
-  const destinations = [...source.matchAll(linkPattern)].map((match) => match[1]);
+  const destinations = collectInlineLinkDestinations(source);
   const definitions = new Map();
 
   for (const match of source.matchAll(definitionPattern)) {
@@ -206,6 +205,74 @@ async function assertLocalLinks(docsDir, file, markdown) {
       throw new Error(`${file} links to missing local target: ${href}`);
     }
   }
+}
+
+/**
+ * Collect inline Markdown destinations while preserving balanced parentheses.
+ *
+ * @param {string} markdown Markdown with code regions removed.
+ * @returns {string[]} Raw content inside each link's parentheses.
+ */
+function collectInlineLinkDestinations(markdown) {
+  const destinations = [];
+
+  for (let start = 0; start < markdown.length; start += 1) {
+    if (markdown[start] !== "[" || isEscaped(markdown, start)) continue;
+
+    let bracketDepth = 1;
+    let labelEnd = -1;
+    for (let cursor = start + 1; cursor < markdown.length; cursor += 1) {
+      const character = markdown[cursor];
+      if (character === "\n" || character === "\r") break;
+      if (character === "\\") {
+        cursor += 1;
+      } else if (character === "[") {
+        bracketDepth += 1;
+      } else if (character === "]") {
+        bracketDepth -= 1;
+        if (bracketDepth === 0) {
+          labelEnd = cursor;
+          break;
+        }
+      }
+    }
+
+    if (labelEnd === -1 || markdown[labelEnd + 1] !== "(") continue;
+
+    let parenthesisDepth = 1;
+    for (let cursor = labelEnd + 2; cursor < markdown.length; cursor += 1) {
+      const character = markdown[cursor];
+      if (character === "\n" || character === "\r") break;
+      if (character === "\\") {
+        cursor += 1;
+      } else if (character === "(") {
+        parenthesisDepth += 1;
+      } else if (character === ")") {
+        parenthesisDepth -= 1;
+        if (parenthesisDepth === 0) {
+          destinations.push(markdown.slice(labelEnd + 2, cursor));
+          break;
+        }
+      }
+    }
+  }
+
+  return destinations;
+}
+
+/**
+ * Return whether punctuation is preceded by an odd number of backslashes.
+ *
+ * @param {string} value Source text.
+ * @param {number} index Character index.
+ * @returns {boolean} Whether the character is escaped.
+ */
+function isEscaped(value, index) {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor -= 1) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
 }
 
 /**
