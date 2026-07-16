@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Contract tests for the maintainer release workflow."""
 
+import fnmatch
 import re
 import unittest
 from pathlib import Path
@@ -145,6 +146,32 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertLess(build.index(append), build.index(invoke))
         self.assertIn('"${UPDATER_SIGNING_ENABLED:-false}" = "true"', collect)
         self.assertIn('"$DESKTOP_ASSET_VERIFIER" --require-updaters', collect)
+
+    def test_release_asset_globs_are_disjoint_and_upload_sequentially(self) -> None:
+        publish = step_block("Publish release")
+        files = re.search(r"\n          files: \|\n((?:            \S+\n)+)", publish)
+        self.assertIsNotNone(files)
+        patterns = [line.strip() for line in files.group(1).splitlines()]
+        assets = (
+            "kandev-linux-x64.tar.gz",
+            "kandev-linux-x64.tar.gz.sha256",
+            "kandev-macos-arm64.tar.gz",
+            "kandev-macos-arm64.tar.gz.sha256",
+            "kandev-windows-x64.tar.gz",
+            "kandev-windows-x64.tar.gz.sha256",
+            "kandev-desktop-macos-arm64-Kandev.app.tar.gz",
+            "kandev-desktop-macos-arm64-Kandev.app.tar.gz.sha256",
+            "kandev-desktop-macos-arm64-Kandev.app.tar.gz.sig",
+            "kandev-desktop-macos-arm64-Kandev.app.tar.gz.sig.sha256",
+            "latest.json",
+        )
+
+        for asset in assets:
+            path = f"dist/release-assets/{asset}"
+            matches = [pattern for pattern in patterns if fnmatch.fnmatchcase(path, pattern)]
+            self.assertEqual(len(matches), 1, f"release glob count for {asset}: {matches}")
+
+        self.assertIn("preserve_order: true", publish)
 
     def test_macos_dmg_build_has_retry_timeout_and_diagnostics(self) -> None:
         build = step_block("Build Tauri desktop app")
