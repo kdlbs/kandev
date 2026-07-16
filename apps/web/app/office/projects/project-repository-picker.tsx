@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { IconCode, IconPlus, IconWorld } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import {
@@ -13,10 +13,10 @@ import {
 } from "@kandev/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { discoverRepositoriesAction } from "@/app/actions/workspaces";
 import { cn, formatUserHomePath } from "@/lib/utils";
-import type { LocalRepository, Repository } from "@/lib/types/http";
+import type { Repository } from "@/lib/types/http";
 import { normalizeRepoValue, shouldShowCustomEntry } from "./repo-entry";
+import { useDiscoveredRepositories } from "./use-discovered-repositories";
 
 type Props = {
   workspaceId: string | null;
@@ -48,36 +48,6 @@ type RepoOption = { key: string; value: string; name: string; path: string };
  *
  * On-disk discovery runs lazily the first time the popover opens.
  */
-/**
- * Lazily discovers on-disk repositories the first time the popover
- * opens. Returns `null` until discovery has been attempted — used to
- * drive the "Searching your machine…" empty-state copy without an
- * extra loading flag (the lint rule discourages synchronous setState
- * in an effect body).
- */
-function useDiscoveredRepositories(open: boolean, workspaceId: string | null) {
-  const [discovered, setDiscovered] = useState<LocalRepository[] | null>(null);
-  const discoveredOnce = useRef(false);
-
-  useEffect(() => {
-    if (!open || !workspaceId || discoveredOnce.current) return;
-    discoveredOnce.current = true;
-    let cancelled = false;
-    discoverRepositoriesAction(workspaceId)
-      .then((res) => {
-        if (!cancelled) setDiscovered(res.repositories ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setDiscovered([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, workspaceId]);
-
-  return discovered;
-}
-
 export function ProjectRepositoryPicker({
   workspaceId,
   repositories,
