@@ -35,8 +35,12 @@ test.describe("Workflow cycle guardrails", () => {
       .getByRole("list", { name: "Replay path for Work" })
       .getByRole("listitem");
     await expect(trace).toHaveCount(2);
-    await expect(trace.nth(0)).toContainText(/Work\s*on_turn_complete\s*move_to_next\s*Review/);
-    await expect(trace.nth(1)).toContainText(/Review\s*on_turn_complete\s*move_to_previous\s*Work/);
+    await expect(trace.nth(0)).toContainText(
+      /Work\s*Review\s*On turn complete\s*Move to next step/,
+    );
+    await expect(trace.nth(1)).toContainText(
+      /Review\s*Work\s*On turn complete\s*Move to previous step/,
+    );
     await expect(trace.nth(1).getByText("User action required")).toBeVisible();
     await expect(
       diagnostic.getByText(

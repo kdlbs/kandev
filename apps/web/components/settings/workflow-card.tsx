@@ -323,11 +323,6 @@ function WorkflowCardBody({
             <span>Workflow Name</span>
             {isWorkflowDirty && <UnsavedChangesBadge />}
             {readOnly && <SyncedBadge sourcePath={workflow.source_path} />}
-            {readOnly && (
-              <span className="text-xs text-muted-foreground">
-                Read-only - managed by workflow sync
-              </span>
-            )}
           </Label>
           <Input
             value={workflow.name}
