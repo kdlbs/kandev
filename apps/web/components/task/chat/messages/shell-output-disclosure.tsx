@@ -48,9 +48,10 @@ function ResultDetails({ snapshot }: { snapshot: ShellCommandOutputSnapshot }) {
   if (!isTerminalToolCallStatus(status) && !output.truncated) return null;
   const knownExit = typeof output.exit_code === "number";
   const failed = normalizedStatus === "error" || (knownExit && output.exit_code !== 0);
+  const succeeded = normalizedStatus === "complete" && knownExit && output.exit_code === 0;
   let exitClass = "text-muted-foreground";
   if (knownExit && failed) exitClass = "text-red-600 dark:text-red-400";
-  if (knownExit && !failed) exitClass = "text-green-600 dark:text-green-400";
+  if (succeeded) exitClass = "text-green-600 dark:text-green-400";
 
   return (
     <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border/40 pt-2 text-xs text-muted-foreground">
@@ -69,15 +70,18 @@ function DisclosureContent({
   isLoading,
   error,
   retry,
+  messageStatus,
 }: {
   snapshot: ShellCommandOutputSnapshot | null;
   isLoading: boolean;
   error: Error | null;
   retry: () => void;
+  messageStatus?: string;
 }) {
   const hasTranscript = Boolean(snapshot?.output.stdout || snapshot?.output.stderr);
   const emptyLabel =
-    normalizeToolCallStatus(snapshot?.status) === "running"
+    normalizeToolCallStatus(snapshot?.status) === "running" &&
+    !isTerminalToolCallStatus(messageStatus)
       ? "No command output yet."
       : "No command output.";
 
@@ -129,7 +133,9 @@ export function ShellOutputDisclosure({
           )}
         </Button>
       </CollapsibleTrigger>
-      <CollapsibleContent>{isOpen && <DisclosureContent {...output} />}</CollapsibleContent>
+      <CollapsibleContent>
+        {isOpen && <DisclosureContent {...output} messageStatus={messageStatus} />}
+      </CollapsibleContent>
     </Collapsible>
   );
 }

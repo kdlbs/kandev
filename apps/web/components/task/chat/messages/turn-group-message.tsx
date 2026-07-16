@@ -185,7 +185,11 @@ function isZeroExitCode(shellExec: ShellExecPayload): boolean {
 }
 
 function hasProjectedShellOutput(output: ShellExecPayload["output"]): boolean {
-  return Boolean(output?.has_output || output?.stdout_bytes || output?.stderr_bytes);
+  return (
+    Boolean(output?.has_output) ||
+    (output?.stdout_bytes ?? 0) > 0 ||
+    (output?.stderr_bytes ?? 0) > 0
+  );
 }
 
 function createShellExecSummary(message: Message, shellExec: ShellExecPayload): ShellExecSummary {

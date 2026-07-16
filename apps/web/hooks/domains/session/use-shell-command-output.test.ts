@@ -105,6 +105,26 @@ describe("useShellCommandOutput fetching", () => {
     expect(fetchOutputMock).toHaveBeenCalledTimes(2);
   });
 
+  it("polls pending output while the projected message remains active", async () => {
+    fetchOutputMock
+      .mockResolvedValueOnce(snapshot("pending", "queued"))
+      .mockResolvedValueOnce(snapshot("complete", "done", { exit_code: 0 }));
+    const { result } = renderHook(() =>
+      useShellCommandOutput({
+        sessionId: "session-1",
+        messageId: "message-1",
+        isOpen: true,
+        messageStatus: "pending",
+      }),
+    );
+    await flushPromises();
+
+    expect(result.current.snapshot?.output.stdout).toBe("queued");
+    await act(async () => vi.advanceTimersByTime(1_000));
+    await flushPromises();
+    expect(fetchOutputMock).toHaveBeenCalledTimes(2);
+  });
+
   it("retains the latest snapshot and caps consecutive failure backoff at five seconds", async () => {
     fetchOutputMock
       .mockResolvedValueOnce(snapshot("running", "retained"))

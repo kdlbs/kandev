@@ -3,7 +3,7 @@ import {
   fetchShellCommandOutput,
   type ShellCommandOutputSnapshot,
 } from "@/lib/api/domains/session-api";
-import { isTerminalToolCallStatus, normalizeToolCallStatus } from "@/lib/utils/tool-call-status";
+import { isTerminalToolCallStatus } from "@/lib/utils/tool-call-status";
 
 const POLL_INTERVAL_MS = 1_000;
 const MAX_RETRY_INTERVAL_MS = 5_000;
@@ -27,10 +27,6 @@ type PollOperation = {
   controller: AbortController | null;
   timer: ReturnType<typeof setTimeout> | null;
 };
-
-function isRunningStatus(status: string | undefined) {
-  return normalizeToolCallStatus(status) === "running";
-}
 
 function retryDelay(failureCount: number) {
   return Math.min(POLL_INTERVAL_MS * 2 ** Math.max(0, failureCount - 1), MAX_RETRY_INTERVAL_MS);
@@ -100,7 +96,7 @@ export function useShellCommandOutput({
         setError(null);
         setIsLoading(false);
         if (
-          isRunningStatus(nextSnapshot.status) &&
+          !isTerminalToolCallStatus(nextSnapshot.status) &&
           !isTerminalToolCallStatus(messageStatusRef.current)
         ) {
           operation.timer = setTimeout(requestSnapshot, POLL_INTERVAL_MS);

@@ -20,9 +20,7 @@ spec: "../../specs/ui/acp-shell-command-output.md"
 
 ```bash
 make -C apps/backend fmt
-cd apps/backend && go test ./internal/task/models -run 'Test.*ShellOutput|Test.*MessageMetadata'
-cd apps/backend && go test ./internal/task/handlers -run 'Test.*ShellOutput|Test.*ListMessages'
-cd apps/backend && go test ./internal/task/service ./internal/backendapp -run 'Test.*Message.*Projection|Test.*Boot.*Shell'
+make -C apps/backend test
 make -C apps/backend lint
 ```
 

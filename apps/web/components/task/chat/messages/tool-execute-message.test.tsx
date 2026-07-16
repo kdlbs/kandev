@@ -220,3 +220,22 @@ describe("ToolExecuteMessage output states", () => {
     expect(screen.queryByText("No command output yet.")).toBeNull();
   });
 });
+
+describe("ToolExecuteMessage cancelled result", () => {
+  it("renders a cancelled zero exit neutrally", () => {
+    useShellOutputMock.mockReturnValue(
+      hookResult({
+        snapshot: {
+          message_id: "message-cancelled",
+          status: "cancelled",
+          updated_at: outputUpdatedAt,
+          output: { exit_code: 0 },
+        },
+      }),
+    );
+    render(<ToolExecuteMessage comment={executeMessage("cancelled", { exit_code: 0 })} />);
+
+    openOutput();
+    expect(screen.getByText("Exit code 0").className).toContain("text-muted-foreground");
+  });
+});

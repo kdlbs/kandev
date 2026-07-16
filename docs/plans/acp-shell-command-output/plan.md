@@ -152,9 +152,7 @@ Dependency graph:
 01-backend-normalization --> 02-acp-live-updates ----> 04-e2e-and-verification
                        `--> 03-frontend-command-row --'
 
-04-e2e-and-verification --> 05-backend-output-projection
-                         --> 06-frontend-output-disclosure
-                         --> 07-lazy-output-e2e
+04-e2e-and-verification --> 05-backend-output-projection --> 06-frontend-output-disclosure --> 07-lazy-output-e2e
 ```
 
 Tasks 05-07 are sequential because Task 06 consumes Task 05's exact summary/snapshot contract and Task 07 verifies the integrated transport and UI.
@@ -163,7 +161,7 @@ Tasks 05-07 are sequential because Task 06 consumes Task 05's exact summary/snap
 
 ```bash
 make -C apps/backend fmt
-cd apps/backend && go test ./internal/task/models ./internal/task/handlers ./internal/task/service ./internal/backendapp
+make -C apps/backend test
 make -C apps/backend lint
 
 cd apps && pnpm --filter @kandev/web test -- hooks/domains/session/use-shell-command-output.test.ts components/task/chat/messages/tool-execute-message.test.tsx
