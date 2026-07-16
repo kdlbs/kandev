@@ -22,12 +22,14 @@ export function resolveSessionWorktrees(
     .map((wt) => {
       const id = wt.worktree_id || wt.id;
       const live = worktrees[id];
+      // `||` (not `??`): the Go backend may serialize these as empty strings,
+      // which should also fall back to the live WS-populated values.
       return {
         id,
         sessionId,
-        repositoryId: wt.repository_id ?? live?.repositoryId,
-        path: wt.worktree_path ?? live?.path,
-        branch: wt.worktree_branch ?? live?.branch,
+        repositoryId: wt.repository_id || live?.repositoryId,
+        path: wt.worktree_path || live?.path,
+        branch: wt.worktree_branch || live?.branch,
       };
     });
   const seen = new Set(result.map((wt) => wt.id));

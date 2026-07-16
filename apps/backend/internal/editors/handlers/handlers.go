@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -100,12 +102,12 @@ func (h *Handlers) httpDeleteEditor(c *gin.Context) {
 
 func (h *Handlers) httpOpenFolder(c *gin.Context) {
 	var req dto.OpenFolderRequest
-	// The body is optional for backward compatibility.
-	if c.Request.ContentLength > 0 {
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-			return
-		}
+	// The body is optional for backward compatibility; an empty body decodes
+	// as EOF and keeps the zero value. Checking ContentLength instead would
+	// silently drop the payload of chunked requests (ContentLength == -1).
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
 	}
 	resp, err := h.controller.OpenFolder(c.Request.Context(), c.Param("id"), req)
 	if err != nil {

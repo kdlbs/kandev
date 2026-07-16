@@ -65,6 +65,21 @@ describe("resolveSessionWorktrees", () => {
     expect(result[0]).toMatchObject({ id: "wt-1", repositoryId: "repo-a", path: "/x/a" });
   });
 
+  it("treats empty-string API fields as missing and falls back to live values", () => {
+    const live: Record<string, Worktree> = {
+      "wt-1": { id: "wt-1", sessionId: SESSION_ID, path: "/x/a", branch: "kd/a" },
+    };
+    const result = resolveSessionWorktrees(
+      SESSION_ID,
+      session({
+        worktrees: [apiWorktree({ worktree_id: "wt-1", worktree_path: "", worktree_branch: "" })],
+      }),
+      live,
+      undefined,
+    );
+    expect(result[0]).toMatchObject({ id: "wt-1", path: "/x/a", branch: "kd/a" });
+  });
+
   it("unions WS-only worktrees with the API list", () => {
     const live: Record<string, Worktree> = {
       "wt-1": { id: "wt-1", sessionId: SESSION_ID, path: "/x/a" },

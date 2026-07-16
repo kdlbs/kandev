@@ -87,22 +87,26 @@ function OpenEditorButton({
   const buttonClass = "rounded-none border-0 cursor-pointer px-2 focus-visible:ring-inset";
 
   // Multi-worktree sessions get a picker instead of opening the first worktree.
+  // The focusable span keeps the tooltip reachable while the button is
+  // disabled (disabled buttons receive no pointer/focus events).
   if (worktreeOptions.length > 1) {
     return (
       <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className={buttonClass}
-                data-testid="editors-menu-open"
-                disabled={disabled}
-              >
-                {icon}
-              </Button>
-            </DropdownMenuTrigger>
+            <span tabIndex={disabled ? 0 : -1} className="inline-flex">
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className={buttonClass}
+                  data-testid="editors-menu-open"
+                  disabled={disabled}
+                >
+                  {icon}
+                </Button>
+              </DropdownMenuTrigger>
+            </span>
           </TooltipTrigger>
           <TooltipContent>{tooltip}</TooltipContent>
         </Tooltip>
@@ -116,16 +120,18 @@ function OpenEditorButton({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          size="sm"
-          variant="outline"
-          className={buttonClass}
-          data-testid="editors-menu-open"
-          onClick={() => onOpen()}
-          disabled={disabled}
-        >
-          {icon}
-        </Button>
+        <span tabIndex={disabled ? 0 : -1} className="inline-flex">
+          <Button
+            size="sm"
+            variant="outline"
+            className={buttonClass}
+            data-testid="editors-menu-open"
+            onClick={() => onOpen()}
+            disabled={disabled}
+          >
+            {icon}
+          </Button>
+        </span>
       </TooltipTrigger>
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
