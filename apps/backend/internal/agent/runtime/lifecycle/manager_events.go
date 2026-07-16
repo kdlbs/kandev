@@ -14,7 +14,10 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-const toolStatusComplete = "complete"
+const (
+	toolStatusComplete = "complete"
+	toolStatusFailed   = "failed"
+)
 
 // handleMessageChunkEvent handles a "message_chunk" agent event, accumulating and flushing on newlines.
 func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agentctl.AgentEvent) {
@@ -420,7 +423,7 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 		return false
 	}
 	switch event.ToolStatus {
-	case toolStatusComplete, "error", "cancelled":
+	case toolStatusComplete, "completed", "success", "error", toolStatusFailed, "cancelled":
 		return true
 	default:
 		return false

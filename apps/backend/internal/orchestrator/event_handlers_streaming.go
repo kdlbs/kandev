@@ -404,9 +404,18 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 				zap.String("session_id", payload.SessionID),
 				zap.String("tool_call_id", payload.Data.ToolCallID),
 				zap.Error(err))
+			// Fail closed: without a confirmed active turn, this must be an
+			// update-only reconciliation and cannot wake a settled session.
+			turnID = ""
 		}
 	} else {
 		turnID = s.getActiveTurnID(payload.SessionID)
+	}
+	fallbackMsgType := msgType
+	if terminal && turnID == "" {
+		// A late terminal update can update its existing card, but must not
+		// create a message (and implicitly a turn) after the turn settled.
+		fallbackMsgType = ""
 	}
 
 	if err := s.messageCreator.UpdateToolCallMessage(
@@ -419,7 +428,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		payload.SessionID,
 		payload.Data.ToolTitle,  // Include title from update event
 		turnID,                  // Turn ID for fallback creation
-		msgType,                 // Message type for fallback creation
+		fallbackMsgType,         // Empty for settled terminal reconciliations
 		payload.Data.Normalized, // Pass normalized tool data for message metadata
 	); err != nil {
 		s.logger.Warn("failed to update tool call message",

@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -54,6 +55,50 @@ type mockAutomationRunService struct {
 	succeededTaskIDs  []string
 	failedTaskIDs     []string
 	failedErrorByTask map[string]string
+}
+
+type serviceBackedMessageCreator struct {
+	mockMessageCreator
+	svc *taskservice.Service
+}
+
+func (m *serviceBackedMessageCreator) UpdateToolCallMessage(
+	ctx context.Context,
+	taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string,
+	normalized *streams.NormalizedPayload,
+) error {
+	return m.svc.UpdateToolCallMessageWithCreate(
+		ctx,
+		agentSessionID,
+		toolCallID,
+		parentToolCallID,
+		status,
+		result,
+		title,
+		normalized,
+		taskID,
+		turnID,
+		msgType,
+	)
+}
+
+func newServiceBackedMessageCreator(repo *sqliterepo.Repository) *serviceBackedMessageCreator {
+	services := taskservice.NewService(taskservice.Repos{
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
+	}, bus.NewMemoryEventBus(testLogger()), testLogger(), taskservice.RepositoryDiscoveryConfig{})
+	return &serviceBackedMessageCreator{svc: services}
 }
 
 func (m *mockAutomationRunService) GetAutomation(context.Context, string) (*automation.Automation, error) {
@@ -583,8 +628,7 @@ func TestLateTerminalToolUpdateDoesNotCreateTurnOrWakeWaitingSession(t *testing.
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 	svc.turnService = &repoTurnService{repo: repo}
-	messages := &mockMessageCreator{}
-	svc.messageCreator = messages
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
 
 	svc.handleToolUpdateEvent(ctx, &lifecycle.AgentStreamEventPayload{
 		TaskID:      "task1",
@@ -597,8 +641,10 @@ func TestLateTerminalToolUpdateDoesNotCreateTurnOrWakeWaitingSession(t *testing.
 		},
 	})
 
-	require.Equal(t, 1, messages.toolUpdateWrites,
-		"late terminal status must still reconcile the existing tool message")
+	messages, err := repo.ListMessages(ctx, "session1")
+	require.NoError(t, err)
+	require.Empty(t, messages,
+		"late terminal status must not create a fallback message when the original is absent")
 	require.Zero(t, openTurnCount(t, repo, "session1"),
 		"late terminal status must not create a phantom turn")
 	updated, err := repo.GetTaskSession(ctx, "session1")
