@@ -1,7 +1,7 @@
 # ADR-2026-07-15-office-agent-execution-profile-routing: Separate Office identity from routed execution profiles
 
-**Status:** proposed  
-**Date:** 2026-07-15  
+**Status:** proposed
+**Date:** 2026-07-15
 **Area:** backend, frontend
 
 ## Context
