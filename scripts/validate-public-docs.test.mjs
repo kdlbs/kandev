@@ -247,6 +247,72 @@ test("ignores links inside inline code and nested shorter fences", async () => {
   await assert.doesNotReject(validatePublicDocs(dir));
 });
 
+test("ignores links inside indented code blocks", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        `Example only:
+
+    [Missing](indented-missing.md)`,
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("ignores indented code blocks after a heading", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        `## Example
+    [Missing](heading-code-missing.md)`,
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("ignores indented code blocks nested in list items", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        `- Example only:
+
+      [Missing](list-code-missing.md)`,
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("validates links in indented list paragraphs", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        `- Related material:
+
+    [Missing](list-paragraph-missing.md)`,
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md links to missing local target: list-paragraph-missing.md/,
+  );
+});
+
 test("accepts escaped parentheses in local link destinations", async () => {
   const dir = await createDocs(
     {

@@ -72,4 +72,4 @@ Parallel agents can saturate CPU, memory, disk I/O, process limits, network, or 
 - **SSH task dies after disconnect:** verify remote process supervision and inspect the stored remote PID/agentctl logs.
 - **No disk space:** remove stale task environments/worktrees after confirming branch state, and inspect **Settings > System > Disk usage**.
 
-Related deployment guides: [Docker](docker.md), [Remote environments](remote-cloud-environment.md), [Windows](windows-support.md), and [Operations](operations.md).
+Related guides: [Docker](docker.md), [Windows](windows-support.md), and [Operations](operations.md).

@@ -276,15 +276,17 @@ function isEscaped(value, index) {
 }
 
 /**
- * Remove fenced and inline code so examples are not treated as live links.
- * Note: 4-space indented code blocks are not stripped; use fenced blocks in
- * published pages.
+ * Remove fenced, indented, and inline code so examples are not treated as
+ * live links.
  *
  * @param {string} markdown Page source.
  * @returns {string} Markdown with code regions removed.
  */
 function stripMarkdownCode(markdown) {
   let fence = null;
+  let indentedCodeIndent = null;
+  let canStartIndentedCode = true;
+  const listContentIndents = [];
   const lines = markdown.split(/\r?\n/).map((line) => {
     const marker = line.match(/^\s*(`{3,}|~{3,})/)?.[1];
     if (marker) {
@@ -293,12 +295,82 @@ function stripMarkdownCode(markdown) {
       } else if (marker[0] === fence[0] && marker.length >= fence.length) {
         fence = null;
       }
+      canStartIndentedCode = true;
       return "";
     }
-    return fence ? "" : line;
+    if (fence) return "";
+
+    const blank = /^\s*$/.test(line);
+    const indent = leadingIndentWidth(line);
+    if (indentedCodeIndent !== null) {
+      if (blank || indent >= indentedCodeIndent) {
+        canStartIndentedCode = blank;
+        return "";
+      }
+      indentedCodeIndent = null;
+    }
+
+    if (blank) {
+      canStartIndentedCode = true;
+      return line;
+    }
+
+    while (
+      listContentIndents.length > 0 &&
+      indent < listContentIndents.at(-1)
+    ) {
+      listContentIndents.pop();
+    }
+
+    const requiredCodeIndent = (listContentIndents.at(-1) ?? 0) + 4;
+    if (canStartIndentedCode && indent >= requiredCodeIndent) {
+      indentedCodeIndent = requiredCodeIndent;
+      canStartIndentedCode = false;
+      return "";
+    }
+
+    const listMarker = line.match(
+      /^([ \t]*)(?:[-+*]|\d{1,9}[.)])([ \t]+)/,
+    );
+    if (listMarker) {
+      listContentIndents.push(columnWidth(listMarker[0]));
+    }
+
+    canStartIndentedCode = /^(?: {0,3}#{1,6}(?:[ \t]+|$)| {0,3}(?:=+|-+)[ \t]*$| {0,3}\[[^\]\n]+\]:)/.test(
+      line,
+    );
+    return line;
   });
 
   return lines.join("\n").replace(/`+[^`\n]*`+/g, "");
+}
+
+/**
+ * Count indentation columns, expanding tabs to four-column stops.
+ *
+ * @param {string} value Source line or prefix.
+ * @returns {number} Leading indentation width in columns.
+ */
+function leadingIndentWidth(value) {
+  return columnWidth(value.match(/^[ \t]*/)[0]);
+}
+
+/**
+ * Count source columns, expanding tabs to four-column stops.
+ *
+ * @param {string} value Source text.
+ * @returns {number} Width in columns.
+ */
+function columnWidth(value) {
+  let width = 0;
+  for (const character of value) {
+    if (character === "\t") {
+      width += 4 - (width % 4);
+    } else {
+      width += 1;
+    }
+  }
+  return width;
 }
 
 /**
