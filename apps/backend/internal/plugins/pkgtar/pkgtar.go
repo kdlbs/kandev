@@ -366,7 +366,9 @@ func Remove(destRoot, id string) error {
 	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\") {
 		return fmt.Errorf("pkgtar: invalid plugin id %q", id)
 	}
-	dir, err := securejoin(destRoot, id)
+	// filepath.Base pins id to a single path segment (a barrier the taint
+	// analysis recognizes); securejoin then re-verifies containment.
+	dir, err := securejoin(destRoot, filepath.Base(id))
 	if err != nil {
 		return err
 	}

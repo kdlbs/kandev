@@ -45,13 +45,16 @@ func NewFSStore(dir string) *FSStore {
 }
 
 // recordPath returns the on-disk path for a plugin's installation record.
+// The id is validated (safePluginID) by every public method before it
+// reaches here; filepath.Base is an additional single-segment barrier at the
+// path sink so no id can ever escape s.dir.
 func (s *FSStore) recordPath(id string) string {
-	return filepath.Join(s.dir, id+".yml")
+	return filepath.Join(s.dir, filepath.Base(id)+".yml")
 }
 
 // configPath returns the on-disk path for a plugin's operator config.
 func (s *FSStore) configPath(id string) string {
-	return filepath.Join(s.dir, id+".config.yml")
+	return filepath.Join(s.dir, filepath.Base(id)+".config.yml")
 }
 
 // writeRecord marshals record to YAML and writes it to disk, creating the
