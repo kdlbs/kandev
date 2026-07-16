@@ -279,6 +279,7 @@ function RemoteRepoPopoverContent({
   onPaste: (value: string) => void;
 }) {
   const [value, setValue] = useState("");
+  const [urlError, setUrlError] = useState<string | null>(null);
   const { search: triggerSearch } = accessible;
   useEffect(() => {
     triggerSearch(value);
@@ -286,7 +287,13 @@ function RemoteRepoPopoverContent({
 
   const commitURL = (candidate: string) => {
     const trimmed = candidate.trim();
-    if (!parseGitHubAnyUrl(trimmed)) return false;
+    if (!parseGitHubAnyUrl(trimmed)) {
+      if (looksLikeURL(trimmed)) {
+        setUrlError("Enter a GitHub repository URL, such as github.com/owner/repo.");
+      }
+      return false;
+    }
+    setUrlError(null);
     onPaste(trimmed);
     return true;
   };
@@ -297,43 +304,69 @@ function RemoteRepoPopoverContent({
         autoFocus
         type="text"
         value={value}
-        onChange={(event) => setValue(event.target.value)}
+        onChange={(event) => {
+          setValue(event.target.value);
+          setUrlError(null);
+        }}
         onBlur={() => commitURL(value)}
         onPaste={(event) => {
           const pasted = event.clipboardData.getData("text");
-          if (!commitURL(pasted)) return;
+          const isURL = looksLikeURL(pasted.trim());
+          if (!commitURL(pasted) && !isURL) return;
           event.preventDefault();
           setValue(pasted.trim());
         }}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && commitURL(value)) event.preventDefault();
+          if (event.key !== "Enter") return;
+          const isURL = looksLikeURL(value.trim());
+          if (commitURL(value) || isURL) event.preventDefault();
         }}
         placeholder="Search repositories or paste a GitHub URL"
         aria-label="Search repositories or paste a GitHub URL"
+        aria-invalid={urlError ? true : undefined}
         data-testid="remote-repo-input"
         data-legacy-testid="remote-paste-url-input"
         className={cn(
           "h-11 sm:h-9 mx-2 mt-2 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
           "outline-none focus:bg-muted focus:border-border placeholder:text-muted-foreground",
+          urlError && "border-destructive focus:border-destructive",
         )}
       />
-      <PickerList accessible={accessible} onPick={onPick} />
+      <PickerList accessible={accessible} onPick={onPick} urlError={urlError} />
     </div>
   );
+}
+
+function looksLikeURL(value: string): boolean {
+  if (!value) return false;
+  const withScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
+  try {
+    const parsed = new URL(withScheme);
+    return parsed.hostname.includes(".") && value.includes("/");
+  } catch {
+    return false;
+  }
 }
 
 function PickerList({
   accessible,
   onPick,
+  urlError,
 }: {
   accessible: UseAccessibleReposResult;
   onPick: (repo: AccessibleRepo) => void;
+  urlError: string | null;
 }) {
   const { repos, loading, error } = accessible;
   return (
     <div className="h-56 max-h-[calc(100vh-16rem)] overflow-y-auto p-1">
+      {urlError ? (
+        <div role="alert" className="px-2 py-3 text-xs text-destructive">
+          {urlError}
+        </div>
+      ) : null}
       {accessible.unavailable ? <ConnectGitHubBanner /> : null}
-      {loading && repos.length === 0 ? (
+      {!accessible.unavailable && loading && repos.length === 0 ? (
         <div
           className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
           data-testid="remote-repo-picker-loading"

@@ -167,6 +167,29 @@ describe("RemoteRepoChip — URL entry", () => {
     fireEvent.blur(input);
     expect(onURLChange).toHaveBeenCalledWith("https://github.com/foo/bar/issues/42", "paste");
   });
+
+  it("surfaces an inline error when a URL-shaped non-GitHub value is submitted", () => {
+    const onURLChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible()}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "https://gitlab.com/acme/api" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByRole("alert").textContent).toContain("Enter a GitHub repository URL");
+    expect(onURLChange).not.toHaveBeenCalled();
+  });
 });
 
 describe("RemoteRepoChip — unified search", () => {
@@ -189,6 +212,8 @@ describe("RemoteRepoChip — unified search", () => {
     fireEvent.change(input, { target: { value: "acme" } });
     fireEvent.blur(input);
     expect(search).toHaveBeenLastCalledWith("acme");
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(onURLChange).not.toHaveBeenCalled();
   });
 
@@ -375,6 +400,23 @@ describe("RemoteRepoChip — picker loading state", () => {
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
     expect(screen.queryByTestId("remote-repo-picker-loading")).toBeNull();
     expect(screen.getByText(FULL_NAME)).toBeTruthy();
+  });
+
+  it("does not render a loading spinner with the GitHub connection banner", () => {
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible({ unavailable: true, loading: true })}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    expect(screen.getByText(/Connect a GitHub account/i)).toBeTruthy();
+    expect(screen.queryByTestId("remote-repo-picker-loading")).toBeNull();
   });
 });
 
