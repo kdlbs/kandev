@@ -20,9 +20,11 @@ const state = {
 };
 
 let officeEnabled = false;
+let pathname = "/tasks/session-1";
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
+  usePathname: () => pathname,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -71,6 +73,7 @@ function renderFooter() {
 describe("AppSidebarFooter", () => {
   beforeEach(() => {
     officeEnabled = false;
+    pathname = "/tasks/session-1";
     state.workspaces.activeId = "kanban-1";
     state.workspaces.items = [
       { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
@@ -161,5 +164,37 @@ describe("AppSidebarFooter", () => {
 
     expect(document.cookie).toContain("office-active-workspace=office-2");
     expect(mocks.routerPush).toHaveBeenCalledWith("/?workspaceId=kanban-1");
+  });
+  it("navigates to /settings when the gear opens settings mode from a non-settings route", () => {
+    pathname = "/tasks/session-1";
+    state.appSidebar.settingsMode = false;
+
+    renderFooter();
+    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+
+    expect(mocks.routerPush).toHaveBeenCalledWith("/settings");
+    expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
+  });
+
+  it("does not navigate when the gear reopens settings mode while already on a settings route", () => {
+    pathname = "/settings/agents";
+    state.appSidebar.settingsMode = false;
+
+    renderFooter();
+    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+
+    expect(mocks.routerPush).not.toHaveBeenCalled();
+    expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
+  });
+
+  it("does not navigate when the gear closes an already-open settings mode", () => {
+    pathname = "/settings";
+    state.appSidebar.settingsMode = true;
+
+    renderFooter();
+    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+
+    expect(mocks.routerPush).not.toHaveBeenCalled();
+    expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
   });
 });
