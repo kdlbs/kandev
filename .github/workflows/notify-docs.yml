@@ -1,0 +1,65 @@
+name: Published Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/public/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/public/**"
+      - "scripts/validate-public-docs.mjs"
+      - "scripts/validate-public-docs.test.mjs"
+      - ".github/workflows/notify-docs.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate public docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Test public docs validator
+        run: node --test scripts/validate-public-docs.test.mjs
+
+      - name: Validate public docs
+        run: node scripts/validate-public-docs.mjs
+
+  rebuild:
+    name: Trigger Cloudflare Pages rebuild
+    needs: validate
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+
+    steps:
+      - name: Trigger Cloudflare Pages deploy hook
+        env:
+          DEPLOY_HOOK_URL: ${{ secrets.CLOUDFLARE_PAGES_DEPLOY_HOOK_KANDEV_AI }}
+        run: |
+          if [[ -z "$DEPLOY_HOOK_URL" ]]; then
+            echo "::error::CLOUDFLARE_PAGES_DEPLOY_HOOK_KANDEV_AI is not configured"
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            --max-time 30 \
+            --retry 3 \
+            --retry-all-errors \
+            --retry-max-time 90 \
+            --request POST \
+            "$DEPLOY_HOOK_URL"

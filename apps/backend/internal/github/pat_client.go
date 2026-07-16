@@ -3,6 +3,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -665,6 +666,45 @@ func (c *PATClient) DeleteGist(ctx context.Context, gistID string) error {
 		return fmt.Errorf("delete gist: empty id")
 	}
 	return c.delete(ctx, "/gists/"+gistID)
+}
+
+// ListRepoDirectory lists the entries of a directory in a repository at the
+// given ref via the REST contents API. A 404 (missing directory) surfaces as
+// a *GitHubAPIError via the shared get() helper.
+func (c *PATClient) ListRepoDirectory(ctx context.Context, owner, repo, dir, ref string) ([]RepoContentEntry, error) {
+	endpoint := repoContentsEndpoint(owner, repo, dir, ref)
+	var entries []RepoContentEntry
+	if err := c.get(ctx, endpoint, &entries); err != nil {
+		return nil, fmt.Errorf("list repo directory: %w", err)
+	}
+	return entries, nil
+}
+
+// ghRepoFileContent mirrors the GitHub contents API's per-file response
+// shape (only the fields GetRepoFileContent needs).
+type ghRepoFileContent struct {
+	Type     string `json:"type"`
+	Encoding string `json:"encoding"`
+	Content  string `json:"content"`
+}
+
+// GetRepoFileContent fetches the raw decoded content of a single file via
+// the REST contents API. A 404 (missing file) surfaces as a *GitHubAPIError
+// via the shared get() helper.
+func (c *PATClient) GetRepoFileContent(ctx context.Context, owner, repo, path, ref string) ([]byte, error) {
+	endpoint := repoContentsEndpoint(owner, repo, path, ref)
+	var raw ghRepoFileContent
+	if err := c.get(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("get repo file content: %w", err)
+	}
+	if raw.Encoding != "base64" {
+		return nil, fmt.Errorf("get repo file content: unsupported encoding %q", raw.Encoding)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(stripBase64Whitespace(raw.Content))
+	if err != nil {
+		return nil, fmt.Errorf("get repo file content: decode base64: %w", err)
+	}
+	return decoded, nil
 }
 
 // gistFileDTO mirrors the GitHub API's per-file body shape.

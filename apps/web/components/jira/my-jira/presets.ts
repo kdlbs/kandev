@@ -31,7 +31,7 @@ export type JiraPresetIcon =
   | "sparkle"
   | "check";
 
-// Persisted shape — stored in localStorage and edited from settings.
+// Persisted shape stored in backend user settings and edited from settings.
 export type JiraStoredPreset = {
   id: string;
   label: string;

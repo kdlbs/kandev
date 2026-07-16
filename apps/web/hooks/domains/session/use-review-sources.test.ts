@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { buildReviewSources } from "./use-review-sources";
+import { resolvePRReviewRepositoryName } from "@/components/review/types";
 import type { PRDiffFile } from "@/lib/types/github";
 
-/* eslint-disable max-lines-per-function -- multi-case describe block */
+const RENAMED_PATH = "src/new-name.ts";
+const PREVIOUS_PATH = "src/old-name.ts";
+
+/* eslint-disable max-lines-per-function -- comprehensive source merge cases */
 describe("buildReviewSources", () => {
   it("returns empty result when no inputs", () => {
     const result = buildReviewSources({
@@ -76,7 +80,96 @@ describe("buildReviewSources", () => {
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("pr");
+    expect(result.allFiles[0].repository_name).toBeUndefined();
     expect(result.sourceCounts).toEqual({ uncommitted: 0, committed: 0, pr: 1 });
+  });
+
+  it("keeps a patchless PR rename with its previous path", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: undefined,
+      cumulativeDiff: null,
+      prDiffFiles: [
+        {
+          filename: RENAMED_PATH,
+          old_path: PREVIOUS_PATH,
+          status: "renamed",
+          patch: "",
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+    });
+
+    expect(result.allFiles).toEqual([
+      expect.objectContaining({
+        path: RENAMED_PATH,
+        old_path: PREVIOUS_PATH,
+        status: "renamed",
+        diff: "",
+        source: "pr",
+      }),
+    ]);
+    expect(result.sourceCounts).toEqual({ uncommitted: 0, committed: 0, pr: 1 });
+  });
+
+  it("normalizes removed and unknown PR statuses", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: undefined,
+      cumulativeDiff: null,
+      prDiffFiles: [
+        { filename: "gone.ts", status: "removed", patch: "", additions: 0, deletions: 1 },
+        { filename: "copied.ts", status: "copied", patch: "", additions: 1, deletions: 0 },
+      ],
+    });
+
+    expect(Object.fromEntries(result.allFiles.map((file) => [file.path, file.status]))).toEqual({
+      "copied.ts": "modified",
+      "gone.ts": "deleted",
+    });
+  });
+
+  it("keeps patchless uncommitted and cumulative files with metadata", () => {
+    const result = buildReviewSources({
+      gitStatus: {
+        files: {
+          "assets/logo.png": {
+            status: "modified",
+            diff_skip_reason: "binary",
+          },
+        },
+      },
+      statusByRepo: undefined,
+      cumulativeDiff: {
+        files: {
+          [RENAMED_PATH]: {
+            status: "renamed",
+            old_path: PREVIOUS_PATH,
+          },
+        },
+      },
+      prDiffFiles: undefined,
+    });
+
+    expect(result.allFiles).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "assets/logo.png",
+          diff_skip_reason: "binary",
+          diff: "",
+          source: "uncommitted",
+        }),
+        expect.objectContaining({
+          path: RENAMED_PATH,
+          old_path: PREVIOUS_PATH,
+          status: "renamed",
+          diff: "",
+          source: "committed",
+        }),
+      ]),
+    );
+    expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 1, pr: 0 });
   });
 
   it("dedupes by path: uncommitted wins over committed wins over PR", () => {
@@ -217,12 +310,16 @@ describe("buildReviewSources", () => {
     expect(result.sourceCounts).toEqual({ uncommitted: 1, committed: 0, pr: 0 });
   });
 
-  it("multi-repo uncommitted + PR overlap: file appears once as uncommitted (same repo)", () => {
+  it("dedupes PR files using the canonical workspace repo rather than provider repo name", () => {
+    const prRepoName = resolvePRReviewRepositoryName(
+      { repository_id: "repo-1", repo: "widgets" },
+      "acme/widgets",
+    );
     const result = buildReviewSources({
       gitStatus: undefined,
       statusByRepo: [
         {
-          repository_name: "frontend",
+          repository_name: "acme-widgets",
           status: {
             files: {
               "src/shared.ts": {
@@ -245,7 +342,7 @@ describe("buildReviewSources", () => {
           deletions: 0,
         },
       ],
-      prRepoName: "frontend",
+      prRepoName,
     });
     expect(result.allFiles).toHaveLength(1);
     expect(result.allFiles[0].source).toBe("uncommitted");
@@ -411,6 +508,42 @@ describe("buildReviewSources", () => {
     expect(byRepo["frontend"]?.path).toBe("README.md");
     expect(byRepo["backend"]?.path).toBe("README.md");
     expect(result.sourceCounts).toEqual({ uncommitted: 2, committed: 0, pr: 0 });
+  });
+
+  it("keeps repo and path combinations containing colons distinct", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: [
+        {
+          repository_name: "frontend:src",
+          status: {
+            files: {
+              "app.ts": { diff: "@@first@@", status: "modified", additions: 1, deletions: 0 },
+            },
+          },
+        },
+        {
+          repository_name: "frontend",
+          status: {
+            files: {
+              "src:app.ts": {
+                diff: "@@second@@",
+                status: "modified",
+                additions: 1,
+                deletions: 0,
+              },
+            },
+          },
+        },
+      ],
+      cumulativeDiff: null,
+      prDiffFiles: undefined,
+    });
+
+    expect(result.allFiles.map((file) => [file.repository_name, file.path])).toEqual([
+      ["frontend", "src:app.ts"],
+      ["frontend:src", "app.ts"],
+    ]);
   });
 
   // Regression for the multi-repo cumulative-diff bug: backend's

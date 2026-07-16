@@ -41,6 +41,7 @@ import { useSessionGit } from "@/hooks/domains/session/use-session-git";
 import type { FileInfo } from "@/lib/state/slices";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
+import { openExternalLink } from "@/lib/desktop/external-links";
 import {
   CommitSummary,
   MobilePRBranchSummary,
@@ -491,7 +492,7 @@ export function useMobileGitActions(
             if (activeTaskId) {
               setPendingPrUrlForTask(activeTaskId, "", result.pr_url);
             }
-            window.open(result.pr_url, "_blank");
+            void openExternalLink(result.pr_url).catch(() => undefined);
           }
         } else {
           toast({

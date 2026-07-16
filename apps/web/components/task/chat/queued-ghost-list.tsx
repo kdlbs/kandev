@@ -47,10 +47,12 @@ function useEscToClose(open: boolean, onClose: () => void): void {
       // the clarification overlay).
       if (isEditableTarget(e.target)) return;
       e.preventDefault();
+      e.stopPropagation();
       onClose();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Capture Escape before an enclosing Radix dialog handles it as a dismissal.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
 }
 

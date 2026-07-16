@@ -53,4 +53,18 @@ describe("kanban slice active session selection", () => {
       lastSessionByTaskId: { [TASK_ID]: AUTO_SESSION_ID },
     });
   });
+
+  it("clears a pin when auto-selecting a session for a different task", () => {
+    const store = makeStore();
+
+    store.getState().setActiveSession(TASK_ID, PINNED_SESSION_ID);
+    store.getState().setActiveSessionAuto("task-2", AUTO_SESSION_ID);
+
+    expect(store.getState().tasks).toMatchObject({
+      activeTaskId: "task-2",
+      activeSessionId: AUTO_SESSION_ID,
+      pinnedSessionId: null,
+      lastSessionByTaskId: { [TASK_ID]: PINNED_SESSION_ID, "task-2": AUTO_SESSION_ID },
+    });
+  });
 });

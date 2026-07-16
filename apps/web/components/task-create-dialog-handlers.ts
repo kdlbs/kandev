@@ -3,8 +3,6 @@
 import { useCallback } from "react";
 import type { Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
-import { removeLocalStorage, setLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
 
@@ -27,7 +25,6 @@ type TaskCreateLastUsedPayload = {
 };
 
 let lastQueuedLastUsed: Partial<TaskCreateLastUsedState> = {};
-const LOCAL_STORAGE_WRITE_EVENT = "localStorage-write";
 const lastUsedDebug = createDebugLogger("task-create:last-used");
 
 /**
@@ -166,17 +163,8 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
         : { repositoryId: undefined, localPath: value, branch: "" };
       fs.updateRepository(key, patch);
       if (isWorkspaceRepo) {
-        setLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID, value);
-        removeLocalStorage(STORAGE_KEYS.LAST_BRANCH);
         syncTaskCreateLastUsed({ repository_id: value, branch: null });
-        lastUsedDebug(LOCAL_STORAGE_WRITE_EVENT, {
-          key: "lastRepositoryId",
-          value,
-          row_key: key,
-        });
       } else {
-        removeLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID);
-        removeLocalStorage(STORAGE_KEYS.LAST_BRANCH);
         syncTaskCreateLastUsed({ repository_id: null, branch: null });
       }
       // Switching the repo invalidates whatever local-status the fresh-branch
@@ -189,9 +177,7 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
   const handleRowBranchChange = useCallback(
     (key: string, value: string) => {
       fs.updateRepository(key, { branch: value });
-      setLocalStorage(STORAGE_KEYS.LAST_BRANCH, value);
       syncTaskCreateLastUsed({ branch: value });
-      lastUsedDebug(LOCAL_STORAGE_WRITE_EVENT, { key: "lastBranch", value, row_key: key });
     },
     [fs],
   );
@@ -203,18 +189,14 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
   const handleAgentProfileChange = useCallback(
     (value: string) => {
       fs.setAgentProfileId(value);
-      setLocalStorage(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, value);
       syncTaskCreateLastUsed({ agent_profile_id: value });
-      lastUsedDebug(LOCAL_STORAGE_WRITE_EVENT, { key: "lastAgentProfileId", value });
     },
     [fs],
   );
   const handleExecutorProfileChange = useCallback(
     (value: string) => {
       fs.setExecutorProfileId(value);
-      setLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, value);
       syncTaskCreateLastUsed({ executor_profile_id: value });
-      lastUsedDebug(LOCAL_STORAGE_WRITE_EVENT, { key: "lastExecutorProfileId", value });
     },
     [fs],
   );
@@ -256,8 +238,6 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
     // useRemote when flipping the other way.
     if (next) {
       fs.setNoRepository(false);
-      removeLocalStorage(STORAGE_KEYS.LAST_REPOSITORY_ID);
-      removeLocalStorage(STORAGE_KEYS.LAST_BRANCH);
       syncTaskCreateLastUsed({ repository_id: null, branch: null });
     }
     clearFreshBranch(fs);
@@ -287,7 +267,6 @@ function useGitHubAndFreshBranchHandlers(fs: DialogFormState) {
       // non-worktree default (worktree is unworkable in no-repo mode).
       fs.setExecutorId("");
       fs.setExecutorProfileId("");
-      removeLocalStorage(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
       syncTaskCreateLastUsed({
         repository_id: null,
         branch: null,

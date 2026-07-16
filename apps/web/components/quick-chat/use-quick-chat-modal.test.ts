@@ -140,6 +140,19 @@ describe("useQuickChatModal — persisted config lifecycle", () => {
     expect(mockAppState.closeQuickChatSession).toHaveBeenCalledWith(configSessionId);
     expect(mockDeleteTask).toHaveBeenCalledWith("config-task");
   });
+
+  it("exposes only sessions from the hydrated workspace", () => {
+    mockAppState.quickChat.sessions = [
+      { sessionId: "session-a", workspaceId: WORKSPACE_ID, kind: "chat" },
+      { sessionId: "session-b", workspaceId: "ws-2", kind: "chat" },
+    ];
+
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    expect(result.current.sessions).toEqual([
+      { sessionId: "session-a", workspaceId: WORKSPACE_ID, kind: "chat" },
+    ]);
+  });
 });
 
 describe("useAgentSelection — happy path", () => {

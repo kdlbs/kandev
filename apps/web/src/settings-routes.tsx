@@ -33,6 +33,7 @@ import {
   AppearanceSettings,
   GeneralSettings,
   KeyboardShortcutsSettings,
+  TaskActionsSettings,
 } from "@/components/settings/general-settings";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
@@ -126,6 +127,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/general/secrets": () => <SecretsSettings />,
   "/settings/general/shell": () => <SettingsRedirect to="/settings/general/terminal" />,
   "/settings/general/sprites": () => <SpritesSettings />,
+  "/settings/general/task-actions": () => <TaskActionsSettings />,
   "/settings/general/terminal": () => <TerminalSettings />,
   "/settings/workspace": () => <WorkspacesPage />,
   "/settings/agents": () => <AgentsSettingsPage />,

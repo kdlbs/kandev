@@ -362,7 +362,7 @@ func (s *Server) registerTools() {
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 13
+		count += 14
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -427,7 +427,7 @@ func (s *Server) registerKanbanTools() {
 	s.registerCreateTaskTool()
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("list_agents_kandev",
-			"List all configured agents with their profiles. Use this to find available agent_profile_ids for create_task_kandev.",
+			"List all configured agents with their profiles. Use this to find available agent_profile_ids for create_task_kandev and spawn_session_kandev.",
 			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
 		s.wrapHandler("list_agents_kandev", s.listAgentsHandler()),
@@ -476,9 +476,9 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("message_task_kandev",
-			mcp.WithDescription(`Send a follow-up prompt (message) to an existing task's primary session.
+			mcp.WithDescription(`Send a follow-up prompt (message) to an existing task's primary session, or to a specific session via session_id.
 
-Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward.
+Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward. Pass session_id to target a specific session — including a sibling session on your OWN task (e.g. one you spawned with spawn_session_kandev).
 
 Behaviour by session state:
 - Running/starting: the message is queued and delivered when the current turn ends. Pass delivery_mode="interrupt" to instead interrupt the target's current turn immediately so the message is delivered without waiting — keeps a parent's steering/stop messages from piling up behind a long-running child's turn. Only honored when you are the target task's direct parent; a non-parent sender requesting "interrupt" gets a hard error instead of being silently downgraded to "queued".
@@ -488,6 +488,7 @@ Behaviour by session state:
 
 Returns the dispatch status: "queued", "sent", or "started".`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The target task's full UUID (not a truncated prefix)")),
+			mcp.WithString("session_id", mcp.Description("Optional target session ID (must belong to task_id). Omit to message the task's primary session. Required when messaging a sibling session on your OWN task (task_id may then be your own task ID) — e.g. a session you spawned with spawn_session_kandev.")),
 			mcp.WithString("prompt", mcp.Required(), mcp.Description("The message to deliver to the task's agent")),
 			mcp.WithString("delivery_mode",
 				mcp.Enum("queued", "interrupt"),
@@ -497,6 +498,7 @@ Returns the dispatch status: "queued", "sent", or "started".`),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
 	)
+	s.registerSpawnSessionTool()
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_conversation_kandev",
 			mcp.WithDescription("Get conversation history for a task. If session_id is omitted, the primary session is used."),
@@ -581,6 +583,29 @@ IMPORTANT:
 			mcp.WithString("base_branch", mcp.Description("Base branch for the repository (e.g. 'main'). Optional. Defaults: same-repo subtasks inherit the parent's base_branch; cross-repo subtasks and top-level tasks fall back to the repository's default_branch (visible via list_repositories_kandev).")),
 		),
 		s.wrapHandler("create_task_kandev", s.createTaskHandler()),
+	)
+}
+
+// registerSpawnSessionTool registers spawn_session_kandev. Spawns an ADDITIONAL
+// agent session on an existing task (usually the caller's own) — unlike
+// create_task_kandev, no new task is created: the spawned session shares the
+// task's workspace, conversation surface (as a separate tab), and lifecycle.
+func (s *Server) registerSpawnSessionTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("spawn_session_kandev",
+			mcp.WithDescription(`Spawn an ADDITIONAL agent session on an existing task (defaults to your current task) and start it with the given prompt.
+
+Unlike create_task_kandev this does NOT create a new task — the new session runs alongside the task's existing sessions in the same workspace, as a separate session tab. Use it to bring in another agent (or another instance of yourself) on the work you're already doing: a reviewer, a pair of hands for a parallelizable piece, or a different agent profile better suited to a subproblem.
+
+The spawned session knows it was spawned by you and can reply via message_task_kandev using your task_id + session_id. You can message it the same way using the session_id returned by this tool.
+
+Returns {task_id, session_id, state}.`),
+			mcp.WithString("prompt", mcp.Required(), mcp.Description("The spawned session's initial prompt. This is the ONLY context the new agent receives — be specific and detailed.")),
+			mcp.WithString("agent_profile_id", mcp.Description("Agent profile for the new session. Omit to reuse your own session's agent profile.")),
+			mcp.WithString("name", mcp.Description("Optional session name shown on the session tab (e.g. 'reviewer'). Helps the user tell concurrent sessions apart.")),
+			mcp.WithString("task_id", mcp.Description("Task to spawn the session on. Omit to use your current task.")),
+		),
+		s.wrapHandler("spawn_session_kandev", s.spawnSessionHandler()),
 	)
 }
 

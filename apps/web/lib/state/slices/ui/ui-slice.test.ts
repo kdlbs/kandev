@@ -3,9 +3,9 @@ import { create, type StoreApi, type UseBoundStore } from "zustand";
 import { waitFor } from "@testing-library/react";
 import { immer } from "zustand/middleware/immer";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
-import { createUISlice } from "./ui-slice";
+import { createUISlice, migrateView } from "./ui-slice";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar-constants";
-import type { SidebarViewDraft } from "./sidebar-view-types";
+import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 import type { UISlice } from "./types";
 import {
   getStoredAcknowledgedAgentErrors,
@@ -28,14 +28,12 @@ type UIStore = UseBoundStore<StoreApi<UISlice>>;
 const KEY = "kandev.sidebar.collapsedSubtasks";
 const TASK_A = "task-a";
 const TASK_B = "task-b";
-const SIDEBAR_VIEWS_KEY = "kandev.sidebar.views";
-const SIDEBAR_ACTIVE_VIEW_KEY = "kandev.sidebar.activeViewId";
-const SIDEBAR_DRAFT_KEY = "kandev.sidebar.draft";
 const BACKEND_DOWN = "backend down";
+const RENAME_FAILED = "rename failed";
 const PINNED_KEY = "kandev.sidebar.pinnedTaskIds";
 const ORDER_KEY = "kandev.sidebar.orderedTaskIds";
 
-function makeSidebarView(id: string, name: string) {
+function makeSidebarView(id: string, name: string): SidebarView {
   return {
     id,
     name,
@@ -45,6 +43,18 @@ function makeSidebarView(id: string, name: string) {
     collapsedGroups: [],
   };
 }
+
+describe("migrateView", () => {
+  it("retains all supported boolean filter dimensions", () => {
+    const view = makeSidebarView("view-a", "View A");
+    view.filters = [
+      { id: "has-pr", dimension: "hasPR", op: "is", value: true },
+      { id: "issue-watch", dimension: "isIssueWatch", op: "is", value: true },
+    ];
+
+    expect(migrateView(view).filters).toEqual(view.filters);
+  });
+});
 
 describe("toggleSubtaskCollapsed", () => {
   beforeEach(() => {
@@ -94,26 +104,24 @@ describe("sidebar task prefs (pin + manual order)", () => {
     } as Awaited<ReturnType<typeof updateUserSettings>>);
   });
 
-  it("hydrates pinned + ordered from localStorage", () => {
+  it("ignores stale pinned + ordered values in localStorage", () => {
     window.localStorage.setItem(PINNED_KEY, JSON.stringify(["t1"]));
     window.localStorage.setItem(ORDER_KEY, JSON.stringify(["t2", "t1"]));
     const store = makeStore();
-    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1"]);
-    expect(store.getState().sidebarTaskPrefs.orderedTaskIds).toEqual(["t2", "t1"]);
+    expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual([]);
+    expect(store.getState().sidebarTaskPrefs.orderedTaskIds).toEqual([]);
   });
 
-  it("togglePinnedTask adds, removes, and persists", () => {
+  it("togglePinnedTask adds and removes tasks", () => {
     const store = makeStore();
     store.getState().togglePinnedTask("t1");
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1"]);
-    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t1"]);
 
     store.getState().togglePinnedTask("t2");
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1", "t2"]);
 
     store.getState().togglePinnedTask("t1");
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t2"]);
-    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t2"]);
   });
 
   it("pinTasks pins all given ids without unpinning existing ones", () => {
@@ -123,11 +131,6 @@ describe("sidebar task prefs (pin + manual order)", () => {
     store.getState().pinTasks(["t1", "t2", "t3"]);
     // t1 already pinned stays pinned; t2/t3 added.
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1", "t2", "t3"]);
-    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual([
-      "t1",
-      "t2",
-      "t3",
-    ]);
   });
 
   it("unpinTasks removes all given ids and leaves other pinned tasks alone", () => {
@@ -137,21 +140,18 @@ describe("sidebar task prefs (pin + manual order)", () => {
     store.getState().unpinTasks(["t1", "t3"]);
 
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t2"]);
-    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t2"]);
   });
 
-  it("setSidebarTaskOrder replaces and persists", () => {
+  it("setSidebarTaskOrder replaces the order", () => {
     const store = makeStore();
     store.getState().setSidebarTaskOrder(["a", "b", "c"]);
     expect(store.getState().sidebarTaskPrefs.orderedTaskIds).toEqual(["a", "b", "c"]);
-    expect(JSON.parse(window.localStorage.getItem(ORDER_KEY) ?? "null")).toEqual(["a", "b", "c"]);
 
     store.getState().setSidebarTaskOrder(["c", "a"]);
     expect(store.getState().sidebarTaskPrefs.orderedTaskIds).toEqual(["c", "a"]);
-    expect(JSON.parse(window.localStorage.getItem(ORDER_KEY) ?? "null")).toEqual(["c", "a"]);
   });
 
-  it("removeTaskFromSidebarPrefs strips the id from both arrays and persists", () => {
+  it("removeTaskFromSidebarPrefs strips the id from both arrays", () => {
     const store = makeStore();
     store.getState().togglePinnedTask("t1");
     store.getState().togglePinnedTask("t2");
@@ -161,22 +161,17 @@ describe("sidebar task prefs (pin + manual order)", () => {
 
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t2"]);
     expect(store.getState().sidebarTaskPrefs.orderedTaskIds).toEqual(["t2", "t3"]);
-    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t2"]);
-    expect(JSON.parse(window.localStorage.getItem(ORDER_KEY) ?? "null")).toEqual(["t2", "t3"]);
 
     // Subsequent togglePinnedTask must NOT bring "t1" back from a stale draft.
     store.getState().togglePinnedTask("t3");
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t2", "t3"]);
-    expect(JSON.parse(window.localStorage.getItem(PINNED_KEY) ?? "null")).toEqual(["t2", "t3"]);
   });
 
   it("removeTaskFromSidebarPrefs is a no-op for unknown ids", () => {
     const store = makeStore();
     store.getState().togglePinnedTask("t1");
-    const before = window.localStorage.getItem(PINNED_KEY);
     store.getState().removeTaskFromSidebarPrefs("ghost");
     expect(store.getState().sidebarTaskPrefs.pinnedTaskIds).toEqual(["t1"]);
-    expect(window.localStorage.getItem(PINNED_KEY)).toBe(before);
   });
 });
 
@@ -249,7 +244,9 @@ describe("sidebar view sync rollback", () => {
     const store = makeStore();
     seedViews(store);
     vi.mocked(updateUserSettings)
-      .mockRejectedValueOnce(new Error("rename failed"))
+      .mockRejectedValueOnce(new Error(RENAME_FAILED))
+      .mockRejectedValueOnce(new Error(RENAME_FAILED))
+      .mockRejectedValueOnce(new Error(RENAME_FAILED))
       .mockResolvedValueOnce({
         settings: {},
       } as Awaited<ReturnType<typeof updateUserSettings>>);
@@ -258,7 +255,7 @@ describe("sidebar view sync rollback", () => {
     store.getState().setSidebarActiveView("view-b");
 
     await waitFor(() => {
-      expect(store.getState().sidebarViews.syncError).toBe("rename failed");
+      expect(store.getState().sidebarViews.syncError).toBe(RENAME_FAILED);
     });
 
     expect(store.getState().sidebarViews.activeViewId).toBe("view-b");
@@ -275,21 +272,16 @@ describe("setSubtaskOrder", () => {
     window.localStorage.clear();
   });
 
-  it("hydrates subtaskOrderByParentId from localStorage", () => {
+  it("ignores stale subtask order in localStorage", () => {
     window.localStorage.setItem(SUB_KEY, JSON.stringify({ [PARENT_A]: ["c1", "c2"] }));
     const store = makeStore();
-    expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({
-      [PARENT_A]: ["c1", "c2"],
-    });
+    expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({});
   });
 
-  it("setSubtaskOrder writes per-parent order and persists", () => {
+  it("setSubtaskOrder writes per-parent order", () => {
     const store = makeStore();
     store.getState().setSubtaskOrder(PARENT_A, ["c2", "c1"]);
     expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({
-      [PARENT_A]: ["c2", "c1"],
-    });
-    expect(JSON.parse(window.localStorage.getItem(SUB_KEY) ?? "null")).toEqual({
       [PARENT_A]: ["c2", "c1"],
     });
 
@@ -305,7 +297,6 @@ describe("setSubtaskOrder", () => {
     store.getState().setSubtaskOrder(PARENT_A, ["c1"]);
     store.getState().setSubtaskOrder(PARENT_A, []);
     expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({});
-    expect(JSON.parse(window.localStorage.getItem(SUB_KEY) ?? "null")).toEqual({});
   });
 
   it("removeTaskFromSidebarPrefs drops the task as a parent key and from sibling lists", () => {
@@ -332,7 +323,6 @@ describe("setSubtaskOrder", () => {
     store.getState().setSubtaskOrder(PARENT_A, ["c1"]);
     store.getState().removeTaskFromSidebarPrefs("c1");
     expect(store.getState().sidebarTaskPrefs.subtaskOrderByParentId).toEqual({});
-    expect(JSON.parse(window.localStorage.getItem(SUB_KEY) ?? "null")).toEqual({});
   });
 });
 
@@ -419,6 +409,23 @@ describe("appSidebar actions", () => {
     expect(store.getState().appSidebar.settingsMode).toBe(false);
   });
 
+  it("setAppSidebarSettingsMode applies the requested state idempotently", () => {
+    window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify(true));
+    const store = makeStore();
+
+    store.getState().setAppSidebarSettingsMode(true);
+    store.getState().setAppSidebarSettingsMode(true);
+    expect(store.getState().appSidebar.settingsMode).toBe(true);
+    expect(store.getState().appSidebar.collapsed).toBe(false);
+    expect(JSON.parse(window.localStorage.getItem(COLLAPSED_KEY) ?? "null")).toBe(false);
+
+    store.getState().setAppSidebarSettingsMode(false);
+    store.getState().setAppSidebarSettingsMode(false);
+    expect(store.getState().appSidebar.settingsMode).toBe(false);
+    expect(store.getState().appSidebar.collapsed).toBe(false);
+    expect(window.localStorage.getItem("kandev.appSidebar.settingsMode")).toBeNull();
+  });
+
   it("entering settings mode while collapsed force-expands the rail", () => {
     window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify(true));
     const store = makeStore();
@@ -498,18 +505,6 @@ describe("reorderSidebarViews", () => {
     store.getState().reorderSidebarViews("two", "one");
 
     expect(store.getState().sidebarViews.views.map((v) => v.id)).toEqual(["all", "two", "one"]);
-    expect(JSON.parse(window.localStorage.getItem(SIDEBAR_VIEWS_KEY) ?? "[]")).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ id: "all" }),
-        expect.objectContaining({ id: "two" }),
-        expect.objectContaining({ id: "one" }),
-      ]),
-    );
-    expect(
-      JSON.parse(window.localStorage.getItem(SIDEBAR_VIEWS_KEY) ?? "[]").map(
-        (v: { id: string }) => v.id,
-      ),
-    ).toEqual(["all", "two", "one"]);
     expect(updateUserSettings).toHaveBeenCalledWith({
       sidebar_views: [
         expect.objectContaining({ id: "all" }),
@@ -597,8 +592,6 @@ describe("sidebar view backend state", () => {
     store.getState().setSidebarActiveView("mine");
 
     expect(store.getState().sidebarViews.activeViewId).toBe("mine");
-    expect(window.localStorage.getItem(SIDEBAR_ACTIVE_VIEW_KEY)).toBe(JSON.stringify("mine"));
-    expect(window.localStorage.getItem(SIDEBAR_DRAFT_KEY)).toBeNull();
     expect(updateUserSettings).toHaveBeenCalledWith({
       sidebar_active_view_id: "mine",
       sidebar_draft: null,

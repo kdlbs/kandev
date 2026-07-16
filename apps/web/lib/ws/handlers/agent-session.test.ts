@@ -141,6 +141,55 @@ describe("session.state_changed handler", () => {
   });
 });
 
+describe("session.state_changed name propagation", () => {
+  let store: ReturnType<typeof makeStore>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let handler: (msg: any) => void;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("applies a session name from rename broadcasts, including clearing", () => {
+    store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING", started_at: "" } },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING", name: "reviewer" }),
+    );
+    expect(store.getState().upsertTaskSessionFromEvent).toHaveBeenCalledWith(
+      "t-1",
+      expect.objectContaining({ id: "s-1", name: "reviewer" }),
+    );
+
+    // Rename-to-clear carries name: "" and must still apply.
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "RUNNING", name: "" }));
+    expect(store.getState().upsertTaskSessionFromEvent).toHaveBeenLastCalledWith(
+      "t-1",
+      expect.objectContaining({ id: "s-1", name: "" }),
+    );
+  });
+
+  it("does not touch the name when the event omits it", () => {
+    store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING", started_at: "", name: "reviewer" },
+        },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "COMPLETED" }));
+    const call = vi.mocked(store.getState().upsertTaskSessionFromEvent).mock.calls.at(-1);
+    expect(call?.[1]).not.toHaveProperty("name");
+  });
+});
+
 describe("session.state_changed recoverable errors", () => {
   it("upserts recoverable error metadata for non-failed session states", () => {
     const upsertTaskSessionFromEvent = vi.fn();

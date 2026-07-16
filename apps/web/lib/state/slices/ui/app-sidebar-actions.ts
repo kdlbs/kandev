@@ -60,6 +60,14 @@ export function buildAppSidebarActions(set: ImmerSet) {
         draft.appSidebar.width = width;
         setStoredAppSidebarWidth(width);
       }),
+    setAppSidebarSettingsMode: (settingsMode: boolean) =>
+      set((draft) => {
+        draft.appSidebar.settingsMode = settingsMode;
+        if (settingsMode && draft.appSidebar.collapsed) {
+          draft.appSidebar.collapsed = false;
+          setStoredAppSidebarCollapsed(false);
+        }
+      }),
     toggleAppSidebarSettingsMode: () =>
       set((draft) => {
         const next = !draft.appSidebar.settingsMode;

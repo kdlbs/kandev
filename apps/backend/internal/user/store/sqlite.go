@@ -337,6 +337,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"enable_preview_on_click":         settings.EnablePreviewOnClick,
 		"chat_submit_key":                 settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":      settings.ReviewAutoMarkOnScroll,
+		"confirm_task_archive":            settings.ConfirmTaskArchive,
 		"show_release_notification":       settings.ShowReleaseNotification,
 		"release_notes_last_seen_version": settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":        lspAutoStart,
@@ -453,6 +454,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.TasksListGroup = models.TasksListGroupDefault
 		settings.ShowReleaseNotification = true
 		settings.ReviewAutoMarkOnScroll = true
+		settings.ConfirmTaskArchive = true
 		settings.ChatSubmitKey = "cmd_enter"
 		settings.KeyboardShortcuts = map[string]interface{}{}
 		settings.TerminalLinkBehavior = "new_tab"
@@ -475,6 +477,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		EnablePreviewOnClick        bool                                `json:"enable_preview_on_click"`
 		ChatSubmitKey               string                              `json:"chat_submit_key"`
 		ReviewAutoMarkOnScroll      *bool                               `json:"review_auto_mark_on_scroll"`
+		ConfirmTaskArchive          *bool                               `json:"confirm_task_archive"`
 		ShowReleaseNotification     *bool                               `json:"show_release_notification"`
 		ReleaseNotesLastSeenVersion string                              `json:"release_notes_last_seen_version"`
 		LspAutoStartLanguages       []string                            `json:"lsp_auto_start_languages"`
@@ -524,6 +527,11 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ReviewAutoMarkOnScroll = *payload.ReviewAutoMarkOnScroll
 	} else {
 		settings.ReviewAutoMarkOnScroll = true
+	}
+	if payload.ConfirmTaskArchive != nil {
+		settings.ConfirmTaskArchive = *payload.ConfirmTaskArchive
+	} else {
+		settings.ConfirmTaskArchive = true
 	}
 	if payload.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *payload.ShowReleaseNotification

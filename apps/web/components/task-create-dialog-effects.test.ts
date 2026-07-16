@@ -8,7 +8,7 @@ import { decideAgentProfileAutopick } from "./task-create-dialog-autopick";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { Workspace } from "@/lib/types/http";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
+const STORAGE_KEYS = { LAST_AGENT_PROFILE_ID: "kandev.dialog.lastAgentProfileId" } as const;
 
 // Minimal fake of DialogFormState - the hook destructures only three fields,
 // so the rest can be undefined behind an `as` cast and never read.
@@ -49,7 +49,6 @@ beforeEach(() => {
 
 describe("useWorkflowAgentProfileEffect", () => {
   it("clears workflowAgentProfileId and leaves agentProfileId alone when no workflow is selected", () => {
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify("stale-id"));
     const fs = makeFs({ selectedWorkflowId: null });
 
     renderHook(() =>
@@ -98,8 +97,7 @@ describe("useWorkflowAgentProfileEffect", () => {
     expect(fs.setAgentProfileId).not.toHaveBeenCalledWith("missing-id");
   });
 
-  it("restores last-used agentProfileId when the workflow has no override and the id is still valid", () => {
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify("real-id"));
+  it("restores backend last-used agentProfileId when the workflow has no override", () => {
     const fs = makeFs({ selectedWorkflowId: "wf-1" });
     const workflows = [{ id: "wf-1" /* no agent_profile_id */ }];
 
@@ -109,6 +107,7 @@ describe("useWorkflowAgentProfileEffect", () => {
         workflows,
         [makeProfile("real-id")],
         [makeProfile("real-id")],
+        { lastUsedAgentProfileId: "real-id" },
       ),
     );
 
@@ -315,9 +314,8 @@ describe("decideAgentProfileAutopick — user settings deferral", () => {
     expect(picked).toEqual({ kind: "pick", source: "first", id: cursor.id });
   });
 
-  it("defers auto-pick while user settings load even when localStorage has a valid profile", () => {
+  it("defers auto-pick while user settings load", () => {
     const cursor = makeProfile("cursor");
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify(cursor.id));
 
     const deferred = decideAgentProfileAutopick({
       open: true,
@@ -342,7 +340,6 @@ describe("useDefaultSelectionsEffect — executor-aware agent restoration", () =
   it("restores lastId when it is compatible with the current executor", async () => {
     const claude = makeProfile("claude");
     const cursor = makeProfile("cursor");
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify(cursor.id));
     const fs = makeDefaultSelFs();
     const sel = makeSel({
       agentProfiles: [claude, cursor],
@@ -364,7 +361,6 @@ describe("useDefaultSelectionsEffect — executor-aware agent restoration", () =
     const claude = makeProfile("claude");
     const cursor = makeProfile("cursor");
     const codex = makeProfile("codex");
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify(claude.id));
     const fs = makeDefaultSelFs();
     const sel = makeSel({
       agentProfiles: [claude, cursor, codex],
@@ -381,7 +377,6 @@ describe("useDefaultSelectionsEffect — executor-aware agent restoration", () =
     const claude = makeProfile("claude");
     const cursor = makeProfile("cursor");
     const codex = makeProfile("codex");
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify(claude.id));
     const fs = makeDefaultSelFs();
     const sel = makeSel({
       agentProfiles: [claude, cursor, codex],
@@ -399,7 +394,6 @@ describe("useDefaultSelectionsEffect — executor-aware agent restoration", () =
     const claude = makeProfile("claude");
     const gemini = makeProfile("gemini");
     const cursor = makeProfile("cursor");
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify(claude.id));
     const fs = makeDefaultSelFs();
     const sel = makeSel({
       agentProfiles: [claude, gemini, cursor],
@@ -423,7 +417,6 @@ describe("useDefaultSelectionsEffect — executor-aware agent restoration", () =
     // producing a worse UX (selector populated, but submit still blocked).
     const claude = makeProfile("claude");
     const gemini = makeProfile("gemini");
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify(claude.id));
     const fs = makeDefaultSelFs();
     const sel = makeSel({
       agentProfiles: [claude, gemini],
@@ -440,7 +433,6 @@ describe("useDefaultSelectionsEffect — executor-aware agent restoration", () =
   it("does nothing when agentProfileId is already set (user has explicitly picked)", async () => {
     const claude = makeProfile("claude");
     const cursor = makeProfile("cursor");
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify(cursor.id));
     const fs = makeDefaultSelFs({ agentProfileId: claude.id });
     const sel = makeSel({
       agentProfiles: [claude, cursor],
@@ -466,7 +458,6 @@ describe("useDefaultSelectionsEffect — auth-spec load race", () => {
     // later, the filter narrows the list, and `noCompatibleAgent` flips true.
     const claude = makeProfile("claude");
     const cursor = makeProfile("cursor");
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify(claude.id));
     const fs = makeDefaultSelFs({ executorProfileId: "" });
     // Mirror the production shape: specs loaded, no executor picked yet, so
     // useExecutorProfileCompat returns agentProfiles unfiltered.
@@ -508,7 +499,6 @@ describe("useDefaultSelectionsEffect — auth-spec load race", () => {
     const claude = makeProfile("claude");
     const cursor = makeProfile("cursor");
     const codex = makeProfile("codex");
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify(claude.id));
     const fs = makeDefaultSelFs();
     // Phase 1: specs not yet loaded — compatibleAgentProfiles is the full
     // list because the executor-compat hook returns agentProfiles when

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { isValidElement, type ReactElement } from "react";
 
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
+import { TaskActionsSettings } from "@/components/settings/general-settings";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { buildSettingsInitialStateForRoute, renderSettingsRoute } from "./settings-routes";
@@ -110,6 +111,12 @@ describe("buildSettingsInitialStateForRoute", () => {
 });
 
 describe("renderSettingsRoute", () => {
+  it("renders task action preferences from General settings", () => {
+    const route = renderSettingsRoute("/settings/general/task-actions");
+    expect(isValidElement(route)).toBe(true);
+    expect((route as ReactElement).type).toBe(TaskActionsSettings);
+  });
+
   it("passes the route workspace id to the GitLab integration page", () => {
     expect(gitLabRouteWorkspaceId("/settings/workspace/ws-2/integrations/gitlab")).toBe("ws-2");
     expect(gitLabRouteWorkspaceId("/settings/workspace/ws%202/integrations/gitlab")).toBe("ws 2");

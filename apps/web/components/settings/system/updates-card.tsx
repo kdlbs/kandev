@@ -18,6 +18,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconDownload, IconExternalLink, IconRefresh } from "@tabler/icons-react";
 import { useSelfUpdate } from "@/hooks/domains/system/use-self-update";
+import {
+  useDesktopUpdater,
+  type DesktopUpdaterController,
+} from "@/hooks/domains/system/use-desktop-updater";
 import { useUpdates } from "@/hooks/domains/system/use-updates";
 import type { UpdatesResponse } from "@/lib/types/system";
 import { SelfUpdateProgress } from "./self-update-progress";
@@ -28,10 +32,10 @@ interface ApplyGate {
   manualCommands: string[];
 }
 
-function formatChecked(iso: string | undefined): string {
-  if (!iso) return "never";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
+function formatChecked(value: string | number | null | undefined): string {
+  if (!value) return "never";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
   return d.toLocaleString();
 }
 
@@ -62,9 +66,14 @@ function getApplyGate(updates: UpdatesResponse | null | undefined): ApplyGate {
 export function UpdatesCard() {
   const { updates, check, reload } = useUpdates();
   const selfUpdate = useSelfUpdate({ latestVersion: updates?.latest, onComplete: reload });
+  const desktopUpdater = useDesktopUpdater();
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
+
+  if (desktopUpdater.available) {
+    return <DesktopUpdatesCard updater={desktopUpdater} />;
+  }
 
   const onCheck = async () => {
     setChecking(true);
@@ -122,6 +131,99 @@ export function UpdatesCard() {
   );
 }
 
+function DesktopUpdatesCard({ updater }: { updater: DesktopUpdaterController }) {
+  const view = desktopCardView(updater);
+
+  return (
+    <Card data-testid="system-updates-card">
+      <CardHeader>
+        <UpdatesHeader available={view.available} />
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <VersionGrid current={view.current} latest={view.latest} />
+        <LastChecked checkedAt={updater.state?.checkedAtEpochMs} />
+        <UpdateActions
+          checking={view.checking}
+          showApply={view.showApply}
+          latest={view.latest}
+          url={updater.state?.releaseUrl ?? undefined}
+          onCheck={() => ignoreFailure(updater.check())}
+          onApply={() => ignoreFailure(updater.install())}
+          desktop
+        />
+        <ManualUpdateInstructions
+          show={view.available && !view.installSupported}
+          reason={updater.state?.installUnsupportedReason ?? undefined}
+          commands={[]}
+        />
+        <DesktopCurrentStatus phase={updater.state?.phase} />
+        <DesktopUpdateProgress updater={updater} />
+        <UpdateError error={updater.error} retryAfter={null} />
+      </CardContent>
+    </Card>
+  );
+}
+
+function desktopCardView(updater: DesktopUpdaterController) {
+  const state = updater.state;
+  if (!state) {
+    return {
+      available: false,
+      checking: updater.checking,
+      showApply: false,
+      installSupported: false,
+      current: "-",
+      latest: "-",
+    };
+  }
+  const available = state.phase === "available";
+  const installing = updater.installing || ["downloading", "installing"].includes(state.phase);
+  const busy = updater.checking || installing || state.phase === "checking";
+  return {
+    available,
+    checking: busy,
+    showApply: available && state.installSupported === true && !busy,
+    installSupported: state.installSupported === true,
+    current: state.currentVersion,
+    latest: state.latestVersion ?? (state.phase === "up-to-date" ? state.currentVersion : "-"),
+  };
+}
+
+function DesktopCurrentStatus({ phase }: { phase: string | undefined }) {
+  if (phase !== "up-to-date") return null;
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="system-updates-current-status">
+      Kandev is up to date.
+    </p>
+  );
+}
+
+async function ignoreFailure(operation: Promise<void>): Promise<void> {
+  await operation.catch(() => undefined);
+}
+
+function DesktopUpdateProgress({ updater }: { updater: DesktopUpdaterController }) {
+  const state = updater.state;
+  if (state?.phase !== "downloading" && state?.phase !== "installing") return null;
+  let detail = "Installing update...";
+  if (state.phase === "downloading") {
+    const downloaded = state.downloadedBytes ?? 0;
+    detail = state.totalBytes
+      ? `Downloading update (${downloaded} of ${state.totalBytes} bytes)...`
+      : `Downloading update (${downloaded} bytes)...`;
+  }
+  return (
+    <div
+      className="flex items-center gap-2 text-xs text-muted-foreground"
+      data-testid="system-updates-progress"
+      data-phase={state.phase}
+    >
+      <Spinner className="size-3.5" />
+      {detail}
+    </div>
+  );
+}
+
 function UpdatesHeader({ available }: { available: boolean }) {
   return (
     <CardTitle className="text-base flex items-center gap-2">
@@ -156,7 +258,7 @@ function VersionValue({ label, value, testId }: { label: string; value: string; 
   );
 }
 
-function LastChecked({ checkedAt }: { checkedAt?: string }) {
+function LastChecked({ checkedAt }: { checkedAt?: string | number | null }) {
   return (
     <div className="text-xs text-muted-foreground" data-testid="system-updates-checked-at">
       Last checked {formatChecked(checkedAt)}
@@ -171,17 +273,22 @@ interface UpdateActionsProps {
   url?: string;
   onCheck: () => Promise<void>;
   onApply: () => Promise<void>;
+  desktop?: boolean;
 }
 
 function UpdateActions(props: UpdateActionsProps) {
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+    <div
+      className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
+      data-testid="system-updates-actions"
+    >
       <CheckNowButton checking={props.checking} onCheck={props.onCheck} />
       <ReleaseNotesLink url={props.url} />
       <ApplyUpdateDialog
         showApply={props.showApply}
         latest={props.latest}
         onApply={props.onApply}
+        desktop={props.desktop}
       />
     </div>
   );
@@ -235,9 +342,10 @@ interface ApplyUpdateDialogProps {
   showApply: boolean;
   latest: string;
   onApply: () => Promise<void>;
+  desktop?: boolean;
 }
 
-function ApplyUpdateDialog({ showApply, latest, onApply }: ApplyUpdateDialogProps) {
+function ApplyUpdateDialog({ showApply, latest, onApply, desktop }: ApplyUpdateDialogProps) {
   if (!showApply) return null;
   return (
     <AlertDialog>
@@ -251,7 +359,9 @@ function ApplyUpdateDialog({ showApply, latest, onApply }: ApplyUpdateDialogProp
         <AlertDialogHeader>
           <AlertDialogTitle>Apply update?</AlertDialogTitle>
           <AlertDialogDescription className="text-left">
-            Kandev will update to {latest}, reinstall the user service, and restart it.
+            {desktop
+              ? `Kandev will install ${latest} and restart the desktop app.`
+              : `Kandev will update to ${latest}, reinstall the user service, and restart it.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

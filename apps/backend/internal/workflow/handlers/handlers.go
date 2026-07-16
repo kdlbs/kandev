@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/workflow/controller"
 	"github.com/kandev/kandev/internal/workflow/models"
+	"github.com/kandev/kandev/internal/workflow/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -143,7 +145,7 @@ func (h *Handlers) httpCreateStepsFromTemplate(c *gin.Context) {
 		TemplateID: req.TemplateID,
 	}); err != nil {
 		h.logger.Error("failed to create steps from template", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create steps"})
+		h.writeStepMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"success": true})
@@ -185,6 +187,10 @@ func (h *Handlers) httpUpdateStep(c *gin.Context) {
 }
 
 func (h *Handlers) writeStepMutationError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrWorkflowReadOnly) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	msg := strings.ToLower(err.Error())
 	switch {
 	case isStepValidationError(msg):
@@ -206,7 +212,7 @@ func isStepValidationError(msg string) bool {
 func (h *Handlers) httpDeleteStep(c *gin.Context) {
 	if err := h.controller.DeleteStep(c.Request.Context(), c.Param("id")); err != nil {
 		h.logger.Error("failed to delete step", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete step"})
+		h.writeStepMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
@@ -227,7 +233,7 @@ func (h *Handlers) httpReorderSteps(c *gin.Context) {
 		StepIDs:    req.StepIDs,
 	}); err != nil {
 		h.logger.Error("failed to reorder steps", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reorder steps"})
+		h.writeStepMutationError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})

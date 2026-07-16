@@ -263,7 +263,10 @@ test.describe("Mobile file viewer panel", () => {
       seedData,
       backend,
       taskTitle: "Mobile FV Markdown",
-      options: { extension: "md", content: "# Heading\n\nBody text" },
+      options: {
+        extension: "md",
+        content: '# Heading\n\n<div align="center"><p>Embedded HTML body</p></div>',
+      },
     });
 
     await testPage.getByRole("button", { name: "Files" }).tap();
@@ -277,6 +280,7 @@ test.describe("Mobile file viewer panel", () => {
 
     await viewer.getByTestId("markdown-preview-toggle").tap();
     await expect(viewer.getByTestId("markdown-preview")).toBeVisible();
+    await expect(viewer.locator('div[align="center"]')).toContainText("Embedded HTML body");
 
     await selectMarkdownPreviewText(viewer.getByTestId("markdown-preview").locator("p").first());
     const commentButton = testPage.getByTestId("markdown-preview-comment-button");

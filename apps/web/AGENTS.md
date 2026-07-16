@@ -150,6 +150,14 @@ surface.
   hover/title/tooltip metadata. Tasks with no repository, or only a non-repo
   local folder, should not render a repo chip.
 
+## Markdown safety
+
+Any renderer that enables embedded raw HTML must pair `rehype-raw` immediately
+with `rehype-sanitize`, and enable that combination only on the intended
+surface. Do not broaden raw-HTML support to chat, comments, or other renderers
+without a separate security decision. Add regression coverage for permitted
+README markup and for stripping executable HTML and unsafe URLs.
+
 ## Code-quality limits
 
 Enforced by `apps/web/eslint.config.mjs` (warnings, will become errors):

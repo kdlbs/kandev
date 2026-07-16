@@ -104,7 +104,11 @@ function senderLabel(entry: QueuedMessage): string {
   const kind = senderKindOf(entry);
   if (kind === "agent") {
     const title = entry.metadata?.sender_task_title;
-    return typeof title === "string" && title.length > 0 ? `From ${title}` : "From agent";
+    const sessionName = entry.metadata?.sender_session_name;
+    const base = typeof title === "string" && title.length > 0 ? `From ${title}` : "From agent";
+    return typeof sessionName === "string" && sessionName.length > 0
+      ? `${base} · ${sessionName}`
+      : base;
   }
   if (kind === "workflow") return "Workflow";
   if (kind === "system") return "System";
@@ -139,11 +143,21 @@ function SenderIcon({ entry }: SenderIconProps) {
 function getSenderTaskInfo(entry: QueuedMessage): SenderTaskInfo | null {
   if (senderKindOf(entry) !== "agent") return null;
   const meta = entry.metadata as
-    | { sender_task_id?: string; sender_task_title?: string }
+    | {
+        sender_task_id?: string;
+        sender_task_title?: string;
+        sender_session_id?: string;
+        sender_session_name?: string;
+      }
     | undefined;
   const id = meta?.sender_task_id;
   if (typeof id !== "string" || id.length === 0) return null;
-  return { id, snapshotTitle: meta?.sender_task_title ?? "" };
+  return {
+    id,
+    snapshotTitle: meta?.sender_task_title ?? "",
+    sessionId: meta?.sender_session_id,
+    sessionName: meta?.sender_session_name,
+  };
 }
 
 function getWorkflowMessageInfo(entry: QueuedMessage): WorkflowStepMessageInfo | null {

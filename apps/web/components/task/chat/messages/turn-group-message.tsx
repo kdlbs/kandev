@@ -164,8 +164,10 @@ type ShellExecSummary = {
   command: string;
   workDir: string;
   exitCode: number;
-  stdout: string;
-  stderr: string;
+  hasOutput: boolean;
+  stdoutBytes: number;
+  stderrBytes: number;
+  truncated: boolean;
 };
 
 type ShellExecPayload = NonNullable<NonNullable<ToolCallMetadata["normalized"]>["shell_exec"]>;
@@ -182,18 +184,33 @@ function isZeroExitCode(shellExec: ShellExecPayload): boolean {
   return exitCode === 0;
 }
 
+function hasProjectedShellOutput(output: ShellExecPayload["output"]): boolean {
+  return (
+    Boolean(output?.has_output) ||
+    (output?.stdout_bytes ?? 0) > 0 ||
+    (output?.stderr_bytes ?? 0) > 0
+  );
+}
+
+function createShellExecSummary(message: Message, shellExec: ShellExecPayload): ShellExecSummary {
+  const output = shellExec.output;
+  return {
+    command: shellExec.command ?? message.content,
+    workDir: shellExec.work_dir ?? "",
+    exitCode: 0,
+    hasOutput: output?.has_output ?? false,
+    stdoutBytes: output?.stdout_bytes ?? 0,
+    stderrBytes: output?.stderr_bytes ?? 0,
+    truncated: output?.truncated ?? false,
+  };
+}
+
 function readShellExecSummary(message: Message): ShellExecSummary | null {
   const shellExec = getCompleteShellExec(message);
   if (!shellExec) return null;
   if (!isZeroExitCode(shellExec)) return null;
-  const output = shellExec.output;
-  return {
-    command: shellExec?.command ?? message.content,
-    workDir: shellExec?.work_dir ?? "",
-    exitCode: 0,
-    stdout: output?.stdout ?? "",
-    stderr: output?.stderr ?? "",
-  };
+  if (hasProjectedShellOutput(shellExec.output)) return null;
+  return createShellExecSummary(message, shellExec);
 }
 
 function repeatFingerprint(message: Message): string | null {

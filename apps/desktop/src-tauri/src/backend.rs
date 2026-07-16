@@ -13,6 +13,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use url::Url;
 
 #[cfg(feature = "desktop-runtime")]
 use tauri::{AppHandle, Manager, WebviewWindow};
@@ -22,6 +23,7 @@ const LOOPBACK_HOST: &str = "127.0.0.1";
 const DEFAULT_DESKTOP_PORT: u16 = 38430;
 const DESKTOP_PORT_ENV: &str = "KANDEV_DESKTOP_PORT";
 const DESKTOP_HEALTH_TOKEN_ENV: &str = "KANDEV_DESKTOP_HEALTH_TOKEN";
+const DESKTOP_NATIVE_NOTIFICATIONS_ENV: &str = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS";
 const DESKTOP_HEALTH_TOKEN_HEADER: &str = "x-kandev-desktop-health-token";
 const STARTUP_OUTPUT_LIMIT: usize = 12 * 1024;
 const HEALTH_READY_SETTLE: Duration = Duration::from_millis(100);
@@ -37,6 +39,7 @@ pub struct BackendState {
     child: Arc<Mutex<Option<Child>>>,
     startup_output: Arc<Mutex<StartupOutput>>,
     shutdown_started: Arc<AtomicBool>,
+    owned_origin: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for BackendState {
@@ -45,6 +48,7 @@ impl Default for BackendState {
             child: Arc::new(Mutex::new(None)),
             startup_output: Arc::new(Mutex::new(StartupOutput::default())),
             shutdown_started: Arc::new(AtomicBool::new(false)),
+            owned_origin: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -56,7 +60,12 @@ impl BackendState {
 
     pub fn stop(&self) {
         self.shutdown_started.store(true, Ordering::SeqCst);
-        let child = self.child.lock().expect("backend child mutex poisoned").take();
+        self.clear_owned_origin();
+        let child = self
+            .child
+            .lock()
+            .expect("backend child mutex poisoned")
+            .take();
         if let Some(mut child) = child {
             terminate_child(&mut child);
         }
@@ -64,6 +73,55 @@ impl BackendState {
 
     fn is_shutdown_started(&self) -> bool {
         self.shutdown_started.load(Ordering::SeqCst)
+    }
+
+    pub fn set_owned_origin(&self, backend_url: &str) -> Result<(), String> {
+        let origin = loopback_origin(backend_url)?;
+        *self
+            .owned_origin
+            .lock()
+            .expect("desktop origin mutex poisoned") = Some(origin);
+        Ok(())
+    }
+
+    pub fn accepts_url(&self, url: &str) -> bool {
+        let expected = self
+            .owned_origin
+            .lock()
+            .expect("desktop origin mutex poisoned")
+            .clone();
+        expected.is_some_and(|origin| same_origin(&origin, url))
+    }
+
+    #[cfg(feature = "desktop-runtime")]
+    pub fn require_owned_origin(&self, webview: &WebviewWindow) -> Result<(), String> {
+        if !self.has_live_child() {
+            self.clear_owned_origin();
+            return Err("desktop backend is no longer running".to_string());
+        }
+        let url = webview
+            .url()
+            .map_err(|err| format!("could not read desktop WebView URL: {err}"))?;
+        if self.accepts_url(url.as_str()) {
+            Ok(())
+        } else {
+            Err("desktop command is only available from the Kandev backend".to_string())
+        }
+    }
+
+    fn clear_owned_origin(&self) {
+        *self
+            .owned_origin
+            .lock()
+            .expect("desktop origin mutex poisoned") = None;
+    }
+
+    fn has_live_child(&self) -> bool {
+        self.child
+            .lock()
+            .expect("backend child mutex poisoned")
+            .as_mut()
+            .is_some_and(|child| matches!(child.try_wait(), Ok(None)))
     }
 
     fn set_child(&self, mut child: Child) -> bool {
@@ -160,7 +218,11 @@ pub fn start_desktop_backend(app: AppHandle, window: WebviewWindow) {
         );
         match launch_and_wait(&app, &state) {
             Ok(url) => {
-                if let Err(err) = navigate_to_backend(&window, &url) {
+                if let Err(err) = state
+                    .set_owned_origin(&url)
+                    .and_then(|_| navigate_to_backend(&window, &url))
+                {
+                    state.clear_owned_origin();
                     state.stop();
                     set_status(
                         &window,
@@ -168,6 +230,8 @@ pub fn start_desktop_backend(app: AppHandle, window: WebviewWindow) {
                         &format!("Backend started, but the window could not navigate: {err}"),
                         true,
                     );
+                } else {
+                    crate::updater::start_automatic_checks(app);
                 }
             }
             Err(err) => {
@@ -176,6 +240,23 @@ pub fn start_desktop_backend(app: AppHandle, window: WebviewWindow) {
             }
         }
     });
+}
+
+fn loopback_origin(input: &str) -> Result<String, String> {
+    let url = Url::parse(input).map_err(|err| format!("invalid desktop backend URL: {err}"))?;
+    if url.scheme() != "http"
+        || url.host_str() != Some(LOOPBACK_HOST)
+        || url.port_or_known_default().is_none()
+    {
+        return Err("desktop backend URL must use a loopback HTTP origin".to_string());
+    }
+    Ok(url.origin().ascii_serialization())
+}
+
+fn same_origin(expected: &str, input: &str) -> bool {
+    Url::parse(input)
+        .map(|url| url.origin().ascii_serialization() == expected)
+        .unwrap_or(false)
 }
 
 #[cfg(feature = "desktop-runtime")]
@@ -228,7 +309,12 @@ pub fn build_backend_command(
     let program = runtime_dir.join("bin").join(executable_name("kandev"));
     let cwd = program
         .parent()
-        .ok_or_else(|| format!("Kandev launcher has no parent directory: {}", program.display()))?
+        .ok_or_else(|| {
+            format!(
+                "Kandev launcher has no parent directory: {}",
+                program.display()
+            )
+        })?
         .to_path_buf();
     Ok(BackendCommandSpec {
         program,
@@ -244,8 +330,14 @@ pub fn build_backend_command(
 
 pub fn validate_runtime_dir(runtime_dir: &Path) -> Result<(), String> {
     let bin_dir = runtime_dir.join("bin");
-    require_runtime_file(&bin_dir.join(executable_name("kandev")), "Kandev launcher binary")?;
-    require_runtime_file(&bin_dir.join(executable_name("agentctl")), "agentctl binary")?;
+    require_runtime_file(
+        &bin_dir.join(executable_name("kandev")),
+        "Kandev launcher binary",
+    )?;
+    require_runtime_file(
+        &bin_dir.join(executable_name("agentctl")),
+        "agentctl binary",
+    )?;
     for &(name, label) in REMOTE_AGENTCTL_HELPERS.iter() {
         require_runtime_file(&bin_dir.join(name), label)?;
     }
@@ -266,6 +358,11 @@ pub fn desktop_environment(
     home_dir: Option<&Path>,
 ) -> BTreeMap<OsString, OsString> {
     let path = normalized_path(env.get(OsStr::new("PATH")), home_dir);
+    env.retain(|key, _| {
+        !key
+            .to_string_lossy()
+            .eq_ignore_ascii_case(DESKTOP_NATIVE_NOTIFICATIONS_ENV)
+    });
     env.insert(
         OsString::from("KANDEV_SERVER_HOST"),
         OsString::from(LOOPBACK_HOST),
@@ -273,6 +370,10 @@ pub fn desktop_environment(
     env.insert(
         OsString::from("KANDEV_BUNDLE_DIR"),
         runtime_dir.as_os_str().to_os_string(),
+    );
+    env.insert(
+        OsString::from(DESKTOP_NATIVE_NOTIFICATIONS_ENV),
+        OsString::from("true"),
     );
     env.insert(OsString::from("PATH"), path);
     env
@@ -319,7 +420,9 @@ fn preferred_desktop_port(value: Option<OsString>) -> Result<u16, String> {
         .parse::<u16>()
         .map_err(|_| format!("{DESKTOP_PORT_ENV} must be a TCP port between 1 and 65535"))?;
     if port == 0 {
-        Err(format!("{DESKTOP_PORT_ENV} must be a TCP port between 1 and 65535"))
+        Err(format!(
+            "{DESKTOP_PORT_ENV} must be a TCP port between 1 and 65535"
+        ))
     } else {
         Ok(port)
     }
@@ -332,7 +435,9 @@ fn pick_available_loopback_port(preferred: u16) -> Result<u16, String> {
             .map(|addr| addr.port())
             .map_err(|err| err.to_string()),
         Err(err) if err.kind() == ErrorKind::AddrInUse => pick_loopback_port(),
-        Err(err) => Err(format!("Could not reserve {LOOPBACK_HOST}:{preferred}: {err}")),
+        Err(err) => Err(format!(
+            "Could not reserve {LOOPBACK_HOST}:{preferred}: {err}"
+        )),
     }
 }
 
@@ -395,7 +500,9 @@ fn wait_for_backend(
             return Err("Desktop startup cancelled".to_string());
         }
         if let Some(message) = state.child_exit_message()? {
-            return Err(format!("Kandev launcher exited before /health became ready ({message})"));
+            return Err(format!(
+                "Kandev launcher exited before /health became ready ({message})"
+            ));
         }
         if health_ready(port, expected_health_token) {
             thread::sleep(HEALTH_READY_SETTLE);
@@ -646,7 +753,10 @@ mod tests {
         )
         .expect("command spec");
 
-        assert_eq!(spec.program, runtime_dir.join("bin").join(executable_name("kandev")));
+        assert_eq!(
+            spec.program,
+            runtime_dir.join("bin").join(executable_name("kandev"))
+        );
         assert_eq!(
             spec.args,
             vec![
@@ -655,7 +765,10 @@ mod tests {
                 OsString::from("48123"),
             ]
         );
-        assert_eq!(spec.env.get(OsStr::new("CUSTOM_ENV")), Some(&OsString::from("kept")));
+        assert_eq!(
+            spec.env.get(OsStr::new("CUSTOM_ENV")),
+            Some(&OsString::from("kept"))
+        );
         assert_eq!(
             spec.env.get(OsStr::new("KANDEV_SERVER_HOST")),
             Some(&OsString::from(LOOPBACK_HOST))
@@ -667,6 +780,11 @@ mod tests {
         assert_eq!(
             spec.env.get(OsStr::new(DESKTOP_HEALTH_TOKEN_ENV)),
             Some(&OsString::from("health-token"))
+        );
+        assert_eq!(
+            spec.env
+                .get(OsStr::new("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS")),
+            Some(&OsString::from("true"))
         );
     }
 
@@ -687,10 +805,27 @@ mod tests {
     }
 
     #[test]
+    fn desktop_environment_replaces_notification_flag_case_insensitively() {
+        let mut inherited = BTreeMap::new();
+        inherited.insert(
+            OsString::from("kandev_desktop_native_notifications"),
+            OsString::from("false"),
+        );
+
+        let env = desktop_environment(Path::new("/opt/kandev"), inherited, None);
+
+        assert_eq!(
+            env.get(OsStr::new(DESKTOP_NATIVE_NOTIFICATIONS_ENV)),
+            Some(&OsString::from("true"))
+        );
+        assert!(!env.contains_key(OsStr::new("kandev_desktop_native_notifications")));
+    }
+
+    #[test]
     fn missing_launcher_returns_readable_error() {
         let dir = temp_root("missing-launcher");
-        let err =
-            build_backend_command(&dir, 48123, BTreeMap::new(), None).expect_err("missing launcher");
+        let err = build_backend_command(&dir, 48123, BTreeMap::new(), None)
+            .expect_err("missing launcher");
         assert!(err.contains("Kandev launcher binary is missing"), "{err}");
     }
 
@@ -701,8 +836,8 @@ mod tests {
         fs::create_dir_all(&bin).expect("create bin");
         fs::write(bin.join(executable_name("kandev")), b"stub").expect("write launcher");
 
-        let err =
-            build_backend_command(&dir, 48123, BTreeMap::new(), None).expect_err("missing agentctl");
+        let err = build_backend_command(&dir, 48123, BTreeMap::new(), None)
+            .expect_err("missing agentctl");
 
         assert!(err.contains("agentctl binary is missing"), "{err}");
     }
@@ -718,7 +853,10 @@ mod tests {
         let err =
             build_backend_command(&dir, 48123, BTreeMap::new(), None).expect_err("missing helper");
 
-        assert!(err.contains("agentctl linux/amd64 helper is missing"), "{err}");
+        assert!(
+            err.contains("agentctl linux/amd64 helper is missing"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -735,7 +873,10 @@ mod tests {
         let err =
             build_backend_command(&dir, 48123, BTreeMap::new(), None).expect_err("missing helper");
 
-        assert!(err.contains("agentctl darwin/arm64 helper is missing"), "{err}");
+        assert!(
+            err.contains("agentctl darwin/arm64 helper is missing"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -816,6 +957,38 @@ mod tests {
     }
 
     #[test]
+    fn desktop_commands_require_the_exact_owned_backend_origin() {
+        let state = BackendState::default();
+        state
+            .set_owned_origin("http://127.0.0.1:38430")
+            .expect("set owned backend origin");
+
+        assert!(state.accepts_url("http://127.0.0.1:38430/settings"));
+        assert!(!state.accepts_url("http://127.0.0.1:38431/settings"));
+        assert!(!state.accepts_url("http://localhost:38430/settings"));
+        assert!(!state.accepts_url("https://127.0.0.1:38430/settings"));
+    }
+
+    #[test]
+    fn desktop_commands_are_denied_before_backend_origin_is_set() {
+        assert!(!BackendState::default().accepts_url("http://127.0.0.1:38430"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_child_is_recognized_as_running() {
+        let state = BackendState::default();
+        let child = Command::new("sh")
+            .args(["-c", "sleep 1"])
+            .spawn()
+            .expect("start child");
+
+        assert!(state.set_child(child));
+        assert!(state.has_live_child());
+        state.stop();
+    }
+
+    #[test]
     fn launcher_exit_message_includes_recent_output() {
         let message = launcher_exit_message("exit status: 1", Some("database failed".to_string()));
 
@@ -838,7 +1011,11 @@ mod tests {
     fn capture_stream_retries_interrupted_reads() {
         let output = Arc::new(Mutex::new(StartupOutput::default()));
 
-        capture_stream("stdout", InterruptedThenData::new(b"backend ready"), output.clone());
+        capture_stream(
+            "stdout",
+            InterruptedThenData::new(b"backend ready"),
+            output.clone(),
+        );
 
         let deadline = Instant::now() + Duration::from_secs(1);
         while Instant::now() < deadline {
@@ -875,8 +1052,16 @@ mod tests {
     fn response_header_check_requires_matching_desktop_health_token() {
         let response = b"HTTP/1.1 200 OK\r\nX-Kandev-Desktop-Health-Token: token\r\n\r\n";
 
-        assert!(response_has_header(response, DESKTOP_HEALTH_TOKEN_HEADER, "token"));
-        assert!(!response_has_header(response, DESKTOP_HEALTH_TOKEN_HEADER, "other-token"));
+        assert!(response_has_header(
+            response,
+            DESKTOP_HEALTH_TOKEN_HEADER,
+            "token"
+        ));
+        assert!(!response_has_header(
+            response,
+            DESKTOP_HEALTH_TOKEN_HEADER,
+            "other-token"
+        ));
         assert!(!response_has_header(
             b"HTTP/1.1 200 OK\r\n\r\n",
             DESKTOP_HEALTH_TOKEN_HEADER,
@@ -901,7 +1086,10 @@ mod tests {
         assert!(state.set_child(child));
         state.stop();
 
-        assert!(!process_exists(pid), "backend child {pid} should be terminated");
+        assert!(
+            !process_exists(pid),
+            "backend child {pid} should be terminated"
+        );
     }
 
     #[cfg(unix)]
@@ -921,7 +1109,10 @@ mod tests {
         state.stop();
 
         assert!(!state.set_child(child));
-        assert!(!process_exists(pid), "backend child {pid} should be terminated");
+        assert!(
+            !process_exists(pid),
+            "backend child {pid} should be terminated"
+        );
     }
 
     fn temp_runtime_dir(name: &str) -> PathBuf {
@@ -937,10 +1128,7 @@ mod tests {
     }
 
     fn temp_root(name: &str) -> PathBuf {
-        let dir = env::temp_dir().join(format!(
-            "kandev-desktop-{name}-{}",
-            std::process::id()
-        ));
+        let dir = env::temp_dir().join(format!("kandev-desktop-{name}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).expect("create temp root");
         dir

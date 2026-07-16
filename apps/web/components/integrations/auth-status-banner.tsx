@@ -15,8 +15,9 @@ export type IntegrationAuthHealth = {
 };
 
 // Re-render every 30s so "checked 1 minute ago" doesn't sit stale on a long-
-// open settings tab.
-function useTick(intervalMs: number) {
+// open settings tab. Exported so other settings status banners (e.g. workflow
+// sync) can reuse the same self-refreshing relative-time pattern.
+export function useTick(intervalMs: number) {
   const [, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick((n) => n + 1), intervalMs);

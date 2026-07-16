@@ -5,6 +5,7 @@ import type {
   ListWorkflowsResponse,
   ListWorkflowStepsResponse,
   TaskSessionState,
+  TaskCreateLastUsedApi,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
@@ -657,6 +658,7 @@ export class ApiClient {
 
   async saveUserSettings(settings: {
     enable_preview_on_click?: boolean;
+    confirm_task_archive?: boolean;
     workspace_id?: string;
     workflow_filter_id?: string;
     repository_ids?: string[];
@@ -671,6 +673,7 @@ export class ApiClient {
     kanban_view_mode?: string;
     tasks_list_sort?: string;
     tasks_list_group?: string;
+    task_create_last_used?: TaskCreateLastUsedApi;
     voice_mode?: VoiceModeSettings;
   }): Promise<void> {
     await this.request("PATCH", "/api/v1/user/settings", settings);
@@ -1003,6 +1006,7 @@ export class ApiClient {
       additions: number;
       deletions: number;
       patch?: string;
+      old_path?: string;
     }>,
   ): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/files", {

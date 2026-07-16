@@ -44,6 +44,7 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/files", c.addPRFiles)
 	api.POST("/commits", c.addPRCommits)
 	api.POST("/branches", c.addBranches)
+	api.POST("/repo-files", c.addRepoFiles)
 	api.POST("/task-prs", c.associateTaskPR)
 	api.POST("/pr-feedback", c.seedPRFeedback)
 	api.PUT("/auth-health", c.setAuthHealth)
@@ -242,6 +243,33 @@ func (c *MockController) addBranches(ctx *gin.Context) {
 	}
 	c.mock.AddBranches(req.Owner, req.Repo, req.Branches)
 	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Branches)})
+}
+
+// addRepoFiles seeds file content for MockClient.ListRepoDirectory /
+// GetRepoFileContent. ref "" seeds a wildcard entry that matches any
+// requested ref (see MockClient.SeedRepoFile).
+func (c *MockController) addRepoFiles(ctx *gin.Context) {
+	var req struct {
+		Owner string `json:"owner"`
+		Repo  string `json:"repo"`
+		Ref   string `json:"ref"`
+		Files []struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		} `json:"files"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		respondInvalidPayload(ctx)
+		return
+	}
+	if req.Owner == "" || req.Repo == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{errKey: "owner and repo are required"})
+		return
+	}
+	for _, f := range req.Files {
+		c.mock.SeedRepoFile(req.Owner, req.Repo, req.Ref, f.Path, []byte(f.Content))
+	}
+	ctx.JSON(http.StatusOK, gin.H{"added": len(req.Files)})
 }
 
 // associateTaskPRRequest is the JSON body for the mock-controller's

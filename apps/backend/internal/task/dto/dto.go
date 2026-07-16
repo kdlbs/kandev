@@ -18,9 +18,13 @@ type WorkflowDTO struct {
 	Hidden         bool    `json:"hidden,omitempty"`
 	// Style is a Phase 2 (ADR-0004) UX hint read by the frontend ONLY.
 	// Allowed values: "kanban" | "office" | "custom".
-	Style     string    `json:"style,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Style string `json:"style,omitempty"`
+	// Source records where the workflow definition came from ("manual" |
+	// "github"); SourcePath is the repo-relative file for synced workflows.
+	Source     string    `json:"source,omitempty"`
+	SourcePath string    `json:"source_path,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type WorkspaceDTO struct {
@@ -70,6 +74,14 @@ type RepositoryScriptDTO struct {
 	Position     int       `json:"position"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// ShellOutputSnapshotResponse is the on-demand full output for one shell message.
+type ShellOutputSnapshotResponse struct {
+	MessageID string                         `json:"message_id"`
+	Status    string                         `json:"status"`
+	UpdatedAt time.Time                      `json:"updated_at"`
+	Output    models.ShellExecOutputSnapshot `json:"output"`
 }
 
 type ExecutorDTO struct {
@@ -180,8 +192,11 @@ type TaskRepositoryDTO struct {
 }
 
 type TaskSessionDTO struct {
-	ID                   string                  `json:"id"`
-	TaskID               string                  `json:"task_id"`
+	ID     string `json:"id"`
+	TaskID string `json:"task_id"`
+	// Name is the user-supplied session tab label. Serialized without
+	// omitempty so a cleared name ("") overwrites stale client state.
+	Name                 string                  `json:"name"`
 	AgentExecutionID     string                  `json:"agent_execution_id,omitempty"`
 	ContainerID          string                  `json:"container_id,omitempty"`
 	AgentProfileID       string                  `json:"agent_profile_id,omitempty"`
@@ -214,8 +229,11 @@ type TaskSessionDTO struct {
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
 // Used for list endpoints where snapshots are not needed, reducing response size by ~40-60%.
 type TaskSessionSummaryDTO struct {
-	ID                string                  `json:"id"`
-	TaskID            string                  `json:"task_id"`
+	ID     string `json:"id"`
+	TaskID string `json:"task_id"`
+	// Name is the user-supplied session tab label. Serialized without
+	// omitempty so a cleared name ("") overwrites stale client state.
+	Name              string                  `json:"name"`
 	AgentExecutionID  string                  `json:"agent_execution_id,omitempty"`
 	ContainerID       string                  `json:"container_id,omitempty"`
 	AgentProfileID    string                  `json:"agent_profile_id,omitempty"`
@@ -407,6 +425,8 @@ func FromWorkflow(workflow *models.Workflow) WorkflowDTO {
 		SortOrder:      workflow.SortOrder,
 		Hidden:         workflow.Hidden,
 		Style:          workflow.Style,
+		Source:         workflow.Source,
+		SourcePath:     workflow.SourcePath,
 		CreatedAt:      workflow.CreatedAt,
 		UpdatedAt:      workflow.UpdatedAt,
 	}
@@ -617,6 +637,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
 		ID:                session.ID,
 		TaskID:            session.TaskID,
+		Name:              session.Name,
 		AgentExecutionID:  session.AgentExecutionID,
 		ContainerID:       session.ContainerID,
 		AgentProfileID:    session.AgentProfileID,
@@ -649,6 +670,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 	result := TaskSessionDTO{
 		ID:                   session.ID,
 		TaskID:               session.TaskID,
+		Name:                 session.Name,
 		AgentExecutionID:     session.AgentExecutionID,
 		ContainerID:          session.ContainerID,
 		AgentProfileID:       session.AgentProfileID,

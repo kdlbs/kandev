@@ -14,6 +14,7 @@ import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
+import { normalizeFileChangeStatus } from "@/lib/utils/file-change-status";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import { ReviewTopBar } from "./review-top-bar";
 import { ReviewFileTree } from "./review-file-tree";
@@ -42,7 +43,7 @@ function fileMapKey(path: string, repositoryName?: string): string {
 function addCumulativeDiffFiles(
   fileMap: Map<string, ReviewFile>,
   files: CumulativeDiff["files"],
-  gitStatusFiles: Record<string, FileInfo> | null,
+  useRepositoryKeys: boolean,
 ) {
   // Multi-repo: backend stamps each per-file payload with `repository_name`
   // + the repo-relative `path`, and uses a NUL-composite `<repo>\x00<path>`
@@ -51,43 +52,26 @@ function addCumulativeDiffFiles(
   // value so the composite key doesn't bleed into the displayed path, and
   // fall back to the map key so single-repo files aren't silently dropped.
   for (const [mapKey, file] of Object.entries(files)) {
-    const repoName = file.repository_name;
-    const path = file.path ?? mapKey;
+    const repoName = useRepositoryKeys ? file.repository_name : undefined;
+    const path = file.path ?? splitFileKey(mapKey).path;
     if (!path) continue;
     const key = fileMapKey(path, repoName);
-    if (fileMap.has(key)) continue;
+    const hasRepoUnawareCollision = key !== path && fileMap.has(path);
+    if (fileMap.has(key) || hasRepoUnawareCollision) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    if (diff) {
-      const matchingUncommitted = findUncommittedByPathAndRepo(gitStatusFiles, path, repoName);
-      fileMap.set(key, {
-        path,
-        diff,
-        status: file.status || "modified",
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        staged: matchingUncommitted?.staged ?? false,
-        source: matchingUncommitted ? "uncommitted" : "committed",
-        repository_name: repoName,
-      });
-    }
+    fileMap.set(key, {
+      path,
+      diff,
+      status: normalizeFileChangeStatus(file.status),
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+      staged: false,
+      source: "committed",
+      old_path: file.old_path,
+      diff_skip_reason: file.diff_skip_reason,
+      repository_name: repoName,
+    });
   }
-}
-
-/** Looks up a FileInfo in the (possibly composite-keyed) gitStatus map by
- *  (path, repository_name). When repo is undefined or empty (single-repo),
- *  returns the first match by path. */
-function findUncommittedByPathAndRepo(
-  gitStatusFiles: Record<string, FileInfo> | null,
-  path: string,
-  repositoryName: string | undefined,
-): FileInfo | undefined {
-  if (!gitStatusFiles) return undefined;
-  for (const file of Object.values(gitStatusFiles)) {
-    if (file.path !== path) continue;
-    if (!repositoryName) return file;
-    if (file.repository_name === repositoryName) return file;
-  }
-  return undefined;
 }
 
 function addUncommittedFiles(
@@ -98,40 +82,39 @@ function addUncommittedFiles(
     const key = fileMapKey(file.path, file.repository_name);
     if (fileMap.has(key)) continue;
     const diff = file.diff ? normalizeDiffContent(file.diff) : "";
-    if (diff)
-      fileMap.set(key, {
-        path: file.path,
-        diff,
-        status: file.status,
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        staged: file.staged,
-        source: "uncommitted",
-        repository_name: file.repository_name,
-      });
+    fileMap.set(key, {
+      path: file.path,
+      diff,
+      status: normalizeFileChangeStatus(file.status),
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+      staged: file.staged,
+      source: "uncommitted",
+      old_path: file.old_path,
+      diff_skip_reason: file.diff_skip_reason,
+      repository_name: file.repository_name,
+    });
   }
 }
 
-function prFileStatus(status: string): "added" | "deleted" | "modified" {
-  if (status === "added") return "added";
-  if (status === "removed") return "deleted";
-  return "modified";
-}
-
-function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[]) {
+function addPRFiles(fileMap: Map<string, ReviewFile>, files: PRDiffFile[], repoName?: string) {
+  const repositoryName = repoName || undefined;
   for (const file of files) {
-    if (fileMap.has(file.filename)) continue;
+    const key = fileMapKey(file.filename, repositoryName);
+    const hasRepoUnawareCollision = !!repositoryName && fileMap.has(file.filename);
+    if (fileMap.has(key) || hasRepoUnawareCollision) continue;
     const diff = file.patch ? normalizeDiffContent(file.patch) : "";
-    if (diff)
-      fileMap.set(file.filename, {
-        path: file.filename,
-        diff,
-        status: prFileStatus(file.status),
-        additions: file.additions ?? 0,
-        deletions: file.deletions ?? 0,
-        staged: false,
-        source: "pr",
-      });
+    fileMap.set(key, {
+      path: file.filename,
+      diff,
+      status: normalizeFileChangeStatus(file.status),
+      additions: file.additions ?? 0,
+      deletions: file.deletions ?? 0,
+      staged: false,
+      source: "pr",
+      old_path: file.old_path,
+      repository_name: repositoryName,
+    });
   }
 }
 
@@ -139,19 +122,28 @@ export function buildAllFiles(
   gitStatusFiles: Record<string, FileInfo> | null,
   cumulativeDiff: CumulativeDiff | null,
   prDiffFiles?: PRDiffFile[],
+  prRepoName?: string,
+  useRepositoryKeys = true,
 ): ReviewFile[] {
   const fileMap = new Map<string, ReviewFile>();
-  // Order matters and must match `buildReviewSources` (the Changes panel
-  // builder): uncommitted FIRST so its always-fresh WS-pushed diff content
-  // wins over the polled cumulative diff for files that exist in both. Before
+  // Keep priority, dedup keys, and sorting aligned with `buildReviewSources`
+  // in `hooks/domains/session/use-review-sources.ts`. Uncommitted goes first,
+  // so its always-fresh WS-pushed diff content wins over the polled cumulative
+  // diff for files that exist in both. Before
   // this, the dialog and the panel disagreed on `datasource.ts`-style files
   // (panel: fresh worktree content from `git-status`, dialog: stale cumulative
   // diff snapshot from the last fetch) — the dialog appeared to show outdated
   // content even though the cumulative-diff hook was successfully refetching.
   if (gitStatusFiles) addUncommittedFiles(fileMap, gitStatusFiles);
-  if (cumulativeDiff?.files) addCumulativeDiffFiles(fileMap, cumulativeDiff.files, gitStatusFiles);
-  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles);
-  return Array.from(fileMap.values()).sort((a, b) => a.path.localeCompare(b.path));
+  if (cumulativeDiff?.files) {
+    addCumulativeDiffFiles(fileMap, cumulativeDiff.files, useRepositoryKeys);
+  }
+  if (prDiffFiles) addPRFiles(fileMap, prDiffFiles, prRepoName);
+  return Array.from(fileMap.values()).sort((a, b) => {
+    const repoCmp = (a.repository_name ?? "").localeCompare(b.repository_name ?? "");
+    if (repoCmp !== 0) return repoCmp;
+    return a.path.localeCompare(b.path);
+  });
 }
 
 export function filterPendingDiffCommentsForSession(
@@ -173,6 +165,8 @@ type ReviewDialogProps = {
   gitStatusFiles: Record<string, FileInfo> | null;
   cumulativeDiff: CumulativeDiff | null;
   prDiffFiles?: PRDiffFile[];
+  prRepoName?: string;
+  useRepositoryKeys?: boolean;
 };
 
 function computeReviewSets(
@@ -343,6 +337,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
     gitStatusFiles,
     cumulativeDiff,
     prDiffFiles,
+    prRepoName,
+    useRepositoryKeys = true,
   } = props;
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [splitView, setSplitView] = useState(() =>
@@ -361,8 +357,8 @@ function useReviewDialogState(props: ReviewDialogProps) {
 
   const [filter, setFilter] = useState("");
   const allFiles = useMemo<ReviewFile[]>(
-    () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles),
-    [gitStatusFiles, cumulativeDiff, prDiffFiles],
+    () => buildAllFiles(gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName, useRepositoryKeys),
+    [gitStatusFiles, cumulativeDiff, prDiffFiles, prRepoName, useRepositoryKeys],
   );
   const filteredFiles = useFilteredReviewFiles(allFiles, filter);
   const { reviewedFiles, staleFiles } = useMemo(

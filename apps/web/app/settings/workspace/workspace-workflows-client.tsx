@@ -3,13 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
-import {
-  IconDownload,
-  IconGripVertical,
-  IconArrowsShuffle,
-  IconPlus,
-  IconUpload,
-} from "@tabler/icons-react";
+import { IconGripVertical, IconArrowsShuffle } from "@tabler/icons-react";
 import {
   DndContext,
   closestCenter,
@@ -29,6 +23,8 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { WorkflowCard } from "@/components/settings/workflow-card";
+import { WorkflowSectionActions } from "@/components/settings/workflow-section-actions";
+import { WorkflowSyncSection } from "@/components/settings/workflow-sync-section";
 import { WorkflowExportDialog } from "@/components/settings/workflow-export-dialog";
 import { useToast } from "@/components/toast-provider";
 import { useWorkflowSettings } from "@/hooks/domains/settings/use-workflow-settings";
@@ -297,36 +293,6 @@ function useWorkflowActions({
   };
 }
 
-type WorkflowSectionActionsProps = {
-  onExport: () => void;
-  onImport: () => void;
-  onAdd: () => void;
-};
-
-function WorkflowSectionActions({ onExport, onImport, onAdd }: WorkflowSectionActionsProps) {
-  return (
-    <div className="flex gap-2">
-      <Button size="sm" variant="outline" onClick={onExport} className="cursor-pointer">
-        <IconDownload className="h-4 w-4 mr-2" />
-        Export All
-      </Button>
-      <Button size="sm" variant="outline" onClick={onImport} className="cursor-pointer">
-        <IconUpload className="h-4 w-4 mr-2" />
-        Import
-      </Button>
-      <Button
-        size="sm"
-        onClick={onAdd}
-        className="cursor-pointer"
-        data-testid="add-workflow-button"
-      >
-        <IconPlus className="h-4 w-4 mr-2" />
-        Add Workflow
-      </Button>
-    </div>
-  );
-}
-
 type WorkflowListProps = {
   workflowItems: Workflow[];
   workspaceId: string;
@@ -484,6 +450,7 @@ export function WorkspaceWorkflowsClient({
   workflowTemplates,
 }: WorkspaceWorkflowsClientProps) {
   const page = useWorkspaceWorkflowsPage(workspace, workflows, workflowTemplates);
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
 
   if (!workspace)
     return <WorkspaceNotFoundCard onBack={() => page.router.push("/settings/workspace")} />;
@@ -509,9 +476,15 @@ export function WorkspaceWorkflowsClient({
             onExport={page.handleExportAll}
             onImport={() => page.setIsImportDialogOpen(true)}
             onAdd={page.handleOpenAddWorkflowDialog}
+            onGitHubSync={() => setSyncDialogOpen(true)}
           />
         }
       >
+        <WorkflowSyncSection
+          workspaceId={workspace.id}
+          dialogOpen={syncDialogOpen}
+          onDialogOpenChange={setSyncDialogOpen}
+        />
         <WorkflowList
           workflowItems={page.workflowItems}
           workspaceId={workspace.id}

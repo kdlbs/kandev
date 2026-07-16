@@ -7,6 +7,20 @@ import type {
 } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
+export type ShellCommandOutput = {
+  exit_code?: number;
+  stdout?: string;
+  stderr?: string;
+  truncated?: boolean;
+};
+
+export type ShellCommandOutputSnapshot = {
+  message_id: string;
+  status: string;
+  updated_at: string;
+  output: ShellCommandOutput;
+};
+
 export type MessageSearchHit = {
   id: string;
   turn_id?: string;
@@ -34,6 +48,17 @@ export async function searchSessionMessages(
     { session_id: sessionId, query, limit },
     10000,
   );
+}
+
+/**
+ * Rename a session's tab label. Pass an empty string to clear the custom
+ * name and revert to the derived agent/model title. The backend broadcasts
+ * a session.state_changed event so every client picks up the new label.
+ */
+export async function renameSession(sessionId: string, name: string): Promise<void> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error("WebSocket unavailable");
+  await client.request("session.rename", { session_id: sessionId, name });
 }
 
 // Session operations
@@ -72,6 +97,17 @@ export async function listTaskSessionMessages(
   const suffix = query.toString();
   const url = `/api/v1/task-sessions/${taskSessionId}/messages${suffix ? `?${suffix}` : ""}`;
   return fetchJson<ListMessagesResponse>(url, options);
+}
+
+export async function fetchShellCommandOutput(
+  taskSessionId: string,
+  messageId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<ShellCommandOutputSnapshot>(
+    `/api/v1/task-sessions/${taskSessionId}/messages/${messageId}/shell-output`,
+    options,
+  );
 }
 
 export async function listSessionTurns(taskSessionId: string, options?: ApiRequestOptions) {

@@ -18,6 +18,7 @@ import { useCommentsStore } from "@/lib/state/slices/comments";
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { usePRCIPopover } from "@/hooks/domains/github/use-pr-ci-popover";
+import { openExternalLink } from "@/lib/desktop/external-links";
 import {
   bucketCheck,
   bucketCheckCounts,
@@ -197,7 +198,7 @@ function PRWorkflowRow({
       data-bucket={group.bucket}
       className="flex items-center gap-2 px-2 py-1 rounded-sm hover:bg-accent/50 cursor-pointer"
       onClick={() => {
-        if (group.htmlUrl) window.open(group.htmlUrl, "_blank", "noopener,noreferrer");
+        if (group.htmlUrl) void openExternalLink(group.htmlUrl).catch(() => undefined);
       }}
     >
       <span className="text-xs font-medium truncate min-w-0 flex-1" title={group.workflow}>
@@ -212,7 +213,7 @@ function PRWorkflowRow({
           className="h-5 w-5 p-0 cursor-pointer"
           onClick={(e) => {
             e.stopPropagation();
-            window.open(group.htmlUrl, "_blank", "noopener,noreferrer");
+            void openExternalLink(group.htmlUrl).catch(() => undefined);
           }}
           aria-label={`Open ${group.workflow} on GitHub`}
         >

@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { IconChevronDown, IconChevronRight, IconGitPullRequest } from "@tabler/icons-react";
 import { LineStat } from "@/components/diff-stat";
+import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import { cn } from "@/lib/utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { FileStatusIcon } from "./file-status-icon";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import type { PRChangedFile } from "./changes-panel-timeline";
 import type { OpenDiffOptions } from "./changes-diff-target";
@@ -145,7 +145,7 @@ function PRFileRow({
       </div>
       <div className="flex items-center gap-2">
         <LineStat added={file.plus} removed={file.minus} />
-        <FileStatusIcon status={file.status} />
+        <FileStatusIcon status={file.status} oldPath={file.oldPath} />
       </div>
     </li>
   );

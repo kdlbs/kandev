@@ -31,6 +31,7 @@ name: release
 #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / KEYCHAIN_PASSWORD — macOS Developer ID signing
 #   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID or APPLE_API_KEY / APPLE_API_ISSUER / APPLE_API_KEY_P8 — macOS notarization
 #   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD — Windows installer signing
+#   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD — updater artifact signing
 
 on:
   workflow_dispatch:
@@ -565,11 +566,11 @@ jobs:
           - platform: linux-x64
             os: ubuntu-22.04
             rust_target: x86_64-unknown-linux-gnu
-            tauri_bundles: deb,rpm
+            tauri_bundles: appimage,deb,rpm
           - platform: linux-arm64
             os: ubuntu-24.04-arm
             rust_target: aarch64-unknown-linux-gnu
-            tauri_bundles: deb,rpm
+            tauri_bundles: appimage,deb,rpm
           - platform: windows-x64
             os: windows-latest
             rust_target: x86_64-pc-windows-msvc
@@ -583,6 +584,18 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
+
+      - name: Prepare desktop asset verifier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/verify-desktop-assets.sh"
+          gh api \
+            --header "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}" \
+            > "$helper"
+          echo "DESKTOP_ASSET_VERIFIER=$helper" >> "$GITHUB_ENV"
 
       - name: Prepare macOS desktop diagnostics helper
         if: startsWith(matrix.platform, 'macos-')
@@ -642,7 +655,9 @@ jobs:
             libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
+            xdg-utils \
             patchelf
+          command -v xdg-open
 
       - name: Install dependencies
         run: pnpm -C apps install --frozen-lockfile
@@ -769,6 +784,28 @@ jobs:
             & "$env:GITHUB_WORKSPACE/apps/desktop/src-tauri/windows-sign.ps1" -Path $path
           }
 
+      - name: Detect Tauri updater signing input
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "UPDATER_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+            echo "::notice::Tauri updater signing key is absent; signed updater artifacts and latest.json will be skipped."
+            exit 0
+          fi
+          helper="$RUNNER_TEMP/updater-signing-ready.sh"
+          gh api \
+            --header "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/scripts/release/updater-signing-ready.sh?ref=${{ github.workflow_sha }}" \
+            > "$helper"
+          if ! bash "$helper" "${{ matrix.platform }}"; then
+            echo "::error::Updater signing prerequisites failed for ${{ matrix.platform }}." >&2
+            exit 1
+          fi
+          echo "UPDATER_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+
       - name: Build Tauri desktop app
         timeout-minutes: 70
         env:
@@ -789,6 +826,8 @@ jobs:
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
           WINDOWS_SIGNTOOL_PATH: ${{ secrets.WINDOWS_SIGNTOOL_PATH }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           if [ "${MACOS_SIGNING_ENABLED:-false}" != "true" ]; then
@@ -808,6 +847,18 @@ jobs:
             unset WINDOWS_CERTIFICATE_PASSWORD
             unset WINDOWS_TIMESTAMP_URL
             unset WINDOWS_SIGNTOOL_PATH
+          fi
+          tauri_bundles="${{ matrix.tauri_bundles }}"
+          updater_config='{"bundle":{"createUpdaterArtifacts":false}}'
+          if [ "${UPDATER_SIGNING_ENABLED:-false}" = "true" ]; then
+            updater_config='{"bundle":{"createUpdaterArtifacts":"v1Compatible"}}'
+            if [[ "${{ matrix.platform }}" == macos-* ]]; then
+              # Tauri derives the macOS updater archive from the app bundle.
+              tauri_bundles="${tauri_bundles},app"
+            fi
+          else
+            unset TAURI_SIGNING_PRIVATE_KEY
+            unset TAURI_SIGNING_PRIVATE_KEY_PASSWORD
           fi
           pnpm -C apps --filter @kandev/desktop build:vite
           cd apps/desktop
@@ -871,7 +922,8 @@ jobs:
               pnpm tauri build \
                 --features desktop-runtime \
                 --target "${{ matrix.rust_target }}" \
-                --bundles "${{ matrix.tauri_bundles }}"
+                --bundles "$tauri_bundles" \
+                --config "$updater_config"
           }
 
           status=0
@@ -1011,7 +1063,11 @@ jobs:
             -name '*.rpm' -o \
             -name '*.msi' -o \
             -name '*.exe' -o \
-            -name '*.AppImage' \
+            -name '*.AppImage' -o \
+            -name '*.app.tar.gz' -o \
+            -name '*.AppImage.tar.gz' -o \
+            -name '*.nsis.zip' -o \
+            -name '*.sig' \
           \) -print0)
 
           if [ "$found" -eq 0 ]; then
@@ -1019,7 +1075,12 @@ jobs:
             exit 1
           fi
 
-          scripts/release/verify-desktop-assets.sh "$out_dir" "${{ matrix.platform }}"
+          if [ "${UPDATER_SIGNING_ENABLED:-false}" = "true" ]; then
+            bash "$DESKTOP_ASSET_VERIFIER" --require-updaters \
+              "$out_dir" "${{ matrix.platform }}"
+          else
+            bash "$DESKTOP_ASSET_VERIFIER" "$out_dir" "${{ matrix.platform }}"
+          fi
           ls -lh "$out_dir"
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
@@ -1390,6 +1451,21 @@ jobs:
           ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
+      - name: Prepare desktop asset verifier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/verify-desktop-assets.sh"
+          gh api \
+            --header "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}" \
+            > "$helper"
+          echo "DESKTOP_ASSET_VERIFIER=$helper" >> "$GITHUB_ENV"
+
+      - name: Install updater signature verifier toolchain
+        run: rustup toolchain install 1.88.0 --profile minimal
+
       - name: Generate release notes
         uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
         with:
@@ -1468,8 +1544,32 @@ jobs:
               exit 1
             fi
           done
-          scripts/release/verify-desktop-assets.sh dist/release-assets
+          bash "$DESKTOP_ASSET_VERIFIER" dist/release-assets
           ls -lh dist/release-assets
+
+      - name: Generate and verify updater manifest
+        env:
+          RUSTUP_TOOLCHAIN: 1.88.0
+        run: |
+          set -euo pipefail
+          pub_date="$(git show -s --format=%cI '${{ needs.prepare.outputs.tag }}^{commit}')"
+          node scripts/release/updater-manifest.mjs generate \
+            --assets-dir dist/release-assets \
+            --output dist/release-assets/latest.json \
+            --version "${{ needs.prepare.outputs.version }}" \
+            --tag "${{ needs.prepare.outputs.tag }}" \
+            --repository "${{ github.repository }}" \
+            --notes-file RELEASE_NOTES.md \
+            --pub-date "$pub_date" \
+            --allow-unsigned
+          if [ -f dist/release-assets/latest.json ]; then
+            node scripts/release/updater-manifest.mjs verify \
+              --assets-dir dist/release-assets \
+              --manifest dist/release-assets/latest.json \
+              --version "${{ needs.prepare.outputs.version }}" \
+              --tag "${{ needs.prepare.outputs.tag }}" \
+              --repository "${{ github.repository }}"
+          fi
 
       - name: Publish release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
@@ -1478,9 +1578,15 @@ jobs:
           name: ${{ needs.prepare.outputs.tag }}
           body_path: RELEASE_NOTES.md
           files: |
-            dist/release-assets/kandev-*.tar.gz
-            dist/release-assets/kandev-*.tar.gz.sha256
+            dist/release-assets/kandev-linux-*.tar.gz
+            dist/release-assets/kandev-linux-*.tar.gz.sha256
+            dist/release-assets/kandev-macos-*.tar.gz
+            dist/release-assets/kandev-macos-*.tar.gz.sha256
+            dist/release-assets/kandev-windows-*.tar.gz
+            dist/release-assets/kandev-windows-*.tar.gz.sha256
             dist/release-assets/kandev-desktop-*
+            dist/release-assets/latest.json
+          preserve_order: true
 
   publish-npm:
     name: Publish npm packages

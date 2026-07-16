@@ -4,14 +4,18 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: verify-desktop-assets.sh <assets-dir> [platform...]
+Usage: verify-desktop-assets.sh [--require-updaters] <assets-dir> [platform...]
 
 Checks that each required platform has at least one desktop artifact named:
 
   kandev-desktop-<platform>-*
 
 and that every matching artifact has a sibling .sha256 file. If no platform is
-given, all supported desktop platforms are required.
+given, all supported desktop platforms are required. Signed Tauri updater
+artifacts (`*.app.tar.gz`, `*.AppImage.tar.gz`, and `*.nsis.zip`) must have a
+matching `*.sig` file, and signatures without their updater bundle are rejected.
+When --require-updaters is set, every requested platform must also include its
+signed updater bundle.
 EOF
 }
 
@@ -20,7 +24,13 @@ if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
   exit 0
 fi
 
-ASSETS_DIR="${1:?Usage: verify-desktop-assets.sh <assets-dir> [platform...]}"
+REQUIRE_UPDATERS=false
+if [ "${1:-}" = "--require-updaters" ]; then
+  REQUIRE_UPDATERS=true
+  shift
+fi
+
+ASSETS_DIR="${1:?Usage: verify-desktop-assets.sh [--require-updaters] <assets-dir> [platform...]}"
 shift || true
 
 if [ "$#" -gt 0 ]; then
@@ -50,11 +60,19 @@ verify_checksum() {
 
 shopt -s nullglob
 
+updater_suffix_for_platform() {
+  case "$1" in
+    macos-*) printf '%s\n' '*.app.tar.gz' ;;
+    linux-*) printf '%s\n' '*.AppImage.tar.gz' ;;
+    windows-*) printf '%s\n' '*.nsis.zip' ;;
+    *) return 1 ;;
+  esac
+}
+
 for platform in "${REQUIRED_PLATFORMS[@]}"; do
-  artifacts=("$ASSETS_DIR"/kandev-desktop-"$platform"-*)
   found=0
 
-  for artifact in "${artifacts[@]}"; do
+  for artifact in "$ASSETS_DIR"/kandev-desktop-"$platform"-*; do
     if [[ "$artifact" == *.sha256 ]]; then
       continue
     fi
@@ -72,6 +90,27 @@ for platform in "${REQUIRED_PLATFORMS[@]}"; do
 
   if [ "$found" -eq 0 ]; then
     echo "Missing desktop artifact for platform: $platform" >&2
+    exit 1
+  fi
+
+  updater_suffix="$(updater_suffix_for_platform "$platform")"
+  updater_found=0
+  for updater_bundle in "$ASSETS_DIR"/kandev-desktop-"$platform"-$updater_suffix; do
+    updater_found=$((updater_found + 1))
+    if [ ! -f "$updater_bundle.sig" ]; then
+      echo "Missing updater signature: $updater_bundle.sig" >&2
+      exit 1
+    fi
+  done
+  for updater_signature in "$ASSETS_DIR"/kandev-desktop-"$platform"-$updater_suffix.sig; do
+    updater_bundle="${updater_signature%.sig}"
+    if [ ! -f "$updater_bundle" ]; then
+      echo "Missing updater bundle for signature: $updater_signature" >&2
+      exit 1
+    fi
+  done
+  if [ "$REQUIRE_UPDATERS" = true ] && [ "$updater_found" -eq 0 ]; then
+    echo "Missing updater artifact for platform: $platform" >&2
     exit 1
   fi
 done

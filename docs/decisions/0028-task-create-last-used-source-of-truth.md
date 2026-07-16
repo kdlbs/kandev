@@ -1,6 +1,6 @@
 # 0028: Backend-Owned Task-Create Last-Used Preferences
 
-**Status:** accepted
+**Status:** accepted; browser-cache portion superseded by 0041
 **Date:** 2026-06-29
 **Area:** backend, frontend
 
@@ -10,7 +10,7 @@ The task-create dialog restores the user's last repository, branch, agent profil
 
 ## Decision
 
-Backend user settings are the durable source of truth for `task_create_last_used`. Successful task creation records the final values used by the backend. Browser localStorage remains a cache and pending-write bridge, but dialog auto-selection must wait for backend settings to load before trusting cached values.
+Backend user settings are the durable source of truth for `task_create_last_used`. Successful task creation records the final values used by the backend. The original browser-cache compatibility path was removed by ADR 0041 after the migration window. Dialog auto-selection now uses backend settings only; an in-memory queued overlay may bridge an in-flight task-create response without becoming a second durable store.
 
 Task-create preference writes use targeted JSON updates under `users.settings.task_create_last_used`, and broad user-settings writes preserve the current task-create preference instead of rewriting it from a stale settings blob.
 

@@ -44,7 +44,7 @@ test.describe("Task creation", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    // First: create a task so localStorage selections get persisted
+    // First: create a task so its selections are persisted to user settings.
     await kanban.createTaskButton.first().click();
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
@@ -149,15 +149,12 @@ test.describe("Task creation", () => {
     }
   });
 
-  test("falls back to a valid profile when localStorage holds a stale agent id", async ({
+  test("ignores a stale browser profile and selects a valid backend profile", async ({
     testPage,
   }) => {
-    // Reproduces the "No compatible agent profiles for 'Worktree'" regression
-    // that fires after a DB reset: localStorage still carries the previous
-    // run's agent profile UUID, which no longer exists in the fresh DB.
-    // The dialog must reject the stale id and fall back through the
-    // workspace default / first-profile chain instead of locking in a
-    // bogus selection that the compatibility check then rejects.
+    // A stale value from an older browser build must not participate in
+    // selection. The dialog uses backend settings and then falls back through
+    // the workspace default / first-profile chain.
     await testPage.addInitScript(() => {
       localStorage.setItem(
         "kandev.dialog.lastAgentProfileId",

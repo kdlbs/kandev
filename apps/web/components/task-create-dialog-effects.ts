@@ -9,8 +9,6 @@ import {
   getLocalRepositoryStatusAction,
 } from "@/app/actions/workspaces";
 import { listWorkflowSteps } from "@/lib/api/domains/workflow-api";
-import { getLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type {
   DialogFormState,
@@ -229,14 +227,12 @@ function pickDefaultExecutorProfileId(
       : allProfiles;
   if (eligibleProfiles.length === 0) return null;
 
-  const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
   if (
     lastUsedExecutorProfileId &&
     eligibleProfiles.some((p) => p.id === lastUsedExecutorProfileId)
   ) {
     return lastUsedExecutorProfileId;
   }
-  if (lastId && eligibleProfiles.some((p) => p.id === lastId)) return lastId;
 
   const executorId = pickDefaultExecutorId(
     executors,
@@ -260,8 +256,6 @@ type ExecutorAutopickContext = {
 type ExecutorProfileLastUsedState = {
   allProfiles: ExecutorProfileCandidate[];
   eligibleProfiles: ExecutorProfileCandidate[];
-  localStorageId: string | null;
-  localStorageValid: boolean;
   settingsId: string | null;
   settingsValid: boolean;
 };
@@ -276,17 +270,9 @@ function getExecutorProfileLastUsedState(
     noRepository || preferLocalExecutor
       ? allProfiles.filter((p) => !isWorktreeExecutorType(p._executorType))
       : allProfiles;
-  const localStorageId = getLocalStorage<string | null>(
-    STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-    null,
-  );
   return {
     allProfiles,
     eligibleProfiles,
-    localStorageId,
-    localStorageValid: Boolean(
-      localStorageId && eligibleProfiles.some((p) => p.id === localStorageId),
-    ),
     settingsId,
     settingsValid: Boolean(settingsId && eligibleProfiles.some((p) => p.id === settingsId)),
   };
@@ -304,7 +290,7 @@ export function shouldWaitForLastUsedExecutorProfile(context: ExecutorAutopickCo
     context,
     context.lastUsedExecutorProfileId ?? null,
   );
-  if (!lastUsedProfile.localStorageValid && !lastUsedProfile.settingsValid) return false;
+  if (!lastUsedProfile.settingsValid) return false;
   if (isDebug()) {
     selectionDebug("executor-autopick", {
       current: "-",
@@ -329,8 +315,6 @@ function logExecutorProfileAutopick(
   selectionDebug("executor-profile-autopick", {
     current: "-",
     pick: pick ?? "-",
-    local_storage_id: lastUsed.localStorageId ?? "-",
-    local_storage_valid: lastUsed.localStorageValid,
     settings_id: lastUsed.settingsId ?? "-",
     settings_valid: lastUsed.settingsValid,
     profile_count: lastUsed.allProfiles.length,
@@ -415,7 +399,7 @@ function useExecutorProfileAutopickEffect({
 }) {
   const { executors, workspaceDefaults, noRepository, preferLocalExecutor } = context;
   useEffect(() => {
-    // Auto-select executor profile: last used (localStorage) → source-aware
+    // Auto-select executor profile: last-used backend setting → source-aware
     // executor default → first eligible profile.
     if (!open || executorProfileId || executors.length === 0) return;
     const lastUsed = getExecutorProfileLastUsedState(
@@ -527,13 +511,14 @@ export function useDefaultSelectionsEffect(
       } as DialogFormState),
     [noRepository, useRemote, remoteRepos, repositories],
   );
-  useMultiRepoGuardEffect(
+  useMultiRepoGuardEffect({
     open,
     executorProfileId,
     setExecutorProfileId,
     executors,
     selectedRepoCount,
-  );
+    lastUsedExecutorProfileId: sel.lastUsedExecutorProfileId ?? null,
+  });
 }
 
 /**

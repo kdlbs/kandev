@@ -112,10 +112,10 @@ function maybePromoteAgentctlReady(
  * follow the switch. Returns true when the caller should adopt the new session
  * as the task's active session.
  *
- * Adopts only when the current active session is missing, cross-task, or
- * already terminal — not while a live session for the same task is still
- * running (the backend only creates sessions during workflow step transitions
- * after stopping the previous one, but WS events may arrive out of order).
+ * Adopts only when the current active session is missing, cross-task, parked
+ * IDLE, or already terminal — not while a live session for the same task is
+ * still running. A parked IDLE session has no live process, so a newly started
+ * workflow session should replace it just like a terminal session.
  */
 export function shouldAdoptNewSession(
   state: AppState,
@@ -127,7 +127,11 @@ export function shouldAdoptNewSession(
   const activeSessionId = state.tasks.activeSessionId;
   if (activeSessionId) {
     const activeSession = state.taskSessions.items[activeSessionId];
-    if (activeSession?.task_id === taskId && !isTerminalSessionState(activeSession.state)) {
+    if (
+      activeSession?.task_id === taskId &&
+      activeSession.state !== "IDLE" &&
+      !isTerminalSessionState(activeSession.state)
+    ) {
       return false;
     }
   }
@@ -175,6 +179,9 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
     update.agent_profile_snapshot = payload.agent_profile_snapshot;
   if (payload.is_passthrough !== undefined) update.is_passthrough = payload.is_passthrough;
   if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
+  // Apply only when the key is present: rename events always carry `name`
+  // (including "" for a cleared label); other session events omit it.
+  if (payload.name !== undefined) update.name = payload.name;
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
   return update;

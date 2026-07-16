@@ -4,8 +4,8 @@ import { memo, type ReactNode } from "react";
 import Link from "@/components/routing/app-link";
 import { IconBug, IconCircleDot } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@kandev/ui/breadcrumb";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { TaskTopBarTitle } from "@/components/task/task-top-bar-title";
 import { EditorsMenu } from "@/components/task/editors-menu";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
 import { DocumentControls } from "@/components/task/document/document-controls";
@@ -151,20 +151,7 @@ function TopBarLeft({
   const showExecutorSettings = shouldShowExecutorEnvironmentControls(remoteExecutorType);
   return (
     <div className="flex min-w-0 max-w-[min(44rem,45vw)] items-center gap-2.5 overflow-hidden">
-      <Breadcrumb className="min-w-0 max-w-full">
-        <BreadcrumbList className="min-w-0 max-w-full flex-nowrap text-sm">
-          <BreadcrumbItem className="min-w-0 max-w-full">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <BreadcrumbPage className="block max-w-full truncate font-medium">
-                  {taskTitle ?? "Task details"}
-                </BreadcrumbPage>
-              </TooltipTrigger>
-              <TooltipContent>{taskTitle ?? "Task details"}</TooltipContent>
-            </Tooltip>
-          </BreadcrumbItem>
-        </BreadcrumbList>
-      </Breadcrumb>
+      <TaskTopBarTitle taskId={taskId} taskTitle={taskTitle} isArchived={isArchived} />
 
       {!isArchived && showExecutorSettings && (
         <ExecutorSettingsButton taskId={taskId} sessionId={activeSessionId ?? null} />

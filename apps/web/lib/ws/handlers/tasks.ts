@@ -405,9 +405,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
         ),
       );
       cleanupTaskStorage(deletedId, sessionIds, envIds);
-      // Keep the in-memory sidebar pin/order arrays in sync — without this,
-      // a later togglePinnedTask / setSidebarTaskOrder would persist the
-      // stale state (still containing the deleted ID) back to localStorage.
+      // Remove the deleted task before the next sidebar preference PATCH.
       currentState.removeTaskFromSidebarPrefs(deletedId);
       for (const sid of sessionIds) {
         useContextFilesStore.getState().clearSession(sid);

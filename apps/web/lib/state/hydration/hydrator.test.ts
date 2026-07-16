@@ -188,6 +188,58 @@ describe("mergeInitialState — quick chat name overlay", () => {
   });
 });
 
+describe("mergeInitialState — sidebar views from boot settings", () => {
+  it("bridges backend sidebar settings into the UI slice before the store is created", () => {
+    const result = mergeInitialState({
+      userSettings: {
+        sidebarViews: [
+          {
+            id: "server",
+            name: "Server",
+            filters: [],
+            sort: { key: "state", direction: "asc" },
+            group: "none",
+            collapsedGroups: [],
+          },
+        ],
+        sidebarActiveViewId: "server",
+        sidebarDraft: {
+          baseViewId: "server",
+          filters: [],
+          sort: { key: "updatedAt", direction: "desc" },
+          group: "workflow",
+        },
+        loaded: true,
+      },
+    } as unknown as Partial<AppState>);
+
+    expect(result.sidebarViews).toMatchObject({
+      views: [{ id: "server", name: "Server" }],
+      activeViewId: "server",
+      draft: { baseViewId: "server", group: "workflow" },
+    });
+  });
+
+  it("bridges backend task preferences into the UI slice before the store is created", () => {
+    const result = mergeInitialState({
+      userSettings: {
+        sidebarTaskPrefs: {
+          pinnedTaskIds: ["task-1"],
+          orderedTaskIds: ["task-2", "task-1"],
+          subtaskOrderByParentId: { "task-1": ["subtask-1"] },
+        },
+        loaded: true,
+      },
+    } as unknown as Partial<AppState>);
+
+    expect(result.sidebarTaskPrefs).toMatchObject({
+      pinnedTaskIds: ["task-1"],
+      orderedTaskIds: ["task-2", "task-1"],
+      subtaskOrderByParentId: { "task-1": ["subtask-1"] },
+    });
+  });
+});
+
 describe("hydrateState — sidebar views from user settings", () => {
   it("hydrates active view and draft from backend user settings", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {

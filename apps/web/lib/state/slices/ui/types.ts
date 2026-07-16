@@ -221,7 +221,6 @@ export type UISliceActions = {
   toggleSubtaskCollapsed: (parentTaskId: string) => void;
   clearSidebarSyncError: () => void;
   clearSidebarTaskPrefsSyncError: () => void;
-  migrateLocalViewsToBackend: () => void;
   setKanbanPreviewedTaskId: (taskId: string | null) => void;
   togglePinnedTask: (taskId: string) => void;
   /** Pin every id that isn't already pinned (bulk "Pin" for multi-select). */
@@ -242,6 +241,7 @@ export type UISliceActions = {
   setAppSidebarCollapsed: (collapsed: boolean) => void;
   toggleAppSidebarSection: (sectionId: string, defaultExpanded?: boolean) => void;
   setAppSidebarWidth: (width: number) => void;
+  setAppSidebarSettingsMode: (settingsMode: boolean) => void;
   toggleAppSidebarSettingsMode: () => void;
   /** Record multiple sidebar badge acknowledgements with one localStorage merge. */
   acknowledgeAgentErrors: (stamps: Record<string, string>) => void;

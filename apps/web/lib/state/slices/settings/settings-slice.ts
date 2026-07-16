@@ -35,6 +35,7 @@ export const defaultSettingsState: SettingsSliceState = {
     terminalLinkBehavior: "new_tab",
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
+    confirmTaskArchive: true,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],

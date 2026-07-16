@@ -53,6 +53,7 @@ export function ExportPreview() {
 
   const handleExport = useCallback(() => {
     if (!activeWorkspaceId) return;
+    // This same-origin endpoint is a file download, not an external navigation.
     window.open(officeApi.exportConfigZipUrl(activeWorkspaceId), "_blank");
   }, [activeWorkspaceId]);
 

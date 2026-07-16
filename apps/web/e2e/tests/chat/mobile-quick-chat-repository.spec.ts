@@ -10,6 +10,7 @@ async function assertNoHorizontalOverflow(page: import("@playwright/test").Page)
 
 test.describe("Quick Chat repository context on mobile", () => {
   test("selects an agent and repository branch without hidden actions", async ({ testPage }) => {
+    test.setTimeout(90_000);
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -38,6 +39,31 @@ test.describe("Quick Chat repository context on mobile", () => {
 
     await dialog.getByTestId("quick-chat-start").click();
     await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
+    await assertNoHorizontalOverflow(testPage);
+
+    await dialog.getByLabel("Start new chat").click();
+    await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 5_000 });
+    const secondAgentSelector = dialog.getByTestId("agent-profile-selector");
+    if (await secondAgentSelector.getByText("Select agent", { exact: false }).isVisible()) {
+      await secondAgentSelector.click();
+      await testPage.getByRole("option").first().click();
+    }
+    await dialog.getByTestId("quick-chat-start").click();
+    await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
+
+    const originalTabs = dialog.getByTestId("quick-chat-tab");
+    await expect(originalTabs).toHaveCount(2);
+    const originalNames = await originalTabs.locator("span").allTextContents();
+
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
+    await testPage.keyboard.press(`${modifier}+Shift+q`);
+
+    const restoredDialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    const restoredTabs = restoredDialog.getByTestId("quick-chat-tab");
+    await expect(restoredTabs).toHaveCount(2);
+    await expect(restoredTabs.locator("span")).toHaveText(originalNames);
+    await expect(restoredDialog.getByTestId("quick-chat-setup")).not.toBeVisible();
     await assertNoHorizontalOverflow(testPage);
   });
 });

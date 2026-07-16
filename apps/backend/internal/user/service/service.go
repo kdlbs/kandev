@@ -47,6 +47,7 @@ type UpdateUserSettingsRequest struct {
 	EnablePreviewOnClick        *bool
 	ChatSubmitKey               *string
 	ReviewAutoMarkOnScroll      *bool
+	ConfirmTaskArchive          *bool
 	ShowReleaseNotification     *bool
 	ReleaseNotesLastSeenVersion *string
 	LspAutoStartLanguages       *[]string
@@ -212,6 +213,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	}
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
+	}
+	if req.ConfirmTaskArchive != nil {
+		settings.ConfirmTaskArchive = *req.ConfirmTaskArchive
 	}
 	if req.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *req.ShowReleaseNotification
@@ -542,6 +546,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"enable_preview_on_click":         settings.EnablePreviewOnClick,
 		"chat_submit_key":                 settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":      settings.ReviewAutoMarkOnScroll,
+		"confirm_task_archive":            settings.ConfirmTaskArchive,
 		"show_release_notification":       settings.ShowReleaseNotification,
 		"release_notes_last_seen_version": settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":        settings.LspAutoStartLanguages,

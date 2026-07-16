@@ -50,6 +50,27 @@ describe("openQuickChat agentProfileId persistence", () => {
   });
 });
 
+describe("Quick Chat workspace isolation", () => {
+  it("replaces a blank setup tab when opening a different workspace", () => {
+    const store = makeStore();
+    store.getState().openQuickChat("", "ws-a");
+    store.getState().openQuickChat("", "ws-b");
+
+    expect(store.getState().quickChat.sessions).toEqual([{ sessionId: "", workspaceId: "ws-b" }]);
+  });
+
+  it("falls back to a tab from the closed session workspace", () => {
+    const store = makeStore();
+    store.getState().openQuickChat("session-a", "ws-a");
+    store.getState().openQuickChat("session-b-1", "ws-b");
+    store.getState().openQuickChat("session-b-2", "ws-b");
+
+    store.getState().closeQuickChatSession("session-b-2");
+
+    expect(store.getState().quickChat.activeSessionId).toBe("session-b-1");
+  });
+});
+
 describe("renameQuickChatSession local persistence", () => {
   beforeEach(() => {
     window.localStorage.clear();

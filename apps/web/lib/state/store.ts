@@ -528,7 +528,6 @@ export type AppState = {
   toggleSubtaskCollapsed: UIA["toggleSubtaskCollapsed"];
   clearSidebarSyncError: UIA["clearSidebarSyncError"];
   clearSidebarTaskPrefsSyncError: UIA["clearSidebarTaskPrefsSyncError"];
-  migrateLocalViewsToBackend: UIA["migrateLocalViewsToBackend"];
   setKanbanPreviewedTaskId: UIA["setKanbanPreviewedTaskId"];
   togglePinnedTask: UIA["togglePinnedTask"];
   pinTasks: UIA["pinTasks"];
@@ -540,6 +539,7 @@ export type AppState = {
   setAppSidebarCollapsed: UIA["setAppSidebarCollapsed"];
   toggleAppSidebarSection: UIA["toggleAppSidebarSection"];
   setAppSidebarWidth: UIA["setAppSidebarWidth"];
+  setAppSidebarSettingsMode: UIA["setAppSidebarSettingsMode"];
   toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];

@@ -21,6 +21,7 @@ func TestClassifyRouteSPARoutes(t *testing.T) {
 		{name: "task detail compat", path: "/tasks/task-123", wantRoute: RouteTaskDetail, wantParams: map[string]string{"taskId": "task-123"}},
 		{name: "office root", path: "/office", wantRoute: RouteOffice},
 		{name: "office nested", path: "/office/agents/agent-1", wantRoute: RouteOffice},
+		{name: "office task detail", path: "/office/tasks/task-123", wantRoute: RouteOffice, wantParams: map[string]string{"taskId": "task-123"}},
 		{name: "settings root", path: "/settings", wantRoute: RouteSettings},
 		{name: "settings nested", path: "/settings/integrations/github", wantRoute: RouteSettings},
 		{name: "github", path: "/github", wantRoute: RouteGitHub},

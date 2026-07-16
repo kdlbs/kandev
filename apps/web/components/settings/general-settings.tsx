@@ -9,6 +9,7 @@ import {
   IconPalette,
   IconKeyboard,
   IconGitBranch,
+  IconArchive,
 } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
@@ -21,6 +22,7 @@ import { GENERAL_NAV_ITEMS } from "@/components/settings/general-nav";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
+import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
 
 function ThemeSettingsCard() {
   const { theme: currentTheme, setTheme } = useTheme();
@@ -183,6 +185,20 @@ export function GeneralSettings() {
           </Link>
         ))}
       </div>
+    </div>
+  );
+}
+
+export function TaskActionsSettings() {
+  return (
+    <div className="space-y-8">
+      <SettingsSection
+        icon={<IconArchive className="h-5 w-5" />}
+        title="Task Actions"
+        description="Configure safeguards for task actions"
+      >
+        <ArchiveConfirmationSettings />
+      </SettingsSection>
     </div>
   );
 }

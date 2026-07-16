@@ -104,7 +104,8 @@ apps/backend/
 │   │   ├── engine/       # Typed state-machine engine
 │   │   ├── models/       # Workflow step, template, and history models
 │   │   ├── repository/   # Workflow persistence (SQLite)
-│   │   └── service/      # Workflow CRUD and step resolution
+│   │   └── service/      # Workflow CRUD, step resolution, and sync apply
+│   ├── workflowsync/     # GitHub workflow sync (per-workspace repo config, poller, force sync)
 │   └── worktree/         # Git worktree management for workspace isolation
 ```
 

@@ -24,6 +24,8 @@ export function DockviewReviewDialog({ sessionId, review }: DockviewReviewDialog
       gitStatusFiles={review.reviewGitStatusFiles}
       cumulativeDiff={review.reviewCumulativeDiff}
       prDiffFiles={review.reviewPRDiffFiles}
+      prRepoName={review.reviewPRRepoName}
+      useRepositoryKeys={review.reviewUseRepositoryKeys}
     />
   );
 }

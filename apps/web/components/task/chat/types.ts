@@ -95,10 +95,11 @@ export type ModifyFilePayload = {
   mutations?: FileMutation[];
 };
 
-export type ShellExecOutput = {
+export type ShellExecOutputSummary = {
   exit_code?: number;
-  stdout?: string;
-  stderr?: string;
+  has_output?: boolean;
+  stdout_bytes?: number;
+  stderr_bytes?: number;
   truncated?: boolean;
 };
 
@@ -108,7 +109,7 @@ export type ShellExecPayload = {
   description?: string;
   timeout?: number;
   background?: boolean;
-  output?: ShellExecOutput;
+  output?: ShellExecOutputSummary;
 };
 
 export type HttpRequestPayload = {
@@ -134,7 +135,16 @@ export type ToolCallMetadata = {
   parent_tool_call_id?: string; // For subagent nesting
   tool_name?: string;
   title?: string;
-  status?: "pending" | "running" | "in_progress" | "complete" | "error" | "cancelled";
+  status?:
+    | "pending"
+    | "running"
+    | "in_progress"
+    | "complete"
+    | "completed"
+    | "success"
+    | "error"
+    | "failed"
+    | "cancelled";
   args?: Record<string, unknown>;
   result?: string;
   normalized?: NormalizedPayload;

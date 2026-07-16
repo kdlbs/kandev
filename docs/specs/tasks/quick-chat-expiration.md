@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: shipped
 created: 2026-07-02
 owner: kandev
 ---
@@ -44,14 +44,16 @@ quick chats.
   is deleted instead of reopening the abandoned tab.
 - Restorable utility sessions are reconstructed from backend task/session state for the active
   workspace after a reload. They are available as tabs while the modal itself starts closed.
+- Hydration resolves the workspace represented by the current route. On `/t/:id` and
+  `/office/tasks/:id`, the task workspace takes precedence over a stale active-workspace setting.
 - Ordinary quick chats expire after seven days of inactivity through the existing task deletion
   path. Configuration sessions do not use that idle expiration policy and remain until explicitly
   deleted or their workspace is deleted.
 - Ordinary and configuration sessions can coexist without sharing setup state, initial prompts,
   repository choices, or workspace state.
 
-Decision: [ADR 0039](../../decisions/0039-typed-quick-chat-sessions.md). Repository-backed ordinary
-chats additionally follow [ADR 0036](../../decisions/0036-quick-chat-repository-isolation.md).
+Decision: [ADR 0043](../../decisions/0043-typed-quick-chat-sessions.md). Repository-backed ordinary
+chats additionally follow [ADR 0038](../../decisions/0038-quick-chat-repository-isolation.md).
 
 ## Data model
 
@@ -86,8 +88,8 @@ type QuickChatSession = {
 ```
 
 For backward compatibility, a session object without `kind` is normalized to `kind: "chat"`.
-Blank setup tabs use the same frontend shape with `sessionId: ""`, but are never persisted or
-included in boot state.
+Blank setup tabs use the same frontend shape with a generated workspace-and-kind-scoped
+`sessionId`, but are never persisted or included in boot state.
 
 Ordinary-chat last activity is the greater of `tasks.updated_at` and the newest associated
 `task_sessions.updated_at`. An ordinary chat is eligible for deletion when that timestamp is more
@@ -213,6 +215,8 @@ deletion.
   **WHEN** boot state is built, **THEN** only the config-mode and ordinary utility chats are restored.
 - **GIVEN** sessions belonging to two workspaces, **WHEN** either workspace is active, **THEN** only
   that workspace's sessions can be shown or activated.
+- **GIVEN** a task route whose workspace differs from the persisted active-workspace setting,
+  **WHEN** the page reloads, **THEN** the task workspace's utility sessions are restored.
 - **GIVEN** an agent clarification is pending, **WHEN** the Quick Chat tab is visible, **THEN** the
   question remains inline in a scrollable region, meaningful preceding message context remains
   visible, and the user can resize or collapse the question before answering it.

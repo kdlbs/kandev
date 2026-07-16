@@ -14,23 +14,41 @@ function useIsMounted() {
   return useSyncExternalStore(emptySubscribe, getClientSnapshot, getServerSnapshot);
 }
 
+export function getWorkspaceId(
+  sessions: { sessionId: string; workspaceId: string }[],
+  isOpen: boolean,
+  activeSessionId: string | null,
+  activeWorkspace: string | null,
+): string | null {
+  if (!isOpen) return null;
+  return (
+    sessions.find((session) => session.sessionId === activeSessionId)?.workspaceId ??
+    activeWorkspace
+  );
+}
+
 /**
  * Global provider for Quick Chat functionality.
  * Renders the modal that can be opened from anywhere in the app.
  * Preloads agent profiles so they're available when quick chat is opened.
  */
 export function QuickChatProvider({ children }: { children: React.ReactNode }) {
+  const quickChatSessions = useAppStore((s) => s.quickChat.sessions);
+  const isOpen = useAppStore((s) => s.quickChat.isOpen);
+  const activeSessionId = useAppStore((s) => s.quickChat.activeSessionId);
   const activeWorkspace = useAppStore((s) => s.workspaces.activeId);
   const mounted = useIsMounted();
 
   // Preload agent profiles so they're available when quick chat is opened
   useSettingsData(true);
 
+  const workspaceId = getWorkspaceId(quickChatSessions, isOpen, activeSessionId, activeWorkspace);
+
   return (
     <>
       {children}
       {/* Only render modal on client side and if we have a workspace */}
-      {mounted && activeWorkspace && <QuickChatModal workspaceId={activeWorkspace} />}
+      {mounted && workspaceId && <QuickChatModal workspaceId={workspaceId} />}
     </>
   );
 }

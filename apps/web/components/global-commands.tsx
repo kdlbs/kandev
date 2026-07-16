@@ -12,7 +12,6 @@ import {
   IconMoon,
   IconRobot,
   IconCpu,
-  IconServer,
   IconFolder,
   IconMessageCircle,
   IconSparkles,
@@ -51,7 +50,7 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Go to Settings",
       group: "Navigation",
       icon: <IconSettings className="size-3.5" />,
-      keywords: ["settings", "preferences", "config"],
+      keywords: ["settings", "preferences", "config", "general settings"],
       action: () => push("/settings/general"),
     },
     {
@@ -59,7 +58,7 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Go to Stats",
       group: "Navigation",
       icon: <IconChartBar className="size-3.5" />,
-      keywords: ["stats", "analytics", "metrics"],
+      keywords: ["stats", "statistics", "analytics", "metrics"],
       action: () => push("/stats"),
     },
     {
@@ -67,7 +66,7 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Go to GitHub Dashboard",
       group: "Navigation",
       icon: <IconBrandGithub className="size-3.5" />,
-      keywords: ["github", "dashboard", "pr", "pull request", "review"],
+      keywords: ["github", "dashboard", "pr", "pull request", "code review", "issues", "review"],
       action: () => push("/github"),
     },
     {
@@ -75,7 +74,7 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Agents Settings",
       group: "Settings",
       icon: <IconRobot className="size-3.5" />,
-      keywords: ["agents", "ai", "claude"],
+      keywords: ["agents", "agent settings", "agent profiles", "installed agents", "claude"],
       action: () => push("/settings/agents"),
     },
     {
@@ -83,23 +82,22 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Executors Settings",
       group: "Settings",
       icon: <IconCpu className="size-3.5" />,
-      keywords: ["executors", "compute", "run"],
+      keywords: [
+        "executors",
+        "executor profiles",
+        "execution environment",
+        "environment variables",
+        "runtime",
+        "compute",
+      ],
       action: () => push("/settings/executors"),
-    },
-    {
-      id: "settings-environments",
-      label: "Environments Settings",
-      group: "Settings",
-      icon: <IconServer className="size-3.5" />,
-      keywords: ["environments", "env", "variables"],
-      action: () => push("/settings/environments"),
     },
     {
       id: "settings-workspace",
       label: "Workspace Settings",
       group: "Settings",
       icon: <IconFolder className="size-3.5" />,
-      keywords: ["workspace", "project"],
+      keywords: ["workspace", "workspaces"],
       action: () => push("/settings/workspace"),
     },
     {
@@ -107,7 +105,13 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       label: "Prompts Settings",
       group: "Settings",
       icon: <IconMessageCircle className="size-3.5" />,
-      keywords: ["prompts", "templates", "message"],
+      keywords: [
+        "prompts",
+        "prompt settings",
+        "custom prompts",
+        "prompt snippets",
+        "prompt templates",
+      ],
       action: () => push("/settings/prompts"),
     },
   ];
@@ -118,13 +122,14 @@ function buildThemeCommand(
   setTheme: (theme: string) => void,
 ): CommandItem {
   const isDark = resolvedTheme === "dark";
+  const destinationTheme = isDark ? "light" : "dark";
   return {
     id: "pref-theme",
     label: isDark ? "Switch to Light Mode" : "Switch to Dark Mode",
     group: "Preferences",
     icon: isDark ? <IconSun className="size-3.5" /> : <IconMoon className="size-3.5" />,
-    keywords: ["theme", "dark", "light", "mode"],
-    action: () => setTheme(isDark ? "light" : "dark"),
+    keywords: ["theme", "color theme", "appearance"],
+    action: () => setTheme(destinationTheme),
   };
 }
 
@@ -144,7 +149,7 @@ export function GlobalCommands() {
       label: "Quick Chat",
       group: "Actions",
       icon: <IconMessageCircle className="size-3.5" />,
-      keywords: ["quick", "chat", "ai", "agent"],
+      keywords: ["quick chat", "new quick chat", "quick question", "ask agent"],
       shortcut: quickChatShortcut,
       action: handleOpenQuickChat,
     }),
@@ -157,7 +162,13 @@ export function GlobalCommands() {
       label: "Configuration Chat",
       group: "Actions",
       icon: <IconSparkles className="size-3.5" />,
-      keywords: ["config", "configure", "settings", "chat", "ai"],
+      keywords: [
+        "config chat",
+        "config mode",
+        "configure kandev",
+        "workflow configuration",
+        "mcp configuration",
+      ],
       action: handleOpenConfigChat,
     }),
     [handleOpenConfigChat],

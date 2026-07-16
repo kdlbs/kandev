@@ -167,6 +167,14 @@ export type Workflow = {
    * shell (kanban board, office task pane, etc). Backend does NOT branch on it.
    */
   style?: "kanban" | "office" | "custom";
+  /**
+   * Workflow provenance. `"github"` marks workflows synced from a configured
+   * GitHub repo (see workflow sync); omitted/`"manual"` for user-created
+   * workflows. `source_path` is the repo-relative file the workflow was
+   * synced from and is omitted for manual workflows.
+   */
+  source?: string;
+  source_path?: string;
   created_at: string;
   updated_at: string;
 };
@@ -357,6 +365,8 @@ export type MoveTaskResponse = {
 export type TaskSession = {
   id: SessionId;
   task_id: TaskId;
+  /** Optional user-supplied label shown on the session tab. */
+  name?: string;
   agent_profile_id?: AgentProfileId;
   container_id?: string;
   executor_id?: string;

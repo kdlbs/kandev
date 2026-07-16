@@ -14,6 +14,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown, { type ExtraProps, type Components } from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconCode, IconMessagePlus } from "@tabler/icons-react";
@@ -355,7 +357,11 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
       <div ref={scrollRef} className="flex-1 overflow-auto p-6">
         <div ref={rootRef} className="markdown-body max-w-3xl" tabIndex={commentsEnabled ? 0 : -1}>
           <PreviewCommentContext.Provider value={previewCommentContextValue}>
-            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownPreviewComponents}>
+            <ReactMarkdown
+              remarkPlugins={remarkPlugins}
+              rehypePlugins={[rehypeRaw, [rehypeSanitize, defaultSchema]]}
+              components={markdownPreviewComponents}
+            >
               {content}
             </ReactMarkdown>
           </PreviewCommentContext.Provider>

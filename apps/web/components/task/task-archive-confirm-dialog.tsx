@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IconLoader } from "@tabler/icons-react";
 import {
   AlertDialog,
@@ -13,6 +13,7 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { Checkbox } from "@kandev/ui/checkbox";
+import { useAppStore } from "@/components/state-provider";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
 
@@ -33,6 +34,40 @@ type TaskArchiveConfirmDialogProps = {
   confirmTestId?: string;
 };
 
+type ArchiveOpenMode = "pending" | "confirm" | "bypass";
+
+function useArchiveConfirmationMode(
+  open: boolean,
+  confirmTaskArchive: boolean,
+  onConfirm: TaskArchiveConfirmDialogProps["onConfirm"],
+  onOpenChange: TaskArchiveConfirmDialogProps["onOpenChange"],
+) {
+  const wasOpenRef = useRef(false);
+  const [archiveOpenMode, setArchiveOpenMode] = useState<ArchiveOpenMode>("pending");
+
+  useEffect(() => {
+    const openedNow = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+
+    if (!open) {
+      setArchiveOpenMode("pending");
+      return;
+    }
+    if (!openedNow) return;
+
+    if (confirmTaskArchive) {
+      setArchiveOpenMode("confirm");
+      return;
+    }
+
+    setArchiveOpenMode("bypass");
+    onConfirm({ cascade: false });
+    onOpenChange(false);
+  }, [confirmTaskArchive, onConfirm, onOpenChange, open]);
+
+  return archiveOpenMode === "confirm" || (archiveOpenMode === "pending" && confirmTaskArchive);
+}
+
 export function TaskArchiveConfirmDialog({
   open,
   onOpenChange,
@@ -47,6 +82,7 @@ export function TaskArchiveConfirmDialog({
   onConfirm,
   confirmTestId,
 }: TaskArchiveConfirmDialogProps) {
+  const confirmTaskArchive = useAppStore((state) => state.userSettings?.confirmTaskArchive ?? true);
   const safeCount = count ?? 0;
   const label = isBulkOperation ? `task${safeCount !== 1 ? "s" : ""}` : "task";
   const title = isBulkOperation ? `Archive ${safeCount} ${label}?` : "Archive task?";
@@ -58,12 +94,20 @@ export function TaskArchiveConfirmDialog({
     : getCleanupSummary(executorType);
 
   const [cascade, setCascade] = useState(false);
-  const subtaskCount = useSubtaskCount(open, taskId, taskIds);
+  const requiresConfirmation = useArchiveConfirmationMode(
+    open,
+    confirmTaskArchive,
+    onConfirm,
+    onOpenChange,
+  );
+  const subtaskCount = useSubtaskCount(open && requiresConfirmation, taskId, taskIds);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setCascade(false);
     onOpenChange(next);
   };
+
+  if (!requiresConfirmation) return null;
 
   return (
     <AlertDialog open={open} onOpenChange={handleOpenChange}>

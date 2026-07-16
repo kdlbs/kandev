@@ -1,6 +1,5 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import { shouldWaitForLastUsedExecutorProfile } from "./task-create-dialog-effects";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import type { StoreSelections } from "@/components/task-create-dialog-types";
 
 const WORKTREE_EXECUTOR_ID = "exec-worktree";
@@ -13,10 +12,6 @@ function makeWorktreeExecutor(): StoreSelections["executors"][number] {
     profiles: [{ id: WORKTREE_PROFILE_ID, executor_id: WORKTREE_EXECUTOR_ID, name: "B" }],
   } as unknown as StoreSelections["executors"][number];
 }
-
-beforeEach(() => {
-  window.localStorage.removeItem(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID);
-});
 
 describe("shouldWaitForLastUsedExecutorProfile", () => {
   it("waits only while a valid last-used executor profile can restore", () => {

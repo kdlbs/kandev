@@ -29,7 +29,7 @@ spec: "../../specs/tasks/quick-chat-expiration.md"
 ## Inputs
 
 - Spec: Data model, API surface, persistence scenarios.
-- ADR 0039 metadata-derived typing and workspace isolation.
+- ADR 0043 metadata-derived typing and workspace isolation.
 - Existing `quickChatSessions`, `listQuickChatTasks`, and boot harness patterns.
 
 ## Dependencies

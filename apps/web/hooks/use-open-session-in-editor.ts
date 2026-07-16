@@ -63,6 +63,7 @@ export function useOpenSessionInEditor(sessionId?: string | null) {
         return response;
       }
 
+      // Editor integrations may return registered custom schemes such as vscode://.
       window.open(response.url, "_blank", "noopener,noreferrer");
     }
     return response ?? null;

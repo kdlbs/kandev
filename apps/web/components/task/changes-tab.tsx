@@ -116,6 +116,7 @@ export function ChangesTab(props: IDockviewPanelHeaderProps) {
     <ContextMenu>
       <ContextMenuTrigger
         className="flex h-full items-center cursor-pointer select-none"
+        data-testid="dockview-tab-changes"
         onDoubleClick={onDoubleClick}
       >
         <div className={cn("relative", isFlashing && "animate-changes-flash")}>

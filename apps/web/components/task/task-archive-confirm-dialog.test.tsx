@@ -1,5 +1,8 @@
+import { StrictMode, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { StateProvider, useAppStore } from "@/components/state-provider";
+import { defaultState } from "@/lib/state/default-state";
 
 const mockGetSubtaskCount = vi.fn();
 
@@ -9,6 +12,32 @@ vi.mock("@/lib/api", () => ({
 
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
 
+function renderDialog(ui: ReactNode, confirmTaskArchive = true) {
+  return render(
+    <StateProvider
+      initialState={{
+        userSettings: { ...defaultState.userSettings, confirmTaskArchive },
+      }}
+    >
+      {ui}
+    </StateProvider>,
+  );
+}
+
+function DisableArchiveConfirmationButton() {
+  const settings = useAppStore((state) => state.userSettings);
+  const setUserSettings = useAppStore((state) => state.setUserSettings);
+
+  return (
+    <button
+      type="button"
+      onClick={() => setUserSettings({ ...settings, confirmTaskArchive: false })}
+    >
+      Disable archive confirmation
+    </button>
+  );
+}
+
 beforeEach(() => {
   mockGetSubtaskCount.mockReset();
   mockGetSubtaskCount.mockResolvedValue({ count: 0 });
@@ -16,9 +45,59 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+describe("TaskArchiveConfirmDialog preference", () => {
+  it("archives once without rendering a dialog when confirmation is disabled", async () => {
+    const onConfirm = vi.fn();
+    const onOpenChange = vi.fn();
+
+    renderDialog(
+      <StrictMode>
+        <TaskArchiveConfirmDialog
+          open
+          onOpenChange={onOpenChange}
+          taskTitle="My task"
+          taskId="task-1"
+          executorType="worktree"
+          onConfirm={onConfirm}
+        />
+      </StrictMode>,
+      false,
+    );
+
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ cascade: false }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("does not auto-archive an already-open dialog after a settings sync", () => {
+    const onConfirm = vi.fn();
+
+    renderDialog(
+      <>
+        <DisableArchiveConfirmationButton />
+        <TaskArchiveConfirmDialog
+          open
+          onOpenChange={() => {}}
+          taskTitle="My task"
+          taskId="task-1"
+          executorType="worktree"
+          onConfirm={onConfirm}
+        />
+      </>,
+    );
+
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    fireEvent.click(screen.getByText("Disable archive confirmation", { selector: "button" }));
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+  });
+});
+
 describe("TaskArchiveConfirmDialog cleanup copy", () => {
   it("renders local-executor reassurance about untouched repo", () => {
-    render(
+    renderDialog(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}
@@ -32,7 +111,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
   });
 
   it("renders worktree-executor copy about worktree + branch removal", () => {
-    render(
+    renderDialog(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}
@@ -46,7 +125,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
   });
 
   it("warns about sandbox destruction for sprites executor", () => {
-    render(
+    renderDialog(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}
@@ -61,7 +140,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
   });
 
   it("describes Docker container removal for local_docker", () => {
-    render(
+    renderDialog(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}
@@ -75,7 +154,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
   });
 
   it("renders grouped copy for bulk archive", () => {
-    render(
+    renderDialog(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}
@@ -91,7 +170,7 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
   });
 
   it("no longer renders the old hardcoded worktree line for non-worktree executors", () => {
-    render(
+    renderDialog(
       <TaskArchiveConfirmDialog
         open
         onOpenChange={() => {}}

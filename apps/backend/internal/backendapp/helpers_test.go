@@ -608,6 +608,67 @@ func TestBootRouteDataTaskDetailIncludesTaskPageData(t *testing.T) {
 	}
 }
 
+func TestBootTaskDetailMessagesProjectShellOutput(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil || len(workspaces) == 0 {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		Title:       "Shell output projection",
+		IsEphemeral: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	if err := harness.taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "shell-session", TaskID: task.ID, State: models.TaskSessionStateWaitingForInput,
+		StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := harness.taskRepo.CreateTurn(ctx, &models.Turn{
+		ID: "shell-turn", TaskID: task.ID, TaskSessionID: "shell-session",
+		StartedAt: now, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	if err := harness.taskRepo.CreateMessage(ctx, &models.Message{
+		ID: "shell-message", TaskID: task.ID, TaskSessionID: "shell-session", TurnID: "shell-turn",
+		AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeToolExecute, Content: "make test",
+		Metadata: map[string]any{
+			"status": "completed",
+			"normalized": map[string]any{
+				"kind": "shell_exec",
+				"shell_exec": map[string]any{
+					"command": "make test",
+					"output":  map[string]any{"stdout": "boot-output-sentinel"},
+				},
+			},
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	state := map[string]any{}
+	builder := bootStateBuilder{p: routeParams{taskSvc: harness.taskSvc}}
+	builder.addTaskDetailActiveTaskState(ctx, state, taskdto.FromTask(task), "shell-session")
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("Marshal state: %v", err)
+	}
+	if strings.Contains(string(raw), "boot-output-sentinel") {
+		t.Fatal("boot message payload leaked shell output")
+	}
+	if !strings.Contains(string(raw), `"stdout_bytes":20`) {
+		t.Fatalf("boot message payload missing shell output summary: %s", raw)
+	}
+}
+
 func TestBootRouteDataTasksIncludesFirstPageRows(t *testing.T) {
 	taskSvc, workflowSvc := newBootStateTestServices(t)
 	ctx := context.Background()
@@ -876,6 +937,79 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	}
 }
 
+func TestBootPayloadRestoresQuickChatsFromTaskRouteWorkspace(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	repo := harness.taskRepo
+	for _, workspace := range []*models.Workspace{
+		{ID: "ws-active", Name: "Persisted Active"},
+		{ID: "ws-task", Name: "Task Workspace"},
+	} {
+		if err := repo.CreateWorkspace(ctx, workspace); err != nil {
+			t.Fatalf("CreateWorkspace(%s): %v", workspace.ID, err)
+		}
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "route-task", WorkspaceID: "ws-task", Title: "Route Task",
+		State: v1.TaskStateTODO, Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask(route-task): %v", err)
+	}
+	base := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-active-chat", workspaceID: "ws-active", title: "Wrong Workspace",
+		updatedAt: base, sessionUpdatedAt: base, agentProfileID: "agent-active",
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-route-first", workspaceID: "ws-task", title: "First Route Chat",
+		updatedAt: base.Add(time.Minute), sessionUpdatedAt: base.Add(time.Minute), agentProfileID: "agent-first",
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-route-second", workspaceID: "ws-task", title: "Second Route Chat",
+		updatedAt: base.Add(2 * time.Minute), sessionUpdatedAt: base.Add(2 * time.Minute), agentProfileID: "agent-second",
+	})
+
+	for _, routePath := range []string{"/t/route-task", "/office/tasks/route-task"} {
+		t.Run(routePath, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, routePath, nil)
+			req.AddCookie(&http.Cookie{Name: activeWorkspaceCookie, Value: "ws-active"})
+			payload := bootPayload(ctx, req, routeParams{
+				taskSvc: harness.taskSvc, services: &Services{Workflow: harness.workflowSvc}, userCtrl: harness.userCtrl,
+			}, webapp.ClassifyRoute(routePath))
+
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("Marshal payload: %v", err)
+			}
+			var decoded struct {
+				InitialState struct {
+					QuickChat struct {
+						Sessions []struct {
+							SessionID   string `json:"sessionId"`
+							WorkspaceID string `json:"workspaceId"`
+						} `json:"sessions"`
+					} `json:"quickChat"`
+				} `json:"initialState"`
+			}
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatalf("Unmarshal payload: %v", err)
+			}
+			sessions := decoded.InitialState.QuickChat.Sessions
+			if len(sessions) != 2 {
+				t.Fatalf("quickChat sessions = %#v, want 2 task-workspace sessions", sessions)
+			}
+			if sessions[0].SessionID != "task-route-second-session" || sessions[1].SessionID != "task-route-first-session" {
+				t.Fatalf("quickChat sessions = %#v, want task-workspace activity order", sessions)
+			}
+			for _, session := range sessions {
+				if session.WorkspaceID != "ws-task" {
+					t.Fatalf("restored workspace = %q, want ws-task", session.WorkspaceID)
+				}
+			}
+		})
+	}
+}
+
 type bootQuickChatFixture struct {
 	id               string
 	workspaceID      string
@@ -892,13 +1026,13 @@ type bootQuickChatFixture struct {
 
 func seedBootQuickChatTask(t *testing.T, repo *sqlitetaskrepo.Repository, ctx context.Context, f bootQuickChatFixture) {
 	t.Helper()
-	metadata := map[string]interface{}{models.MetaKeyAgentProfileID: f.agentProfileID}
-	for key, value := range f.metadata {
-		metadata[key] = value
-	}
 	workspaceID := f.workspaceID
 	if workspaceID == "" {
 		workspaceID = "ws-qc"
+	}
+	metadata := map[string]interface{}{models.MetaKeyAgentProfileID: f.agentProfileID}
+	for key, value := range f.metadata {
+		metadata[key] = value
 	}
 	if err := repo.CreateTask(ctx, &models.Task{
 		ID:          f.id,

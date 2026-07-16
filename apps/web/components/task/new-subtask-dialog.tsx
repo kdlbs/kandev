@@ -19,8 +19,6 @@ import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useSummarizeSession, type SummarizeSessionResult } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
-import { getLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import type { ExecutorProfile, ExecutorType, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import {
@@ -113,17 +111,22 @@ function useExecutorProfiles(
   }, [executors]);
 }
 
-function useAutoSelectExecutorProfile(
+function useExecutorDefault(
   allProfiles: ExecutorProfile[],
   executorProfileId: string,
-  setExecutorProfileId: (v: string) => void,
+  setExecutorProfileId: (value: string) => void,
 ) {
+  const lastUsedExecutorProfileId = useAppStore(
+    (s) => s.userSettings.taskCreateLastUsed?.executorProfileId ?? null,
+  );
   useEffect(() => {
     if (executorProfileId || allProfiles.length === 0) return;
-    const lastId = getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null);
-    const pick = lastId && allProfiles.some((p) => p.id === lastId) ? lastId : allProfiles[0].id;
+    const pick =
+      lastUsedExecutorProfileId && allProfiles.some((p) => p.id === lastUsedExecutorProfileId)
+        ? lastUsedExecutorProfileId
+        : allProfiles[0].id;
     setExecutorProfileId(pick);
-  }, [allProfiles, executorProfileId, setExecutorProfileId]);
+  }, [allProfiles, executorProfileId, lastUsedExecutorProfileId, setExecutorProfileId]);
 }
 
 /**
@@ -253,7 +256,7 @@ function NewSubtaskForm({
   const sessionOptions = useSessionOptions(parentTaskId);
   const allExecutorProfiles = useExecutorProfiles(executors);
   const executorProfileOptions = useExecutorProfileOptions(allExecutorProfiles);
-  useAutoSelectExecutorProfile(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);
+  useExecutorDefault(allExecutorProfiles, fs.executorProfileId, fs.setExecutorProfileId);
   const promptZone = useSubtaskPromptZone({
     taskTitle: title,
     inputDisabled: isCreating || isSummarizing,

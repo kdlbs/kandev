@@ -225,8 +225,8 @@ function PermissionToggles({
   );
 }
 
-function capabilityStatusMessage(modelConfig: ModelConfig): string | null {
-  switch (modelConfig.status) {
+function capabilityStatusMessage(status: ModelConfig["status"]): string | null {
+  switch (status) {
     case "probing":
       return "Checking agent capabilities…";
     case "auth_required":
@@ -240,13 +240,13 @@ function capabilityStatusMessage(modelConfig: ModelConfig): string | null {
   }
 }
 
-function CapabilityStatusMessage({ modelConfig }: { modelConfig: ModelConfig }) {
-  const msg = capabilityStatusMessage(modelConfig);
+function CapabilityStatusMessage({ status }: { status: ModelConfig["status"] }) {
+  const msg = capabilityStatusMessage(status);
   if (!msg) return null;
   return (
     <p
       data-testid="profile-capability-status"
-      data-status={modelConfig.status}
+      data-status={status}
       className="text-xs text-muted-foreground"
     >
       {msg}
@@ -423,6 +423,7 @@ function CapabilitiesRow({
   commands,
   currentModelId,
   currentModeId,
+  status,
   onChange,
   isCompact,
   isLoading,
@@ -437,6 +438,7 @@ function CapabilitiesRow({
   commands: CommandEntry[];
   currentModelId: string | undefined;
   currentModeId: string | undefined;
+  status: ModelConfig["status"];
   onChange: (patch: Partial<ProfileFormData>) => void;
   isCompact: boolean;
   isLoading: boolean;
@@ -462,7 +464,6 @@ function CapabilitiesRow({
     );
   }
 
-  const status = modelConfig.status;
   if (status === "probing") {
     return <ProbingPanel />;
   }
@@ -509,7 +510,7 @@ function CapabilitiesRow({
         <p className="text-xs text-muted-foreground">{activeMode.description}</p>
       )}
       {commands.length > 0 && <CommandsButton commands={commands} />}
-      <CapabilityStatusMessage modelConfig={modelConfig} />
+      <CapabilityStatusMessage status={status} />
     </div>
   );
 }
@@ -580,6 +581,7 @@ export function ProfileFormFields({
         commands={caps.commands}
         currentModelId={caps.currentModelId}
         currentModeId={caps.currentModeId}
+        status={caps.status}
         agentName={agentName}
         onChange={onChange}
         isCompact={isCompact}

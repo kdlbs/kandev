@@ -128,3 +128,11 @@ func (c *NoopClient) CreateGist(context.Context, CreateGistInput) (*GistResponse
 func (c *NoopClient) DeleteGist(context.Context, string) error {
 	return ErrNoClient
 }
+
+func (c *NoopClient) ListRepoDirectory(context.Context, string, string, string, string) ([]RepoContentEntry, error) {
+	return nil, ErrNoClient
+}
+
+func (c *NoopClient) GetRepoFileContent(context.Context, string, string, string, string) ([]byte, error) {
+	return nil, ErrNoClient
+}

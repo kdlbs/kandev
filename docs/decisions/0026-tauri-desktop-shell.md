@@ -1,6 +1,6 @@
 # 0026: Tauri Desktop Shell Over Native Runtime
 
-**Status:** accepted
+**Status:** accepted (amended 2026-07-15)
 **Date:** 2026-06-23
 **Area:** frontend, backend, cli, infra
 
@@ -14,7 +14,11 @@ Add a Tauri v2 desktop app as a thin native shell over the existing Kandev runti
 
 The installed desktop app will not include a Node.js runtime. Node.js and pnpm remain build-time tooling for Vite, TypeScript, Tauri CLI invocation, tests, and release automation.
 
-Desktop launches set the backend to a loopback-only bind address and an app-selected local port. Desktop release automation signs macOS and Windows artifacts when CI signing secrets are configured; otherwise it publishes unsigned desktop development artifacts with a release-notes warning. The first desktop implementation does not include Tauri's in-app updater; updates continue through GitHub release downloads/manual reinstall until a separate updater spec is approved.
+Desktop launches set the backend to a loopback-only bind address and an app-selected local port. Desktop release automation signs macOS and Windows artifacts when CI signing secrets are configured; otherwise it publishes unsigned desktop development artifacts with a release-notes warning. The first desktop implementation did not include Tauri's in-app updater; updates continued through GitHub release downloads/manual reinstall pending a separate approved design.
+
+**Amendment (2026-07-15):** ADR-0039 adds the approved native menu, updater,
+notification, window-state, and external-link integration boundary. This ADR remains the decision
+for the shell/runtime architecture; ADR-0039 supersedes only its initial no-updater scope.
 
 ## Consequences
 

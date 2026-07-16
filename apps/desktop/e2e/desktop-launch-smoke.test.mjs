@@ -13,6 +13,8 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const backendRsPath = resolve(__dirname, "../src-tauri/src/backend.rs");
+const mainRsPath = resolve(__dirname, "../src-tauri/src/main.rs");
+const shellRsPath = resolve(__dirname, "../src-tauri/src/shell.rs");
 
 async function withTempDir(run) {
   const dir = await mkdtemp(join(tmpdir(), "wait-for-file-"));
@@ -95,4 +97,37 @@ test("health-requested timeout stays above the Rust backend's own HEALTH_TIMEOUT
     ROOT_REQUESTED_TIMEOUT_MS > 0 && Number.isInteger(ROOT_REQUESTED_TIMEOUT_MS),
     "ROOT_REQUESTED_TIMEOUT_MS must be a positive integer",
   );
+});
+
+test("Close Context owns Cmd/Ctrl+W without a native window-close fallback", async () => {
+  const [mainSource, shellSource] = await Promise.all([
+    readFile(mainRsPath, "utf8"),
+    readFile(shellRsPath, "utf8"),
+  ]);
+
+  assert.match(mainSource, /MENU_CLOSE_CONTEXT, "Close Context"[\s\S]*CmdOrCtrl\+KeyW/);
+  assert.match(
+    shellSource,
+    /MENU_CLOSE_CONTEXT\s*=>\s*Some\(MenuAction::Emit\(CLOSE_CONTEXT_EVENT\)\)/,
+  );
+  assert.doesNotMatch(mainSource, /PredefinedMenuItem::close_window/);
+  assert.doesNotMatch(mainSource, /\.accelerator\("CmdOrCtrl\+KeyW"\)[\s\S]{0,160}shutdown_and_exit/);
+});
+
+test("generic app activation never consumes a pending notification route", async () => {
+  const mainSource = await readFile(mainRsPath, "utf8");
+
+  assert.doesNotMatch(mainSource, /emit_pending_notification_route/);
+  assert.match(
+    mainSource,
+    /tauri_plugin_single_instance::init\([\s\S]*activate_main_window/,
+  );
+  assert.match(mainSource, /RunEvent::Reopen[\s\S]*activate_main_window/);
+});
+
+test("fullscreen uses the platform-native desktop accelerators", async () => {
+  const mainSource = await readFile(mainRsPath, "utf8");
+
+  assert.match(mainSource, /target_os = "macos"[\s\S]*"Ctrl\+Cmd\+F"/);
+  assert.match(mainSource, /not\(target_os = "macos"\)[\s\S]*"F11"/);
 });

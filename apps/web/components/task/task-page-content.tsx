@@ -28,6 +28,7 @@ import {
   buildArchivedValue,
   hasResolvedTaskDetails,
   resolveTaskContentState,
+  syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -193,19 +194,6 @@ export function useMergedAgentState(
   return { isResuming, isResumed, taskSessionState, worktreePath, worktreeBranch, isAgentWorking };
 }
 
-function syncActiveTaskSession(params: {
-  initialTaskId: string | undefined;
-  fallbackTaskId: string | null | undefined;
-  initialSessionId: string | null;
-  setActiveSession: (taskId: string, sessionId: string) => void;
-  setActiveTask: (taskId: string) => void;
-}) {
-  const taskId = params.initialTaskId ?? params.fallbackTaskId;
-  if (!taskId) return;
-  if (params.initialSessionId) params.setActiveSession(taskId, params.initialSessionId);
-  else params.setActiveTask(taskId);
-}
-
 function TaskLoadingState() {
   return (
     <div
@@ -301,7 +289,7 @@ function useTaskPageData(
   initialRepositories: Repository[],
 ) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const setActiveSession = useAppStore((state) => state.setActiveSession);
+  const setActiveSessionAuto = useAppStore((state) => state.setActiveSessionAuto);
   const setActiveTask = useAppStore((state) => state.setActiveTask);
 
   // Validate that activeSessionId belongs to activeTaskId to prevent showing
@@ -325,10 +313,10 @@ function useTaskPageData(
       initialTaskId: initialTask?.id,
       fallbackTaskId,
       initialSessionId,
-      setActiveSession,
+      setActiveSessionAuto,
       setActiveTask,
     });
-  }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSession, setActiveTask]);
+  }, [initialTask?.id, fallbackTaskId, initialSessionId, setActiveSessionAuto, setActiveTask]);
 
   const { repositories } = useRepositories(task?.workspace_id ?? null, Boolean(task?.workspace_id));
   const effectiveRepositories = repositories.length ? repositories : initialRepositories;

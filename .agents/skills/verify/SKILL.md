@@ -5,9 +5,9 @@ description: Run format, typecheck, test, and lint across the monorepo. Use afte
 
 # Verify
 
-Delegate to the **`verify` subagent** to run the full verification pipeline (rebase, format, typecheck, test, lint) and fix any issues it finds when the runtime supports delegated helpers. The subagent runs on Sonnet, which is cheaper than the main session and well-suited to the mechanical run-parse-fix loop.
+Delegate to the **registered `verify` subagent** to run the full verification pipeline (rebase, format, typecheck, test, lint) and fix any issues it finds when the runtime supports delegated helpers. The subagent runs on Sonnet, which is cheaper than the main session and well-suited to the mechanical run-parse-fix loop. Do not substitute a generic agent: it may lack the required GitHub network access or shared-worktree write permissions.
 
-If runtime policy forbids delegated helpers/subagents unless the user explicitly requested them, or the helper fails to start or initialize, treat delegation as unavailable and use the direct-command fallback below. Do not stop at a partial check just because delegation is unavailable.
+If runtime policy forbids delegated helpers/subagents unless the user explicitly requested them, the named helper is not registered, or the helper fails to start, initialize, or access the required Git/network/worktree resources, treat delegation as unavailable and use the direct-command fallback below. Do not stop at a partial check just because delegation is unavailable.
 
 ## What to do
 

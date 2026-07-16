@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Contract tests for the maintainer release workflow."""
 
+import fnmatch
 import re
 import unittest
 from pathlib import Path
@@ -80,6 +81,97 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             block = job_block(name)
             self.assertIn("if: ${{ !inputs.dry_run", block)
             self.assertNotIn("inputs.backfill_tag == ''", block)
+
+    def test_updater_signing_validation_uses_workflow_control_revision(self) -> None:
+        build_desktop = job_block("build-desktop")
+        self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", build_desktop)
+
+        detect = step_block("Detect Tauri updater signing input")
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", detect)
+        self.assertIn("gh api", detect)
+        self.assertIn("$RUNNER_TEMP/updater-signing-ready.sh", detect)
+        self.assertIn(
+            "scripts/release/updater-signing-ready.sh?ref=${{ github.workflow_sha }}",
+            detect,
+        )
+        self.assertIn('if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]', detect)
+        self.assertLess(
+            detect.index('if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]'),
+            detect.index("gh api"),
+        )
+        self.assertIn('bash "$helper"', detect)
+        self.assertNotIn("bash scripts/release/updater-signing-ready.sh", detect)
+
+    def test_desktop_asset_validation_uses_workflow_control_revision(self) -> None:
+        for job in ("build-desktop", "publish-release"):
+            block = job_block(job)
+            self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", block)
+            self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", block)
+            self.assertIn(
+                "scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}",
+                block,
+            )
+            self.assertIn("DESKTOP_ASSET_VERIFIER=$helper", block)
+            self.assertIn('"$DESKTOP_ASSET_VERIFIER"', block)
+            self.assertNotIn('scripts/release/verify-desktop-assets.sh "', block)
+
+    def test_linux_appimage_build_installs_xdg_open(self) -> None:
+        install = step_block("Install Linux desktop dependencies")
+        self.assertIn("startsWith(matrix.platform, 'linux-')", install)
+        self.assertIn("xdg-utils", install)
+        self.assertIn("command -v xdg-open", install)
+
+    def test_updater_manifest_date_dereferences_annotated_tag(self) -> None:
+        generate = step_block("Generate and verify updater manifest")
+        self.assertIn("git show -s --format=%cI", generate)
+        self.assertRegex(
+            generate,
+            r"needs\.prepare\.outputs\.tag \}\}\^\{commit\}",
+        )
+
+    def test_macos_signed_build_selects_app_bundle_for_updater(self) -> None:
+        build = step_block("Build Tauri desktop app")
+        collect = step_block("Collect desktop artifacts")
+        initialize = 'tauri_bundles="${{ matrix.tauri_bundles }}"'
+        append = 'tauri_bundles="${tauri_bundles},app"'
+        invoke = '--bundles "$tauri_bundles"'
+
+        self.assertIn('[[ "${{ matrix.platform }}" == macos-*', build)
+        self.assertIn('"${UPDATER_SIGNING_ENABLED:-false}" = "true"', build)
+        self.assertIn(initialize, build)
+        self.assertIn(append, build)
+        self.assertNotIn('tauri_bundles="${tauri_bundles},updater"', build)
+        self.assertIn(invoke, build)
+        self.assertLess(build.index(initialize), build.index(append))
+        self.assertLess(build.index(append), build.index(invoke))
+        self.assertIn('"${UPDATER_SIGNING_ENABLED:-false}" = "true"', collect)
+        self.assertIn('"$DESKTOP_ASSET_VERIFIER" --require-updaters', collect)
+
+    def test_release_asset_globs_are_disjoint_and_upload_sequentially(self) -> None:
+        publish = step_block("Publish release")
+        files = re.search(r"\n          files: \|\n((?:            \S+\n)+)", publish)
+        self.assertIsNotNone(files)
+        patterns = [line.strip() for line in files.group(1).splitlines()]
+        assets = (
+            "kandev-linux-x64.tar.gz",
+            "kandev-linux-x64.tar.gz.sha256",
+            "kandev-macos-arm64.tar.gz",
+            "kandev-macos-arm64.tar.gz.sha256",
+            "kandev-windows-x64.tar.gz",
+            "kandev-windows-x64.tar.gz.sha256",
+            "kandev-desktop-macos-arm64-Kandev.app.tar.gz",
+            "kandev-desktop-macos-arm64-Kandev.app.tar.gz.sha256",
+            "kandev-desktop-macos-arm64-Kandev.app.tar.gz.sig",
+            "kandev-desktop-macos-arm64-Kandev.app.tar.gz.sig.sha256",
+            "latest.json",
+        )
+
+        for asset in assets:
+            path = f"dist/release-assets/{asset}"
+            matches = [pattern for pattern in patterns if fnmatch.fnmatchcase(path, pattern)]
+            self.assertEqual(len(matches), 1, f"release glob count for {asset}: {matches}")
+
+        self.assertIn("preserve_order: true", publish)
 
     def test_macos_dmg_build_has_retry_timeout_and_diagnostics(self) -> None:
         build = step_block("Build Tauri desktop app")

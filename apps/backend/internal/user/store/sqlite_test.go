@@ -67,6 +67,45 @@ func TestScanUserSettingsChangesPanelLayoutDefault(t *testing.T) {
 	})
 }
 
+func TestScanUserSettingsConfirmTaskArchiveDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "empty settings require confirmation", raw: `{}`, want: true},
+		{name: "missing setting requires confirmation", raw: `{"chat_submit_key":"enter"}`, want: true},
+		{name: "explicit false skips confirmation", raw: `{"confirm_task_archive":false}`, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.ConfirmTaskArchive != tt.want {
+				t.Fatalf("ConfirmTaskArchive = %v, want %v", settings.ConfirmTaskArchive, tt.want)
+			}
+		})
+	}
+}
+
+func TestMarshalUserSettingsPersistsDisabledArchiveConfirmation(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{ConfirmTaskArchive: false})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if got, ok := payload["confirm_task_archive"].(bool); !ok || got {
+		t.Fatalf("confirm_task_archive = %#v, want false", payload["confirm_task_archive"])
+	}
+}
+
 func TestScanUserSettingsSystemMetricsDisplayDefault(t *testing.T) {
 	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
 	if err != nil {

@@ -1,13 +1,19 @@
 "use client";
 
-import { hashDiff, normalizeDiffContent } from "@/components/review/types";
+import {
+  hashDiff,
+  normalizeDiffContent,
+  reviewFileKey,
+  splitReviewFileKey,
+} from "@/components/review/types";
 import type { FileInfo } from "@/lib/state/store";
 import type { PRDiffFile } from "@/lib/types/github";
+import { normalizeFileChangeStatus, type FileChangeStatus } from "@/lib/utils/file-change-status";
 import type { PRChangedFile } from "./changes-panel-timeline";
 
 export type ChangedFile = {
   path: string;
-  status: FileInfo["status"];
+  status: FileChangeStatus;
   staged: boolean;
   plus: number | undefined;
   minus: number | undefined;
@@ -59,65 +65,137 @@ export function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
 
 type CumulativeDiffFiles = Record<
   string,
-  { diff?: string; status?: string; additions?: number; deletions?: number }
+  {
+    path?: string;
+    repository_name?: string;
+    diff?: string;
+    status?: string;
+    additions?: number;
+    deletions?: number;
+  }
 >;
 
-function collectReviewPaths(
+function cumulativeFileIdentity(
+  mapKey: string,
+  file: CumulativeDiffFiles[string],
+  useRepositoryKeys: boolean,
+) {
+  const path = file.path ?? splitReviewFileKey(mapKey).path;
+  const repositoryName = useRepositoryKeys ? file.repository_name : undefined;
+  return {
+    key: reviewFileKey({ path, repository_name: repositoryName }),
+    path,
+    repositoryName,
+  };
+}
+
+export type ReviewProgressPRFile = PRDiffFile & { repository_name?: string };
+
+export type ReviewProgressPRSource = {
+  repositoryName: string;
+  files: PRDiffFile[];
+};
+
+export function selectPRFilesForReviewProgress(
+  sourcesByPRID: ReadonlyMap<string, ReviewProgressPRSource>,
+  primaryPRID: string | undefined,
+  useRepositoryKeys: boolean,
+): ReviewProgressPRFile[] {
+  if (!primaryPRID) return [];
+  const source = sourcesByPRID.get(primaryPRID);
+  if (!source) return [];
+  return source.files.map((file) => ({
+    ...file,
+    repository_name: useRepositoryKeys ? source.repositoryName : undefined,
+  }));
+}
+
+function addReviewSource(
+  winningDiffs: Map<string, string | undefined>,
+  paths: Set<string>,
+  source: {
+    key: string;
+    path: string;
+    repositoryName?: string;
+    diff?: string;
+  },
+): void {
+  const collidesWithHigherPriority = source.repositoryName
+    ? winningDiffs.has(source.path)
+    : paths.has(source.path);
+  if (winningDiffs.has(source.key) || collidesWithHigherPriority) return;
+  winningDiffs.set(source.key, source.diff);
+  paths.add(source.path);
+}
+
+function buildReviewProgressIndex(
   uncommittedFiles: FileInfo[],
   cumulativeDiffFiles: CumulativeDiffFiles | undefined,
-  prFiles?: PRDiffFile[],
-): Set<string> {
+  prFiles?: ReviewProgressPRFile[],
+  useRepositoryKeys = true,
+): Map<string, string | undefined> {
+  const winningDiffs = new Map<string, string | undefined>();
   const paths = new Set<string>();
   for (const file of uncommittedFiles) {
-    if (file.diff && normalizeDiffContent(file.diff)) paths.add(file.path);
+    const repositoryName = useRepositoryKeys ? file.repository_name : undefined;
+    const key = reviewFileKey({ path: file.path, repository_name: repositoryName });
+    addReviewSource(winningDiffs, paths, {
+      key,
+      path: file.path,
+      repositoryName,
+      diff: file.diff,
+    });
   }
   if (cumulativeDiffFiles) {
-    for (const [path, file] of Object.entries(cumulativeDiffFiles)) {
-      if (!paths.has(path) && file.diff && normalizeDiffContent(file.diff)) paths.add(path);
+    for (const [mapKey, file] of Object.entries(cumulativeDiffFiles)) {
+      const identity = cumulativeFileIdentity(mapKey, file, useRepositoryKeys);
+      addReviewSource(winningDiffs, paths, {
+        ...identity,
+        diff: file.diff,
+      });
     }
   }
   if (prFiles) {
     for (const file of prFiles) {
-      if (!paths.has(file.filename) && file.patch) paths.add(file.filename);
+      const repositoryName = useRepositoryKeys ? file.repository_name : undefined;
+      const key = reviewFileKey({
+        path: file.filename,
+        repository_name: repositoryName,
+      });
+      addReviewSource(winningDiffs, paths, {
+        key,
+        path: file.filename,
+        repositoryName,
+        diff: file.patch,
+      });
     }
   }
-  return paths;
-}
-
-function getDiffForPath(
-  path: string,
-  uncommittedFiles: FileInfo[],
-  cumulativeDiffFiles: CumulativeDiffFiles | undefined,
-  prFiles?: PRDiffFile[],
-): string {
-  const uncommitted = uncommittedFiles.find((f) => f.path === path);
-  if (uncommitted?.diff) return normalizeDiffContent(uncommitted.diff);
-  const cumDiff = cumulativeDiffFiles?.[path]?.diff;
-  if (cumDiff) return normalizeDiffContent(cumDiff);
-  if (prFiles) {
-    const prFile = prFiles.find((f) => f.filename === path);
-    if (prFile?.patch) return normalizeDiffContent(prFile.patch);
-  }
-  return "";
+  return winningDiffs;
 }
 
 export function computeReviewProgress(
   uncommittedFiles: FileInfo[],
   cumulativeDiff: { files?: CumulativeDiffFiles } | null,
   reviews: Map<string, { reviewed: boolean; diffHash?: string }>,
-  prFiles?: PRDiffFile[],
+  prFiles?: ReviewProgressPRFile[],
+  useRepositoryKeys = true,
 ) {
   const cumulativeDiffFiles = cumulativeDiff?.files;
-  const paths = collectReviewPaths(uncommittedFiles, cumulativeDiffFiles, prFiles);
+  const winningDiffs = buildReviewProgressIndex(
+    uncommittedFiles,
+    cumulativeDiffFiles,
+    prFiles,
+    useRepositoryKeys,
+  );
   let reviewed = 0;
-  for (const path of paths) {
-    const state = reviews.get(path);
+  for (const [key, diff] of winningDiffs) {
+    const state = reviews.get(key);
     if (!state?.reviewed) continue;
-    const diffContent = getDiffForPath(path, uncommittedFiles, cumulativeDiffFiles, prFiles);
+    const diffContent = normalizeDiffContent(diff ?? "");
     if (diffContent && state.diffHash && state.diffHash !== hashDiff(diffContent)) continue;
     reviewed++;
   }
-  return { reviewedCount: reviewed, totalFileCount: paths.size };
+  return { reviewedCount: reviewed, totalFileCount: winningDiffs.size };
 }
 
 export function computeStagedStats(stagedFiles: FileInfo[]) {
@@ -130,30 +208,14 @@ export function mapPRFilesToChangedFiles(
   files: PRDiffFile[],
   repositoryName?: string,
 ): PRChangedFile[] {
-  return files.map((file) => {
-    let status: FileInfo["status"];
-    switch (file.status) {
-      case "added":
-        status = "added";
-        break;
-      case "removed":
-        status = "deleted";
-        break;
-      case "renamed":
-        status = "renamed";
-        break;
-      default:
-        status = "modified";
-    }
-    return {
-      path: file.filename,
-      status,
-      plus: file.additions,
-      minus: file.deletions,
-      oldPath: file.old_path,
-      repository_name: repositoryName ?? "",
-    };
-  });
+  return files.map((file) => ({
+    path: file.filename,
+    status: normalizeFileChangeStatus(file.status),
+    plus: file.additions,
+    minus: file.deletions,
+    oldPath: file.old_path,
+    repository_name: repositoryName ?? "",
+  }));
 }
 
 export function filterUnpushedCommits<T extends { commit_sha: string }>(

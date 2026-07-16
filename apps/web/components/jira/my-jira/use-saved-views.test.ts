@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { fetchUserSettings, updateUserSettings } from "@/lib/api/domains/settings-api";
 import { useSavedViews, type SavedView } from "./use-saved-views";
 
 const STORAGE_KEY = "kandev:jira:saved-views:v1";
-const SYNC_FAILED_KEY = "kandev:jira:saved-views:sync-failed:v1";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchUserSettings: vi.fn(),
@@ -23,6 +22,14 @@ function makeLocalStorageMock() {
     },
     key: (index: number) => Array.from(store.keys())[index] ?? null,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 const localStorageMock = makeLocalStorageMock();
@@ -53,16 +60,13 @@ describe("useSavedViews", () => {
     } as Awaited<ReturnType<typeof updateUserSettings>>);
   });
 
-  it("retries local views after a failed backend sync and clears the marker", async () => {
+  it("ignores stale local views when backend settings are empty", async () => {
     localStorageMock.setItem(STORAGE_KEY, JSON.stringify([view]));
-    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
 
-    renderHook(() => useSavedViews());
+    const { result } = renderHook(() => useSavedViews());
 
-    await waitFor(() => {
-      expect(updateUserSettings).toHaveBeenCalledWith({ jira_saved_views: [view] });
-      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
-    });
+    await waitFor(() => expect(result.current.custom).toEqual([]));
+    expect(updateUserSettings).not.toHaveBeenCalled();
   });
 
   it("hydrates a legacy statusCategories view to statuses: [] without throwing", async () => {
@@ -79,7 +83,9 @@ describe("useSavedViews", () => {
         sort: "updated",
       },
     };
-    localStorageMock.setItem(STORAGE_KEY, JSON.stringify([legacy]));
+    vi.mocked(fetchUserSettings).mockResolvedValue({
+      settings: { jira_saved_views: [legacy] },
+    } as Awaited<ReturnType<typeof fetchUserSettings>>);
 
     const { result } = renderHook(() => useSavedViews());
 
@@ -92,18 +98,68 @@ describe("useSavedViews", () => {
     });
   });
 
-  it("retries empty local views after a failed backend sync", async () => {
-    localStorageMock.setItem(STORAGE_KEY, JSON.stringify([]));
-    localStorageMock.setItem(SYNC_FAILED_KEY, "1");
-    vi.mocked(fetchUserSettings).mockResolvedValue({
-      settings: { jira_saved_views: [view] },
+  it("replays a saved view mutation on hydrated server views", async () => {
+    const settings = deferred<Awaited<ReturnType<typeof fetchUserSettings>>>();
+    vi.mocked(fetchUserSettings).mockReturnValueOnce(settings.promise);
+    const serverView = { ...view, id: "custom:server", name: "Server view" };
+
+    const { result } = renderHook(() => useSavedViews());
+    const saved = result.current.save("New view", view.filters, null);
+
+    expect(updateUserSettings).not.toHaveBeenCalled();
+
+    settings.resolve({
+      settings: { jira_saved_views: [serverView] },
     } as Awaited<ReturnType<typeof fetchUserSettings>>);
 
-    renderHook(() => useSavedViews());
-
     await waitFor(() => {
-      expect(updateUserSettings).toHaveBeenCalledWith({ jira_saved_views: [] });
-      expect(localStorageMock.getItem(SYNC_FAILED_KEY)).toBeNull();
+      expect(result.current.custom.map((savedView) => savedView.id)).toEqual([
+        "custom:server",
+        saved.id,
+      ]);
+      expect(updateUserSettings).toHaveBeenCalledWith({
+        jira_saved_views: expect.arrayContaining([
+          expect.objectContaining({ id: "custom:server" }),
+          expect.objectContaining({ id: saved.id }),
+        ]),
+      });
+    });
+  });
+
+  it("does not sync queued mutations when fetching settings fails", async () => {
+    vi.mocked(fetchUserSettings).mockRejectedValueOnce(new Error("network unavailable"));
+    vi.mocked(fetchUserSettings).mockRejectedValueOnce(new Error("network still unavailable"));
+    const fetchCallsBefore = vi.mocked(fetchUserSettings).mock.calls.length;
+    const syncCallsBefore = vi.mocked(updateUserSettings).mock.calls.length;
+
+    const { result } = renderHook(() => useSavedViews());
+    await waitFor(() => expect(fetchUserSettings).toHaveBeenCalledTimes(fetchCallsBefore + 1));
+    act(() => {
+      result.current.save("New view", view.filters, null);
+    });
+
+    await waitFor(() => expect(fetchUserSettings).toHaveBeenCalledTimes(fetchCallsBefore + 2));
+    expect(updateUserSettings).toHaveBeenCalledTimes(syncCallsBefore);
+  });
+
+  it("keeps saved views visible and retries hydration after a fetch failure", async () => {
+    vi.mocked(fetchUserSettings).mockRejectedValueOnce(new Error("network unavailable"));
+    const fetchCallsBefore = vi.mocked(fetchUserSettings).mock.calls.length;
+
+    const { result } = renderHook(() => useSavedViews());
+    await waitFor(() => expect(fetchUserSettings).toHaveBeenCalledTimes(fetchCallsBefore + 1));
+
+    let saved!: SavedView;
+    act(() => {
+      saved = result.current.save("New view", view.filters, null);
+    });
+
+    expect(result.current.custom.map((savedView) => savedView.id)).toEqual([saved.id]);
+    await waitFor(() => {
+      expect(fetchUserSettings).toHaveBeenCalledTimes(fetchCallsBefore + 2);
+      expect(updateUserSettings).toHaveBeenCalledWith({
+        jira_saved_views: [expect.objectContaining({ id: saved.id })],
+      });
     });
   });
 });

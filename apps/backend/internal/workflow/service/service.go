@@ -30,6 +30,7 @@ type Service struct {
 	workflowProvider WorkflowProvider
 	resolveProfile   models.AgentProfileResolver
 	matchProfile     models.AgentProfileMatcher
+	syncOps          SyncWorkflowOps
 }
 
 // SetWorkflowProvider wires the workflow provider (set during service init to break circular deps).
@@ -493,7 +494,7 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 			result.Skipped = append(result.Skipped, pw.Name)
 			continue
 		}
-		if err := s.importSingleWorkflow(ctx, workspaceID, pw); err != nil {
+		if _, err := s.importSingleWorkflow(ctx, workspaceID, pw); err != nil {
 			return nil, fmt.Errorf("failed to import workflow %q: %w", pw.Name, err)
 		}
 		result.Created = append(result.Created, pw.Name)
@@ -506,10 +507,10 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 	return result, nil
 }
 
-func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable) error {
+func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable) (*taskmodels.Workflow, error) {
 	wf, err := s.workflowProvider.CreateWorkflow(ctx, workspaceID, pw.Name, pw.Description)
 	if err != nil {
-		return fmt.Errorf("create workflow: %w", err)
+		return nil, fmt.Errorf("create workflow: %w", err)
 	}
 
 	// Match workflow-level agent profile if present.
@@ -517,7 +518,7 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		if profileID := s.matchProfile(pw.AgentProfile.AgentName, pw.AgentProfile.Model, pw.AgentProfile.Mode); profileID != "" {
 			wf.AgentProfileID = profileID
 			if err := s.workflowProvider.UpdateWorkflow(ctx, wf); err != nil {
-				return fmt.Errorf("set workflow agent profile: %w", err)
+				return nil, fmt.Errorf("set workflow agent profile: %w", err)
 			}
 		}
 	}
@@ -530,29 +531,36 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 
 	// Create each step with remapped events.
 	for _, sp := range pw.Steps {
-		step := &models.WorkflowStep{
-			ID:                        posToID[sp.Position],
-			WorkflowID:                wf.ID,
-			Name:                      sp.Name,
-			Position:                  sp.Position,
-			Color:                     sp.Color,
-			Prompt:                    sp.Prompt,
-			Events:                    models.ConvertPositionToStepID(sp.Events, posToID),
-			IsStartStep:               sp.IsStartStep,
-			ShowInCommandPanel:        sp.ShowInCommandPanel,
-			AllowManualMove:           sp.AllowManualMove,
-			AutoArchiveAfterHours:     sp.AutoArchiveAfterHours,
-			AutoAdvanceRequiresSignal: sp.AutoAdvanceRequiresSignal,
-			WIPLimit:                  sp.WIPLimit,
-			PullFromStepID:            sp.PullFromStepID(posToID),
-		}
-		// Match step-level agent profile if present.
-		if sp.AgentProfile != nil && s.matchProfile != nil {
-			step.AgentProfileID = s.matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode)
-		}
+		step := s.stepFromPortable(wf.ID, sp, posToID)
 		if err := s.repo.CreateStep(ctx, step); err != nil {
-			return fmt.Errorf("create step %q: %w", sp.Name, err)
+			return nil, fmt.Errorf("create step %q: %w", sp.Name, err)
 		}
 	}
-	return nil
+	return wf, nil
+}
+
+// stepFromPortable builds a WorkflowStep from its portable form, remapping
+// position-based references to the step IDs in posToID and matching the
+// step-level agent profile when a matcher is wired.
+func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, posToID map[int]string) *models.WorkflowStep {
+	step := &models.WorkflowStep{
+		ID:                        posToID[sp.Position],
+		WorkflowID:                workflowID,
+		Name:                      sp.Name,
+		Position:                  sp.Position,
+		Color:                     sp.Color,
+		Prompt:                    sp.Prompt,
+		Events:                    models.ConvertPositionToStepID(sp.Events, posToID),
+		IsStartStep:               sp.IsStartStep,
+		ShowInCommandPanel:        sp.ShowInCommandPanel,
+		AllowManualMove:           sp.AllowManualMove,
+		AutoArchiveAfterHours:     sp.AutoArchiveAfterHours,
+		AutoAdvanceRequiresSignal: sp.AutoAdvanceRequiresSignal,
+		WIPLimit:                  sp.WIPLimit,
+		PullFromStepID:            sp.PullFromStepID(posToID),
+	}
+	if sp.AgentProfile != nil && s.matchProfile != nil {
+		step.AgentProfileID = s.matchProfile(sp.AgentProfile.AgentName, sp.AgentProfile.Model, sp.AgentProfile.Mode)
+	}
+	return step
 }

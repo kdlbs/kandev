@@ -14,6 +14,8 @@ On a 10-logical-CPU development host, the old uncapped suite averaged roughly 7.
 
 Kandev keeps Vitest as the frontend unit-test runner and aligns it with the application's current Vite major. Local full-suite runs use the worker-thread pool and at most 20 percent of the host's available parallelism. `pool: "threads"` is explicit because Vitest 2+ defaults to `forks`; the suite's isolation trial showed that `forks` produces widespread cross-file mock and DOM failures. CI remains uncapped so dedicated runners can use their assigned capacity, and `VITEST_MAX_WORKERS` can override either default for an explicit execution environment when it is a positive integer or percentage. Vitest is upgraded to 4.1.10; Vite remains locked at 8.0.16 rather than the incompatible 8.1.4.
 
+The unit-test environment disables Happy DOM child-frame navigation and intercepts otherwise unmocked Happy DOM requests with a deterministic non-success response, so component tests cannot make real requests to its default `http://localhost:3000` origin. Tests that explicitly replace `fetch` retain full control over their response. The Vitest config also clears the generic inherited `DEBUG=1` value, which otherwise enables Tailwind's per-file transform diagnostics; namespaced debug values remain available for intentional tooling diagnostics.
+
 Targeted test-file runs remain the normal development loop. Full frontend suites run during final verification and CI rather than after every edit. Per-file isolation remains enabled because the suite relies on module and DOM isolation.
 
 ## Consequences
@@ -22,6 +24,7 @@ Targeted test-file runs remain the normal development loop. Full frontend suites
 - A local full-suite run takes longer when it is the only workload, but overlapping runs cause less contention and thermal pressure.
 - CI performance is unchanged unless the CI environment explicitly sets `VITEST_MAX_WORKERS`.
 - Vitest and Vite share a supported dependency generation instead of loading a second legacy Vite toolchain.
+- Unit tests do not load iframe content, access the network through Happy DOM, or inherit the host's generic debug verbosity.
 - The percentage limit scales across developer machines without hard-coding a workstation-specific core count.
 - Vite updates require a production-build smoke check until the Rolldown re-export regression is fixed upstream.
 

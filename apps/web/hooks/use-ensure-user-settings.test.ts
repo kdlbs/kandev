@@ -58,6 +58,7 @@ function makeUnloadedSettings(): UserSettingsState {
     enablePreviewOnClick: false,
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
+    confirmTaskArchive: true,
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     savedLayouts: [],

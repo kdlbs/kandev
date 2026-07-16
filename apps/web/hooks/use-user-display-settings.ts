@@ -68,6 +68,12 @@ function carryForwardCoreSettings(current: DisplaySettings) {
   };
 }
 
+function carryForwardTaskActionSettings(current: DisplaySettings) {
+  return {
+    confirmTaskArchive: current.confirmTaskArchive ?? true,
+  };
+}
+
 function carryForwardSidebarSettings(current: DisplaySettings) {
   return {
     sidebarViews: current.sidebarViews ?? [],
@@ -100,6 +106,7 @@ function carryForwardSyncedLocalSettings(current: DisplaySettings) {
 function carryForwardSettings(current: DisplaySettings) {
   return {
     ...carryForwardCoreSettings(current),
+    ...carryForwardTaskActionSettings(current),
     ...carryForwardSidebarSettings(current),
     ...carryForwardSyncedLocalSettings(current),
     ...carryForwardLspSettings(current),

@@ -2,6 +2,61 @@
 
 All notable changes to Kandev.
 
+## 0.79.0 - 2026-07-16
+
+### Features
+
+- sync workflows from a configured github repo ([#1721](https://github.com/kdlbs/kandev/pull/1721))
+- add native app integrations ([#1715](https://github.com/kdlbs/kandev/pull/1715))
+- add archive confirmation preference ([#1708](https://github.com/kdlbs/kandev/pull/1708))
+- show file statuses in review ([#1683](https://github.com/kdlbs/kandev/pull/1683))
+- rename task inline from the top bar via double-click ([#1702](https://github.com/kdlbs/kandev/pull/1702))
+- add opt-in notification sound for waiting-for-input ([#1689](https://github.com/kdlbs/kandev/pull/1689))
+- add repository context to quick chats ([#1679](https://github.com/kdlbs/kandev/pull/1679))
+- surface agent subscription usage in settings and chat tooltip ([#1697](https://github.com/kdlbs/kandev/pull/1697))
+- add Grok ACP agent ([#1688](https://github.com/kdlbs/kandev/pull/1688)) by @zensi-dev
+- show ACP shell command output in chat ([#1684](https://github.com/kdlbs/kandev/pull/1684))
+- unarchive tasks with worktree branch recovery ([#1687](https://github.com/kdlbs/kandev/pull/1687))
+- interrupt busy child task turn on parent message_task_kandev ([#1653](https://github.com/kdlbs/kandev/pull/1653)) by @ClemDNL
+- link GitHub issues to tasks ([#1672](https://github.com/kdlbs/kandev/pull/1672)) ([#1676](https://github.com/kdlbs/kandev/pull/1676))
+
+### Bug Fixes
+
+- compact plan implement control ([#1719](https://github.com/kdlbs/kandev/pull/1719))
+- improve command palette alias matching ([#1718](https://github.com/kdlbs/kandev/pull/1718))
+- render walkthrough surfaces behind dialogs ([#1717](https://github.com/kdlbs/kandev/pull/1717))
+- render HTML in markdown previews ([#1707](https://github.com/kdlbs/kandev/pull/1707))
+- handle parked task sessions ([#1711](https://github.com/kdlbs/kandev/pull/1711))
+- prevent cross-task acknowledgement loops ([#1712](https://github.com/kdlbs/kandev/pull/1712))
+- prevent settings sidebar from closing on first click ([#1709](https://github.com/kdlbs/kandev/pull/1709))
+- restore persisted tabs after task reload ([#1703](https://github.com/kdlbs/kandev/pull/1703))
+- stop task renames from wiping task repositories ([#1705](https://github.com/kdlbs/kandev/pull/1705))
+- silence Vitest network noise ([#1700](https://github.com/kdlbs/kandev/pull/1700))
+- enforce origin validation on websocket upgrades ([#1698](https://github.com/kdlbs/kandev/pull/1698))
+- keep chat readable after right-pane resize ([#1682](https://github.com/kdlbs/kandev/pull/1682)) ([#1691](https://github.com/kdlbs/kandev/pull/1691))
+- promote commandless workspace executions ([#1692](https://github.com/kdlbs/kandev/pull/1692))
+- align topbar metrics heights ([#1694](https://github.com/kdlbs/kandev/pull/1694))
+- repair grok docker auth and archived task control ([#1693](https://github.com/kdlbs/kandev/pull/1693))
+- soften deferred clarification notice ([#1690](https://github.com/kdlbs/kandev/pull/1690))
+- bump @playwright/test to ^1.61.1 to fix install hang on Node 26 ([#1685](https://github.com/kdlbs/kandev/pull/1685))
+- resolve two cancel/clarification deadlocks that wedge sessions in RUNNING ([#1680](https://github.com/kdlbs/kandev/pull/1680))
+- prevent stale ready events from completing replacement turns ([#1678](https://github.com/kdlbs/kandev/pull/1678))
+- make clipboard fallback work in Radix dialogs ([#1671](https://github.com/kdlbs/kandev/pull/1671)) by @yattdev
+
+### Performance
+
+- upgrade Vitest and cap local workers ([#1696](https://github.com/kdlbs/kandev/pull/1696))
+
+### Refactoring
+
+- remove legacy settings migration ([#1704](https://github.com/kdlbs/kandev/pull/1704))
+
+### Documentation
+
+- own public documentation metadata ([#1713](https://github.com/kdlbs/kandev/pull/1713))
+- add curated public documentation ([#1701](https://github.com/kdlbs/kandev/pull/1701))
+- improve harness and issue templates ([#1681](https://github.com/kdlbs/kandev/pull/1681))
+
 ## 0.78.0 - 2026-07-13
 
 ### Features

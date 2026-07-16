@@ -143,6 +143,35 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
   });
 });
 
+describe("FileRow status marker", () => {
+  it("shows previous-path context for a moved file", () => {
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{
+              ...baseFile,
+              path: "src/new-name.ts",
+              status: "renamed",
+              oldPath: "src/old-name.ts",
+            }}
+            isPending={false}
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const marker = container.querySelector("[data-file-status='renamed']");
+    expect(marker?.getAttribute("aria-label")).toBe("Moved from src/old-name.ts");
+  });
+});
+
 describe("FileRow hover swap (stats <-> actions occupy same cell)", () => {
   // Goal: hovering must not shift the file name. The stats group and the
   // hover-actions group live in the same CSS grid cell — stats fade out and

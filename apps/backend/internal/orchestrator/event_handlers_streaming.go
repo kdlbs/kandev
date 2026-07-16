@@ -530,6 +530,9 @@ func (s *Service) publishTaskSessionStateChanged(
 	if session.ReviewStatus != models.ReviewStatusNone {
 		eventData["review_status"] = string(session.ReviewStatus)
 	}
+	// Always included (even when empty) so a rename-to-clear propagates;
+	// the frontend only applies the key when present.
+	eventData["name"] = session.Name
 	if len(session.Metadata) > 0 {
 		eventData["session_metadata"] = session.Metadata
 	}

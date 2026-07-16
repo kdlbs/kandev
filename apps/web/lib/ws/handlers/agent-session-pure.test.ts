@@ -111,6 +111,21 @@ describe("shouldAdoptNewSession", () => {
     expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(true);
   });
 
+  it("adopts when the active session is parked idle", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-old",
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: { "s-old": { id: "s-old", task_id: "t-1", state: "IDLE" } },
+      } as unknown as AppState["taskSessions"],
+    });
+    expect(shouldAdoptNewSession(state, "t-1", "STARTING")).toBe(true);
+  });
+
   it("does NOT adopt while the current active session is still running", () => {
     const state = makeAppState({
       tasks: {
@@ -187,6 +202,22 @@ describe("pickReplacementSessionId", () => {
 });
 
 describe("shouldPreservePinnedSessionForTask", () => {
+  it("preserves a pinned idle session for the active task", () => {
+    const state = makeAppState({
+      tasks: {
+        activeTaskId: "t-1",
+        activeSessionId: "s-pinned",
+        pinnedSessionId: "s-pinned",
+        lastSessionByTaskId: {},
+      },
+      taskSessions: {
+        items: { "s-pinned": { id: "s-pinned", task_id: "t-1", state: "IDLE" } },
+      } as unknown as AppState["taskSessions"],
+    });
+
+    expect(shouldPreservePinnedSessionForTask(state, "t-1")).toBe(true);
+  });
+
   it("preserves a missing pinned session while the per-task list is hydrating", () => {
     const state = makeAppState({
       tasks: {

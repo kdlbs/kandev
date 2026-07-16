@@ -123,6 +123,12 @@ func (s *stubClient) CreateGist(context.Context, CreateGistInput) (*GistResponse
 	return nil, nil
 }
 func (s *stubClient) DeleteGist(context.Context, string) error { return nil }
+func (s *stubClient) ListRepoDirectory(context.Context, string, string, string, string) ([]RepoContentEntry, error) {
+	return nil, nil
+}
+func (s *stubClient) GetRepoFileContent(context.Context, string, string, string, string) ([]byte, error) {
+	return nil, nil
+}
 
 func newControllerTestLogger() *logger.Logger {
 	log, _ := logger.NewLogger(logger.LoggingConfig{

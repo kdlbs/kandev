@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconMessageCircle, IconSquarePlus, IconSubtask } from "@tabler/icons-react";
@@ -12,6 +12,7 @@ import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
+import { subscribeNewTaskCreationRequests } from "@/lib/desktop/new-task-request";
 
 // The Office "New issue" dialog only renders on `/office` routes, but this item
 // lives in the global sidebar (every page). Lazy-load it so its office-only
@@ -26,6 +27,16 @@ import { AppSidebarNavItem } from "./app-sidebar-nav-item";
 type AppSidebarNewTaskItemProps = {
   collapsed: boolean;
 };
+
+function useNewTaskCreationRequest(
+  workspaceId: string | null,
+  setOpen: Dispatch<SetStateAction<boolean>>,
+) {
+  useEffect(() => {
+    if (!workspaceId) return;
+    return subscribeNewTaskCreationRequests(() => setOpen(true));
+  }, [setOpen, workspaceId]);
+}
 
 const ONE_ROW_ACTION_INSET_CLASS = "pr-10";
 const TWO_ROW_ACTIONS_INSET_CLASS = "pr-16";
@@ -86,6 +97,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const [open, setOpen] = useState(false);
   const [subtaskOpen, setSubtaskOpen] = useState(false);
+  useNewTaskCreationRequest(workspaceId, setOpen);
 
   // The subtask affordance is available in both modes (office uses the richer
   // dialog for the primary New Task, but subtasks always go through the compact

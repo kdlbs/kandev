@@ -54,4 +54,24 @@ describe("PRFilesGroupedList", () => {
       repositoryName: undefined,
     });
   });
+
+  it("shows previous-path context for a moved PR file", () => {
+    render(
+      <PRFilesGroupedList
+        files={[
+          {
+            path: "src/new-name.ts",
+            status: "renamed",
+            plus: 0,
+            minus: 0,
+            oldPath: "src/old-name.ts",
+            repository_name: "",
+          },
+        ]}
+        onOpenDiff={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "Moved from src/old-name.ts" })).toBeTruthy();
+  });
 });

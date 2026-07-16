@@ -3,6 +3,7 @@ import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
+import { expectWalkthroughBehindDialog } from "./walkthrough-layering";
 
 async function seedWalkthroughTask(
   testPage: Page,
@@ -58,6 +59,17 @@ test.describe("Mobile code walkthrough", () => {
     await expect(testPage.getByTestId("walkthrough-editor-range")).toBeVisible({
       timeout: 15_000,
     });
+
+    await testPage.evaluate(() => window.dispatchEvent(new CustomEvent("open-review-dialog")));
+    const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
+    await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
+    await expectWalkthroughBehindDialog(testPage, reviewDialog, [
+      { locator: card, name: "walkthrough window" },
+      {
+        locator: testPage.getByTestId("walkthrough-launcher").locator(".."),
+        name: "walkthrough launcher",
+      },
+    ]);
   });
 
   test("requests a walkthrough from Changes and opens the generated bottom sheet", async ({

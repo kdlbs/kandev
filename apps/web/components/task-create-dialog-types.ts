@@ -172,15 +172,15 @@ export type TaskCreateEffectsArgs = {
   workspaceDefaults: Workspace | null | undefined;
   toast: ReturnType<typeof useToast>["toast"];
   workflows: Array<{ id: string; agent_profile_id?: string }>;
-  /** Store-backed last-used repository. Used when the localStorage mirror has not been primed yet. */
+  /** Backend-owned last-used repository. */
   lastUsedRepositoryId?: string | null;
   /** Whether DB-backed user settings are loaded, or a best-effort fetch has settled. */
   userSettingsLoaded?: boolean;
-  /** Store-backed last-used agent profile. Used when the localStorage mirror has not been primed yet. */
+  /** Backend-owned last-used agent profile. */
   lastUsedAgentProfileId?: string | null;
-  /** Store-backed last-used executor profile. Used when the localStorage mirror has not been primed yet. */
+  /** Backend-owned last-used executor profile. */
   lastUsedExecutorProfileId?: string | null;
-  /** Store-backed last-used branch. Used when the localStorage mirror has not been primed yet. */
+  /** Backend-owned last-used branch. */
   lastUsedBranch?: string | null;
   /**
    * True when the currently-selected executor is the local-host one (no

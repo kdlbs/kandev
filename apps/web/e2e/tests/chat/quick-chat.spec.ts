@@ -8,13 +8,19 @@ import { attachAvailableCommandsCapture } from "../../helpers/ws-capture";
  * Quick Chat E2E tests: basic flow, enhance prompt, queued messages, multi-tab.
  */
 
-async function openQuickChatSetup(page: Page): Promise<Locator> {
-  await page.goto("/");
-  await page.waitForLoadState("networkidle");
+async function openQuickChatSetup(page: Page, navigateHome = true): Promise<Locator> {
+  if (navigateHome) {
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+  }
 
-  // Open Quick Chat via keyboard shortcut (Cmd+Shift+Q / Ctrl+Shift+Q).
-  const modifier = process.platform === "darwin" ? "Meta" : "Control";
-  await page.keyboard.press(`${modifier}+Shift+q`);
+  if (navigateHome) {
+    // Open Quick Chat via keyboard shortcut (Cmd+Shift+Q / Ctrl+Shift+Q).
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await page.keyboard.press(`${modifier}+Shift+q`);
+  } else {
+    await page.getByTestId("sidebar-quick-chat-shortcut").click();
+  }
 
   // Wait for Quick Chat dialog.
   const dialog = page.getByRole("dialog", { name: "Quick Chat" });
@@ -54,8 +60,8 @@ async function startQuickChatFromSetup(dialog: Locator, page: Page) {
   await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
 }
 
-async function openQuickChatWithAgent(page: Page): Promise<Locator> {
-  const dialog = await openQuickChatSetup(page);
+async function openQuickChatWithAgent(page: Page, navigateHome = true): Promise<Locator> {
+  const dialog = await openQuickChatSetup(page, navigateHome);
   await startQuickChatFromSetup(dialog, page);
   return dialog;
 }
@@ -179,8 +185,7 @@ test.describe("Quick Chat", () => {
     await expect(dialog).not.toBeVisible();
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
-    const modifier = process.platform === "darwin" ? "Meta" : "Control";
-    await testPage.keyboard.press(`${modifier}+Shift+q`);
+    await testPage.getByTestId("sidebar-quick-chat-shortcut").click();
     await expect(dialog).toBeVisible();
     await waitForQuickChatWidth(dialog);
     const restoredBox = await dialog.boundingBox();
@@ -348,16 +353,46 @@ test.describe("Quick Chat", () => {
     });
   });
 
-  test("supports multiple chat tabs and switching between them", async ({ testPage }) => {
+  test("restores multiple chat tabs in creation order after reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     test.setTimeout(90_000);
 
-    const dialog = await openQuickChatWithAgent(testPage);
+    const quickChatWorkspace = await apiClient.createWorkspace("Quick Chat Restore Workspace");
+    const workflow = await apiClient.createWorkflow(
+      quickChatWorkspace.id,
+      "Restore Workflow",
+      "simple",
+    );
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    const startStep = steps.find((step) => step.is_start_step) ?? steps[0];
+    const task = await apiClient.createTaskWithAgent(
+      quickChatWorkspace.id,
+      "Quick Chat Restore Task",
+      seedData.agentProfileId,
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: startStep.id,
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    await testPage.waitForLoadState("networkidle");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}`));
+    await expect
+      .poll(() =>
+        testPage.evaluate("window.__KANDEV_E2E_STORE__?.getState().workspaces.activeId ?? null"),
+      )
+      .toBe(quickChatWorkspace.id);
+
+    const dialog = await openQuickChatWithAgent(testPage, false);
 
     // Send a message in the first tab.
-    await sendQuickChatMessage(dialog, testPage, "/e2e:simple-message");
-    await expect(
-      dialog.getByText("simple mock response for e2e testing", { exact: false }),
-    ).toBeVisible({ timeout: 30_000 });
+    await sendQuickChatMessage(dialog, testPage, 'e2e:message("first tab response")');
+    await expect(dialog.getByText("first tab response", { exact: true })).toBeVisible({
+      timeout: 30_000,
+    });
 
     // Create a new tab.
     const newChatBtn = dialog.getByLabel("Start new chat");
@@ -376,14 +411,49 @@ test.describe("Quick Chat", () => {
       timeout: 30_000,
     });
 
-    // Switch back to the first tab by clicking its tab button.
-    const tabBar = dialog.locator(".scrollbar-hide").first();
-    const firstTab = tabBar.locator("button").first();
-    await firstTab.click();
+    const originalTabs = dialog.getByTestId("quick-chat-tab");
+    await expect(originalTabs).toHaveCount(2);
+    const originalNames = await originalTabs.locator("span").allTextContents();
 
-    // First tab content should still be visible.
-    await expect(
-      dialog.getByText("simple mock response for e2e testing", { exact: false }),
-    ).toBeVisible({ timeout: 10_000 });
+    const beforeReloadResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/workspaces/${quickChatWorkspace.id}/tasks?only_ephemeral=true&exclude_config=true`,
+    );
+    expect(beforeReloadResponse.ok).toBe(true);
+    const beforeReload = (await beforeReloadResponse.json()) as {
+      tasks: Array<{ id: string }>;
+    };
+    expect(beforeReload.tasks).toHaveLength(2);
+
+    await testPage.reload();
+    await testPage.waitForLoadState("networkidle");
+
+    const persistedResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/workspaces/${quickChatWorkspace.id}/tasks?only_ephemeral=true&exclude_config=true`,
+    );
+    expect(persistedResponse.ok).toBe(true);
+    const persisted = (await persistedResponse.json()) as { tasks: Array<{ id: string }> };
+    expect(persisted.tasks).toHaveLength(2);
+
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+Shift+q`);
+    const restoredDialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await expect(restoredDialog).toBeVisible({ timeout: 10_000 });
+
+    const restoredTabs = restoredDialog.getByTestId("quick-chat-tab");
+    await expect(restoredTabs).toHaveCount(2);
+    await expect(restoredTabs.locator("span")).toHaveText(originalNames);
+    await expect(restoredDialog.getByTestId("quick-chat-setup")).not.toBeVisible();
+
+    await restoredTabs.nth(0).locator("button").first().click();
+    await expect(restoredDialog.getByText("first tab response", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+
+    await restoredTabs.nth(1).locator("button").first().click();
+    await expect(restoredDialog.getByText("second tab response", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
   });
 });

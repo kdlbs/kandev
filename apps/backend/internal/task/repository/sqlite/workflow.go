@@ -52,11 +52,21 @@ func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workfl
 	workflow.SortOrder = maxOrder + 1
 
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflows (id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, hidden, style, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), workflow.CreatedAt, workflow.UpdatedAt)
+		INSERT INTO workflows (id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt)
 
 	return err
+}
+
+// normalizeWorkflowSource returns a value fit for the workflows.source column.
+// Empty or unknown sources collapse to the manual default.
+func normalizeWorkflowSource(source string) string {
+	switch source {
+	case models.WorkflowSourceManual, models.WorkflowSourceGitHub:
+		return source
+	}
+	return models.WorkflowSourceManual
 }
 
 // normalizeWorkflowStyle returns a value fit for the workflows.style column.
@@ -72,7 +82,7 @@ func normalizeWorkflowStyle(style string) string {
 
 const workflowSelectColumns = `
 	id, workspace_id, name, description, agent_profile_id,
-	workflow_template_id, sort_order, hidden, style, created_at, updated_at
+	workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at
 `
 
 type workflowScanner interface {
@@ -81,7 +91,7 @@ type workflowScanner interface {
 
 func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 	workflow := &models.Workflow{}
-	var workflowTemplateID, agentProfileID, style sql.NullString
+	var workflowTemplateID, agentProfileID, style, source, sourcePath sql.NullString
 	var hidden int
 	if err := scanner.Scan(
 		&workflow.ID,
@@ -93,6 +103,8 @@ func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 		&workflow.SortOrder,
 		&hidden,
 		&style,
+		&source,
+		&sourcePath,
 		&workflow.CreatedAt,
 		&workflow.UpdatedAt,
 	); err != nil {
@@ -109,6 +121,10 @@ func scanWorkflowRow(scanner workflowScanner) (*models.Workflow, error) {
 		workflow.Style = style.String
 	} else {
 		workflow.Style = models.WorkflowStyleKanban
+	}
+	workflow.Source = normalizeWorkflowSource(source.String)
+	if sourcePath.Valid {
+		workflow.SourcePath = sourcePath.String
 	}
 	return workflow, nil
 }
@@ -145,8 +161,8 @@ func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workfl
 	workflow.UpdatedAt = time.Now().UTC()
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE workflows SET name = ?, description = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, updated_at = ? WHERE id = ?
-	`), workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), workflow.UpdatedAt, workflow.ID)
+		UPDATE workflows SET name = ?, description = ?, agent_profile_id = ?, workflow_template_id = ?, hidden = ?, style = ?, source = ?, source_path = ?, updated_at = ? WHERE id = ?
+	`), workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.UpdatedAt, workflow.ID)
 	if err != nil {
 		return err
 	}

@@ -28,6 +28,7 @@ type UserSettingsDTO struct {
 	EnablePreviewOnClick        bool                                `json:"enable_preview_on_click"`
 	ChatSubmitKey               string                              `json:"chat_submit_key"`
 	ReviewAutoMarkOnScroll      bool                                `json:"review_auto_mark_on_scroll"`
+	ConfirmTaskArchive          bool                                `json:"confirm_task_archive"`
 	ShowReleaseNotification     bool                                `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion string                              `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages       []string                            `json:"lsp_auto_start_languages"`
@@ -84,6 +85,7 @@ type UpdateUserSettingsRequest struct {
 	EnablePreviewOnClick        *bool                                `json:"enable_preview_on_click,omitempty"`
 	ChatSubmitKey               *string                              `json:"chat_submit_key,omitempty"`
 	ReviewAutoMarkOnScroll      *bool                                `json:"review_auto_mark_on_scroll,omitempty"`
+	ConfirmTaskArchive          *bool                                `json:"confirm_task_archive,omitempty"`
 	ShowReleaseNotification     *bool                                `json:"show_release_notification,omitempty"`
 	ReleaseNotesLastSeenVersion *string                              `json:"release_notes_last_seen_version,omitempty"`
 	LspAutoStartLanguages       *[]string                            `json:"lsp_auto_start_languages,omitempty"`
@@ -196,6 +198,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		EnablePreviewOnClick:        settings.EnablePreviewOnClick,
 		ChatSubmitKey:               settings.ChatSubmitKey,
 		ReviewAutoMarkOnScroll:      settings.ReviewAutoMarkOnScroll,
+		ConfirmTaskArchive:          settings.ConfirmTaskArchive,
 		ShowReleaseNotification:     settings.ShowReleaseNotification,
 		ReleaseNotesLastSeenVersion: settings.ReleaseNotesLastSeenVersion,
 		LspAutoStartLanguages:       settings.LspAutoStartLanguages,

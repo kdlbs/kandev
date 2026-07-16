@@ -32,6 +32,7 @@ import (
 	utilitystore "github.com/kandev/kandev/internal/utility/store"
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
+	"github.com/kandev/kandev/internal/workflowsync"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -65,6 +66,9 @@ type Services struct {
 	Linear       *linear.Service
 	Sentry       *sentry.Service
 	Slack        *slack.Service
+	// WorkflowSync keeps workspace workflows in sync with definition files
+	// in a configured GitHub repository. Nil when GitHub is unavailable.
+	WorkflowSync *workflowsync.Service
 	Share        *share.HTTPHandlers
 	Office       *officeservice.Service
 	OfficeSvcs   *office.Services

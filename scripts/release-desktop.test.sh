@@ -162,6 +162,51 @@ printf 'desktop artifact\n' > "$artifact"
 "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" "$assets_dir" linux-x64 >/dev/null
 pass "verify-desktop-assets accepts matching checksums"
 
+macos_assets_dir="$TMP_DIR/macos-assets"
+mkdir -p "$macos_assets_dir"
+macos_artifact="$macos_assets_dir/kandev-desktop-macos-arm64-Kandev.dmg"
+printf 'unsigned macOS artifact\n' > "$macos_artifact"
+"$ROOT_DIR/scripts/release/write-sha256.sh" \
+  "$macos_artifact" "$macos_artifact.sha256"
+"$ROOT_DIR/scripts/release/verify-desktop-assets.sh" \
+  "$macos_assets_dir" macos-arm64 >/dev/null
+pass "verify-desktop-assets accepts macOS artifacts without optional updater bundles"
+
+if "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" --require-updaters \
+  "$macos_assets_dir" macos-arm64 >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "verify-desktop-assets should require a key-enabled macOS updater bundle"
+fi
+grep -q "Missing updater artifact for platform: macos-arm64" "$ERR_FILE" || \
+  fail "verify-desktop-assets did not explain the missing macOS updater bundle"
+pass "verify-desktop-assets requires key-enabled updater bundles"
+
+macos_updater="$macos_assets_dir/kandev-desktop-macos-arm64-Kandev.app.tar.gz"
+printf 'signed macOS updater\n' > "$macos_updater"
+printf 'signature\n' > "$macos_updater.sig"
+"$ROOT_DIR/scripts/release/write-sha256.sh" \
+  "$macos_updater" "$macos_updater.sha256"
+"$ROOT_DIR/scripts/release/write-sha256.sh" \
+  "$macos_updater.sig" "$macos_updater.sig.sha256"
+"$ROOT_DIR/scripts/release/verify-desktop-assets.sh" --require-updaters \
+  "$macos_assets_dir" macos-arm64 >/dev/null
+pass "verify-desktop-assets accepts signed required updater bundles"
+
+missing_assets_dir="$TMP_DIR/missing-assets"
+mkdir -p "$missing_assets_dir"
+if "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" \
+  "$missing_assets_dir" macos-arm64 >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "verify-desktop-assets should reject a missing platform artifact"
+fi
+grep -q "Missing desktop artifact for platform: macos-arm64" "$ERR_FILE" || \
+  fail "verify-desktop-assets did not explain the missing platform artifact"
+pass "verify-desktop-assets reports missing platform artifacts"
+
+if grep -Eq '(artifacts|updater_bundles|updater_signatures)=\(' \
+  "$ROOT_DIR/scripts/release/verify-desktop-assets.sh"; then
+  fail "verify-desktop-assets uses optional arrays that fail under Bash 3.2 nounset"
+fi
+pass "verify-desktop-assets avoids Bash 3.2 empty-array nounset failures"
+
 if signing_secret_env "$ROOT_DIR/scripts/release/desktop-signing-ready.sh" macos >"$OUT_FILE" 2>"$ERR_FILE"; then
   fail "desktop-signing-ready should report macOS signing not ready without secrets"
 fi
@@ -224,3 +269,6 @@ if "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" "$assets_dir" linux-x64 
 fi
 grep -q "Checksum verification failed" "$ERR_FILE" || fail "verify-desktop-assets did not explain checksum mismatch"
 pass "verify-desktop-assets rejects checksum mismatches"
+
+bash "$ROOT_DIR/scripts/release/updater-signing-ready.test.sh"
+bash "$ROOT_DIR/scripts/release/updater-manifest.test.sh"
