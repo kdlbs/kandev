@@ -61,6 +61,48 @@ func TestEmitAuthoritativeConfigOptionsIgnoresReplacedSession(t *testing.T) {
 	}
 }
 
+func TestFallbackConfigEmittersIgnoreReplacedSession(t *testing.T) {
+	tests := []struct {
+		name string
+		emit func(*Adapter, []streams.ConfigOption)
+	}{
+		{
+			name: "model",
+			emit: func(a *Adapter, cached []streams.ConfigOption) {
+				a.emitSetModelEvent("sess-1", "gpt-5.6", nil, cached)
+			},
+		},
+		{
+			name: "config option",
+			emit: func(a *Adapter, cached []streams.ConfigOption) {
+				a.emitSetConfigOptionEvent("sess-1", "reasoning_effort", "low", nil, cached)
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := newTestAdapter()
+			a.sessionID = "sess-2"
+			a.availableConfigOptions = []streams.ConfigOption{{
+				ID: "reasoning_effort", CurrentValue: "high",
+			}}
+			cached := []streams.ConfigOption{
+				{ID: "model", Category: "model", CurrentValue: "gpt-5.5"},
+				{ID: "reasoning_effort", CurrentValue: "medium"},
+			}
+
+			tt.emit(a, cached)
+
+			if events := drainEvents(a); len(events) != 0 {
+				t.Fatalf("stale fallback emitted %d events, want none", len(events))
+			}
+			if got := currentConfigValue(a.availableConfigOptions, "reasoning_effort"); got != "high" {
+				t.Fatalf("active session cache = %q, want high", got)
+			}
+		})
+	}
+}
+
 func currentConfigValue(options []streams.ConfigOption, id string) string {
 	for _, option := range options {
 		if option.ID == id {
@@ -132,6 +174,7 @@ func TestIsModelConfigID(t *testing.T) {
 // would be lost on page refresh after a backend restart.
 func TestEmitSetConfigOptionEvent_RewritesChangedOptionAndKeepsModel(t *testing.T) {
 	a := newTestAdapter()
+	a.sessionID = "sess-1"
 	cachedModels := []modelInfo{{ModelId: "gpt-5", Name: "GPT-5"}}
 	cachedConfig := []streams.ConfigOption{
 		{Type: "select", ID: "model", Category: "model", Name: "Model", CurrentValue: "gpt-5"},

@@ -1660,7 +1660,13 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	// Store the write-once baseline before the mutable selector snapshot so a
 	// concurrent task-detail boot cannot observe the new state without its
 	// comparison values.
-	configBaseline := s.sessionACPConfigBaselineForEvent(ctx, sessionID, payload.Data)
+	configBaseline, err := s.sessionACPConfigBaselineForEvent(ctx, sessionID, payload.Data)
+	if err != nil {
+		s.logger.Warn("failed to persist ACP config baseline",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
 	s.persistSessionModelAndRuntimeConfig(
 		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions,
 	)
@@ -1688,10 +1694,10 @@ func (s *Service) sessionACPConfigBaselineForEvent(
 	ctx context.Context,
 	sessionID string,
 	data *lifecycle.AgentStreamEventData,
-) map[string]string {
+) (map[string]string, error) {
 	baseline := s.loadSessionACPConfigBaseline(ctx, sessionID)
 	if len(baseline) > 0 || data == nil || !configOptionsSettled(data.Data) {
-		return baseline
+		return baseline, nil
 	}
 	options := data.ConfigBaselineCandidate
 	if len(options) == 0 {
@@ -1699,22 +1705,19 @@ func (s *Service) sessionACPConfigBaselineForEvent(
 	}
 	values := configOptionValues(options)
 	if len(values) == 0 {
-		return nil
+		return nil, nil
 	}
 	writeCtx := context.WithoutCancel(ctx)
 	stored, err := s.repo.SetSessionMetadataKeyIfAbsent(
 		writeCtx, sessionID, models.SessionMetaKeyACPConfigBaseline, values,
 	)
 	if err != nil {
-		s.logger.Warn("failed to persist ACP config baseline",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-		return nil
+		return nil, err
 	}
 	if stored {
-		return values
+		return values, nil
 	}
-	return s.loadSessionACPConfigBaseline(writeCtx, sessionID)
+	return s.loadSessionACPConfigBaseline(writeCtx, sessionID), nil
 }
 
 func configOptionValues(options []streams.ConfigOption) map[string]string {

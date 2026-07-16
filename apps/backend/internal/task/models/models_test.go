@@ -52,6 +52,29 @@ func TestLoadSessionRuntimeConfigOverridesUsesDedicatedKey(t *testing.T) {
 	}
 }
 
+func TestLoadSessionACPConfigBaselinePreservesEmptyJSONValues(t *testing.T) {
+	baseline, ok := LoadSessionACPConfigBaseline(map[string]interface{}{
+		SessionMetaKeyACPConfigBaseline: map[string]interface{}{
+			"reasoning_effort": "",
+			"fast_mode":        "off",
+			"ignored":          float64(1),
+		},
+	})
+
+	if !ok {
+		t.Fatal("expected JSON-rehydrated baseline")
+	}
+	if value, exists := baseline["reasoning_effort"]; !exists || value != "" {
+		t.Fatalf("empty baseline value = %q, exists = %v", value, exists)
+	}
+	if baseline["fast_mode"] != "off" {
+		t.Fatalf("fast_mode = %q, want off", baseline["fast_mode"])
+	}
+	if _, exists := baseline["ignored"]; exists {
+		t.Fatal("non-string baseline value should be ignored")
+	}
+}
+
 func TestTaskStateConstants(t *testing.T) {
 	tests := []struct {
 		name     string

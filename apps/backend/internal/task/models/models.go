@@ -261,11 +261,28 @@ func LoadSessionACPConfigBaseline(metadata map[string]interface{}) (map[string]s
 	if metadata == nil {
 		return nil, false
 	}
-	values := stringMapFromAny(metadata[SessionMetaKeyACPConfigBaseline])
+	values := stringMapFromAnyPreservingEmpty(metadata[SessionMetaKeyACPConfigBaseline])
 	if len(values) == 0 {
 		return nil, false
 	}
 	return values, true
+}
+
+func stringMapFromAnyPreservingEmpty(raw interface{}) map[string]string {
+	switch values := raw.(type) {
+	case map[string]string:
+		return maps.Clone(values)
+	case map[string]interface{}:
+		out := make(map[string]string, len(values))
+		for key, value := range values {
+			if str, ok := value.(string); ok {
+				out[key] = str
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 // IsZero reports whether the runtime config carries any selected value.

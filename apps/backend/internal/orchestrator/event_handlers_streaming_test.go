@@ -52,6 +52,19 @@ type failSetSessionMetadataRepo struct {
 	repoStore
 }
 
+type failSetBaselineRepo struct {
+	repoStore
+}
+
+func (r failSetBaselineRepo) SetSessionMetadataKeyIfAbsent(
+	context.Context,
+	string,
+	string,
+	interface{},
+) (bool, error) {
+	return false, errors.New("baseline write failed")
+}
+
 type concurrentBaselineRepo struct {
 	repoStore
 	mu         sync.Mutex
@@ -1933,22 +1946,63 @@ func TestSettledConfigBaselineConcurrentCaptureReturnsOneWinner(t *testing.T) {
 	repo := &concurrentBaselineRepo{repoStore: baseRepo, bothLoaded: make(chan struct{})}
 	svc := &Service{logger: testLogger(), repo: repo}
 
-	results := make(chan map[string]string, 2)
+	type baselineResult struct {
+		values map[string]string
+		err    error
+	}
+	results := make(chan baselineResult, 2)
 	for _, reasoning := range []string{"high", "low"} {
 		reasoning := reasoning
 		go func() {
-			results <- svc.sessionACPConfigBaselineForEvent(ctx, "s1", &lifecycle.AgentStreamEventData{
+			values, err := svc.sessionACPConfigBaselineForEvent(ctx, "s1", &lifecycle.AgentStreamEventData{
 				Data: map[string]any{"config_options_settled": true},
 				ConfigOptions: []streams.ConfigOption{{
 					ID: "reasoning_effort", CurrentValue: reasoning,
 				}},
 			})
+			results <- baselineResult{values: values, err: err}
 		}()
 	}
 
-	first := <-results
-	second := <-results
-	require.Equal(t, first, second)
+	captured := make([]baselineResult, 0, 2)
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for len(captured) < 2 {
+		select {
+		case result := <-results:
+			captured = append(captured, result)
+		case <-timer.C:
+			t.Fatal("timed out waiting for concurrent baseline captures")
+		}
+	}
+	require.NoError(t, captured[0].err)
+	require.NoError(t, captured[1].err)
+	require.Equal(t, captured[0].values, captured[1].values)
+}
+
+func TestSessionModelsEventSkipsMutableSnapshotWhenBaselineWriteFails(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedSession(t, baseRepo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	svc := &Service{logger: testLogger(), repo: failSetBaselineRepo{repoStore: baseRepo}, eventBus: eb}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			Data:           map[string]any{"config_options_settled": true},
+			CurrentModelID: "gpt-5.6-sol",
+			ConfigOptions: []streams.ConfigOption{{
+				ID: "reasoning_effort", CurrentValue: "high",
+			}},
+		},
+	})
+
+	updated, err := baseRepo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	_, snapshotStored := updated.Metadata[models.SessionMetaKeyACPModelState]
+	require.False(t, snapshotStored)
+	require.Empty(t, eb.events)
 }
 
 func TestPersistSessionModelAndRuntimeConfigPersistsSnapshotRuntimeConfigAndCache(t *testing.T) {

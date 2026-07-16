@@ -395,6 +395,7 @@ func TestEmitSessionModels_NonEmptyCurrentIDPreserved(t *testing.T) {
 // applies the profile model at session init.
 func TestEmitSetModelEvent_EmitsSessionModelsWithCachedState(t *testing.T) {
 	a := newTestAdapter()
+	a.sessionID = "sess-1"
 
 	cachedModels := []modelInfo{
 		{ModelId: "claude-opus-4-7", Name: "Opus 4.7"},
@@ -521,6 +522,7 @@ func TestFinalizeSetModel_MethodNoneEmitsNothing(t *testing.T) {
 // frontend converges on the new model.
 func TestFinalizeSetModel_RealMethodEmitsEvent(t *testing.T) {
 	a := newTestAdapter()
+	a.sessionID = "sess-1"
 
 	cachedModels := []modelInfo{{ModelId: "claude-opus-4-7", Name: "Opus 4.7"}}
 	cachedConfig := []streams.ConfigOption{
@@ -546,6 +548,7 @@ func TestFinalizeSetModel_RealMethodEmitsEvent(t *testing.T) {
 // model-shaped option's CurrentValue says — verbatim.
 func TestSetModelThenSetConfigOption_PreservesModel(t *testing.T) {
 	a := newTestAdapter()
+	a.sessionID = "sess-1"
 
 	reasoningOptions := []streams.ConfigOptionValue{
 		{Name: "Medium", Value: "medium"},

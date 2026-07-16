@@ -487,26 +487,22 @@ func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []mo
 				outConfig[i].CurrentValue = modelID
 			}
 		}
-		// Refresh the cached config options so a subsequent SetConfigOption
-		// (e.g. user toggles reasoning effort after switching model) doesn't
-		// reuse the stale model CurrentValue from session/new and clobber the
-		// just-applied model in the convergence event.
-		a.mu.Lock()
-		a.availableConfigOptions = outConfig
-		a.mu.Unlock()
 	}
 
-	a.logger.Info("emitting session_models convergence event after SetModel",
-		zap.String("session_id", sessionID),
-		zap.String("model_id", modelID),
-	)
-	a.sendUpdate(AgentEvent{
+	event := AgentEvent{
 		Type:           streams.EventTypeSessionModels,
 		SessionID:      sessionID,
 		CurrentModelID: modelID,
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
-	})
+	}
+	if !a.emitConfigUpdateForSession(sessionID, outConfig, event) {
+		return
+	}
+	a.logger.Info("emitting session_models convergence event after SetModel",
+		zap.String("session_id", sessionID),
+		zap.String("model_id", modelID),
+	)
 }
 
 // currentModelFromConfig returns the CurrentValue of the model-shaped
@@ -752,14 +748,7 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 	cachedModels []modelInfo,
 ) {
 	configOptions := convertACPConfigOptions(options)
-	a.mu.Lock()
-	if a.sessionID != sessionID {
-		a.mu.Unlock()
-		return
-	}
-	a.availableConfigOptions = configOptions
-	a.mu.Unlock()
-	a.sendUpdate(AgentEvent{
+	a.emitConfigUpdateForSession(sessionID, configOptions, AgentEvent{
 		Type:           streams.EventTypeSessionModels,
 		SessionID:      sessionID,
 		CurrentModelID: currentModelFromConfig(configOptions),
@@ -770,6 +759,21 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 			"config_options_config_id": configID,
 		},
 	})
+}
+
+func (a *Adapter) emitConfigUpdateForSession(
+	sessionID string,
+	configOptions []streams.ConfigOption,
+	event AgentEvent,
+) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.sessionID != sessionID || a.closed {
+		return false
+	}
+	a.availableConfigOptions = configOptions
+	a.sendUpdateLocked(event)
+	return true
 }
 
 // emitSetConfigOptionEvent emits a session_models convergence event after a
@@ -811,25 +815,21 @@ func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, ca
 			zap.String("config_id", configID),
 		)
 	}
-	// Refresh the cached config options so consecutive SetConfigOption
-	// calls (or a follow-up SetModel) read the latest CurrentValues
-	// instead of the stale session/new snapshot.
-	a.mu.Lock()
-	a.availableConfigOptions = outConfig
-	a.mu.Unlock()
-
-	a.logger.Info("emitting session_models convergence event after SetConfigOption",
-		zap.String("session_id", sessionID),
-		zap.String("config_id", configID),
-		zap.String("value", value),
-	)
-	a.sendUpdate(AgentEvent{
+	event := AgentEvent{
 		Type:           streams.EventTypeSessionModels,
 		SessionID:      sessionID,
 		CurrentModelID: currentModelFromConfig(outConfig),
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
-	})
+	}
+	if !a.emitConfigUpdateForSession(sessionID, outConfig, event) {
+		return
+	}
+	a.logger.Info("emitting session_models convergence event after SetConfigOption",
+		zap.String("session_id", sessionID),
+		zap.String("config_id", configID),
+		zap.String("value", value),
+	)
 }
 
 // isModelConfigID reports whether configID identifies the model-shaped
