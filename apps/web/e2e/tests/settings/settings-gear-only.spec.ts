@@ -72,4 +72,21 @@ test.describe("Settings sidebar takeover", () => {
     await expect(sidebar).toHaveAttribute("data-collapsed", "false");
     await expect(takeover).toBeVisible();
   });
+
+  test("a route change cannot undo the first gear click", async ({ testPage }) => {
+    await testPage.goto("/");
+
+    const takeover = testPage.getByTestId("app-sidebar-settings-mode");
+    await expect(testPage.getByTestId("sidebar-settings-gear")).toBeVisible();
+
+    // Keep both actions in one browser task so the route-sync effect is still
+    // pending when the user action arrives. The click must win.
+    await testPage.evaluate(() => {
+      window.history.pushState({}, "", "/tasks");
+      window.dispatchEvent(new Event("kandev:navigation"));
+      document.querySelector<HTMLElement>('[data-testid="sidebar-settings-gear"]')?.click();
+    });
+
+    await expect(takeover).toBeVisible();
+  });
 });

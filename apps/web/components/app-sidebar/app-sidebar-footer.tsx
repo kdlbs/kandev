@@ -32,6 +32,7 @@ import {
 
 type AppSidebarFooterProps = {
   collapsed: boolean;
+  onToggleSettingsMode: () => void;
 };
 
 type FooterIconButtonProps = {
@@ -95,7 +96,7 @@ function FooterIconButton({
   );
 }
 
-export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
+export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebarFooterProps) {
   const router = useRouter();
   const workspaces = useAppStore((s) => s.workspaces);
   const workspaceId = workspaces.activeId;
@@ -105,7 +106,6 @@ export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
     ? resolveLastKanbanWorkspace(workspaces.items)
     : resolveLastOfficeWorkspace(workspaces.items);
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
-  const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
   const officeEnabled = useFeature("office");
   const releaseNotes = useReleaseNotes();
   const [improveOpen, setImproveOpen] = useState(false);
@@ -121,7 +121,7 @@ export function AppSidebarFooter({ collapsed }: AppSidebarFooterProps) {
         icon={IconSettings}
         label={settingsMode ? "Close settings" : "Settings"}
         collapsed={collapsed}
-        onClick={toggleSettingsMode}
+        onClick={onToggleSettingsMode}
         active={settingsMode}
         testId="sidebar-settings-gear"
       />
