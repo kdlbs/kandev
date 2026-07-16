@@ -147,6 +147,26 @@ describe("RemoteRepoChip — URL entry", () => {
     });
     expect(onURLChange).toHaveBeenCalledWith("https://github.com/foo/bar/pull/42", "paste");
   });
+
+  it("commits a typed GitHub URL on blur", () => {
+    const onURLChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible()}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "https://github.com/foo/bar/issues/42" } });
+    fireEvent.blur(input);
+    expect(onURLChange).toHaveBeenCalledWith("https://github.com/foo/bar/issues/42", "paste");
+  });
 });
 
 describe("RemoteRepoChip — unified search", () => {

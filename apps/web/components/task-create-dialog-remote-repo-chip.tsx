@@ -298,6 +298,7 @@ function RemoteRepoPopoverContent({
         type="text"
         value={value}
         onChange={(event) => setValue(event.target.value)}
+        onBlur={() => commitURL(value)}
         onPaste={(event) => {
           const pasted = event.clipboardData.getData("text");
           if (!commitURL(pasted)) return;
