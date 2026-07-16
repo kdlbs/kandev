@@ -727,6 +727,12 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 	if err != nil {
 		return fmt.Errorf("set session config option failed: %w", err)
 	}
+	a.mu.RLock()
+	sessionActive := a.sessionID == sessionID
+	a.mu.RUnlock()
+	if !sessionActive {
+		return nil
+	}
 	if len(resp.ConfigOptions) > 0 {
 		a.emitAuthoritativeConfigOptions(sessionID, configID, resp.ConfigOptions, cachedModels)
 		return nil
@@ -747,6 +753,10 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 ) {
 	configOptions := convertACPConfigOptions(options)
 	a.mu.Lock()
+	if a.sessionID != sessionID {
+		a.mu.Unlock()
+		return
+	}
 	a.availableConfigOptions = configOptions
 	a.mu.Unlock()
 	a.sendUpdate(AgentEvent{

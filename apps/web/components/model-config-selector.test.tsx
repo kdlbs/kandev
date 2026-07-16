@@ -13,6 +13,7 @@ const effortTriggerTestId = "config-option-trigger-effort";
 const modelSettingsButtonName = "Model settings";
 const providerModelId = "gpt-5.6-sol";
 const optionDescription = "Controls how much reasoning the model performs.";
+const effortOptionName = "Reasoning Effort";
 const makeModelOptions = (count: number) =>
   Array.from({ length: count }, (_, index) => ({
     id: `model-${index + 1}`,
@@ -138,7 +139,7 @@ describe("ModelConfigSelector provider descriptions", () => {
           {
             type: "select",
             id: "effort",
-            name: "Reasoning Effort",
+            name: effortOptionName,
             description: optionDescription,
             currentValue: "high",
             options: [
@@ -173,7 +174,7 @@ describe("ModelConfigSelector provider descriptions", () => {
             {
               type: "select",
               id: "effort",
-              name: "Reasoning Effort",
+              name: effortOptionName,
               description: optionDescription,
               currentValue: "low",
               options: [
@@ -199,9 +200,41 @@ describe("ModelConfigSelector provider descriptions", () => {
     expect(scrollArea.className).toContain("overflow-y-auto");
     expect(scrollArea.className).toContain("overscroll-contain");
     expect(scrollArea.tabIndex).toBe(0);
-    expect(within(tooltip).getByText("Reasoning Effort")).not.toBeNull();
+    expect(within(tooltip).getByText(effortOptionName)).not.toBeNull();
     expect(within(tooltip).getByText("Low")).not.toBeNull();
     expect(within(tooltip).getByText(optionDescription)).not.toBeNull();
     expect(within(tooltip).getByText("Faster responses with less reasoning.")).not.toBeNull();
+  });
+});
+
+describe("ModelConfigSelector disabled summary", () => {
+  it("keeps changed-value details keyboard-accessible", async () => {
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
+          currentModel={providerModelId}
+          onModelChange={() => {}}
+          disabled
+          triggerSummary="changed"
+          configBaseline={{ effort: "high" }}
+          configOptions={[
+            {
+              type: "select",
+              id: "effort",
+              name: effortOptionName,
+              currentValue: "low",
+              options: [{ value: "low", name: "Low" }],
+            },
+          ]}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.focus(screen.getByTestId("model-config-tooltip-trigger"));
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(within(tooltip).getByText(effortOptionName)).not.toBeNull();
+    expect(within(tooltip).getByText("Low")).not.toBeNull();
   });
 });

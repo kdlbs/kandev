@@ -284,9 +284,6 @@ func (ae *AgentExecution) SetModelStateApplyingSettlement(state *CachedModelStat
 		return state, false
 	}
 	if settlement.configID == "" {
-		if state.ConfigSource != "" {
-			return state, false
-		}
 		ae.pendingConfigSettlement = nil
 		return state, true
 	}

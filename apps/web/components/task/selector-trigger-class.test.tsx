@@ -59,11 +59,16 @@ const mocks = vi.hoisted(() => {
 
   return {
     appState,
+    storeSelections: [] as unknown[],
   };
 });
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: typeof mocks.appState) => unknown) => selector(mocks.appState),
+  useAppStore: (selector: (state: typeof mocks.appState) => unknown) => {
+    const result = selector(mocks.appState);
+    mocks.storeSelections.push(result);
+    return result;
+  },
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -86,6 +91,7 @@ vi.mock("@/lib/api/domains/session-api", () => ({
 
 afterEach(() => {
   cleanup();
+  mocks.storeSelections.length = 0;
 });
 
 describe("task selector trigger styling", () => {
@@ -111,6 +117,17 @@ describe("task selector trigger styling", () => {
     expect(screen.getByRole("button", { name: "Session model settings" }).textContent).toBe(
       "GPT-5.5 / Low",
     );
+  });
+
+  it("subscribes only to the active session model entry", () => {
+    render(
+      <TooltipProvider>
+        <ModelSelector sessionId="session-1" />
+      </TooltipProvider>,
+    );
+
+    expect(mocks.storeSelections).toContain(mocks.appState.sessionModels.bySessionId["session-1"]);
+    expect(mocks.storeSelections).not.toContain(mocks.appState.sessionModels.bySessionId);
   });
 
   it("forwards custom trigger classes to the mode selector trigger", () => {

@@ -75,7 +75,7 @@ func TestProbePreservesConfigOptionDescriptions(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		require.NoError(t, json.NewEncoder(w).Encode(map[string]any{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"success": true,
 			"config_options": []any{map[string]any{
 				"type":          "select",
@@ -89,7 +89,9 @@ func TestProbePreservesConfigOptionDescriptions(t *testing.T) {
 					"description": "More thorough reasoning.",
 				}},
 			}},
-		}))
+		}); err != nil {
+			t.Errorf("encode probe response: %v", err)
+		}
 	}))
 	defer server.Close()
 	host, port := serverHostPort(t, server)

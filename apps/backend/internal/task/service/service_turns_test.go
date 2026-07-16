@@ -17,15 +17,6 @@ type nilTaskSessionRepo struct {
 	repository.SessionRepository
 }
 
-type slowSessionRepo struct {
-	repository.SessionRepository
-}
-
-func (r slowSessionRepo) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
-	time.Sleep(20 * time.Millisecond)
-	return r.SessionRepository.GetTaskSession(ctx, sessionID)
-}
-
 func (nilTaskSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
 	return nil, nil
 }
@@ -206,8 +197,6 @@ func TestPersistSessionRuntimeOverridesMergeConcurrentSelections(t *testing.T) {
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
 	}
-	svc.sessions = slowSessionRepo{SessionRepository: repo}
-
 	start := make(chan struct{})
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup

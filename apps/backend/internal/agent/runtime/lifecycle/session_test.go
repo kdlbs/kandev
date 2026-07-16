@@ -608,6 +608,20 @@ func TestConfigSettlementAuthoritativeResponseOrdering(t *testing.T) {
 		}
 	})
 
+	t.Run("first provider update settles empty startup config", func(t *testing.T) {
+		sm, mgr, execution, eventBus := newHarness()
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "")
+		mgr.handleAgentEvent(execution, event("provider_update", "", "medium", "off"))
+
+		settled := settledEvents(eventBus)
+		if len(settled) != 1 {
+			t.Fatalf("settled events = %#v, want first provider update to settle", settled)
+		}
+		if got := configValueByID(settled[0].ConfigBaselineCandidate, "effort"); got != "medium" {
+			t.Fatalf("baseline candidate effort = %q, want medium", got)
+		}
+	})
+
 	t.Run("matching response is consumed once", func(t *testing.T) {
 		sm, mgr, execution, eventBus := newHarness()
 		mgr.handleAgentEvent(execution, event("provider_response", "effort", "low", "on"))

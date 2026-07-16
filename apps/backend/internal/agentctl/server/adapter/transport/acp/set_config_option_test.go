@@ -11,6 +11,7 @@ import (
 
 func TestEmitAuthoritativeConfigOptionsUsesCompleteResponseState(t *testing.T) {
 	a := newTestAdapter()
+	a.sessionID = "sess-1"
 	values := func(current string) acp.SessionConfigOption {
 		options := acp.SessionConfigSelectOptionsUngrouped{{Value: acp.SessionConfigValueId(current), Name: current}}
 		return acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{
@@ -34,6 +35,29 @@ func TestEmitAuthoritativeConfigOptionsUsesCompleteResponseState(t *testing.T) {
 	if event.Data["config_options_source"] != "provider_response" ||
 		event.Data["config_options_config_id"] != "reasoning_effort" {
 		t.Fatalf("authoritative metadata = %#v", event.Data)
+	}
+}
+
+func TestEmitAuthoritativeConfigOptionsIgnoresReplacedSession(t *testing.T) {
+	a := newTestAdapter()
+	a.sessionID = "sess-2"
+	a.availableConfigOptions = []streams.ConfigOption{{
+		ID: "reasoning_effort", CurrentValue: "high",
+	}}
+	options := acp.SessionConfigSelectOptionsUngrouped{{Value: "low", Name: "Low"}}
+
+	a.emitAuthoritativeConfigOptions("sess-1", "reasoning_effort", []acp.SessionConfigOption{{
+		Select: &acp.SessionConfigOptionSelect{
+			Type: "select", Id: "reasoning_effort", Name: "Reasoning effort",
+			CurrentValue: "low", Options: acp.SessionConfigSelectOptions{Ungrouped: &options},
+		},
+	}}, nil)
+
+	if events := drainEvents(a); len(events) != 0 {
+		t.Fatalf("stale response emitted %d events, want none", len(events))
+	}
+	if got := currentConfigValue(a.availableConfigOptions, "reasoning_effort"); got != "high" {
+		t.Fatalf("active session cache = %q, want high", got)
 	}
 }
 

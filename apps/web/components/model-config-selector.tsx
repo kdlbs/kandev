@@ -439,11 +439,23 @@ function ModelConfigSelectorTrigger({
   );
   const popoverTrigger = <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>;
   if (triggerSummary !== "changed" || configOptions.length === 0) return popoverTrigger;
+  const tooltipTrigger = disabled ? (
+    <span
+      data-testid="model-config-tooltip-trigger"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      className="inline-flex max-w-full"
+    >
+      {popoverTrigger}
+    </span>
+  ) : (
+    popoverTrigger
+  );
 
   return (
     <TooltipProvider disableHoverableContent={false}>
       <Tooltip>
-        <TooltipTrigger asChild>{popoverTrigger}</TooltipTrigger>
+        <TooltipTrigger asChild>{tooltipTrigger}</TooltipTrigger>
         <TooltipContent
           side={popoverSide}
           className="pointer-events-auto w-80 max-w-[calc(100vw-1rem)] p-0"

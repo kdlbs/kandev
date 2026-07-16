@@ -37,7 +37,7 @@ function resolveSessionState(
   sessionId: string | null,
   taskSessions: Record<string, TaskSession>,
   activeModels: Record<string, string>,
-  sessionModels: Record<string, SessionModelsEntry>,
+  sessionModelsData: SessionModelsEntry | undefined,
 ) {
   if (!sessionId) {
     return { session: null, activeModel: null, sessionModelsData: undefined };
@@ -45,7 +45,7 @@ function resolveSessionState(
   return {
     session: taskSessions[sessionId] ?? null,
     activeModel: activeModels[sessionId] || null,
-    sessionModelsData: sessionModels[sessionId],
+    sessionModelsData,
   };
 }
 
@@ -253,12 +253,14 @@ function useModelSelectorState(sessionId: string | null) {
   const taskSessions = useAppStore((state) => state.taskSessions.items);
   const activeModels = useAppStore((state) => state.activeModel.bySessionId);
   const { items: availableAgents } = useAvailableAgents();
-  const sessionModels = useAppStore((state) => state.sessionModels.bySessionId);
+  const selectedSessionModels = useAppStore((state) =>
+    sessionId ? state.sessionModels.bySessionId[sessionId] : undefined,
+  );
   const { session, activeModel, sessionModelsData } = resolveSessionState(
     sessionId,
     taskSessions,
     activeModels,
-    sessionModels,
+    selectedSessionModels,
   );
   const snapshotModel = resolveSnapshotModel(session?.agent_profile_snapshot);
   const profileModel = useMemo(

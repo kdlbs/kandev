@@ -37,6 +37,36 @@ func TestSetSessionConfigOptionReturnsAuthoritativeState(t *testing.T) {
 	}
 }
 
+func TestSetSessionConfigOptionRejectsUnknownValue(t *testing.T) {
+	sessionID := acp.SessionId("session-config-test")
+	agent := &mockAgent{
+		sessionConfig: map[acp.SessionId][]acp.SessionConfigOption{
+			sessionID: mockSessionConfigOptions(),
+		},
+	}
+
+	_, err := agent.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{
+		ValueId: &acp.SetSessionConfigOptionValueId{
+			SessionId: sessionID,
+			ConfigId:  "effort",
+			Value:     "unadvertised",
+		},
+	})
+	if err == nil {
+		t.Fatal("SetSessionConfigOption() error = nil, want invalid value error")
+	}
+
+	values := make(map[string]string)
+	for _, option := range agent.sessionConfig[sessionID] {
+		if option.Select != nil {
+			values[string(option.Select.Id)] = string(option.Select.CurrentValue)
+		}
+	}
+	if values["effort"] != "medium" {
+		t.Fatalf("effort = %q, want unchanged medium", values["effort"])
+	}
+}
+
 func TestSessionConfigIsIsolatedAcrossNewSessions(t *testing.T) {
 	agent := &mockAgent{
 		sessions:        make(map[acp.SessionId]bool),

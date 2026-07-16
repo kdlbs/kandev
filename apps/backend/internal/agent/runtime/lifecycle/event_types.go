@@ -489,8 +489,10 @@ type SessionModelsEventPayload struct {
 	CurrentModelID string                     `json:"current_model_id"`
 	Models         []streams.SessionModelInfo `json:"models"`
 	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
-	ConfigBaseline map[string]string          `json:"config_baseline,omitempty"`
-	Timestamp      string                     `json:"timestamp"`
+	// ConfigBaseline is the persisted ID/value projection used by clients to
+	// compare the current ConfigOptions without duplicating provider metadata.
+	ConfigBaseline map[string]string `json:"config_baseline,omitempty"`
+	Timestamp      string            `json:"timestamp"`
 }
 
 // GetSessionID returns the session ID for this event (used by event routing).

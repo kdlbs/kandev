@@ -277,6 +277,11 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSession
 		if options[i].Select == nil || options[i].Select.Id != req.ValueId.ConfigId {
 			continue
 		}
+		if !mockConfigOptionContainsValue(options[i].Select.Options, req.ValueId.Value) {
+			return acp.SetSessionConfigOptionResponse{}, fmt.Errorf(
+				"unknown value %q for mock config option %q", req.ValueId.Value, req.ValueId.ConfigId,
+			)
+		}
 		options[i].Select.CurrentValue = req.ValueId.Value
 		found = true
 		break
@@ -286,6 +291,26 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSession
 	}
 	a.sessionConfig[req.ValueId.SessionId] = options
 	return acp.SetSessionConfigOptionResponse{ConfigOptions: cloneSessionConfigOptions(options)}, nil
+}
+
+func mockConfigOptionContainsValue(options acp.SessionConfigSelectOptions, value acp.SessionConfigValueId) bool {
+	if options.Ungrouped != nil {
+		for _, option := range *options.Ungrouped {
+			if option.Value == value {
+				return true
+			}
+		}
+	}
+	if options.Grouped != nil {
+		for _, group := range *options.Grouped {
+			for _, option := range group.Options {
+				if option.Value == value {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // CloseSession releases any state for a session (no-op for mock).

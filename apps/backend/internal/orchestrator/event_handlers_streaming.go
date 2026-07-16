@@ -1700,37 +1700,19 @@ func (s *Service) sessionACPConfigBaselineForEvent(
 		return nil
 	}
 	writeCtx := context.WithoutCancel(ctx)
-	if store, ok := s.repo.(sessionMetadataWriteOnceStore); ok {
-		stored, err := store.SetSessionMetadataKeyIfAbsent(
-			writeCtx, sessionID, models.SessionMetaKeyACPConfigBaseline, values,
-		)
-		if err != nil {
-			s.logger.Warn("failed to persist ACP config baseline",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return nil
-		}
-		if stored {
-			return values
-		}
-		return s.loadSessionACPConfigBaseline(writeCtx, sessionID)
-	}
-	if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyACPConfigBaseline, values); err != nil {
+	stored, err := s.repo.SetSessionMetadataKeyIfAbsent(
+		writeCtx, sessionID, models.SessionMetaKeyACPConfigBaseline, values,
+	)
+	if err != nil {
 		s.logger.Warn("failed to persist ACP config baseline",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		return nil
 	}
-	return values
-}
-
-type sessionMetadataWriteOnceStore interface {
-	SetSessionMetadataKeyIfAbsent(
-		ctx context.Context,
-		sessionID string,
-		key string,
-		value interface{},
-	) (bool, error)
+	if stored {
+		return values
+	}
+	return s.loadSessionACPConfigBaseline(writeCtx, sessionID)
 }
 
 func configOptionValues(options []streams.ConfigOption) map[string]string {
