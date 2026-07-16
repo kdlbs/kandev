@@ -1973,8 +1973,10 @@ const maxSessionNameLength = 120
 // An empty name clears the custom label, falling back to the derived title.
 func (s *Service) RenameSession(ctx context.Context, sessionID, name string) error {
 	name = strings.TrimSpace(name)
-	if len(name) > maxSessionNameLength {
-		name = name[:maxSessionNameLength]
+	// Truncate by runes, not bytes — a byte slice could split a multi-byte
+	// UTF-8 sequence and persist an invalid string.
+	if runes := []rune(name); len(runes) > maxSessionNameLength {
+		name = string(runes[:maxSessionNameLength])
 	}
 	if err := s.repo.RenameTaskSession(ctx, sessionID, name); err != nil {
 		return fmt.Errorf("failed to rename session: %w", err)

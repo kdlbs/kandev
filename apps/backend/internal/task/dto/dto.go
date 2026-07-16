@@ -184,8 +184,11 @@ type TaskRepositoryDTO struct {
 }
 
 type TaskSessionDTO struct {
-	ID                   string                  `json:"id"`
-	TaskID               string                  `json:"task_id"`
+	ID     string `json:"id"`
+	TaskID string `json:"task_id"`
+	// Name is the user-supplied session tab label. Serialized without
+	// omitempty so a cleared name ("") overwrites stale client state.
+	Name                 string                  `json:"name"`
 	AgentExecutionID     string                  `json:"agent_execution_id,omitempty"`
 	ContainerID          string                  `json:"container_id,omitempty"`
 	AgentProfileID       string                  `json:"agent_profile_id,omitempty"`
@@ -218,8 +221,11 @@ type TaskSessionDTO struct {
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
 // Used for list endpoints where snapshots are not needed, reducing response size by ~40-60%.
 type TaskSessionSummaryDTO struct {
-	ID                string                  `json:"id"`
-	TaskID            string                  `json:"task_id"`
+	ID     string `json:"id"`
+	TaskID string `json:"task_id"`
+	// Name is the user-supplied session tab label. Serialized without
+	// omitempty so a cleared name ("") overwrites stale client state.
+	Name              string                  `json:"name"`
 	AgentExecutionID  string                  `json:"agent_execution_id,omitempty"`
 	ContainerID       string                  `json:"container_id,omitempty"`
 	AgentProfileID    string                  `json:"agent_profile_id,omitempty"`
@@ -623,6 +629,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 	result := TaskSessionSummaryDTO{
 		ID:                session.ID,
 		TaskID:            session.TaskID,
+		Name:              session.Name,
 		AgentExecutionID:  session.AgentExecutionID,
 		ContainerID:       session.ContainerID,
 		AgentProfileID:    session.AgentProfileID,
@@ -655,6 +662,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 	result := TaskSessionDTO{
 		ID:                   session.ID,
 		TaskID:               session.TaskID,
+		Name:                 session.Name,
 		AgentExecutionID:     session.AgentExecutionID,
 		ContainerID:          session.ContainerID,
 		AgentProfileID:       session.AgentProfileID,

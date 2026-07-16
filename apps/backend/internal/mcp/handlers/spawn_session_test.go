@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -116,6 +118,47 @@ func TestHandleSpawnSession_CrossTask_DefaultsToTargetPrimaryProfile(t *testing.
 
 	require.Len(t, orch.launchCalls, 1)
 	assert.Equal(t, "agent-profile-1", orch.launchCalls[0].AgentProfileID)
+}
+
+// A LaunchSession failure surfaces as an internal error to the caller instead
+// of a half-reported success.
+func TestHandleSpawnSession_LaunchFailure(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.launchErr = errors.New("executor unavailable")
+
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "do things", target.ID, sess.ID))
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	assert.Empty(t, orch.renameCalls, "no rename after a failed launch")
+}
+
+// Spawning on a task in another workspace is rejected — unlike message_task,
+// spawn consumes executor resources and must stay workspace-scoped.
+func TestHandleSpawnSession_CrossWorkspace_Forbidden(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, _, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-2", WorkspaceID: "ws-2", Name: "Board"}))
+	other, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-2",
+		WorkflowID:  "wf-2",
+		Title:       "Other-workspace task",
+	})
+	require.NoError(t, err)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(other.ID, "help out", sender.ID, "sender-sess-1"))
+	resp, err := h.handleSpawnSession(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeForbidden)
+	assert.Empty(t, orch.launchCalls, "cross-workspace spawn must not launch")
 }
 
 func TestWrapSpawnedSessionPrompt(t *testing.T) {

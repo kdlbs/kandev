@@ -1684,7 +1684,16 @@ func (h *Handlers) lookupSenderSessionName(ctx context.Context, senderTaskID, se
 func (h *Handlers) resolveMessageTargetSession(ctx context.Context, msg *ws.Message, taskID, sessionID string) (*models.TaskSession, *ws.Message) {
 	if sessionID != "" {
 		session, err := h.taskSvc.GetTaskSession(ctx, sessionID)
-		if err != nil || session == nil {
+		if err != nil {
+			// Only genuine no-row lookups are NotFound; transient DB errors
+			// must surface as internal so callers keep retrying instead of
+			// treating a live session as gone.
+			if errors.Is(err, models.ErrTaskSessionNotFound) {
+				return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target session not found: "+sessionID)
+			}
+			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to look up target session: "+err.Error())
+		}
+		if session == nil {
 			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target session not found: "+sessionID)
 		}
 		if session.TaskID != taskID {

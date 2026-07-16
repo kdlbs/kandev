@@ -22,6 +22,10 @@ export function TabRenameInput({
 }) {
   const [value, setValue] = useState(initial);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Enter/Escape resolve the rename synchronously, but the resulting unmount
+  // also fires the input's blur — guard so Escape can't be followed by a
+  // stale onCommit (and Enter can't commit twice).
+  const doneRef = useRef(false);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -47,15 +51,20 @@ export function TabRenameInput({
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             e.preventDefault();
+            doneRef.current = true;
             onCommit(value);
           } else if (e.key === "Escape") {
             e.preventDefault();
+            doneRef.current = true;
             onCancel();
           }
           // Don't let dockview see typed keys as shortcuts.
           e.stopPropagation();
         }}
-        onBlur={() => onCommit(value)}
+        onBlur={() => {
+          if (doneRef.current) return;
+          onCommit(value);
+        }}
         data-testid={testId}
         className="h-5 min-w-[6rem] max-w-[14rem] rounded border border-input bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
       />
