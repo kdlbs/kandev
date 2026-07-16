@@ -54,7 +54,7 @@ function SessionUsageRows({ sessionId }: { sessionId: string | null }) {
 
   return (
     <div
-      className="pt-2 mt-2 border-t border-border/60 space-y-2 min-w-56"
+      className="pb-2 mb-2 border-b border-border/60 space-y-2 min-w-56"
       data-testid="doughnut-subscription-usage"
     >
       <div className="flex items-center justify-between gap-4">
@@ -125,11 +125,11 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
         </div>
       </TooltipTrigger>
       <TooltipContent side="top">
-        <div className="text-xs space-y-1">
-          <div className="font-medium">
+        <div className="text-xs">
+          <SessionUsageRows sessionId={sessionId} />
+          <div className="text-[11px] text-muted-foreground">
             {usagePercent.toFixed(0)}% ({formatNumber(used)} / {formatNumber(size)})
           </div>
-          <SessionUsageRows sessionId={sessionId} />
         </div>
       </TooltipContent>
     </Tooltip>

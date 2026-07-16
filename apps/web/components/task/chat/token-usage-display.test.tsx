@@ -102,10 +102,14 @@ describe("TokenUsageDisplay", () => {
       },
     });
 
-    const { container, getByText } = render(<TokenUsageDisplay sessionId="sess-1" />);
+    const { container, getByTestId, getByText } = render(<TokenUsageDisplay sessionId="sess-1" />);
 
     expect(container.querySelector('[data-testid="doughnut-subscription-usage"]')).not.toBeNull();
     expect(getByText(/Subscription usage · max/i)).toBeDefined();
+    expect(
+      getByTestId("doughnut-subscription-usage").compareDocumentPosition(getByText(/^28%/)) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     // Worst window is 86% → provider status "High".
     expect(getByText("High")).toBeDefined();
     expect(getByText("5h")).toBeDefined();
