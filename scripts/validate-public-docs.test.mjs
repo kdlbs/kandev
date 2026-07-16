@@ -289,6 +289,34 @@ test("validates collapsed reference-style links", async () => {
   );
 });
 
+test("rejects undefined shortcut reference-style links", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace("Page body.", "Read the [Guide]."),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md uses undefined Markdown reference: guide/,
+  );
+});
+
+test("ignores non-reference bracket syntax", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        "> [!WARNING]\n\n- [x] Done\n\n[^note]\n\n\\[Literal]",
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
 test("checks local links in README files", async () => {
   const dir = await createDocs(
     {

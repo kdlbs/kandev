@@ -141,6 +141,7 @@ async function assertLocalLinks(docsDir, file, markdown) {
   const linkPattern = /!?\[[^\]\n]*\]\(((?:[^)\n\\]|\\.)+)\)/g;
   const definitionPattern = /^\s{0,3}\[([^\]\n]+)\]:\s*(\S.*)$/gm;
   const referencePattern = /!?\[([^\]\n]+)\]\[([^\]\n]*)\]/g;
+  const shortcutReferencePattern = /(?<![!\\\[\]])\[([^\]\n]+)\](?![\[(:])/g;
   const destinations = [...source.matchAll(linkPattern)].map((match) => match[1]);
   const definitions = new Map();
 
@@ -153,6 +154,22 @@ async function assertLocalLinks(docsDir, file, markdown) {
 
   for (const match of source.matchAll(referencePattern)) {
     const label = normalizeReferenceLabel(match[2] || match[1]);
+    if (!definitions.has(label)) {
+      throw new Error(`${file} uses undefined Markdown reference: ${label}`);
+    }
+  }
+
+  for (const match of source.matchAll(shortcutReferencePattern)) {
+    const label = normalizeReferenceLabel(match[1]);
+    // Admonitions, footnotes, and task boxes use brackets but are not links.
+    if (
+      !label ||
+      label.startsWith("!") ||
+      label.startsWith("^") ||
+      /^(?:x|-)$/i.test(label)
+    ) {
+      continue;
+    }
     if (!definitions.has(label)) {
       throw new Error(`${file} uses undefined Markdown reference: ${label}`);
     }
