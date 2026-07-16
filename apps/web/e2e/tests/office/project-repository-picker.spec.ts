@@ -85,4 +85,46 @@ test.describe("Project repository picker", () => {
     await expect(testPage.getByTestId("project-add-custom")).toBeVisible({ timeout: 5_000 });
     await expect(testPage.getByTestId("project-add-custom")).toContainText(/Add as local path/i);
   });
+
+  // The create-project dialog reuses the same picker + chip components as
+  // the detail page (previously it only offered a bare text input), so a
+  // repo chosen at creation time must survive the POST and render on the
+  // project detail page afterwards.
+  test("create-project dialog: pick a repo → create → repo persists on detail page", async ({
+    testPage,
+    officeSeed: _,
+  }) => {
+    await testPage.goto("/office/projects");
+    await testPage
+      .getByRole("button", { name: /New Project|Create your first project/ })
+      .first()
+      .click();
+
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    const projectName = `Picker Create ${Date.now()}`;
+    await dialog.locator("#project-name").fill(projectName);
+
+    // Add a repository through the picker's custom-entry row.
+    const url = "https://github.com/example/created-with-picker.git";
+    await dialog.getByTestId("project-add-repository").click();
+    const searchInput = dialog.getByPlaceholder(/Search or paste a URL/i);
+    await expect(searchInput).toBeVisible();
+    await searchInput.fill(url);
+    const customRow = dialog.getByTestId("project-add-custom");
+    await expect(customRow).toBeVisible({ timeout: 5_000 });
+    await customRow.click();
+
+    // Chip renders inside the dialog before submitting.
+    const dialogChip = dialog.locator('[data-testid="project-repo-chip"]', { hasText: url });
+    await expect(dialogChip).toBeVisible();
+
+    await dialog.getByRole("button", { name: "Create Project" }).click();
+    await expect(dialog).toHaveCount(0, { timeout: 10_000 });
+
+    // The new project card appears; opening it shows the persisted repo chip.
+    await testPage.getByText(projectName).first().click();
+    const detailChip = testPage.locator('[data-testid="project-repo-chip"]', { hasText: url });
+    await expect(detailChip).toBeVisible({ timeout: 10_000 });
+  });
 });
