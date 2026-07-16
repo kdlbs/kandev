@@ -128,17 +128,18 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             r"needs\.prepare\.outputs\.tag \}\}\^\{commit\}",
         )
 
-    def test_macos_signed_build_selects_updater_bundle(self) -> None:
+    def test_macos_signed_build_selects_app_bundle_for_updater(self) -> None:
         build = step_block("Build Tauri desktop app")
         collect = step_block("Collect desktop artifacts")
         initialize = 'tauri_bundles="${{ matrix.tauri_bundles }}"'
-        append = 'tauri_bundles="${tauri_bundles},updater"'
+        append = 'tauri_bundles="${tauri_bundles},app"'
         invoke = '--bundles "$tauri_bundles"'
 
         self.assertIn('[[ "${{ matrix.platform }}" == macos-*', build)
         self.assertIn('"${UPDATER_SIGNING_ENABLED:-false}" = "true"', build)
         self.assertIn(initialize, build)
         self.assertIn(append, build)
+        self.assertNotIn('tauri_bundles="${tauri_bundles},updater"', build)
         self.assertIn(invoke, build)
         self.assertLess(build.index(initialize), build.index(append))
         self.assertLess(build.index(append), build.index(invoke))

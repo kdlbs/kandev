@@ -853,7 +853,8 @@ jobs:
           if [ "${UPDATER_SIGNING_ENABLED:-false}" = "true" ]; then
             updater_config='{"bundle":{"createUpdaterArtifacts":"v1Compatible"}}'
             if [[ "${{ matrix.platform }}" == macos-* ]]; then
-              tauri_bundles="${tauri_bundles},updater"
+              # Tauri derives the macOS updater archive from the app bundle.
+              tauri_bundles="${tauri_bundles},app"
             fi
           else
             unset TAURI_SIGNING_PRIVATE_KEY
