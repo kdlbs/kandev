@@ -120,6 +120,14 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("xdg-utils", install)
         self.assertIn("command -v xdg-open", install)
 
+    def test_updater_manifest_date_dereferences_annotated_tag(self) -> None:
+        generate = step_block("Generate and verify updater manifest")
+        self.assertIn("git show -s --format=%cI", generate)
+        self.assertRegex(
+            generate,
+            r"needs\.prepare\.outputs\.tag \}\}\^\{commit\}",
+        )
+
     def test_macos_dmg_build_has_retry_timeout_and_diagnostics(self) -> None:
         build = step_block("Build Tauri desktop app")
         self.assertIn("timeout-minutes: 70", build)

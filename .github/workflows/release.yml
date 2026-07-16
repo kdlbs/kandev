@@ -1542,7 +1542,7 @@ jobs:
           RUSTUP_TOOLCHAIN: 1.88.0
         run: |
           set -euo pipefail
-          pub_date="$(git show -s --format=%cI '${{ needs.prepare.outputs.tag }}')"
+          pub_date="$(git show -s --format=%cI '${{ needs.prepare.outputs.tag }}^{commit}')"
           node scripts/release/updater-manifest.mjs generate \
             --assets-dir dist/release-assets \
             --output dist/release-assets/latest.json \
