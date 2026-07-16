@@ -86,6 +86,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", build_desktop)
 
         detect = step_block("Detect Tauri updater signing input")
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", detect)
         self.assertIn("gh api", detect)
         self.assertIn("$RUNNER_TEMP/updater-signing-ready.sh", detect)
         self.assertIn(
