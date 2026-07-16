@@ -62,6 +62,17 @@ test.describe("Project repository picker", () => {
     // Empty-state line disappears once a chip exists.
     await expect(testPage.getByText("No repositories added yet.")).toHaveCount(0);
 
+    // Re-open the picker: the exact attached value must not offer a
+    // duplicate custom row, but a prefix of it must stay addable —
+    // partial overlap with existing entries cannot block literal input.
+    await testPage.getByTestId("project-add-repository").click();
+    await expect(searchInput).toBeVisible();
+    await searchInput.fill(url);
+    await expect(testPage.getByTestId("project-add-custom")).toHaveCount(0);
+    await searchInput.fill(url.replace(/\.git$/, ""));
+    await expect(testPage.getByTestId("project-add-custom")).toBeVisible();
+    await testPage.keyboard.press("Escape");
+
     // Remove the chip; empty state comes back.
     await chip.getByTestId("project-repo-chip-remove").click();
     await expect(chip).toHaveCount(0, { timeout: 10_000 });
