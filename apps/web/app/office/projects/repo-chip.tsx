@@ -9,9 +9,6 @@ import type { Repository } from "@/lib/types/http";
  * A single attached repository, rendered as a chip with friendly label
  * + remove button. Falls back to the raw stored string when no
  * workspace row matches (custom URL or unimported local path).
- *
- * Shared by the project detail repos section and the create-project
- * dialog so both surfaces present repositories identically.
  */
 export function RepoChip({
   value,

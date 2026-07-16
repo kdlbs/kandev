@@ -86,10 +86,10 @@ test.describe("Project repository picker", () => {
     await expect(testPage.getByTestId("project-add-custom")).toContainText(/Add as local path/i);
   });
 
-  // The create-project dialog reuses the same picker + chip components as
-  // the detail page (previously it only offered a bare text input), so a
-  // repo chosen at creation time must survive the POST and render on the
-  // project detail page afterwards.
+  // The create-project dialog embeds the same picker as the detail page.
+  // Without this, a dialog-side regression (picker not wired to the form
+  // state, repositories dropped from the create payload) would silently
+  // break attaching a repo at creation time.
   test("create-project dialog: pick a repo → create → repo persists on detail page", async ({
     testPage,
     officeSeed: _,
