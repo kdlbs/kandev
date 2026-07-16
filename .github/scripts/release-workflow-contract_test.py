@@ -114,6 +114,12 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn('"$DESKTOP_ASSET_VERIFIER"', block)
             self.assertNotIn('scripts/release/verify-desktop-assets.sh "', block)
 
+    def test_linux_appimage_build_installs_xdg_open(self) -> None:
+        install = step_block("Install Linux desktop dependencies")
+        self.assertIn("startsWith(matrix.platform, 'linux-')", install)
+        self.assertIn("xdg-utils", install)
+        self.assertIn("command -v xdg-open", install)
+
     def test_macos_dmg_build_has_retry_timeout_and_diagnostics(self) -> None:
         build = step_block("Build Tauri desktop app")
         self.assertIn("timeout-minutes: 70", build)
