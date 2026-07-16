@@ -23,8 +23,8 @@ spec: "../../specs/workflow-cycle-guardrails/spec.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- components/settings/workflow-card-actions.test.ts lib/workflows/replay-cycle-analysis.test.ts
-cd apps/web && pnpm run typecheck
+(cd apps && pnpm --filter @kandev/web test -- components/settings/workflow-card-actions.test.ts lib/workflows/replay-cycle-analysis.test.ts)
+(cd apps/web && pnpm run typecheck)
 ```
 
 ## Files Likely Touched

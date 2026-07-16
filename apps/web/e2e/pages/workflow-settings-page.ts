@@ -106,7 +106,7 @@ export class WorkflowSettingsPage {
     const transitionSection = panel
       .getByText("On Turn Complete", { exact: true })
       .locator("xpath=../..");
-    await this.activate(transitionSection.getByRole("combobox").first(), touch);
+    await this.activate(transitionSection.getByRole("combobox"), touch);
     await this.activate(this.page.getByRole("option", { name: optionName }), touch);
   }
 
@@ -161,7 +161,7 @@ export class WorkflowSettingsPage {
       await this.activate(this.createDialog.locator('label[for="custom"]'), touch);
     } else if (templateName) {
       await this.activate(
-        this.createDialog.getByText(templateName, { exact: false }).first(),
+        this.createDialog.getByRole("radio", { name: templateName, exact: false }),
         touch,
       );
     }

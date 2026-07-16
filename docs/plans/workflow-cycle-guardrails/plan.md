@@ -56,9 +56,10 @@ Changes:
   step through an `on_turn_complete` replay edge. Treat `on_turn_start` entry
   into an auto-start step as safe because the runtime skips destination
   `on_enter` while dispatching the user's message.
-- Classify a hop as automatic only for an unapproved
-  `on_turn_complete` transition whose source also auto-starts on entry. A
-  cycle is blocking only when all of its hops are automatic.
+- Classify a hop as automatic when its source auto-starts on entry and the
+  transition does not require approval. This includes `on_turn_start`
+  transitions fired by an auto-started prompt. A cycle is blocking only when
+  all of its hops are automatic.
 - Produce stable diagnostic identities, affected step IDs, a deterministic
   highest-severity/shortest trace per auto-start step, and the prompt-source
   category.
@@ -228,22 +229,22 @@ make fmt
 Focused frontend unit tests:
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- lib/workflows/replay-cycle-analysis.test.ts components/settings/workflow-card-actions.test.ts components/settings/workflow-cycle-diagnostic.test.tsx
+(cd apps && pnpm --filter @kandev/web test -- lib/workflows/replay-cycle-analysis.test.ts components/settings/workflow-card-actions.test.ts components/settings/workflow-cycle-diagnostic.test.tsx)
 ```
 
 Frontend typecheck and lint:
 
 ```bash
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
 ```
 
 Focused desktop and mobile E2E (rebuilds the production web/backend artifacts
 through the repo E2E harness):
 
 ```bash
-cd apps/web && pnpm e2e:run --host tests/workflow/workflow-cycle-guardrails.spec.ts
-cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/workflow/mobile-workflow-cycle-guardrails.spec.ts
+(cd apps/web && pnpm e2e:run --host tests/workflow/workflow-cycle-guardrails.spec.ts)
+(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/workflow/mobile-workflow-cycle-guardrails.spec.ts)
 ```
 
 Full repository verification:

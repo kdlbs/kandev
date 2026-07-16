@@ -15,7 +15,8 @@ spec: "../../specs/workflow-cycle-guardrails/spec.md"
 - A pure deterministic analyzer returns the diagnostic contract from the spec
   for cycles over `on_turn_start` and `on_turn_complete` move actions.
 - Fully automatic versus user-mediated classification accounts for source-step
-  auto-start, trigger, and approval, and ignores cycles without auto-start
+  auto-start and approval, including automatic `on_turn_start` transitions,
+  and ignores cycles without auto-start
   re-entry through `on_turn_complete`. An `on_turn_start` edge into an
   auto-start step is covered as a safe non-replay regression.
 - Trace choice, identities, affected steps, dangling targets, reorder behavior,
@@ -24,8 +25,8 @@ spec: "../../specs/workflow-cycle-guardrails/spec.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- lib/workflows/replay-cycle-analysis.test.ts
-cd apps/web && pnpm run typecheck
+(cd apps && pnpm --filter @kandev/web test -- lib/workflows/replay-cycle-analysis.test.ts)
+(cd apps/web && pnpm run typecheck)
 ```
 
 ## Files Likely Touched

@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { WorkflowStep } from "@/lib/types/http";
 import {
+  analyzeIntroducedWorkflowReplayCycles,
   analyzeWorkflowReplayCycles,
   type WorkflowReplayCycleDiagnostic,
   type WorkflowReplayCycleSeverity,
@@ -33,18 +34,6 @@ export type WorkflowMutationGuardController = {
 };
 
 type MutationPhase = "idle" | "proposal" | "running";
-
-function introducedDiagnostics(
-  baselineSteps: WorkflowStep[],
-  proposedSteps: WorkflowStep[],
-): WorkflowReplayCycleDiagnostic[] {
-  const existingIdentities = new Set(
-    analyzeWorkflowReplayCycles(baselineSteps).map((diagnostic) => diagnostic.identity),
-  );
-  return analyzeWorkflowReplayCycles(proposedSteps).filter(
-    (diagnostic) => !existingIdentities.has(diagnostic.identity),
-  );
-}
 
 export function useWorkflowMutationGuard(
   displayedSteps: WorkflowStep[],
@@ -97,7 +86,7 @@ export function useWorkflowMutationGuard(
       setIsMutationPending(true);
 
       try {
-        const introduced = introducedDiagnostics(baselineSteps, proposedSteps);
+        const introduced = analyzeIntroducedWorkflowReplayCycles(baselineSteps, proposedSteps);
         if (introduced.length === 0) {
           await operation();
           releaseMutation();

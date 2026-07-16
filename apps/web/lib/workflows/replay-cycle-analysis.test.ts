@@ -6,10 +6,16 @@ import type {
   OnTurnStartAction,
   TransitionConfig,
 } from "@/lib/types/workflow-actions";
-import { analyzeWorkflowReplayCycles } from "./replay-cycle-analysis";
+import {
+  analyzeIntroducedWorkflowReplayCycles,
+  analyzeWorkflowReplayCycles,
+} from "./replay-cycle-analysis";
 
 const NOW = "2026-07-15T00:00:00.000Z";
 const SHORT_RETURN_STEP_ID = "short-return";
+const WORK_STEP_ID = "work";
+const EXISTING_STEP_ID = "a-existing";
+const ALTERNATE_STEP_ID = "z-existing";
 
 function step(
   id: string,
@@ -435,5 +441,75 @@ describe("replay diagnostic selection", () => {
     expect(
       analyzeWorkflowReplayCycles(steps).map((diagnostic) => diagnostic.autoStartStepId),
     ).toEqual(["second", "first"]);
+  });
+});
+
+describe("introduced replay cycle inventory", () => {
+  it("detects a new alternate loop when the preferred trace is unchanged", () => {
+    const baseline = [
+      step(WORK_STEP_ID, 0, {
+        autoStart: true,
+        onTurnComplete: [guardedMoveToStep(EXISTING_STEP_ID)],
+      }),
+      step(EXISTING_STEP_ID, 1, {
+        autoStart: true,
+        onTurnComplete: [moveToStep(WORK_STEP_ID)],
+      }),
+      step("z-new", 2, {
+        autoStart: true,
+        onTurnComplete: [moveToStep(WORK_STEP_ID)],
+      }),
+    ];
+    const proposed = [
+      {
+        ...baseline[0],
+        events: {
+          ...baseline[0].events,
+          on_turn_complete: [guardedMoveToStep(EXISTING_STEP_ID), guardedMoveToStep("z-new")],
+        },
+      },
+      ...baseline.slice(1),
+    ];
+
+    expect(analyzeWorkflowReplayCycles(proposed)[0].trace[0].destinationStepId).toBe(
+      EXISTING_STEP_ID,
+    );
+    expect(
+      analyzeIntroducedWorkflowReplayCycles(baseline, proposed)[0].trace.map(
+        (hop) => hop.destinationStepId,
+      ),
+    ).toEqual(["z-new", WORK_STEP_ID]);
+  });
+
+  it("does not reclassify an existing alternate loop when the preferred trace is removed", () => {
+    const baseline = [
+      step(WORK_STEP_ID, 0, {
+        autoStart: true,
+        onTurnComplete: [guardedMoveToStep("a-preferred"), guardedMoveToStep(ALTERNATE_STEP_ID)],
+      }),
+      step("a-preferred", 1, {
+        autoStart: true,
+        onTurnComplete: [moveToStep(WORK_STEP_ID)],
+      }),
+      step(ALTERNATE_STEP_ID, 2, {
+        autoStart: true,
+        onTurnComplete: [moveToStep(WORK_STEP_ID)],
+      }),
+    ];
+    const proposed = [
+      {
+        ...baseline[0],
+        events: {
+          ...baseline[0].events,
+          on_turn_complete: [guardedMoveToStep(ALTERNATE_STEP_ID)],
+        },
+      },
+      ...baseline.slice(1),
+    ];
+
+    expect(analyzeWorkflowReplayCycles(proposed)[0].trace[0].destinationStepId).toBe(
+      ALTERNATE_STEP_ID,
+    );
+    expect(analyzeIntroducedWorkflowReplayCycles(baseline, proposed)).toEqual([]);
   });
 });

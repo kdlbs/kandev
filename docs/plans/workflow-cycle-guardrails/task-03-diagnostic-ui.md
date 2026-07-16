@@ -23,9 +23,9 @@ spec: "../../specs/workflow-cycle-guardrails/spec.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- components/settings/workflow-cycle-diagnostic.test.tsx components/settings/workflow-card-actions.test.ts
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
+(cd apps && pnpm --filter @kandev/web test -- components/settings/workflow-cycle-diagnostic.test.tsx components/settings/workflow-card-actions.test.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
 ```
 
 ## Files Likely Touched

@@ -33,16 +33,16 @@ export function addLocalStep(workflow: Workflow, setWorkflowSteps: WorkflowSteps
 export async function addRemoteStep(
   workflow: Workflow,
   stepCount: number,
-  refreshWorkflowSteps: () => Promise<void>,
+  setWorkflowSteps: WorkflowStepsSetter,
   toast: Toast,
 ) {
   try {
-    await createWorkflowStepAction({
+    const created = await createWorkflowStepAction({
       workflow_id: workflow.id,
       ...NEW_STEP_DEFAULTS,
       position: stepCount,
     });
-    await refreshWorkflowSteps();
+    setWorkflowSteps((previous) => [...previous, created]);
   } catch (error) {
     toast({
       title: "Failed to add workflow step",
@@ -68,17 +68,17 @@ export function applyWorkflowStepUpdates(
 export async function updateRemoteWorkflowStep({
   stepId,
   updates,
-  refreshWorkflowSteps,
+  setWorkflowSteps,
   toast,
 }: {
   stepId: string;
   updates: Partial<WorkflowStep>;
-  refreshWorkflowSteps: () => Promise<void>;
+  setWorkflowSteps: WorkflowStepsSetter;
   toast: Toast;
 }) {
   try {
-    await updateWorkflowStepAction(stepId, updates);
-    await refreshWorkflowSteps();
+    const updated = await updateWorkflowStepAction(stepId, updates);
+    setWorkflowSteps((previous) => applyWorkflowStepUpdates(previous, stepId, updated));
   } catch (error) {
     toast({
       title: "Failed to update workflow step",

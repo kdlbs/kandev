@@ -77,16 +77,7 @@ function useWorkflowSteps(
     };
   }, [workflowId, initialSteps, isNewWorkflow, toast]);
 
-  const refreshWorkflowSteps = async () => {
-    try {
-      const res = await listWorkflowStepsAction(workflowId);
-      setWorkflowSteps(res.steps ?? []);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  return { workflowSteps, setWorkflowSteps, workflowLoading, refreshWorkflowSteps };
+  return { workflowSteps, setWorkflowSteps, workflowLoading };
 }
 
 type WorkflowDeleteState = {
@@ -404,15 +395,18 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   const stepDel = useStepDeleteState();
   const isNewWorkflow = workflow.id.startsWith("temp-");
   const deleteWorkflowRequest = useRequest(onDeleteWorkflow);
-  const { workflowSteps, setWorkflowSteps, workflowLoading, refreshWorkflowSteps } =
-    useWorkflowSteps(workflow.id, initialWorkflowSteps, isNewWorkflow, toast);
+  const { workflowSteps, setWorkflowSteps, workflowLoading } = useWorkflowSteps(
+    workflow.id,
+    initialWorkflowSteps,
+    isNewWorkflow,
+    toast,
+  );
   const mutationGuard = useWorkflowMutationGuard(workflowSteps);
   const stepActions = useWorkflowStepActions({
     workflow,
     isNewWorkflow,
     workflowSteps,
     setWorkflowSteps,
-    refreshWorkflowSteps,
     setStepToDelete: stepDel.setStepToDelete,
     setStepTaskCount: stepDel.setStepTaskCount,
     setTargetStepForMigration: stepDel.setTargetStepForMigration,
@@ -441,7 +435,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   const stepDeleteHandlers = useStepDeleteHandlers({
     workflow,
     stepDel,
-    refreshWorkflowSteps,
+    setWorkflowSteps,
     toast,
   });
   const stepsForStepMigration = stepDel.stepToDelete

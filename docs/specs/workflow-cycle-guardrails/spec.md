@@ -97,18 +97,22 @@ Each diagnostic contains:
   `step_prompt`.
 
 Diagnostics have stable identities derived from the auto-start step and the
-ordered trace. The authoring guard compares these identities between current
-and proposed shapes so it can distinguish an introduced cycle from an existing
-one. The analysis is deterministic and has no persisted state.
+ordered trace. The authoring guard compares a bounded inventory of these
+identities between current and proposed shapes so it can distinguish every
+discovered introduced cycle from an existing one, even when the preferred
+display trace is unchanged. The UI still presents one deterministic preferred
+trace per auto-start step. The analysis is deterministic and has no persisted
+state.
 
 ## Failure Modes
 
 - If workflow steps fail to load, the editor keeps its existing load error and
   does not claim that the workflow is safe.
 - If a confirmed remote mutation fails, the existing error toast remains the
-  source of truth and the editor refreshes or retains the server-backed shape
-  according to the existing mutation behavior. Confirmation never implies
-  persistence succeeded.
+  source of truth and the editor retains its last server-backed shape. A
+  successful add, update, or reorder applies the authoritative mutation
+  response before the guard accepts another topology edit. Confirmation never
+  implies persistence succeeded.
 - If a workflow already contains a fully automatic cycle, opening settings
   surfaces the blocking diagnostic but does not interrupt running tasks. The
   author must remove the cycle to prevent future re-entry.

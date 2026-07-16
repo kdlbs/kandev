@@ -133,6 +133,9 @@ describe("WorkflowCycleGuardDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: actionLabel }));
     expect(onConfirm).toHaveBeenCalledOnce();
     expect(onCancel).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: actionLabel }).hasAttribute("data-dialog-default-action"),
+    ).toBe(true);
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
   });
 

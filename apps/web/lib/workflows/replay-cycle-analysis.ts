@@ -58,9 +58,50 @@ type CycleCandidate = {
   trace: WorkflowReplayCycleHop[];
 };
 
+type ReplayAnalysisContext = {
+  orderedSteps: WorkflowStep[];
+  graph: Map<string, ReplayGraphEdge[]>;
+};
+
+const MAX_CYCLE_INVENTORY_SIZE = 256;
+const MAX_CYCLE_INVENTORY_STATES = 4096;
+
 export function analyzeWorkflowReplayCycles(
   steps: WorkflowStep[],
 ): WorkflowReplayCycleDiagnostic[] {
+  const { orderedSteps, graph } = buildAnalysisContext(steps);
+
+  return orderedSteps.flatMap((autoStartStep) => {
+    if (!stepHasOnEnterAction(autoStartStep, "auto_start_agent")) return [];
+    const selected = findPreferredCycleCandidate(autoStartStep, graph);
+    return selected ? [toDiagnostic(autoStartStep, selected)] : [];
+  });
+}
+
+export function analyzeIntroducedWorkflowReplayCycles(
+  baselineSteps: WorkflowStep[],
+  proposedSteps: WorkflowStep[],
+): WorkflowReplayCycleDiagnostic[] {
+  const baseline = buildAnalysisContext(baselineSteps);
+  const existingIdentities = new Set(
+    baseline.orderedSteps.flatMap((step) =>
+      stepHasOnEnterAction(step, "auto_start_agent")
+        ? collectCycleInventory(step, baseline.graph).map((candidate) => candidate.identity)
+        : [],
+    ),
+  );
+  const proposed = buildAnalysisContext(proposedSteps);
+
+  return proposed.orderedSteps.flatMap((autoStartStep) => {
+    if (!stepHasOnEnterAction(autoStartStep, "auto_start_agent")) return [];
+    const selected = collectCycleInventory(autoStartStep, proposed.graph)
+      .filter((candidate) => !existingIdentities.has(candidate.identity))
+      .sort(compareCandidates)[0];
+    return selected ? [toDiagnostic(autoStartStep, selected)] : [];
+  });
+}
+
+function buildAnalysisContext(steps: WorkflowStep[]): ReplayAnalysisContext {
   const orderedSteps = steps
     .map((step, inputIndex) => ({ step, inputIndex }))
     .sort(
@@ -68,25 +109,22 @@ export function analyzeWorkflowReplayCycles(
         left.step.position - right.step.position || left.inputIndex - right.inputIndex,
     )
     .map(({ step }) => step);
-  const graph = buildReplayGraph(orderedSteps);
+  return { orderedSteps, graph: buildReplayGraph(orderedSteps) };
+}
 
-  return orderedSteps.flatMap((autoStartStep) => {
-    if (!stepHasOnEnterAction(autoStartStep, "auto_start_agent")) return [];
-    const selected = findPreferredCycleCandidate(autoStartStep, graph);
-    if (!selected) return [];
-
-    return [
-      {
-        identity: selected.identity,
-        severity: selected.severity,
-        autoStartStepId: autoStartStep.id,
-        autoStartStepName: autoStartStep.name,
-        affectedStepIds: affectedStepIds(autoStartStep.id, selected.trace),
-        trace: selected.trace,
-        promptSource: classifyPromptSource(autoStartStep.prompt),
-      },
-    ];
-  });
+function toDiagnostic(
+  autoStartStep: WorkflowStep,
+  candidate: CycleCandidate,
+): WorkflowReplayCycleDiagnostic {
+  return {
+    identity: candidate.identity,
+    severity: candidate.severity,
+    autoStartStepId: autoStartStep.id,
+    autoStartStepName: autoStartStep.name,
+    affectedStepIds: affectedStepIds(autoStartStep.id, candidate.trace),
+    trace: candidate.trace,
+    promptSource: classifyPromptSource(autoStartStep.prompt),
+  };
 }
 
 function buildReplayGraph(steps: WorkflowStep[]): Map<string, ReplayGraphEdge[]> {
@@ -201,6 +239,61 @@ function findPreferredCycleCandidate(
     findShortestCycleCandidate(autoStartStep, graph, "blocking") ??
     findShortestCycleCandidate(autoStartStep, graph, "warning")
   );
+}
+
+function collectCycleInventory(
+  autoStartStep: WorkflowStep,
+  graph: Map<string, ReplayGraphEdge[]>,
+): CycleCandidate[] {
+  const candidates = new Map<string, CycleCandidate>();
+  const preferred = findPreferredCycleCandidate(autoStartStep, graph);
+  if (preferred) candidates.set(preferred.identity, preferred);
+
+  const queue: Array<{
+    stepId: string;
+    trace: WorkflowReplayCycleHop[];
+    visitedStepIds: Set<string>;
+  }> = [
+    {
+      stepId: autoStartStep.id,
+      trace: [],
+      visitedStepIds: new Set([autoStartStep.id]),
+    },
+  ];
+
+  for (
+    let index = 0;
+    index < queue.length &&
+    index < MAX_CYCLE_INVENTORY_STATES &&
+    candidates.size < MAX_CYCLE_INVENTORY_SIZE;
+    index += 1
+  ) {
+    const state = queue[index];
+    for (const edge of graph.get(state.stepId) ?? []) {
+      const trace = [...state.trace, toTraceHop(edge)];
+      if (edge.destination.id === autoStartStep.id) {
+        if (edge.trigger === "on_turn_complete" && candidates.size < MAX_CYCLE_INVENTORY_SIZE) {
+          const candidate = toCandidate(autoStartStep.id, trace);
+          candidates.set(candidate.identity, candidate);
+        }
+        if (candidates.size >= MAX_CYCLE_INVENTORY_SIZE) break;
+        continue;
+      }
+      if (
+        state.visitedStepIds.has(edge.destination.id) ||
+        queue.length >= MAX_CYCLE_INVENTORY_STATES
+      ) {
+        continue;
+      }
+      queue.push({
+        stepId: edge.destination.id,
+        trace,
+        visitedStepIds: new Set([...state.visitedStepIds, edge.destination.id]),
+      });
+    }
+  }
+
+  return [...candidates.values()].sort(compareCandidates);
 }
 
 function findShortestCycleCandidate(

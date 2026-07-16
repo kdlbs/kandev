@@ -152,6 +152,7 @@ export function WorkflowCycleGuardDialog({
           </AlertDialogCancel>
           {!isBlocking && (
             <AlertDialogAction
+              data-dialog-default-action
               className="min-h-12 w-full cursor-pointer sm:w-auto"
               onClick={handleConfirm}
             >

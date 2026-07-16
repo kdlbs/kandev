@@ -32,7 +32,6 @@ type WorkflowStepActionsParams = {
   isNewWorkflow: boolean;
   workflowSteps: WorkflowStep[];
   setWorkflowSteps: (updater: ((prev: WorkflowStep[]) => WorkflowStep[]) | WorkflowStep[]) => void;
-  refreshWorkflowSteps: () => Promise<void>;
   setStepToDelete: (id: string | null) => void;
   setStepTaskCount: (count: number | null) => void;
   setTargetStepForMigration: (id: string) => void;
@@ -44,7 +43,7 @@ type WorkflowStepActionsParams = {
 type RemoveStepParams = {
   stepId: string;
   workflowSteps: WorkflowStep[];
-  refreshWorkflowSteps: () => Promise<void>;
+  setWorkflowSteps: (updater: (prev: WorkflowStep[]) => WorkflowStep[]) => void;
   setStepToDelete: (id: string | null) => void;
   setStepTaskCount: (count: number | null) => void;
   setTargetStepForMigration: (id: string) => void;
@@ -55,7 +54,7 @@ type RemoveStepParams = {
 async function removeWorkflowStep({
   stepId,
   workflowSteps,
-  refreshWorkflowSteps,
+  setWorkflowSteps,
   setStepToDelete,
   setStepTaskCount,
   setTargetStepForMigration,
@@ -66,7 +65,11 @@ async function removeWorkflowStep({
     const { task_count } = await getStepTaskCount(stepId);
     if (task_count === 0) {
       await deleteWorkflowStepAction(stepId);
-      await refreshWorkflowSteps();
+      setWorkflowSteps((previous) =>
+        previous
+          .filter((step) => step.id !== stepId)
+          .map((step, position) => ({ ...step, position })),
+      );
       return;
     }
     setStepToDelete(stepId);
@@ -88,7 +91,6 @@ export function useWorkflowStepActions({
   isNewWorkflow,
   workflowSteps,
   setWorkflowSteps,
-  refreshWorkflowSteps,
   setStepToDelete,
   setStepTaskCount,
   setTargetStepForMigration,
@@ -104,7 +106,7 @@ export function useWorkflowStepActions({
     const proposedSteps = applyWorkflowStepUpdates(workflowSteps, stepId, updates);
     await mutationGuard.guardMutation({
       proposedSteps,
-      operation: () => updateRemoteWorkflowStep({ stepId, updates, refreshWorkflowSteps, toast }),
+      operation: () => updateRemoteWorkflowStep({ stepId, updates, setWorkflowSteps, toast }),
     });
   };
 
@@ -119,7 +121,7 @@ export function useWorkflowStepActions({
     ];
     await mutationGuard.guardMutation({
       proposedSteps,
-      operation: () => addRemoteStep(workflow, workflowSteps.length, refreshWorkflowSteps, toast),
+      operation: () => addRemoteStep(workflow, workflowSteps.length, setWorkflowSteps, toast),
     });
   };
 
@@ -139,7 +141,7 @@ export function useWorkflowStepActions({
         removeWorkflowStep({
           stepId,
           workflowSteps,
-          refreshWorkflowSteps,
+          setWorkflowSteps,
           setStepToDelete,
           setStepTaskCount,
           setTargetStepForMigration,
@@ -158,19 +160,18 @@ export function useWorkflowStepActions({
     await mutationGuard.guardMutation({
       proposedSteps,
       operation: async () => {
-        setWorkflowSteps(proposedSteps);
         try {
-          await reorderWorkflowStepsAction(
+          const response = await reorderWorkflowStepsAction(
             workflow.id,
             proposedSteps.map((step) => step.id),
           );
+          setWorkflowSteps(response.steps);
         } catch (error) {
           toast({
             title: "Failed to reorder workflow steps",
             description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
             variant: "error",
           });
-          await refreshWorkflowSteps();
         }
       },
     });
@@ -306,28 +307,33 @@ type StepDeleteHandlersParams = {
     setStepDeleteOpen: (v: boolean) => void;
     setStepToDelete: (v: string | null) => void;
   };
-  refreshWorkflowSteps: () => Promise<void>;
+  setWorkflowSteps: (updater: (prev: WorkflowStep[]) => WorkflowStep[]) => void;
   toast: ReturnType<typeof useToast>["toast"];
 };
 
 export function useStepDeleteHandlers({
   workflow,
   stepDel,
-  refreshWorkflowSteps,
+  setWorkflowSteps,
   toast,
 }: StepDeleteHandlersParams) {
   const handleMigrateAndDeleteStep = async () => {
     if (!stepDel.stepToDelete || !stepDel.targetStepForMigration) return;
+    const stepId = stepDel.stepToDelete;
     stepDel.setStepMigrateLoading(true);
     try {
       await bulkMoveTasks({
         source_workflow_id: workflow.id,
-        source_step_id: stepDel.stepToDelete,
+        source_step_id: stepId,
         target_workflow_id: workflow.id,
         target_step_id: stepDel.targetStepForMigration,
       });
-      await deleteWorkflowStepAction(stepDel.stepToDelete);
-      await refreshWorkflowSteps();
+      await deleteWorkflowStepAction(stepId);
+      setWorkflowSteps((previous) =>
+        previous
+          .filter((step) => step.id !== stepId)
+          .map((step, position) => ({ ...step, position })),
+      );
       stepDel.setStepDeleteOpen(false);
       stepDel.setStepToDelete(null);
     } catch (error) {
@@ -343,10 +349,15 @@ export function useStepDeleteHandlers({
 
   const handleDeleteStepAndTasks = async () => {
     if (!stepDel.stepToDelete) return;
+    const stepId = stepDel.stepToDelete;
     stepDel.setStepMigrateLoading(true);
     try {
-      await deleteWorkflowStepAction(stepDel.stepToDelete);
-      await refreshWorkflowSteps();
+      await deleteWorkflowStepAction(stepId);
+      setWorkflowSteps((previous) =>
+        previous
+          .filter((step) => step.id !== stepId)
+          .map((step, position) => ({ ...step, position })),
+      );
       stepDel.setStepDeleteOpen(false);
       stepDel.setStepToDelete(null);
     } catch (error) {

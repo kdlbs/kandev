@@ -24,10 +24,10 @@ spec: "../../specs/workflow-cycle-guardrails/spec.md"
 
 ```bash
 make fmt
-cd apps/web && pnpm e2e:run --host tests/workflow/workflow-cycle-guardrails.spec.ts
-cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/workflow/mobile-workflow-cycle-guardrails.spec.ts
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web lint
+(cd apps/web && pnpm e2e:run --host tests/workflow/workflow-cycle-guardrails.spec.ts)
+(cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/workflow/mobile-workflow-cycle-guardrails.spec.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web lint)
 make typecheck test lint
 ```
 
