@@ -25,6 +25,12 @@ func currentAsyncTurnCompleteIdle() time.Duration {
 }
 
 func isAsyncTurnContentEvent(event AgentEvent) bool {
+	if event.Type == streams.EventTypeToolUpdate {
+		switch event.ToolStatus {
+		case toolStatusComplete, toolStatusError, toolStatusCancelled:
+			return false
+		}
+	}
 	switch event.Type {
 	case streams.EventTypeMessageChunk,
 		streams.EventTypeReasoning,

@@ -187,6 +187,30 @@ func TestWakeup_PostBootMetadataEventsDoNotFlipToRunning(t *testing.T) {
 	}
 }
 
+func TestWakeup_LateTerminalToolUpdateDoesNotFlipToRunning(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	_ = mgr.executionStore.Add(execution)
+
+	execution.firstActivityOnce.Do(func() {})
+	mgr.executionStore.UpdateStatus(execution.ID, v1.AgentStatusReady)
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:       "tool_update",
+		ToolCallID: "tool-1",
+		ToolStatus: "complete",
+	})
+
+	for _, te := range eventBus.PublishedEvents {
+		if te.Event != nil && te.Event.Type == events.AgentRunning {
+			t.Fatal("standalone terminal tool update must not publish agent.running")
+		}
+	}
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("execution.Status = %q, want %q", execution.Status, v1.AgentStatusReady)
+	}
+}
+
 // TestWakeup_EmptyTurnStillPublishesAgentReady covers the narrow edge case
 // where a wakeup turn produces *only* a `complete` event (no preceding
 // message_chunk/tool_call/etc) — e.g. when the model returns an empty

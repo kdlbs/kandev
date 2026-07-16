@@ -415,6 +415,18 @@ var turnContentEventTypes = map[string]struct{}{
 	"permission_request": {},
 }
 
+func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
+	if event.Type != "tool_update" {
+		return false
+	}
+	switch event.ToolStatus {
+	case toolStatusComplete, "error", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
 // recordActivity updates the last-activity timestamp and, on the very first
 // event from an execution, publishes AgentRunning to transition STARTING → RUNNING.
 //
@@ -447,6 +459,9 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 		return
 	}
 	if m.executionStore == nil {
+		return
+	}
+	if isTerminalToolUpdate(event) {
 		return
 	}
 	if _, ok := turnContentEventTypes[event.Type]; !ok {

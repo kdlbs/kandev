@@ -432,8 +432,9 @@ func TestToolEventsWakeSessionAndTaskTogether(t *testing.T) {
 	ctx := context.Background()
 
 	cases := []struct {
-		name string
-		fire func(*Service)
+		name       string
+		activeTurn bool
+		fire       func(*Service)
 	}{
 		{
 			name: "tool_call event",
@@ -449,7 +450,8 @@ func TestToolEventsWakeSessionAndTaskTogether(t *testing.T) {
 			},
 		},
 		{
-			name: "tool_update completion event",
+			name:       "tool_update completion event for active async turn",
+			activeTurn: true,
 			fire: func(svc *Service) {
 				svc.handleToolUpdateEvent(ctx, &lifecycle.AgentStreamEventPayload{
 					TaskID:    "t1",
@@ -477,6 +479,11 @@ func TestToolEventsWakeSessionAndTaskTogether(t *testing.T) {
 			taskRepo := newMockTaskRepo()
 			svc := createTestService(repo, newMockStepGetter(), taskRepo)
 			svc.messageCreator = &mockMessageCreator{}
+			if tc.activeTurn {
+				svc.turnService = &repoTurnService{repo: repo}
+				_, err := svc.turnService.StartTurn(ctx, "s1")
+				require.NoError(t, err)
+			}
 
 			tc.fire(svc)
 
@@ -503,6 +510,11 @@ func TestToolEventsWakeSessionAndTaskTogether(t *testing.T) {
 			taskRepo := newMockTaskRepo()
 			svc := createTestService(repo, newMockStepGetter(), taskRepo)
 			svc.messageCreator = &mockMessageCreator{}
+			if tc.activeTurn {
+				svc.turnService = &repoTurnService{repo: repo}
+				_, err := svc.turnService.StartTurn(ctx, "s1")
+				require.NoError(t, err)
+			}
 
 			tc.fire(svc)
 
@@ -556,6 +568,68 @@ func TestToolUpdateFromCompletedExecutionDoesNotWakeWaitingSession(t *testing.T)
 		"late tool events from the completed execution must not revive the session")
 	require.Equal(t, 1, taskRepo.stateWrites["t1"],
 		"late completed-execution tool event must not move the task back to IN_PROGRESS")
+}
+
+func TestLateTerminalToolUpdateDoesNotCreateTurnOrWakeWaitingSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	svc.turnService = &repoTurnService{repo: repo}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	svc.handleToolUpdateEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:      "task1",
+		SessionID:   "session1",
+		ExecutionID: "exec-1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "tool_update",
+			ToolCallID: "tool-1",
+			ToolStatus: agentEventComplete,
+		},
+	})
+
+	require.Equal(t, 1, messages.toolUpdateWrites,
+		"late terminal status must still reconcile the existing tool message")
+	require.Zero(t, openTurnCount(t, repo, "session1"),
+		"late terminal status must not create a phantom turn")
+	updated, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, updated.State,
+		"late terminal status must not wake the settled session")
+	require.Zero(t, taskRepo.stateWrites["task1"],
+		"late terminal status must not move the task back to IN_PROGRESS")
+}
+
+func TestStatuslessToolUpdateDoesNotCreateTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	svc.handleToolUpdateEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task1",
+		SessionID: "session1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "tool_update",
+			ToolCallID: "tool-1",
+		},
+	})
+
+	require.Zero(t, messages.toolUpdateWrites)
+	require.Zero(t, openTurnCount(t, repo, "session1"))
 }
 
 func TestToolUpdateFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {
