@@ -150,6 +150,9 @@ function useChatSessionTitle(panelId: string, sessionId: string | null, isSessio
   const agentLabel = useAppStore((state) => {
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
+    // User-supplied session name wins over the derived profile label,
+    // matching the session tab title precedence (resolveSessionTabTitle).
+    if (session?.name) return session.name;
     if (!session?.agent_profile_id) return null;
     const profile = state.agentProfiles.items.find(
       (p: { id: string }) => p.id === session.agent_profile_id,

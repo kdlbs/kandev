@@ -108,6 +108,7 @@ export type QueuedMessageMetadata = Record<string, unknown> & {
   sender_task_id?: string;
   sender_task_title?: string;
   sender_session_id?: string;
+  sender_session_name?: string;
 };
 
 export type QueuedMessage = {

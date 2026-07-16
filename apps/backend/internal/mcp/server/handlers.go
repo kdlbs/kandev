@@ -244,8 +244,39 @@ func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 			"sender_session_id": s.sessionID,
 		}
 		copyOptionalStringArg(payload, req, "delivery_mode")
+		copyOptionalStringArg(payload, req, "session_id")
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPMessageTask, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+// spawnSessionHandler spawns an additional agent session on an existing task.
+// task_id defaults to the server's own task; sender identity is injected so
+// the spawned session can identify and reply to its spawner.
+func (s *Server) spawnSessionHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		prompt, err := req.RequireString(promptArg)
+		if err != nil {
+			return mcp.NewToolResultError("prompt is required"), nil
+		}
+		taskID := req.GetString("task_id", s.taskID)
+		if taskID == "" {
+			return mcp.NewToolResultError("task_id is required (no current task in this context)"), nil
+		}
+		payload := map[string]interface{}{
+			"task_id":           taskID,
+			promptArg:           prompt,
+			"sender_task_id":    s.taskID,
+			"sender_session_id": s.sessionID,
+		}
+		copyOptionalStringArg(payload, req, "agent_profile_id")
+		copyOptionalStringArg(payload, req, "name")
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSpawnSession, payload, &result); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")

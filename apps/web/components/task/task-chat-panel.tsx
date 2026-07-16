@@ -104,12 +104,17 @@ function useSessionAgentIdentity(sessionId: string | null | undefined): {
   name: string | null;
 } {
   const profile = useSessionAgentProfile(sessionId);
+  // User-supplied session name wins over the derived profile label,
+  // matching the session tab title precedence (resolveSessionTabTitle).
+  const sessionName = useAppStore((state) =>
+    sessionId ? (state.taskSessions.items[sessionId]?.name ?? null) : null,
+  );
   return useMemo(() => {
-    if (!profile) return { label: null, name: null };
+    if (!profile) return { label: sessionName, name: null };
     const parts = profile.label.split(" \u2022 ");
-    const label = parts[1] || parts[0] || profile.label;
+    const label = sessionName || parts[1] || parts[0] || profile.label;
     return { label, name: profile.agent_name ?? null };
-  }, [profile]);
+  }, [profile, sessionName]);
 }
 
 type TaskChatPanelProps = {

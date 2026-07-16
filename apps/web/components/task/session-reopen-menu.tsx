@@ -24,9 +24,13 @@ function resolveAgentInfo(
   profilesById: Record<string, AgentProfileOption>,
 ): AgentInfo {
   const profile = session.agent_profile_id ? profilesById[session.agent_profile_id] : null;
+  const agentName = profile?.agent_name ?? "";
+  // A user-supplied session name wins over the derived profile label,
+  // matching the session tab title precedence (resolveSessionTabTitle).
+  if (session.name) return { label: session.name, agentName };
   if (!profile) return { label: "Unknown agent", agentName: "" };
   const parts = profile.label.split(" \u2022 ");
-  return { label: parts[1] || parts[0] || profile.label, agentName: profile.agent_name };
+  return { label: parts[1] || parts[0] || profile.label, agentName };
 }
 
 /**

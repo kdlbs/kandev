@@ -36,6 +36,17 @@ export async function searchSessionMessages(
   );
 }
 
+/**
+ * Rename a session's tab label. Pass an empty string to clear the custom
+ * name and revert to the derived agent/model title. The backend broadcasts
+ * a session.state_changed event so every client picks up the new label.
+ */
+export async function renameSession(sessionId: string, name: string): Promise<void> {
+  const client = getWebSocketClient();
+  if (!client) throw new Error("WebSocket unavailable");
+  await client.request("session.rename", { session_id: sessionId, name });
+}
+
 // Session operations
 export async function listTaskSessions(taskId: string, options?: ApiRequestOptions) {
   return fetchJson<TaskSessionsResponse>(`/api/v1/tasks/${taskId}/sessions`, options);

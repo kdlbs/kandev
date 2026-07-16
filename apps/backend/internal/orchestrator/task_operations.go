@@ -1965,6 +1965,30 @@ func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error
 	return nil
 }
 
+// maxSessionNameLength caps user-supplied session names to keep tab labels sane.
+const maxSessionNameLength = 120
+
+// RenameSession sets the user-supplied name for a session and broadcasts a
+// session.state_changed event (same state) so all clients update the tab label.
+// An empty name clears the custom label, falling back to the derived title.
+func (s *Service) RenameSession(ctx context.Context, sessionID, name string) error {
+	name = strings.TrimSpace(name)
+	if len(name) > maxSessionNameLength {
+		name = name[:maxSessionNameLength]
+	}
+	if err := s.repo.RenameTaskSession(ctx, sessionID, name); err != nil {
+		return fmt.Errorf("failed to rename session: %w", err)
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to fetch session after rename", zap.Error(err))
+		return nil
+	}
+	s.publishTaskSessionStateChanged(ctx, session.TaskID, sessionID,
+		session.State, session.State, session.ErrorMessage, &session.UpdatedAt, session)
+	return nil
+}
+
 // StopExecution stops agent execution for a specific execution ID.
 func (s *Service) StopExecution(ctx context.Context, executionID string, reason string, force bool) error {
 	s.logger.Info("stopping execution",

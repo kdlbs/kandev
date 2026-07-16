@@ -37,6 +37,9 @@ type fakeOrchestrator struct {
 	turnStartCalls    []turnStartCall
 	onTurnStart       func(context.Context, string, string) error
 	interruptCalls    []interruptCall
+	launchCalls       []*orchestrator.LaunchSessionRequest
+	launchErr         error
+	renameCalls       []renameCall
 
 	// Configurable: error returned by PromptTask. Cleared after first call so
 	// the retry-after-resume path can succeed on the second call.
@@ -69,8 +72,23 @@ type turnStartCall struct {
 	taskID, sessionID string
 }
 
-func (f *fakeOrchestrator) LaunchSession(context.Context, *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
-	return nil, nil
+type renameCall struct {
+	sessionID, name string
+}
+
+func (f *fakeOrchestrator) LaunchSession(_ context.Context, req *orchestrator.LaunchSessionRequest) (*orchestrator.LaunchSessionResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.launchCalls = append(f.launchCalls, req)
+	if f.launchErr != nil {
+		return nil, f.launchErr
+	}
+	return &orchestrator.LaunchSessionResponse{
+		Success:   true,
+		TaskID:    req.TaskID,
+		SessionID: "spawned-sess-1",
+		State:     "STARTING",
+	}, nil
 }
 
 func (f *fakeOrchestrator) PromptTask(_ context.Context, taskID, sessionID, prompt, _ string, _ bool, _ []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
@@ -141,6 +159,13 @@ func (f *fakeOrchestrator) QueueAndInterruptForPeerMessage(ctx context.Context, 
 		return queued, false, f.interruptErr
 	}
 	return queued, !f.interruptSkippedNoError, nil
+}
+
+func (f *fakeOrchestrator) RenameSession(_ context.Context, sessionID, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.renameCalls = append(f.renameCalls, renameCall{sessionID: sessionID, name: name})
+	return nil
 }
 
 type fakePromptReferenceResolver struct {
@@ -318,6 +343,158 @@ func senderPayloadWithMode(targetTaskID, prompt, senderTaskID, deliveryMode stri
 	payload := senderPayload(targetTaskID, prompt, senderTaskID)
 	payload["delivery_mode"] = deliveryMode
 	return payload
+}
+
+// TestHandleMessageTask_SameTaskWithoutSessionID_Rejected pins the self-message
+// guard: a task can only message itself when it names a specific sibling
+// session — without session_id the old "cannot message itself" rejection holds.
+func TestHandleMessageTask_SameTaskWithoutSessionID_Rejected(t *testing.T) {
+	h := &Handlers{}
+	payload := senderPayload("task-1", "hello", "task-1")
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleMessageTask_SessionCannotMessageItself(t *testing.T) {
+	h := &Handlers{}
+	payload := senderPayload("task-1", "hello", "task-2")
+	payload["session_id"] = "sender-sess-1" // == sender_session_id in senderPayload
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+// TestHandleMessageTask_SiblingSession_Queues covers the spawn-session loop: a
+// session messages a RUNNING sibling session on its OWN task via session_id.
+// The message queues to that exact session (not the primary), and the
+// attribution wrapper names the sender session and includes a session-targeted
+// reply hint.
+func TestHandleMessageTask_SiblingSession_Queues(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	// Second (non-primary) session on the same task — the message target.
+	sibling := &models.TaskSession{
+		ID:             "sess-sibling",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSession(context.Background(), sibling))
+	require.NoError(t, repo.UpdateTaskSessionState(context.Background(), sibling.ID, models.TaskSessionStateRunning, ""))
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	payload := map[string]interface{}{
+		"task_id":           target.ID,
+		"session_id":        sibling.ID,
+		"prompt":            "status update please",
+		"sender_task_id":    target.ID,
+		"sender_session_id": primary.ID,
+	}
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, "queued", out["status"])
+	assert.Equal(t, sibling.ID, out["session_id"])
+
+	// Queued to the sibling, not the primary session.
+	require.Equal(t, 1, orch.queue.GetStatus(context.Background(), sibling.ID).Count)
+	assert.Equal(t, 0, orch.queue.GetStatus(context.Background(), primary.ID).Count)
+
+	entry := orch.queue.GetStatus(context.Background(), sibling.ID).Entries[0]
+	assert.Contains(t, entry.Content, "status update please")
+	assert.Contains(t, entry.Content, "sibling agent session")
+	assert.Contains(t, entry.Content, primary.ID) // reply hint targets the sender session
+	assert.Equal(t, primary.ID, entry.Metadata["sender_session_id"])
+}
+
+// TestHandleMessageTask_IdleSiblingSession_PinsTargetSession is the regression
+// test for the sibling-message misroute found in live testing: when the
+// explicitly-targeted sibling session is IDLE (waiting for input), the dispatch
+// path's resolveSessionAfterTaskMessageTurnStart used to prefer the task's
+// PRIMARY session — which for a sibling message is typically the SENDER — so
+// the message boomeranged back to the sender's own conversation. An explicit
+// session_id must pin delivery to that exact session.
+func TestHandleMessageTask_IdleSiblingSession_PinsTargetSession(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	// primary = the spawner/sender session (waiting state irrelevant for it).
+	_, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	// Non-primary sibling session, idle (waiting for input) with a resumable
+	// executor row, mirroring a spawned session that finished its turn.
+	ctx := context.Background()
+	sibling := &models.TaskSession{
+		ID:             "sess-sibling-idle",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-2",
+		State:          models.TaskSessionStateCreated,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, sibling))
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sibling.ID, models.TaskSessionStateWaitingForInput, ""))
+	require.NoError(t, repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "exec-row-" + sibling.ID,
+		SessionID:        sibling.ID,
+		TaskID:           target.ID,
+		Status:           "running",
+		Resumable:        true,
+		AgentExecutionID: "exec-" + sibling.ID,
+	}))
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	payload := map[string]interface{}{
+		"task_id":           target.ID,
+		"session_id":        sibling.ID,
+		"prompt":            "reply back when done",
+		"sender_task_id":    target.ID,
+		"sender_session_id": primary.ID,
+	}
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, "sent", out["status"])
+	assert.Equal(t, sibling.ID, out["session_id"], "dispatch must stay on the explicitly-targeted sibling")
+
+	// The prompt went to the sibling, NOT rerouted to the primary (the sender).
+	require.Len(t, orch.promptCalls, 1)
+	assert.Equal(t, sibling.ID, orch.promptCalls[0].sessionID)
+
+	// And the message row landed in the sibling's conversation.
+	messages, err := svc.ListMessages(ctx, sibling.ID)
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	senderMessages, err := svc.ListMessages(ctx, primary.ID)
+	require.NoError(t, err)
+	assert.Empty(t, senderMessages, "sender's own session must not receive the message")
+}
+
+func TestHandleMessageTask_SessionIDWrongTask_Rejected(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	sender, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, _ := newMessageTaskHandler(t, svc)
+
+	// sess belongs to target — sending to sender's task with that session must fail.
+	payload := senderPayload(sender.ID, "hello", target.ID)
+	payload["session_id"] = sess.ID
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
+	resp, err := h.handleMessageTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
 func TestHandleMessageTask_MissingTaskID(t *testing.T) {

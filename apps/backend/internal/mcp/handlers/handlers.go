@@ -100,6 +100,9 @@ type SessionLauncher interface {
 	// not report "sent" when it's false — the message is still only
 	// queued, to be delivered later by whichever drain gets to it.
 	QueueAndInterruptForPeerMessage(ctx context.Context, taskID, sessionID, prompt string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, bool, error)
+	// RenameSession sets the user-visible session tab label and broadcasts
+	// the change. Used by spawn_session_kandev's optional name parameter.
+	RenameSession(ctx context.Context, sessionID, name string) error
 }
 
 // MessageQueuer queues a prompt message for delivery to a session on its next turn.
@@ -221,6 +224,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
+	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 	d.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 	d.RegisterFunc(ws.ActionMCPAskUserQuestion, h.handleAskUserQuestion)
 	d.RegisterFunc(ws.ActionMCPCreateTaskPlan, h.handleCreateTaskPlan)
@@ -236,7 +240,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 23
+	count := 24
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -1552,6 +1556,7 @@ func (h *Handlers) publishStepCompletionEvent(
 func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
 		TaskID          string `json:"task_id"`
+		SessionID       string `json:"session_id"`
 		Prompt          string `json:"prompt"`
 		SenderTaskID    string `json:"sender_task_id"`
 		SenderSessionID string `json:"sender_session_id"`
@@ -1569,8 +1574,15 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 	if req.SenderTaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "sender_task_id is required (the calling agent's MCP server must supply this)", nil)
 	}
-	if req.SenderTaskID == req.TaskID {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task cannot send a message to itself", nil)
+	// Same-task messaging is allowed only between distinct sibling sessions:
+	// an explicit session_id proves the sender is targeting a specific peer
+	// rather than echoing into its own conversation.
+	if req.SenderTaskID == req.TaskID && req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"task cannot send a message to itself (pass session_id to message a sibling session on your own task)", nil)
+	}
+	if req.SessionID != "" && req.SessionID == req.SenderSessionID {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session cannot send a message to itself", nil)
 	}
 	if req.DeliveryMode != "" && req.DeliveryMode != deliveryModeQueued && req.DeliveryMode != deliveryModeInterrupt {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
@@ -1604,18 +1616,14 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			"failed to look up target task: "+err.Error(), nil)
 	}
 
-	session, err := h.taskSvc.GetPrimarySession(ctx, req.TaskID)
-	if err != nil {
-		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
-				"target task exists but has no active session", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-			"failed to get session for task: "+err.Error(), nil)
+	session, errResp := h.resolveMessageTargetSession(ctx, msg, req.TaskID, req.SessionID)
+	if errResp != nil {
+		return errResp, nil
 	}
 
 	prompt := h.appendPromptReferenceExpansionContext(ctx, req.Prompt)
-	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID)
+	senderSessionName := h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID)
+	wrappedPrompt, senderMeta := wrapAgentMessage(prompt, senderTask, req.SenderSessionID, senderSessionName, req.SenderTaskID == req.TaskID)
 
 	// Interrupt intent is explicit, never inferred: a parent/child
 	// relationship alone no longer drives interruption (see
@@ -1637,7 +1645,7 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 			`delivery_mode="interrupt" is only allowed when the sender is the target task's direct parent`, nil)
 	}
 
-	result, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt)
+	result, err := h.dispatchTaskMessage(ctx, req.TaskID, session, wrappedPrompt, senderMeta, wantsInterrupt, req.SessionID != "")
 	if err != nil {
 		var qfErr *queueFullDispatchError
 		if errors.As(err, &qfErr) {
@@ -1653,6 +1661,45 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		"session_id": result.sessionID,
 		"status":     result.status,
 	})
+}
+
+// lookupSenderSessionName resolves the sender session's user-supplied name for
+// badge metadata. Best-effort: returns "" when the session is unknown, unnamed,
+// or does not belong to the claimed sender task (so a caller can't stamp an
+// arbitrary session's name onto its messages).
+func (h *Handlers) lookupSenderSessionName(ctx context.Context, senderTaskID, senderSessionID string) string {
+	if senderSessionID == "" || h.taskSvc == nil {
+		return ""
+	}
+	session, err := h.taskSvc.GetTaskSession(ctx, senderSessionID)
+	if err != nil || session == nil || session.TaskID != senderTaskID {
+		return ""
+	}
+	return session.Name
+}
+
+// resolveMessageTargetSession picks the session a message_task call targets:
+// the explicit session_id (validated to belong to taskID) or the task's
+// primary session. Returns a ready-to-send WS error message on failure.
+func (h *Handlers) resolveMessageTargetSession(ctx context.Context, msg *ws.Message, taskID, sessionID string) (*models.TaskSession, *ws.Message) {
+	if sessionID != "" {
+		session, err := h.taskSvc.GetTaskSession(ctx, sessionID)
+		if err != nil || session == nil {
+			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target session not found: "+sessionID)
+		}
+		if session.TaskID != taskID {
+			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id does not belong to task_id")
+		}
+		return session, nil
+	}
+	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, taskrepo.ErrNoPrimarySession) {
+			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task exists but has no active session")
+		}
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to get session for task: "+err.Error())
+	}
+	return session, nil
 }
 
 func (h *Handlers) appendPromptReferenceExpansionContext(ctx context.Context, prompt string) string {
@@ -2090,7 +2137,13 @@ func cloneTaskMessagePendingMove(move *messagequeue.PendingMove) *messagequeue.P
 // row (sender_task_id, sender_task_title, sender_session_id when called from
 // handleMessageTask). It is propagated to all three delivery paths so the
 // receiving task's chat displays the sender badge consistently.
-func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}, interruptIfBusy bool) (taskMessageDispatchResult, error) {
+//
+// pinnedTarget marks a session the caller named explicitly (message_task's
+// session_id param). Idle-path dispatch must then stay on THAT session:
+// resolveSessionAfterTaskMessageTurnStart's primary-switch preference would
+// otherwise reroute the message to the task's primary session — which, for a
+// sibling-session message, is typically the sender itself.
+func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, prompt string, metadata map[string]interface{}, interruptIfBusy, pinnedTarget bool) (taskMessageDispatchResult, error) {
 	if h.sessionLauncher == nil {
 		return taskMessageDispatchResult{}, errors.New("orchestrator not available")
 	}
@@ -2115,7 +2168,7 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 			return taskMessageDispatchResult{}, err
 		}
 		reviewRollback.captureQueues(ctx, h.sessionLauncher.GetMessageQueue())
-		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session)
+		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session, pinnedTarget)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
@@ -2275,9 +2328,19 @@ func (h *Handlers) queueThenInterruptTaskMessage(ctx context.Context, taskID str
 	return result, nil
 }
 
-func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession) (*models.TaskSession, error) {
+func (h *Handlers) prepareSessionForTaskMessage(ctx context.Context, taskID string, session *models.TaskSession, pinnedTarget bool) (*models.TaskSession, error) {
 	if err := h.sessionLauncher.ProcessOnTurnStart(ctx, taskID, session.ID); err != nil {
 		return nil, fmt.Errorf("failed to process on_turn_start for task message: %w", err)
+	}
+	if pinnedTarget {
+		// The caller addressed this exact session — never reroute to the
+		// task's primary session, just pick up any state change from
+		// on_turn_start.
+		reloaded, err := h.taskSvc.GetTaskSession(ctx, session.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to reload pinned target session after on_turn_start: %w", err)
+		}
+		return reloaded, nil
 	}
 	resolved, err := h.resolveSessionAfterTaskMessageTurnStart(ctx, taskID, session)
 	if err != nil {
