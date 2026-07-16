@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { openWideTask } from "../../helpers/dockview-resize";
 
 test.describe("App sidebar resize handle", () => {
   test("straddles the sidebar edge and highlights its full width while dragging", async ({
@@ -26,5 +27,24 @@ test.describe("App sidebar resize handle", () => {
 
     await expect(handle).not.toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
     await testPage.mouse.up();
+  });
+
+  test("matches the Dockview sash hover width", async ({ testPage, apiClient, seedData }) => {
+    await openWideTask(testPage, apiClient, seedData, "Sidebar sash width");
+
+    const handle = testPage
+      .getByTestId("app-sidebar")
+      .getByRole("button", { name: "Resize sidebar" });
+    const handleBox = await handle.boundingBox();
+    const sashWidth = await testPage.locator(".dv-sash").evaluateAll((sashes) => {
+      const verticalSash = sashes
+        .map((sash) => sash.getBoundingClientRect())
+        .find((box) => box.height > box.width);
+      return verticalSash?.width ?? 0;
+    });
+
+    expect(handleBox).not.toBeNull();
+    expect(sashWidth).toBeGreaterThan(0);
+    expect(handleBox!.width).toBe(sashWidth);
   });
 });

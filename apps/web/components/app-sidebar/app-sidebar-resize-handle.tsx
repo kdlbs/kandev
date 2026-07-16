@@ -15,7 +15,7 @@ export function AppSidebarResizeHandle({ onMouseDown }: AppSidebarResizeHandlePr
       aria-label="Resize sidebar"
       onMouseDown={onMouseDown}
       tabIndex={-1}
-      className="absolute -right-px top-0 z-10 h-full w-1.5 translate-x-1/2 cursor-ew-resize bg-transparent transition-colors hover:bg-primary active:bg-primary"
+      className="absolute -right-px top-0 z-10 h-full w-1 translate-x-1/2 cursor-ew-resize bg-transparent transition-colors hover:bg-primary active:bg-primary"
     />
   );
 }
