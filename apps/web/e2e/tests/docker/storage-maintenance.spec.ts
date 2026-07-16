@@ -31,15 +31,15 @@ test("removes only stopped Kandev-labeled containers and gates daemon-wide clean
     await testPage.goto("/settings/system/storage");
     await expect(testPage.getByTestId("storage-docker-build-cache")).toBeDisabled();
     await expect(testPage.getByTestId("storage-resource-managed-containers-trigger")).toContainText(
-      /Kandev containers[1-9]\d* B/,
+      "Kandev containers<0.01 GB",
     );
     await testPage.getByTestId("storage-resource-managed-containers-trigger").click();
     await expect(testPage.getByTestId("storage-resource-managed-containers")).toContainText(
       "2 managed containers",
     );
     await testPage.getByTestId("storage-run-now").click();
-    await expect(testPage.getByTestId("storage-cleanup-job")).toHaveAttribute(
-      "data-state",
+    await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
+      "data-job-state",
       "succeeded",
     );
     await expect.poll(() => dockerInspectExists(managed)).toBe(false);

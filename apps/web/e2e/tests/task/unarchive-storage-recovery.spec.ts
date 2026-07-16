@@ -32,8 +32,8 @@ test("unarchive restores a quarantined workspace before branch recovery", async 
 
   await testPage.goto("/settings/system/storage");
   await testPage.getByTestId("storage-run-now").click();
-  await expect(testPage.getByTestId("storage-cleanup-job")).toHaveAttribute(
-    "data-state",
+  await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
+    "data-job-state",
     "succeeded",
   );
   expect(fs.existsSync(root)).toBe(false);
