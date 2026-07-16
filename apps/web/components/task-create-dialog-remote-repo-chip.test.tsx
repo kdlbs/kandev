@@ -34,6 +34,7 @@ function makeAccessible(
 import { RemoteRepoChip, computeTriggerLabel } from "./task-create-dialog-remote-repo-chip";
 
 const TRIGGER_TID = "remote-repo-chip-trigger";
+const INPUT_TID = "remote-repo-input";
 const FULL_NAME = "acme/site";
 const URL_ACME_SITE = "https://github.com/acme/site";
 
@@ -87,46 +88,6 @@ describe("RemoteRepoChip — write paths", () => {
     });
   });
 
-  it("paste input writes URL with source=paste (no metadata) on Enter", () => {
-    const onURLChange = vi.fn();
-    renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={onURLChange}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
-    fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    const input = screen.getByTestId("remote-paste-url-input") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "https://github.com/acme/api" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    expect(onURLChange).toHaveBeenCalledWith("https://github.com/acme/api", "paste");
-  });
-
-  it("paste input also commits on blur", () => {
-    const onURLChange = vi.fn();
-    renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={onURLChange}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
-    fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    const input = screen.getByTestId("remote-paste-url-input") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "https://github.com/foo/bar" } });
-    fireEvent.blur(input);
-    expect(onURLChange).toHaveBeenCalledWith("https://github.com/foo/bar", "paste");
-  });
-
   it("calls onRemove when the X button is clicked", () => {
     const onRemove = vi.fn();
     renderInProvider(
@@ -145,12 +106,73 @@ describe("RemoteRepoChip — write paths", () => {
   });
 });
 
-describe("RemoteRepoChip — paste/picker race", () => {
-  it("picker click after typing in paste input does not trigger paste commit", () => {
-    // Race: user types into paste input, then clicks a picker option. The
-    // input's onBlur fires first (focus moves to the option button). Without
-    // the guard, blur would commit the typed value AND close the popover,
-    // and the subsequent picker click would be dropped.
+describe("RemoteRepoChip — URL entry", () => {
+  it("writes a GitHub URL with source=paste on Enter", () => {
+    const onURLChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible()}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "https://github.com/acme/api" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onURLChange).toHaveBeenCalledWith("https://github.com/acme/api", "paste");
+  });
+
+  it("commits a pasted GitHub URL immediately", () => {
+    const onURLChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible()}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
+    fireEvent.paste(input, {
+      clipboardData: { getData: () => "https://github.com/foo/bar/pull/42" },
+    });
+    expect(onURLChange).toHaveBeenCalledWith("https://github.com/foo/bar/pull/42", "paste");
+  });
+});
+
+describe("RemoteRepoChip — unified search", () => {
+  it("uses ordinary text as repository search without committing it on blur", () => {
+    const onURLChange = vi.fn();
+    const search = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible({ search })}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "acme" } });
+    fireEvent.blur(input);
+    expect(search).toHaveBeenLastCalledWith("acme");
+    expect(onURLChange).not.toHaveBeenCalled();
+  });
+
+  it("picker click after searching commits only the selected repository", () => {
     const accessibleRepos = makeAccessible({
       repos: [
         {
@@ -176,10 +198,8 @@ describe("RemoteRepoChip — paste/picker race", () => {
       />,
     );
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
-    const input = screen.getByTestId("remote-paste-url-input") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "https://github.com/typed/value" } });
-    // Simulate focus moving to the picker option before the click lands —
-    // this is the exact ordering the browser produces (blur → click).
+    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "acme" } });
     const option = screen.getByText(FULL_NAME).closest("button") as HTMLButtonElement;
     fireEvent.blur(input, { relatedTarget: option });
     fireEvent.click(option);
@@ -305,6 +325,7 @@ describe("RemoteRepoChip — picker loading state", () => {
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
     const loadingNode = screen.getByTestId("remote-repo-picker-loading");
     expect(loadingNode.textContent).toContain("Loading repositories");
+    expect(loadingNode.parentElement?.className).toContain("h-56");
   });
 
   it("does NOT render the spinner once repos have loaded (even if loading flips true again later)", () => {
@@ -338,6 +359,25 @@ describe("RemoteRepoChip — picker loading state", () => {
 });
 
 describe("RemoteRepoChip — popover content", () => {
+  it("renders one top-level input for both repository search and GitHub URLs", () => {
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible()}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
+    expect(input.placeholder).toBe("Search repositories or paste a GitHub URL");
+    expect(screen.queryByTestId("remote-repo-search")).toBeNull();
+    expect(screen.queryByTestId("remote-paste-url-input")).toBeNull();
+  });
+
   it("portals and constrains the repo picker so dialog overflow cannot clip it", () => {
     renderInProvider(
       <div data-testid="clipping-host" className="overflow-hidden">
@@ -357,7 +397,7 @@ describe("RemoteRepoChip — popover content", () => {
     expect(screen.getByTestId("clipping-host").contains(content)).toBe(false);
     expect(content.className).toContain("max-w-[calc(100vw-2rem)]");
     expect(content.className).toContain("max-h-[min(420px,calc(100vh-12rem))]");
-    expect(content.className).toContain("overflow-y-auto");
+    expect(content.className).toContain("overflow-hidden");
   });
 
   it("renders the 'Connect GitHub' banner when accessibleRepos.unavailable=true", () => {

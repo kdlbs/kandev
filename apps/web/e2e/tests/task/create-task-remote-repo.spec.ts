@@ -8,8 +8,8 @@ import { KanbanPage } from "../../pages/kanban-page";
 // rows, add/remove rows, the "GitHub not configured" banner, and mode-switch
 // preservation. Modeled on create-task-github-url.spec.ts but exercises the
 // new chip-popover UI (testids: source-mode-remote, remote-repo-chip,
-// remote-repo-chip-trigger, remote-paste-url-input, remote-add-row,
-// remote-chip-remove, remote-repo-search, remote-repo-option).
+// remote-repo-chip-trigger, remote-repo-input, remote-add-row,
+// remote-chip-remove, remote-repo-option).
 
 type TaskRepoAPI = {
   repositories?: Array<{
@@ -90,7 +90,7 @@ async function pasteUrlInChip(testPage: Page, url: string, chipIndex = 0): Promi
   // multiple chips have popovers open (or Radix is mid-transition between
   // opens), the same testid can briefly resolve to more than one element,
   // so target the last (currently focused) one.
-  const pasteInput = testPage.getByTestId("remote-paste-url-input").last();
+  const pasteInput = testPage.getByTestId("remote-repo-input").last();
   await expect(pasteInput).toBeVisible();
   await pasteInput.fill(url);
   await pasteInput.press("Enter");
@@ -115,6 +115,47 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     // mock-controller.reset on the backend additionally clears the
     // service's accessible-repos / user-orgs caches.
     await apiClient.mockGitHubReset();
+  });
+
+  test("keeps the unified input fixed while repositories load", async ({ testPage, apiClient }) => {
+    await seedAccessibleRepos(apiClient);
+    let releaseRepos = () => undefined;
+    const reposGate = new Promise<void>((resolve) => {
+      releaseRepos = resolve;
+    });
+    await testPage.route("**/api/v1/github/repos?*", async (route) => {
+      await reposGate;
+      await route.continue();
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await openCreateDialog(testPage, kanban);
+    await clickRemoteMode(testPage);
+    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+
+    const popover = testPage.getByTestId("remote-repo-popover-content");
+    const input = testPage.getByTestId("remote-repo-input");
+    await expect(testPage.getByTestId("remote-repo-picker-loading")).toBeVisible();
+    const [loadingPopoverBox, loadingInputBox] = await Promise.all([
+      popover.boundingBox(),
+      input.boundingBox(),
+    ]);
+
+    releaseRepos();
+    await expect(
+      testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }),
+    ).toBeVisible();
+    const [loadedPopoverBox, loadedInputBox] = await Promise.all([
+      popover.boundingBox(),
+      input.boundingBox(),
+    ]);
+
+    expect(loadingPopoverBox).not.toBeNull();
+    expect(loadingInputBox).not.toBeNull();
+    expect(loadedPopoverBox).not.toBeNull();
+    expect(loadedInputBox).not.toBeNull();
+    expect(Math.abs(loadedPopoverBox!.height - loadingPopoverBox!.height)).toBeLessThanOrEqual(2);
+    expect(Math.abs(loadedInputBox!.y - loadingInputBox!.y)).toBeLessThanOrEqual(2);
   });
 
   test("scenario 1: picker selection submits one repo", async ({
@@ -238,7 +279,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
 
     await testPage.getByTestId("remote-repo-chip-trigger").first().click();
     await expectPopoverFitsDialog(testPage);
-    const pasteInput = testPage.getByTestId("remote-paste-url-input").last();
+    const pasteInput = testPage.getByTestId("remote-repo-input").last();
     await pasteInput.fill("https://github.com/issue-owner/issue-repo/issues/1456");
     await pasteInput.press("Enter");
 
@@ -407,7 +448,7 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     await expect(settingsLink).toBeVisible();
 
     // The paste input is still rendered and usable — paste a URL.
-    const pasteInput = testPage.getByTestId("remote-paste-url-input");
+    const pasteInput = testPage.getByTestId("remote-repo-input");
     await expect(pasteInput).toBeVisible();
     await pasteInput.fill("https://github.com/banner-owner/banner-repo");
     await pasteInput.press("Enter");

@@ -59,7 +59,7 @@ test.describe("Create-task URL flow - branches after reopen", () => {
     // inside the chip in Task 5/8).
     await testPage.getByTestId("source-mode-remote").click();
     await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-    const pasteInput = testPage.getByTestId("remote-paste-url-input");
+    const pasteInput = testPage.getByTestId("remote-repo-input");
     await pasteInput.fill(`https://github.com/${repoFullName}`);
     await pasteInput.press("Enter");
 

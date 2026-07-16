@@ -18,7 +18,7 @@ import {
 import { scoreBranch } from "@/lib/utils/branch-filter";
 import type { UseAccessibleReposResult } from "@/hooks/domains/github/use-accessible-repos";
 import type { AccessibleRepo } from "@/lib/api/domains/github-api";
-import type { PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
+import { parseGitHubAnyUrl, type PRInfo } from "@/hooks/domains/github/use-pr-info-by-url";
 import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
 import { useTaskCreateDialogPopoverContainer } from "@/hooks/use-task-create-dialog-popover-container";
 
@@ -79,8 +79,8 @@ export type RemoteRepoChipProps = {
  *
  *     [ repo pill ] [ branch pill ] [X]
  *
- * The repo pill opens a custom popover with two sections (an autocomplete
- * search over the user's accessible GitHub repos, and a paste-a-URL input).
+ * The repo pill opens a custom popover with one input that searches the
+ * user's accessible GitHub repos or accepts a pasted GitHub URL.
  * The branch pill is the shared `Pill` primitive over the per-URL branches
  * the parent loads via `branchesByUrl`.
  */
@@ -220,7 +220,7 @@ function RemoteRepoPill({
       </PopoverTrigger>
       <PopoverContent
         data-testid="remote-repo-popover-content"
-        className="w-[380px] max-w-[calc(100vw-2rem)] max-h-[min(420px,calc(100vh-12rem))] overflow-y-auto p-0"
+        className="w-[380px] max-w-[calc(100vw-2rem)] max-h-[min(420px,calc(100vh-12rem))] overflow-hidden p-0"
         align="start"
         portalContainer={portalContainer}
       >
@@ -278,51 +278,41 @@ function RemoteRepoPopoverContent({
   onPick: (repo: AccessibleRepo) => void;
   onPaste: (value: string) => void;
 }) {
-  const [search, setSearch] = useState("");
-  // Destructure the stable `search` callback so the effect's dep array is
-  // not invalidated on every render of the parent (the hook's result object
-  // identity changes each render, but `search` is a useCallback). The hook
-  // itself owns the 250ms debounce so we just forward the latest value.
+  const [value, setValue] = useState("");
   const { search: triggerSearch } = accessible;
   useEffect(() => {
-    triggerSearch(search);
-  }, [search, triggerSearch]);
-  return (
-    <div className="flex flex-col">
-      <PickerSection
-        accessible={accessible}
-        search={search}
-        onSearchChange={setSearch}
-        onPick={onPick}
-      />
-      <div className="border-t" />
-      <PasteSection onPaste={onPaste} />
-    </div>
-  );
-}
+    triggerSearch(value);
+  }, [value, triggerSearch]);
 
-function PickerSection({
-  accessible,
-  search,
-  onSearchChange,
-  onPick,
-}: {
-  accessible: UseAccessibleReposResult;
-  search: string;
-  onSearchChange: (v: string) => void;
-  onPick: (repo: AccessibleRepo) => void;
-}) {
-  if (accessible.unavailable) return <ConnectGitHubBanner />;
+  const commitURL = (candidate: string) => {
+    const trimmed = candidate.trim();
+    if (!parseGitHubAnyUrl(trimmed)) return false;
+    onPaste(trimmed);
+    return true;
+  };
+
   return (
     <div className="flex flex-col">
       <input
+        autoFocus
         type="text"
-        value={search}
-        onChange={(e) => onSearchChange(e.target.value)}
-        placeholder="Search your GitHub repos…"
-        data-testid="remote-repo-search"
+        value={value}
+        onChange={(event) => setValue(event.target.value)}
+        onPaste={(event) => {
+          const pasted = event.clipboardData.getData("text");
+          if (!commitURL(pasted)) return;
+          event.preventDefault();
+          setValue(pasted.trim());
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && commitURL(value)) event.preventDefault();
+        }}
+        placeholder="Search repositories or paste a GitHub URL"
+        aria-label="Search repositories or paste a GitHub URL"
+        data-testid="remote-repo-input"
+        data-legacy-testid="remote-paste-url-input"
         className={cn(
-          "h-9 mx-2 mt-2 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
+          "h-11 sm:h-9 mx-2 mt-2 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
           "outline-none focus:bg-muted focus:border-border placeholder:text-muted-foreground",
         )}
       />
@@ -340,7 +330,8 @@ function PickerList({
 }) {
   const { repos, loading, error } = accessible;
   return (
-    <div className="max-h-56 overflow-y-auto p-1">
+    <div className="h-56 max-h-[calc(100vh-16rem)] overflow-y-auto p-1">
+      {accessible.unavailable ? <ConnectGitHubBanner /> : null}
       {loading && repos.length === 0 ? (
         <div
           className="flex items-center gap-2 px-2 py-3 text-xs text-muted-foreground"
@@ -350,7 +341,7 @@ function PickerList({
           <span>Loading repositories…</span>
         </div>
       ) : null}
-      {!loading && repos.length === 0 && !error ? (
+      {!accessible.unavailable && !loading && repos.length === 0 && !error ? (
         <div className="px-2 py-3 text-xs text-muted-foreground">No repositories found.</div>
       ) : null}
       {error ? (
@@ -378,7 +369,7 @@ function RepoOption({
       onClick={() => onPick(repo)}
       data-testid="remote-repo-option"
       className={cn(
-        "flex w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
+        "flex min-h-11 sm:min-h-8 w-full items-center justify-between gap-2 rounded-sm px-2 py-1.5 text-xs",
         "hover:bg-muted cursor-pointer text-left",
       )}
     >
@@ -403,55 +394,6 @@ function ConnectGitHubBanner() {
         Settings
       </Link>{" "}
       to pick from your repositories.
-    </div>
-  );
-}
-
-function PasteSection({ onPaste }: { onPaste: (value: string) => void }) {
-  const [value, setValue] = useState("");
-  const commit = () => {
-    const trimmed = value.trim();
-    if (!trimmed) return;
-    onPaste(trimmed);
-  };
-  return (
-    <div className="flex flex-col gap-1 p-2">
-      <label className="text-[11px] text-muted-foreground" htmlFor="remote-paste-url-input">
-        …or paste a URL/PR/issue
-      </label>
-      <input
-        id="remote-paste-url-input"
-        type="text"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onBlur={(e) => {
-          // If focus moved to another element inside this popover (e.g., a
-          // picker option click), let that handler run instead of committing
-          // the paste — otherwise the popover would close before the click
-          // lands and the user's pick would be lost.
-          const popoverContent = e.currentTarget.closest('[data-slot="popover-content"]');
-          if (
-            popoverContent &&
-            e.relatedTarget instanceof Node &&
-            popoverContent.contains(e.relatedTarget)
-          ) {
-            return;
-          }
-          commit();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commit();
-          }
-        }}
-        placeholder="github.com/owner/repo, .../pull/123, or .../issues/123"
-        data-testid="remote-paste-url-input"
-        className={cn(
-          "h-8 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
-          "outline-none focus:bg-muted focus:border-border placeholder:text-muted-foreground",
-        )}
-      />
     </div>
   );
 }

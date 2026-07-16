@@ -17,7 +17,7 @@ async function openRemoteAndPasteURL(testPage: Page, url: string): Promise<void>
   await testPage.getByTestId("source-mode-remote").click();
   // The chip popover holds the paste input. Open the first chip.
   await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-  const pasteInput = testPage.getByTestId("remote-paste-url-input");
+  const pasteInput = testPage.getByTestId("remote-repo-input");
   await expect(pasteInput).toBeVisible();
   await pasteInput.fill(url);
   await pasteInput.press("Enter");
