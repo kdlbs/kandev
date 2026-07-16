@@ -513,3 +513,42 @@ describe("introduced replay cycle inventory", () => {
     expect(analyzeIntroducedWorkflowReplayCycles(baseline, proposed)).toEqual([]);
   });
 });
+
+describe("bounded replay cycle inventory", () => {
+  it("fails conservatively when alternate cycle inventory is truncated", () => {
+    const existingStepIds = Array.from(
+      { length: 257 },
+      (_, index) => `existing-${index.toString().padStart(3, "0")}`,
+    );
+    const baseline = [
+      step(WORK_STEP_ID, 0, {
+        autoStart: true,
+        onTurnComplete: existingStepIds.map(guardedMoveToStep),
+      }),
+      ...existingStepIds.map((stepId, index) =>
+        step(stepId, index + 1, {
+          onTurnComplete: [moveToStep(WORK_STEP_ID)],
+        }),
+      ),
+    ];
+    const newStepId = "new-beyond-inventory-cap";
+    const proposed = [
+      {
+        ...baseline[0],
+        events: {
+          ...baseline[0].events,
+          on_turn_complete: [
+            ...(baseline[0].events?.on_turn_complete ?? []),
+            guardedMoveToStep(newStepId),
+          ],
+        },
+      },
+      ...baseline.slice(1),
+      step(newStepId, baseline.length, {
+        onTurnComplete: [moveToStep(WORK_STEP_ID)],
+      }),
+    ];
+
+    expect(analyzeIntroducedWorkflowReplayCycles(baseline, proposed)).toHaveLength(1);
+  });
+});

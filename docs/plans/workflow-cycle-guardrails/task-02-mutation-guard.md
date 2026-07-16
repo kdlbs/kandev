@@ -16,7 +16,9 @@ spec: "../../specs/workflow-cycle-guardrails/spec.md"
   shape before sending the current API mutation.
 - Blocking proposals send no request; warning proposals execute exactly once
   only after confirmation; existing diagnostic identities and cycle-removing
-  edits are not gated.
+  edits are not gated unless identity comparison is conservatively truncated.
+- Successful remote mutations reconcile from their authoritative responses;
+  reorder remains optimistic while pending and rolls back on request failure.
 - Draft workflow save preflights before `createWorkflowAction`, with cancel
   leaving the draft and sending no create or step requests.
 
@@ -43,7 +45,7 @@ Task 01.
   draft creation.
 - Analyzer and diagnostic identity contract from Task 01.
 - Existing `useWorkflowStepActions` and `useWorkflowSaveActions` behavior,
-  including temp-step remapping and refresh-on-error.
+  including temp-step remapping and request-error feedback.
 
 ## Output Contract
 

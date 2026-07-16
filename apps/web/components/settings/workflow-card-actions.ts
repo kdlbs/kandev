@@ -160,6 +160,7 @@ export function useWorkflowStepActions({
     await mutationGuard.guardMutation({
       proposedSteps,
       operation: async () => {
+        setWorkflowSteps(proposedSteps);
         try {
           const response = await reorderWorkflowStepsAction(
             workflow.id,
@@ -172,6 +173,7 @@ export function useWorkflowStepActions({
             description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
             variant: "error",
           });
+          setWorkflowSteps(workflowSteps);
         }
       },
     });

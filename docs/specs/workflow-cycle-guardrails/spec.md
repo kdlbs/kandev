@@ -101,8 +101,10 @@ ordered trace. The authoring guard compares a bounded inventory of these
 identities between current and proposed shapes so it can distinguish every
 discovered introduced cycle from an existing one, even when the preferred
 display trace is unchanged. The UI still presents one deterministic preferred
-trace per auto-start step. The analysis is deterministic and has no persisted
-state.
+trace per auto-start step. If the bounded inventory is exhausted, the guard
+conservatively presents that preferred diagnostic instead of allowing the
+mutation based on an incomplete identity comparison. The analysis is
+deterministic and has no persisted state.
 
 ## Failure Modes
 

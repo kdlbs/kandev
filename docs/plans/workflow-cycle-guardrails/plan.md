@@ -86,11 +86,13 @@ Changes:
   any follow-up step mutations.
 - Hold one pending user-mediated operation until confirmation; execute it once
   on **Apply anyway** or **Create anyway**, and discard it on cancel.
-- Reject fully automatic proposals without exposing an override. Do not gate
-  changes whose diagnostic identities already exist in the current shape, and
-  always allow changes that remove diagnostics.
-- Preserve current request errors, refresh behavior, temp-step remapping, and
-  workflow creation sequencing.
+- Reject fully automatic proposals without exposing an override. Compare a
+  bounded identity inventory so alternate cycles are not hidden by the
+  preferred display trace, and fall back conservatively when that inventory is
+  exhausted. Always allow changes that remove diagnostics.
+- Preserve current request errors, temp-step remapping, optimistic reorder
+  feedback, and workflow creation sequencing. Reconcile successful remote
+  mutations from their authoritative responses and roll failed reorders back.
 
 ### Diagnostic presentation
 

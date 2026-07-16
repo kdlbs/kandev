@@ -19,8 +19,9 @@ spec: "../../specs/workflow-cycle-guardrails/spec.md"
   and ignores cycles without auto-start
   re-entry through `on_turn_complete`. An `on_turn_start` edge into an
   auto-start step is covered as a safe non-replay regression.
-- Trace choice, identities, affected steps, dangling targets, reorder behavior,
-  and all three prompt-source categories have focused unit coverage.
+- Trace choice, bounded identity inventory with conservative truncation,
+  affected steps, dangling targets, reorder behavior, and all three
+  prompt-source categories have focused unit coverage.
 
 ## Verification
 

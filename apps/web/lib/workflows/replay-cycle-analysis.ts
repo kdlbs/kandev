@@ -63,6 +63,11 @@ type ReplayAnalysisContext = {
   graph: Map<string, ReplayGraphEdge[]>;
 };
 
+type CycleInventory = {
+  candidates: CycleCandidate[];
+  truncated: boolean;
+};
+
 const MAX_CYCLE_INVENTORY_SIZE = 256;
 const MAX_CYCLE_INVENTORY_STATES = 4096;
 
@@ -86,7 +91,9 @@ export function analyzeIntroducedWorkflowReplayCycles(
   const existingIdentities = new Set(
     baseline.orderedSteps.flatMap((step) =>
       stepHasOnEnterAction(step, "auto_start_agent")
-        ? collectCycleInventory(step, baseline.graph).map((candidate) => candidate.identity)
+        ? collectCycleInventory(step, baseline.graph).candidates.map(
+            (candidate) => candidate.identity,
+          )
         : [],
     ),
   );
@@ -94,10 +101,13 @@ export function analyzeIntroducedWorkflowReplayCycles(
 
   return proposed.orderedSteps.flatMap((autoStartStep) => {
     if (!stepHasOnEnterAction(autoStartStep, "auto_start_agent")) return [];
-    const selected = collectCycleInventory(autoStartStep, proposed.graph)
+    const inventory = collectCycleInventory(autoStartStep, proposed.graph);
+    const selected = inventory.candidates
       .filter((candidate) => !existingIdentities.has(candidate.identity))
       .sort(compareCandidates)[0];
-    return selected ? [toDiagnostic(autoStartStep, selected)] : [];
+    const fallback = inventory.truncated ? inventory.candidates[0] : undefined;
+    const diagnosticCandidate = selected ?? fallback;
+    return diagnosticCandidate ? [toDiagnostic(autoStartStep, diagnosticCandidate)] : [];
   });
 }
 
@@ -241,19 +251,22 @@ function findPreferredCycleCandidate(
   );
 }
 
+type CycleInventorySearchState = {
+  stepId: string;
+  trace: WorkflowReplayCycleHop[];
+  visitedStepIds: Set<string>;
+};
+
 function collectCycleInventory(
   autoStartStep: WorkflowStep,
   graph: Map<string, ReplayGraphEdge[]>,
-): CycleCandidate[] {
+): CycleInventory {
   const candidates = new Map<string, CycleCandidate>();
+  let truncated = false;
   const preferred = findPreferredCycleCandidate(autoStartStep, graph);
   if (preferred) candidates.set(preferred.identity, preferred);
 
-  const queue: Array<{
-    stepId: string;
-    trace: WorkflowReplayCycleHop[];
-    visitedStepIds: Set<string>;
-  }> = [
+  const queue: CycleInventorySearchState[] = [
     {
       stepId: autoStartStep.id,
       trace: [],
@@ -270,30 +283,37 @@ function collectCycleInventory(
   ) {
     const state = queue[index];
     for (const edge of graph.get(state.stepId) ?? []) {
-      const trace = [...state.trace, toTraceHop(edge)];
-      if (edge.destination.id === autoStartStep.id) {
-        if (edge.trigger === "on_turn_complete" && candidates.size < MAX_CYCLE_INVENTORY_SIZE) {
-          const candidate = toCandidate(autoStartStep.id, trace);
-          candidates.set(candidate.identity, candidate);
-        }
-        if (candidates.size >= MAX_CYCLE_INVENTORY_SIZE) break;
-        continue;
-      }
-      if (
-        state.visitedStepIds.has(edge.destination.id) ||
-        queue.length >= MAX_CYCLE_INVENTORY_STATES
-      ) {
-        continue;
-      }
-      queue.push({
-        stepId: edge.destination.id,
-        trace,
-        visitedStepIds: new Set([...state.visitedStepIds, edge.destination.id]),
-      });
+      truncated =
+        expandCycleInventoryEdge(autoStartStep.id, state, edge, queue, candidates) || truncated;
+      if (candidates.size >= MAX_CYCLE_INVENTORY_SIZE) break;
     }
   }
 
-  return [...candidates.values()].sort(compareCandidates);
+  return { candidates: [...candidates.values()].sort(compareCandidates), truncated };
+}
+
+function expandCycleInventoryEdge(
+  autoStartStepId: string,
+  state: CycleInventorySearchState,
+  edge: ReplayGraphEdge,
+  queue: CycleInventorySearchState[],
+  candidates: Map<string, CycleCandidate>,
+): boolean {
+  const trace = [...state.trace, toTraceHop(edge)];
+  if (edge.destination.id === autoStartStepId) {
+    if (edge.trigger !== "on_turn_complete") return false;
+    const candidate = toCandidate(autoStartStepId, trace);
+    candidates.set(candidate.identity, candidate);
+    return candidates.size >= MAX_CYCLE_INVENTORY_SIZE;
+  }
+  if (state.visitedStepIds.has(edge.destination.id)) return false;
+  if (queue.length >= MAX_CYCLE_INVENTORY_STATES) return true;
+  queue.push({
+    stepId: edge.destination.id,
+    trace,
+    visitedStepIds: new Set([...state.visitedStepIds, edge.destination.id]),
+  });
+  return false;
 }
 
 function findShortestCycleCandidate(
