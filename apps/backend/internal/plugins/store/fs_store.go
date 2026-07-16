@@ -4,11 +4,31 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 )
+
+// idPattern mirrors internal/plugins/manifest's plugin id pattern:
+// lowercase alphanumerics, dots, underscores, and hyphens, starting with a
+// lowercase alphanumeric. manifest.Validate already enforces this shape
+// upstream during install; this is the sink-level guard every FSStore
+// method re-applies to id before building a filesystem path from it, so a
+// malformed id (e.g. containing "..", "/", or "\") can never reach disk
+// I/O regardless of how it got here.
+var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+// safePluginID rejects any id that is not a single, clean path segment
+// matching idPattern. It is the guard called by every FSStore method
+// before recordPath/configPath build a path from id.
+func safePluginID(id string) error {
+	if !idPattern.MatchString(id) {
+		return fmt.Errorf("plugins: invalid plugin id %q", id)
+	}
+	return nil
+}
 
 // FSStore persists plugin installation records under dir as "{id}.yml" (the
 // Record) and "{id}.config.yml" (operator-editable config). FSStore
@@ -38,6 +58,9 @@ func (s *FSStore) configPath(id string) string {
 // store directory if needed. Used both to create a fresh record (Install)
 // and to persist updates to an existing one (Save).
 func (s *FSStore) writeRecord(record *Record) error {
+	if err := safePluginID(record.ID); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return fmt.Errorf("create plugin store dir: %w", err)
 	}
@@ -53,6 +76,9 @@ func (s *FSStore) writeRecord(record *Record) error {
 
 // Get loads the record for id from disk.
 func (s *FSStore) Get(id string) (*Record, error) {
+	if err := safePluginID(id); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(s.recordPath(id))
 	if err != nil {
 		if os.IsNotExist(err) {

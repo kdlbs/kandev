@@ -244,8 +244,14 @@ func validateInstallManifest(files map[string][]byte) (*manifest.Manifest, strin
 // temp dir to destRoot/<id>/<version>. It fails with ErrVersionExists if
 // that directory already exists, and cleans up the temp dir on any error.
 func extractPackage(destRoot string, m *manifest.Manifest, files map[string][]byte, hostExecPath string) (string, error) {
-	pluginDir := filepath.Join(destRoot, m.ID)
-	versionDir := filepath.Join(pluginDir, m.Version)
+	pluginDir, err := securejoin(destRoot, m.ID)
+	if err != nil {
+		return "", err
+	}
+	versionDir, err := securejoin(pluginDir, m.Version)
+	if err != nil {
+		return "", err
+	}
 
 	if _, err := os.Stat(versionDir); err == nil {
 		return "", fmt.Errorf("%w: %s", ErrVersionExists, versionDir)
@@ -282,10 +288,16 @@ func extractPackage(destRoot string, m *manifest.Manifest, files map[string][]by
 
 // writePackageFiles writes every entry in files under root, creating
 // parent directories as needed, and chmods entries listed in execSet to
-// 0755.
+// 0755. Every entry name is archive-controlled, so each destination path
+// is re-validated with securejoin at this write sink even though
+// cleanArchivePath already rejected unsafe names when the archive was
+// read (defense in depth: this is the actual filesystem write).
 func writePackageFiles(root string, files map[string][]byte, execSet map[string]bool) error {
 	for name, data := range files {
-		dest := filepath.Join(root, filepath.FromSlash(name))
+		dest, err := securejoin(root, filepath.FromSlash(name))
+		if err != nil {
+			return err
+		}
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return fmt.Errorf("pkgtar: creating dir for %s: %w", name, err)
 		}
@@ -298,6 +310,28 @@ func writePackageFiles(root string, files map[string][]byte, execSet map[string]
 		}
 	}
 	return nil
+}
+
+// securejoin joins root and rel (a path derived from archive-controlled
+// input: an archive entry name or a manifest-declared executable path)
+// and verifies the result stays within root. It is the sink-level guard
+// against path traversal / "zip slip": callers upstream (cleanArchivePath,
+// manifest.Validate) already reject unsafe names, but this re-checks
+// containment right before the filesystem operation that uses the path.
+func securejoin(root, rel string) (string, error) {
+	if filepath.IsAbs(rel) {
+		return "", fmt.Errorf("%w: absolute path %q", ErrPathTraversal, rel)
+	}
+	dst := filepath.Join(root, rel)
+	cleanRoot := filepath.Clean(root)
+	relToRoot, err := filepath.Rel(cleanRoot, filepath.Clean(dst))
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", ErrPathTraversal, rel)
+	}
+	if relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(os.PathSeparator)) || filepath.IsAbs(relToRoot) {
+		return "", fmt.Errorf("%w: %s", ErrPathTraversal, rel)
+	}
+	return dst, nil
 }
 
 // executablePaths returns the set of package-relative paths declared by
@@ -318,7 +352,10 @@ func Remove(destRoot, id string) error {
 	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\") {
 		return fmt.Errorf("pkgtar: invalid plugin id %q", id)
 	}
-	dir := filepath.Join(destRoot, id)
+	dir, err := securejoin(destRoot, id)
+	if err != nil {
+		return err
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("pkgtar: removing %s: %w", dir, err)
 	}

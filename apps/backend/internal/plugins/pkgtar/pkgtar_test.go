@@ -563,3 +563,52 @@ func assertNoPartialInstall(t *testing.T, destRoot, id string) {
 		}
 	}
 }
+
+func TestSecureJoin_RejectsTraversalRelativePath(t *testing.T) {
+	root := t.TempDir()
+
+	_, err := securejoin(root, "../evil.txt")
+	if err == nil {
+		t.Fatal("securejoin() expected error for traversal path, got nil")
+	}
+	if !errors.Is(err, ErrPathTraversal) {
+		t.Fatalf("securejoin() error = %v, want ErrPathTraversal", err)
+	}
+}
+
+func TestSecureJoin_RejectsDeeplyNestedTraversal(t *testing.T) {
+	root := t.TempDir()
+
+	_, err := securejoin(root, "server/../../evil.txt")
+	if err == nil {
+		t.Fatal("securejoin() expected error for nested traversal path, got nil")
+	}
+	if !errors.Is(err, ErrPathTraversal) {
+		t.Fatalf("securejoin() error = %v, want ErrPathTraversal", err)
+	}
+}
+
+func TestSecureJoin_RejectsAbsolutePath(t *testing.T) {
+	root := t.TempDir()
+
+	_, err := securejoin(root, "/etc/passwd")
+	if err == nil {
+		t.Fatal("securejoin() expected error for absolute path, got nil")
+	}
+	if !errors.Is(err, ErrPathTraversal) {
+		t.Fatalf("securejoin() error = %v, want ErrPathTraversal", err)
+	}
+}
+
+func TestSecureJoin_AllowsCleanRelativePath(t *testing.T) {
+	root := t.TempDir()
+
+	got, err := securejoin(root, filepath.Join("server", "plugin-linux-amd64"))
+	if err != nil {
+		t.Fatalf("securejoin() unexpected error: %v", err)
+	}
+	want := filepath.Join(root, "server", "plugin-linux-amd64")
+	if got != want {
+		t.Fatalf("securejoin() = %q, want %q", got, want)
+	}
+}

@@ -207,3 +207,77 @@ func TestFSStore_GetConfig_NoConfigFileReturnsEmptyMap(t *testing.T) {
 		t.Fatalf("GetConfig() = %v, want empty map when no config was ever set", got)
 	}
 }
+
+// --- id validation: every FSStore method that builds a path from an id
+// must reject a traversal/unsafe id before touching the filesystem. ---
+
+func TestFSStore_Get_RejectsTraversalID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	if _, err := s.Get("../escape"); err == nil {
+		t.Fatal("Get() expected error for traversal id, got nil")
+	}
+}
+
+func TestFSStore_Save_RejectsTraversalID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	err := s.Save(testRecord("../escape"))
+	if err == nil {
+		t.Fatal("Save() expected error for traversal id, got nil")
+	}
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(dir), "escape.yml")); !os.IsNotExist(statErr) {
+		t.Fatalf("Save() wrote a record file outside the store dir: stat err = %v", statErr)
+	}
+}
+
+func TestFSStore_Delete_RejectsTraversalID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	if err := s.Delete("../escape"); err == nil {
+		t.Fatal("Delete() expected error for traversal id, got nil")
+	}
+}
+
+func TestFSStore_GetConfig_RejectsTraversalID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	if _, err := s.GetConfig("../escape"); err == nil {
+		t.Fatal("GetConfig() expected error for traversal id, got nil")
+	}
+}
+
+func TestFSStore_SetConfig_RejectsTraversalID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	err := s.SetConfig("../escape", map[string]any{"a": 1})
+	if err == nil {
+		t.Fatal("SetConfig() expected error for traversal id, got nil")
+	}
+	if _, statErr := os.Stat(filepath.Join(filepath.Dir(dir), "escape.config.yml")); !os.IsNotExist(statErr) {
+		t.Fatalf("SetConfig() wrote a config file outside the store dir: stat err = %v", statErr)
+	}
+}
+
+func TestFSStore_Get_RejectsIDWithPathSeparator(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	if _, err := s.Get("kandev/plugin"); err == nil {
+		t.Fatal("Get() expected error for id containing a path separator, got nil")
+	}
+}
+
+func TestFSStore_Get_RejectsEmptyID(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	if _, err := s.Get(""); err == nil {
+		t.Fatal("Get() expected error for empty id, got nil")
+	}
+}

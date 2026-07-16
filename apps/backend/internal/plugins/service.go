@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -272,8 +273,15 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 }
 
 // InstallFromURL downloads url (capped at maxDownloadSize, bounded by
-// downloadTimeout) and installs it via Install.
+// downloadTimeout) and installs it via Install. url is operator-provided
+// (an admin installing a plugin from a URL), so this does not attempt full
+// SSRF elimination, but validateInstallURL rejects non-http(s) schemes and
+// URLs with no host before any request is built.
 func (s *Service) InstallFromURL(ctx context.Context, url string) (*store.Record, error) {
+	if err := validateInstallURL(url); err != nil {
+		return nil, fmt.Errorf("plugins: %w", err)
+	}
+
 	reqCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
 	defer cancel()
 
@@ -302,6 +310,29 @@ func (s *Service) InstallFromURL(ctx context.Context, url string) (*store.Record
 	}
 
 	return s.Install(ctx, bytes.NewReader(data))
+}
+
+// validateInstallURL is the sink-level guard InstallFromURL applies before
+// building any outbound request: raw must parse as a URL with an http or
+// https scheme and a non-empty host. It rejects file://, gopher://, and
+// other schemes that would let an operator-supplied string reach something
+// other than a plain HTTP(S) fetch. This narrows, but does not eliminate,
+// the residual SSRF surface inherent to letting an operator point the
+// installer at an arbitrary http(s) URL (including internal hosts).
+func validateInstallURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid install URL: %w", err)
+	}
+	switch parsed.Scheme {
+	case "http", "https":
+	default:
+		return fmt.Errorf("invalid install URL: unsupported scheme %q (must be http or https)", parsed.Scheme)
+	}
+	if parsed.Hostname() == "" {
+		return errors.New("invalid install URL: missing host")
+	}
+	return nil
 }
 
 // Uninstall stops id's process (if running), removes its extracted package

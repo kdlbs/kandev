@@ -13,7 +13,7 @@ export function dispatchToPluginWsHandlers(action: string, payload: unknown): vo
     try {
       handler(payload);
     } catch (error) {
-      console.error(`[plugins] ws handler for "${action}" threw`, error);
+      console.error("[plugins] ws handler threw for action:", action, error);
     }
   }
 }

@@ -49,4 +49,23 @@ describe("dispatchToPluginWsHandlers", () => {
 
     consoleError.mockRestore();
   });
+
+  it("logs a throwing handler's action as a data argument, never interpolated into the format string", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const boom = new Error("boom");
+    pluginRegistry.forPlugin("plugin-a").registerWsHandler(ACTION, () => {
+      throw boom;
+    });
+
+    dispatchToPluginWsHandlers(ACTION, {});
+
+    expect(consoleError).toHaveBeenCalledTimes(1);
+    const [firstArg, ...rest] = consoleError.mock.calls[0]!;
+    expect(typeof firstArg).toBe("string");
+    expect(firstArg as string).not.toContain(ACTION);
+    expect(rest).toContain(ACTION);
+    expect(rest).toContain(boom);
+
+    consoleError.mockRestore();
+  });
 });

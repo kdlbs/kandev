@@ -670,3 +670,47 @@ func TestServiceStartActivePluginsSpawnsOnlyActiveManagedNotAlreadyRunning(t *te
 		t.Fatal("StartActivePlugins() did not spawn the active plugin")
 	}
 }
+
+func TestValidateInstallURL_AcceptsHTTPAndHTTPS(t *testing.T) {
+	for _, raw := range []string{
+		"https://example.com/plugin.tar.gz",
+		"http://example.com/plugin.tar.gz",
+	} {
+		if err := validateInstallURL(raw); err != nil {
+			t.Fatalf("validateInstallURL(%q) unexpected error: %v", raw, err)
+		}
+	}
+}
+
+func TestValidateInstallURL_RejectsNonHTTPScheme(t *testing.T) {
+	for _, raw := range []string{
+		"file:///etc/passwd",
+		"gopher://example.com/plugin",
+		"ftp://example.com/plugin.tar.gz",
+	} {
+		if err := validateInstallURL(raw); err == nil {
+			t.Fatalf("validateInstallURL(%q) expected error, got nil", raw)
+		}
+	}
+}
+
+func TestValidateInstallURL_RejectsEmptyHost(t *testing.T) {
+	if err := validateInstallURL("https:///plugin.tar.gz"); err == nil {
+		t.Fatal("validateInstallURL() expected error for empty host, got nil")
+	}
+}
+
+func TestValidateInstallURL_RejectsMalformedURL(t *testing.T) {
+	if err := validateInstallURL("://not-a-url"); err == nil {
+		t.Fatal("validateInstallURL() expected error for malformed URL, got nil")
+	}
+}
+
+func TestServiceInstallFromURL_RejectsNonHTTPSchemeBeforeAnyRequest(t *testing.T) {
+	svc, _, _ := newTestService(t)
+
+	_, err := svc.InstallFromURL(context.Background(), "file:///etc/passwd")
+	if err == nil {
+		t.Fatal("InstallFromURL() expected error for file:// scheme, got nil")
+	}
+}
