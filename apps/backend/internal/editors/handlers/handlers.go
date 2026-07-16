@@ -99,7 +99,15 @@ func (h *Handlers) httpDeleteEditor(c *gin.Context) {
 }
 
 func (h *Handlers) httpOpenFolder(c *gin.Context) {
-	resp, err := h.controller.OpenFolder(c.Request.Context(), c.Param("id"))
+	var req dto.OpenFolderRequest
+	// The body is optional for backward compatibility.
+	if c.Request.ContentLength > 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+			return
+		}
+	}
+	resp, err := h.controller.OpenFolder(c.Request.Context(), c.Param("id"), req)
 	if err != nil {
 		h.logger.Error("failed to open folder", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to open folder"})

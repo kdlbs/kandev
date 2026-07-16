@@ -86,6 +86,7 @@ export async function openSessionInEditor(
     file_path: string;
     line: number;
     column: number;
+    worktree_id: string;
   }>,
   options?: ApiRequestOptions,
 ) {

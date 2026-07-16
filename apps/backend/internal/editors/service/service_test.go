@@ -9,7 +9,7 @@ import (
 
 func TestOpenFolder_EmptySessionID(t *testing.T) {
 	svc := &Service{}
-	err := svc.OpenFolder(context.Background(), "")
+	err := svc.OpenFolder(context.Background(), "", "")
 	if err != ErrEditorConfigInvalid {
 		t.Errorf("expected ErrEditorConfigInvalid, got %v", err)
 	}
@@ -17,7 +17,7 @@ func TestOpenFolder_EmptySessionID(t *testing.T) {
 
 func TestResolveSessionPath_NilSession(t *testing.T) {
 	svc := &Service{}
-	_, err := svc.resolveSessionPath(context.Background(), nil)
+	_, err := svc.resolveSessionPath(context.Background(), nil, "")
 	if err != ErrWorkspaceNotFound {
 		t.Errorf("expected ErrWorkspaceNotFound, got %v", err)
 	}
@@ -31,7 +31,7 @@ func TestResolveSessionPath_WithWorktree(t *testing.T) {
 			{WorktreePath: "/path/to/worktree"},
 		},
 	}
-	path, err := svc.resolveSessionPath(context.Background(), session)
+	path, err := svc.resolveSessionPath(context.Background(), session, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,7 +48,57 @@ func TestResolveSessionPath_EmptyWorktreePath(t *testing.T) {
 			{WorktreePath: ""},
 		},
 	}
-	_, err := svc.resolveSessionPath(context.Background(), session)
+	_, err := svc.resolveSessionPath(context.Background(), session, "")
+	if err != ErrWorkspaceNotFound {
+		t.Errorf("expected ErrWorkspaceNotFound, got %v", err)
+	}
+}
+
+func TestResolveSessionPath_SelectsWorktreeByID(t *testing.T) {
+	svc := &Service{}
+	session := &taskmodels.TaskSession{
+		ID: "session-1",
+		Worktrees: []*taskmodels.TaskSessionWorktree{
+			{ID: "assoc-1", WorktreeID: "wt-1", WorktreePath: "/path/to/repo-a"},
+			{ID: "assoc-2", WorktreeID: "wt-2", WorktreePath: "/path/to/repo-b"},
+		},
+	}
+
+	tests := []struct {
+		name       string
+		worktreeID string
+		expected   string
+		expectErr  error
+	}{
+		{name: "by worktree id", worktreeID: "wt-2", expected: "/path/to/repo-b"},
+		{name: "by association id", worktreeID: "assoc-2", expected: "/path/to/repo-b"},
+		{name: "empty falls back to first", worktreeID: "", expected: "/path/to/repo-a"},
+		{name: "unknown id", worktreeID: "wt-missing", expectErr: ErrWorkspaceNotFound},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, err := svc.resolveSessionPath(context.Background(), session, tt.worktreeID)
+			if err != tt.expectErr {
+				t.Fatalf("expected error %v, got %v", tt.expectErr, err)
+			}
+			if path != tt.expected {
+				t.Errorf("expected %s, got %s", tt.expected, path)
+			}
+		})
+	}
+}
+
+func TestResolveSessionPath_SelectedWorktreeEmptyPath(t *testing.T) {
+	svc := &Service{}
+	session := &taskmodels.TaskSession{
+		ID: "session-1",
+		Worktrees: []*taskmodels.TaskSessionWorktree{
+			{ID: "assoc-1", WorktreeID: "wt-1", WorktreePath: "/path/to/repo-a"},
+			{ID: "assoc-2", WorktreeID: "wt-2", WorktreePath: ""},
+		},
+	}
+	_, err := svc.resolveSessionPath(context.Background(), session, "wt-2")
 	if err != ErrWorkspaceNotFound {
 		t.Errorf("expected ErrWorkspaceNotFound, got %v", err)
 	}

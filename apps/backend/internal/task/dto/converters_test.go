@@ -3,6 +3,7 @@ package dto
 import (
 	"testing"
 
+	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -54,5 +55,32 @@ func TestFromWorkflowStep_PreservesWIPFields(t *testing.T) {
 	}
 	if got.PullFromStepID != "queue-step" {
 		t.Fatalf("PullFromStepID = %q, want queue-step", got.PullFromStepID)
+	}
+}
+
+func TestFromTaskSession_IncludesAllWorktrees(t *testing.T) {
+	session := &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		Worktrees: []*models.TaskSessionWorktree{
+			{ID: "assoc-1", WorktreeID: "wt-1", RepositoryID: "repo-a", WorktreePath: "/x/a"},
+			{ID: "assoc-2", WorktreeID: "wt-2", RepositoryID: "repo-b", WorktreePath: "/x/b"},
+		},
+	}
+
+	full := FromTaskSession(session)
+	if len(full.Worktrees) != 2 {
+		t.Fatalf("FromTaskSession Worktrees len = %d, want 2", len(full.Worktrees))
+	}
+	if full.WorktreePath != "/x/a" {
+		t.Fatalf("WorktreePath = %q, want /x/a (first worktree)", full.WorktreePath)
+	}
+
+	summary := FromTaskSessionSummary(session)
+	if len(summary.Worktrees) != 2 {
+		t.Fatalf("FromTaskSessionSummary Worktrees len = %d, want 2", len(summary.Worktrees))
+	}
+	if summary.Worktrees[1].WorktreeID != "wt-2" {
+		t.Fatalf("second worktree id = %q, want wt-2", summary.Worktrees[1].WorktreeID)
 	}
 }
