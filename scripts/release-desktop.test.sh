@@ -225,4 +225,5 @@ fi
 grep -q "Checksum verification failed" "$ERR_FILE" || fail "verify-desktop-assets did not explain checksum mismatch"
 pass "verify-desktop-assets rejects checksum mismatches"
 
+bash "$ROOT_DIR/scripts/release/updater-signing-ready.test.sh"
 bash "$ROOT_DIR/scripts/release/updater-manifest.test.sh"

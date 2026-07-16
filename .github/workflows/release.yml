@@ -772,6 +772,7 @@ jobs:
 
       - name: Detect Tauri updater signing input
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           set -euo pipefail
@@ -780,7 +781,12 @@ jobs:
             echo "::notice::Tauri updater signing key is absent; signed updater artifacts and latest.json will be skipped."
             exit 0
           fi
-          if ! bash scripts/release/updater-signing-ready.sh "${{ matrix.platform }}"; then
+          helper="$RUNNER_TEMP/updater-signing-ready.sh"
+          gh api \
+            --header "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/scripts/release/updater-signing-ready.sh?ref=${{ github.workflow_sha }}" \
+            > "$helper"
+          if ! bash "$helper" "${{ matrix.platform }}"; then
             echo "::error::Updater signing prerequisites failed for ${{ matrix.platform }}." >&2
             exit 1
           fi

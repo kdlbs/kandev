@@ -2,6 +2,7 @@
 
 **Status:** accepted
 **Date:** 2026-07-01
+**Amended:** 2026-07-16
 **Area:** infra, workflow
 
 ## Context
@@ -14,6 +15,8 @@ The first desktop macOS failure mode we observed happened after Rust compilation
 
 Add a maintainer-only release backfill mode to `.github/workflows/release.yml`. The `backfill_tag` input accepts the current highest existing `vX.Y.Z` release tag, verifies that the tag exists, and verifies that all release-critical manifests at that tag match the version. It then uses the existing tag as the build and publish ref. In this mode the workflow skips version bumping, changelog generation, release PR creation, and tag creation, while still running the build, GitHub release, npm publish, and Homebrew update jobs.
 
+Keep artifact and application inputs pinned to that immutable release tag, but source release control-plane helpers from `github.workflow_sha`. This allows a corrected workflow revision to recover a broken tag without changing the tag or silently rebuilding application source from main.
+
 Add macOS desktop packaging guardrails to the Tauri build job. macOS DMG builds now run with a bounded timeout and a retry, and failed macOS desktop builds upload diagnostics that include disk state, `hdiutil info`, related packaging processes, bundle directory listings, and Tauri's generated `bundle_dmg.sh` when present.
 
 Keep desktop installer builds on native OS runners. Linux container images remain useful for Linux CI and e2e dependency stability, but they are not the mechanism for macOS DMG recovery.
@@ -23,6 +26,8 @@ Keep desktop installer builds on native OS runners. Linux container images remai
 Release recovery becomes explicit and repeatable for tag-only or partially published current releases. Publishing scripts can keep their existing idempotent behavior, so rerunning a backfill is safe when some assets or packages already exist. Older tags are rejected because this workflow still updates mutable channels such as Docker tags, npm dist-tags, and the Homebrew formula.
 
 The release workflow has more branching logic, and maintainers must choose between normal release, desktop validation, dry run, and tag backfill modes intentionally. The workflow contract is covered by a small CI test so later YAML changes do not silently remove the recovery path or macOS diagnostics.
+
+Backfills therefore combine immutable tagged application inputs with current workflow control logic. Control-plane helper changes must remain compatible with the tagged inputs they validate.
 
 macOS package failures should now leave actionable artifacts instead of only the final Tauri command line. The retry may add time to a failing macOS job, but the step-level timeout caps total time.
 

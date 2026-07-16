@@ -6,6 +6,8 @@ Unsigned desktop artifacts may require manual OS security bypasses and must not 
 
 Use `desktop_validation_only=true` for maintainer inspection builds. That mode uploads workflow artifacts but does not publish a GitHub release, npm packages, Homebrew updates, or public container tags.
 
+Release backfills build application code and artifacts from the requested immutable tag. Updater signing-readiness validation is control-plane logic and runs from `github.workflow_sha`, so a workflow fix on main can recover an existing tag without moving it or substituting main-branch application source.
+
 ## macOS
 
 Signing inputs:
