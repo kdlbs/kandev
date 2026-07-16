@@ -115,8 +115,16 @@ type WorkflowSyncDialogProps = {
 // error surfaced via toast.
 export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDialogProps) {
   const hasConfig = !!sync.config;
+  const intervalInvalid =
+    sync.form.poll_enabled &&
+    (!Number.isInteger(sync.form.interval_seconds) || sync.form.interval_seconds < 60);
   const disableSave =
-    sync.saving || sync.urlInvalid || !sync.form.repo_owner.trim() || !sync.form.repo_name.trim();
+    sync.saving ||
+    sync.loading ||
+    sync.urlInvalid ||
+    intervalInvalid ||
+    !sync.form.repo_owner.trim() ||
+    !sync.form.repo_name.trim();
   const resolved = sync.form.repo_owner
     ? `Syncing ${sync.form.repo_owner}/${sync.form.repo_name} @ ${sync.form.branch || "main"} — directory ${sync.form.path || "(repository root)"}.`
     : "";
@@ -153,6 +161,7 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
               type="button"
               variant="destructive"
               onClick={handleRemove}
+              disabled={sync.saving}
               className="sm:mr-auto cursor-pointer"
               data-testid="workflow-sync-remove"
             >

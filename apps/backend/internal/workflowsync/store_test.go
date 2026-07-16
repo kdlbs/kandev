@@ -16,6 +16,9 @@ func setupTestStore(t *testing.T) *Store {
 	t.Helper()
 	rawDB, err := sql.Open("sqlite3", ":memory:")
 	require.NoError(t, err)
+	// Pin to one connection: each new connection to an in-memory SQLite DB
+	// gets its own isolated database, which makes pooled access flaky.
+	rawDB.SetMaxOpenConns(1)
 	db := sqlx.NewDb(rawDB, "sqlite3")
 	t.Cleanup(func() { _ = db.Close() })
 	store, err := NewStore(db, db)

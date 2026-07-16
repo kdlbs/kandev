@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db"
 )
 
 // Store persists workspace-scoped workflow sync configuration.
@@ -53,31 +55,14 @@ func (s *Store) initSchema() error {
 }
 
 // addPollEnabledColumn brings databases created before the poll toggle up to
-// the current schema. Idempotent — the column lookup avoids the "duplicate
-// column name" error on installs that already have it.
+// the current schema. Idempotent and race-safe: the ALTER always runs and a
+// "duplicate column name" failure is swallowed via the shared helper.
 func (s *Store) addPollEnabledColumn() error {
-	rows, err := s.ro.Query(`PRAGMA table_info(workflow_sync_configs)`)
-	if err != nil {
+	_, err := s.db.Exec(`ALTER TABLE workflow_sync_configs ADD COLUMN poll_enabled INTEGER NOT NULL DEFAULT 1`)
+	if err != nil && !db.IsDuplicateColumnError(err) {
 		return err
 	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var cid int
-		var name, colType string
-		var notNull, pk int
-		var dflt interface{}
-		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			return err
-		}
-		if name == "poll_enabled" {
-			return rows.Err()
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	_, err = s.db.Exec(`ALTER TABLE workflow_sync_configs ADD COLUMN poll_enabled INTEGER NOT NULL DEFAULT 1`)
-	return err
+	return nil
 }
 
 const configSelectColumns = `workspace_id, repo_owner, repo_name, branch, path, interval_seconds,

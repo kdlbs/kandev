@@ -94,8 +94,12 @@ func handleE2EReset(
 		}
 		// The workflow-sync poller reads these rows globally; delete before
 		// task/workflow deletion so a mid-reset tick can't resync workflows.
+		// The table always exists, so a failure is a genuine DB error — abort
+		// rather than let the poller recreate workflows mid-reset.
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM workflow_sync_configs WHERE workspace_id = ?`, workspaceID); err != nil {
-			log.Warn("e2e reset: workflow sync config cleanup failed", zap.Error(err))
+			log.Error("e2e reset: workflow sync config cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: "workflow sync config cleanup failed"})
+			return
 		}
 
 		// Reset every agent's routing override to the inherit-markers

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -443,7 +442,7 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 	if readOnly, roErr := h.isWorkflowReadOnly(ctx, req.ID); roErr == nil && readOnly {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, workflowReadOnlyMsg, nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, workflowReadOnlyMsg, nil)
 	}
 
 	workflow, err := h.service.UpdateWorkflow(ctx, req.ID, &service.UpdateWorkflowRequest{
@@ -459,11 +458,18 @@ func (h *WorkflowHandlers) wsUpdateWorkflow(ctx context.Context, msg *ws.Message
 }
 
 func (h *WorkflowHandlers) wsDeleteWorkflow(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	// Check read-only before the generic ID-request helper so the client gets
+	// a CONFLICT with the actual reason instead of a generic internal error.
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := msg.ParsePayload(&req); err == nil && req.ID != "" {
+		if readOnly, roErr := h.isWorkflowReadOnly(ctx, req.ID); roErr == nil && readOnly {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, workflowReadOnlyMsg, nil)
+		}
+	}
 	return wsHandleIDRequest(ctx, msg, h.logger, "failed to delete workflow",
 		func(ctx context.Context, id string) (any, error) {
-			if readOnly, roErr := h.isWorkflowReadOnly(ctx, id); roErr == nil && readOnly {
-				return nil, errors.New(workflowReadOnlyMsg)
-			}
 			if err := h.service.DeleteWorkflow(ctx, id); err != nil {
 				return nil, err
 			}

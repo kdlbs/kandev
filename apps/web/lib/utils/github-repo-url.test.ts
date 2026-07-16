@@ -74,6 +74,11 @@ describe("parseGitHubRepoUrl", () => {
     expect(parseGitHubRepoUrl("")).toBeNull();
   });
 
+  it("returns null instead of throwing on malformed percent escapes", () => {
+    expect(parseGitHubRepoUrl("https://github.com/org/repo/tree/main/%")).toBeNull();
+    expect(parseGitHubRepoUrl("https://github.com/org/repo/tree/main/%zz")).toBeNull();
+  });
+
   it("decodes percent-encoded path segments", () => {
     expect(parseGitHubRepoUrl("https://github.com/jcfs/repo/tree/main/my%20flows")).toEqual({
       owner: "jcfs",

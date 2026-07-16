@@ -117,6 +117,12 @@ func (s *Service) createSyncedWorkflow(ctx context.Context, workspaceID string, 
 		return
 	}
 	if err := s.syncOps.SetWorkflowSource(ctx, wf.ID, taskmodels.WorkflowSourceGitHub, path); err != nil {
+		// Roll the creation back: an unstamped workflow would be left as an
+		// editable manual copy and the next sync would create a duplicate.
+		if delErr := s.syncOps.DeleteWorkflow(ctx, wf.ID); delErr != nil {
+			s.logger.Warn("failed to roll back unstamped synced workflow",
+				zap.String("workflow_id", wf.ID), zap.Error(delErr))
+		}
 		result.Warnings = append(result.Warnings, fmt.Sprintf("%s: failed to mark workflow %q as synced: %v", path, pw.Name, err))
 		return
 	}
@@ -290,6 +296,11 @@ func (s *Service) ReleaseSyncedWorkflows(ctx context.Context, workspaceID string
 // deleteVanishedWorkflows removes previously-synced workflows whose
 // definition disappeared from the source, unless they still hold tasks or
 // come from a file that failed to parse this round.
+//
+// NOTE: a workflow rename in the source (same source_path, new name) is
+// treated as delete-old + create-new, mirroring the step-rename behavior.
+// Workflow-level references (e.g. workspaces.office_workflow_id) will point
+// at the old ID until updated.
 func (s *Service) deleteVanishedWorkflows(ctx context.Context, synced map[string]*taskmodels.Workflow, desired, frozenPaths map[string]bool, result *SyncApplyResult) {
 	for key, wf := range synced {
 		if desired[key] || frozenPaths[wf.SourcePath] {

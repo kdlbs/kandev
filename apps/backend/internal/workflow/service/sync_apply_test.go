@@ -378,7 +378,8 @@ func TestEnsureWorkflowMutable(t *testing.T) {
 
 	assert.ErrorIs(t, svc.EnsureWorkflowMutable(ctx, "wf-synced"), ErrWorkflowReadOnly)
 	assert.NoError(t, svc.EnsureWorkflowMutable(ctx, "wf-manual"))
-	assert.Error(t, svc.EnsureWorkflowMutable(ctx, "wf-missing"), "lookup errors propagate")
+	assert.NoError(t, svc.EnsureWorkflowMutable(ctx, "wf-missing"),
+		"guard fails open on lookup errors; the mutation itself surfaces not-found")
 }
 
 func TestReleaseSyncedWorkflows(t *testing.T) {

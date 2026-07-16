@@ -29,7 +29,8 @@ function StateIcon({ state }: { state: SyncState }) {
 
 function lastSyncedLabel(config: WorkflowSyncConfig): string {
   if (config.last_synced_at) {
-    return `last synced ${formatDistanceToNow(new Date(config.last_synced_at), { addSuffix: true })}`;
+    const when = formatDistanceToNow(new Date(config.last_synced_at), { addSuffix: true });
+    return config.last_ok ? `last synced ${when}` : `last attempt ${when}`;
   }
   return config.poll_enabled ? "waiting for first sync…" : "not synced yet — use Sync now";
 }
@@ -54,10 +55,10 @@ function WarningsAlert({ warnings }: { warnings: string[] }) {
       <IconAlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
       <AlertDescription className="text-sm">
         <ul className="list-disc pl-4 space-y-0.5">
-          {warnings.map((warning) => (
+          {warnings.map((warning, index) => (
             // Warnings are free-form backend sentences with no stable id;
-            // the text itself is stable enough to key on for this list.
-            <li key={warning}>{warning}</li>
+            // include the index so repeated sentences keep unique keys.
+            <li key={`${index}-${warning}`}>{warning}</li>
           ))}
         </ul>
       </AlertDescription>

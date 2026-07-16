@@ -30,7 +30,14 @@ export function parseGitHubRepoUrl(input: string): ParsedGitHubRepoUrl | null {
   }
   if (url.hostname !== GITHUB_HOST && url.hostname !== `www.${GITHUB_HOST}`) return null;
 
-  const segments = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  let segments: string[];
+  try {
+    segments = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  } catch {
+    // Malformed percent escapes (e.g. a trailing "%") must read as "not a
+    // recognized link", not crash the dialog on every keystroke.
+    return null;
+  }
   if (segments.length < 2) return null;
   const [owner, rawRepo, ...rest] = segments;
   const repo = rawRepo.replace(/\.git$/, "");

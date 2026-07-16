@@ -297,6 +297,7 @@ function SyncedBadge({ sourcePath }: { sourcePath?: string }) {
       <TooltipTrigger asChild>
         <Badge
           variant="outline"
+          tabIndex={0}
           className="text-xs cursor-default"
           data-testid="workflow-synced-badge"
         >

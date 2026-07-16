@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -46,7 +47,7 @@ func (c *Controller) httpGetConfig(ctx *gin.Context) {
 	}
 	cfg, err := c.service.GetConfigForWorkspace(ctx.Request.Context(), workspaceID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.internalError(ctx, "failed to load workflow sync config", err)
 		return
 	}
 	if cfg == nil {
@@ -54,6 +55,13 @@ func (c *Controller) httpGetConfig(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, cfg)
+}
+
+// internalError logs the underlying failure and returns a generic message so
+// driver/query details never leak to clients.
+func (c *Controller) internalError(ctx *gin.Context, msg string, err error) {
+	c.logger.Error(msg, zap.Error(err))
+	ctx.JSON(http.StatusInternalServerError, gin.H{"error": msg})
 }
 
 func (c *Controller) httpSetConfig(ctx *gin.Context) {
@@ -67,12 +75,12 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 		return
 	}
 	cfg, err := c.service.SetConfigForWorkspace(ctx.Request.Context(), workspaceID, &req)
+	if errors.Is(err, ErrInvalidConfig) {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, ErrInvalidConfig) {
-			status = http.StatusBadRequest
-		}
-		ctx.JSON(status, gin.H{"error": err.Error()})
+		c.internalError(ctx, "failed to save workflow sync config", err)
 		return
 	}
 	ctx.JSON(http.StatusOK, cfg)
@@ -84,7 +92,7 @@ func (c *Controller) httpDeleteConfig(ctx *gin.Context) {
 		return
 	}
 	if err := c.service.DeleteConfigForWorkspace(ctx.Request.Context(), workspaceID); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.internalError(ctx, "failed to remove workflow sync config", err)
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
@@ -106,7 +114,7 @@ func (c *Controller) httpForceSync(ctx *gin.Context) {
 	}
 	cfg, err := c.service.GetConfigForWorkspace(ctx.Request.Context(), workspaceID)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.internalError(ctx, "failed to load workflow sync config", err)
 		return
 	}
 	response := gin.H{"config": cfg}

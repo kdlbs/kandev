@@ -52,3 +52,11 @@ func TestSetConfigRequestNormalize_PollEnabledDefaultsTrue(t *testing.T) {
 	require.NoError(t, req.Normalize())
 	assert.False(t, *req.PollEnabled, "explicit false survives normalization")
 }
+
+func TestSetConfigRequestNormalize_IntervalAndBranchBounds(t *testing.T) {
+	req := &SetConfigRequest{RepoOwner: "acme", RepoName: "flows", IntervalSeconds: MaxIntervalSeconds + 1}
+	assert.ErrorIs(t, req.Normalize(), ErrInvalidConfig, "interval above the 30-day cap is rejected")
+
+	req = &SetConfigRequest{RepoOwner: "acme", RepoName: "flows", Branch: "bad..ref"}
+	assert.ErrorIs(t, req.Normalize(), ErrInvalidConfig, "invalid git branch names are rejected")
+}

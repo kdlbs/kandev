@@ -303,6 +303,9 @@ export function useWorkflowDeleteHandlers({
   };
 
   const handleDeleteWorkflow = async () => {
+    // A background sync can flip the workflow read-only while the delete
+    // dialog is already open; re-check at confirm time.
+    if (readOnly) return;
     try {
       await deleteWorkflowRun();
       wfDel.setDeleteOpen(false);
@@ -316,6 +319,7 @@ export function useWorkflowDeleteHandlers({
   };
 
   const handleMigrateAndDeleteWorkflow = async () => {
+    if (readOnly) return;
     if (!wfDel.targetWorkflowId || !wfDel.targetStepId) return;
     wfDel.setMigrateLoading(true);
     try {

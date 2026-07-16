@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -40,6 +41,15 @@ type Service struct {
 	clients ClientProvider
 	applier Applier
 	logger  *logger.Logger
+	// locks serializes syncs and config mutations per workspace so a force
+	// sync cannot interleave with a config delete/replace and apply stale
+	// definitions (or re-stamp workflows that were just released).
+	locks sync.Map // workspaceID → *sync.Mutex
+}
+
+func (s *Service) workspaceLock(workspaceID string) *sync.Mutex {
+	lock, _ := s.locks.LoadOrStore(workspaceID, &sync.Mutex{})
+	return lock.(*sync.Mutex)
 }
 
 // NewService creates a workflow sync service.
@@ -67,6 +77,9 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 	if err := req.Normalize(); err != nil {
 		return nil, err
 	}
+	lock := s.workspaceLock(workspaceID)
+	lock.Lock()
+	defer lock.Unlock()
 	return s.store.UpsertConfigForWorkspace(ctx, workspaceID, req)
 }
 
@@ -74,6 +87,9 @@ func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string,
 // workflows are released back to manual ownership first so they become
 // editable again — a failed release keeps the config so the user can retry.
 func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
+	lock := s.workspaceLock(workspaceID)
+	lock.Lock()
+	defer lock.Unlock()
 	released, err := s.applier.ReleaseSyncedWorkflows(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("failed to release synced workflows: %w", err)
@@ -111,6 +127,9 @@ type fetchedFile struct {
 // silent. The outcome (including failures) is recorded on the config row so
 // the UI can surface it.
 func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) (*SyncResult, error) {
+	lock := s.workspaceLock(workspaceID)
+	lock.Lock()
+	defer lock.Unlock()
 	cfg, err := s.store.GetConfigForWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -178,8 +197,9 @@ func (s *Service) fetchFiles(ctx context.Context, cfg *Config) ([]fetchedFile, e
 	return files, nil
 }
 
-// contentHash is a stable digest of the fetched file set, used to skip
-// re-applying unchanged content on periodic syncs.
+// contentHash is a stable digest of the fetched file set. It is recorded on
+// the config row for observability only — every sync reconciles regardless
+// (repairing local drift), with the applier writing only actual differences.
 func contentHash(files []fetchedFile) string {
 	h := sha256.New()
 	for _, f := range files {

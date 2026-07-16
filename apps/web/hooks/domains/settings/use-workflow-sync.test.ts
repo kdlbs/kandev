@@ -45,6 +45,10 @@ describe("useWorkflowSync", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
     vi.useRealTimers();
   });
 
@@ -122,7 +126,6 @@ describe("useWorkflowSync", () => {
     expect(deleteWorkflowSyncConfigMock).toHaveBeenCalledWith({ workspaceId: "ws-1" });
     expect(result.current.config).toBeNull();
     expect(result.current.form.repo_owner).toBe("");
-    vi.unstubAllGlobals();
   });
 
   it("polls getWorkflowSyncConfig on the background refresh interval", async () => {

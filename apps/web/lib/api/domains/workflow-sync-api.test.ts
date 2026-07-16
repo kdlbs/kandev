@@ -6,6 +6,9 @@ import {
   forceWorkflowSync,
 } from "./workflow-sync-api";
 
+const CONFIG_PATH = "/api/v1/workflow-sync/config";
+const WS_PARAM = "workspace_id=ws-1";
+
 const originalFetch = global.fetch;
 
 function mockResponse(data: unknown, status = 200) {
@@ -48,8 +51,8 @@ describe("workflow-sync-api", () => {
     const config = await getWorkflowSyncConfig({ workspaceId: "ws-1" });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const url = fetchSpy.mock.calls[0]![0] as string;
-    expect(url).toContain("/api/v1/workflow-sync/config");
-    expect(url).toContain("workspace_id=ws-1");
+    expect(url).toContain(CONFIG_PATH);
+    expect(url).toContain(WS_PARAM);
     expect(config?.repo_owner).toBe("kdlbs");
   });
 
@@ -67,8 +70,8 @@ describe("workflow-sync-api", () => {
     );
     const url = fetchSpy.mock.calls[0]![0] as string;
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
-    expect(url).toContain("/api/v1/workflow-sync/config");
-    expect(url).toContain("workspace_id=ws-1");
+    expect(url).toContain(CONFIG_PATH);
+    expect(url).toContain(WS_PARAM);
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ repo_owner: "kdlbs", repo_name: "kandev" });
     expect(saved.repo_name).toBe("kandev");
@@ -77,6 +80,9 @@ describe("workflow-sync-api", () => {
   it("deleteWorkflowSyncConfig issues DELETE", async () => {
     fetchSpy.mockResolvedValueOnce(mockResponse({ deleted: true }));
     const result = await deleteWorkflowSyncConfig({ workspaceId: "ws-1" });
+    const url = String(fetchSpy.mock.calls[0]![0]);
+    expect(url).toContain(CONFIG_PATH);
+    expect(url).toContain(WS_PARAM);
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     expect(init.method).toBe("DELETE");
     expect(result.deleted).toBe(true);
@@ -93,7 +99,7 @@ describe("workflow-sync-api", () => {
     const url = fetchSpy.mock.calls[0]![0] as string;
     const init = fetchSpy.mock.calls[0]![1] as RequestInit;
     expect(url).toContain("/api/v1/workflow-sync/sync");
-    expect(url).toContain("workspace_id=ws-1");
+    expect(url).toContain(WS_PARAM);
     expect(init.method).toBe("POST");
     expect(res.config.repo_owner).toBe("kdlbs");
     expect(res.result?.created).toEqual(["a"]);

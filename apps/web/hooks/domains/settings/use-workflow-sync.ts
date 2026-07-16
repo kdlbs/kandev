@@ -52,14 +52,20 @@ function useWorkflowSyncConfigRefresh(
   setConfig: (cfg: WorkflowSyncConfig | null) => void,
 ) {
   useEffect(() => {
+    let cancelled = false;
     const id = setInterval(() => {
       getWorkflowSyncConfig({ workspaceId })
-        .then((cfg) => setConfig(cfg))
+        .then((cfg) => {
+          if (!cancelled) setConfig(cfg);
+        })
         .catch(() => {
           /* transient failures are fine — next tick retries */
         });
     }, INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [workspaceId, setConfig]);
 }
 
@@ -120,6 +126,47 @@ function syncOutcomeToast(error: string | undefined, warnings: string[] | undefi
   return { description: "Workflow sync completed", variant: "success" };
 }
 
+type InitialLoadDeps = {
+  setConfig: (cfg: WorkflowSyncConfig | null) => void;
+  reset: (cfg: WorkflowSyncConfig | null) => void;
+  setLoading: (loading: boolean) => void;
+  toast: ReturnType<typeof useToast>["toast"];
+};
+
+// useWorkflowSyncInitialLoad fetches the stored config on mount / workspace
+// change. It guards against stale responses: if the hook re-renders for a
+// different workspace while a fetch is in flight, the old workspace's config
+// must not populate the new one's form.
+function useWorkflowSyncInitialLoad(
+  workspaceId: string,
+  { setConfig, reset, setLoading, toast }: InitialLoadDeps,
+) {
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    getWorkflowSyncConfig({ workspaceId })
+      .then((cfg) => {
+        if (cancelled) return;
+        setConfig(cfg);
+        reset(cfg);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        toast({
+          description: `Failed to load workflow sync config: ${String(err)}`,
+          variant: "error",
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId]);
+}
+
 export function useWorkflowSync(workspaceId: string) {
   const { toast } = useToast();
   const router = useRouter();
@@ -129,25 +176,7 @@ export function useWorkflowSync(workspaceId: string) {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const cfg = await getWorkflowSyncConfig({ workspaceId });
-      setConfig(cfg);
-      reset(cfg);
-    } catch (err) {
-      toast({
-        description: `Failed to load workflow sync config: ${String(err)}`,
-        variant: "error",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [workspaceId, toast, reset]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useWorkflowSyncInitialLoad(workspaceId, { setConfig, reset, setLoading, toast });
 
   useWorkflowSyncConfigRefresh(workspaceId, setConfig);
 

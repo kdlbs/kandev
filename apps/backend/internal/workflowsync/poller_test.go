@@ -15,6 +15,7 @@ func TestPoller_StartStopIdempotent(t *testing.T) {
 	p := NewPoller(svc, svc.logger)
 
 	p.Start(context.Background())
+	t.Cleanup(p.Stop)
 	p.Start(context.Background()) // second start is a no-op
 	p.Stop()
 	p.Stop() // second stop is a no-op
@@ -27,6 +28,7 @@ func TestPoller_SyncsDueConfigsOnTick(t *testing.T) {
 
 		p := NewPoller(svc, svc.logger)
 		p.Start(context.Background())
+		t.Cleanup(p.Stop)
 
 		// No sync before the first tick: the loop waits a full interval so
 		// boot doesn't hammer the GitHub API.

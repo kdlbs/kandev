@@ -49,18 +49,18 @@ func (p *Poller) Start(ctx context.Context) {
 	go p.loop(ctx)
 }
 
-// Stop cancels the polling loop and waits for it to drain. Idempotent.
+// Stop cancels the polling loop and waits for it to drain. Idempotent. The
+// mutex is held through the wait so a concurrent Start cannot register a new
+// loop on the WaitGroup mid-shutdown (the loop itself never takes the mutex,
+// so holding it here cannot deadlock).
 func (p *Poller) Stop() {
 	p.mu.Lock()
+	defer p.mu.Unlock()
 	if !p.started {
-		p.mu.Unlock()
 		return
 	}
 	p.started = false
-	cancel := p.cancel
-	p.mu.Unlock()
-
-	cancel()
+	p.cancel()
 	p.wg.Wait()
 }
 

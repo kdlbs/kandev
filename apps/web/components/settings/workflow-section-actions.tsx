@@ -22,15 +22,28 @@ export function WorkflowSectionActions({
   return (
     <div className="flex flex-wrap gap-2">
       <WorkflowSyncButton onClick={onGitHubSync} />
-      <Button size="sm" variant="outline" onClick={onExport} className="cursor-pointer">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={onExport}
+        className="cursor-pointer"
+      >
         <IconDownload className="h-4 w-4 mr-2" />
         Export All
       </Button>
-      <Button size="sm" variant="outline" onClick={onImport} className="cursor-pointer">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={onImport}
+        className="cursor-pointer"
+      >
         <IconUpload className="h-4 w-4 mr-2" />
         Import
       </Button>
       <Button
+        type="button"
         size="sm"
         onClick={onAdd}
         className="cursor-pointer"

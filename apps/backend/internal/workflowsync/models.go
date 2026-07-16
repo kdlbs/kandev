@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/common/securityutil"
 )
 
 // Defaults for optional config fields.
@@ -18,6 +20,9 @@ const (
 	DefaultPath            = ".kandev/workflows"
 	DefaultIntervalSeconds = 300
 	MinIntervalSeconds     = 60
+	// MaxIntervalSeconds caps the poll interval at 30 days — far beyond any
+	// sensible cadence, and safely below time.Duration overflow territory.
+	MaxIntervalSeconds = 30 * 24 * 60 * 60
 )
 
 // ErrInvalidConfig marks validation failures on SetConfigRequest so handlers
@@ -77,6 +82,9 @@ func (r *SetConfigRequest) Normalize() error {
 	if r.Branch == "" {
 		r.Branch = DefaultBranch
 	}
+	if !securityutil.IsValidBranchName(r.Branch) {
+		return fmt.Errorf("%w: branch is not a valid git branch name", ErrInvalidConfig)
+	}
 	if r.Path == "" {
 		r.Path = DefaultPath
 	}
@@ -90,6 +98,9 @@ func (r *SetConfigRequest) Normalize() error {
 	}
 	if r.IntervalSeconds < MinIntervalSeconds {
 		return fmt.Errorf("%w: interval_seconds must be at least %d", ErrInvalidConfig, MinIntervalSeconds)
+	}
+	if r.IntervalSeconds > MaxIntervalSeconds {
+		return fmt.Errorf("%w: interval_seconds must be at most %d", ErrInvalidConfig, MaxIntervalSeconds)
 	}
 	if r.PollEnabled == nil {
 		enabled := true
