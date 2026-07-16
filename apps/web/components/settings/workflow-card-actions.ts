@@ -22,14 +22,15 @@ import {
   addRemoteStep,
   applyWorkflowStepUpdates,
   newWorkflowStep,
+  removeLocalStep,
   updateRemoteWorkflowStep,
 } from "./workflow-step-mutations";
 
 const FALLBACK_ERROR_MESSAGE = "Request failed";
-
 type WorkflowStepActionsParams = {
   workflow: Workflow;
   isNewWorkflow: boolean;
+  readOnly?: boolean;
   workflowSteps: WorkflowStep[];
   setWorkflowSteps: (updater: ((prev: WorkflowStep[]) => WorkflowStep[]) | WorkflowStep[]) => void;
   setStepToDelete: (id: string | null) => void;
@@ -89,6 +90,7 @@ async function removeWorkflowStep({
 export function useWorkflowStepActions({
   workflow,
   isNewWorkflow,
+  readOnly = false,
   workflowSteps,
   setWorkflowSteps,
   setStepToDelete,
@@ -99,6 +101,7 @@ export function useWorkflowStepActions({
   mutationGuard,
 }: WorkflowStepActionsParams) {
   const handleUpdateWorkflowStep = async (stepId: string, updates: Partial<WorkflowStep>) => {
+    if (readOnly) return;
     if (isNewWorkflow) {
       setWorkflowSteps((prev) => applyWorkflowStepUpdates(prev, stepId, updates));
       return;
@@ -109,8 +112,8 @@ export function useWorkflowStepActions({
       operation: () => updateRemoteWorkflowStep({ stepId, updates, setWorkflowSteps, toast }),
     });
   };
-
   const handleAddWorkflowStep = async () => {
+    if (readOnly) return;
     if (isNewWorkflow) {
       addLocalStep(workflow, setWorkflowSteps);
       return;
@@ -124,12 +127,10 @@ export function useWorkflowStepActions({
       operation: () => addRemoteStep(workflow, workflowSteps.length, setWorkflowSteps, toast),
     });
   };
-
   const handleRemoveWorkflowStep = async (stepId: string) => {
+    if (readOnly) return;
     if (isNewWorkflow) {
-      setWorkflowSteps((prev) =>
-        prev.filter((s) => s.id !== stepId).map((s, i) => ({ ...s, position: i })),
-      );
+      removeLocalStep(stepId, setWorkflowSteps);
       return;
     }
     const proposedSteps = workflowSteps
@@ -150,8 +151,8 @@ export function useWorkflowStepActions({
         }),
     });
   };
-
   const handleReorderWorkflowSteps = async (reorderedSteps: WorkflowStep[]) => {
+    if (readOnly) return;
     const proposedSteps = reorderedSteps.map((step, position) => ({ ...step, position }));
     if (isNewWorkflow) {
       setWorkflowSteps(proposedSteps);
@@ -178,19 +179,18 @@ export function useWorkflowStepActions({
       },
     });
   };
-
   return {
     handleUpdateWorkflowStep,
     handleAddWorkflowStep,
     handleRemoveWorkflowStep,
     handleReorderWorkflowSteps,
-    mutationGuard,
   };
 }
 
 type WorkflowDeleteHandlersParams = {
   workflow: Workflow;
   isNewWorkflow: boolean;
+  readOnly?: boolean;
   otherWorkflows: Workflow[];
   wfDel: {
     setDeleteOpen: (v: boolean) => void;
@@ -210,6 +210,7 @@ type WorkflowDeleteHandlersParams = {
 export function useWorkflowDeleteHandlers({
   workflow,
   isNewWorkflow,
+  readOnly = false,
   otherWorkflows,
   wfDel,
   deleteWorkflowRun,
@@ -239,6 +240,7 @@ export function useWorkflowDeleteHandlers({
   }, [wfDel.targetWorkflowId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDeleteWorkflowClick = async () => {
+    if (readOnly) return;
     if (isNewWorkflow) {
       wfDel.setWorkflowTaskCount(0);
       wfDel.setDeleteOpen(true);
@@ -263,6 +265,7 @@ export function useWorkflowDeleteHandlers({
   };
 
   const handleDeleteWorkflow = async () => {
+    if (readOnly) return;
     try {
       await deleteWorkflowRun();
       wfDel.setDeleteOpen(false);
@@ -276,6 +279,7 @@ export function useWorkflowDeleteHandlers({
   };
 
   const handleMigrateAndDeleteWorkflow = async () => {
+    if (readOnly) return;
     if (!wfDel.targetWorkflowId || !wfDel.targetStepId) return;
     wfDel.setMigrateLoading(true);
     try {
@@ -299,7 +303,6 @@ export function useWorkflowDeleteHandlers({
 
   return { handleDeleteWorkflowClick, handleDeleteWorkflow, handleMigrateAndDeleteWorkflow };
 }
-
 type StepDeleteHandlersParams = {
   workflow: Workflow;
   stepDel: {
@@ -491,6 +494,7 @@ async function reconcileTemplateSteps(
 type WorkflowSaveActionsParams = {
   workflow: Workflow;
   isNewWorkflow: boolean;
+  readOnly?: boolean;
   workflowSteps: WorkflowStep[];
   templateStepCount: number;
   onSaveWorkflow: () => Promise<unknown>;
@@ -502,6 +506,7 @@ type WorkflowSaveActionsParams = {
 export function useWorkflowSaveActions({
   workflow,
   isNewWorkflow,
+  readOnly = false,
   workflowSteps,
   templateStepCount,
   onSaveWorkflow,
@@ -546,6 +551,7 @@ export function useWorkflowSaveActions({
   };
 
   const handleSaveWorkflow = async () => {
+    if (readOnly) return;
     if (!isNewWorkflow) {
       await runSaveWorkflow();
       return;

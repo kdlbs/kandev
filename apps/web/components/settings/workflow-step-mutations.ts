@@ -30,6 +30,12 @@ export function addLocalStep(workflow: Workflow, setWorkflowSteps: WorkflowSteps
   ]);
 }
 
+export function removeLocalStep(stepId: string, setWorkflowSteps: WorkflowStepsSetter) {
+  setWorkflowSteps((previous) =>
+    previous.filter((step) => step.id !== stepId).map((step, position) => ({ ...step, position })),
+  );
+}
+
 export async function addRemoteStep(
   workflow: Workflow,
   stepCount: number,
