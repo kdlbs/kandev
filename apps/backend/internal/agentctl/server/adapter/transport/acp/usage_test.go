@@ -156,6 +156,23 @@ func TestExtractUsage(t *testing.T) {
 	}
 }
 
+func TestExtractUsage_DoesNotInterpretGrokPrivateReasoningTokens(t *testing.T) {
+	usage := extractUsage(&acp.PromptResponse{Meta: map[string]any{
+		"usage": map[string]any{
+			"inputTokens":     float64(5),
+			"outputTokens":    float64(3),
+			"totalTokens":     float64(8),
+			"reasoningTokens": float64(2),
+		},
+	}})
+	if usage == nil {
+		t.Fatal("expected non-nil usage")
+	}
+	if usage.ThoughtTokens != 0 {
+		t.Fatalf("ThoughtTokens = %d, want 0; Grok private fields belong to its ACP driver", usage.ThoughtTokens)
+	}
+}
+
 // TestUsageTracker_CumulativeDelta asserts the codex-acp fallback path:
 // usage_update updates the cumulative used counter via tryConvertUntypedUpdate;
 // consumeUsageDelta returns the running total and resets to zero so the next

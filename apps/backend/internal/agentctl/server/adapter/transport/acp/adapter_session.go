@@ -134,14 +134,6 @@ func hasModelConfigOption(options []streams.ConfigOption) bool {
 	return false
 }
 
-func sessionConfigOptions(meta map[string]any, acpConfigOptions []acp.SessionConfigOption) []streams.ConfigOption {
-	configOptions := convertACPConfigOptions(acpConfigOptions)
-	if len(configOptions) > 0 {
-		return configOptions
-	}
-	return extractConfigOptions(meta)
-}
-
 // effectiveMcpCapabilities applies the adapter's AssumeMcpSse/AssumeMcpHttp
 // config overrides on top of the capabilities advertised by the agent during
 // the ACP handshake. Some agents (e.g. Auggie) support SSE/HTTP MCP transports
@@ -426,9 +418,9 @@ func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
 // emitSessionModels emits a session_models event from the session response.
 func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
 	currentModelID := models.CurrentModelId
-	// Prefer typed config options from the response; fall back to _meta
-	// extraction for older agents.
-	configOptions := sessionConfigOptions(meta, acpConfigOptions)
+	configOptions := a.driver.sessionConfigOptions(
+		meta, acpConfigOptions, models.AvailableModels, currentModelID,
+	)
 
 	// Fallback: if the SDK didn't parse currentModelId (some agents omit it),
 	// take the model-shaped configOption's CurrentValue verbatim. We
@@ -566,6 +558,26 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
+	}
+	return a.setModelWithConn(ctx, conn, sessionID, modelID, available, cachedConfig)
+}
+
+func (a *Adapter) setModelWithConn(
+	ctx context.Context,
+	conn driverSessionConn,
+	sessionID string,
+	modelID string,
+	available []modelInfo,
+	cachedConfig []streams.ConfigOption,
+) error {
+	handled, err := a.driver.handleModelChange(ctx, a, conn, driverConfigChange{
+		sessionID: sessionID,
+		value:     modelID,
+		models:    available,
+		config:    cachedConfig,
+	})
+	if handled {
+		return err
 	}
 
 	// Validate model exists in the agent's available models (if known).

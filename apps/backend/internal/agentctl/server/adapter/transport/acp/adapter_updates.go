@@ -150,8 +150,12 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 
 	sessionID := string(n.SessionId)
 
-	event := a.convertNotification(n)
-	if event == nil {
+	suppressed := a.driver.suppressNotification(n)
+	var event *AgentEvent
+	if !suppressed {
+		event = a.convertNotification(n)
+	}
+	if event == nil && !suppressed {
 		// Try untyped updates not yet supported by the ACP SDK.
 		event = a.tryConvertUntypedUpdate(rawData, sessionID)
 	}
@@ -161,10 +165,19 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 			event.Type, rawData, event)
 		a.sendUpdate(*event)
 		a.maybeScheduleAsyncTurnComplete(*event)
-	} else if updateJSON, err := json.Marshal(n.Update); err == nil {
-		a.logger.Warn("unhandled ACP session notification",
-			zap.String("session_id", sessionID),
-			zap.String("update_json", string(updateJSON)))
+	} else if !suppressed {
+		if updateJSON, err := json.Marshal(n.Update); err == nil {
+			a.logger.Warn("unhandled ACP session notification",
+				zap.String("session_id", sessionID),
+				zap.String("update_json", string(updateJSON)))
+		}
+	}
+
+	if !isLoading {
+		for _, supplemental := range a.driver.supplementalEvents(a, sessionID, n.Meta) {
+			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, &supplemental)
+			a.sendUpdate(supplemental)
+		}
 	}
 }
 

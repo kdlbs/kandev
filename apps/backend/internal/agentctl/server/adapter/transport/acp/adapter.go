@@ -228,6 +228,8 @@ type Adapter struct {
 	// the options list when the model is changed.
 	availableConfigOptions []streams.ConfigOption
 
+	driver ACPDriver
+
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
@@ -293,6 +295,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		logger:              l,
 		agentID:             cfg.AgentID,
 		normalizer:          NewNormalizer(cfg.AgentID),
+		driver:              newACPDriver(cfg.AgentID),
 		updatesCh:           make(chan AgentEvent, 100),
 		notifQueue:          make(chan notifWork, notifQueueCapacity),
 		activeToolCalls:     make(map[string]*streams.NormalizedPayload),
