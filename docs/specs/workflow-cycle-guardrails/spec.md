@@ -71,9 +71,11 @@ pipeline view makes the complete trigger path easy to miss.
   blocking/confirmation dialog. Affected steps are visually identified in the
   pipeline without relying on color alone.
 - On mobile, the alert and trace stack vertically, dialog actions remain
-  reachable by touch, long step names and prompt-source text wrap, and the page
-  does not gain horizontal overflow. The existing pipeline may retain its own
-  horizontal scrolling region.
+  reachable by touch, transition triggers and actions use human-readable labels,
+  long step names and prompt-source text wrap, and the page does not gain
+  horizontal overflow. Diagnostic content scrolls independently from the action
+  footer so every explanation can be read without being covered. The existing
+  pipeline may retain its own horizontal scrolling region.
 - The guardrail is advisory for user-mediated cycles and blocking for fully
   automatic cycles only in the workflow settings authoring surface. It does
   not change workflow runtime execution or persisted workflow schemas.
@@ -174,6 +176,9 @@ deterministic and has no persisted state.
 - **GIVEN** the warning is displayed at a mobile viewport, **WHEN** the user
   reviews and confirms a user-mediated cycle, **THEN** the full trace and both
   dialog actions are usable without horizontal page scrolling or hover.
+- **GIVEN** multiple blocking diagnostics exceed a mobile viewport, **WHEN** the
+  user scrolls through them, **THEN** transition labels remain readable and the
+  final explanation can scroll fully above the always-reachable return action.
 
 ## Out of Scope
 

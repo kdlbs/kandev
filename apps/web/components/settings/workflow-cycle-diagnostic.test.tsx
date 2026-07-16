@@ -66,9 +66,9 @@ describe("WorkflowCycleDiagnostic", () => {
     expect(screen.getByText("Potential repeated agent run")).toBeTruthy();
     const hops = screen.getAllByRole("listitem");
     expect(hops).toHaveLength(3);
-    expect(hops[0].textContent).toContain("In Progresson_turn_completemove_to_nextReview");
-    expect(hops[1].textContent).toContain("Reviewon_turn_startmove_to_stepDone");
-    expect(hops[2].textContent).toContain("Doneon_turn_completemove_to_previousIn Progress");
+    expect(hops[0].textContent).toContain("In ProgressReviewOn turn completeMove to next step");
+    expect(hops[1].textContent).toContain("ReviewDoneOn turn startMove to specific step");
+    expect(hops[2].textContent).toContain("DoneIn ProgressOn turn completeMove to previous step");
     expect(within(hops[0]).queryByText("User action required")).toBeNull();
     expect(within(hops[1]).getByText("User action required")).toBeTruthy();
     expect(within(hops[2]).getByText("User action required")).toBeTruthy();

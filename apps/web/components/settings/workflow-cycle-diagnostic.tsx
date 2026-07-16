@@ -29,17 +29,34 @@ const PROMPT_SOURCE_TEXT = {
     `Re-entering "${stepName}" sends its step prompt instead of the task description.`,
 } as const;
 
+const TRIGGER_LABELS = {
+  on_turn_start: "On turn start",
+  on_turn_complete: "On turn complete",
+} as const;
+
+const ACTION_LABELS = {
+  move_to_next: "Move to next step",
+  move_to_previous: "Move to previous step",
+  move_to_step: "Move to specific step",
+} as const;
+
 function CycleHop({ hop, index }: { hop: WorkflowReplayCycleHop; index: number }) {
   return (
-    <li className="min-w-0 rounded-md border bg-background/60 p-2.5">
-      <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(7rem,1fr)_auto_minmax(7rem,1fr)] sm:items-center">
+    <li className="min-w-0 rounded-md border bg-background/60 p-3">
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
         <span className="min-w-0 break-words font-medium">{hop.sourceStepName}</span>
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-muted-foreground">
-          <code className="break-all rounded bg-muted px-1 py-0.5">{hop.trigger}</code>
-          <code className="break-all rounded bg-muted px-1 py-0.5">{hop.actionKind}</code>
-          <IconArrowRight className="size-3.5 shrink-0" aria-hidden="true" />
-        </div>
-        <span className="min-w-0 break-words font-medium">{hop.destinationStepName}</span>
+        <IconArrowRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="min-w-0 break-words text-right font-medium">
+          {hop.destinationStepName}
+        </span>
+      </div>
+      <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="whitespace-nowrap rounded bg-muted px-2 py-1">
+          {TRIGGER_LABELS[hop.trigger]}
+        </span>
+        <span className="whitespace-nowrap rounded bg-muted px-2 py-1">
+          {ACTION_LABELS[hop.actionKind]}
+        </span>
       </div>
       {hop.requiresUserInvolvement && (
         <div className="mt-2 flex items-center gap-1.5 text-xs font-medium text-foreground">
@@ -127,26 +144,31 @@ export function WorkflowCycleGuardDialog({
       onOpenChange={(open) => !open && !confirming.current && onCancel()}
     >
       <AlertDialogContent
-        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-2xl"
+        className="max-h-[calc(100dvh-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0 sm:max-w-2xl"
         enterConfirms={!isBlocking}
         data-testid="workflow-cycle-guard-dialog"
       >
-        <AlertDialogHeader>
-          <AlertDialogTitle>
+        <AlertDialogHeader className="place-items-start p-4 pb-3 text-left sm:p-6 sm:pb-4">
+          <AlertDialogTitle className="text-lg">
             {isBlocking ? "Workflow cycle blocked" : "Confirm workflow cycle"}
           </AlertDialogTitle>
-          <AlertDialogDescription className="text-left">
+          <AlertDialogDescription className="text-left text-sm">
             {isBlocking
               ? "Change the workflow steps to remove the automatic cycle before continuing."
               : "Review the repeated agent run before continuing."}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="grid min-w-0 gap-3">
-          {proposal?.diagnostics.map((diagnostic) => (
-            <WorkflowCycleDiagnostic key={diagnostic.identity} diagnostic={diagnostic} />
-          ))}
+        <div
+          className="min-h-0 overflow-x-hidden overflow-y-auto px-4 pb-4 sm:px-6"
+          data-testid="workflow-cycle-guard-scroll"
+        >
+          <div className="grid min-w-0 gap-3">
+            {proposal?.diagnostics.map((diagnostic) => (
+              <WorkflowCycleDiagnostic key={diagnostic.identity} diagnostic={diagnostic} />
+            ))}
+          </div>
         </div>
-        <AlertDialogFooter className="sticky bottom-0 bg-background pt-1">
+        <AlertDialogFooter className="border-t bg-background p-4 sm:px-6">
           <AlertDialogCancel className="min-h-12 w-full cursor-pointer sm:w-auto">
             {isBlocking ? "Return to workflow" : "Cancel"}
           </AlertDialogCancel>
