@@ -84,7 +84,9 @@ test.describe("Settings sidebar takeover", () => {
     await testPage.evaluate(() => {
       window.history.pushState({}, "", "/tasks");
       window.dispatchEvent(new Event("kandev:navigation"));
-      document.querySelector<HTMLElement>('[data-testid="sidebar-settings-gear"]')?.click();
+      const gear = document.querySelector<HTMLElement>('[data-testid="sidebar-settings-gear"]');
+      if (!gear) throw new Error("sidebar-settings-gear not found");
+      gear.click();
     });
 
     await expect(takeover).toBeVisible();
