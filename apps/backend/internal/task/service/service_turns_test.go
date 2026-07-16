@@ -142,6 +142,7 @@ func TestGetWorkspaceInfoForSession_RuntimeConfigOptionsSetOnlyWhenOptionsPresen
 			},
 			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{
 				Model:         "gpt-5.4",
+				Mode:          "acceptEdits",
 				ConfigOptions: map[string]string{"reasoning_effort": "low"},
 			},
 		},
@@ -158,6 +159,9 @@ func TestGetWorkspaceInfoForSession_RuntimeConfigOptionsSetOnlyWhenOptionsPresen
 	}
 	if optionsInfo.RuntimeModel != "gpt-5.4" || optionsInfo.RuntimeConfigOptions["reasoning_effort"] != "low" {
 		t.Fatalf("explicit overrides not applied last: %#v", optionsInfo)
+	}
+	if optionsInfo.SessionMode != "acceptEdits" {
+		t.Fatalf("explicit mode override not applied: %#v", optionsInfo)
 	}
 }
 

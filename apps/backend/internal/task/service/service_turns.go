@@ -408,7 +408,6 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 				runtimeConfig.Model = overrides.Model
 			}
 			if overrides.Mode != "" {
-				runtimeConfig.Mode = overrides.Mode
 				sessionMode = overrides.Mode
 			}
 			if overrides.ConfigOptions != nil {
