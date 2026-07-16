@@ -403,7 +403,7 @@ func (s *Service) publishMessageEvent(ctx context.Context, eventType string, mes
 		data["raw_content"] = message.Content
 	}
 
-	meta := message.Metadata
+	meta := models.ProjectMessageMetadata(message.Metadata)
 	if hasHidden {
 		if meta == nil {
 			meta = make(map[string]interface{})

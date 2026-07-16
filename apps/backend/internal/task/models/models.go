@@ -576,7 +576,7 @@ func (m *Message) ToAPI() *v1.Message {
 		messageType = string(MessageTypeMessage)
 	}
 	hasHidden := sysprompt.HasSystemContent(m.Content)
-	meta := m.Metadata
+	meta := ProjectMessageMetadata(m.Metadata)
 	if hasHidden {
 		if meta == nil {
 			meta = make(map[string]interface{})

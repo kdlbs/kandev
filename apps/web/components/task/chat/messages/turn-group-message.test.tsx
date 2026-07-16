@@ -18,7 +18,7 @@ function toolExecute(id: string, command = "gh pr checks"): Message {
       normalized: {
         shell_exec: {
           command,
-          output: { exit_code: 0, stdout: "1" },
+          output: { exit_code: 0, has_output: true, stdout_bytes: 1, stderr_bytes: 0 },
         },
       },
     },
@@ -35,7 +35,7 @@ function cancelledToolExecute(id: string): Message {
       normalized: {
         shell_exec: {
           command: "cancelled-command",
-          output: { stdout: "cancelled-output" },
+          output: { has_output: true, stdout_bytes: 16, stderr_bytes: 0 },
         },
       },
     },

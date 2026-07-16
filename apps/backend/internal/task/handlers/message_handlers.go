@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"strconv"
@@ -59,6 +60,32 @@ func (h *MessageHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/agent-sessions/:id/messages", h.httpListMessages)
 	api.GET("/task-sessions/:id/messages", h.httpListMessages) // Alias for SSR compatibility
+	api.GET("/task-sessions/:id/messages/:message_id/shell-output", h.httpGetShellOutput)
+}
+
+func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
+	message, err := h.service.GetMessage(c.Request.Context(), c.Param("message_id"))
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			h.logger.Error("failed to get shell output message", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get shell output"})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+		return
+	}
+	output, ok := models.ExtractShellExecOutput(message.Metadata)
+	if !ok || message.TaskSessionID != c.Param("id") {
+		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+		return
+	}
+	status, _ := message.Metadata["status"].(string)
+	c.JSON(http.StatusOK, dto.ShellOutputSnapshotResponse{
+		MessageID: message.ID,
+		Status:    status,
+		UpdatedAt: message.UpdatedAt,
+		Output:    output,
+	})
 }
 
 func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {

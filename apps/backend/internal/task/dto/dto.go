@@ -76,6 +76,14 @@ type RepositoryScriptDTO struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
+// ShellOutputSnapshotResponse is the on-demand full output for one shell message.
+type ShellOutputSnapshotResponse struct {
+	MessageID string                         `json:"message_id"`
+	Status    string                         `json:"status"`
+	UpdatedAt time.Time                      `json:"updated_at"`
+	Output    models.ShellExecOutputSnapshot `json:"output"`
+}
+
 type ExecutorDTO struct {
 	ID        string                `json:"id"`
 	Name      string                `json:"name"`

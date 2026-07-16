@@ -7,6 +7,20 @@ import type {
 } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
+export type ShellCommandOutput = {
+  exit_code?: number;
+  stdout?: string;
+  stderr?: string;
+  truncated?: boolean;
+};
+
+export type ShellCommandOutputSnapshot = {
+  message_id: string;
+  status: string;
+  updated_at: string;
+  output: ShellCommandOutput;
+};
+
 export type MessageSearchHit = {
   id: string;
   turn_id?: string;
@@ -72,6 +86,17 @@ export async function listTaskSessionMessages(
   const suffix = query.toString();
   const url = `/api/v1/task-sessions/${taskSessionId}/messages${suffix ? `?${suffix}` : ""}`;
   return fetchJson<ListMessagesResponse>(url, options);
+}
+
+export async function fetchShellCommandOutput(
+  taskSessionId: string,
+  messageId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<ShellCommandOutputSnapshot>(
+    `/api/v1/task-sessions/${taskSessionId}/messages/${messageId}/shell-output`,
+    options,
+  );
 }
 
 export async function listSessionTurns(taskSessionId: string, options?: ApiRequestOptions) {

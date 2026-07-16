@@ -164,8 +164,10 @@ type ShellExecSummary = {
   command: string;
   workDir: string;
   exitCode: number;
-  stdout: string;
-  stderr: string;
+  hasOutput: boolean;
+  stdoutBytes: number;
+  stderrBytes: number;
+  truncated: boolean;
 };
 
 type ShellExecPayload = NonNullable<NonNullable<ToolCallMetadata["normalized"]>["shell_exec"]>;
@@ -191,8 +193,10 @@ function readShellExecSummary(message: Message): ShellExecSummary | null {
     command: shellExec?.command ?? message.content,
     workDir: shellExec?.work_dir ?? "",
     exitCode: 0,
-    stdout: output?.stdout ?? "",
-    stderr: output?.stderr ?? "",
+    hasOutput: output?.has_output ?? false,
+    stdoutBytes: output?.stdout_bytes ?? 0,
+    stderrBytes: output?.stderr_bytes ?? 0,
+    truncated: output?.truncated ?? false,
   };
 }
 
