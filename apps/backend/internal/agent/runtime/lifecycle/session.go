@@ -15,11 +15,14 @@ import (
 	"github.com/kandev/kandev/internal/agent/settings/profileconfig"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/common/logger"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.opentelemetry.io/otel/trace"
 )
+
+const modelConfigOptionID = "model"
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
@@ -346,17 +349,23 @@ func (sm *SessionManager) InitializeAndPrompt(
 
 	execution.ACPSessionID = result.SessionID
 	execution.sessionInitialized = true
+	finalConfigID := ""
 
 	// Apply profile model through the ACP session's advertised model-selection
 	// mechanism (best-effort). ACP is the only surface for model selection now;
 	// no --model CLI flag.
 	if profileModel != "" && execution.agentctl != nil {
-		if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
+		if !profileModelIsAdvertised(execution.GetModelState(), profileModel) {
+			sm.logger.Warn("profile model is not advertised by ACP session; keeping provider model",
+				zap.String("execution_id", execution.ID),
+				zap.String("model", profileModel))
+		} else if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
 			sm.logger.Warn("failed to set profile model via ACP",
 				zap.String("execution_id", execution.ID),
 				zap.String("model", profileModel),
 				zap.Error(err))
 		} else {
+			finalConfigID = modelConfigIDFromState(execution.GetModelState())
 			sm.logger.Info("set profile model on ACP session",
 				zap.String("execution_id", execution.ID),
 				zap.String("model", profileModel))
@@ -390,12 +399,14 @@ func (sm *SessionManager) InitializeAndPrompt(
 				zap.String("value", value),
 				zap.Error(err))
 		} else {
+			finalConfigID = configID
 			sm.logger.Info("set profile config option on ACP session",
 				zap.String("execution_id", execution.ID),
 				zap.String("config_id", configID),
 				zap.String("value", value))
 		}
 	}
+	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID)
 
 	// Publish session created event
 	if sm.eventPublisher != nil {
@@ -406,6 +417,70 @@ func (sm *SessionManager) InitializeAndPrompt(
 	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
 
 	return nil
+}
+
+func (sm *SessionManager) publishSettledConfigOptions(
+	execution *AgentExecution,
+	acpSessionID string,
+	finalConfigID string,
+) {
+	if sm.eventPublisher == nil {
+		return
+	}
+	baselineCandidate, live, ready := execution.SettleConfigOptions(finalConfigID)
+	if !ready || len(baselineCandidate.ConfigOptions) == 0 || live == nil {
+		return
+	}
+	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
+		Type:                    streams.EventTypeSessionModels,
+		SessionID:               acpSessionID,
+		CurrentModelID:          live.CurrentModelID,
+		SessionModels:           live.Models,
+		ConfigOptions:           live.ConfigOptions,
+		ConfigBaselineCandidate: baselineCandidate.ConfigOptions,
+		Data:                    map[string]any{"config_options_settled": true},
+	})
+}
+
+func profileModelIsAdvertised(state *CachedModelState, modelID string) bool {
+	if state == nil {
+		return true
+	}
+	for _, option := range state.ConfigOptions {
+		if option.ID != modelConfigOptionID && option.Category != modelConfigOptionID {
+			continue
+		}
+		if len(option.Options) == 0 {
+			return true
+		}
+		for _, value := range option.Options {
+			if value.Value == modelID {
+				return true
+			}
+		}
+		return false
+	}
+	if len(state.Models) == 0 {
+		return true
+	}
+	for _, model := range state.Models {
+		if model.ModelID == modelID {
+			return true
+		}
+	}
+	return false
+}
+
+func modelConfigIDFromState(state *CachedModelState) string {
+	if state == nil {
+		return modelConfigOptionID
+	}
+	for _, option := range state.ConfigOptions {
+		if option.ID == modelConfigOptionID || option.Category == modelConfigOptionID {
+			return option.ID
+		}
+	}
+	return modelConfigOptionID
 }
 
 // convertAttachments converts lifecycle.MessageAttachment to v1.MessageAttachment for ACP.

@@ -162,6 +162,9 @@ type AgentStreamEventData struct {
 	CurrentModelID string                     `json:"current_model_id,omitempty"`
 	SessionModels  []streams.SessionModelInfo `json:"session_models,omitempty"`
 	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+	// ConfigBaselineCandidate is an authoritative startup response snapshot.
+	// ConfigOptions remains the latest live provider state.
+	ConfigBaselineCandidate []streams.ConfigOption `json:"config_baseline_candidate,omitempty"`
 
 	// Session info (from "session_info" event)
 	SessionTitle     string         `json:"session_title,omitempty"`
@@ -486,6 +489,7 @@ type SessionModelsEventPayload struct {
 	CurrentModelID string                     `json:"current_model_id"`
 	Models         []streams.SessionModelInfo `json:"models"`
 	ConfigOptions  []streams.ConfigOption     `json:"config_options,omitempty"`
+	ConfigBaseline map[string]string          `json:"config_baseline,omitempty"`
 	Timestamp      string                     `json:"timestamp"`
 }
 

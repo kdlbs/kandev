@@ -715,7 +715,7 @@ func TestResolveScriptCommandErrors(t *testing.T) {
 	}
 }
 
-func TestSetSessionRuntimeConfigPersistsWithoutRunningAgent(t *testing.T) {
+func TestSetSessionRuntimeConfigOverridesPersistWithoutRunningAgent(t *testing.T) {
 	tests := []struct {
 		name       string
 		path       string
@@ -801,9 +801,9 @@ func TestSetSessionRuntimeConfigPersistsWithoutRunningAgent(t *testing.T) {
 			if resp.Code != http.StatusOK {
 				t.Fatalf("expected idle session update to succeed, got %d: %s", resp.Code, resp.Body.String())
 			}
-			cfg, ok := models.LoadSessionRuntimeConfig(session.Metadata)
+			cfg, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
 			if !ok {
-				t.Fatalf("expected persisted runtime config, got %+v", session.Metadata)
+				t.Fatalf("expected persisted runtime config overrides, got %+v", session.Metadata)
 			}
 			tt.assertions(t, cfg, session.Metadata)
 		})

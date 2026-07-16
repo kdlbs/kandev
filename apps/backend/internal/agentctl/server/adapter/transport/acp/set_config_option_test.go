@@ -5,8 +5,46 @@ import (
 	"strings"
 	"testing"
 
+	acp "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
+
+func TestEmitAuthoritativeConfigOptionsUsesCompleteResponseState(t *testing.T) {
+	a := newTestAdapter()
+	values := func(current string) acp.SessionConfigOption {
+		options := acp.SessionConfigSelectOptionsUngrouped{{Value: acp.SessionConfigValueId(current), Name: current}}
+		return acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{
+			Type: "select", Id: acp.SessionConfigId(current), Name: current,
+			CurrentValue: acp.SessionConfigValueId(current), Options: acp.SessionConfigSelectOptions{Ungrouped: &options},
+		}}
+	}
+	response := []acp.SessionConfigOption{values("low"), values("on")}
+	response[0].Select.Id = "reasoning_effort"
+	response[1].Select.Id = "fast_mode"
+
+	a.emitAuthoritativeConfigOptions("sess-1", "reasoning_effort", response, nil)
+
+	event := findSessionModelsEvent(t, drainEvents(a))
+	if got := currentConfigValue(event.ConfigOptions, "reasoning_effort"); got != "low" {
+		t.Errorf("reasoning_effort = %q, want response value low", got)
+	}
+	if got := currentConfigValue(event.ConfigOptions, "fast_mode"); got != "on" {
+		t.Errorf("fast_mode = %q, want dependent response value on", got)
+	}
+	if event.Data["config_options_source"] != "provider_response" ||
+		event.Data["config_options_config_id"] != "reasoning_effort" {
+		t.Fatalf("authoritative metadata = %#v", event.Data)
+	}
+}
+
+func currentConfigValue(options []streams.ConfigOption, id string) string {
+	for _, option := range options {
+		if option.ID == id {
+			return option.CurrentValue
+		}
+	}
+	return ""
+}
 
 // TestSetConfigOption_WithoutConnectionReturnsError pins the precondition
 // that SetConfigOption must surface an error rather than panic when invoked

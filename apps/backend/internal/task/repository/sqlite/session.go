@@ -646,6 +646,61 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
+// SetSessionMetadataKeyIfAbsent atomically writes a metadata key only when it
+// does not already exist. The returned bool reports whether this call stored
+// the value.
+func (r *Repository) SetSessionMetadataKeyIfAbsent(
+	ctx context.Context,
+	sessionID string,
+	key string,
+	value interface{},
+) (bool, error) {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	path := key
+	if !dialect.IsPostgres(driver) {
+		path = "$." + key
+	}
+	query := setSessionMetadataKeyIfAbsentQuery(driver)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, string(valueJSON), now, sessionID, path)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
+func setSessionMetadataKeyIfAbsentQuery(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				ARRAY[?]::text[],
+				?::jsonb,
+				true
+			)::text,
+				updated_at = ?
+			WHERE id = ?
+				AND jsonb_extract_path(
+					CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+					?
+				) IS NULL
+		`
+	}
+	return `
+		UPDATE task_sessions
+		SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)),
+			updated_at = ?
+		WHERE id = ?
+			AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NULL
+	`
+}
+
 func (r *Repository) DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error) {
 	next := expected
 	next.DismissedAt = &dismissedAt

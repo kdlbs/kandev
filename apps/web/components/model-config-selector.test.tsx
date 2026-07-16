@@ -2,21 +2,24 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelConfigSelector } from "@/components/model-config-selector";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 afterEach(() => {
   cleanup();
 });
 
-describe("ModelConfigSelector", () => {
-  const effortSectionTestId = "config-option-section-effort";
-  const effortTriggerTestId = "config-option-trigger-effort";
-  const modelSettingsButtonName = "Model settings";
-  const makeModelOptions = (count: number) =>
-    Array.from({ length: count }, (_, index) => ({
-      id: `model-${index + 1}`,
-      name: `Model ${index + 1}`,
-    }));
+const effortSectionTestId = "config-option-section-effort";
+const effortTriggerTestId = "config-option-trigger-effort";
+const modelSettingsButtonName = "Model settings";
+const providerModelId = "gpt-5.6-sol";
+const optionDescription = "Controls how much reasoning the model performs.";
+const makeModelOptions = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    id: `model-${index + 1}`,
+    name: `Model ${index + 1}`,
+  }));
 
+describe("ModelConfigSelector", () => {
   it("passes custom trigger classes to the button", () => {
     render(
       <ModelConfigSelector
@@ -91,7 +94,9 @@ describe("ModelConfigSelector", () => {
     expect(onConfigChange).toHaveBeenCalledWith("effort", "high");
     expect(screen.queryByTestId(effortSectionTestId)).toBeNull();
   });
+});
 
+describe("ModelConfigSelector filtering", () => {
   it("hides the model filter when there are five or fewer models", () => {
     render(
       <ModelConfigSelector
@@ -118,5 +123,85 @@ describe("ModelConfigSelector", () => {
     fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
 
     expect(screen.getByPlaceholderText("Filter models...")).not.toBeNull();
+  });
+});
+
+describe("ModelConfigSelector provider descriptions", () => {
+  it("shows provider descriptions in config option and value views", () => {
+    render(
+      <ModelConfigSelector
+        modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
+        currentModel={providerModelId}
+        onModelChange={() => {}}
+        onConfigChange={() => {}}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: "Reasoning Effort",
+            description: optionDescription,
+            currentValue: "high",
+            options: [
+              {
+                value: "high",
+                name: "High",
+                description: "More thorough reasoning for complex tasks.",
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
+    expect(screen.getByText(optionDescription)).not.toBeNull();
+
+    fireEvent.click(screen.getByTestId(effortTriggerTestId));
+    expect(screen.getByText("More thorough reasoning for complex tasks.")).not.toBeNull();
+  });
+
+  it("exposes structured provider context when the compact task trigger receives focus", async () => {
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
+          currentModel={providerModelId}
+          onModelChange={() => {}}
+          triggerSummary="changed"
+          configBaseline={{ effort: "high" }}
+          configOptions={[
+            {
+              type: "select",
+              id: "effort",
+              name: "Reasoning Effort",
+              description: optionDescription,
+              currentValue: "low",
+              options: [
+                {
+                  value: "low",
+                  name: "Low",
+                  description: "Faster responses with less reasoning.",
+                },
+              ],
+            },
+          ]}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.focus(screen.getByRole("button", { name: modelSettingsButtonName }));
+
+    const tooltip = await screen.findByRole("tooltip");
+    const tooltipContent = tooltip.closest<HTMLElement>("[data-slot='tooltip-content']");
+    expect(tooltipContent?.className).toContain("pointer-events-auto");
+    const scrollArea = within(tooltip).getByTestId("config-summary-scroll-area");
+    expect(scrollArea.className).toContain("max-h-[min(24rem,calc(100vh-1rem))]");
+    expect(scrollArea.className).toContain("overflow-y-auto");
+    expect(scrollArea.className).toContain("overscroll-contain");
+    expect(scrollArea.tabIndex).toBe(0);
+    expect(within(tooltip).getByText("Reasoning Effort")).not.toBeNull();
+    expect(within(tooltip).getByText("Low")).not.toBeNull();
+    expect(within(tooltip).getByText(optionDescription)).not.toBeNull();
+    expect(within(tooltip).getByText("Faster responses with less reasoning.")).not.toBeNull();
   });
 });

@@ -399,11 +399,28 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 		if cfg, ok := models.LoadSessionRuntimeConfig(session.Metadata); ok {
 			runtimeConfig = cfg
-			runtimeConfigOptionsSet = cfg.ConfigOptions != nil
 			if sessionMode == "" {
 				sessionMode = cfg.Mode
 			}
 		}
+		if overrides, ok := models.LoadSessionRuntimeConfigOverrides(session.Metadata); ok {
+			if overrides.Model != "" {
+				runtimeConfig.Model = overrides.Model
+			}
+			if overrides.Mode != "" {
+				runtimeConfig.Mode = overrides.Mode
+				sessionMode = overrides.Mode
+			}
+			if overrides.ConfigOptions != nil {
+				if runtimeConfig.ConfigOptions == nil {
+					runtimeConfig.ConfigOptions = make(map[string]string)
+				}
+				for key, value := range overrides.ConfigOptions {
+					runtimeConfig.ConfigOptions[key] = value
+				}
+			}
+		}
+		runtimeConfigOptionsSet = runtimeConfig.ConfigOptions != nil
 	}
 
 	info := &lifecycle.WorkspaceInfo{
@@ -502,7 +519,7 @@ func (s *Service) PersistSessionRuntimeModel(ctx context.Context, sessionID, mod
 	if modelID == "" {
 		return nil
 	}
-	if err := s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+	if err := s.updateSessionRuntimeConfigOverrides(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
 		cfg.Model = modelID
 	}); err != nil {
 		return err
@@ -518,7 +535,7 @@ func (s *Service) PersistSessionRuntimeMode(ctx context.Context, sessionID, mode
 	if err := s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeySessionMode, modeID); err != nil {
 		return err
 	}
-	return s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+	return s.updateSessionRuntimeConfigOverrides(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
 		cfg.Mode = modeID
 	})
 }
@@ -528,7 +545,7 @@ func (s *Service) PersistSessionRuntimeConfigOption(ctx context.Context, session
 	if configID == "" {
 		return nil
 	}
-	if err := s.updateSessionRuntimeConfig(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
+	if err := s.updateSessionRuntimeConfigOverrides(ctx, sessionID, func(cfg *models.SessionRuntimeConfig) {
 		if cfg.ConfigOptions == nil {
 			cfg.ConfigOptions = make(map[string]string)
 		}
@@ -545,7 +562,10 @@ func (s *Service) PersistSessionRuntimeConfigOption(ctx context.Context, session
 	return nil
 }
 
-func (s *Service) updateSessionRuntimeConfig(ctx context.Context, sessionID string, mutate func(*models.SessionRuntimeConfig)) error {
+func (s *Service) updateSessionRuntimeConfigOverrides(ctx context.Context, sessionID string, mutate func(*models.SessionRuntimeConfig)) error {
+	s.runtimeOverridesMu.Lock()
+	defer s.runtimeOverridesMu.Unlock()
+
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err
@@ -553,12 +573,12 @@ func (s *Service) updateSessionRuntimeConfig(ctx context.Context, sessionID stri
 	if session == nil {
 		return fmt.Errorf("agent session not found: %s", sessionID)
 	}
-	cfg, _ := models.LoadSessionRuntimeConfig(session.Metadata)
+	cfg, _ := models.LoadSessionRuntimeConfigOverrides(session.Metadata)
 	mutate(&cfg)
 	if cfg.IsZero() {
 		return nil
 	}
-	return s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfig, cfg)
+	return s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyRuntimeConfigOverrides, cfg)
 }
 
 func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *models.TaskEnvironment) {

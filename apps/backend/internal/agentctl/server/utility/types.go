@@ -141,14 +141,16 @@ type ProbeConfigOption struct {
 	Type         string                    `json:"type"`
 	ID           string                    `json:"id"`
 	Name         string                    `json:"name"`
+	Description  string                    `json:"description,omitempty"`
 	CurrentValue string                    `json:"current_value"`
 	Category     string                    `json:"category,omitempty"`
 	Options      []ProbeConfigOptionChoice `json:"options,omitempty"`
 }
 
 type ProbeConfigOptionChoice struct {
-	Value string `json:"value"`
-	Name  string `json:"name"`
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // ProbeCommand is a single slash command advertised by the agent via the

@@ -51,6 +51,16 @@ func TestEmitSessionModels_EmptyCurrentIDNoFallback(t *testing.T) {
 	}
 }
 
+func TestValidateAvailableModelRejectsStaleProfileValue(t *testing.T) {
+	available := []modelInfo{{ModelId: "mock-fast"}, {ModelId: "mock-smart"}}
+	if err := validateAvailableModel(available, "mock-smart"); err != nil {
+		t.Fatalf("advertised model rejected: %v", err)
+	}
+	if err := validateAvailableModel(available, "mock-default"); err == nil {
+		t.Fatal("stale profile model was accepted")
+	}
+}
+
 // TestEmitSessionModels_EmptyCurrentIDFromConfigOption pins the legitimate
 // fallback that we keep: some agents expose the current model via a
 // configOption (id="model") rather than CurrentModelId.
@@ -495,7 +505,7 @@ func TestFinalizeSetModel_MethodNoneEmitsNothing(t *testing.T) {
 		{Type: "select", ID: "model", Name: "Model", CurrentValue: "old-model"},
 	}
 
-	a.finalizeSetModel(sessionmodel.MethodNone, "sess-1", "claude-opus-4-7", cachedModels, cachedConfig)
+	a.finalizeSetModel(sessionmodel.MethodNone, "sess-1", "claude-opus-4-7", cachedModels, cachedConfig, "", nil)
 
 	events := drainEvents(a)
 	for _, ev := range events {
@@ -517,7 +527,7 @@ func TestFinalizeSetModel_RealMethodEmitsEvent(t *testing.T) {
 		{Type: "select", ID: "model", Name: "Model", CurrentValue: "old-model"},
 	}
 
-	a.finalizeSetModel(sessionmodel.MethodSetConfigOption, "sess-1", "claude-opus-4-7", cachedModels, cachedConfig)
+	a.finalizeSetModel(sessionmodel.MethodSetConfigOption, "sess-1", "claude-opus-4-7", cachedModels, cachedConfig, "model", nil)
 
 	ev := findSessionModelsEvent(t, drainEvents(a))
 	if ev.CurrentModelID != "claude-opus-4-7" {

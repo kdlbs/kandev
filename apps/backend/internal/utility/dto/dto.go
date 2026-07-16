@@ -189,14 +189,16 @@ type ConfigOptionDTO struct {
 	Type         string                  `json:"type"`
 	ID           string                  `json:"id"`
 	Name         string                  `json:"name"`
+	Description  string                  `json:"description,omitempty"`
 	CurrentValue string                  `json:"current_value"`
 	Category     string                  `json:"category,omitempty"`
 	Options      []ConfigOptionChoiceDTO `json:"options,omitempty"`
 }
 
 type ConfigOptionChoiceDTO struct {
-	Value string `json:"value"`
-	Name  string `json:"name"`
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // InferenceAgentsResponse is the response for listing inference agents.

@@ -500,6 +500,7 @@ export type AppState = {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configBaseline?: Record<string, string>;
     },
   ) => void;
   // Prompt usage actions

@@ -78,6 +78,50 @@ func TestPostgresSchemaReinitializes(t *testing.T) {
 	}
 }
 
+func TestPostgresSetSessionMetadataKeyIfAbsentIsWriteOnce(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-baseline-pg", "ws-baseline-pg", "Baseline", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-baseline-pg", TaskID: "task-baseline-pg", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	stored, err := repo.SetSessionMetadataKeyIfAbsent(ctx, "session-baseline-pg", "baseline", map[string]string{"effort": "high"})
+	if err != nil {
+		t.Fatalf("first SetSessionMetadataKeyIfAbsent: %v", err)
+	}
+	if !stored {
+		t.Fatal("first SetSessionMetadataKeyIfAbsent should store")
+	}
+	stored, err = repo.SetSessionMetadataKeyIfAbsent(ctx, "session-baseline-pg", "baseline", map[string]string{"effort": "low"})
+	if err != nil {
+		t.Fatalf("second SetSessionMetadataKeyIfAbsent: %v", err)
+	}
+	if stored {
+		t.Fatal("second SetSessionMetadataKeyIfAbsent should not overwrite")
+	}
+	session, err := repo.GetTaskSession(ctx, "session-baseline-pg")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	baseline, ok := session.Metadata["baseline"].(map[string]interface{})
+	if !ok || baseline["effort"] != "high" {
+		t.Fatalf("baseline = %#v, want effort=high", session.Metadata["baseline"])
+	}
+}
+
 func TestPostgresSkipsLegacyTaskEnvironmentBackfill(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

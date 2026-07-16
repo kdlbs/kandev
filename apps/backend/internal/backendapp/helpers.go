@@ -430,11 +430,20 @@ func appendSessionModelsMessage(sessionID string, session *models.TaskSession, l
 		CurrentModelID: modelState.CurrentModelID,
 		Models:         modelState.Models,
 		ConfigOptions:  modelState.ConfigOptions,
+		ConfigBaseline: sessionACPConfigBaseline(session),
 	})
 	if err == nil {
 		result = append(result, notification)
 	}
 	return result
+}
+
+func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
+	if session == nil {
+		return nil
+	}
+	baseline, _ := models.LoadSessionACPConfigBaseline(session.Metadata)
+	return baseline
 }
 
 // routeParams holds all dependencies needed for HTTP and WebSocket route registration.

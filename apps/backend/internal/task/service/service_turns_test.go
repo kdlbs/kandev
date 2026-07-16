@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +15,15 @@ import (
 
 type nilTaskSessionRepo struct {
 	repository.SessionRepository
+}
+
+type slowSessionRepo struct {
+	repository.SessionRepository
+}
+
+func (r slowSessionRepo) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
+	time.Sleep(20 * time.Millisecond)
+	return r.SessionRepository.GetTaskSession(ctx, sessionID)
 }
 
 func (nilTaskSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
@@ -128,6 +138,10 @@ func TestGetWorkspaceInfoForSession_RuntimeConfigOptionsSetOnlyWhenOptionsPresen
 		Metadata: map[string]interface{}{
 			models.SessionMetaKeyRuntimeConfig: models.SessionRuntimeConfig{
 				Model:         "gpt-5.3-codex-spark",
+				ConfigOptions: map[string]string{"reasoning_effort": "medium"},
+			},
+			models.SessionMetaKeyRuntimeConfigOverrides: models.SessionRuntimeConfig{
+				Model:         "gpt-5.4",
 				ConfigOptions: map[string]string{"reasoning_effort": "low"},
 			},
 		},
@@ -141,6 +155,85 @@ func TestGetWorkspaceInfoForSession_RuntimeConfigOptionsSetOnlyWhenOptionsPresen
 	}
 	if !optionsInfo.RuntimeConfigOptionsSet {
 		t.Fatal("runtime config with options should mark config options as set")
+	}
+	if optionsInfo.RuntimeModel != "gpt-5.4" || optionsInfo.RuntimeConfigOptions["reasoning_effort"] != "low" {
+		t.Fatalf("explicit overrides not applied last: %#v", optionsInfo)
+	}
+}
+
+func TestPersistSessionRuntimeConfigOptionWritesExplicitOverride(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID: "session-override", TaskID: "task-123",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := svc.PersistSessionRuntimeConfigOption(ctx, session.ID, "reasoning_effort", "low"); err != nil {
+		t.Fatalf("PersistSessionRuntimeConfigOption: %v", err)
+	}
+
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(stored.Metadata)
+	if !ok || overrides.ConfigOptions["reasoning_effort"] != "low" {
+		t.Fatalf("runtime overrides = %#v, %v", overrides, ok)
+	}
+	if _, ok := models.LoadSessionRuntimeConfig(stored.Metadata); ok {
+		t.Fatal("explicit selection should not synthesize a provider snapshot")
+	}
+}
+
+func TestPersistSessionRuntimeOverridesMergeConcurrentSelections(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID: "session-concurrent-overrides", TaskID: "task-123",
+		State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	svc.sessions = slowSessionRepo{SessionRepository: repo}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		errs <- svc.PersistSessionRuntimeModel(ctx, session.ID, "mock-smart")
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		errs <- svc.PersistSessionRuntimeConfigOption(ctx, session.ID, "effort", "low")
+	}()
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("persist override: %v", err)
+		}
+	}
+
+	stored, err := repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	overrides, ok := models.LoadSessionRuntimeConfigOverrides(stored.Metadata)
+	if !ok || overrides.Model != "mock-smart" || overrides.ConfigOptions["effort"] != "low" {
+		t.Fatalf("merged overrides = %#v, %v", overrides, ok)
 	}
 }
 

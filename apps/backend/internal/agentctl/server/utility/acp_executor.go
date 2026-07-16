@@ -617,6 +617,7 @@ func probeConfigOptions(opts []acp.SessionConfigOption) []ProbeConfigOption {
 			Type:         sel.Type,
 			ID:           string(sel.Id),
 			Name:         sel.Name,
+			Description:  derefString(sel.Description),
 			CurrentValue: string(sel.CurrentValue),
 		}
 		if sel.Category != nil {
@@ -624,8 +625,9 @@ func probeConfigOptions(opts []acp.SessionConfigOption) []ProbeConfigOption {
 		}
 		for _, item := range selectOptionsUngrouped(sel.Options) {
 			config.Options = append(config.Options, ProbeConfigOptionChoice{
-				Value: string(item.Value),
-				Name:  item.Name,
+				Value:       string(item.Value),
+				Name:        item.Name,
+				Description: derefString(item.Description),
 			})
 		}
 		out = append(out, config)

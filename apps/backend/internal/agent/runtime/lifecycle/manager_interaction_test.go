@@ -983,6 +983,8 @@ func TestEffectiveSessionRuntimeConfig(t *testing.T) {
 		)
 
 		require.Equal(t, "gpt-5.3-codex-spark", model)
+		provider.infos["session-1"].RuntimeConfigOptions["reasoning_effort"] = "medium"
+		require.Equal(t, "low", options["reasoning_effort"], "effective config must own its map")
 		require.Equal(t, "full-access", mode)
 		require.Equal(t, map[string]string{"reasoning_effort": "low"}, options)
 		require.Equal(t, 1, provider.sessionCalls)

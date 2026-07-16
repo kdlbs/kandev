@@ -34,10 +34,19 @@ test.describe("Chat model selector — RPC failure", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const baseline = sessions[0]?.metadata?.acp_config_baseline as
+          | Record<string, string>
+          | undefined;
+        return baseline?.effort;
+      })
+      .toBe("medium");
+
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
     await expect(trigger).toBeVisible({ timeout: 15_000 });
-    // mock-agent ships with model="mock-fast" + effort="medium", so the
-    // composite trigger label starts as "Mock Fast / Medium".
+    // Baseline-matching secondary options stay out of the task-chat trigger.
     await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
 
     const backendErrorMessage = "mock backend rejected model change";
@@ -152,7 +161,14 @@ test.describe("Chat model selector — RPC failure", () => {
  * session snapshot and SSR re-served the pre-change model on reload.
  */
 test.describe("Chat model selector — persistence", () => {
-  test("model change persists across page reload", async ({ testPage, apiClient, seedData }) => {
+  test("changed values stay compact across backend restart", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }, testInfo) => {
+    test.setTimeout(120_000);
+
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Model Selector Persistence Test",
@@ -171,27 +187,84 @@ test.describe("Chat model selector — persistence", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const baseline = sessions[0]?.metadata?.acp_config_baseline as
+          | Record<string, string>
+          | undefined;
+        return baseline?.effort;
+      })
+      .toBe("medium");
+
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
-    await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
+    await expect(trigger).toHaveText("Mock Fast", { timeout: 15_000 });
 
-    // Switch from Mock Fast to Mock Smart. mock-agent routes model changes
-    // through POST /set-config-option — the same path the persistence bug
-    // lived on (SetConfigOption did not emit the session_models convergence
-    // event, so the orchestrator never wrote the new model to the DB).
+    // Provider-authored descriptions are visible in the open selector. The
+    // mock effort option intentionally has none, proving descriptions remain
+    // optional rather than synthesized by Kandev.
     await trigger.click();
-    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
-    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+    await expect(testPage.getByText("Fast mock model for testing", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("Smart mock model for testing", { exact: true })).toBeVisible();
 
+    // Change both model and effort. The closed task trigger lists every
+    // changed value in ACP order while omitting the baseline Medium value.
+    // Model changes refresh the provider's full option snapshot, so wait for
+    // that convergence before applying a dependent option.
+    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    await expect(trigger).toHaveText("Mock Smart", { timeout: 5_000 });
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const runtime = sessions[0]?.metadata?.runtime_config as { model?: string } | undefined;
+        return runtime?.model;
+      })
+      .toBe("mock-smart");
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeHidden();
+    await trigger.click();
+    await testPage.getByTestId("config-option-trigger-effort").click();
+    await testPage.getByRole("button", { name: "Low", exact: true }).click();
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const runtime = sessions[0]?.metadata?.runtime_config as
+          | { config_options?: Record<string, string> }
+          | undefined;
+        return runtime?.config_options?.effort;
+      })
+      .toBe("low");
+    await expect(trigger).toHaveText("Mock Smart / Low", { timeout: 5_000 });
+    await expect(trigger).not.toContainText("Medium");
+
+    await testInfo.attach("task-model-selector-desktop", {
+      body: await testPage.screenshot(),
+      contentType: "image/png",
+    });
+
+    // A full backend recreation keeps both the mutable values and the original
+    // persisted baseline, so the same differences remain visible after resume.
+    await backend.restart();
     await testPage.reload();
     await session.waitForLoad();
-    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await session.waitForChatIdle({ timeout: 60_000 });
 
-    // After reload the trigger label comes from SSR-hydrated session state.
-    // If SetConfigOption fails to emit the convergence event, the orchestrator
-    // never persists the change and SSR re-serves "Mock Fast" — this assertion
-    // is the regression guard.
-    await expect(trigger).toContainText("Mock Smart", { timeout: 15_000 });
-    await expect(trigger).not.toContainText("Mock Fast");
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const metadata = sessions[0]?.metadata;
+        const runtime = metadata?.runtime_config as
+          | { config_options?: Record<string, string> }
+          | undefined;
+        const baseline = metadata?.acp_config_baseline as Record<string, string> | undefined;
+        return `${runtime?.config_options?.effort}/${baseline?.effort}`;
+      })
+      .toBe("low/medium");
+    await trigger.click();
+    await expect(testPage.getByTestId("config-option-trigger-effort")).toContainText("Low");
+    await testPage.keyboard.press("Escape");
+    await expect(trigger).toHaveText("Mock Smart / Low", { timeout: 15_000 });
+    await expect(trigger).not.toContainText("Medium");
   });
 });
 

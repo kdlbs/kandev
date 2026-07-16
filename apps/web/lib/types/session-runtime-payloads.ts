@@ -33,9 +33,10 @@ export type ConfigOptionPayload = {
   type: string;
   id: string;
   name: string;
+  description?: string;
   current_value: string;
   category?: string;
-  options?: { value: string; name: string }[];
+  options?: { value: string; name: string; description?: string }[];
 };
 
 export type SessionModelsPayload = {
@@ -45,6 +46,7 @@ export type SessionModelsPayload = {
   current_model_id: string;
   models: SessionModelInfoPayload[];
   config_options: ConfigOptionPayload[];
+  config_baseline?: Record<string, string>;
   timestamp: string;
 };
 

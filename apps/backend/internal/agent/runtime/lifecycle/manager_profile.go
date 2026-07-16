@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"go.uber.org/zap"
@@ -163,9 +164,9 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 // signal (the agent has never run a turn). When there IS a prompt, the callback is unused and
 // MarkReady fires later from handleCompleteEvent — that path is the true turn-end.
 //
-// Session runtime config persisted in task_sessions.metadata.runtime_config
-// takes precedence over profile defaults. This preserves user-selected model
-// and reasoning-effort values across process recovery.
+// Persisted session runtime state and explicit overrides take precedence over
+// profile defaults. This preserves user-selected model and reasoning-effort
+// values across process recovery.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
 	model, mode, configOptions := m.effectiveSessionRuntimeConfig(ctx, execution, profileModel, profileMode, profileConfigOptions)
@@ -175,7 +176,7 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *AgentExecution, profileModel, profileMode string, profileConfigOptions map[string]string) (string, string, map[string]string) {
 	model := profileModel
 	mode := profileMode
-	configOptions := profileConfigOptions
+	configOptions := maps.Clone(profileConfigOptions)
 	info := m.sessionWorkspaceInfo(ctx, execution)
 	if info == nil {
 		return model, mode, configOptions
@@ -187,7 +188,7 @@ func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *
 		mode = info.SessionMode
 	}
 	if info.RuntimeConfigOptionsSet {
-		configOptions = info.RuntimeConfigOptions
+		configOptions = maps.Clone(info.RuntimeConfigOptions)
 	}
 	return model, mode, configOptions
 }

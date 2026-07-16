@@ -334,6 +334,42 @@ func TestHttpListInferenceAgents(t *testing.T) {
 	}
 }
 
+func TestInferenceAgentDTOFromCapsPreservesConfigOptionDescriptions(t *testing.T) {
+	dto := inferenceAgentDTOFromCaps(lifecycle.InferenceAgentInfo{
+		ID: "codex-acp", Name: "Codex ACP", DisplayName: "Codex",
+	}, hostutility.AgentCapabilities{
+		Status: hostutility.StatusOK,
+		ConfigOptions: []hostutility.ConfigOption{{
+			Type:         "select",
+			ID:           "reasoning_effort",
+			Name:         "Reasoning effort",
+			Description:  "Controls reasoning depth.",
+			CurrentValue: "high",
+			Options: []hostutility.ConfigOptionChoice{{
+				Value:       "high",
+				Name:        "High",
+				Description: "More thorough reasoning.",
+			}},
+		}},
+	}, true)
+
+	raw, err := json.Marshal(dto.ConfigOptions)
+	if err != nil {
+		t.Fatalf("marshal config options: %v", err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal config options: %v", err)
+	}
+	if got := payload[0]["description"]; got != "Controls reasoning depth." {
+		t.Errorf("option description = %#v, want provider description", got)
+	}
+	values := payload[0]["options"].([]any)
+	if got := values[0].(map[string]any)["description"]; got != "More thorough reasoning." {
+		t.Errorf("value description = %#v, want provider description", got)
+	}
+}
+
 // TestSanitizeStatusMessage guards the wire-level redaction of credentials in
 // upstream probe errors. An ACP agent that echoes the offending value back
 // must not leak it through /api/v1/utility/inference-agents.
