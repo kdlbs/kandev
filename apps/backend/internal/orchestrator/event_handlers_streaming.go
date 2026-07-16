@@ -1657,11 +1657,13 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 		return
 	}
 
-	// Persist the agent-reported current model so SSR can render the model
-	// selector trigger with the right value on a page reload instead of
-	// flashing the profile default before the WS catches up.
-	s.persistSessionModelAndRuntimeConfig(ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.ConfigOptions)
+	// Store the write-once baseline before the mutable selector snapshot so a
+	// concurrent task-detail boot cannot observe the new state without its
+	// comparison values.
 	configBaseline := s.sessionACPConfigBaselineForEvent(ctx, sessionID, payload.Data)
+	s.persistSessionModelAndRuntimeConfig(
+		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions,
+	)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
 		TaskID:         payload.TaskID,
@@ -1768,7 +1770,12 @@ func (s *Service) persistSessionModel(ctx context.Context, sessionID, model stri
 	s.persistSessionModelOnSession(ctx, sessionID, session, model)
 }
 
-func (s *Service) persistSessionModelAndRuntimeConfig(ctx context.Context, sessionID, model, mode string, options []streams.ConfigOption) {
+func (s *Service) persistSessionModelAndRuntimeConfig(
+	ctx context.Context,
+	sessionID, model, mode string,
+	availableModels []streams.SessionModelInfo,
+	options []streams.ConfigOption,
+) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to load session for session model persistence",
@@ -1783,6 +1790,37 @@ func (s *Service) persistSessionModelAndRuntimeConfig(ctx context.Context, sessi
 		s.persistSessionModelOnSession(ctx, sessionID, session, model)
 	}
 	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
+	s.persistSessionModelsSnapshot(ctx, sessionID, model, availableModels, options)
+}
+
+func (s *Service) persistSessionModelsSnapshot(
+	ctx context.Context,
+	sessionID, currentModelID string,
+	availableModels []streams.SessionModelInfo,
+	options []streams.ConfigOption,
+) {
+	modelsForBoot := make([]streams.SessionModelInfo, 0, len(availableModels))
+	for _, model := range availableModels {
+		modelsForBoot = append(modelsForBoot, streams.SessionModelInfo{
+			ModelID:         model.ModelID,
+			Name:            model.Name,
+			Description:     model.Description,
+			UsageMultiplier: model.UsageMultiplier,
+		})
+	}
+	snapshot := lifecycle.SessionModelsSnapshot{
+		CurrentModelID: currentModelID,
+		Models:         modelsForBoot,
+		ConfigOptions:  options,
+	}
+	writeCtx := context.WithoutCancel(ctx)
+	if err := s.repo.SetSessionMetadataKey(
+		writeCtx, sessionID, models.SessionMetaKeyACPModelState, snapshot,
+	); err != nil {
+		s.logger.Warn("failed to persist ACP model selector state",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
 
 func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, model, mode string, options []streams.ConfigOption) {

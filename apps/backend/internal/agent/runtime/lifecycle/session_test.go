@@ -414,7 +414,7 @@ func TestPublishSettledConfigOptionsAppliesToDelayedModelState(t *testing.T) {
 	sm.SetDependencies(publisher, nil, nil, nil)
 	execution := &AgentExecution{ID: "exec-1", TaskID: "task-1", SessionID: "session-1"}
 
-	sm.publishSettledConfigOptions(execution, "acp-session-1", "effort")
+	sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", nil)
 	mgr := &Manager{logger: log, eventPublisher: publisher}
 	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
 		Type:           streams.EventTypeSessionModels,
@@ -447,7 +447,7 @@ func TestPublishSettledConfigOptionsAppliesToDelayedModelState(t *testing.T) {
 	}
 }
 
-func TestConfigBaselineUsesDelayedAuthoritativeResponseAfterStartupRPCs(t *testing.T) {
+func TestConfigBaselineRetainsProviderDefaultsWhenProfileOverrideSettles(t *testing.T) {
 	log := newSessionTestLogger()
 	eventBus := &MockEventBusWithTracking{}
 	publisher := NewEventPublisher(eventBus, log)
@@ -462,11 +462,12 @@ func TestConfigBaselineUsesDelayedAuthoritativeResponseAfterStartupRPCs(t *testi
 			{ID: "fast_mode", CurrentValue: "off"},
 		},
 	})
+	providerDefaults := execution.GetModelState()
 
 	// Startup requested effort=high, but the stable ACP response's complete
 	// configOptions reports the provider's dependent final state. Stream
 	// dispatch is deliberately delayed until after the startup RPC boundary.
-	sm.publishSettledConfigOptions(execution, "acp-session-1", "effort")
+	sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", providerDefaults)
 	mgr := &Manager{logger: log, eventPublisher: publisher}
 	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
 		Type:           streams.EventTypeSessionModels,
@@ -498,6 +499,12 @@ func TestConfigBaselineUsesDelayedAuthoritativeResponseAfterStartupRPCs(t *testi
 	}
 	if got := configValueByID(settled.ConfigOptions, "fast_mode"); got != "on" {
 		t.Errorf("settled fast_mode = %q, want provider-reported dependent on", got)
+	}
+	if got := configValueByID(settled.ConfigBaselineCandidate, "effort"); got != "medium" {
+		t.Errorf("baseline effort = %q, want provider default medium", got)
+	}
+	if got := configValueByID(settled.ConfigBaselineCandidate, "fast_mode"); got != "off" {
+		t.Errorf("baseline fast_mode = %q, want provider default off", got)
 	}
 }
 
@@ -541,7 +548,8 @@ func TestConfigSettlementAuthoritativeResponseOrdering(t *testing.T) {
 	t.Run("old provider update then settle then matching response", func(t *testing.T) {
 		sm, mgr, execution, eventBus := newHarness()
 		mgr.handleAgentEvent(execution, event("provider_update", "", "medium", "off"))
-		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort")
+		providerDefaults := execution.GetModelState()
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", providerDefaults)
 		mgr.handleAgentEvent(execution, event("provider_response", "effort", "low", "on"))
 
 		settled := settledEvents(eventBus)
@@ -554,7 +562,12 @@ func TestConfigSettlementAuthoritativeResponseOrdering(t *testing.T) {
 		sm, mgr, execution, eventBus := newHarness()
 		mgr.handleAgentEvent(execution, event("provider_response", "effort", "high", "off"))
 		mgr.handleAgentEvent(execution, event("provider_update", "", "low", "on"))
-		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort")
+		providerDefaults := &CachedModelState{ConfigOptions: []streams.ConfigOption{
+			{ID: "model", Category: "model", CurrentValue: "gpt-5"},
+			{ID: "effort", CurrentValue: "medium"},
+			{ID: "fast_mode", CurrentValue: "off"},
+		}}
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", providerDefaults)
 
 		settled := settledEvents(eventBus)
 		if len(settled) != 1 {
@@ -566,8 +579,8 @@ func TestConfigSettlementAuthoritativeResponseOrdering(t *testing.T) {
 		if got := configValueByID(settled[0].ConfigOptions, "fast_mode"); got != "on" {
 			t.Fatalf("published live fast mode = %q, want newest provider update on", got)
 		}
-		if got := configValueByID(settled[0].ConfigBaselineCandidate, "effort"); got != "high" {
-			t.Fatalf("baseline candidate effort = %q, want retained response high", got)
+		if got := configValueByID(settled[0].ConfigBaselineCandidate, "effort"); got != "medium" {
+			t.Fatalf("baseline candidate effort = %q, want provider default medium", got)
 		}
 		if got := configValueByID(settled[0].ConfigBaselineCandidate, "fast_mode"); got != "off" {
 			t.Fatalf("baseline candidate fast mode = %q, want retained response off", got)
@@ -579,7 +592,7 @@ func TestConfigSettlementAuthoritativeResponseOrdering(t *testing.T) {
 
 	t.Run("pending settlement ignores unrelated provider update", func(t *testing.T) {
 		sm, mgr, execution, eventBus := newHarness()
-		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort")
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", nil)
 		mgr.handleAgentEvent(execution, event("provider_update", "", "medium", "off"))
 
 		if settled := settledEvents(eventBus); len(settled) != 0 {
@@ -590,9 +603,27 @@ func TestConfigSettlementAuthoritativeResponseOrdering(t *testing.T) {
 		}
 	})
 
+	t.Run("queued initial state remains baseline before matching profile response", func(t *testing.T) {
+		sm, mgr, execution, eventBus := newHarness()
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", nil)
+		mgr.handleAgentEvent(execution, event("provider_update", "", "medium", "off"))
+		mgr.handleAgentEvent(execution, event("provider_response", "effort", "high", "off"))
+
+		settled := settledEvents(eventBus)
+		if len(settled) != 1 {
+			t.Fatalf("settled events = %#v, want one event", settled)
+		}
+		if got := configValueByID(settled[0].ConfigBaselineCandidate, "effort"); got != "medium" {
+			t.Fatalf("baseline effort = %q, want queued provider default medium", got)
+		}
+		if got := configValueByID(settled[0].ConfigOptions, "effort"); got != "high" {
+			t.Fatalf("live effort = %q, want profile-selected high", got)
+		}
+	})
+
 	t.Run("first provider update settles empty startup config", func(t *testing.T) {
 		sm, mgr, execution, eventBus := newHarness()
-		sm.publishSettledConfigOptions(execution, "acp-session-1", "")
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "", nil)
 		mgr.handleAgentEvent(execution, event("provider_update", "", "medium", "off"))
 
 		settled := settledEvents(eventBus)
@@ -607,8 +638,8 @@ func TestConfigSettlementAuthoritativeResponseOrdering(t *testing.T) {
 	t.Run("matching response is consumed once", func(t *testing.T) {
 		sm, mgr, execution, eventBus := newHarness()
 		mgr.handleAgentEvent(execution, event("provider_response", "effort", "low", "on"))
-		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort")
-		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort")
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", nil)
+		sm.publishSettledConfigOptions(execution, "acp-session-1", "effort", nil)
 
 		if settled := settledEvents(eventBus); len(settled) != 1 {
 			t.Fatalf("settled event count = %d, want response consumed once", len(settled))

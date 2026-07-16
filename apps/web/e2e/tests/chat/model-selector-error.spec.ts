@@ -161,6 +161,85 @@ test.describe("Chat model selector — RPC failure", () => {
  * session snapshot and SSR re-served the pre-change model on reload.
  */
 test.describe("Chat model selector — persistence", () => {
+  test("profile config overrides provider defaults on the first rendered label", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "High Effort Task Profile", {
+      model: "mock-fast",
+      config_options: { effort: "high" },
+    });
+
+    try {
+      const task = await apiClient.createTaskWithAgent(
+        seedData.workspaceId,
+        "Profile Model Selector Defaults Test",
+        profile.id,
+        {
+          description: "/e2e:simple-message",
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.waitForChatIdle({ timeout: 30_000 });
+
+      await expect
+        .poll(async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const metadata = sessions[0]?.metadata;
+          const runtime = metadata?.runtime_config as
+            | { config_options?: Record<string, string> }
+            | undefined;
+          const baseline = metadata?.acp_config_baseline as Record<string, string> | undefined;
+          return `${runtime?.config_options?.effort}/${baseline?.effort}`;
+        })
+        .toBe("high/medium");
+
+      const trigger = testPage.getByRole("button", { name: "Session model settings" });
+      await expect(trigger).toHaveText("Mock Fast / High", { timeout: 15_000 });
+
+      await testPage.addInitScript(() => {
+        const win = window as Window & { __modelSelectorTexts?: string[] };
+        const capture = () => {
+          const text = document
+            .querySelector('button[aria-label="Session model settings"]')
+            ?.textContent?.trim();
+          if (text && win.__modelSelectorTexts?.at(-1) !== text) {
+            win.__modelSelectorTexts?.push(text);
+          }
+        };
+        win.__modelSelectorTexts = [];
+        new MutationObserver(capture).observe(document, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+        });
+        document.addEventListener("DOMContentLoaded", capture);
+      });
+
+      await testPage.reload();
+      await session.waitForLoad();
+      await expect(trigger).toHaveText("Mock Fast / High", { timeout: 15_000 });
+      const renderedLabels = await testPage.evaluate(
+        () =>
+          (window as Window & { __modelSelectorTexts?: string[] }).__modelSelectorTexts?.filter(
+            (text) => text.startsWith("Mock Fast"),
+          ) ?? [],
+      );
+      expect(renderedLabels.length).toBeGreaterThan(0);
+      expect(renderedLabels).toEqual(renderedLabels.map(() => "Mock Fast / High"));
+    } finally {
+      await apiClient.deleteAgentProfile(profile.id, true);
+    }
+  });
+
   test("changed values stay compact across backend restart", async ({
     testPage,
     apiClient,
@@ -200,12 +279,14 @@ test.describe("Chat model selector — persistence", () => {
     const trigger = testPage.getByRole("button", { name: "Session model settings" });
     await expect(trigger).toHaveText("Mock Fast", { timeout: 15_000 });
 
-    // Provider-authored descriptions are visible in the open selector. The
-    // mock effort option intentionally has none, proving descriptions remain
-    // optional rather than synthesized by Kandev.
+    // Model help is visible in the model list. Option help remains hidden in
+    // the compact top-level list until the user enters that option submenu.
     await trigger.click();
     await expect(testPage.getByText("Fast mock model for testing", { exact: true })).toBeVisible();
     await expect(testPage.getByText("Smart mock model for testing", { exact: true })).toBeVisible();
+    await expect(
+      testPage.getByText("Controls how much reasoning the mock model uses", { exact: true }),
+    ).toHaveCount(0);
 
     // Change both model and effort. The closed task trigger lists every
     // changed value in ACP order while omitting the baseline Medium value.
@@ -224,6 +305,9 @@ test.describe("Chat model selector — persistence", () => {
     await expect(testPage.getByRole("option", { name: /Mock Smart/ })).toBeHidden();
     await trigger.click();
     await testPage.getByTestId("config-option-trigger-effort").click();
+    await expect(
+      testPage.getByText("Controls how much reasoning the mock model uses", { exact: true }),
+    ).toBeVisible();
     await testPage.getByRole("button", { name: "Low", exact: true }).click();
     await expect
       .poll(async () => {

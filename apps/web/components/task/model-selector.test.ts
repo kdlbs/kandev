@@ -112,7 +112,9 @@ describe("model selector config options", () => {
 
     expect(label).toBe("GPT-5.5 / Medium");
   });
+});
 
+describe("task model selector compact label", () => {
   it("shows only the model when task configuration matches its baseline", () => {
     const label = compactTriggerLabel(modelOptions, providerModelId, sessionConfigOptions(), {
       model: providerModelId,
@@ -146,6 +148,16 @@ describe("model selector config options", () => {
     );
 
     expect(label).toBe(`${providerModelName} / Low / On`);
+  });
+
+  it("shows a profile-selected value that differs from the provider default", () => {
+    const label = compactTriggerLabel(modelOptions, providerModelId, sessionConfigOptions("high"), {
+      model: providerModelId,
+      reasoning_effort: "medium",
+      fast_mode: "off",
+    });
+
+    expect(label).toBe(`${providerModelName} / High`);
   });
 
   it("hides a value after it returns to baseline", () => {

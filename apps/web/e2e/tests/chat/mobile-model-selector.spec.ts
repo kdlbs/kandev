@@ -69,8 +69,17 @@ test.describe("Mobile chat model selector", () => {
 
     const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
     await expect(effortTrigger).toBeVisible();
+    await expect(
+      testPage.getByText("Controls how much reasoning the mock model uses", { exact: true }),
+    ).toHaveCount(0);
     await effortTrigger.tap();
     await expect(testPage.getByTestId("config-option-section-effort")).toBeVisible();
+    await expect(
+      testPage.getByText("Controls how much reasoning the mock model uses", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      testPage.getByText("Faster responses with less reasoning", { exact: true }),
+    ).toBeVisible();
     await testPage.getByRole("button", { name: "Low", exact: true }).tap();
     await expect(trigger).toHaveText("Mock Fast / Low");
     await expect(trigger).not.toContainText("Medium");

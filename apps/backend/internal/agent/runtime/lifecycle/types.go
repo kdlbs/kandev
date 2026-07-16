@@ -121,6 +121,7 @@ type AgentExecution struct {
 
 	// Cached session model state (for re-sending on subscribe after page refresh)
 	modelState                   *CachedModelState
+	providerDefaultModelState    *CachedModelState
 	authoritativeConfigResponses map[string]*CachedModelState
 	pendingConfigSettlement      *configSettlement
 	modelStateMu                 sync.RWMutex
@@ -225,7 +226,8 @@ type CachedModelState struct {
 }
 
 type configSettlement struct {
-	configID string
+	configID        string
+	providerDefault *CachedModelState
 }
 
 // SetModeState caches the session mode state on this execution.
@@ -247,27 +249,43 @@ func (ae *AgentExecution) SetModelState(state *CachedModelState) {
 	ae.modelStateMu.Lock()
 	defer ae.modelStateMu.Unlock()
 	ae.modelState = state
+	ae.captureProviderDefaultModelState(state)
 	ae.cacheAuthoritativeConfigResponse(state)
 }
 
-// SettleConfigOptions returns an authoritative final RPC snapshot when it is
-// already cached, otherwise retains the final startup config ID until that
-// response reaches the stream dispatcher.
-func (ae *AgentExecution) SettleConfigOptions(configID string) (*CachedModelState, *CachedModelState, bool) {
+// SettleConfigOptions pairs the initial provider defaults with the live state
+// after the final startup RPC. When that response is still in flight, it keeps
+// both values until the stream dispatcher receives the matching update.
+func (ae *AgentExecution) SettleConfigOptions(
+	configID string,
+	providerDefault *CachedModelState,
+) (*CachedModelState, *CachedModelState, bool) {
 	ae.modelStateMu.Lock()
 	defer ae.modelStateMu.Unlock()
+	providerDefault = cloneCachedModelState(providerDefault)
+	if providerDefault == nil {
+		providerDefault = cloneCachedModelState(ae.providerDefaultModelState)
+	}
 	if configID == "" {
 		if ae.modelState == nil {
-			ae.pendingConfigSettlement = &configSettlement{}
+			ae.pendingConfigSettlement = &configSettlement{providerDefault: providerDefault}
 			return nil, nil, false
 		}
 		state := cloneCachedModelState(ae.modelState)
-		return state, state, true
+		if providerDefault == nil {
+			providerDefault = state
+		}
+		return providerDefault, state, true
 	}
 	if response := ae.consumeAuthoritativeConfigResponse(configID); response != nil {
-		return response, cloneCachedModelState(ae.modelState), true
+		if providerDefault == nil {
+			providerDefault = response
+		}
+		return providerDefault, cloneCachedModelState(ae.modelState), true
 	}
-	ae.pendingConfigSettlement = &configSettlement{configID: configID}
+	ae.pendingConfigSettlement = &configSettlement{
+		configID: configID, providerDefault: providerDefault,
+	}
 	return nil, nil, false
 }
 
@@ -277,6 +295,7 @@ func (ae *AgentExecution) SetModelStateApplyingSettlement(state *CachedModelStat
 	ae.modelStateMu.Lock()
 	defer ae.modelStateMu.Unlock()
 	ae.modelState = state
+	ae.captureProviderDefaultModelState(state)
 	ae.cacheAuthoritativeConfigResponse(state)
 
 	settlement := ae.pendingConfigSettlement
@@ -285,6 +304,9 @@ func (ae *AgentExecution) SetModelStateApplyingSettlement(state *CachedModelStat
 	}
 	if settlement.configID == "" {
 		ae.pendingConfigSettlement = nil
+		if settlement.providerDefault != nil {
+			return cloneCachedModelState(settlement.providerDefault), true
+		}
 		return state, true
 	}
 	response := ae.consumeAuthoritativeConfigResponse(settlement.configID)
@@ -292,7 +314,19 @@ func (ae *AgentExecution) SetModelStateApplyingSettlement(state *CachedModelStat
 		return state, false
 	}
 	ae.pendingConfigSettlement = nil
+	if settlement.providerDefault != nil {
+		return cloneCachedModelState(settlement.providerDefault), true
+	}
+	if ae.providerDefaultModelState != nil {
+		return cloneCachedModelState(ae.providerDefaultModelState), true
+	}
 	return response, true
+}
+
+func (ae *AgentExecution) captureProviderDefaultModelState(state *CachedModelState) {
+	if ae.providerDefaultModelState == nil && state != nil && len(state.ConfigOptions) > 0 {
+		ae.providerDefaultModelState = cloneCachedModelState(state)
+	}
 }
 
 func (ae *AgentExecution) cacheAuthoritativeConfigResponse(state *CachedModelState) {
@@ -335,7 +369,7 @@ func cloneCachedModelState(state *CachedModelState) *CachedModelState {
 func (ae *AgentExecution) GetModelState() *CachedModelState {
 	ae.modelStateMu.RLock()
 	defer ae.modelStateMu.RUnlock()
-	return ae.modelState
+	return cloneCachedModelState(ae.modelState)
 }
 
 // SetAuthMethods caches the auth methods on this execution.

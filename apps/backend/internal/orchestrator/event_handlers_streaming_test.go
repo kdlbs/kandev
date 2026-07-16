@@ -1876,10 +1876,18 @@ func TestHandleSessionModelsEventStoresBaselineCandidateAndPublishesLiveState(t 
 		AgentID:   "a1",
 		Data: &lifecycle.AgentStreamEventData{
 			CurrentModelID: "gpt-5.6-sol",
-			Data:           map[string]any{"config_options_settled": true},
+			SessionModels: []streams.SessionModelInfo{{
+				ModelID: "gpt-5.6-sol", Name: "GPT-5.6-Sol", Description: "Provider model help",
+				Meta: map[string]any{"provider_internal": "not needed by task selector"},
+			}},
+			Data: map[string]any{"config_options_settled": true},
 			ConfigOptions: []streams.ConfigOption{
 				{ID: "model", Category: "model", CurrentValue: "gpt-5.6-sol"},
-				{ID: "reasoning_effort", CurrentValue: "low"},
+				{
+					Type: "select", ID: "reasoning_effort", Name: "Reasoning effort",
+					Description: "Provider option help", CurrentValue: "low",
+					Options: []streams.ConfigOptionValue{{Value: "low", Name: "Low", Description: "Provider value help"}},
+				},
 				{ID: "fast_mode", CurrentValue: "on"},
 			},
 			ConfigBaselineCandidate: []streams.ConfigOption{
@@ -1903,6 +1911,13 @@ func TestHandleSessionModelsEventStoresBaselineCandidateAndPublishesLiveState(t 
 	require.True(t, ok)
 	require.Equal(t, "low", runtimeConfig.ConfigOptions["reasoning_effort"])
 	require.Equal(t, "on", runtimeConfig.ConfigOptions["fast_mode"])
+	modelState, ok := lifecycle.LoadSessionModelsSnapshot(updated.Metadata[models.SessionMetaKeyACPModelState])
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", modelState.CurrentModelID)
+	require.Equal(t, "Provider model help", modelState.Models[0].Description)
+	require.Nil(t, modelState.Models[0].Meta)
+	require.Equal(t, "Provider option help", modelState.ConfigOptions[1].Description)
+	require.Equal(t, "Provider value help", modelState.ConfigOptions[1].Options[0].Description)
 
 	require.Len(t, eb.events, 1)
 	published := eb.events[0].event.Data.(lifecycle.SessionModelsEventPayload)
@@ -1943,7 +1958,7 @@ func TestPersistSessionModelAndRuntimeConfigPersistsSnapshotRuntimeConfigAndCach
 	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", "context_window", map[string]interface{}{"size": int64(256000)}))
 	svc := &Service{logger: testLogger(), repo: repo}
 
-	svc.persistSessionModelAndRuntimeConfig(ctx, "s1", "gpt-5.3-codex-spark", "", []streams.ConfigOption{
+	svc.persistSessionModelAndRuntimeConfig(ctx, "s1", "gpt-5.3-codex-spark", "", nil, []streams.ConfigOption{
 		{ID: "reasoning_effort", Category: "thought_level", CurrentValue: "low"},
 	})
 

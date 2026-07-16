@@ -103,6 +103,11 @@ const SessionMetaKeyRuntimeConfigOverrides = "runtime_config_overrides"
 // runtime restoration continues to use SessionMetaKeyRuntimeConfig.
 const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
 
+// SessionMetaKeyACPModelState records the provider's latest complete model
+// selector state so task-detail boot hydration does not wait for WebSocket
+// reconnection. It is display metadata and is not replayed to the provider.
+const SessionMetaKeyACPModelState = "acp_model_state"
+
 // SessionRuntimeConfig is persisted as provider state or explicit overrides.
 // On resume, explicit values take precedence over the latest provider snapshot
 // so delayed provider events cannot replace user intent.

@@ -16,7 +16,6 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Separator } from "@kandev/ui/separator";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 
 export type ModelSelectorOption = {
   id: string;
@@ -185,11 +184,6 @@ function ConfigOptionTrigger({
     >
       <span className="min-w-0 flex-1">
         <span className="block font-medium">{option.name}</span>
-        {option.description && (
-          <span className="block whitespace-normal text-muted-foreground">
-            {option.description}
-          </span>
-        )}
       </span>
       <span className="flex min-w-0 items-center gap-2 text-muted-foreground">
         <span className="truncate">{currentOptionName(option)}</span>
@@ -232,60 +226,48 @@ function ConfigOptionSubSelector({
         data-testid={`config-option-section-${option.id}`}
       >
         <div className="space-y-1">
-          {option.options.map((item) => (
-            <Button
-              key={item.value}
-              type="button"
-              variant={item.value === option.currentValue ? "secondary" : "ghost"}
-              size="sm"
-              className="h-auto min-h-9 w-full min-w-0 cursor-pointer justify-start px-2 py-2 text-left"
-              disabled={!onChange}
-              onClick={() => {
-                onChange?.(option.id, item.value);
-                onBack();
-              }}
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block truncate">{item.name}</span>
-                {item.description && (
-                  <span className="block whitespace-normal text-xs text-muted-foreground">
-                    {item.description}
-                  </span>
-                )}
-              </span>
-              <IconCheck
-                className={cn(
-                  "ml-auto h-4 w-4 shrink-0",
-                  item.value === option.currentValue ? "opacity-100" : "opacity-0",
-                )}
-              />
-            </Button>
-          ))}
+          {option.options.map((item, index) => {
+            const descriptionId = item.description
+              ? `config-option-value-description-${option.id}-${index}`
+              : undefined;
+            return (
+              <Button
+                key={item.value}
+                type="button"
+                aria-label={item.name}
+                aria-describedby={descriptionId}
+                variant={item.value === option.currentValue ? "secondary" : "ghost"}
+                size="sm"
+                className="h-auto min-h-9 w-full min-w-0 cursor-pointer justify-start px-2 py-2 text-left"
+                disabled={!onChange}
+                onClick={() => {
+                  onChange?.(option.id, item.value);
+                  onBack();
+                }}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{item.name}</span>
+                  {item.description && (
+                    <span
+                      id={descriptionId}
+                      className="block whitespace-normal text-xs text-muted-foreground"
+                    >
+                      {item.description}
+                    </span>
+                  )}
+                </span>
+                <IconCheck
+                  className={cn(
+                    "ml-auto h-4 w-4 shrink-0",
+                    item.value === option.currentValue ? "opacity-100" : "opacity-0",
+                  )}
+                />
+              </Button>
+            );
+          })}
         </div>
       </ScrollArea>
     </div>
-  );
-}
-
-function ConfigSummary({ configOptions }: { configOptions: SelectConfigOption[] }) {
-  return (
-    <dl className="space-y-2">
-      {configOptions.map((option) => {
-        const selectedValue = currentOptionValue(option);
-        return (
-          <div key={option.id} className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4">
-            <dt className="font-medium">{option.name}</dt>
-            <dd className="text-muted-foreground">{currentOptionName(option)}</dd>
-            {option.description && <dd className="col-span-2 mt-0.5">{option.description}</dd>}
-            {selectedValue?.description && (
-              <dd className="col-span-2 mt-0.5 text-muted-foreground">
-                {selectedValue.description}
-              </dd>
-            )}
-          </div>
-        );
-      })}
-    </dl>
   );
 }
 
@@ -398,79 +380,37 @@ export type ModelConfigSelectorProps = {
 
 type ModelConfigSelectorTriggerProps = Pick<
   ModelConfigSelectorProps,
-  | "ariaLabel"
-  | "disabled"
-  | "placeholder"
-  | "popoverSide"
-  | "triggerClassName"
-  | "triggerSummary"
-  | "variant"
+  "ariaLabel" | "disabled" | "placeholder" | "triggerClassName" | "variant"
 > & {
-  configOptions: SelectConfigOption[];
   label: string;
 };
 
 function ModelConfigSelectorTrigger({
   ariaLabel,
-  configOptions,
   disabled,
   label,
   placeholder,
-  popoverSide,
   triggerClassName,
-  triggerSummary,
   variant,
 }: ModelConfigSelectorTriggerProps) {
   const compact = variant === "compact";
   const baseClassName = compact
     ? "h-7 max-w-[min(18rem,70vw)] cursor-pointer gap-1 px-2 text-xs hover:bg-muted/40"
     : "w-full justify-between font-normal cursor-pointer";
-  const triggerButton = (
-    <Button
-      type="button"
-      variant={compact ? "ghost" : "outline"}
-      size={compact ? "sm" : "default"}
-      className={cn(baseClassName, triggerClassName)}
-      aria-label={ariaLabel}
-      disabled={disabled}
-    >
-      <span className="truncate">{label || placeholder}</span>
-      <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
-    </Button>
-  );
-  const popoverTrigger = <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>;
-  if (triggerSummary !== "changed" || configOptions.length === 0) return popoverTrigger;
-  const tooltipTrigger = disabled ? (
-    <span
-      data-testid="model-config-tooltip-trigger"
-      tabIndex={0}
-      aria-label={ariaLabel}
-      className="inline-flex max-w-full"
-    >
-      {popoverTrigger}
-    </span>
-  ) : (
-    popoverTrigger
-  );
-
   return (
-    <TooltipProvider disableHoverableContent={false}>
-      <Tooltip>
-        <TooltipTrigger asChild>{tooltipTrigger}</TooltipTrigger>
-        <TooltipContent
-          side={popoverSide}
-          className="pointer-events-auto w-80 max-w-[calc(100vw-1rem)] p-0"
-        >
-          <div
-            data-testid="config-summary-scroll-area"
-            tabIndex={0}
-            className="max-h-[min(24rem,calc(100vh-1rem))] overflow-y-auto overscroll-contain p-3 focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:outline-none"
-          >
-            <ConfigSummary configOptions={configOptions} />
-          </div>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <PopoverTrigger asChild>
+      <Button
+        type="button"
+        variant={compact ? "ghost" : "outline"}
+        size={compact ? "sm" : "default"}
+        className={cn(baseClassName, triggerClassName)}
+        aria-label={ariaLabel}
+        disabled={disabled}
+      >
+        <span className="truncate">{label || placeholder}</span>
+        <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
+      </Button>
+    </PopoverTrigger>
   );
 }
 
@@ -532,13 +472,10 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     <Popover open={open} onOpenChange={onOpenChange}>
       <ModelConfigSelectorTrigger
         ariaLabel={ariaLabel}
-        configOptions={selectConfigOptions}
         disabled={disabled}
         label={label}
         placeholder={placeholder}
-        popoverSide={popoverSide}
         triggerClassName={customTriggerClassName}
-        triggerSummary={triggerSummary}
         variant={variant}
       />
       <PopoverContent

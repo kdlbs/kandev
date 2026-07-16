@@ -349,6 +349,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 
 	execution.ACPSessionID = result.SessionID
 	execution.sessionInitialized = true
+	providerDefaultConfig := execution.GetModelState()
 	finalConfigID := ""
 
 	// Apply profile model through the ACP session's advertised model-selection
@@ -402,7 +403,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 				zap.String("value", value))
 		}
 	}
-	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID)
+	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
 
 	// Publish session created event
 	if sm.eventPublisher != nil {
@@ -419,11 +420,12 @@ func (sm *SessionManager) publishSettledConfigOptions(
 	execution *AgentExecution,
 	acpSessionID string,
 	finalConfigID string,
+	providerDefaultConfig *CachedModelState,
 ) {
 	if sm.eventPublisher == nil {
 		return
 	}
-	baselineCandidate, live, ready := execution.SettleConfigOptions(finalConfigID)
+	baselineCandidate, live, ready := execution.SettleConfigOptions(finalConfigID, providerDefaultConfig)
 	if !ready || len(baselineCandidate.ConfigOptions) == 0 || live == nil {
 		return
 	}

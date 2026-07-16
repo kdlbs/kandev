@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelConfigSelector } from "@/components/model-config-selector";
-import { TooltipProvider } from "@kandev/ui/tooltip";
 
 afterEach(() => {
   cleanup();
@@ -90,7 +89,7 @@ describe("ModelConfigSelector", () => {
 
     fireEvent.click(screen.getByTestId(effortTriggerTestId));
     const reopenedEffortSection = screen.getByTestId(effortSectionTestId);
-    fireEvent.click(within(reopenedEffortSection).getByRole("button", { name: "High" }));
+    fireEvent.click(within(reopenedEffortSection).getByRole("button", { name: /^High$/ }));
 
     expect(onConfigChange).toHaveBeenCalledWith("effort", "high");
     expect(screen.queryByTestId(effortSectionTestId)).toBeNull();
@@ -128,7 +127,7 @@ describe("ModelConfigSelector filtering", () => {
 });
 
 describe("ModelConfigSelector provider descriptions", () => {
-  it("shows provider descriptions in config option and value views", () => {
+  it("shows provider descriptions only inside the selected option submenu", () => {
     render(
       <ModelConfigSelector
         modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
@@ -155,86 +154,42 @@ describe("ModelConfigSelector provider descriptions", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: modelSettingsButtonName }));
-    expect(screen.getByText(optionDescription)).not.toBeNull();
+    expect(screen.queryByText(optionDescription)).toBeNull();
 
     fireEvent.click(screen.getByTestId(effortTriggerTestId));
+    expect(screen.getByText(optionDescription)).not.toBeNull();
     expect(screen.getByText("More thorough reasoning for complex tasks.")).not.toBeNull();
   });
 
-  it("exposes structured provider context when the compact task trigger receives focus", async () => {
+  it("does not show configuration details when the compact task trigger receives focus", () => {
     render(
-      <TooltipProvider>
-        <ModelConfigSelector
-          modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
-          currentModel={providerModelId}
-          onModelChange={() => {}}
-          triggerSummary="changed"
-          configBaseline={{ effort: "high" }}
-          configOptions={[
-            {
-              type: "select",
-              id: "effort",
-              name: effortOptionName,
-              description: optionDescription,
-              currentValue: "low",
-              options: [
-                {
-                  value: "low",
-                  name: "Low",
-                  description: "Faster responses with less reasoning.",
-                },
-              ],
-            },
-          ]}
-        />
-      </TooltipProvider>,
+      <ModelConfigSelector
+        modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
+        currentModel={providerModelId}
+        onModelChange={() => {}}
+        triggerSummary="changed"
+        configBaseline={{ effort: "high" }}
+        configOptions={[
+          {
+            type: "select",
+            id: "effort",
+            name: effortOptionName,
+            description: optionDescription,
+            currentValue: "low",
+            options: [
+              {
+                value: "low",
+                name: "Low",
+                description: "Faster responses with less reasoning.",
+              },
+            ],
+          },
+        ]}
+      />,
     );
 
     fireEvent.focus(screen.getByRole("button", { name: modelSettingsButtonName }));
-
-    const tooltip = await screen.findByRole("tooltip");
-    const tooltipContent = tooltip.closest<HTMLElement>("[data-slot='tooltip-content']");
-    expect(tooltipContent?.className).toContain("pointer-events-auto");
-    const scrollArea = within(tooltip).getByTestId("config-summary-scroll-area");
-    expect(scrollArea.className).toContain("max-h-[min(24rem,calc(100vh-1rem))]");
-    expect(scrollArea.className).toContain("overflow-y-auto");
-    expect(scrollArea.className).toContain("overscroll-contain");
-    expect(scrollArea.tabIndex).toBe(0);
-    expect(within(tooltip).getByText(effortOptionName)).not.toBeNull();
-    expect(within(tooltip).getByText("Low")).not.toBeNull();
-    expect(within(tooltip).getByText(optionDescription)).not.toBeNull();
-    expect(within(tooltip).getByText("Faster responses with less reasoning.")).not.toBeNull();
-  });
-});
-
-describe("ModelConfigSelector disabled summary", () => {
-  it("keeps changed-value details keyboard-accessible", async () => {
-    render(
-      <TooltipProvider>
-        <ModelConfigSelector
-          modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
-          currentModel={providerModelId}
-          onModelChange={() => {}}
-          disabled
-          triggerSummary="changed"
-          configBaseline={{ effort: "high" }}
-          configOptions={[
-            {
-              type: "select",
-              id: "effort",
-              name: effortOptionName,
-              currentValue: "low",
-              options: [{ value: "low", name: "Low" }],
-            },
-          ]}
-        />
-      </TooltipProvider>,
-    );
-
-    fireEvent.focus(screen.getByTestId("model-config-tooltip-trigger"));
-
-    const tooltip = await screen.findByRole("tooltip");
-    expect(within(tooltip).getByText(effortOptionName)).not.toBeNull();
-    expect(within(tooltip).getByText("Low")).not.toBeNull();
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(screen.queryByText(optionDescription)).toBeNull();
   });
 });
