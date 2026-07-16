@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -64,10 +66,67 @@ func TestGrokSessionConfig_UnsupportedModelHidesEffort(t *testing.T) {
 	}
 }
 
+func TestGrokSessionConfig_MergesDerivedReasoningWithTypedOptions(t *testing.T) {
+	modelCategory := acp.SessionConfigOptionCategoryModel
+	typed := []streams.ConfigOption{{
+		Type:         "select",
+		ID:           configOptionIDModel,
+		Category:     string(modelCategory),
+		Name:         "Model",
+		CurrentValue: "grok-4.5",
+	}}
+	models := []modelInfo{{
+		ModelId: "grok-4.5",
+		Meta: map[string]any{
+			"supportsReasoningEffort": true,
+			"reasoningEffort":         "high",
+			"reasoningEfforts":        []any{"high", "medium", "low"},
+		},
+	}}
+
+	opts := grokSessionConfigOptions(typed, nil, models, "grok-4.5")
+
+	if len(opts) != 2 {
+		t.Fatalf("got %d options, want typed model + derived reasoning", len(opts))
+	}
+	if opts[1].ID != configOptionIDReasoningEffort {
+		t.Fatalf("second option ID = %q, want %q", opts[1].ID, configOptionIDReasoningEffort)
+	}
+}
+
 type fakeGrokSetModelConn struct {
 	reqs       []acp.UnstableSetSessionModelRequest
 	configReqs []acp.SetSessionConfigOptionRequest
 	err        error
+}
+
+type blockingGrokSetModelConn struct {
+	mu           sync.Mutex
+	started      chan string
+	releaseFirst chan struct{}
+	calls        int
+}
+
+func (f *blockingGrokSetModelConn) SetSessionConfigOption(
+	context.Context,
+	acp.SetSessionConfigOptionRequest,
+) (acp.SetSessionConfigOptionResponse, error) {
+	return acp.SetSessionConfigOptionResponse{}, nil
+}
+
+func (f *blockingGrokSetModelConn) UnstableSetSessionModel(
+	_ context.Context,
+	req acp.UnstableSetSessionModelRequest,
+) (acp.UnstableSetSessionModelResponse, error) {
+	f.mu.Lock()
+	f.calls++
+	call := f.calls
+	f.mu.Unlock()
+	f.started <- req.ModelId
+	if call == 1 {
+		<-f.releaseFirst
+	}
+	return acp.UnstableSetSessionModelResponse{}, nil
 }
 
 func (f *fakeGrokSetModelConn) SetSessionConfigOption(
@@ -87,7 +146,7 @@ func grokAdapterWithModels(t *testing.T, models []modelInfo, config []streams.Co
 	t.Helper()
 	a := newTestAdapter()
 	a.agentID = grokAgentID
-	a.driver = newGrokACPDriver()
+	a.dialect = newGrokACPDialect()
 	a.sessionID = "sess-grok"
 	a.availableModels = models
 	a.availableConfigOptions = config
@@ -116,13 +175,7 @@ func TestSetGrokModel_UsesSessionSetModel(t *testing.T) {
 	a := grokAdapterWithModels(t, models, config)
 	conn := &fakeGrokSetModelConn{}
 
-	driver := a.driver.(*grokACPDriver)
-	if err := driver.setModel(context.Background(), a, conn, driverConfigChange{
-		sessionID: "sess-grok",
-		value:     "grok-4.5",
-		models:    models,
-		config:    config,
-	}); err != nil {
+	if err := a.setModelWithConn(context.Background(), conn, "sess-grok", "grok-4.5", models, config); err != nil {
 		t.Fatalf("setModel: %v", err)
 	}
 	if len(conn.reqs) != 1 {
@@ -152,22 +205,20 @@ func TestSetGrokReasoningEffort_UsesNormalizedModelConfig(t *testing.T) {
 				{Value: "low", Name: "Low"}, {Value: "medium", Name: "Medium"}, {Value: "high", Name: "High"},
 			}},
 	}
-	a := grokAdapterWithModels(t, models, config)
-	conn := &fakeGrokSetModelConn{}
-
-	driver := a.driver.(*grokACPDriver)
-	if err := driver.setReasoningEffort(context.Background(), a, conn, driverConfigChange{
+	rpc, err := grokConfigChangeRequest(dialectConfigChange{
 		sessionID: "sess-grok",
+		configID:  configOptionIDReasoningEffort,
 		value:     "high",
 		models:    models,
 		config:    config,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(conn.reqs) != 1 {
-		t.Fatalf("RPC count = %d, want 1", len(conn.reqs))
+	if rpc == nil {
+		t.Fatal("expected Grok session/set_model request")
 	}
-	req := conn.reqs[0]
+	req := rpc.request
 	if req.ModelId != "grok-4.5" {
 		t.Fatalf("modelId = %q, want current model preserved", req.ModelId)
 	}
@@ -193,13 +244,9 @@ func TestSetGrokModel_IncompatibleHarnessAsksForNewSession(t *testing.T) {
 		},
 	}
 
-	driver := a.driver.(*grokACPDriver)
-	err := driver.setModel(context.Background(), a, conn, driverConfigChange{
-		sessionID: "sess-grok",
-		value:     "grok-composer-2.5-fast",
-		models:    models,
-		config:    config,
-	})
+	err := a.setModelWithConn(
+		context.Background(), conn, "sess-grok", "grok-composer-2.5-fast", models, config,
+	)
 	if err == nil || !strings.Contains(err.Error(), "Start a new session") {
 		t.Fatalf("setModel error = %v, want actionable new-session instruction", err)
 	}
@@ -253,6 +300,92 @@ func TestSetModelWithConn_GrokDriverAsksForNewSession(t *testing.T) {
 	}
 	if currentModelFromConfig(adapter.availableConfigOptions) != "grok-build" {
 		t.Fatalf("current model config changed after failed switch: %#v", adapter.availableConfigOptions)
+	}
+}
+
+func TestSetModelWithConn_SerializesConcurrentGrokChanges(t *testing.T) {
+	models := []modelInfo{{ModelId: "grok-old"}, {ModelId: "grok-first"}, {ModelId: "grok-latest"}}
+	config := []streams.ConfigOption{{
+		Type: "select", ID: configOptionIDModel, Category: configOptionIDModel, CurrentValue: "grok-old",
+	}}
+	adapter := grokAdapterWithModels(t, models, config)
+	conn := &blockingGrokSetModelConn{
+		started:      make(chan string, 2),
+		releaseFirst: make(chan struct{}),
+	}
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- adapter.setModelWithConn(
+			context.Background(), conn, "sess-grok", "grok-first", models, config,
+		)
+	}()
+	if got := <-conn.started; got != "grok-first" {
+		t.Fatalf("first RPC model = %q, want grok-first", got)
+	}
+
+	secondDone := make(chan error, 1)
+	go func() {
+		secondDone <- adapter.setModelWithConn(
+			context.Background(), conn, "sess-grok", "grok-latest", models, config,
+		)
+	}()
+	select {
+	case got := <-conn.started:
+		t.Fatalf("second RPC %q started before the first completed", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(conn.releaseFirst)
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first SetModel: %v", err)
+	}
+	if got := <-conn.started; got != "grok-latest" {
+		t.Fatalf("second RPC model = %q, want grok-latest", got)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatalf("second SetModel: %v", err)
+	}
+	if got := currentModelFromConfig(adapter.availableConfigOptions); got != "grok-latest" {
+		t.Fatalf("cached model = %q, want latest selection", got)
+	}
+}
+
+func TestSetModelWithConn_StaleGrokCompletionDoesNotMutateReplacementSession(t *testing.T) {
+	models := []modelInfo{{ModelId: "grok-old"}, {ModelId: "grok-stale"}, {ModelId: "grok-new"}}
+	oldConfig := []streams.ConfigOption{{
+		Type: "select", ID: configOptionIDModel, Category: configOptionIDModel, CurrentValue: "grok-old",
+	}}
+	adapter := grokAdapterWithModels(t, models, oldConfig)
+	conn := &blockingGrokSetModelConn{
+		started:      make(chan string, 1),
+		releaseFirst: make(chan struct{}),
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- adapter.setModelWithConn(
+			context.Background(), conn, "sess-grok", "grok-stale", models, oldConfig,
+		)
+	}()
+	<-conn.started
+
+	newConfig := []streams.ConfigOption{{
+		Type: "select", ID: configOptionIDModel, Category: configOptionIDModel, CurrentValue: "grok-new",
+	}}
+	adapter.mu.Lock()
+	adapter.sessionID = "sess-new"
+	adapter.availableConfigOptions = newConfig
+	adapter.mu.Unlock()
+	close(conn.releaseFirst)
+	if err := <-done; err != nil {
+		t.Fatalf("stale SetModel: %v", err)
+	}
+
+	adapter.mu.RLock()
+	gotSession := adapter.sessionID
+	gotModel := currentModelFromConfig(adapter.availableConfigOptions)
+	adapter.mu.RUnlock()
+	if gotSession != "sess-new" || gotModel != "grok-new" {
+		t.Fatalf("replacement state = session %q model %q, want sess-new/grok-new", gotSession, gotModel)
 	}
 }
 
@@ -314,7 +447,7 @@ func TestGrokContextFromNotificationMeta(t *testing.T) {
 	})
 	for _, event := range drainEvents(a) {
 		if event.Type == streams.EventTypeContextWindow {
-			t.Fatal("usage tracker reset must not duplicate unchanged driver context")
+			t.Fatal("usage tracker reset must not duplicate unchanged dialect context")
 		}
 	}
 
@@ -348,7 +481,7 @@ func TestGrokContextFromNotificationMeta(t *testing.T) {
 	})
 	for _, event := range drainEvents(a) {
 		if event.Type == streams.EventTypeContextWindow {
-			t.Fatal("stale session must not emit driver context")
+			t.Fatal("stale session must not emit dialect context")
 		}
 	}
 }
@@ -386,7 +519,7 @@ func TestGrokUserMessageEchoIsSuppressedWithoutDroppingContext(t *testing.T) {
 	}
 }
 
-func TestGrokDriver_NormalizesPrivateReasoningTokens(t *testing.T) {
+func TestGrokDialect_NormalizesPrivateReasoningTokens(t *testing.T) {
 	response := &acp.PromptResponse{Meta: map[string]any{
 		"usage": map[string]any{
 			"inputTokens":     float64(5),
@@ -395,8 +528,8 @@ func TestGrokDriver_NormalizesPrivateReasoningTokens(t *testing.T) {
 			"reasoningTokens": float64(2),
 		},
 	}}
-	driver := newGrokACPDriver()
-	usage := driver.normalizePromptUsage(extractUsage(response), response.Meta)
+	dialect := newGrokACPDialect()
+	usage := dialect.promptUsage(extractUsage(response), response.Meta)
 	if usage == nil {
 		t.Fatal("expected non-nil usage")
 	}

@@ -183,7 +183,7 @@ func (a *Adapter) sendPrompt(
 		zap.String("session_id", sessionID),
 		zap.String("stop_reason", stopReason))
 	a.cancelAsyncTurnComplete(sessionID)
-	usage := a.driver.normalizePromptUsage(extractUsage(&resp), resp.Meta)
+	usage := a.dialect.promptUsage(extractUsage(&resp), resp.Meta)
 	// codex-acp emits no per-turn usage frame, only cumulative
 	// usage_update.used. Fall back to the inferred delta so the office
 	// cost subscriber sees at least an approximate input count. The

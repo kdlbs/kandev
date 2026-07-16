@@ -169,7 +169,7 @@ func TestExtractUsage_DoesNotInterpretGrokPrivateReasoningTokens(t *testing.T) {
 		t.Fatal("expected non-nil usage")
 	}
 	if usage.ThoughtTokens != 0 {
-		t.Fatalf("ThoughtTokens = %d, want 0; Grok private fields belong to its ACP driver", usage.ThoughtTokens)
+		t.Fatalf("ThoughtTokens = %d, want 0; Grok private fields belong to its ACP dialect", usage.ThoughtTokens)
 	}
 }
 

@@ -150,7 +150,7 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 
 	sessionID := string(n.SessionId)
 
-	suppressed := a.driver.suppressNotification(n)
+	suppressed := a.dialect.suppresses(n)
 	var event *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
@@ -174,11 +174,44 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 	}
 
 	if !isLoading {
-		for _, supplemental := range a.driver.supplementalEvents(a, sessionID, n.Meta) {
-			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, &supplemental)
-			a.sendUpdate(supplemental)
+		if supplemental := a.emitDialectContextWindow(sessionID, n.Meta); supplemental != nil {
+			shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, supplemental)
 		}
 	}
+}
+
+// emitDialectContextWindow derives and enqueues an agent-specific context
+// sample while holding the same lock that protects the active session/model.
+// This keeps a model switch from interleaving between size selection and event
+// delivery.
+func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any) *AgentEvent {
+	a.mu.Lock()
+	if a.closed || sessionID != a.sessionID {
+		a.mu.Unlock()
+		return nil
+	}
+	sample, ok := a.dialect.contextSample(meta, a.availableModels, a.availableConfigOptions)
+	if !ok || a.contextSamples[sessionID] == sample {
+		a.mu.Unlock()
+		return nil
+	}
+	a.contextSamples[sessionID] = sample
+	remaining := max(sample.size-sample.used, 0)
+	event := AgentEvent{
+		Type:                   streams.EventTypeContextWindow,
+		SessionID:              sessionID,
+		ContextWindowSize:      sample.size,
+		ContextWindowUsed:      sample.used,
+		ContextWindowRemaining: remaining,
+		ContextEfficiency:      float64(sample.used) / float64(sample.size) * 100,
+	}
+	sent := a.sendUpdateLocked(event)
+	a.mu.Unlock()
+	if !sent {
+		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+		return nil
+	}
+	return &event
 }
 
 // convertNotification converts an ACP SessionNotification to an AgentEvent.
@@ -337,6 +370,7 @@ func (a *Adapter) resetContextWindowMaxSize(sessionID string) {
 	if tr := a.usageBySession[sessionID]; tr != nil {
 		tr.maxSize = 0
 	}
+	delete(a.contextSamples, sessionID)
 }
 
 // consumeUsageDelta returns the delta of cumulative `used` since the
