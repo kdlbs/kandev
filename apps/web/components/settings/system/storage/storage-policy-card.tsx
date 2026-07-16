@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
@@ -9,6 +8,7 @@ import { settingsWithDockerAcknowledgement } from "@/hooks/domains/system/use-st
 import type { StorageCapabilities, StorageMaintenanceSettings } from "@/lib/types/system";
 import { DedicatedDockerDialog, ExternalGoCacheDialog } from "./storage-confirmation-dialogs";
 import { StorageActionButton } from "./storage-action-button";
+import { NumberField, PolicySection, SettingRow } from "./storage-policy-fields";
 import { StorageSettingHelp } from "./storage-setting-help";
 import { bytesToGigabytes, gigabytesToBytes } from "./storage-units";
 
@@ -24,96 +24,10 @@ type Props = {
 
 type PolicySectionProps = Pick<Props, "settings" | "capabilities" | "onChange" | "pending">;
 
-function PolicySection({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="border-t py-5 first:border-t-0 first:pt-0">
-      <div className="mb-3">
-        <h3 className="text-sm font-medium">{title}</h3>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function SettingRow({
-  title,
-  description,
-  help,
-  control,
-}: {
-  title: string;
-  description: string;
-  help: string;
-  control: ReactNode;
-}) {
-  return (
-    <div className="flex min-h-11 items-center justify-between gap-4 border-b py-3 last:border-b-0">
-      <div className="min-w-0">
-        <div className="flex items-center gap-1">
-          <Label className="text-sm">{title}</Label>
-          <StorageSettingHelp label={title}>{help}</StorageSettingHelp>
-        </div>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      <div className="shrink-0">{control}</div>
-    </div>
-  );
-}
-
-function NumberField({
-  label,
-  help,
-  value,
-  min,
-  max,
-  disabled,
-  onChange,
-  testId,
-}: {
-  label: string;
-  help: string;
-  value: number;
-  min: number;
-  max?: number;
-  disabled?: boolean;
-  onChange: (value: number) => void;
-  testId: string;
-}) {
-  return (
-    <div className="min-w-0 space-y-1">
-      <div className="flex items-center gap-1">
-        <Label htmlFor={testId} className="text-xs text-muted-foreground">
-          {label}
-        </Label>
-        <StorageSettingHelp label={label}>{help}</StorageSettingHelp>
-      </div>
-      <Input
-        id={testId}
-        type="number"
-        min={min}
-        max={max}
-        disabled={disabled}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-        className="h-11"
-        data-testid={testId}
-      />
-    </div>
-  );
-}
-
 function ScheduleSection({ settings, pending, onChange }: PolicySectionProps) {
   return (
     <PolicySection
+      sectionId="schedule"
       title="Schedule"
       description="Controls when automatic maintenance is allowed to start. Manual actions remain available when scheduling is off."
     >
@@ -138,7 +52,7 @@ function ScheduleSection({ settings, pending, onChange }: PolicySectionProps) {
           value={settings.check_interval_hours}
           min={1}
           max={168}
-          disabled={pending}
+          disabled={pending || !settings.enabled}
           onChange={(check_interval_hours) => onChange({ ...settings, check_interval_hours })}
           testId="storage-check-interval"
         />
@@ -148,7 +62,7 @@ function ScheduleSection({ settings, pending, onChange }: PolicySectionProps) {
           value={settings.idle_for_minutes}
           min={1}
           max={1440}
-          disabled={pending}
+          disabled={pending || !settings.enabled}
           onChange={(idle_for_minutes) => onChange({ ...settings, idle_for_minutes })}
           testId="storage-idle-period"
         />
@@ -160,6 +74,7 @@ function ScheduleSection({ settings, pending, onChange }: PolicySectionProps) {
 function WorkspaceSection({ settings, pending, onChange }: PolicySectionProps) {
   return (
     <PolicySection
+      sectionId="workspaces"
       title="Workspaces and containers"
       description="Reclaim resources that Kandev can positively identify as no longer in use."
     >
@@ -183,7 +98,7 @@ function WorkspaceSection({ settings, pending, onChange }: PolicySectionProps) {
           value={settings.orphan_grace_hours}
           min={24}
           max={2160}
-          disabled={pending}
+          disabled={pending || !settings.workspaces.enabled}
           onChange={(orphan_grace_hours) => onChange({ ...settings, orphan_grace_hours })}
           testId="storage-orphan-grace"
         />
@@ -210,14 +125,17 @@ function AdoptionField({
   setPath,
   onOpen,
   pending,
+  enabled,
 }: {
   path: string;
   setPath: (path: string) => void;
   onOpen: () => void;
   pending: boolean;
+  enabled: boolean;
 }) {
   let disabledReason: string | undefined;
   if (pending) disabledReason = "Wait for the current storage action to finish.";
+  else if (!enabled) disabledReason = "Enable the managed Go cache first.";
   else if (!path.trim()) disabledReason = "Enter an absolute cache path first.";
   return (
     <div className="min-w-0 space-y-2 pt-3">
@@ -236,7 +154,7 @@ function AdoptionField({
         <Input
           id="storage-adoption-path"
           value={path}
-          disabled={pending}
+          disabled={pending || !enabled}
           onChange={(event) => setPath(event.target.value)}
           placeholder="/root/.cache/go-build"
           className="h-11 min-w-0 font-mono"
@@ -270,6 +188,7 @@ function GoCacheSection({
 }) {
   return (
     <PolicySection
+      sectionId="go-cache"
       title="Go build cache"
       description="Use and trim a Kandev-owned cache for new host-local Go executions."
     >
@@ -295,7 +214,7 @@ function GoCacheSection({
           help="This is a cleanup trigger, not a hard quota. The cache may grow past this size while tasks are active. Maintenance rotates the owned cache into quarantine and recreates an empty cache after the limit is exceeded."
           value={bytesToGigabytes(settings.go_cache.max_bytes)}
           min={1}
-          disabled={pending}
+          disabled={pending || !settings.go_cache.enabled}
           onChange={(gigabytes) =>
             onChange({
               ...settings,
@@ -310,6 +229,7 @@ function GoCacheSection({
           path={adoptionPath}
           setPath={setAdoptionPath}
           pending={pending}
+          enabled={settings.go_cache.enabled}
           onOpen={onOpenAdoption}
         />
       )}
@@ -321,12 +241,10 @@ type DockerSettings = StorageMaintenanceSettings["docker"];
 
 function DockerBuildCacheSettings({
   docker,
-  pending,
   disabledReason,
   updateDocker,
 }: {
   docker: DockerSettings;
-  pending: boolean;
   disabledReason?: string;
   updateDocker: (docker: DockerSettings) => void;
 }) {
@@ -354,7 +272,7 @@ function DockerBuildCacheSettings({
           help="Docker keeps approximately this much build cache when pruning eligible records. A larger value preserves more reusable build layers but reclaims less disk space."
           value={bytesToGigabytes(docker.build_cache_keep_bytes)}
           min={1}
-          disabled={pending}
+          disabled={Boolean(disabledReason) || !docker.build_cache_enabled}
           onChange={(gigabytes) =>
             updateDocker({
               ...docker,
@@ -369,7 +287,7 @@ function DockerBuildCacheSettings({
           value={docker.build_cache_unused_hours}
           min={24}
           max={2562047}
-          disabled={pending}
+          disabled={Boolean(disabledReason) || !docker.build_cache_enabled}
           onChange={(build_cache_unused_hours) =>
             updateDocker({ ...docker, build_cache_unused_hours })
           }
@@ -382,12 +300,10 @@ function DockerBuildCacheSettings({
 
 function DockerImageSettings({
   docker,
-  pending,
   disabledReason,
   updateDocker,
 }: {
   docker: DockerSettings;
-  pending: boolean;
   disabledReason?: string;
   updateDocker: (docker: DockerSettings) => void;
 }) {
@@ -416,7 +332,7 @@ function DockerImageSettings({
           value={docker.unused_images_hours}
           min={24}
           max={2562047}
-          disabled={pending}
+          disabled={Boolean(disabledReason) || !docker.unused_images_enabled}
           onChange={(unused_images_hours) => updateDocker({ ...docker, unused_images_hours })}
           testId="storage-docker-unused-images-hours"
         />
@@ -445,6 +361,7 @@ function DockerSection({
     onChange({ ...settings, docker });
   return (
     <PolicySection
+      sectionId="docker"
       title="Docker cleanup"
       description="Optional daemon-wide cleanup. Enable it only when this Docker daemon is dedicated to Kandev."
     >
@@ -472,13 +389,11 @@ function DockerSection({
       )}
       <DockerBuildCacheSettings
         docker={settings.docker}
-        pending={pending}
         disabledReason={disabledReason}
         updateDocker={updateDocker}
       />
       <DockerImageSettings
         docker={settings.docker}
-        pending={pending}
         disabledReason={disabledReason}
         updateDocker={updateDocker}
       />
@@ -490,6 +405,7 @@ function DockerSection({
 function QuarantineSection({ settings, pending, onChange }: PolicySectionProps) {
   return (
     <PolicySection
+      sectionId="quarantine"
       title="Quarantine safety"
       description="Keep recoverable resources for a grace period before permanent deletion."
     >
@@ -524,14 +440,14 @@ export function StoragePolicyCard({
   const [adoptionDialogOpen, setAdoptionDialogOpen] = useState(false);
   const [adoptionPath, setAdoptionPath] = useState("");
   return (
-    <Card className="min-w-0" data-testid="storage-policy-card">
-      <CardHeader>
-        <CardTitle className="text-base">Maintenance policy</CardTitle>
+    <section className="min-w-0 space-y-4" data-testid="storage-policy-card">
+      <div>
+        <h2 className="text-base font-medium">Maintenance policy</h2>
         <p className="text-xs text-muted-foreground">
           Choose what Kandev may reclaim automatically and the safety limits it must follow.
         </p>
-      </CardHeader>
-      <CardContent>
+      </div>
+      <div className="space-y-3">
         <ScheduleSection
           settings={settings}
           capabilities={capabilities}
@@ -566,16 +482,16 @@ export function StoragePolicyCard({
           pending={pending}
           onChange={onChange}
         />
-        <div className="flex justify-end border-t pt-5">
-          <StorageActionButton
-            disabledReason={pending ? "Wait for the current storage action to finish." : undefined}
-            onClick={() => void onSave()}
-            data-testid="storage-save-settings"
-          >
-            Save policy
-          </StorageActionButton>
-        </div>
-      </CardContent>
+      </div>
+      <div className="flex justify-end">
+        <StorageActionButton
+          disabledReason={pending ? "Wait for the current storage action to finish." : undefined}
+          onClick={() => void onSave()}
+          data-testid="storage-save-settings"
+        >
+          Save policy
+        </StorageActionButton>
+      </div>
       <DedicatedDockerDialog
         open={dockerDialogOpen}
         onOpenChange={setDockerDialogOpen}
@@ -595,6 +511,6 @@ export function StoragePolicyCard({
           setAdoptionDialogOpen(false);
         }}
       />
-    </Card>
+    </section>
   );
 }

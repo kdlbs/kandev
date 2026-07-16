@@ -1,16 +1,59 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
-import { IconAlertTriangle, IconPlayerPlay, IconRefresh } from "@tabler/icons-react";
+import { Spinner } from "@kandev/ui/spinner";
+import { IconAlertTriangle, IconCheck, IconPlayerPlay, IconRefresh } from "@tabler/icons-react";
 import { useStorageMaintenance } from "@/hooks/domains/system/use-storage-maintenance";
-import type { StorageMaintenanceSettings as Settings } from "@/lib/types/system";
-import { JobProgressIndicator } from "../job-progress-indicator";
+import type { StorageMaintenanceSettings as Settings, SystemJob } from "@/lib/types/system";
 import { StorageActionButton } from "./storage-action-button";
 import { StorageOverviewCard } from "./storage-overview-card";
 import { StoragePolicyCard } from "./storage-policy-card";
 import { StorageQuarantineCard } from "./storage-quarantine-card";
 import { StorageRunHistory } from "./storage-run-history";
+
+function StorageJobButtonContent({
+  job,
+  idleLabel,
+  activeLabel,
+  successLabel,
+  failedLabel,
+  idleIcon,
+}: {
+  job?: SystemJob;
+  idleLabel: string;
+  activeLabel: string;
+  successLabel: string;
+  failedLabel: string;
+  idleIcon: ReactNode;
+}) {
+  if (job?.state === "queued" || job?.state === "running") {
+    return (
+      <>
+        <Spinner className="size-4" /> {activeLabel}
+      </>
+    );
+  }
+  if (job?.state === "succeeded") {
+    return (
+      <>
+        <IconCheck className="size-4" /> {successLabel}
+      </>
+    );
+  }
+  if (job?.state === "failed") {
+    return (
+      <>
+        <IconAlertTriangle className="size-4" /> {failedLabel}
+      </>
+    );
+  }
+  return (
+    <>
+      {idleIcon} {idleLabel}
+    </>
+  );
+}
 
 function StorageActions({
   controller,
@@ -19,6 +62,10 @@ function StorageActions({
   controller: ReturnType<typeof useStorageMaintenance>;
   disabledReason?: string;
 }) {
+  const analysisActive =
+    controller.analysisJob?.state === "queued" || controller.analysisJob?.state === "running";
+  const cleanupActive =
+    controller.cleanupJob?.state === "queued" || controller.cleanupJob?.state === "running";
   return (
     <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0 sm:max-w-xl">
@@ -29,44 +76,46 @@ function StorageActions({
         </p>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
-        <div
-          className="flex flex-col items-stretch gap-2 sm:items-end"
-          data-testid="storage-analyze-control"
-        >
+        <div data-testid="storage-analyze-control">
           <StorageActionButton
             variant="outline"
-            className="w-full sm:w-auto"
-            disabledReason={disabledReason}
+            className="w-full sm:w-44"
+            disabledReason={
+              disabledReason ?? (analysisActive ? "Storage analysis is still running." : undefined)
+            }
             onClick={() => void controller.analyze()}
             data-testid="storage-analyze"
+            data-job-state={controller.analysisJob?.state}
           >
-            <IconRefresh className="size-4" /> Analyze
+            <StorageJobButtonContent
+              job={controller.analysisJob}
+              idleLabel="Analyze"
+              activeLabel="Analyzing..."
+              successLabel="Analysis complete"
+              failedLabel="Analysis failed"
+              idleIcon={<IconRefresh className="size-4" />}
+            />
           </StorageActionButton>
-          <JobProgressIndicator
-            kind="storage-analysis"
-            jobId={controller.analysisJob?.id}
-            successLabel="Analysis complete"
-            testId="storage-analysis-job"
-          />
         </div>
-        <div
-          className="flex flex-col items-stretch gap-2 sm:items-end"
-          data-testid="storage-cleanup-control"
-        >
+        <div data-testid="storage-cleanup-control">
           <StorageActionButton
-            className="w-full sm:w-auto"
-            disabledReason={disabledReason}
+            className="w-full sm:w-44"
+            disabledReason={
+              disabledReason ?? (cleanupActive ? "Storage cleanup is still running." : undefined)
+            }
             onClick={() => void controller.runNow()}
             data-testid="storage-run-now"
+            data-job-state={controller.cleanupJob?.state}
           >
-            <IconPlayerPlay className="size-4" /> Run now
+            <StorageJobButtonContent
+              job={controller.cleanupJob}
+              idleLabel="Run now"
+              activeLabel="Cleaning..."
+              successLabel="Cleanup complete"
+              failedLabel="Cleanup failed"
+              idleIcon={<IconPlayerPlay className="size-4" />}
+            />
           </StorageActionButton>
-          <JobProgressIndicator
-            kind="storage-cleanup"
-            jobId={controller.cleanupJob?.id}
-            successLabel="Cleanup complete"
-            testId="storage-cleanup-job"
-          />
         </div>
       </div>
     </div>

@@ -20,13 +20,15 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
 - Settings includes a **System → Storage** page at `/settings/system/storage` for disk
   analysis, maintenance policy, manual cleanup, run history, and quarantined workspaces.
 - The page presents storage analysis and maintenance policy as separate full-width sections.
-  Analysis and cleanup progress stays beside the action that started it instead of appearing as
-  detached page status.
+  Analysis and cleanup state replaces the label and icon inside the action button that started it
+  instead of appearing as detached page status.
 - User-facing storage totals and editable size limits are shown in GB. The frontend converts those
   values to and from the byte-based API without changing the persisted data model.
-- Maintenance settings are grouped by scope: schedule, workspaces and containers, Go build cache,
-  Docker cleanup, and quarantine safety. Every option includes focusable, pointer-accessible help
-  that explains what it can change, when it runs, and which safety checks apply.
+- Maintenance settings use separate cards grouped by scope: schedule, workspaces and containers,
+  Go build cache, Docker cleanup, and quarantine safety. Every option includes focusable,
+  pointer-accessible help that explains what it can change, when it runs, and which safety checks
+  apply. Threshold and path fields are disabled while their parent cleanup option is disabled;
+  quarantine retention remains independently editable because it also governs existing entries.
 - Read-only analysis is available even when scheduled maintenance is disabled. It reports
   active task workspace bytes, orphan-candidate bytes, active quarantined count and bytes, the
   managed Go cache, Kandev-managed container count and writable-layer bytes, Docker build cache,

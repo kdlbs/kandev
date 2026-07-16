@@ -31,13 +31,24 @@ const capabilities = {
   host_global_docker_cleanup_allowed: true,
 };
 
+const testIds = {
+  goCacheMax: "storage-go-cache-max",
+  dockerBuildCacheKeep: "storage-docker-build-cache-keep-bytes",
+  dockerBuildCacheUnused: "storage-docker-build-cache-unused-hours",
+  dockerImagesUnused: "storage-docker-unused-images-hours",
+};
+
 afterEach(cleanup);
 
-function renderCard(pending = false, onChange = vi.fn()) {
+function renderCard(
+  pending = false,
+  onChange = vi.fn(),
+  currentSettings: StorageMaintenanceSettings = settings,
+) {
   render(
     <TooltipProvider>
       <StoragePolicyCard
-        settings={settings}
+        settings={currentSettings}
         capabilities={capabilities}
         pending={pending}
         onChange={onChange}
@@ -54,12 +65,10 @@ describe("StoragePolicyCard", () => {
   it("edits every Docker cleanup threshold", () => {
     const onChange = renderCard();
 
-    expect((screen.getByTestId("storage-go-cache-max") as HTMLInputElement).value).toBe("15");
-    expect(
-      (screen.getByTestId("storage-docker-build-cache-keep-bytes") as HTMLInputElement).value,
-    ).toBe("10");
+    expect((screen.getByTestId(testIds.goCacheMax) as HTMLInputElement).value).toBe("15");
+    expect((screen.getByTestId(testIds.dockerBuildCacheKeep) as HTMLInputElement).value).toBe("10");
 
-    fireEvent.change(screen.getByTestId("storage-go-cache-max"), {
+    fireEvent.change(screen.getByTestId(testIds.goCacheMax), {
       target: { value: "20" },
     });
     expect(onChange).toHaveBeenLastCalledWith({
@@ -67,7 +76,7 @@ describe("StoragePolicyCard", () => {
       go_cache: { ...settings.go_cache, max_bytes: 21_474_836_480 },
     });
 
-    fireEvent.change(screen.getByTestId("storage-docker-build-cache-keep-bytes"), {
+    fireEvent.change(screen.getByTestId(testIds.dockerBuildCacheKeep), {
       target: { value: "2" },
     });
     expect(onChange).toHaveBeenLastCalledWith({
@@ -75,7 +84,7 @@ describe("StoragePolicyCard", () => {
       docker: { ...settings.docker, build_cache_keep_bytes: 2147483648 },
     });
 
-    fireEvent.change(screen.getByTestId("storage-docker-build-cache-unused-hours"), {
+    fireEvent.change(screen.getByTestId(testIds.dockerBuildCacheUnused), {
       target: { value: "72" },
     });
     expect(onChange).toHaveBeenLastCalledWith({
@@ -83,7 +92,7 @@ describe("StoragePolicyCard", () => {
       docker: { ...settings.docker, build_cache_unused_hours: 72 },
     });
 
-    fireEvent.change(screen.getByTestId("storage-docker-unused-images-hours"), {
+    fireEvent.change(screen.getByTestId(testIds.dockerImagesUnused), {
       target: { value: "96" },
     });
     expect(onChange).toHaveBeenLastCalledWith({
@@ -91,29 +100,31 @@ describe("StoragePolicyCard", () => {
       docker: { ...settings.docker, unused_images_hours: 96 },
     });
   });
+});
 
+describe("StoragePolicyCard interactions", () => {
   it("disables policy controls while an action is pending", () => {
     renderCard(true);
 
-    const testIds = [
+    const pendingTestIds = [
       "storage-scheduling-enabled",
       "storage-go-cache-enabled",
       "storage-check-interval",
       "storage-idle-period",
       "storage-orphan-grace",
       "storage-quarantine-retention",
-      "storage-go-cache-max",
+      testIds.goCacheMax,
       "storage-go-cache-adopt-path",
       "storage-go-cache-adopt",
       "storage-docker-dedicated",
       "storage-docker-build-cache",
-      "storage-docker-build-cache-keep-bytes",
-      "storage-docker-build-cache-unused-hours",
+      testIds.dockerBuildCacheKeep,
+      testIds.dockerBuildCacheUnused,
       "storage-docker-unused-images",
-      "storage-docker-unused-images-hours",
+      testIds.dockerImagesUnused,
       "storage-save-settings",
     ];
-    for (const testId of testIds) {
+    for (const testId of pendingTestIds) {
       expect((screen.getByTestId(testId) as HTMLButtonElement | HTMLInputElement).disabled).toBe(
         true,
       );
@@ -124,6 +135,49 @@ describe("StoragePolicyCard", () => {
     expect((screen.getByLabelText("Clean Kandev containers") as HTMLButtonElement).disabled).toBe(
       true,
     );
+  });
+
+  it("disables child fields when their cleanup option is off", () => {
+    renderCard(false, vi.fn(), {
+      ...settings,
+      enabled: false,
+      workspaces: { enabled: false },
+      go_cache: { ...settings.go_cache, enabled: false },
+      docker: {
+        ...settings.docker,
+        build_cache_enabled: false,
+        unused_images_enabled: false,
+      },
+    });
+
+    for (const testId of [
+      "storage-check-interval",
+      "storage-idle-period",
+      "storage-orphan-grace",
+      testIds.goCacheMax,
+      "storage-go-cache-adopt-path",
+      "storage-go-cache-adopt",
+      testIds.dockerBuildCacheKeep,
+      testIds.dockerBuildCacheUnused,
+      testIds.dockerImagesUnused,
+    ]) {
+      expect((screen.getByTestId(testId) as HTMLButtonElement | HTMLInputElement).disabled).toBe(
+        true,
+      );
+    }
+    expect((screen.getByTestId("storage-quarantine-retention") as HTMLInputElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it("renders each maintenance group as a separate card", () => {
+    renderCard();
+
+    for (const section of ["schedule", "workspaces", "go-cache", "docker", "quarantine"]) {
+      expect(
+        screen.getByTestId(`storage-policy-section-${section}`).getAttribute("data-slot"),
+      ).toBe("card");
+    }
   });
 
   it("groups related settings and provides help for every policy option", () => {

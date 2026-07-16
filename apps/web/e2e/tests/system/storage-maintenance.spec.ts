@@ -48,8 +48,8 @@ test.describe("System storage maintenance", () => {
     );
     await testPage.getByTestId("storage-run-now").click();
     expect((await globalRequest).postDataJSON()).toEqual({});
-    await expect(testPage.getByTestId("storage-cleanup-job")).toHaveAttribute(
-      "data-state",
+    await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
+      "data-job-state",
       "succeeded",
     );
     expect(fs.existsSync(cache.artifact)).toBe(true);
@@ -78,8 +78,12 @@ test.describe("System storage maintenance", () => {
     const scheduling = testPage.getByTestId("storage-scheduling-enabled");
     await expect(scheduling).toHaveAttribute("data-state", "unchecked");
     await expect(testPage.getByTestId("storage-check-interval")).toHaveValue("24");
+    await expect(testPage.getByTestId("storage-check-interval")).toBeDisabled();
+    await expect(testPage.getByTestId("storage-idle-period")).toBeDisabled();
 
     await scheduling.click();
+    await expect(testPage.getByTestId("storage-check-interval")).toBeEnabled();
+    await expect(testPage.getByTestId("storage-idle-period")).toBeEnabled();
     await testPage.getByTestId("storage-idle-period").fill("11");
     await testPage.getByTestId("storage-save-settings").click();
     await expect(testPage.getByText("Storage policy saved")).toBeVisible();
@@ -93,8 +97,8 @@ test.describe("System storage maintenance", () => {
     await expect(scheduling).toHaveAttribute("data-state", "unchecked");
 
     await testPage.getByTestId("storage-analyze").click();
-    await expect(testPage.getByTestId("storage-analysis-job")).toHaveAttribute(
-      "data-state",
+    await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute(
+      "data-job-state",
       "succeeded",
     );
     await testPage.getByTestId("storage-resource-workspaces-trigger").click();
@@ -108,8 +112,8 @@ test.describe("System storage maintenance", () => {
     await expect(testPage.getByTestId("storage-idle-period")).toHaveValue("11");
 
     await testPage.getByTestId("storage-run-now").click();
-    await expect(testPage.getByTestId("storage-cleanup-job")).toHaveAttribute(
-      "data-state",
+    await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
+      "data-job-state",
       "succeeded",
     );
     const quarantineCard = testPage.getByTestId("storage-quarantine-card");
@@ -180,6 +184,6 @@ test.describe("System storage maintenance", () => {
       body: { busy_resources: expect.any(Array) },
     });
     await expect(testPage.getByTestId("storage-error")).toContainText(/busy|active/i);
-    await expect(testPage.getByTestId("storage-cleanup-job")).toHaveCount(0);
+    await expect(testPage.getByTestId("storage-run-now")).not.toHaveAttribute("data-job-state");
   });
 });

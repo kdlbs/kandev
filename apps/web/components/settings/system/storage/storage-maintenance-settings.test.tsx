@@ -87,16 +87,17 @@ describe("StorageMaintenanceSettings", () => {
     mocks.useStorageMaintenance.mockReturnValue(controller(overview));
   });
 
-  it("keeps analysis completion beside the Analyze action", () => {
-    mocks.useSystemJob.mockReturnValue({
+  it("shows analysis completion inside the Analyze button", () => {
+    const analysisJob = {
       id: "analysis-1",
       kind: "storage-analysis",
       state: "succeeded",
       started_at: "2026-07-16T00:00:00Z",
-    });
+    } as const;
+    mocks.useSystemJob.mockReturnValue(analysisJob);
     mocks.useStorageMaintenance.mockReturnValue({
       ...controller(overview),
-      analysisJob: { id: "analysis-1" },
+      analysisJob,
     });
 
     render(
@@ -105,9 +106,33 @@ describe("StorageMaintenanceSettings", () => {
       </TooltipProvider>,
     );
 
-    const analyzeControl = screen.getByTestId("storage-analyze-control");
-    expect(analyzeControl.textContent).toContain("Analyze");
-    expect(analyzeControl.textContent).toContain("Analysis complete");
+    const analyzeButton = screen.getByTestId("storage-analyze");
+    expect(analyzeButton.textContent?.trim()).toBe("Analysis complete");
+    expect(analyzeButton.getAttribute("data-job-state")).toBe("succeeded");
+    expect(screen.queryByTestId("storage-analysis-job")).toBeNull();
+  });
+
+  it("keeps the Analyze button disabled while its job is active", () => {
+    const analysisJob = {
+      id: "analysis-1",
+      kind: "storage-analysis",
+      state: "running",
+      started_at: "2026-07-16T00:00:00Z",
+    } as const;
+    mocks.useStorageMaintenance.mockReturnValue({
+      ...controller(overview),
+      analysisJob,
+    });
+
+    render(
+      <TooltipProvider>
+        <StorageMaintenanceSettings />
+      </TooltipProvider>,
+    );
+
+    const analyzeButton = screen.getByTestId("storage-analyze") as HTMLButtonElement;
+    expect(analyzeButton.textContent?.trim()).toBe("Analyzing...");
+    expect(analyzeButton.disabled).toBe(true);
   });
 
   it("preserves a dirty policy draft when refreshed overview data arrives", () => {

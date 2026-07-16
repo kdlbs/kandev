@@ -27,10 +27,11 @@ test.describe("Mobile storage maintenance", () => {
     );
     await testPage.keyboard.press("Escape");
     await testPage.getByTestId("storage-analyze").click();
-    await expect(testPage.getByTestId("storage-analysis-job")).toHaveAttribute(
-      "data-state",
+    await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute(
+      "data-job-state",
       "succeeded",
     );
+    await expect(testPage.getByTestId("storage-analyze")).toHaveText("Analysis complete");
     await testPage.getByTestId("storage-resource-workspaces-trigger").click();
     await expect(testPage.getByTestId("storage-resource-workspaces")).toBeVisible();
     await testPage.getByTestId("storage-resource-go-cache-trigger").click();
