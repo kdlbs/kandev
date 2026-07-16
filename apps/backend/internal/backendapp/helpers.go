@@ -182,6 +182,7 @@ func appendSessionStateMessage(sessionID string, session *models.TaskSession, re
 		taskIDPayloadKey:           session.TaskID,
 		newStatePayloadKey:         string(session.State),
 		sessionUpdatedAtPayloadKey: session.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		"name":                     session.Name,
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		payload["review_status"] = string(session.ReviewStatus)

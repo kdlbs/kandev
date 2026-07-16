@@ -1201,6 +1201,8 @@ func (m *mockSessionLauncher) QueueAndInterruptForPeerMessage(context.Context, s
 	return &messagequeue.QueuedMessage{ID: "mock-entry"}, true, nil
 }
 
+func (m *mockSessionLauncher) RenameSession(context.Context, string, string) error { return nil }
+
 func TestAutoStartTask_DefaultsToWorktreeExecutor(t *testing.T) {
 	launcher := newMockSessionLauncher()
 	log := testLogger(t)

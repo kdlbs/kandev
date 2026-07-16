@@ -608,6 +608,67 @@ func TestBootRouteDataTaskDetailIncludesTaskPageData(t *testing.T) {
 	}
 }
 
+func TestBootTaskDetailMessagesProjectShellOutput(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil || len(workspaces) == 0 {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		Title:       "Shell output projection",
+		IsEphemeral: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	if err := harness.taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "shell-session", TaskID: task.ID, State: models.TaskSessionStateWaitingForInput,
+		StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := harness.taskRepo.CreateTurn(ctx, &models.Turn{
+		ID: "shell-turn", TaskID: task.ID, TaskSessionID: "shell-session",
+		StartedAt: now, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+	if err := harness.taskRepo.CreateMessage(ctx, &models.Message{
+		ID: "shell-message", TaskID: task.ID, TaskSessionID: "shell-session", TurnID: "shell-turn",
+		AuthorType: models.MessageAuthorAgent, Type: models.MessageTypeToolExecute, Content: "make test",
+		Metadata: map[string]any{
+			"status": "completed",
+			"normalized": map[string]any{
+				"kind": "shell_exec",
+				"shell_exec": map[string]any{
+					"command": "make test",
+					"output":  map[string]any{"stdout": "boot-output-sentinel"},
+				},
+			},
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+
+	state := map[string]any{}
+	builder := bootStateBuilder{p: routeParams{taskSvc: harness.taskSvc}}
+	builder.addTaskDetailActiveTaskState(ctx, state, taskdto.FromTask(task), "shell-session")
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("Marshal state: %v", err)
+	}
+	if strings.Contains(string(raw), "boot-output-sentinel") {
+		t.Fatal("boot message payload leaked shell output")
+	}
+	if !strings.Contains(string(raw), `"stdout_bytes":20`) {
+		t.Fatalf("boot message payload missing shell output summary: %s", raw)
+	}
+}
+
 func TestBootRouteDataTasksIncludesFirstPageRows(t *testing.T) {
 	taskSvc, workflowSvc := newBootStateTestServices(t)
 	ctx := context.Background()

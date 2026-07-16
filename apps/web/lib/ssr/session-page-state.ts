@@ -25,6 +25,7 @@ import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { prepareResultToSessionState } from "@/lib/state/slices/session-runtime/prepare-result";
 import type { SessionPrepareState } from "@/lib/state/slices/session-runtime/types";
 import type { AppState } from "@/lib/state/store";
+import { mapWorkspaceItem } from "@/lib/routing/route-bootstrap";
 
 function buildWorktreeState(allSessions: TaskSession[]) {
   const sessionsWithWorktrees = allSessions.filter((s) => s.worktree_id);
@@ -100,17 +101,7 @@ function buildResourceState(p: BuildSessionPageStateParams) {
   const scripts = repository?.scripts ?? [];
   return {
     workspaces: {
-      items: workspaces.map((w) => ({
-        id: w.id,
-        name: w.name,
-        description: w.description ?? null,
-        owner_id: w.owner_id,
-        default_executor_id: w.default_executor_id ?? null,
-        default_environment_id: w.default_environment_id ?? null,
-        default_agent_profile_id: w.default_agent_profile_id ?? null,
-        created_at: w.created_at,
-        updated_at: w.updated_at,
-      })),
+      items: workspaces.map(mapWorkspaceItem),
       activeId: task.workspace_id,
     },
     // Don't write activeId — null means "All Workflows"; task context lives in kanban.workflowId.

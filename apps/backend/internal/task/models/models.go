@@ -576,7 +576,7 @@ func (m *Message) ToAPI() *v1.Message {
 		messageType = string(MessageTypeMessage)
 	}
 	hasHidden := sysprompt.HasSystemContent(m.Content)
-	meta := m.Metadata
+	meta := ProjectMessageMetadata(m.Metadata)
 	if hasHidden {
 		if meta == nil {
 			meta = make(map[string]interface{})
@@ -697,6 +697,7 @@ type SessionBranchInfo struct {
 type TaskSession struct {
 	ID                   string                 `json:"id"`
 	TaskID               string                 `json:"task_id"`
+	Name                 string                 `json:"name,omitempty"`     // Optional user-supplied label shown on the session tab
 	AgentExecutionID     string                 `json:"agent_execution_id"` // Docker container/agent execution
 	ContainerID          string                 `json:"container_id"`       // Docker container ID for cleanup
 	AgentProfileID       string                 `json:"agent_profile_id"`   // ID of the agent profile used
@@ -752,6 +753,9 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	if len(s.Worktrees) > 0 {
 		result["worktree_path"] = s.Worktrees[0].WorktreePath
 		result["worktree_branch"] = s.Worktrees[0].WorktreeBranch
+	}
+	if s.Name != "" {
+		result["name"] = s.Name
 	}
 	if s.ErrorMessage != "" {
 		result["error_message"] = s.ErrorMessage

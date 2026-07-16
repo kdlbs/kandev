@@ -10,7 +10,7 @@ function repeatedToolMetadata(i: number) {
     normalized: {
       shell_exec: {
         command: "gh pr checks",
-        output: { exit_code: 0, stdout: "1" },
+        output: { exit_code: 0 },
       },
     },
   };

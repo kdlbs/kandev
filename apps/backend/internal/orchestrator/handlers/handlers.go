@@ -43,6 +43,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionDelete, h.wsDeleteSession)
 	d.RegisterFunc(ws.ActionSessionSetPrimary, h.wsSetPrimarySession)
 	d.RegisterFunc(ws.ActionSessionSetPlanMode, h.wsSetPlanMode)
+	d.RegisterFunc(ws.ActionSessionRename, h.wsRenameSession)
 	d.RegisterFunc(ws.ActionGitHubCheckSessionPR, h.wsCheckSessionPR)
 }
 
@@ -399,6 +400,26 @@ func (h *Handlers) wsSetPrimarySession(ctx context.Context, msg *ws.Message) (*w
 	if err := h.service.SetPrimarySession(ctx, req.SessionID); err != nil {
 		h.logger.Error("failed to set primary session", zap.String("session_id", req.SessionID), zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set primary session: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
+}
+
+type wsRenameSessionRequest struct {
+	SessionID string `json:"session_id"`
+	Name      string `json:"name"`
+}
+
+func (h *Handlers) wsRenameSession(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsRenameSessionRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if err := h.service.RenameSession(ctx, req.SessionID, req.Name); err != nil {
+		h.logger.Error("failed to rename session", zap.String("session_id", req.SessionID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to rename session: "+err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.SuccessResponse{Success: true})
 }

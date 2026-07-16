@@ -1578,10 +1578,15 @@ jobs:
           name: ${{ needs.prepare.outputs.tag }}
           body_path: RELEASE_NOTES.md
           files: |
-            dist/release-assets/kandev-*.tar.gz
-            dist/release-assets/kandev-*.tar.gz.sha256
+            dist/release-assets/kandev-linux-*.tar.gz
+            dist/release-assets/kandev-linux-*.tar.gz.sha256
+            dist/release-assets/kandev-macos-*.tar.gz
+            dist/release-assets/kandev-macos-*.tar.gz.sha256
+            dist/release-assets/kandev-windows-*.tar.gz
+            dist/release-assets/kandev-windows-*.tar.gz.sha256
             dist/release-assets/kandev-desktop-*
             dist/release-assets/latest.json
+          preserve_order: true
 
   publish-npm:
     name: Publish npm packages
