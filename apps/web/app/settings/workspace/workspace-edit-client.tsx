@@ -63,6 +63,7 @@ type WorkspaceEditFormProps = {
 type SelectFieldProps = {
   label: string;
   value: string;
+  isDirty: boolean;
   onChange: (v: string) => void;
   options: { id: string; name: string }[];
   emptyLabel: string;
@@ -72,6 +73,7 @@ type SelectFieldProps = {
 function SelectField({
   label,
   value,
+  isDirty,
   onChange,
   options,
   emptyLabel,
@@ -81,7 +83,7 @@ function SelectField({
     <div className="space-y-2">
       <Label>{label}</Label>
       <Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? "" : v)}>
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full" data-settings-dirty={isDirty}>
           <SelectValue placeholder={`Select ${label.toLowerCase()}`} />
         </SelectTrigger>
         <SelectContent>
@@ -104,24 +106,30 @@ function SelectField({
 
 type WorkspaceSettingsCardProps = {
   workspaceNameDraft: string;
+  nameIsDirty: boolean;
   onNameChange: (value: string) => void;
   defaultExecutorId: string;
+  executorIsDirty: boolean;
   onExecutorChange: (value: string) => void;
   activeExecutors: Executor[];
   executorsEmpty: boolean;
   defaultAgentProfileId: string;
+  agentProfileIsDirty: boolean;
   onAgentProfileChange: (value: string) => void;
   agentProfiles: AgentProfileOption[];
 };
 
 function WorkspaceSettingsCard({
   workspaceNameDraft,
+  nameIsDirty,
   onNameChange,
   defaultExecutorId,
+  executorIsDirty,
   onExecutorChange,
   activeExecutors,
   executorsEmpty,
   defaultAgentProfileId,
+  agentProfileIsDirty,
   onAgentProfileChange,
   agentProfiles,
 }: WorkspaceSettingsCardProps) {
@@ -142,12 +150,14 @@ function WorkspaceSettingsCard({
             <Input
               id="workspace-name"
               value={workspaceNameDraft}
+              data-settings-dirty={nameIsDirty}
               onChange={(e) => onNameChange(e.target.value)}
             />
           </div>
           <SelectField
             label="Default Executor"
             value={defaultExecutorId}
+            isDirty={executorIsDirty}
             onChange={onExecutorChange}
             options={executorsEmpty ? [] : executorOptions}
             emptyLabel="No executors available"
@@ -156,6 +166,7 @@ function WorkspaceSettingsCard({
           <SelectField
             label="Default Agent Profile"
             value={defaultAgentProfileId}
+            isDirty={agentProfileIsDirty}
             onChange={onAgentProfileChange}
             options={profileOptions}
             emptyLabel="No agent profiles available"
@@ -464,6 +475,7 @@ function useWorkspaceEditForm(workspace: Workspace) {
     activeExecutors,
     executors,
     agentProfiles,
+    savedState,
     isDirty,
     handleSave,
     handleDiscard,
@@ -487,6 +499,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
     activeExecutors,
     executors,
     agentProfiles,
+    savedState,
     isDirty,
     handleSave,
     handleDiscard,
@@ -518,12 +531,15 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       <Separator />
       <WorkspaceSettingsCard
         workspaceNameDraft={workspaceNameDraft}
+        nameIsDirty={workspaceNameDraft.trim() !== savedState.name}
         onNameChange={setWorkspaceNameDraft}
         defaultExecutorId={defaultExecutorId}
+        executorIsDirty={defaultExecutorId !== savedState.executorId}
         onExecutorChange={setDefaultExecutorId}
         activeExecutors={activeExecutors}
         executorsEmpty={executors.length === 0}
         defaultAgentProfileId={defaultAgentProfileId}
+        agentProfileIsDirty={defaultAgentProfileId !== savedState.agentProfileId}
         onAgentProfileChange={setDefaultAgentProfileId}
         agentProfiles={agentProfiles}
       />

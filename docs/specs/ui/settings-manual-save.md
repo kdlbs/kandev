@@ -22,6 +22,8 @@ Settings pages currently mix immediate persistence, section-level Save buttons, 
 - A draftable reset-to-default action, including keyboard shortcut, feature-toggle, query, and preset resets, updates the draft and requires Save. It is not treated as an immediate command.
 - A visual preview may react immediately when that is the purpose of the setting, such as changing the color theme, but the durable value is not updated until Save. Reloading or discarding before Save restores the saved value.
 - Controls remain interactive while dirty. Persistence latency begins only after Save, so experimenting with toggles and selectors does not block further editing.
+- Each draftable control whose value differs from its saved baseline uses a green border/ring so the user can identify the unsaved fields. The marker clears when the value returns to its baseline, is discarded, or saves successfully.
+- On settings routes, the floating action uses the success-green treatment and does not overlap the Configuration Chat trigger or its open popover.
 
 ### Workflow settings
 
@@ -59,15 +61,15 @@ Changing a configuration value to its default is not an immediate action merely 
 
 Each registered contributor has these observable states:
 
-| State | Trigger | Result |
-|---|---|---|
-| Clean | Draft equals its saved baseline | No floating action is shown for that contributor. |
-| Dirty | A draftable value changes | The floating action appears; no persistence request is made. |
-| Invalid | A dirty draft fails local validation | The action remains visible but Save is disabled with the invalid field identified on the page. |
-| Saving | The user presses Save | The submitted revision is persisted once; duplicate Save is disabled. |
-| Clean | The submitted revision succeeds and is still current | The baseline advances and the contributor leaves the dirty set. |
-| Dirty | The submitted revision succeeds but the user edited again in flight | The new revision stays dirty. |
-| Error | Persistence fails | The draft remains visible and dirty; the action reports failure and can be retried. |
+| State   | Trigger                                                             | Result                                                                                         |
+| ------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Clean   | Draft equals its saved baseline                                     | No floating action is shown for that contributor.                                              |
+| Dirty   | A draftable value changes                                           | The floating action appears; no persistence request is made.                                   |
+| Invalid | A dirty draft fails local validation                                | The action remains visible but Save is disabled with the invalid field identified on the page. |
+| Saving  | The user presses Save                                               | The submitted revision is persisted once; duplicate Save is disabled.                          |
+| Clean   | The submitted revision succeeds and is still current                | The baseline advances and the contributor leaves the dirty set.                                |
+| Dirty   | The submitted revision succeeds but the user edited again in flight | The new revision stays dirty.                                                                  |
+| Error   | Persistence fails                                                   | The draft remains visible and dirty; the action reports failure and can be retried.            |
 
 Route navigation with dirty contributors opens an in-app confirmation with `Save and leave`, `Discard and leave`, and `Continue editing`. Browser reload, tab close, and external navigation use the native `beforeunload` warning. A failed `Save and leave` keeps the user on the page. Browser history navigation must not silently discard drafts.
 
@@ -96,9 +98,11 @@ Route navigation with dirty contributors opens an in-app confirmation with `Save
 - **GIVEN** a dirty keyboard shortcut, **WHEN** the user presses Reset, **THEN** the default shortcut is shown locally and no persistence request occurs until Save.
 - **GIVEN** a dirty feature-toggle override, **WHEN** the user presses Reset to default, **THEN** the inherited value is staged and the runtime flag does not change until Save succeeds.
 - **GIVEN** a dirty color-theme draft, **WHEN** the user previews another theme and leaves with Discard, **THEN** the previously saved theme is restored.
+- **GIVEN** one or more changed settings fields, **WHEN** their draft values differ from the saved baseline, **THEN** only those controls have the green dirty-field border until they are reverted, discarded, or saved.
 - **GIVEN** a dirty settings route, **WHEN** the user navigates elsewhere, **THEN** an in-app confirmation offers Save and leave, Discard and leave, or Continue editing.
 - **GIVEN** a persisted workflow step with tasks, **WHEN** the user confirms migration and deletion, **THEN** the destructive operation runs immediately without waiting for the floating Save action.
 - **GIVEN** a long settings page on desktop or a 390px mobile viewport, **WHEN** any field becomes dirty, **THEN** the floating action is fully visible, keyboard/touch reachable, clear of safe-area insets, and does not cover the last editable control.
+- **GIVEN** Configuration Chat is closed or open on a dirty settings route, **WHEN** the floating action is shown, **THEN** the Save action does not intersect the chat trigger or popover.
 - **GIVEN** a clean settings route, **WHEN** it is displayed, **THEN** no floating save action occupies the viewport.
 
 ## Out of Scope

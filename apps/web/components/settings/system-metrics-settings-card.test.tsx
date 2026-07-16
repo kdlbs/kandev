@@ -36,10 +36,12 @@ describe("SystemMetricsSettingsCard", () => {
     fireEvent.click(cpuMetric);
 
     expect(updateSystemMetricsSettingsMock).not.toHaveBeenCalled();
+    expect(cpuMetric.getAttribute("data-settings-dirty")).toBe("true");
 
     fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(updateSystemMetricsSettingsMock).toHaveBeenCalledTimes(1));
     expect(updateSystemMetricsSettingsMock.mock.calls[0]?.[0].metrics).not.toContain("cpu_percent");
+    await waitFor(() => expect(cpuMetric.getAttribute("data-settings-dirty")).toBe("false"));
   });
 });

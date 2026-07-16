@@ -24,6 +24,7 @@ function resolveShellSelection(preferredShell: string, shellOptions: ShellOption
 
 type ShellSelectProps = {
   shellSelection: string;
+  isDirty: boolean;
   onSelectionChange: (value: string) => void;
   customShell: string;
   onCustomShellChange: (value: string) => void;
@@ -33,6 +34,7 @@ type ShellSelectProps = {
 
 function ShellSelect({
   shellSelection,
+  isDirty,
   onSelectionChange,
   customShell,
   onCustomShellChange,
@@ -47,7 +49,7 @@ function ShellSelect({
           onValueChange={onSelectionChange}
           disabled={!shellLoaded || shellOptions.length === 0}
         >
-          <SelectTrigger>
+          <SelectTrigger data-settings-dirty={isDirty}>
             <SelectValue
               placeholder={
                 shellOptions.length === 0 ? "Shell options unavailable" : "Select a shell"
@@ -76,6 +78,7 @@ function ShellSelect({
         <div className="space-y-2">
           <Input
             value={customShell}
+            data-settings-dirty={isDirty}
             onChange={(event) => onCustomShellChange(event.target.value)}
             placeholder="/bin/zsh"
           />
@@ -90,11 +93,13 @@ function ShellSelect({
 
 export function ShellSettingsCard({
   preferredShell,
+  isDirty,
   onPreferredShellChange,
   shellLoaded,
   shellOptions,
 }: {
   preferredShell: string;
+  isDirty?: boolean;
   onPreferredShellChange: (value: string) => void;
   shellLoaded: boolean;
   shellOptions: ShellOption[];
@@ -122,6 +127,7 @@ export function ShellSettingsCard({
         <CardContent className="space-y-4">
           <ShellSelect
             shellSelection={shellSelection}
+            isDirty={Boolean(isDirty)}
             onSelectionChange={(value) => {
               setShellSelection(value);
               if (value === AUTO_SHELL) {

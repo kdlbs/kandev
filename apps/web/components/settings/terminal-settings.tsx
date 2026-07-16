@@ -72,9 +72,11 @@ function FontGroupOptions() {
 
 function TerminalFontSizeCard({
   fontSize,
+  isDirty,
   onChange,
 }: {
   fontSize: number;
+  isDirty: boolean;
   onChange: (value: number) => void;
 }) {
   const handleFontSizeBlur = () => {
@@ -96,6 +98,7 @@ function TerminalFontSizeCard({
               min={8}
               max={24}
               value={fontSize}
+              data-settings-dirty={isDirty}
               onChange={(e) => onChange(Number(e.target.value))}
               onBlur={handleFontSizeBlur}
               onKeyDown={(e) => {
@@ -117,9 +120,11 @@ function TerminalFontSizeCard({
 
 function TerminalFontCard({
   fontFamily,
+  isDirty,
   onChange,
 }: {
   fontFamily: string | null;
+  isDirty: boolean;
   onChange: (value: string | null) => void;
 }) {
   const [isCustom, setIsCustom] = useState(() => {
@@ -163,7 +168,11 @@ function TerminalFontCard({
         <div className="space-y-3">
           <Label htmlFor="terminal-font">Font Family</Label>
           <Select value={selectValue} onValueChange={handleSelectChange}>
-            <SelectTrigger id="terminal-font" data-testid="terminal-font-select">
+            <SelectTrigger
+              id="terminal-font"
+              data-testid="terminal-font-select"
+              data-settings-dirty={isDirty}
+            >
               <SelectValue placeholder="Default" />
             </SelectTrigger>
             <SelectContent>
@@ -177,6 +186,7 @@ function TerminalFontCard({
             <Input
               placeholder='e.g. "My Custom Font"'
               value={customValue}
+              data-settings-dirty={isDirty}
               onChange={(e) => setCustomValue(e.target.value)}
               onBlur={handleCustomBlur}
               onKeyDown={(e) => {
@@ -196,9 +206,11 @@ function TerminalFontCard({
 
 function TerminalLinksCard({
   value,
+  isDirty,
   onChange,
 }: {
   value: "new_tab" | "browser_panel";
+  isDirty: boolean;
   onChange: (value: "new_tab" | "browser_panel") => void;
 }) {
   return (
@@ -213,7 +225,7 @@ function TerminalLinksCard({
             value={value}
             onValueChange={(next) => onChange(next as "new_tab" | "browser_panel")}
           >
-            <SelectTrigger id="terminal-link-behavior">
+            <SelectTrigger id="terminal-link-behavior" data-settings-dirty={isDirty}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -277,6 +289,7 @@ export function TerminalSettings() {
     <div className="space-y-8">
       <ShellSettingsCard
         preferredShell={draft.preferredShell}
+        isDirty={draft.preferredShell !== saved.preferredShell}
         onPreferredShellChange={(preferredShell) =>
           setDraft((current) => ({ ...current, preferredShell }))
         }
@@ -293,16 +306,19 @@ export function TerminalSettings() {
       >
         <TerminalFontCard
           fontFamily={draft.terminalFontFamily}
+          isDirty={draft.terminalFontFamily !== saved.terminalFontFamily}
           onChange={(terminalFontFamily) =>
             setDraft((current) => ({ ...current, terminalFontFamily }))
           }
         />
         <TerminalFontSizeCard
           fontSize={draft.terminalFontSize}
+          isDirty={draft.terminalFontSize !== saved.terminalFontSize}
           onChange={(terminalFontSize) => setDraft((current) => ({ ...current, terminalFontSize }))}
         />
         <TerminalLinksCard
           value={draft.terminalLinkBehavior}
+          isDirty={draft.terminalLinkBehavior !== saved.terminalLinkBehavior}
           onChange={(terminalLinkBehavior) =>
             setDraft((current) => ({ ...current, terminalLinkBehavior }))
           }

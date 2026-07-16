@@ -18,6 +18,7 @@ describe("WorkflowCardHeaderActions", () => {
           onDeleteClick={vi.fn().mockRejectedValue(failure)}
           deleteDisabled={false}
           exportDisabled
+          readOnly={false}
         />
       </TooltipProvider>,
     );

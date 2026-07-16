@@ -27,9 +27,11 @@ const DEFAULT_METRICS_SETTINGS: SystemMetricsGlobalSettings = {
 
 export function SystemMetricsSettingsCard({
   showInTopbar,
+  isShowInTopbarDirty,
   onShowInTopbarChange,
 }: {
   showInTopbar: boolean;
+  isShowInTopbarDirty?: boolean;
   onShowInTopbarChange: (checked: boolean) => void;
 }) {
   const [settings, setSettings] = useState<SystemMetricsGlobalSettings>(DEFAULT_METRICS_SETTINGS);
@@ -87,9 +89,14 @@ export function SystemMetricsSettingsCard({
           Useful when Kandev is self-hosted on a remote server and you want a lightweight view of
           the machine resources from the kanban or task topbar.
         </p>
-        <MetricsDisplayToggle checked={showInTopbar} onCheckedChange={onShowInTopbarChange} />
+        <MetricsDisplayToggle
+          checked={showInTopbar}
+          isDirty={Boolean(isShowInTopbarDirty)}
+          onCheckedChange={onShowInTopbarChange}
+        />
         <MetricsSamplerControls
           settings={settings}
+          savedSettings={savedSettings}
           isSaving={!loaded}
           onToggleMetric={toggleMetric}
           onChangeSettings={setSettings}
@@ -97,6 +104,7 @@ export function SystemMetricsSettingsCard({
         />
         <ExecutionMetricsToggle
           checked={settings.collect_execution}
+          isDirty={settings.collect_execution !== savedSettings.collect_execution}
           disabled={!loaded}
           onCheckedChange={(checked) => setSettings({ ...settings, collect_execution: checked })}
         />
@@ -107,9 +115,11 @@ export function SystemMetricsSettingsCard({
 
 function MetricsDisplayToggle({
   checked,
+  isDirty,
   onCheckedChange,
 }: {
   checked: boolean;
+  isDirty: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
@@ -120,19 +130,26 @@ function MetricsDisplayToggle({
           Collection starts only while at least one client displays metrics.
         </p>
       </div>
-      <Switch id="show-system-metrics" checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch
+        id="show-system-metrics"
+        checked={checked}
+        data-settings-dirty={isDirty}
+        onCheckedChange={onCheckedChange}
+      />
     </div>
   );
 }
 
 function MetricsSamplerControls({
   settings,
+  savedSettings,
   isSaving,
   onToggleMetric,
   onChangeSettings,
   onDraftSettings,
 }: {
   settings: SystemMetricsGlobalSettings;
+  savedSettings: SystemMetricsGlobalSettings;
   isSaving: boolean;
   onToggleMetric: (metric: SystemMetricId, checked: boolean) => void;
   onChangeSettings: (settings: SystemMetricsGlobalSettings) => void;
@@ -140,7 +157,12 @@ function MetricsSamplerControls({
 }) {
   return (
     <div className="grid gap-4 md:grid-cols-[1fr_180px_180px]">
-      <MetricCheckboxes settings={settings} isSaving={isSaving} onToggleMetric={onToggleMetric} />
+      <MetricCheckboxes
+        settings={settings}
+        savedSettings={savedSettings}
+        isSaving={isSaving}
+        onToggleMetric={onToggleMetric}
+      />
       <div className="space-y-2">
         <Label htmlFor="metrics-interval">Frequency (seconds)</Label>
         <Input
@@ -149,6 +171,7 @@ function MetricsSamplerControls({
           min={1}
           max={300}
           value={settings.interval_seconds}
+          data-settings-dirty={settings.interval_seconds !== savedSettings.interval_seconds}
           disabled={isSaving}
           onChange={(event) =>
             onChangeSettings({ ...settings, interval_seconds: clampInterval(event.target.value) })
@@ -160,6 +183,7 @@ function MetricsSamplerControls({
         <Input
           id="metrics-disk-path"
           value={settings.backend_disk_path}
+          data-settings-dirty={settings.backend_disk_path !== savedSettings.backend_disk_path}
           disabled={isSaving}
           onChange={(event) =>
             onDraftSettings({ ...settings, backend_disk_path: event.target.value })
@@ -173,10 +197,12 @@ function MetricsSamplerControls({
 
 function MetricCheckboxes({
   settings,
+  savedSettings,
   isSaving,
   onToggleMetric,
 }: {
   settings: SystemMetricsGlobalSettings;
+  savedSettings: SystemMetricsGlobalSettings;
   isSaving: boolean;
   onToggleMetric: (metric: SystemMetricId, checked: boolean) => void;
 }) {
@@ -188,6 +214,9 @@ function MetricCheckboxes({
           <label key={metric.id} className="flex items-center gap-2 text-sm">
             <Checkbox
               checked={settings.metrics.includes(metric.id)}
+              data-settings-dirty={
+                settings.metrics.includes(metric.id) !== savedSettings.metrics.includes(metric.id)
+              }
               disabled={isSaving}
               onCheckedChange={(checked) => onToggleMetric(metric.id, checked === true)}
             />
@@ -201,10 +230,12 @@ function MetricCheckboxes({
 
 function ExecutionMetricsToggle({
   checked,
+  isDirty,
   disabled,
   onCheckedChange,
 }: {
   checked: boolean;
+  isDirty: boolean;
   disabled: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
@@ -219,6 +250,7 @@ function ExecutionMetricsToggle({
       <Switch
         id="collect-execution-metrics"
         checked={checked}
+        data-settings-dirty={isDirty}
         disabled={disabled}
         onCheckedChange={onCheckedChange}
       />

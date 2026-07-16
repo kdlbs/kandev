@@ -28,9 +28,11 @@ import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides"
 
 function ThemeSettingsCard({
   theme,
+  isDirty,
   onChange,
 }: {
   theme: Theme;
+  isDirty: boolean;
   onChange: (theme: Theme) => void;
 }) {
   return (
@@ -41,7 +43,7 @@ function ThemeSettingsCard({
       <CardContent>
         <div className="space-y-2">
           <Select value={theme} onValueChange={(value) => onChange(value as Theme)}>
-            <SelectTrigger id="theme">
+            <SelectTrigger id="theme" data-settings-dirty={isDirty}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -58,9 +60,11 @@ function ThemeSettingsCard({
 
 function ChatSubmitKeyCard({
   value,
+  isDirty,
   onChange,
 }: {
   value: "enter" | "cmd_enter";
+  isDirty: boolean;
   onChange: (value: "enter" | "cmd_enter") => void;
 }) {
   return (
@@ -72,7 +76,7 @@ function ChatSubmitKeyCard({
         <div className="space-y-2">
           <Label htmlFor="chat-submit-key">Message Submit Key</Label>
           <Select value={value} onValueChange={(next) => onChange(next as "enter" | "cmd_enter")}>
-            <SelectTrigger id="chat-submit-key">
+            <SelectTrigger id="chat-submit-key" data-settings-dirty={isDirty}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -93,9 +97,11 @@ function ChatSubmitKeyCard({
 
 function ChangesPanelLayoutCard({
   value,
+  isDirty,
   onChange,
 }: {
   value: "flat" | "tree";
+  isDirty: boolean;
   onChange: (value: "flat" | "tree") => void;
 }) {
   return (
@@ -110,6 +116,7 @@ function ChangesPanelLayoutCard({
             <SelectTrigger
               id="changes-panel-layout"
               data-testid="changes-panel-layout-select"
+              data-settings-dirty={isDirty}
               className="cursor-pointer"
             >
               <SelectValue />
@@ -227,6 +234,7 @@ export function AppearanceSettings() {
       >
         <ThemeSettingsCard
           theme={draft.theme}
+          isDirty={draft.theme !== saved.theme}
           onChange={(theme) => {
             updateDraft({ theme });
             previewTheme(theme);
@@ -243,6 +251,7 @@ export function AppearanceSettings() {
       >
         <ChangesPanelLayoutCard
           value={draft.changesPanelLayout}
+          isDirty={draft.changesPanelLayout !== saved.changesPanelLayout}
           onChange={(changesPanelLayout) => updateDraft({ changesPanelLayout })}
         />
       </SettingsSection>
@@ -256,6 +265,7 @@ export function AppearanceSettings() {
       >
         <SystemMetricsSettingsCard
           showInTopbar={draft.showMetrics}
+          isShowInTopbarDirty={draft.showMetrics !== saved.showMetrics}
           onShowInTopbarChange={(showMetrics) => updateDraft({ showMetrics })}
         />
       </SettingsSection>
@@ -302,6 +312,7 @@ export function KeyboardShortcutsSettings() {
       >
         <ChatSubmitKeyCard
           value={draft.chatSubmitKey}
+          isDirty={draft.chatSubmitKey !== saved.chatSubmitKey}
           onChange={(chatSubmitKey) => setDraft((current) => ({ ...current, chatSubmitKey }))}
         />
       </SettingsSection>

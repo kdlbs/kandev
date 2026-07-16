@@ -73,7 +73,7 @@ export function ConfigChatAgentSection() {
           value={draftProfileId || "none"}
           onValueChange={(value) => setDraftProfileId(value === "none" ? "" : value)}
         >
-          <SelectTrigger className="w-full max-w-sm cursor-pointer">
+          <SelectTrigger className="w-full max-w-sm cursor-pointer" data-settings-dirty={isDirty}>
             <SelectValue placeholder="Choose an agent profile..." />
           </SelectTrigger>
           <SelectContent>

@@ -62,6 +62,7 @@ export function ChangelogNotificationCard() {
           <Switch
             id="release-notification-toggle"
             checked={draft}
+            data-settings-dirty={draft !== saved}
             onCheckedChange={setDraft}
             className="cursor-pointer"
           />

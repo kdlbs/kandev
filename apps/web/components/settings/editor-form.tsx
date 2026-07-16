@@ -153,9 +153,11 @@ type EditorFormProps = {
 
 function EditorKindFields({
   state,
+  baseline,
   setField,
 }: {
   state: EditorFormState;
+  baseline: EditorFormState;
   setField: <K extends keyof EditorFormState>(key: K, value: EditorFormState[K]) => void;
 }) {
   if (state.kind === "custom_command") {
@@ -163,6 +165,7 @@ function EditorKindFields({
       <div className="space-y-2">
         <Input
           value={state.command}
+          data-settings-dirty={state.command !== baseline.command}
           onChange={(event) => setField("command", event.target.value)}
           placeholder="code --goto {file}:{line}"
         />
@@ -175,16 +178,19 @@ function EditorKindFields({
       <div className="space-y-2">
         <Input
           value={state.host}
+          data-settings-dirty={state.host !== baseline.host}
           onChange={(event) => setField("host", event.target.value)}
           placeholder="ssh-host.example.com"
         />
         <Input
           value={state.user}
+          data-settings-dirty={state.user !== baseline.user}
           onChange={(event) => setField("user", event.target.value)}
           placeholder="optional username"
         />
         <Input
           value={state.scheme}
+          data-settings-dirty={state.scheme !== baseline.scheme}
           onChange={(event) => setField("scheme", event.target.value)}
           placeholder="optional scheme (vscode, cursor)"
         />
@@ -199,6 +205,7 @@ function EditorKindFields({
     return (
       <Input
         value={state.url}
+        data-settings-dirty={state.url !== baseline.url}
         onChange={(event) => setField("url", event.target.value)}
         placeholder="https://code.example.com"
       />
@@ -272,11 +279,12 @@ export function EditorForm({
       <div className="text-sm font-medium text-foreground">{title}</div>
       <Input
         value={state.name}
+        data-settings-dirty={state.name !== baseline.name}
         onChange={(event) => setField("name", event.target.value)}
         placeholder="Editor name"
       />
       <Select value={state.kind} onValueChange={(value) => setField("kind", value as CustomKind)}>
-        <SelectTrigger>
+        <SelectTrigger data-settings-dirty={state.kind !== baseline.kind}>
           <SelectValue placeholder="Editor type" />
         </SelectTrigger>
         <SelectContent>
@@ -288,7 +296,7 @@ export function EditorForm({
           ))}
         </SelectContent>
       </Select>
-      <EditorKindFields state={state} setField={setField} />
+      <EditorKindFields state={state} baseline={baseline} setField={setField} />
       <div className="flex items-center justify-end gap-2">
         <Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>
           Cancel

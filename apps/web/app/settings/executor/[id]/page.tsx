@@ -87,10 +87,12 @@ function McpPresetButton({ label, onClick }: { label: string; onClick: () => voi
 
 function McpPolicyCard({
   mcpPolicy,
+  isDirty,
   mcpPolicyError,
   onPolicyChange,
 }: {
   mcpPolicy: string;
+  isDirty: boolean;
   mcpPolicyError: string | null;
   onPolicyChange: (value: string) => void;
 }) {
@@ -116,6 +118,7 @@ function McpPolicyCard({
         <Textarea
           id="mcp-policy"
           value={mcpPolicy}
+          data-settings-dirty={isDirty}
           onChange={(event) => onPolicyChange(event.target.value)}
           placeholder='{"allow_stdio":true,"allow_http":true}'
           rows={8}
@@ -334,6 +337,7 @@ function ExecutorEditForm({ executor }: { executor: Executor }) {
 
       <McpPolicyCard
         mcpPolicy={mcpPolicy}
+        isDirty={isDirty}
         mcpPolicyError={mcpPolicyError}
         onPolicyChange={setMcpPolicy}
       />

@@ -202,6 +202,12 @@
   }
 }
 
+@layer components {
+  [data-settings-dirty="true"] {
+    @apply border-success ring-2 ring-success/30;
+  }
+}
+
 /* iOS Safari auto-zooms a focused form control whose computed font-size is
    < 16px (native <select> included). Force 16px on coarse-pointer (touch)
    devices to stop focus-zoom. !important because some controls are styled by

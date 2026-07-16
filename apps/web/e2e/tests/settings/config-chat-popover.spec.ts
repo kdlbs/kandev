@@ -42,6 +42,41 @@ test.describe("Configuration Chat", () => {
     });
   });
 
+  test("keeps the floating Save action clear of the closed and open config chat", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const initial = await apiClient.getUserSettings();
+    const initialLayout = initial.settings.changes_panel_layout === "tree" ? "tree" : "flat";
+    const nextLayout = initialLayout === "tree" ? "flat" : "tree";
+
+    try {
+      await testPage.goto("/settings/general/appearance");
+      const layout = testPage.getByTestId("changes-panel-layout-select");
+      await layout.click();
+      await testPage
+        .getByRole("option", { name: nextLayout === "tree" ? "Tree" : "Flat list" })
+        .click();
+
+      const floatingSave = testPage.getByTestId("settings-floating-save");
+      const saveButton = floatingSave.getByRole("button", { name: "Save changes" });
+      const configChatButton = testPage.getByRole("button", { name: "Configuration Chat" });
+      await expect(saveButton).toHaveClass(/bg-success/);
+      await expectElementsNotToIntersect(saveButton, configChatButton);
+
+      await configChatButton.click();
+      const configChatPopover = testPage.locator('[data-slot="popover-content"]').filter({
+        has: testPage.getByRole("button", { name: "Close config chat" }),
+      });
+      await expect(configChatPopover).toBeVisible();
+      await expectElementsNotToIntersect(saveButton, configChatPopover);
+    } finally {
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        changes_panel_layout: initialLayout,
+      });
+    }
+  });
+
   test("starts floating, expands the same session, restores, continues, and deletes", async ({
     testPage,
   }) => {
@@ -163,3 +198,18 @@ test.describe("Configuration Chat", () => {
     await expect(clarification).not.toBeVisible({ timeout: 30_000 });
   });
 });
+
+async function expectElementsNotToIntersect(
+  first: import("@playwright/test").Locator,
+  second: import("@playwright/test").Locator,
+) {
+  const [firstBox, secondBox] = await Promise.all([first.boundingBox(), second.boundingBox()]);
+  expect(firstBox).not.toBeNull();
+  expect(secondBox).not.toBeNull();
+  const intersects =
+    firstBox!.x < secondBox!.x + secondBox!.width &&
+    firstBox!.x + firstBox!.width > secondBox!.x &&
+    firstBox!.y < secondBox!.y + secondBox!.height &&
+    firstBox!.y + firstBox!.height > secondBox!.y;
+  expect(intersects).toBe(false);
+}

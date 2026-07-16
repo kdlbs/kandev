@@ -9,12 +9,19 @@ import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 
 type FeatureToggleCardProps = {
   flag: RuntimeFlagState;
+  isDirty?: boolean;
   saving: boolean;
   onChange: (next: boolean) => void;
   onReset: () => void;
 };
 
-export function FeatureToggleCard({ flag, saving, onChange, onReset }: FeatureToggleCardProps) {
+export function FeatureToggleCard({
+  flag,
+  isDirty = false,
+  saving,
+  onChange,
+  onReset,
+}: FeatureToggleCardProps) {
   const disabled = saving || flag.env_locked || !flag.mutable;
   return (
     <Card data-testid={`feature-toggle-${flag.key}`}>
@@ -28,6 +35,7 @@ export function FeatureToggleCard({ flag, saving, onChange, onReset }: FeatureTo
         </div>
         <Switch
           checked={flag.effective_value}
+          data-settings-dirty={isDirty}
           disabled={disabled}
           onCheckedChange={onChange}
           aria-label={`Toggle ${flag.label}`}

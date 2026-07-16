@@ -6,6 +6,7 @@ let pathname = "/settings/integrations/github";
 const COPY_CONFIG_TEST_ID = "mock-copy-config";
 
 const state = {
+  configChat: { isOpen: false },
   workspaces: {
     activeId: "ws-1",
     items: [
@@ -24,6 +25,8 @@ vi.mock("@/lib/routing/client-router", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: typeof state) => unknown) => selector(state),
+  useOptionalAppStore: (selector: (s: typeof state) => unknown, fallback: unknown) =>
+    selector(state) ?? fallback,
 }));
 
 vi.mock("@/components/page-topbar", () => ({

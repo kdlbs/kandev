@@ -11,6 +11,7 @@ import { QuickChatSessionView } from "@/components/quick-chat/quick-chat-session
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { ConfigChatSetup } from "./config-chat-setup";
 import { useConfigChat } from "./use-config-chat";
+import { cn } from "@/lib/utils";
 
 function useConfigChatPanelStore() {
   return useAppStore(
@@ -122,7 +123,12 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
           <PopoverTrigger asChild>
             <Button
               size="icon"
-              className="fixed bottom-6 right-6 z-50 h-12 w-12 cursor-pointer rounded-full shadow-lg"
+              aria-hidden={panel.isOpen}
+              tabIndex={panel.isOpen ? -1 : undefined}
+              className={cn(
+                "fixed bottom-6 right-6 z-50 h-12 w-12 cursor-pointer rounded-full shadow-lg",
+                panel.isOpen && "pointer-events-none opacity-0",
+              )}
               aria-label="Configuration Chat"
             >
               <IconSparkles className="h-6 w-6" />
@@ -140,7 +146,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
         sideOffset={8}
         onInteractOutside={(event) => event.preventDefault()}
         data-testid="config-chat-popover"
-        className="flex h-[min(550px,calc(100dvh-6rem))] w-[min(420px,calc(100vw-2rem))] flex-col gap-0 overflow-hidden p-0 shadow-2xl"
+        className="flex h-[min(550px,calc(100dvh-7rem))] max-h-[550px] w-[min(420px,calc(100vw-2rem))] flex-col gap-0 overflow-hidden p-0 shadow-2xl"
       >
         <PanelHeader onExpand={panel.handleExpand} onClose={() => panel.handleOpenChange(false)} />
         {panel.session ? (
