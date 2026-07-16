@@ -3,6 +3,7 @@ package scheduler_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -119,7 +120,10 @@ func seedRoutingConfig(t *testing.T, repo *officesqlite.Repository, providers []
 	for _, p := range providers {
 		profiles[p] = routing.ProviderProfile{
 			TierMap: routing.TierMap{Balanced: string(p) + "-bal"},
-			Mode:    "default",
+			ExecutionProfileIDs: routing.ExecutionProfileIDs{
+				Balanced: string(p) + "-profile",
+			},
+			Mode: "default",
 		}
 	}
 	cfg := &routing.WorkspaceConfig{
@@ -180,6 +184,34 @@ func TestDispatch_RoutingDisabled_FallsThrough(t *testing.T) {
 	}
 }
 
+func TestDispatch_RoutingDisabledLaunchesFirstTierProfileOnly(t *testing.T) {
+	repo := newTestRepoSched(t)
+	seedRoutingConfig(t, repo, []routing.ProviderID{"claude-acp", "codex-acp"})
+	cfg, err := repo.GetWorkspaceRouting(context.Background(), testWorkspaceID)
+	if err != nil {
+		t.Fatalf("get routing: %v", err)
+	}
+	cfg.Enabled = false
+	if err := repo.UpsertWorkspaceRouting(context.Background(), testWorkspaceID, cfg); err != nil {
+		t.Fatalf("disable routing: %v", err)
+	}
+	starter := newFakeTaskStarter()
+	ss := buildScheduler(t, repo, starter)
+	run := seedRun(t, repo, `{"task_id":"t-1"}`)
+	launched, parked, err := ss.DispatchWithRouting(
+		context.Background(), run, makeAgent(), scheduler.LaunchContext{},
+	)
+	if err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	if !launched || parked || starter.callCount() != 1 {
+		t.Fatalf("launched=%v parked=%v calls=%d", launched, parked, starter.callCount())
+	}
+	if got := starter.lastCall().route.ExecutionProfileID; got != "claude-acp-profile" {
+		t.Fatalf("execution profile = %q, want claude-acp-profile", got)
+	}
+}
+
 func TestDispatch_ForwardsLaunchContextToStarter(t *testing.T) {
 	repo := newTestRepoSched(t)
 	seedRoutingConfig(t, repo, []routing.ProviderID{"claude-acp"})
@@ -229,6 +261,9 @@ func TestDispatch_FirstProviderSucceeds(t *testing.T) {
 	if got := starter.lastCall().route.ProviderID; got != "claude-acp" {
 		t.Errorf("expected first provider claude-acp; got %s", got)
 	}
+	if got := starter.lastCall().route.ExecutionProfileID; got != "claude-acp-profile" {
+		t.Errorf("execution profile = %q", got)
+	}
 	attempts, _ := repo.ListRouteAttempts(context.Background(), run.ID)
 	if len(attempts) != 1 {
 		t.Fatalf("expected 1 attempt; got %d", len(attempts))
@@ -251,7 +286,11 @@ func TestDispatch_WakeReasonTierPolicy(t *testing.T) {
 	profiles := map[routing.ProviderID]routing.ProviderProfile{
 		"claude-acp": {
 			TierMap: routing.TierMap{Balanced: "sonnet", Economy: "haiku"},
-			Mode:    "default",
+			ExecutionProfileIDs: routing.ExecutionProfileIDs{
+				Balanced: "claude-sonnet-profile",
+				Economy:  "claude-haiku-profile",
+			},
+			Mode: "default",
 		},
 	}
 	cfg := &routing.WorkspaceConfig{
@@ -393,13 +432,14 @@ func TestDispatch_ExcludesProvidersFromPriorAttempts(t *testing.T) {
 		t.Fatalf("seed seq bump: %v", err)
 	}
 	if err := repo.AppendRouteAttempt(context.Background(), &officemodels.RouteAttempt{
-		RunID:      run.ID,
-		Seq:        1,
-		ProviderID: "claude-acp",
-		Model:      "claude-acp-bal",
-		Tier:       "balanced",
-		Outcome:    scheduler.RouteAttemptOutcomeFailedProviderUnavail,
-		StartedAt:  time.Now().UTC(),
+		RunID:              run.ID,
+		Seq:                1,
+		ExecutionProfileID: "claude-acp-profile",
+		ProviderID:         "claude-acp",
+		Model:              "claude-acp-bal",
+		Tier:               "balanced",
+		Outcome:            scheduler.RouteAttemptOutcomeFailedProviderUnavail,
+		StartedAt:          time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("seed prior attempt: %v", err)
 	}
@@ -590,13 +630,14 @@ func TestDispatch_PostStartFallbackKeepsExclusions(t *testing.T) {
 		t.Fatalf("seed seq bump: %v", err)
 	}
 	if err := repo.AppendRouteAttempt(context.Background(), &officemodels.RouteAttempt{
-		RunID:      run.ID,
-		Seq:        1,
-		ProviderID: "claude-acp",
-		Model:      "claude-acp-bal",
-		Tier:       "balanced",
-		Outcome:    scheduler.RouteAttemptOutcomeFailedProviderUnavail,
-		StartedAt:  time.Now().UTC(),
+		RunID:              run.ID,
+		Seq:                1,
+		ExecutionProfileID: "claude-acp-profile",
+		ProviderID:         "claude-acp",
+		Model:              "claude-acp-bal",
+		Tier:               "balanced",
+		Outcome:            scheduler.RouteAttemptOutcomeFailedProviderUnavail,
+		StartedAt:          time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("seed prior attempt: %v", err)
 	}
@@ -618,6 +659,16 @@ func TestDispatch_PostStartFallbackKeepsExclusions(t *testing.T) {
 	}
 	if got := starter.lastCall().route.ProviderID; got != "codex-acp" {
 		t.Errorf("expected codex-acp (claude excluded within-cycle); got %s", got)
+	}
+	prompt := starter.lastCall().launch.Prompt
+	for _, want := range []string{
+		"[Kandev provider fallback]", "fresh provider-native session",
+		"task description", "comments/messages", "task status", "current run state",
+		"git status", "git diff", "git log",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("continuation prompt missing %q: %s", want, prompt)
+		}
 	}
 }
 

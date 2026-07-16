@@ -2,10 +2,12 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -34,11 +36,76 @@ func TestEnsureSessionForAgent_CreatesWhenMissing(t *testing.T) {
 	if got.AgentProfileID != "agent-1" {
 		t.Errorf("agent_profile_id: got %q want agent-1", got.AgentProfileID)
 	}
+	if got.ExecutionProfileID != "profile-1" {
+		t.Errorf("execution_profile_id: got %q want profile-1", got.ExecutionProfileID)
+	}
 	if got.State != models.TaskSessionStateCreated {
 		t.Errorf("state: got %q want CREATED", got.State)
 	}
 	if len(repo.createTaskSessionCalls) != 1 {
 		t.Fatalf("expected 1 CreateTaskSession call, got %d", len(repo.createTaskSessionCalls))
+	}
+}
+
+func TestEnsureSessionForAgent_RebindsExecutionProfileOnReuse(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	existing := &models.TaskSession{
+		ID:                 "sess-existing",
+		TaskID:             "task-office",
+		AgentProfileID:     "agent-1",
+		ExecutionProfileID: "codex-profile",
+		State:              models.TaskSessionStateIdle,
+		StartedAt:          time.Now().UTC(),
+	}
+	repo.sessions[existing.ID] = existing
+
+	got, err := exec.EnsureSessionForAgent(
+		context.Background(), officeTestTask(), "agent-1", "claude-profile", "exec-1", "",
+	)
+	if err != nil {
+		t.Fatalf("EnsureSessionForAgent: %v", err)
+	}
+	if got.AgentProfileID != "agent-1" {
+		t.Fatalf("office identity changed: %q", got.AgentProfileID)
+	}
+	if got.ExecutionProfileID != "claude-profile" {
+		t.Fatalf("execution profile = %q, want claude-profile", got.ExecutionProfileID)
+	}
+}
+
+func TestEnsureSessionForAgent_RebindsExecutionProfileAfterCreateRace(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	winner := &models.TaskSession{
+		ID:                 "sess-winner",
+		TaskID:             "task-office",
+		AgentProfileID:     "agent-1",
+		ExecutionProfileID: "codex-profile",
+		State:              models.TaskSessionStateIdle,
+		StartedAt:          time.Now().UTC(),
+	}
+	repo.createTaskSessionFunc = func(_ context.Context, _ *models.TaskSession) error {
+		repo.mu.Lock()
+		repo.sessions[winner.ID] = winner
+		repo.mu.Unlock()
+		return fmt.Errorf("%w: concurrent insert", taskrepo.ErrOfficeSessionRaceConflict)
+	}
+
+	got, err := exec.EnsureSessionForAgent(
+		context.Background(), officeTestTask(), "agent-1", "claude-profile", "exec-1", "",
+	)
+	if err != nil {
+		t.Fatalf("EnsureSessionForAgent: %v", err)
+	}
+	if got.ID != winner.ID {
+		t.Fatalf("session = %q, want race winner %q", got.ID, winner.ID)
+	}
+	if got.AgentProfileID != "agent-1" {
+		t.Fatalf("office identity changed: %q", got.AgentProfileID)
+	}
+	if got.ExecutionProfileID != "claude-profile" {
+		t.Fatalf("execution profile = %q, want claude-profile", got.ExecutionProfileID)
 	}
 }
 

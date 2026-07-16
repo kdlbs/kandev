@@ -58,8 +58,8 @@ export function AgentRoutingCard({ agentId, initial }: Props) {
     }
   }, [initial, persistedOverrides]);
 
-  if (!workspace.config?.enabled) {
-    return <DisabledCard />;
+  if (!workspace.config) {
+    return null;
   }
 
   const handleSave = async () => {
@@ -137,27 +137,12 @@ function tierMissingMappingWarning(
   return `No provider in the effective order has the ${tier} tier mapped. Configure a model for ${tier} on at least one provider in Workspace → Provider routing.`;
 }
 
-function DisabledCard() {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-sm">Provider routing</CardTitle>
-        <p className="text-xs text-muted-foreground">
-          Provider routing is off for this workspace. Enable it in Workspace → Provider routing to
-          override the agent&apos;s tier or fallback chain.
-        </p>
-      </CardHeader>
-    </Card>
-  );
-}
-
 function Header() {
   return (
     <CardHeader>
       <CardTitle className="text-sm">Provider routing</CardTitle>
       <p className="text-xs text-muted-foreground">
-        Override the workspace&apos;s tier or fallback order for this agent. Inheriting keeps the
-        agent in step with workspace settings.
+        Override the workspace tier or provider order for this agent.
       </p>
     </CardHeader>
   );

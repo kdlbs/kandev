@@ -523,6 +523,22 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("session does not belong to task")
 	}
 
+	running, _ := e.repo.GetExecutorRunningBySessionID(ctx, sessionID)
+	if running != nil && running.ExecutionProfileID != "" &&
+		running.ExecutionProfileID != agentProfileID {
+		if running.AgentExecutionID != "" {
+			if err := e.agentManager.StopAgentWithReason(
+				ctx, running.AgentExecutionID, "execution profile changed", true,
+			); err != nil {
+				return nil, fmt.Errorf("stop previous execution profile: %w", err)
+			}
+		}
+		if err := e.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
+			return nil, fmt.Errorf("clear previous execution profile: %w", err)
+		}
+		running = nil
+	}
+
 	// Inject session handover context if there are previous sessions for this task.
 	prompt = e.injectHandoverIfNeeded(ctx, task.ID, sessionID, prompt)
 
@@ -585,6 +601,10 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err != nil {
 		return nil, err
 	}
+	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
+	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
+		req.OfficeAgentProfileID = session.AgentProfileID
+	}
 	mergeEnv(req, opts.Env)
 	if opts.RouteOverride != nil {
 		req.RouteOverride = opts.RouteOverride
@@ -604,12 +624,12 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	// Unlike ResumeSession we do NOT clear req.TaskDescription — wakeups
 	// deliver the new comment / event as the prompt.
 	if startAgent {
-		if running, _ := e.repo.GetExecutorRunningBySessionID(ctx, sessionID); running != nil && running.ResumeToken != "" {
-			req.ACPSessionID = running.ResumeToken
+		if token := resumeTokenForExecutionProfile(running, agentProfileID); token != "" {
+			req.ACPSessionID = token
 			e.logger.Info("resuming ACP session via stored resume token",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", sessionID),
-				zap.String("acp_session_id", running.ResumeToken))
+				zap.String("acp_session_id", token))
 		}
 	}
 
@@ -650,6 +670,13 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	}(sessionID)
 
 	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg)
+}
+
+func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID string) string {
+	if running == nil || profileID == "" || running.ExecutionProfileID != profileID {
+		return ""
+	}
+	return running.ResumeToken
 }
 
 // handleLaunchFailure marks the session and task as FAILED and returns the original error.

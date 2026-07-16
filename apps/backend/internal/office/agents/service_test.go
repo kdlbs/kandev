@@ -3,11 +3,13 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
@@ -62,6 +64,145 @@ func newTestAgentService(t *testing.T) (*AgentService, *sqlite.Repository) {
 	}
 	svc := NewAgentService(repo, logger.Default(), &testActivityLogger{})
 	return svc, repo
+}
+
+func newTestAgentServiceWithProfileStore(
+	t *testing.T,
+) (*AgentService, *sqlite.Repository, settingsstore.Repository) {
+	t.Helper()
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	profileStore, _, err := settingsstore.Provide(db, db, nil)
+	if err != nil {
+		t.Fatalf("settings store init: %v", err)
+	}
+	repo, err := sqlite.NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+	svc := NewAgentService(repo, logger.Default(), &testActivityLogger{})
+	svc.SetProfileStore(profileStore)
+	return svc, repo, profileStore
+}
+
+func TestUpdateAgent_ProfileSelectionDirectsClientsToRouting(t *testing.T) {
+	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
+	ctx := context.Background()
+	provider := &settingsmodels.Agent{ID: "provider-db-id", Name: "claude-acp"}
+	if err := profileStore.CreateAgent(ctx, provider); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	source := &settingsmodels.AgentProfile{
+		ID:               "source-profile",
+		AgentID:          provider.ID,
+		Name:             "Work",
+		AgentDisplayName: "Claude",
+		Model:            "opus",
+		Mode:             "bypassPermissions",
+		ConfigOptions:    map[string]string{"effort": "high"},
+		AutoApprove:      true,
+		CLIFlags: []settingsmodels.CLIFlag{
+			{Flag: "--dangerously-skip-permissions", Enabled: true},
+		},
+		EnvVars: []settingsmodels.ProfileEnvVar{
+			{Key: "CLAUDE_CONFIG_DIR", Value: "/data/home/.claude-work"},
+		},
+	}
+	if err := profileStore.CreateAgentProfile(ctx, source); err != nil {
+		t.Fatalf("create source profile: %v", err)
+	}
+	target := &models.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "Researcher",
+		Role:        models.AgentRoleSpecialist,
+	}
+	if err := svc.CreateAgentInstance(ctx, target); err != nil {
+		t.Fatalf("create office agent: %v", err)
+	}
+
+	rec := newPatchAgentRecorder(t, svc, target.ID, `{"agent_profile_id":"source-profile"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	stored, err := profileStore.GetAgentProfile(ctx, target.ID)
+	if err != nil {
+		t.Fatalf("get updated office agent: %v", err)
+	}
+	if stored.Name != "Researcher" || stored.Role != models.AgentRoleSpecialist || stored.WorkspaceID != "ws-1" {
+		t.Fatalf("office identity changed: name=%q role=%q workspace=%q", stored.Name, stored.Role, stored.WorkspaceID)
+	}
+	if stored.Model == "opus" || stored.Mode == "bypassPermissions" {
+		t.Errorf("Office runtime fields were overwritten: model=%q mode=%q", stored.Model, stored.Mode)
+	}
+	if stored.AutoApprove || len(stored.CLIFlags) != 0 {
+		t.Errorf("Office permission fields were overwritten: auto=%v flags=%+v", stored.AutoApprove, stored.CLIFlags)
+	}
+	if len(stored.ConfigOptions) != 0 {
+		t.Errorf("Office config options were overwritten: %+v", stored.ConfigOptions)
+	}
+	if len(stored.EnvVars) != 0 {
+		t.Errorf("Office environment was overwritten: %+v", stored.EnvVars)
+	}
+}
+
+func TestApplyProfileConfigurationCopiesOnlyProviderFamily(t *testing.T) {
+	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
+	ctx := context.Background()
+	provider := &settingsmodels.Agent{ID: "provider-db-id", Name: "claude-acp"}
+	if err := profileStore.CreateAgent(ctx, provider); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	source := &settingsmodels.AgentProfile{
+		ID: "source-profile", AgentID: provider.ID, Name: "Work", Model: "opus",
+		AutoApprove: true, EnvVars: []settingsmodels.ProfileEnvVar{{Key: "SECRET", Value: "value"}},
+	}
+	if err := profileStore.CreateAgentProfile(ctx, source); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	target := &models.AgentInstance{WorkspaceID: "ws-1", Name: "CTO", Model: "identity-model"}
+	if err := svc.ApplyProfileConfiguration(ctx, target, source.ID); err != nil {
+		t.Fatalf("assign provider family: %v", err)
+	}
+	if target.AgentID != provider.ID {
+		t.Fatalf("agent family = %q, want %q", target.AgentID, provider.ID)
+	}
+	if target.Model != "identity-model" || target.AutoApprove || len(target.EnvVars) != 0 {
+		t.Fatalf("runtime config copied onto Office identity: %+v", target)
+	}
+}
+
+func TestApplyProfileConfiguration_RejectsCrossWorkspaceSource(t *testing.T) {
+	svc, _, profileStore := newTestAgentServiceWithProfileStore(t)
+	ctx := context.Background()
+	provider := &settingsmodels.Agent{ID: "provider-db-id", Name: "claude-acp"}
+	if err := profileStore.CreateAgent(ctx, provider); err != nil {
+		t.Fatalf("create provider: %v", err)
+	}
+	source := &settingsmodels.AgentProfile{
+		ID:          "other-workspace-profile",
+		AgentID:     provider.ID,
+		Name:        "Private",
+		WorkspaceID: "ws-other",
+		EnvVars: []settingsmodels.ProfileEnvVar{
+			{Key: "PRIVATE_CONFIG", Value: "/private/path"},
+		},
+	}
+	if err := profileStore.CreateAgentProfile(ctx, source); err != nil {
+		t.Fatalf("create source profile: %v", err)
+	}
+	target := &models.AgentInstance{WorkspaceID: "ws-1", Name: "Worker"}
+
+	err := svc.ApplyProfileConfiguration(ctx, target, source.ID)
+	if err == nil {
+		t.Fatal("expected cross-workspace source profile to be rejected")
+	}
+	if len(target.EnvVars) != 0 {
+		t.Fatalf("cross-workspace environment was copied: %+v", target.EnvVars)
+	}
 }
 
 func TestCreateAgentInstanceWithCaller_PersistsPendingAgentWhenApprovalRequired(t *testing.T) {

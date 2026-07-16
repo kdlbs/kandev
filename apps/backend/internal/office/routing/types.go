@@ -97,35 +97,30 @@ func (m TierMap) Model(t Tier) string {
 // IsConfigured reports whether tier t has a model assigned.
 func (m TierMap) IsConfigured(t Tier) bool { return m.Model(t) != "" }
 
-// ProviderProfile holds the per-provider, per-workspace settings needed
-// to launch via that provider. Cross-provider routing means CLI mode,
-// flags, and env are provider-scoped — they cannot safely be inherited
-// from a base AgentProfile authored against a different provider — so
-// they live here alongside the tier→model map.
-//
-// Note: there is no provider-level permission preset in v1. The base
-// AgentProfile's CLIFlags (resolved by cliflags.Resolve) carry every
-// permission knob the agent runtime consults at launch time. Adding a
-// per-provider permission override would require modelling the existing
-// boolean/CLIFlag system as named presets first — out of scope here.
+// ProviderProfile maps each tier to the complete execution profile used for
+// that launch. TierMap, Mode, Flags, and Env are retained as legacy display
+// snapshots during migration; execution profile references are authoritative.
 type ProviderProfile struct {
-	TierMap        TierMap           `json:"tier_map"`
-	TierProfileIDs TierProfileIDs    `json:"tier_profile_ids,omitempty"`
+	TierMap             TierMap             `json:"tier_map"`
+	ExecutionProfileIDs ExecutionProfileIDs `json:"-"`
+	// TierProfileIDs is retained as a source-compatibility shim while callers
+	// migrate. JSON decoding normalizes the legacy key into
+	// ExecutionProfileIDs and JSON encoding always writes the canonical key.
+	TierProfileIDs TierProfileIDs    `json:"-"`
 	Mode           string            `json:"mode,omitempty"`
 	Flags          []string          `json:"flags,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
 }
 
-// MarshalJSON omits tier_profile_ids unless at least one tier records its
-// source profile. A value struct with omitempty would otherwise serialize as
-// an empty object.
+// MarshalJSON writes the canonical execution_profile_ids key while accepting
+// TierProfileIDs as the in-memory compatibility field during migration.
 func (p ProviderProfile) MarshalJSON() ([]byte, error) {
 	type providerProfileJSON struct {
-		TierMap        TierMap           `json:"tier_map"`
-		TierProfileIDs *TierProfileIDs   `json:"tier_profile_ids,omitempty"`
-		Mode           string            `json:"mode,omitempty"`
-		Flags          []string          `json:"flags,omitempty"`
-		Env            map[string]string `json:"env,omitempty"`
+		TierMap             TierMap              `json:"tier_map"`
+		ExecutionProfileIDs *ExecutionProfileIDs `json:"execution_profile_ids,omitempty"`
+		Mode                string               `json:"mode,omitempty"`
+		Flags               []string             `json:"flags,omitempty"`
+		Env                 map[string]string    `json:"env,omitempty"`
 	}
 	out := providerProfileJSON{
 		TierMap: p.TierMap,
@@ -133,29 +128,91 @@ func (p ProviderProfile) MarshalJSON() ([]byte, error) {
 		Flags:   p.Flags,
 		Env:     p.Env,
 	}
-	if !p.TierProfileIDs.IsZero() {
-		out.TierProfileIDs = &p.TierProfileIDs
+	ids := p.effectiveExecutionProfileIDs()
+	if !ids.IsZero() {
+		out.ExecutionProfileIDs = &ids
 	}
 	return json.Marshal(out)
 }
 
-// TierProfileIDs records which source agent profile authored each tier map
-// entry. Runtime routing uses TierMap; this metadata lets settings block
-// deleting a profile while a workspace tier still points at it.
-type TierProfileIDs struct {
+// UnmarshalJSON accepts the canonical execution_profile_ids field and the
+// legacy tier_profile_ids field. When both are present the canonical field is
+// authoritative, including when it is explicitly empty.
+func (p *ProviderProfile) UnmarshalJSON(data []byte) error {
+	type providerProfileJSON struct {
+		TierMap             TierMap              `json:"tier_map"`
+		ExecutionProfileIDs *ExecutionProfileIDs `json:"execution_profile_ids"`
+		TierProfileIDs      *ExecutionProfileIDs `json:"tier_profile_ids"`
+		Mode                string               `json:"mode,omitempty"`
+		Flags               []string             `json:"flags,omitempty"`
+		Env                 map[string]string    `json:"env,omitempty"`
+	}
+	var raw providerProfileJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*p = ProviderProfile{
+		TierMap: raw.TierMap,
+		Mode:    raw.Mode,
+		Flags:   raw.Flags,
+		Env:     raw.Env,
+	}
+	if raw.ExecutionProfileIDs != nil {
+		p.ExecutionProfileIDs = *raw.ExecutionProfileIDs
+		p.TierProfileIDs = *raw.ExecutionProfileIDs
+	} else if raw.TierProfileIDs != nil {
+		p.ExecutionProfileIDs = *raw.TierProfileIDs
+		p.TierProfileIDs = *raw.TierProfileIDs
+	}
+	return nil
+}
+
+// ExecutionProfileIDs maps each tier to the complete agent profile used to
+// launch that candidate.
+type ExecutionProfileIDs struct {
 	Frontier string `json:"frontier,omitempty"`
 	Balanced string `json:"balanced,omitempty"`
 	Economy  string `json:"economy,omitempty"`
 }
 
-// IsZero reports whether no tier has source profile metadata.
-func (ids TierProfileIDs) IsZero() bool {
+// TierProfileIDs is the legacy source name kept while call sites migrate.
+type TierProfileIDs = ExecutionProfileIDs
+
+// ProfileID returns the execution profile configured for tier.
+func (ids ExecutionProfileIDs) ProfileID(tier Tier) string {
+	switch tier {
+	case TierFrontier:
+		return ids.Frontier
+	case TierBalanced:
+		return ids.Balanced
+	case TierEconomy:
+		return ids.Economy
+	default:
+		return ""
+	}
+}
+
+// IsZero reports whether no tier has an execution profile.
+func (ids ExecutionProfileIDs) IsZero() bool {
 	return ids.Frontier == "" && ids.Balanced == "" && ids.Economy == ""
 }
 
-// WorkspaceConfig is the persisted routing config for one workspace.
-// When Enabled is false, downstream code uses the concrete agent
-// profile and ignores ProviderOrder / DefaultTier / ProviderProfiles.
+// ExecutionProfileID returns the complete runtime profile for tier. The
+// deprecated source field is consulted only when no canonical mapping exists.
+func (p ProviderProfile) ExecutionProfileID(tier Tier) string {
+	return p.effectiveExecutionProfileIDs().ProfileID(tier)
+}
+
+func (p ProviderProfile) effectiveExecutionProfileIDs() ExecutionProfileIDs {
+	if !p.ExecutionProfileIDs.IsZero() {
+		return p.ExecutionProfileIDs
+	}
+	return p.TierProfileIDs
+}
+
+// WorkspaceConfig is the persisted routing config for one workspace. Enabled
+// controls automatic fallback; tier-to-execution-profile selection applies to
+// every Office launch.
 type WorkspaceConfig struct {
 	Enabled          bool                           `json:"enabled"`
 	ProviderOrder    []ProviderID                   `json:"provider_order"`

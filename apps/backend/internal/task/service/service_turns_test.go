@@ -32,11 +32,12 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	now := time.Now().UTC()
 
 	session := &models.TaskSession{
-		ID:                "session-1",
-		TaskID:            "task-123",
-		TaskEnvironmentID: "env-123",
-		AgentProfileID:    "profile-1",
-		State:             models.TaskSessionStateCompleted,
+		ID:                 "session-1",
+		TaskID:             "task-123",
+		TaskEnvironmentID:  "env-123",
+		AgentProfileID:     "profile-1",
+		ExecutionProfileID: "claude-opus",
+		State:              models.TaskSessionStateCompleted,
 		AgentProfileSnapshot: map[string]interface{}{
 			"agent_name": "auggie",
 		},
@@ -82,6 +83,9 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	}
 	if info.AgentProfileID != "profile-1" {
 		t.Errorf("expected AgentProfileID 'profile-1', got %q", info.AgentProfileID)
+	}
+	if info.ExecutionProfileID != "claude-opus" {
+		t.Errorf("expected ExecutionProfileID 'claude-opus', got %q", info.ExecutionProfileID)
 	}
 	if info.AgentID != "auggie" {
 		t.Errorf("expected AgentID 'auggie', got %q", info.AgentID)

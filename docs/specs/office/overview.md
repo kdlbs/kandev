@@ -91,7 +91,7 @@ Why DB-first:
 - Cloud-ready: shared PostgreSQL for team/SaaS works without filesystem coordination.
 - Atomic operations (budget checks, wakeup claims, approval flows) stay transactional.
 - No fsnotify / reload / cache-invalidation complexity.
-- Agent profiles continue to live in the existing kandev DB tables, referenced by ID.
+- Office agents are workspace-scoped rich rows in the existing `agent_profiles` table and are referenced by their stable canonical row ID. Concrete launches separately record the routed `execution_profile_id`.
 
 Filesystem layout:
 
@@ -131,7 +131,7 @@ Filesystem layout:
 
 **Skill injection**: skills for agent sessions are written into the agent's worktree (CWD) before each session. Skill content can come from the DB (inline skills created via UI), the filesystem (imported from GitHub/skills.sh), or bundled (shipped with the kandev binary). All routes inject into the agent-specific skill path under the worktree. See [office agents](./agents.md#skill-injection).
 
-**Agent profiles** (model, CLI flags, MCP servers) stay in the existing kandev `agent_profiles` DB table. Office agent instances reference profiles by ID. Filesystem export format:
+**Office identities and execution profiles** share the existing kandev `agent_profiles` DB table but have separate responsibilities. The workspace-scoped rich row owns Office identity and metadata; provider routing references a concrete execution profile for each launch instead of copying runtime configuration into the Office row. Filesystem export format:
 
 ```yaml
 # agents/ceo.yml
@@ -167,9 +167,9 @@ When a user opens `/office`, the backend checks both DB and filesystem state via
 
 **On "Create & Launch"** the following are created in a single transaction:
 1. Office workspace: `kandev.yml` on filesystem + DB row in `workspaces` + system office workflow (7 steps).
-2. CEO agent instance with `role=ceo`, full permissions, linked profile, bundled skills (kandev-protocol, memory).
+2. CEO Office identity with `role=ceo`, full Office permissions, and bundled skills (kandev-protocol, memory).
 3. Agent runtime row `status=idle` in `office_agent_runtime`.
-4. Workspace provider routing seed: disabled by default, default tier persisted from the coordinator tier selector, Frontier / Balanced / Economy mapped from the selected source profiles, and profile IDs recorded as tier metadata so profile deletion is blocked while a tier still references them.
+4. Workspace provider routing seed: automatic fallback disabled by default, default tier persisted from the coordinator tier selector, and Frontier / Balanced / Economy mapped to authoritative execution profile IDs so launches use the complete selected CLI configuration and profile deletion is blocked while referenced.
 5. First task if not skipped: assigned to the CEO, `status=todo`; a `task_assigned` wakeup is enqueued so the scheduler picks it up. The task brief tells the CEO to create the required projects, including one per repository, and propose follow-up tasks for human approval before creating them.
 6. Onboarding state marked completed in the DB.
 

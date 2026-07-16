@@ -13,15 +13,15 @@ var testKnown = []routing.ProviderID{
 	"claude-acp", "codex-acp", "opencode-acp", "copilot-acp", "amp-acp",
 }
 
-func TestProviderProfileMarshalJSON_OmitsEmptyTierProfileIDs(t *testing.T) {
+func TestProviderProfileMarshalJSON_WritesCanonicalExecutionProfileIDs(t *testing.T) {
 	raw, err := json.Marshal(routing.ProviderProfile{
 		TierMap: routing.TierMap{Balanced: "sonnet"},
 	})
 	if err != nil {
 		t.Fatalf("marshal empty tier profile ids: %v", err)
 	}
-	if strings.Contains(string(raw), "tier_profile_ids") {
-		t.Fatalf("empty tier_profile_ids should be omitted, got %s", raw)
+	if strings.Contains(string(raw), "execution_profile_ids") {
+		t.Fatalf("empty execution_profile_ids should be omitted, got %s", raw)
 	}
 
 	raw, err = json.Marshal(routing.ProviderProfile{
@@ -33,8 +33,51 @@ func TestProviderProfileMarshalJSON_OmitsEmptyTierProfileIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal tier profile ids: %v", err)
 	}
-	if !strings.Contains(string(raw), `"tier_profile_ids":{"balanced":"profile-balanced"}`) {
-		t.Fatalf("non-empty tier_profile_ids should be present, got %s", raw)
+	if !strings.Contains(string(raw), `"execution_profile_ids":{"balanced":"profile-balanced"}`) {
+		t.Fatalf("canonical execution_profile_ids should be present, got %s", raw)
+	}
+	if strings.Contains(string(raw), "tier_profile_ids") {
+		t.Fatalf("legacy tier_profile_ids should not be written, got %s", raw)
+	}
+}
+
+func TestProviderProfileUnmarshalJSON_PrefersCanonicalExecutionProfileIDs(t *testing.T) {
+	var profile routing.ProviderProfile
+	err := json.Unmarshal([]byte(`{
+		"tier_map":{"balanced":"sonnet"},
+		"execution_profile_ids":{"balanced":"canonical-profile"},
+		"tier_profile_ids":{"balanced":"legacy-profile"}
+	}`), &profile)
+	if err != nil {
+		t.Fatalf("unmarshal provider profile: %v", err)
+	}
+	if got := profile.ExecutionProfileID(routing.TierBalanced); got != "canonical-profile" {
+		t.Fatalf("balanced profile = %q, want canonical-profile", got)
+	}
+}
+
+func TestProviderProfileUnmarshalJSON_DecodesLegacyTierProfileIDs(t *testing.T) {
+	var profile routing.ProviderProfile
+	err := json.Unmarshal([]byte(`{
+		"tier_map":{"balanced":"sonnet"},
+		"tier_profile_ids":{"balanced":"legacy-profile"}
+	}`), &profile)
+	if err != nil {
+		t.Fatalf("unmarshal legacy provider profile: %v", err)
+	}
+	if got := profile.ExecutionProfileID(routing.TierBalanced); got != "legacy-profile" {
+		t.Fatalf("balanced profile = %q, want legacy-profile", got)
+	}
+
+	raw, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatalf("marshal migrated provider profile: %v", err)
+	}
+	if !strings.Contains(string(raw), `"execution_profile_ids":{"balanced":"legacy-profile"}`) {
+		t.Fatalf("legacy mapping was not rewritten canonically: %s", raw)
+	}
+	if strings.Contains(string(raw), "tier_profile_ids") {
+		t.Fatalf("legacy key survived rewrite: %s", raw)
 	}
 }
 

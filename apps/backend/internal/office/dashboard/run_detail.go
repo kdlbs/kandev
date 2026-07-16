@@ -320,6 +320,9 @@ func buildRunRouting(
 	if run.RequestedTier != nil {
 		out.RequestedTier = *run.RequestedTier
 	}
+	if run.ResolvedExecutionProfileID != nil {
+		out.ResolvedExecutionProfileID = *run.ResolvedExecutionProfileID
+	}
 	if run.ResolvedProviderID != nil {
 		out.ResolvedProviderID = *run.ResolvedProviderID
 	}

@@ -16,6 +16,45 @@ import (
 
 // Tests
 
+func TestResumeTokenForExecutionProfile(t *testing.T) {
+	tests := []struct {
+		name      string
+		running   *models.ExecutorRunning
+		profileID string
+		want      string
+	}{
+		{
+			name: "same profile resumes",
+			running: &models.ExecutorRunning{
+				ExecutionProfileID: "claude-profile",
+				ResumeToken:        "claude-session",
+			},
+			profileID: "claude-profile",
+			want:      "claude-session",
+		},
+		{
+			name: "cross provider token suppressed",
+			running: &models.ExecutorRunning{
+				ExecutionProfileID: "codex-profile",
+				ResumeToken:        "codex-session",
+			},
+			profileID: "claude-profile",
+		},
+		{
+			name:      "legacy unbound token suppressed",
+			running:   &models.ExecutorRunning{ResumeToken: "unknown-session"},
+			profileID: "claude-profile",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resumeTokenForExecutionProfile(tt.running, tt.profileID); got != tt.want {
+				t.Fatalf("resume token = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPrepareSession_Success(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{}
@@ -906,12 +945,13 @@ func TestLaunchPreparedSession_FullPath_CarriesResumeToken(t *testing.T) {
 	// HasExecutorRunningRow is true → fast path is tried; the live execution
 	// is gone (office IDLE) → ErrStaleExecution → fall through to full path.
 	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
-		ID:               session.ID,
-		SessionID:        session.ID,
-		TaskID:           session.TaskID,
-		AgentExecutionID: "stale-exec-id",
-		ResumeToken:      "acp-session-abc",
-		Status:           "ready",
+		ID:                 session.ID,
+		SessionID:          session.ID,
+		TaskID:             session.TaskID,
+		AgentExecutionID:   "stale-exec-id",
+		ExecutionProfileID: "profile-123",
+		ResumeToken:        "acp-session-abc",
+		Status:             "ready",
 	}
 
 	var capturedReq *LaunchAgentRequest

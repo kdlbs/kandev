@@ -117,6 +117,9 @@ function DebugBlock({ attempt }: { attempt: RouteAttempt }) {
   return (
     <div className="px-10 py-2 text-xs font-mono space-y-1 bg-muted/30 border-t border-border">
       {attempt.error_confidence && <KV k="confidence" v={attempt.error_confidence} />}
+      {attempt.execution_profile_id && (
+        <KV k="execution_profile" v={attempt.execution_profile_id} />
+      )}
       {attempt.adapter_phase && <KV k="phase" v={attempt.adapter_phase} />}
       {attempt.classifier_rule && <KV k="rule" v={attempt.classifier_rule} />}
       {typeof attempt.exit_code === "number" && <KV k="exit_code" v={String(attempt.exit_code)} />}

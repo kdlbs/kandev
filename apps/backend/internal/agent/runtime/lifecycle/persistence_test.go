@@ -56,6 +56,27 @@ func TestBuildRunningFromExecutionPersistsLiveAgentctlEndpoint(t *testing.T) {
 	}
 }
 
+func TestBuildRunningFromExecutionBindsResumeTokenToExecutionProfile(t *testing.T) {
+	prior := &models.ExecutorRunning{
+		ExecutionProfileID: "codex-profile",
+		ResumeToken:        "codex-session",
+		LastMessageUUID:    "last-codex-message",
+	}
+	running := buildRunningFromExecution(&AgentExecution{
+		ID:             "exec-2",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "claude-profile",
+	}, prior)
+
+	if running.ExecutionProfileID != "claude-profile" {
+		t.Fatalf("ExecutionProfileID = %q, want claude-profile", running.ExecutionProfileID)
+	}
+	if running.ResumeToken != "" || running.LastMessageUUID != "" {
+		t.Fatalf("cross-profile resume state leaked: %+v", running)
+	}
+}
+
 func TestBuildRunningFromExecutionPersistsSSHRuntimePID(t *testing.T) {
 	log := newNopLogger(t)
 	client := agentctl.NewClient("127.0.0.1", 43001, log)

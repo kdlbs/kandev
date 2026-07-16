@@ -26,6 +26,14 @@ type UsageProvider interface {
 	GetUsage(ctx context.Context, profileID string) (*agentusage.ProviderUsage, error)
 }
 
+// ProfileStore owns the complete canonical agent profile shape. Office's
+// repository intentionally projects only Office fields, so profile-selection
+// writes use this store to preserve advanced runtime configuration.
+type ProfileStore interface {
+	GetAgentProfile(ctx context.Context, id string) (*models.AgentInstance, error)
+	UpdateAgentProfile(ctx context.Context, profile *models.AgentInstance) error
+}
+
 // Sentinel errors for agent validation.
 var (
 	ErrAgentNameRequired     = errors.New("agent name is required")
@@ -100,6 +108,13 @@ type AgentService struct {
 	sessionTerm        SessionTerminator
 	routineInstaller   CoordinatorRoutineInstaller
 	knownProvidersFn   func() []routing.ProviderID
+	profileStore       ProfileStore
+}
+
+// SetProfileStore wires the canonical settings repository used when an Office
+// agent copies a CLI profile's complete runtime configuration.
+func (s *AgentService) SetProfileStore(store ProfileStore) {
+	s.profileStore = store
 }
 
 // SetKnownProvidersFn wires the source of routing-eligible provider IDs
@@ -312,6 +327,8 @@ func (s *AgentService) prepareAgentDefaults(agent *models.AgentInstance) {
 	if agent.Status == "" {
 		agent.Status = models.AgentStatusIdle
 	}
+	// Office names are user-facing identities, not generated profile labels.
+	agent.UserModified = true
 }
 
 // BackfillDefaultSkillsForWorkspace seeds default system skills onto
@@ -481,10 +498,37 @@ func (s *AgentService) persistAgent(ctx context.Context, agent *models.AgentInst
 	if err := s.repo.CreateAgentInstance(ctx, agent); err != nil {
 		return fmt.Errorf("create agent: %w", err)
 	}
+	if s.profileStore != nil {
+		if err := s.profileStore.UpdateAgentProfile(ctx, agent); err != nil {
+			return fmt.Errorf("persist agent runtime configuration: %w", err)
+		}
+	}
 	if err := s.CreateDefaultInstructions(ctx, agent.ID, string(agent.Role)); err != nil {
 		s.logger.Warn("failed to create default instructions", zap.Error(err))
 	}
 	s.installCoordinatorRoutine(ctx, agent)
+	return nil
+}
+
+// ApplyProfileConfiguration assigns the legacy provider-family foreign key
+// needed by agent_profiles. Runtime configuration is intentionally not copied:
+// Office launches resolve their complete execution profile through routing.
+func (s *AgentService) ApplyProfileConfiguration(
+	ctx context.Context,
+	target *models.AgentInstance,
+	sourceProfileID string,
+) error {
+	if s.profileStore == nil {
+		return errors.New("agent profile store is not configured")
+	}
+	source, err := s.profileStore.GetAgentProfile(ctx, sourceProfileID)
+	if err != nil {
+		return fmt.Errorf("get source agent profile: %w", err)
+	}
+	if source.WorkspaceID != "" && source.WorkspaceID != target.WorkspaceID {
+		return errors.New("source agent profile belongs to a different workspace")
+	}
+	target.AgentID = source.AgentID
 	return nil
 }
 

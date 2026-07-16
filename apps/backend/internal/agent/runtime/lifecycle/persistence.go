@@ -72,27 +72,30 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 	}
 
 	running := &models.ExecutorRunning{
-		ID:               execution.SessionID,
-		SessionID:        execution.SessionID,
-		TaskID:           execution.TaskID,
-		Runtime:          execution.RuntimeName,
-		Status:           executorRunningStatusFromExecution(execution),
-		Resumable:        true,
-		AgentExecutionID: execution.ID,
-		ContainerID:      execution.ContainerID,
-		AgentctlURL:      agentctlURL,
-		AgentctlPort:     agentctlPort,
-		PID:              pid,
-		WorktreeID:       getMetadataString(execution.Metadata, MetadataKeyWorktreeID),
-		WorktreePath:     getMetadataString(execution.Metadata, "worktree_path"),
-		WorktreeBranch:   getMetadataString(execution.Metadata, MetadataKeyWorktreeBranch),
-		Metadata:         FilterPersistentMetadata(execution.Metadata),
-		LastSeenAt:       lastSeenAt,
+		ID:                 execution.SessionID,
+		SessionID:          execution.SessionID,
+		TaskID:             execution.TaskID,
+		ExecutionProfileID: execution.AgentProfileID,
+		Runtime:            execution.RuntimeName,
+		Status:             executorRunningStatusFromExecution(execution),
+		Resumable:          true,
+		AgentExecutionID:   execution.ID,
+		ContainerID:        execution.ContainerID,
+		AgentctlURL:        agentctlURL,
+		AgentctlPort:       agentctlPort,
+		PID:                pid,
+		WorktreeID:         getMetadataString(execution.Metadata, MetadataKeyWorktreeID),
+		WorktreePath:       getMetadataString(execution.Metadata, "worktree_path"),
+		WorktreeBranch:     getMetadataString(execution.Metadata, MetadataKeyWorktreeBranch),
+		Metadata:           FilterPersistentMetadata(execution.Metadata),
+		LastSeenAt:         lastSeenAt,
 	}
 	if prior != nil {
 		running.ExecutorID = prior.ExecutorID
-		running.ResumeToken = prior.ResumeToken
-		running.LastMessageUUID = prior.LastMessageUUID
+		if prior.ExecutionProfileID == execution.AgentProfileID {
+			running.ResumeToken = prior.ResumeToken
+			running.LastMessageUUID = prior.LastMessageUUID
+		}
 		// Preserve metadata keys the orchestrator owns (context_window, prepare_result, etc.)
 		// by merging prior metadata under our own keys. FilterPersistentMetadata above stripped
 		// transient lifecycle-only keys; the prior row's metadata has the orchestrator-owned

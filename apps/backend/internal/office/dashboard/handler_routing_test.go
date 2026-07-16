@@ -20,17 +20,24 @@ import (
 
 // fakeRoutingProvider is a hand-rolled stub for dashboard.RoutingProvider.
 type fakeRoutingProvider struct {
-	cfg            *routing.WorkspaceConfig
-	known          []routing.ProviderID
-	updateCfg      routing.WorkspaceConfig
-	updateErr      error
-	retryStatus    string
-	retryErr       error
-	healthRows     []models.ProviderHealth
-	preview        []routing.PreviewItem
-	previewAgent   *routing.PreviewItem
-	agentOverrides routing.AgentOverrides
-	overridesErr   error
+	cfg               *routing.WorkspaceConfig
+	known             []routing.ProviderID
+	updateCfg         routing.WorkspaceConfig
+	updateErr         error
+	retryStatus       string
+	retryErr          error
+	healthRows        []models.ProviderHealth
+	preview           []routing.PreviewItem
+	previewAgent      *routing.PreviewItem
+	agentOverrides    routing.AgentOverrides
+	overridesErr      error
+	executionProfiles []routing.ExecutionProfileSummary
+}
+
+func (f *fakeRoutingProvider) ListExecutionProfiles(
+	_ context.Context, _ string,
+) ([]routing.ExecutionProfileSummary, error) {
+	return f.executionProfiles, nil
 }
 
 func (f *fakeRoutingProvider) GetConfig(_ context.Context, _ string) (*routing.WorkspaceConfig, []routing.ProviderID, error) {

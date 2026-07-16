@@ -67,6 +67,66 @@ func TestPostgresExecutorRunningLocalPIDMigration(t *testing.T) {
 	}
 }
 
+func TestPostgresExecutionProfileMigration(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-pg-execution-profile", "ws-pg-execution-profile", "Task", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-pg-execution-profile", TaskID: "task-pg-execution-profile",
+		AgentProfileID: "office-agent", ExecutionProfileID: "codex-profile",
+		State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "session-pg-execution-profile", SessionID: "session-pg-execution-profile",
+		TaskID: "task-pg-execution-profile", ExecutionProfileID: "codex-profile",
+		ExecutorID: "exec-pg", Runtime: agentruntime.RuntimeStandalone,
+		Status: models.ExecutorRunningStatusStarting, ResumeToken: "pg-token",
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+
+	for _, table := range []string{"task_sessions", "executors_running"} {
+		if _, err := db.Exec(`ALTER TABLE ` + table + ` DROP COLUMN execution_profile_id`); err != nil {
+			t.Fatalf("drop %s.execution_profile_id: %v", table, err)
+		}
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("runMigrations on legacy postgres schema: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay postgres migrations: %v", err)
+	}
+
+	gotSession, err := repo.GetTaskSession(ctx, "session-pg-execution-profile")
+	if err != nil {
+		t.Fatalf("read migrated session: %v", err)
+	}
+	if gotSession.ExecutionProfileID != "" || gotSession.AgentProfileID != "office-agent" {
+		t.Fatalf("migrated session identities = (%q, %q), want (office-agent, empty)",
+			gotSession.AgentProfileID, gotSession.ExecutionProfileID)
+	}
+	gotRunning, err := repo.GetExecutorRunningBySessionID(ctx, "session-pg-execution-profile")
+	if err != nil {
+		t.Fatalf("read migrated running executor: %v", err)
+	}
+	if gotRunning.ExecutionProfileID != "" || gotRunning.ResumeToken != "pg-token" {
+		t.Fatalf("migrated executor = (%q, %q), want (empty, pg-token)",
+			gotRunning.ExecutionProfileID, gotRunning.ResumeToken)
+	}
+}
+
 func TestPostgresSchemaReinitializes(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/office-fixture";
+import { balancedExecutionProfileRouting } from "../../helpers/office-routing";
 
 /**
  * Phase 7 spec #4 — recovery from degraded state.
@@ -30,6 +31,7 @@ test.describe("Office provider routing — recovery", () => {
 
   test("clearing the injection + retry returns provider to healthy", async ({
     backend,
+    apiClient,
     officeApi,
     officeSeed,
   }) => {
@@ -38,15 +40,13 @@ test.describe("Office provider routing — recovery", () => {
       KANDEV_MOCK_PROVIDERS: "claude-acp,codex-acp,opencode-acp",
       KANDEV_PROVIDER_FAILURES: "claude-acp:quota_limited",
     });
-    await officeApi.updateRouting(officeSeed.workspaceId, {
-      enabled: true,
-      provider_order: ["claude-acp", "codex-acp"],
-      default_tier: "balanced",
-      provider_profiles: {
-        "claude-acp": { tier_map: { balanced: "sonnet" }, mode: "default" },
-        "codex-acp": { tier_map: { balanced: "gpt-5" }, mode: "default" },
-      },
-    });
+    await officeApi.updateRouting(
+      officeSeed.workspaceId,
+      await balancedExecutionProfileRouting(apiClient, officeApi, officeSeed.workspaceId, [
+        "claude-acp",
+        "codex-acp",
+      ]),
+    );
     const degradeTask = (await officeApi.createTask(officeSeed.workspaceId, "Degrade trigger", {
       workflow_id: officeSeed.workflowId,
     })) as { id?: string };

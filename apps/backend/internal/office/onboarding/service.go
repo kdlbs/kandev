@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/configloader"
 	"github.com/kandev/kandev/internal/office/models"
@@ -70,10 +71,14 @@ type CoordinatorRoutineInstaller interface {
 	CreateDefaultCoordinatorRoutine(ctx context.Context, workspaceID, agentID string) (*models.Routine, error)
 }
 
-// SourceProfileReader looks up an existing kanban CLI profile by id so
-// onboarding can copy its CLI fields onto the new office agent.
+// SourceProfileReader looks up an existing CLI profile so onboarding can
+// seed execution-profile routing and satisfy the legacy provider-family FK.
 type SourceProfileReader interface {
 	GetAgentProfile(ctx context.Context, id string) (*models.AgentInstance, error)
+}
+
+type sourceProviderReader interface {
+	GetAgent(ctx context.Context, id string) (*settingsmodels.Agent, error)
 }
 
 // WorkflowEnsurer creates the system office workflows for a workspace.
@@ -527,10 +532,9 @@ func (s *OnboardingService) createOnboardingAgent(ctx context.Context, wsID stri
 		execPref = fmt.Sprintf(`{"type":%q}`, req.ExecutorPreference)
 	}
 	// The office agent gets a fresh row in agent_profiles. When the user
-	// picked an existing kanban CLI profile (req.AgentProfileID), copy its
-	// CLI fields (agent_id, model, mode, permission flags) onto the new
-	// office row — agent_profiles.agent_id is FK to agents and may not be
-	// empty. Reusing the source id would collide with the existing row.
+	// picked an existing CLI profile, retain only its parent agent_id because
+	// agent_profiles still has that legacy FK. Launch-affecting fields come
+	// from the routed execution profile and are not copied onto the Office row.
 	agent := &models.AgentInstance{
 		ID:                 uuid.New().String(),
 		WorkspaceID:        wsID,
@@ -547,13 +551,6 @@ func (s *OnboardingService) createOnboardingAgent(ctx context.Context, wsID stri
 			return "", fmt.Errorf("look up source profile %s: %w", req.AgentProfileID, err)
 		}
 		agent.AgentID = src.AgentID
-		agent.AgentDisplayName = src.AgentDisplayName
-		agent.Model = src.Model
-		agent.Mode = src.Mode
-		agent.AutoApprove = src.AutoApprove
-		agent.DangerouslySkipPermissions = src.DangerouslySkipPermissions
-		agent.AllowIndexing = src.AllowIndexing
-		agent.CLIPassthrough = src.CLIPassthrough
 	}
 	if err := s.agentCreator.CreateAgentInstance(ctx, agent); err != nil {
 		return "", err
@@ -562,11 +559,9 @@ func (s *OnboardingService) createOnboardingAgent(ctx context.Context, wsID stri
 	return agent.ID, nil
 }
 
-// seedWorkspaceRouting writes the workspace routing config row + the
-// CEO agent's inherit markers. It looks the freshly created CEO agent
-// up by ID so the chosen CLI + model end up in the routing seed even
-// though the wizard only forwards an opaque AgentProfileID. Failures
-// are warn-logged: onboarding must succeed even if seeding fails.
+// seedWorkspaceRouting writes authoritative execution-profile references plus
+// the CEO agent's inherit markers. Failures are warn-logged so onboarding can
+// complete and the routing editor can surface any missing mapping.
 func (s *OnboardingService) seedWorkspaceRouting(
 	ctx context.Context, workspaceID, agentID string, req CompleteRequest,
 ) {
@@ -574,14 +569,13 @@ func (s *OnboardingService) seedWorkspaceRouting(
 		return
 	}
 	tier := normalizeDefaultTier(req.DefaultTier)
-	agent, err := s.lookupOnboardingAgent(ctx, workspaceID, agentID)
-	if err != nil {
-		s.logger.Warn("routing seed: lookup CEO agent failed",
-			zap.String("workspace_id", workspaceID),
-			zap.String("agent_id", agentID), zap.Error(err))
-		return
+	cfg := buildOnboardingRoutingConfig(tier)
+	if req.AgentProfileID != "" {
+		if err := s.applyOnboardingTierProfile(ctx, cfg, tier, req.AgentProfileID); err != nil {
+			s.logger.Warn("routing seed: coordinator profile lookup failed",
+				zap.String("workspace_id", workspaceID), zap.Error(err))
+		}
 	}
-	cfg := buildOnboardingRoutingConfig(tier, agent)
 	if err := s.applyOnboardingTierProfiles(ctx, cfg, req.TierProfiles); err != nil {
 		s.logger.Warn("routing seed: tier profile lookup failed",
 			zap.String("workspace_id", workspaceID), zap.Error(err))
@@ -607,31 +601,9 @@ func normalizeDefaultTier(raw string) routing.Tier {
 	return routing.TierBalanced
 }
 
-// lookupOnboardingAgent fetches the freshly created CEO agent by ID so
-// the routing seed can pull its agent_id / model / mode without
-// re-threading those values from createOnboardingAgent.
-func (s *OnboardingService) lookupOnboardingAgent(
-	ctx context.Context, workspaceID, agentID string,
-) (*models.AgentInstance, error) {
-	agents, err := s.repo.ListAgentInstances(ctx, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	for _, a := range agents {
-		if a != nil && a.ID == agentID {
-			return a, nil
-		}
-	}
-	return nil, fmt.Errorf("agent %s not found in workspace %s", agentID, workspaceID)
-}
-
-// buildOnboardingRoutingConfig produces the disabled-by-default routing
-// seed for a workspace. The chosen tier is always persisted so the
-// Workspace → Provider routing settings page lands on the right
-// default. When the CEO agent has a concrete provider/model attached,
-// that pairing is also seeded into the order + tier_map so enabling
-// routing later requires zero edits to make the chosen CLI the default.
-func buildOnboardingRoutingConfig(tier routing.Tier, agent *models.AgentInstance) *routing.WorkspaceConfig {
+// buildOnboardingRoutingConfig produces the disabled-by-default routing seed.
+// Concrete mappings are added from the coordinator and tier profile choices.
+func buildOnboardingRoutingConfig(tier routing.Tier) *routing.WorkspaceConfig {
 	cfg := &routing.WorkspaceConfig{
 		Enabled:          false,
 		DefaultTier:      tier,
@@ -646,23 +618,6 @@ func buildOnboardingRoutingConfig(tier routing.Tier, agent *models.AgentInstance
 			routing.WakeReasonRoutineTrigger: routing.TierEconomy,
 			routing.WakeReasonBudgetAlert:    routing.TierEconomy,
 		},
-	}
-	if agent == nil || agent.AgentID == "" {
-		return cfg
-	}
-	providerID := routing.ProviderID(agent.AgentID)
-	tierMap := routing.TierMap{}
-	switch tier {
-	case routing.TierFrontier:
-		tierMap.Frontier = agent.Model
-	case routing.TierEconomy:
-		tierMap.Economy = agent.Model
-	default:
-		tierMap.Balanced = agent.Model
-	}
-	cfg.ProviderOrder = []routing.ProviderID{providerID}
-	cfg.ProviderProfiles[providerID] = routing.ProviderProfile{
-		TierMap: tierMap, Mode: agent.Mode,
 	}
 	return cfg
 }
@@ -698,14 +653,14 @@ func (s *OnboardingService) applyOnboardingTierProfile(
 	if src.AgentID == "" {
 		return nil
 	}
-	providerID := routing.ProviderID(src.AgentID)
+	providerID, err := s.resolveProviderID(ctx, src.AgentID)
+	if err != nil {
+		return fmt.Errorf("resolve provider for tier profile %s: %w", profileID, err)
+	}
 	if cfg.ProviderProfiles == nil {
 		cfg.ProviderProfiles = map[routing.ProviderID]routing.ProviderProfile{}
 	}
 	profile := cfg.ProviderProfiles[providerID]
-	if profile.Mode == "" {
-		profile.Mode = src.Mode
-	}
 	applyTierProfileSeed(&profile, tier, src.Model, profileID)
 	cfg.ProviderProfiles[providerID] = profile
 	if !providerInOrder(cfg.ProviderOrder, providerID) {
@@ -714,17 +669,44 @@ func (s *OnboardingService) applyOnboardingTierProfile(
 	return nil
 }
 
+func (s *OnboardingService) resolveProviderID(
+	ctx context.Context,
+	agentID string,
+) (routing.ProviderID, error) {
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return "", nil
+	}
+	for _, known := range routing.KnownProviders(nil) {
+		if routing.ProviderID(agentID) == known {
+			return known, nil
+		}
+	}
+	reader, ok := s.sourceProfile.(sourceProviderReader)
+	if !ok {
+		return "", fmt.Errorf("source profile reader cannot resolve provider %s", agentID)
+	}
+	agent, err := reader.GetAgent(ctx, agentID)
+	if err != nil {
+		return "", fmt.Errorf("look up provider %s: %w", agentID, err)
+	}
+	if agent == nil || strings.TrimSpace(agent.Name) == "" {
+		return "", fmt.Errorf("provider %s has no logical name", agentID)
+	}
+	return routing.ProviderID(agent.Name), nil
+}
+
 func applyTierProfileSeed(profile *routing.ProviderProfile, tier routing.Tier, model, profileID string) {
 	switch tier {
 	case routing.TierFrontier:
 		profile.TierMap.Frontier = model
-		profile.TierProfileIDs.Frontier = profileID
+		profile.ExecutionProfileIDs.Frontier = profileID
 	case routing.TierEconomy:
 		profile.TierMap.Economy = model
-		profile.TierProfileIDs.Economy = profileID
+		profile.ExecutionProfileIDs.Economy = profileID
 	default:
 		profile.TierMap.Balanced = model
-		profile.TierProfileIDs.Balanced = profileID
+		profile.ExecutionProfileIDs.Balanced = profileID
 	}
 }
 

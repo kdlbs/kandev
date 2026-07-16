@@ -33,18 +33,19 @@ func (r *Repository) SetRunRoutingDecision(
 	return nil
 }
 
-// SetRunResolvedProvider records the provider/model that launched a
-// run. Called from the dispatch success branch.
-func (r *Repository) SetRunResolvedProvider(
-	ctx context.Context, runID, providerID, model string,
+// SetRunResolvedRoute records the concrete execution profile that
+// launched a run together with its derived provider/model snapshots.
+func (r *Repository) SetRunResolvedRoute(
+	ctx context.Context,
+	runID, executionProfileID, providerID, model string,
 ) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs
-		SET resolved_provider_id = ?, resolved_model = ?
+		SET resolved_execution_profile_id = ?, resolved_provider_id = ?, resolved_model = ?
 		WHERE id = ?
-	`), providerID, model, runID)
+	`), executionProfileID, providerID, model, runID)
 	if err != nil {
-		return fmt.Errorf("run_routing: set resolved: %w", err)
+		return fmt.Errorf("run_routing: set resolved route: %w", err)
 	}
 	return nil
 }

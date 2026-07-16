@@ -50,6 +50,41 @@ func seedAgentProfile(t *testing.T, db *sqlx.DB, id, workspaceID string) {
 	}
 }
 
+func TestSetRunResolvedRoute_PersistsExecutionProfileAndSnapshots(t *testing.T) {
+	repo, _ := newTestRepoWithDB(t)
+	ctx := context.Background()
+	run := &models.Run{
+		AgentProfileID: "office-cto",
+		Reason:         "task_assigned",
+		Payload:        `{}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+	}
+	if err := repo.CreateRun(ctx, run); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	if err := repo.SetRunResolvedRoute(ctx, run.ID,
+		"profile-claude-opus", "claude-acp", "opus"); err != nil {
+		t.Fatalf("set resolved route: %v", err)
+	}
+
+	got, err := repo.GetRunByID(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if got.ResolvedExecutionProfileID == nil ||
+		*got.ResolvedExecutionProfileID != "profile-claude-opus" {
+		t.Fatalf("resolved execution profile = %v", got.ResolvedExecutionProfileID)
+	}
+	if got.ResolvedProviderID == nil || *got.ResolvedProviderID != "claude-acp" {
+		t.Errorf("resolved provider = %v", got.ResolvedProviderID)
+	}
+	if got.ResolvedModel == nil || *got.ResolvedModel != "opus" {
+		t.Errorf("resolved model = %v", got.ResolvedModel)
+	}
+}
+
 func TestClearAllParkedRoutingForWorkspace_ClearsOnlyTargetWorkspace(t *testing.T) {
 	repo, db := newTestRepoWithDB(t)
 	ctx := context.Background()

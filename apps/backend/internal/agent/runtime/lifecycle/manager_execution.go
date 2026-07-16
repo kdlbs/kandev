@@ -317,13 +317,14 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 	}
 
 	// Verify this session should use passthrough mode
-	if err := m.verifyPassthroughEnabled(ctx, sessionID, info.AgentProfileID); err != nil {
+	if err := m.verifyPassthroughEnabled(ctx, sessionID, workspaceExecutionProfileID(info)); err != nil {
 		return nil, err
 	}
 
 	// If agent ID not in workspace info (snapshot missing/empty), resolve from profile
-	if info.AgentID == "" && info.AgentProfileID != "" && m.profileResolver != nil {
-		profileInfo, err := m.profileResolver.ResolveProfile(ctx, info.AgentProfileID)
+	executionProfileID := workspaceExecutionProfileID(info)
+	if info.AgentID == "" && executionProfileID != "" && m.profileResolver != nil {
+		profileInfo, err := m.profileResolver.ResolveProfile(ctx, executionProfileID)
 		if err != nil {
 			return nil, fmt.Errorf("resolve agent for session %s: %w", sessionID, err)
 		}
@@ -412,11 +413,12 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	// found.
 	env := map[string]string{}
 	var profileInfo *AgentProfileInfo
-	if info.AgentProfileID != "" && m.profileResolver != nil {
-		resolvedProfile, err := m.profileResolver.ResolveProfile(ctx, info.AgentProfileID)
+	executionProfileID := workspaceExecutionProfileID(info)
+	if executionProfileID != "" && m.profileResolver != nil {
+		resolvedProfile, err := m.profileResolver.ResolveProfile(ctx, executionProfileID)
 		if err != nil {
 			m.logger.Warn("failed to resolve profile for workspace execution",
-				zap.String("agent_profile_id", info.AgentProfileID),
+				zap.String("execution_profile_id", executionProfileID),
 				zap.Error(err))
 		} else {
 			profileInfo = resolvedProfile
@@ -438,7 +440,8 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		TaskID:                         taskID,
 		SessionID:                      info.SessionID,
 		TaskEnvironmentID:              info.TaskEnvironmentID,
-		AgentProfileID:                 info.AgentProfileID,
+		AgentProfileID:                 executionProfileID,
+		OfficeAgentProfileID:           info.AgentProfileID,
 		WorkspacePath:                  info.WorkspacePath,
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
@@ -520,6 +523,16 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		zap.Stringer("runtime", execution.RuntimeName))
 
 	return execution, nil
+}
+
+func workspaceExecutionProfileID(info *WorkspaceInfo) string {
+	if info == nil {
+		return ""
+	}
+	if info.ExecutionProfileID != "" {
+		return info.ExecutionProfileID
+	}
+	return info.AgentProfileID
 }
 
 // rollbackRacedExecution tears down an execution that lost a session-conflict

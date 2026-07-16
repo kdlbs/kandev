@@ -319,6 +319,7 @@ func (r *Repository) createRunTables() error {
 		-- Provider routing (office-provider-routing).
 		logical_provider_order TEXT,
 		requested_tier TEXT,
+		resolved_execution_profile_id TEXT,
 		resolved_provider_id TEXT,
 		resolved_model TEXT,
 		current_route_attempt_seq INTEGER NOT NULL DEFAULT 0,

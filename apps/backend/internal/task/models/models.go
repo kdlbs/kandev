@@ -697,10 +697,11 @@ type SessionBranchInfo struct {
 type TaskSession struct {
 	ID                   string                 `json:"id"`
 	TaskID               string                 `json:"task_id"`
-	Name                 string                 `json:"name,omitempty"`     // Optional user-supplied label shown on the session tab
-	AgentExecutionID     string                 `json:"agent_execution_id"` // Docker container/agent execution
-	ContainerID          string                 `json:"container_id"`       // Docker container ID for cleanup
-	AgentProfileID       string                 `json:"agent_profile_id"`   // ID of the agent profile used
+	Name                 string                 `json:"name,omitempty"`       // Optional user-supplied label shown on the session tab
+	AgentExecutionID     string                 `json:"agent_execution_id"`   // Docker container/agent execution
+	ContainerID          string                 `json:"container_id"`         // Docker container ID for cleanup
+	AgentProfileID       string                 `json:"agent_profile_id"`     // ID of the agent profile used
+	ExecutionProfileID   string                 `json:"execution_profile_id"` // Concrete profile used for this execution
 	ExecutorID           string                 `json:"executor_id"`
 	ExecutorProfileID    string                 `json:"executor_profile_id"`
 	EnvironmentID        string                 `json:"environment_id"`
@@ -923,19 +924,20 @@ type Executor struct {
 
 // ExecutorRunning tracks an active executor instance for a session.
 type ExecutorRunning struct {
-	ID               string               `json:"id"`
-	SessionID        string               `json:"session_id"`
-	TaskID           string               `json:"task_id"`
-	ExecutorID       string               `json:"executor_id"`
-	Runtime          agentruntime.Runtime `json:"runtime,omitempty"`
-	Status           string               `json:"status"`
-	Resumable        bool                 `json:"resumable"`
-	ResumeToken      string               `json:"resume_token,omitempty"`
-	LastMessageUUID  string               `json:"last_message_uuid,omitempty"`
-	AgentExecutionID string               `json:"agent_execution_id,omitempty"`
-	ContainerID      string               `json:"container_id,omitempty"`
-	AgentctlURL      string               `json:"agentctl_url,omitempty"`
-	AgentctlPort     int                  `json:"agentctl_port,omitempty"`
+	ID                 string               `json:"id"`
+	SessionID          string               `json:"session_id"`
+	TaskID             string               `json:"task_id"`
+	ExecutionProfileID string               `json:"execution_profile_id"`
+	ExecutorID         string               `json:"executor_id"`
+	Runtime            agentruntime.Runtime `json:"runtime,omitempty"`
+	Status             string               `json:"status"`
+	Resumable          bool                 `json:"resumable"`
+	ResumeToken        string               `json:"resume_token,omitempty"`
+	LastMessageUUID    string               `json:"last_message_uuid,omitempty"`
+	AgentExecutionID   string               `json:"agent_execution_id,omitempty"`
+	ContainerID        string               `json:"container_id,omitempty"`
+	AgentctlURL        string               `json:"agentctl_url,omitempty"`
+	AgentctlPort       int                  `json:"agentctl_port,omitempty"`
 	// PID is SSH-only: the agentctl PID on the *remote* host, used by the SSH
 	// executor's remote-pid stop path. It is 0 for local/standalone rows.
 	PID int `json:"pid,omitempty"`

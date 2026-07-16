@@ -11,8 +11,6 @@ import { toast } from "sonner";
 import { useAppStore } from "@/components/state-provider";
 import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
-import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
-import { AgentConfigCliCard } from "./agent-config-cli-card";
 import { AgentRoutingCard } from "./agent-routing-card";
 
 type AgentConfigurationTabProps = {
@@ -52,7 +50,6 @@ const CAPABILITY_LABELS: Record<string, string> = {
 type FormState = {
   name: string;
   role: AgentRole;
-  agentProfileId: string;
   budgetMonthlyCents: number;
   maxConcurrentSessions: number;
   executorType: string;
@@ -62,7 +59,6 @@ function initialForm(agent: AgentProfile): FormState {
   return {
     name: agent.name,
     role: agent.role,
-    agentProfileId: agent.agentProfileId || agent.id,
     budgetMonthlyCents: agent.budgetMonthlyCents,
     maxConcurrentSessions: agent.maxConcurrentSessions,
     executorType: agent.executorPreference?.type ?? "",
@@ -98,13 +94,13 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
       const update: Partial<AgentProfile> = {
         name: form.name,
         role: form.role,
-        agentProfileId: form.agentProfileId ? toAgentProfileId(form.agentProfileId) : undefined,
         budgetMonthlyCents: form.budgetMonthlyCents,
         maxConcurrentSessions: form.maxConcurrentSessions,
         executorPreference: form.executorType ? { type: form.executorType } : undefined,
       };
-      await updateAgentProfile(agent.id, update);
-      updateStore(agent.id, update);
+      const saved = await updateAgentProfile(agent.id, update);
+      updateStore(agent.id, saved);
+      setForm(initialForm(saved));
       setDirty(false);
       toast.success("Agent configuration updated");
     } catch (err) {
@@ -125,11 +121,6 @@ export function AgentConfigurationTab({ agent }: AgentConfigurationTabProps) {
         onRoleChange={(v) => patch({ role: v })}
       />
       <CapabilityPreviewCard agent={agent} role={form.role} />
-      <AgentConfigCliCard
-        agentProfileId={form.agentProfileId}
-        currentAgent={agent}
-        onAgentProfileChange={(v) => patch({ agentProfileId: v })}
-      />
       <OrchestrationCard
         budgetCents={form.budgetMonthlyCents}
         maxConcurrent={form.maxConcurrentSessions}

@@ -272,6 +272,7 @@ type ApprovalReactivityQueuer interface {
 // next to the rest of the routing code.
 type RoutingProvider interface {
 	GetConfig(ctx context.Context, workspaceID string) (*routing.WorkspaceConfig, []routing.ProviderID, error)
+	ListExecutionProfiles(ctx context.Context, workspaceID string) ([]routing.ExecutionProfileSummary, error)
 	UpdateConfig(ctx context.Context, workspaceID string, cfg routing.WorkspaceConfig) error
 	Retry(ctx context.Context, workspaceID, providerID string) (string, *time.Time, error)
 	Health(ctx context.Context, workspaceID string) ([]models.ProviderHealth, error)

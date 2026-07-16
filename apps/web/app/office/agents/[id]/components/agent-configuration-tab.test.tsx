@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import { updateAgentProfile } from "@/lib/api/domains/office-api";
 import type { AgentProfile } from "@/lib/state/slices/office/types";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import { defaultOfficeState } from "@/lib/state/slices/office/office-slice";
@@ -51,7 +52,12 @@ const PROFILE_OPTION = {
 };
 
 describe("AgentConfigurationTab", () => {
-  it("renders the CLI configuration card with the linked profile summary", () => {
+  it("reconciles the form with the canonical profile returned by the backend", async () => {
+    vi.mocked(updateAgentProfile).mockResolvedValueOnce({
+      ...baseAgent,
+      agentProfileId: toAgentProfileId(baseAgent.id),
+      name: "Canonical CEO",
+    });
     render(
       <StateProvider
         initialState={{
@@ -64,32 +70,12 @@ describe("AgentConfigurationTab", () => {
       </StateProvider>,
     );
 
-    expect(screen.getByText("CLI Configuration")).toBeTruthy();
-    // Linked profile is surfaced with the CLI client badge.
-    expect(screen.getByText(CLAUDE_AGENT_ID)).toBeTruthy();
-  });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Local edit" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save Configuration" }));
 
-  it("uses the office agent row as the CLI profile when no legacy profile link exists", () => {
-    const orphan = {
-      ...baseAgent,
-      agentProfileId: undefined,
-      agentId: CLAUDE_AGENT_ID,
-      agentDisplayName: "Claude",
-    };
-    render(
-      <StateProvider
-        initialState={{
-          workspaces: { activeId: "ws-1", items: [] },
-          office: { ...defaultOfficeState.office, agentProfiles: [orphan] },
-          agentProfiles: { items: [PROFILE_OPTION], version: 0 },
-        }}
-      >
-        <AgentConfigurationTab agent={orphan} />
-      </StateProvider>,
-    );
-
-    expect(screen.queryByText(/no cli profile selected/i)).toBeNull();
-    expect(screen.getByText("Claude")).toBeTruthy();
+    await waitFor(() => {
+      expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Canonical CEO");
+    });
   });
 
   it("shows create-agent capability for CEO agents", () => {

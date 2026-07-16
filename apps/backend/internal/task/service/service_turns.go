@@ -412,6 +412,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		TaskEnvironmentID:       session.TaskEnvironmentID,
 		WorkspacePath:           workspacePath,
 		AgentProfileID:          session.AgentProfileID,
+		ExecutionProfileID:      session.ExecutionProfileID,
 		AgentID:                 agentID,
 		ACPSessionID:            acpSessionID,
 		SessionMode:             sessionMode,
