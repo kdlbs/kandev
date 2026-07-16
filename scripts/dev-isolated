@@ -250,7 +250,7 @@ env -i \
   KANDEV_MOCK_JIRA=true \
   KANDEV_MOCK_LINEAR=true \
   KANDEV_LOG_LEVEL="${KANDEV_LOG_LEVEL:-info}" \
-  setsid "$BACKEND_BIN" >"$BACKEND_LOG" 2>&1 &
+  setsid "$BACKEND_BIN" __backend >"$BACKEND_LOG" 2>&1 &
 BACKEND_PID=$!
 echo "$BACKEND_PID" >"$PIDFILE"
 

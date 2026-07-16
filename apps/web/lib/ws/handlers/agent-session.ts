@@ -179,6 +179,9 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
     update.agent_profile_snapshot = payload.agent_profile_snapshot;
   if (payload.is_passthrough !== undefined) update.is_passthrough = payload.is_passthrough;
   if (payload.session_metadata !== undefined) update.metadata = payload.session_metadata;
+  // Apply only when the key is present: rename events always carry `name`
+  // (including "" for a cleared label); other session events omit it.
+  if (payload.name !== undefined) update.name = payload.name;
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
   return update;

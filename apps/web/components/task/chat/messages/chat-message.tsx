@@ -152,6 +152,7 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   sender_task_id?: string;
   sender_task_title?: string;
   sender_session_id?: string;
+  sender_session_name?: string;
 };
 
 type PromptMentionMarkdownTag =
@@ -316,7 +317,12 @@ function parseUserMessageMetadata(comment: Message) {
   const hasContent = !!(comment.content && comment.content.trim() !== "");
   const hasAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
   const senderTask: SenderTaskInfo | null = metadata?.sender_task_id
-    ? { id: metadata.sender_task_id, snapshotTitle: metadata.sender_task_title || "" }
+    ? {
+        id: metadata.sender_task_id,
+        snapshotTitle: metadata.sender_task_title || "",
+        sessionId: metadata.sender_session_id,
+        sessionName: metadata.sender_session_name,
+      }
     : null;
   const workflowMessage = workflowMessageInfoFromMetadata(metadata);
   return {

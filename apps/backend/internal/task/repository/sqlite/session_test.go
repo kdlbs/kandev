@@ -74,6 +74,68 @@ func insertAgentMsg(t *testing.T, repo *Repository, id, sessionID, turnID, autho
 	}
 }
 
+func TestRenameTaskSession(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	if err := repo.RenameTaskSession(ctx, "missing-session", "reviewer"); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("RenameTaskSession error = %v, want ErrTaskSessionNotFound", err)
+	}
+
+	seedForMsgTest(t, repo, "task-rename", "session-rename", "turn-rename")
+	if err := repo.RenameTaskSession(ctx, "session-rename", "reviewer"); err != nil {
+		t.Fatalf("RenameTaskSession: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-rename")
+	if err != nil {
+		t.Fatalf("GetTaskSession after rename: %v", err)
+	}
+	if session.Name != "reviewer" {
+		t.Fatalf("session.Name = %q, want %q", session.Name, "reviewer")
+	}
+	if got := session.ToAPI()["name"]; got != "reviewer" {
+		t.Fatalf(`ToAPI()["name"] = %v, want "reviewer"`, got)
+	}
+
+	// Clearing the name falls back to the derived tab title on the frontend.
+	if err := repo.RenameTaskSession(ctx, "session-rename", ""); err != nil {
+		t.Fatalf("RenameTaskSession clear: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, "session-rename")
+	if err != nil {
+		t.Fatalf("GetTaskSession after clear: %v", err)
+	}
+	if session.Name != "" {
+		t.Fatalf("session.Name = %q, want empty after clear", session.Name)
+	}
+	if _, ok := session.ToAPI()["name"]; ok {
+		t.Fatalf("ToAPI() should omit name when empty")
+	}
+
+	// Name survives CreateTaskSession round-trips and list scans.
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-named", TaskID: "task-rename", Name: "verifier",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession with name: %v", err)
+	}
+	sessions, err := repo.ListTaskSessions(ctx, "task-rename")
+	if err != nil {
+		t.Fatalf("ListTaskSessionsByTaskID: %v", err)
+	}
+	found := false
+	for _, s := range sessions {
+		if s.ID == "session-named" {
+			found = true
+			if s.Name != "verifier" {
+				t.Fatalf("listed session Name = %q, want %q", s.Name, "verifier")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("session-named not returned by ListTaskSessions")
+	}
+}
+
 func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

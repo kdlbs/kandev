@@ -197,7 +197,7 @@ const taskSessionSelectCols = `ts.id, ts.task_id,
 	ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id`
+	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -260,15 +260,15 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 			repository_id, base_branch, base_commit_sha, workspace_path,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
-			is_primary, review_status, is_passthrough, task_environment_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			is_primary, review_status, is_passthrough, task_environment_id, name
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), session.ID, session.TaskID, agentProfileID,
 		session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID, session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, string(metadataJSON),
 		session.StartedAt, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
-		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID)
+		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID, session.Name)
 
 	if err != nil && strings.Contains(err.Error(), "uniq_office_task_session") {
 		// Two callers raced past their SELECT-then-INSERT for the same
@@ -305,6 +305,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	// agent_profile_id is nullable (kanban / quick-chat rows store NULL); decode
 	// via NullString so the empty case maps to "" on the model.
 	var agentProfileID sql.NullString
+	var name sql.NullString
 
 	err := row.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
@@ -312,7 +313,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID,
+		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name,
 	)
 
 	if err == sql.ErrNoRows {
@@ -330,6 +331,9 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	}
 	if agentProfileID.Valid {
 		session.AgentProfileID = agentProfileID.String
+	}
+	if name.Valid {
+		session.Name = name.String
 	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
@@ -516,6 +520,23 @@ func (r *Repository) updateTaskSession(
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, session.ID)
+	}
+	return nil
+}
+
+// RenameTaskSession updates just the user-supplied name of an agent session.
+// name is deliberately excluded from the full-row updateTaskSession write (like
+// metadata) so concurrent session updates can't clobber a rename.
+func (r *Repository) RenameTaskSession(ctx context.Context, id, name string) error {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions SET name = ?, updated_at = ? WHERE id = ?
+	`), name, time.Now().UTC(), id)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
 	}
 	return nil
 }
@@ -1023,6 +1044,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	var isPassthrough int
 	var reviewStatus sql.NullString
 	var agentProfileID sql.NullString
+	var name sql.NullString
 
 	err := rows.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
@@ -1030,7 +1052,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID,
+		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name,
 	)
 	if err != nil {
 		return nil, err
@@ -1044,6 +1066,9 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	}
 	if agentProfileID.Valid {
 		session.AgentProfileID = agentProfileID.String
+	}
+	if name.Valid {
+		session.Name = name.String
 	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time

@@ -15,6 +15,22 @@ const baseArgs = {
 };
 
 describe("resolveSessionTabTitle", () => {
+  it("prefers the user-supplied custom name over every derived title", () => {
+    expect(
+      resolveSessionTabTitle({
+        ...baseArgs,
+        customName: "reviewer",
+        activeModelId: SPARK_MODEL_ID,
+        modelOptions: [{ id: SPARK_MODEL_ID, name: SPARK_MODEL_NAME }],
+      }),
+    ).toBe("reviewer");
+  });
+
+  it("falls back to derived titles when the custom name is empty or absent", () => {
+    expect(resolveSessionTabTitle({ ...baseArgs, customName: "" })).toBe(PROFILE_LABEL);
+    expect(resolveSessionTabTitle({ ...baseArgs, customName: null })).toBe(PROFILE_LABEL);
+  });
+
   it("uses the agent label over live model state when a profile label is available", () => {
     expect(
       resolveSessionTabTitle({

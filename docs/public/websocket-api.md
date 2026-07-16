@@ -180,6 +180,7 @@ Direct create, update, delete, and reorder operations for individual workflow st
 | `session.delete` | Delete a session. |
 | `session.set_primary` | Set the primary session for a task. |
 | `session.set_plan_mode` | Enable or disable plan mode. |
+| `session.rename` | Set or clear a session's custom tab name. |
 | `message.add` | Persist a user message and forward it to the session when appropriate. |
 | `message.list` | List session messages. |
 | `message.search` | Search messages. |
