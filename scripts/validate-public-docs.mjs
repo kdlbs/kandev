@@ -27,7 +27,7 @@ export async function validatePublicDocs(
     const markdown = await fs.readFile(path.join(docsDir, file), "utf8");
     assertFrontmatter(file, markdown);
 
-    const slug = file.replace(/\.mdx?$/, "").replace(/\/index$/, "") || "index";
+    const slug = file.replace(/\.mdx?$/, "").replace(/\/index$/, "");
     const existing = pagesBySlug.get(slug);
     if (existing) {
       throw new Error(
