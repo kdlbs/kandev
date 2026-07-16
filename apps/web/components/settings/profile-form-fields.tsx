@@ -423,6 +423,7 @@ function CapabilitiesRow({
   commands,
   currentModelId,
   currentModeId,
+  status,
   onChange,
   isCompact,
   isLoading,
@@ -437,6 +438,7 @@ function CapabilitiesRow({
   commands: CommandEntry[];
   currentModelId: string | undefined;
   currentModeId: string | undefined;
+  status: ModelConfig["status"];
   onChange: (patch: Partial<ProfileFormData>) => void;
   isCompact: boolean;
   isLoading: boolean;
@@ -462,7 +464,6 @@ function CapabilitiesRow({
     );
   }
 
-  const status = modelConfig.status;
   if (status === "probing") {
     return <ProbingPanel />;
   }
@@ -509,7 +510,7 @@ function CapabilitiesRow({
         <p className="text-xs text-muted-foreground">{activeMode.description}</p>
       )}
       {commands.length > 0 && <CommandsButton commands={commands} />}
-      <CapabilityStatusMessage modelConfig={modelConfig} />
+      <CapabilityStatusMessage modelConfig={{ ...modelConfig, status }} />
     </div>
   );
 }
@@ -580,6 +581,7 @@ export function ProfileFormFields({
         commands={caps.commands}
         currentModelId={caps.currentModelId}
         currentModeId={caps.currentModeId}
+        status={caps.status}
         agentName={agentName}
         onChange={onChange}
         isCompact={isCompact}
