@@ -51,7 +51,12 @@ type FSStore struct {
 	dir string
 	log *logger.Logger
 
-	mu sync.Mutex
+	// mu guards every disk write (Save, Delete, SetConfig) and read
+	// (GetConfig) that touches a plugin's record/config files, so
+	// concurrent callers (e.g. two operator UpdateConfig PATCH requests for
+	// the same id) can never interleave writes to the same path. Writers
+	// take Lock; GetConfig takes RLock since it only reads.
+	mu sync.RWMutex
 }
 
 // NewFSStore returns a store that persists records under dir.
@@ -240,6 +245,9 @@ func (s *FSStore) GetConfig(id string) (map[string]any, error) {
 	if err := safePluginID(id); err != nil {
 		return nil, err
 	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	if _, err := s.Get(id); err != nil {
 		return nil, err
 	}
@@ -260,11 +268,18 @@ func (s *FSStore) GetConfig(id string) (map[string]any, error) {
 	return cfg, nil
 }
 
-// SetConfig replaces the operator-editable config for id.
+// SetConfig replaces the operator-editable config for id. The write is
+// atomic (tmp file + rename within the store dir, via writeFileAtomic), the
+// same guarantee writeRecord gives Save, and is additionally serialized by
+// s.mu so two concurrent SetConfig calls for the same id (e.g. two operator
+// UpdateConfig PATCH requests racing) can never interleave.
 func (s *FSStore) SetConfig(id string, config map[string]any) error {
 	if err := safePluginID(id); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if _, err := s.Get(id); err != nil {
 		return err
 	}
@@ -272,7 +287,7 @@ func (s *FSStore) SetConfig(id string, config map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("marshal plugin config: %w", err)
 	}
-	if err := os.WriteFile(s.configPath(id), data, 0o644); err != nil {
+	if err := writeFileAtomic(s.dir, s.configPath(id), data, 0o644); err != nil {
 		return fmt.Errorf("write plugin config: %w", err)
 	}
 	return nil

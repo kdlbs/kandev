@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -359,5 +360,128 @@ func TestFSStore_Get_RejectsIDEndingInDotConfig(t *testing.T) {
 
 	if _, err := s.Get("foo.config"); err == nil {
 		t.Fatal("Get() expected error for an id ending in \".config\", got nil")
+	}
+}
+
+// --- concurrency: SetConfig/GetConfig must hold s.mu, matching Save/Delete,
+// so concurrent UpdateConfig PATCH requests cannot interleave writes to the
+// same config path. ---
+
+// TestFSStore_SetConfig_SerializedByMu proves SetConfig takes s.mu (the same
+// mutex Save/Delete already hold during disk I/O) rather than writing to
+// disk unsynchronized. This test is in-package so it can grab s.mu directly
+// to simulate a concurrent Save/Delete/SetConfig already in flight.
+func TestFSStore_SetConfig_SerializedByMu(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+	if err := s.Save(testRecord("kandev-plugin-slack")); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+
+	s.mu.Lock()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- s.SetConfig("kandev-plugin-slack", map[string]any{"a": 1})
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("SetConfig() returned (err=%v) while s.mu was held externally — SetConfig is not guarded by s.mu", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	s.mu.Unlock()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("SetConfig() unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("SetConfig() never returned after s.mu was released")
+	}
+}
+
+// TestFSStore_GetConfig_SerializedByMu proves GetConfig takes s.mu (RLock)
+// before reading the config file, so a read can never observe a write that
+// is only partially applied.
+func TestFSStore_GetConfig_SerializedByMu(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+	if err := s.Save(testRecord("kandev-plugin-slack")); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+
+	s.mu.Lock()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.GetConfig("kandev-plugin-slack")
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		t.Fatalf("GetConfig() returned (err=%v) while s.mu was held externally — GetConfig is not guarded by s.mu", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	s.mu.Unlock()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("GetConfig() unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GetConfig() never returned after s.mu was released")
+	}
+}
+
+// TestFSStore_SetConfig_ConcurrentCallsLeaveConsistentFile stress-tests many
+// concurrent SetConfig calls for the same id: the config file must always
+// end up fully valid (never truncated/interleaved content from two
+// writers), and no tmp artifact from the atomic-write helper may leak into
+// the store dir. Run with -race.
+func TestFSStore_SetConfig_ConcurrentCallsLeaveConsistentFile(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+	if err := s.Save(testRecord("kandev-plugin-slack")); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+
+	const n = 20
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		i := i
+		go func() {
+			defer wg.Done()
+			cfg := map[string]any{"writer": i, "padding": strings.Repeat("x", 4096)}
+			if err := s.SetConfig("kandev-plugin-slack", cfg); err != nil {
+				t.Errorf("SetConfig(%d) unexpected error: %v", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	got, err := s.GetConfig("kandev-plugin-slack")
+	if err != nil {
+		t.Fatalf("GetConfig() unexpected error after concurrent SetConfig calls (corrupt file): %v", err)
+	}
+	writer, ok := got["writer"].(int)
+	if !ok || writer < 0 || writer >= n {
+		t.Fatalf("GetConfig() = %v, want a single writer's complete config (not merged/corrupted)", got)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir() unexpected error: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".tmp-") {
+			t.Fatalf("store dir leaked a temp file after concurrent SetConfig calls: %v", entries)
+		}
 	}
 }

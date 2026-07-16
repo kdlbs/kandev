@@ -59,6 +59,17 @@ type Service struct {
 	// cannot double-install the same dropped tarball or dir sideload.
 	syncMu sync.Mutex
 
+	// lifecycleLocks serializes Enable/Disable/Install/InstallFromURL/
+	// Uninstall/UpdateConfig per plugin id, so two near-simultaneous
+	// lifecycle requests for the same id (e.g. two Enable clicks) cannot
+	// both pass an idempotency check built on a stale read and race each
+	// other's status-machine transition. Different ids stay fully
+	// concurrent. Never taken by handleStatusChange (the runtime.Manager
+	// supervision-goroutine callback) — that path only touches s.mu — so
+	// holding a lifecycleLocks entry while calling into PluginRuntime
+	// cannot deadlock against it.
+	lifecycleLocks *keyedMutex
+
 	pluginsDir string
 	store      store.Store
 	registry   *Registry
@@ -85,12 +96,39 @@ type Service struct {
 // directly for tests that want a fake store.Store/PluginRuntime.
 func NewService(pluginStore store.Store, registry *Registry, eventBus bus.EventBus, log *logger.Logger) *Service {
 	return &Service{
-		store:      pluginStore,
-		registry:   registry,
-		eventBus:   eventBus,
-		log:        log,
-		httpClient: &http.Client{},
+		store:          pluginStore,
+		registry:       registry,
+		eventBus:       eventBus,
+		log:            log,
+		httpClient:     &http.Client{},
+		lifecycleLocks: newKeyedMutex(),
 	}
+}
+
+// keyedMutex hands out a *sync.Mutex per key, creating it on first use and
+// keeping it around for the process lifetime (the plugin id keyspace is
+// small and long-lived, so there is nothing to garbage-collect). Mirrors the
+// parentMutex pattern in internal/task/service/handoff_service.go.
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+func newKeyedMutex() *keyedMutex {
+	return &keyedMutex{locks: make(map[string]*sync.Mutex)}
+}
+
+// lockFor returns the mutex for key, creating it if this is the first call
+// for that key. Callers must Lock/Unlock the returned mutex themselves.
+func (k *keyedMutex) lockFor(key string) *sync.Mutex {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	m, ok := k.locks[key]
+	if !ok {
+		m = &sync.Mutex{}
+		k.locks[key] = m
+	}
+	return m
 }
 
 // SetDeliverer attaches the event-delivery subsystem. See the "Extension
@@ -250,6 +288,10 @@ func (s *Service) Get(id string) (*store.Record, error) {
 
 // UpdateConfig replaces the operator-editable config for id.
 func (s *Service) UpdateConfig(id string, config map[string]any) error {
+	lock := s.lifecycleLocks.lockFor(id)
+	lock.Lock()
+	defer lock.Unlock()
+
 	if _, err := s.Get(id); err != nil {
 		return err
 	}
@@ -283,6 +325,17 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		_ = os.RemoveAll(result.InstallPath)
 		return nil, err
 	}
+
+	// The plugin id is only known once pkgtar.Install has parsed the
+	// package's manifest, so the per-plugin lock is acquired here rather
+	// than at the very top of the function — this still covers
+	// InstallFromURL, which calls through to Install. It serializes the
+	// rest of this method (the record/registry/activate mutation) against
+	// any other Enable/Disable/Install/Uninstall/UpdateConfig call for the
+	// same id.
+	lock := s.lifecycleLocks.lockFor(result.Manifest.ID)
+	lock.Lock()
+	defer lock.Unlock()
 
 	oldRec, hadOldRec := s.registry.Get(result.Manifest.ID)
 	wasRunning := s.runtime != nil && s.runtime.Running(result.Manifest.ID)
@@ -427,6 +480,10 @@ func validateInstallURL(raw string) error {
 // under the same id (or an id later reused by a different plugin) never
 // silently inherits stale state from this install.
 func (s *Service) Uninstall(id string) error {
+	lock := s.lifecycleLocks.lockFor(id)
+	lock.Lock()
+	defer lock.Unlock()
+
 	if _, err := s.Get(id); err != nil {
 		return err
 	}
@@ -461,6 +518,10 @@ func (s *Service) deletePluginState(id string) {
 // is not already running. Idempotent: a no-op (nil error) if id is already
 // active.
 func (s *Service) Enable(id string) error {
+	lock := s.lifecycleLocks.lockFor(id)
+	lock.Lock()
+	defer lock.Unlock()
+
 	rec, err := s.Get(id)
 	if err != nil {
 		return err
@@ -479,6 +540,10 @@ func (s *Service) Enable(id string) error {
 // StatusDisabled. Idempotent: a no-op (nil error) if id is already
 // disabled.
 func (s *Service) Disable(id string) error {
+	lock := s.lifecycleLocks.lockFor(id)
+	lock.Lock()
+	defer lock.Unlock()
+
 	rec, err := s.Get(id)
 	if err != nil {
 		return err

@@ -17,6 +17,8 @@ const PLUGIN_UNLOAD_STYLE_A_ID = "plugin-unload-style-a";
 const PLUGIN_REENABLE_A_ID = "plugin-reenable-a";
 const PLUGIN_REENABLE_A_PATH = "/plugin-reenable-a";
 const NAV_REENABLE_A_ID = "nav-reenable-a";
+const PLUGIN_HANG_A_ID = "plugin-hang-a";
+const PLUGIN_HANG_B_ID = "plugin-hang-b";
 
 function makeHostFactory(pluginId: string): PluginHostApi {
   return {
@@ -325,6 +327,51 @@ describe("unloadPlugin", () => {
 
     expect(document.head.querySelector("link[href='/plugin-unload-style-a.css']")).toBeNull();
     happyDOMWindow.happyDOM.settings.disableCSSFileLoading = false;
+  });
+});
+
+describe("loadPlugins — initialize() timeout isolation", () => {
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_HANG_A_ID);
+    pluginRegistry.unregisterPlugin(PLUGIN_HANG_B_ID);
+  });
+
+  it("does not let a plugin whose initialize() never resolves block a subsequent plugin", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const secondInitialize = vi.fn((registry: PluginRegistry) => {
+      registry.registerNavItem({ id: "nav-hang-b", label: "B", path: "/plugin-hang-b" });
+    });
+    const importer = fakeImporterFor({
+      "/hang-bundle.js": (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_HANG_A_ID, {
+          // Never resolves — simulates a hung plugin initialize().
+          initialize: () => new Promise<void>(() => {}),
+        }),
+      "/second-bundle.js": (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_HANG_B_ID, {
+          initialize: secondInitialize,
+        }),
+    });
+
+    await loadPlugins(
+      [
+        activePlugin({ id: PLUGIN_HANG_A_ID, bundleUrl: "/hang-bundle.js" }),
+        activePlugin({ id: PLUGIN_HANG_B_ID, bundleUrl: "/second-bundle.js" }),
+      ],
+      makeHostFactory,
+      importer,
+      window,
+      10, // short per-test timeout instead of the 10s default
+    );
+
+    expect(secondInitialize).toHaveBeenCalledTimes(1);
+    expect(pluginRegistry.getNavItems()).toContainEqual({
+      id: "nav-hang-b",
+      label: "B",
+      path: "/plugin-hang-b",
+    });
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(PLUGIN_HANG_A_ID));
+    warnSpy.mockRestore();
   });
 });
 

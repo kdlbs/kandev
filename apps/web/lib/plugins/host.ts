@@ -27,6 +27,46 @@ export type BundleImporter = (url: string) => Promise<unknown>;
 
 const defaultImporter: BundleImporter = (url) => import(/* @vite-ignore */ url);
 
+/**
+ * How long `loadPlugin` waits for a single plugin's `initialize(registry, host)`
+ * to settle before giving up on it and moving on to the next plugin in the
+ * boot list. A plugin whose `initialize()` never resolves must not be able to
+ * stall every plugin queued behind it.
+ */
+const DEFAULT_INITIALIZE_TIMEOUT_MS = 10_000;
+
+/**
+ * Races `promise` against a `timeoutMs` timer. Resolves with `promise`'s
+ * value (or rejects with its error) if it settles first; otherwise calls
+ * `onTimeout` and resolves with `undefined` once the timer fires — a timeout
+ * is deliberately not a rejection, so the caller's loop can continue to the
+ * next plugin instead of routing a hang through the same error-handling path
+ * as a thrown/rejected `initialize()`. The original promise is not
+ * cancelled; if it eventually settles nothing observes it.
+ */
+function raceTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => void,
+): Promise<T | void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      onTimeout();
+      resolve();
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error as Error);
+      },
+    );
+  });
+}
+
 type PluginGlobalWindow = Window & {
   registerKandevPlugin?: (id: string, plugin: KandevPlugin) => void;
 };
@@ -45,17 +85,22 @@ export function installPluginGlobal(win: Window = window): void {
  * Loads every plugin from the boot payload: injects styles, imports the
  * bundle, then runs `initialize(registry, host)`. Each plugin is isolated —
  * a failure anywhere in its load path is logged and does not affect the
- * others or the boot sequence.
+ * others or the boot sequence. `initTimeoutMs` (default
+ * `DEFAULT_INITIALIZE_TIMEOUT_MS`) bounds how long a single plugin's
+ * `initialize()` can block the (sequential) loop before the loader gives up
+ * on it and moves on — tests inject a short value instead of waiting out the
+ * real default.
  */
 export async function loadPlugins(
   bootPlugins: ActivePlugin[],
   hostFactory: PluginHostFactory,
   importer: BundleImporter = defaultImporter,
   win: Window = window,
+  initTimeoutMs: number = DEFAULT_INITIALIZE_TIMEOUT_MS,
 ): Promise<void> {
   installPluginGlobal(win);
   for (const plugin of bootPlugins) {
-    await loadPlugin(plugin, hostFactory, importer);
+    await loadPlugin(plugin, hostFactory, importer, initTimeoutMs);
   }
 }
 
@@ -63,6 +108,7 @@ async function loadPlugin(
   plugin: ActivePlugin,
   hostFactory: PluginHostFactory,
   importer: BundleImporter,
+  initTimeoutMs: number,
 ): Promise<void> {
   const { apiBaseUrl } = getBackendConfig();
   try {
@@ -74,7 +120,11 @@ async function loadPlugin(
     }
     const host = hostFactory(plugin.id);
     const registry = pluginRegistry.forPlugin(plugin.id);
-    await registered.initialize(registry, host);
+    await raceTimeout(Promise.resolve(registered.initialize(registry, host)), initTimeoutMs, () => {
+      console.warn(
+        `[plugins] "${plugin.id}" initialize() timed out after ${initTimeoutMs}ms; continuing without it`,
+      );
+    });
   } catch (error) {
     console.error(`[plugins] failed to load plugin "${plugin.id}"`, error);
   }

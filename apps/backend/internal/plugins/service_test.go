@@ -11,6 +11,7 @@ import (
 	goruntime "runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
@@ -711,6 +712,80 @@ func TestServiceDisabledCanReEnableAndRespawns(t *testing.T) {
 	}
 	if want := 2; rt.startCallCount("kandev-plugin-slack") != want {
 		t.Fatalf("runtime Start called %d times, want %d (install + re-enable)", rt.startCallCount("kandev-plugin-slack"), want)
+	}
+}
+
+// TestServiceEnable_ConcurrentCallsForSameID_OnlyOneActivationNoError proves
+// Enable is guarded by a per-plugin lock: two near-simultaneous Enable calls
+// for the same disabled plugin id must not both pass the StatusActive
+// idempotency check and race into activate. Without the lock, the second
+// call's SetStatus(Active) races the first, and the loser observes
+// *ErrInvalidTransition ("active -> active") even though the plugin is
+// correctly active by the time both calls return.
+func TestServiceEnable_ConcurrentCallsForSameID_OnlyOneActivationNoError(t *testing.T) {
+	svc, _, rt := newTestService(t)
+	installTestPlugin(t, svc, "kandev-plugin-slack")
+	if err := svc.Disable("kandev-plugin-slack"); err != nil {
+		t.Fatalf("Disable(): %v", err)
+	}
+
+	started, release := rt.blockNextStart()
+
+	firstErr := make(chan error, 1)
+	go func() {
+		firstErr <- svc.Enable("kandev-plugin-slack")
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first Enable() never reached the blocked runtime Start call")
+	}
+
+	secondErr := make(chan error, 1)
+	go func() {
+		secondErr <- svc.Enable("kandev-plugin-slack")
+	}()
+
+	// The second Enable() must still be blocked behind the per-plugin lock:
+	// give it a bounded window to (incorrectly) complete, and fail if it does.
+	select {
+	case err := <-secondErr:
+		t.Fatalf("second Enable() completed (err=%v) while the first was still starting — Enable is not per-plugin lock-guarded", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	release()
+
+	select {
+	case err := <-firstErr:
+		if err != nil {
+			t.Fatalf("first Enable() unexpected error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("first Enable() never returned after release")
+	}
+	select {
+	case err := <-secondErr:
+		if err != nil {
+			t.Fatalf("second Enable() unexpected error (must be a no-op observing the now-active status): %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("second Enable() never returned after the first released the lock")
+	}
+
+	// Install's initial activate() already called Start once; this Enable
+	// (after the earlier Disable) must add exactly one more — never two —
+	// proving the second concurrent Enable() did not also spawn.
+	if got, want := rt.startCallCount("kandev-plugin-slack"), 2; got != want {
+		t.Fatalf("runtime Start called %d times for kandev-plugin-slack, want exactly %d (no double activation)", got, want)
+	}
+	rec, err := svc.Get("kandev-plugin-slack")
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if rec.Status != StatusActive {
+		t.Fatalf("Status = %q, want %q", rec.Status, StatusActive)
 	}
 }
 
