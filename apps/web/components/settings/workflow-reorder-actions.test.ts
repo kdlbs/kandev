@@ -100,8 +100,8 @@ it("keeps a reorder optimistic until the authoritative response arrives", async 
   });
   expect(getSteps()).toEqual(proposed);
 
-  response.resolve({ steps: authoritative, total: 2 });
   await act(async () => {
+    response.resolve({ steps: authoritative, total: 2 });
     await request;
   });
   expect(getSteps()).toEqual(authoritative);
