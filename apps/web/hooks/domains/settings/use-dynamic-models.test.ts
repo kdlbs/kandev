@@ -79,4 +79,50 @@ describe("useAgentCapabilities", () => {
 
     expect(result.current.status).toBe("probing");
   });
+
+  it("keeps loaded capabilities when a refresh probe fails", async () => {
+    fetchDynamicModelsMock
+      .mockResolvedValueOnce({
+        ...response("ok"),
+        models: [{ id: "grok-4", name: "Grok 4" }],
+        current_model_id: "grok-4",
+      })
+      .mockResolvedValueOnce({
+        agent_name: "grok-acp",
+        status: "failed",
+        models: [],
+        error: "probe failed",
+      });
+
+    const { result } = renderHook(() => useAgentCapabilities("grok-acp", initialConfig));
+    await waitFor(() => expect(result.current.models).toHaveLength(1));
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+
+    expect(result.current.status).toBe("failed");
+    expect(result.current.error).toBe("probe failed");
+    expect(result.current.models).toEqual([{ id: "grok-4", name: "Grok 4" }]);
+    expect(result.current.currentModelId).toBe("grok-4");
+  });
+
+  it("does not let a stale snapshot overwrite a completed manual refresh", async () => {
+    fetchDynamicModelsMock
+      .mockResolvedValueOnce(response("not_installed"))
+      .mockResolvedValueOnce(response("ok"));
+
+    const { result, rerender } = renderHook(
+      ({ initial }) => useAgentCapabilities("grok-acp", initial),
+      { initialProps: { initial: initialConfig } },
+    );
+    await waitFor(() => expect(fetchDynamicModelsMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      await result.current.refresh();
+    });
+    rerender({ initial: { ...initialConfig, status: "probing" } });
+
+    expect(result.current.status).toBe("ok");
+  });
 });

@@ -225,8 +225,8 @@ function PermissionToggles({
   );
 }
 
-function capabilityStatusMessage(modelConfig: ModelConfig): string | null {
-  switch (modelConfig.status) {
+function capabilityStatusMessage(status: ModelConfig["status"]): string | null {
+  switch (status) {
     case "probing":
       return "Checking agent capabilities…";
     case "auth_required":
@@ -240,13 +240,13 @@ function capabilityStatusMessage(modelConfig: ModelConfig): string | null {
   }
 }
 
-function CapabilityStatusMessage({ modelConfig }: { modelConfig: ModelConfig }) {
-  const msg = capabilityStatusMessage(modelConfig);
+function CapabilityStatusMessage({ status }: { status: ModelConfig["status"] }) {
+  const msg = capabilityStatusMessage(status);
   if (!msg) return null;
   return (
     <p
       data-testid="profile-capability-status"
-      data-status={modelConfig.status}
+      data-status={status}
       className="text-xs text-muted-foreground"
     >
       {msg}
@@ -510,7 +510,7 @@ function CapabilitiesRow({
         <p className="text-xs text-muted-foreground">{activeMode.description}</p>
       )}
       {commands.length > 0 && <CommandsButton commands={commands} />}
-      <CapabilityStatusMessage modelConfig={{ ...modelConfig, status }} />
+      <CapabilityStatusMessage status={status} />
     </div>
   );
 }

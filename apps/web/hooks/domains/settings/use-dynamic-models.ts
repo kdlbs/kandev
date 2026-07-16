@@ -41,6 +41,8 @@ export function useAgentCapabilities(
   );
   const [currentModeId, setCurrentModeId] = useState<string | undefined>(initial.current_mode_id);
   const [status, setStatus] = useState<CapabilityStatus | undefined>(initial.status);
+  const [manualRefreshAgentName, setManualRefreshAgentName] = useState<string>();
+  const hasManualRefresh = manualRefreshAgentName === agentName;
   const [isLoading, setIsLoading] = useState(supportsDynamicModels && !!agentName);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,11 +59,16 @@ export function useAgentCapabilities(
         });
         setStatus(response.status);
         setError(response.error ?? null);
-        setModels(response.models ?? []);
-        setModes(response.modes ?? []);
-        setCommands(response.commands ?? []);
-        setCurrentModelId(response.current_model_id);
-        setCurrentModeId(response.current_mode_id);
+        if (forceRefresh) {
+          setManualRefreshAgentName(agentName);
+        }
+        if (response.status !== "failed") {
+          setModels(response.models ?? []);
+          setModes(response.modes ?? []);
+          setCommands(response.commands ?? []);
+          setCurrentModelId(response.current_model_id);
+          setCurrentModeId(response.current_mode_id);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to fetch capabilities");
       } finally {
@@ -72,8 +79,10 @@ export function useAgentCapabilities(
   );
 
   useEffect(() => {
-    setStatus(initial.status);
-  }, [initial.status]);
+    if (!hasManualRefresh) {
+      setStatus(initial.status);
+    }
+  }, [hasManualRefresh, initial.status]);
 
   useEffect(() => {
     if (supportsDynamicModels && agentName) {
