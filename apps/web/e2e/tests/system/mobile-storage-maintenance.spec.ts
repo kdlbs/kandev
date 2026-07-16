@@ -19,6 +19,13 @@ test.describe("Mobile storage maintenance", () => {
     await settingsMenu.getByRole("link", { name: "Storage" }).click();
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
+    await testPage
+      .getByRole("button", { name: "More information about Scheduled maintenance" })
+      .click();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "Turning it off does not disable Analyze or Run now",
+    );
+    await testPage.keyboard.press("Escape");
     await testPage.getByTestId("storage-analyze").click();
     await expect(testPage.getByTestId("storage-analysis-job")).toHaveAttribute(
       "data-state",
@@ -35,6 +42,8 @@ test.describe("Mobile storage maintenance", () => {
     await testPage.getByTestId("storage-go-cache-clean").click();
     expect((await explicitRequest).postDataJSON()).toEqual({ resources: ["go_cache"] });
     await expect.poll(() => fs.existsSync(cache.artifact)).toBe(false);
+    await testPage.getByRole("button", { name: "More information about Quarantine" }).click();
+    await expect(testPage.getByRole("tooltip")).toContainText("recoverable holding area");
     await expect
       .poll(() =>
         testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

@@ -1,11 +1,12 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StorageOverviewResponse } from "@/lib/types/system";
 import { StorageMaintenanceSettings } from "./storage-maintenance-settings";
 
 const mocks = vi.hoisted(() => ({
   useStorageMaintenance: vi.fn(),
+  useSystemJob: vi.fn(),
 }));
 
 vi.mock("@/hooks/domains/system/use-storage-maintenance", () => ({
@@ -13,7 +14,7 @@ vi.mock("@/hooks/domains/system/use-storage-maintenance", () => ({
 }));
 
 vi.mock("@/hooks/domains/system/use-system-jobs", () => ({
-  useSystemJob: () => undefined,
+  useSystemJob: mocks.useSystemJob,
   useSystemJobs: () => [],
 }));
 
@@ -79,8 +80,34 @@ function controller(currentOverview: StorageOverviewResponse) {
 }
 
 describe("StorageMaintenanceSettings", () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
+    mocks.useSystemJob.mockReturnValue(undefined);
     mocks.useStorageMaintenance.mockReturnValue(controller(overview));
+  });
+
+  it("keeps analysis completion beside the Analyze action", () => {
+    mocks.useSystemJob.mockReturnValue({
+      id: "analysis-1",
+      kind: "storage-analysis",
+      state: "succeeded",
+      started_at: "2026-07-16T00:00:00Z",
+    });
+    mocks.useStorageMaintenance.mockReturnValue({
+      ...controller(overview),
+      analysisJob: { id: "analysis-1" },
+    });
+
+    render(
+      <TooltipProvider>
+        <StorageMaintenanceSettings />
+      </TooltipProvider>,
+    );
+
+    const analyzeControl = screen.getByTestId("storage-analyze-control");
+    expect(analyzeControl.textContent).toContain("Analyze");
+    expect(analyzeControl.textContent).toContain("Analysis complete");
   });
 
   it("preserves a dirty policy draft when refreshed overview data arrives", () => {

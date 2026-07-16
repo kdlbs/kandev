@@ -70,6 +70,11 @@ test.describe("System storage maintenance", () => {
   }) => {
     const orphan = seedOrphanWorkspace(backend.tmpDir);
     await testPage.goto("/settings/system/storage");
+    const overviewBox = await testPage.getByTestId("storage-overview-card").boundingBox();
+    const policyBox = await testPage.getByTestId("storage-policy-card").boundingBox();
+    expect(overviewBox).not.toBeNull();
+    expect(policyBox).not.toBeNull();
+    expect(policyBox!.y).toBeGreaterThanOrEqual(overviewBox!.y + overviewBox!.height);
     const scheduling = testPage.getByTestId("storage-scheduling-enabled");
     await expect(scheduling).toHaveAttribute("data-state", "unchecked");
     await expect(testPage.getByTestId("storage-check-interval")).toHaveValue("24");
@@ -94,7 +99,7 @@ test.describe("System storage maintenance", () => {
     );
     await testPage.getByTestId("storage-resource-workspaces-trigger").click();
     await expect(testPage.getByTestId("storage-resource-workspaces-trigger")).toContainText(
-      /Task workspaces[1-9]\d* B/,
+      "Task workspaces<0.01 GB",
     );
     expect(fs.existsSync(orphan.artifact)).toBe(true);
 

@@ -54,8 +54,21 @@ describe("StoragePolicyCard", () => {
   it("edits every Docker cleanup threshold", () => {
     const onChange = renderCard();
 
+    expect((screen.getByTestId("storage-go-cache-max") as HTMLInputElement).value).toBe("15");
+    expect(
+      (screen.getByTestId("storage-docker-build-cache-keep-bytes") as HTMLInputElement).value,
+    ).toBe("10");
+
+    fireEvent.change(screen.getByTestId("storage-go-cache-max"), {
+      target: { value: "20" },
+    });
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...settings,
+      go_cache: { ...settings.go_cache, max_bytes: 21_474_836_480 },
+    });
+
     fireEvent.change(screen.getByTestId("storage-docker-build-cache-keep-bytes"), {
-      target: { value: "2147483648" },
+      target: { value: "2" },
     });
     expect(onChange).toHaveBeenLastCalledWith({
       ...settings,
@@ -111,5 +124,20 @@ describe("StoragePolicyCard", () => {
     expect((screen.getByLabelText("Clean Kandev containers") as HTMLButtonElement).disabled).toBe(
       true,
     );
+  });
+
+  it("groups related settings and provides help for every policy option", () => {
+    renderCard();
+
+    for (const heading of [
+      "Schedule",
+      "Workspaces and containers",
+      "Go build cache",
+      "Docker cleanup",
+      "Quarantine safety",
+    ]) {
+      expect(screen.getByText(heading)).toBeTruthy();
+    }
+    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(16);
   });
 });

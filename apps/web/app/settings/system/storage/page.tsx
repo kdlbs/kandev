@@ -5,7 +5,7 @@ export default function StoragePage() {
   return (
     <SystemPageShell
       title="Storage"
-      description="Analyze disk use and safely maintain Kandev-owned workspaces, caches, and Docker resources."
+      description="Review disk use and reclaim space from Kandev-owned workspaces, caches, and Docker resources whenever your installation needs it."
     >
       <StorageMaintenanceSettings />
     </SystemPageShell>

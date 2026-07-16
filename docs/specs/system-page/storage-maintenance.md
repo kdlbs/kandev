@@ -19,6 +19,14 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
 
 - Settings includes a **System → Storage** page at `/settings/system/storage` for disk
   analysis, maintenance policy, manual cleanup, run history, and quarantined workspaces.
+- The page presents storage analysis and maintenance policy as separate full-width sections.
+  Analysis and cleanup progress stays beside the action that started it instead of appearing as
+  detached page status.
+- User-facing storage totals and editable size limits are shown in GB. The frontend converts those
+  values to and from the byte-based API without changing the persisted data model.
+- Maintenance settings are grouped by scope: schedule, workspaces and containers, Go build cache,
+  Docker cleanup, and quarantine safety. Every option includes focusable, pointer-accessible help
+  that explains what it can change, when it runs, and which safety checks apply.
 - Read-only analysis is available even when scheduled maintenance is disabled. It reports
   active task workspace bytes, orphan-candidate bytes, active quarantined count and bytes, the
   managed Go cache, Kandev-managed container count and writable-layer bytes, Docker build cache,
@@ -77,6 +85,8 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
 - Candidate task directories are atomically moved, on the same filesystem, to
   `~/.kandev/trash/tasks/`; they are not immediately deleted. Quarantine entries record their
   original path, size, task/workspace identity when known, and permanent-deletion deadline.
+- The Storage page describes quarantine as a recoverable holding area, explains when Kandev uses
+  it, and distinguishes restore from immediate permanent deletion.
 - The default orphan grace period is seven days and the default quarantine retention is seven
   additional days. Both are configurable in whole hours and apply to scheduled and manual runs.
 - Quarantine never deletes a Git branch. Permanent deletion removes the quarantined files and

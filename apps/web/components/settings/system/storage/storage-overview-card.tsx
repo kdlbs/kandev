@@ -1,10 +1,10 @@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@kandev/ui/accordion";
 import { Badge } from "@kandev/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { IconChartPie, IconTrash } from "@tabler/icons-react";
 import type { StorageOverviewResponse, StorageQuarantineSummary } from "@/lib/types/system";
-import { formatBytes } from "@/lib/utils/format-bytes";
 import { StorageActionButton } from "./storage-action-button";
+import { formatGigabytes } from "./storage-units";
 
 interface Props {
   overview: StorageOverviewResponse | null;
@@ -44,8 +44,8 @@ function quarantineResource(summary: StorageQuarantineSummary): StorageResource 
   return {
     id: "quarantine",
     label: "Quarantined resources",
-    value: formatBytes(summary.size_bytes),
-    detail: `${summary.count} resources awaiting recovery or deletion`,
+    value: formatGigabytes(summary.size_bytes),
+    detail: `${summary.count} items moved aside for recovery before permanent deletion`,
   };
 }
 
@@ -67,8 +67,8 @@ function storageResources(overview: StorageOverviewResponse): StorageResource[] 
     {
       id: "workspaces",
       label: "Task workspaces",
-      value: formatBytes(summary.workspaces.candidate_bytes ?? 0),
-      detail: `Active ${formatBytes(summary.workspaces.active_bytes ?? 0)}`,
+      value: formatGigabytes(summary.workspaces.candidate_bytes ?? 0),
+      detail: `Active workspaces use ${formatGigabytes(summary.workspaces.active_bytes ?? 0)}`,
       warning: summary.workspaces.warning,
     },
     quarantineResource(summary.quarantine),
@@ -77,7 +77,7 @@ function storageResources(overview: StorageOverviewResponse): StorageResource[] 
       label: "Kandev containers",
       ...dockerMeasurement(
         summary.docker.available,
-        formatBytes(summary.docker.managed_container_bytes ?? 0),
+        formatGigabytes(summary.docker.managed_container_bytes ?? 0),
         `${summary.docker.managed_container_count ?? 0} managed containers`,
       ),
       warning: dockerWarning,
@@ -85,7 +85,7 @@ function storageResources(overview: StorageOverviewResponse): StorageResource[] 
     {
       id: "go-cache",
       label: "Go build cache",
-      value: formatBytes(summary.go_cache.size_bytes ?? 0),
+      value: formatGigabytes(summary.go_cache.size_bytes ?? 0),
       detail: summary.go_cache.path ?? overview.capabilities.managed_go_cache_path,
       warning: summary.go_cache.warning,
     },
@@ -94,7 +94,7 @@ function storageResources(overview: StorageOverviewResponse): StorageResource[] 
       label: "Docker build cache",
       ...dockerMeasurement(
         summary.docker.available,
-        formatBytes(summary.docker.build_cache_bytes),
+        formatGigabytes(summary.docker.build_cache_bytes),
         overview.capabilities.docker_host || "Default Docker host",
       ),
       warning: dockerWarning,
@@ -104,7 +104,7 @@ function storageResources(overview: StorageOverviewResponse): StorageResource[] 
       label: "Unused Docker images",
       ...dockerMeasurement(
         summary.docker.available,
-        formatBytes(summary.docker.unused_image_bytes),
+        formatGigabytes(summary.docker.unused_image_bytes),
         "Unused by every container and older than the configured age",
       ),
       warning: dockerWarning,
@@ -169,6 +169,10 @@ export function StorageOverviewCard({ overview, disabledReason, onRunGoCache }: 
           <IconChartPie className="size-4" /> Storage analysis
           {!summary.docker.available && <Badge variant="outline">Docker unavailable</Badge>}
         </CardTitle>
+        <CardDescription>
+          A read-only breakdown of current usage and reclaimable space. Run Analyze occasionally to
+          refresh these estimates; it never deletes or moves anything.
+        </CardDescription>
       </CardHeader>
       <CardContent className="min-w-0">
         <Accordion type="multiple" className="min-w-0">

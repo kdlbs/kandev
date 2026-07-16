@@ -2,26 +2,54 @@
 
 import { useState } from "react";
 import { Badge } from "@kandev/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { IconRestore, IconTrash } from "@tabler/icons-react";
 import type { StorageQuarantineEntry } from "@/lib/types/system";
-import { formatBytes } from "@/lib/utils/format-bytes";
+import { JobProgressIndicator } from "../job-progress-indicator";
 import { PermanentDeleteDialog } from "./storage-confirmation-dialogs";
 import { StorageActionButton } from "./storage-action-button";
+import { StorageSettingHelp } from "./storage-setting-help";
+import { formatGigabytes } from "./storage-units";
 
 type Props = {
   entries: StorageQuarantineEntry[];
+  deleteJobId?: string;
   disabledReason?: string;
   onRestore: (id: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 };
 
-export function StorageQuarantineCard({ entries, disabledReason, onRestore, onDelete }: Props) {
+export function StorageQuarantineCard({
+  entries,
+  deleteJobId,
+  disabledReason,
+  onRestore,
+  onDelete,
+}: Props) {
   const [deleteEntry, setDeleteEntry] = useState<StorageQuarantineEntry | null>(null);
   return (
     <Card className="min-w-0" data-testid="storage-quarantine-card">
       <CardHeader>
-        <CardTitle className="text-base">Quarantine</CardTitle>
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="flex items-center gap-1 text-base">
+            Quarantine
+            <StorageSettingHelp label="Quarantine">
+              Quarantine is Kandev's recoverable holding area. Orphan task workspaces and rotated Go
+              caches are moved here before deletion. You can restore an item during its retention
+              period; after the deadline, a later maintenance run may permanently delete it.
+            </StorageSettingHelp>
+          </CardTitle>
+          <JobProgressIndicator
+            kind="storage-quarantine-delete"
+            jobId={deleteJobId}
+            successLabel="Deletion complete"
+            testId="storage-delete-job"
+          />
+        </div>
+        <CardDescription>
+          Cleanup moves recoverable data here first instead of deleting it immediately. Restore an
+          item if you still need it, or delete it permanently when you are certain.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {entries.length === 0 && (
@@ -38,7 +66,7 @@ export function StorageQuarantineCard({ entries, disabledReason, onRestore, onDe
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="outline">{entry.resource_type.replace("_", " ")}</Badge>
                   <span className="text-xs text-muted-foreground">
-                    {formatBytes(entry.size_bytes)}
+                    {formatGigabytes(entry.size_bytes)}
                   </span>
                 </div>
                 <p className="break-all font-mono text-xs">{entry.original_path}</p>
