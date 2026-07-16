@@ -28,7 +28,10 @@ function ExecuteStatusIcon({
       </span>
     );
   }
-  if (status === "error" || (status === "complete" && typeof exitCode === "number")) {
+  if (
+    status === "error" ||
+    (status === "complete" && typeof exitCode === "number" && exitCode !== 0)
+  ) {
     return (
       <span className="shrink-0" aria-label="Command failed">
         <IconX aria-hidden className="h-3.5 w-3.5 text-red-500" />

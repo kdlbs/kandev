@@ -69,7 +69,12 @@ function DisclosureContent({
   isLoading,
   error,
   retry,
-}: ReturnType<typeof useShellCommandOutput>) {
+}: {
+  snapshot: ShellCommandOutputSnapshot | null;
+  isLoading: boolean;
+  error: Error | null;
+  retry: () => void;
+}) {
   const hasTranscript = Boolean(snapshot?.output.stdout || snapshot?.output.stderr);
   const emptyLabel =
     normalizeToolCallStatus(snapshot?.status) === "running"
@@ -89,7 +94,9 @@ function DisclosureContent({
           </Button>
         </div>
       )}
-      {snapshot && !hasTranscript && <p className="text-xs text-muted-foreground">{emptyLabel}</p>}
+      {snapshot && !hasTranscript && !error && (
+        <p className="text-xs text-muted-foreground">{emptyLabel}</p>
+      )}
       {snapshot && <OutputTranscript output={snapshot.output} />}
       {snapshot && <ResultDetails snapshot={snapshot} />}
     </div>

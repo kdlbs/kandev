@@ -3,7 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import { TurnGroupMessage } from "./turn-group-message";
 
-function toolExecute(id: string, command = "gh pr checks"): Message {
+function toolExecute(
+  id: string,
+  output: Record<string, unknown> = {},
+  command = "gh pr checks",
+): Message {
   return {
     id,
     session_id: toSessionId("s1"),
@@ -18,7 +22,7 @@ function toolExecute(id: string, command = "gh pr checks"): Message {
       normalized: {
         shell_exec: {
           command,
-          output: { exit_code: 0, has_output: true, stdout_bytes: 1, stderr_bytes: 0 },
+          output: { exit_code: 0, ...output },
         },
       },
     },
@@ -63,6 +67,29 @@ describe("TurnGroupMessage repeated tool compaction", () => {
 
     expect(html).toContain('data-testid="repeated-tool-summary"');
     expect(html).toContain("4 repeated identical terminal commands hidden");
+  });
+
+  it("does not summarize commands when only their output bodies distinguish them", () => {
+    const messages = Array.from({ length: 6 }, (_, i) =>
+      toolExecute(`tool-${i + 1}`, { has_output: true, stdout_bytes: 8, stderr_bytes: 0 }),
+    );
+
+    const html = renderToStaticMarkup(
+      <TurnGroupMessage
+        group={{
+          type: "turn_group",
+          id: "turn-group-output-tool-1",
+          turnId: "turn-1",
+          messages,
+        }}
+        sessionId="s1"
+        permissionsByToolCallId={new Map()}
+        isLastGroup
+        isTurnActive
+      />,
+    );
+
+    expect(html).not.toContain('data-testid="repeated-tool-summary"');
   });
 
   it("treats a cancelled tool as terminal", () => {

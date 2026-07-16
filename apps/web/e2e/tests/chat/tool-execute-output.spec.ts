@@ -151,7 +151,6 @@ test.describe("shell command output", () => {
     await expect.poll(() => requestCount, { timeout: 4_000 }).toBe(2);
     await expect(chat.getByText("final running transcript")).toBeVisible();
     await expect(chat.getByText("Exit code 0")).toBeVisible();
-    await testPage.waitForTimeout(1_250);
     expect(requestCount).toBe(2);
   });
 

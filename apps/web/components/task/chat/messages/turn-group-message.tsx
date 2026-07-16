@@ -184,20 +184,29 @@ function isZeroExitCode(shellExec: ShellExecPayload): boolean {
   return exitCode === 0;
 }
 
-function readShellExecSummary(message: Message): ShellExecSummary | null {
-  const shellExec = getCompleteShellExec(message);
-  if (!shellExec) return null;
-  if (!isZeroExitCode(shellExec)) return null;
+function hasProjectedShellOutput(output: ShellExecPayload["output"]): boolean {
+  return Boolean(output?.has_output || output?.stdout_bytes || output?.stderr_bytes);
+}
+
+function createShellExecSummary(message: Message, shellExec: ShellExecPayload): ShellExecSummary {
   const output = shellExec.output;
   return {
-    command: shellExec?.command ?? message.content,
-    workDir: shellExec?.work_dir ?? "",
+    command: shellExec.command ?? message.content,
+    workDir: shellExec.work_dir ?? "",
     exitCode: 0,
     hasOutput: output?.has_output ?? false,
     stdoutBytes: output?.stdout_bytes ?? 0,
     stderrBytes: output?.stderr_bytes ?? 0,
     truncated: output?.truncated ?? false,
   };
+}
+
+function readShellExecSummary(message: Message): ShellExecSummary | null {
+  const shellExec = getCompleteShellExec(message);
+  if (!shellExec) return null;
+  if (!isZeroExitCode(shellExec)) return null;
+  if (hasProjectedShellOutput(shellExec.output)) return null;
+  return createShellExecSummary(message, shellExec);
 }
 
 function repeatFingerprint(message: Message): string | null {

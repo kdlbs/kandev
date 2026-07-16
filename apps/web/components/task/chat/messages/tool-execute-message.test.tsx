@@ -5,6 +5,8 @@ import type { UseShellCommandOutputResult } from "@/hooks/domains/session/use-sh
 import { ToolExecuteMessage } from "./tool-execute-message";
 
 const useShellOutputMock = vi.hoisted(() => vi.fn());
+const runningMessageID = "message-running";
+const outputUpdatedAt = "2026-07-16T12:00:02Z";
 
 vi.mock("@/hooks/domains/session/use-shell-command-output", () => ({
   useShellCommandOutput: useShellOutputMock,
@@ -110,7 +112,7 @@ describe("ToolExecuteMessage command row", () => {
     useShellOutputMock.mockReturnValue(
       hookResult({
         snapshot: {
-          message_id: "message-running",
+          message_id: runningMessageID,
           status: "running",
           updated_at: "2026-07-16T12:00:01Z",
           output: {},
@@ -130,7 +132,7 @@ describe("ToolExecuteMessage output states", () => {
         snapshot: {
           message_id: "message-complete",
           status: "failed",
-          updated_at: "2026-07-16T12:00:02Z",
+          updated_at: outputUpdatedAt,
           output: {
             stdout: "standard output",
             stderr: "standard error",
@@ -155,7 +157,7 @@ describe("ToolExecuteMessage output states", () => {
         snapshot: {
           message_id: "message-cancelled",
           status: "cancelled",
-          updated_at: "2026-07-16T12:00:02Z",
+          updated_at: outputUpdatedAt,
           output: { stdout: "snapshot transcript" },
         },
       }),
@@ -181,9 +183,9 @@ describe("ToolExecuteMessage output states", () => {
     useShellOutputMock.mockReturnValue(
       hookResult({
         snapshot: {
-          message_id: "message-running",
+          message_id: runningMessageID,
           status: "running",
-          updated_at: "2026-07-16T12:00:02Z",
+          updated_at: outputUpdatedAt,
           output: { stdout: "retained transcript" },
         },
         error: new Error("network unavailable"),
@@ -197,5 +199,24 @@ describe("ToolExecuteMessage output states", () => {
     expect(screen.getByText("Command output unavailable.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("shows only the unavailable state when an empty snapshot is followed by an error", () => {
+    useShellOutputMock.mockReturnValue(
+      hookResult({
+        snapshot: {
+          message_id: runningMessageID,
+          status: "running",
+          updated_at: outputUpdatedAt,
+          output: {},
+        },
+        error: new Error("network unavailable"),
+      }),
+    );
+    render(<ToolExecuteMessage comment={executeMessage("running")} />);
+
+    openOutput();
+    expect(screen.getByText("Command output unavailable.")).toBeTruthy();
+    expect(screen.queryByText("No command output yet.")).toBeNull();
   });
 });
