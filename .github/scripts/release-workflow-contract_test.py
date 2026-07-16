@@ -128,6 +128,23 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             r"needs\.prepare\.outputs\.tag \}\}\^\{commit\}",
         )
 
+    def test_macos_signed_build_selects_updater_bundle(self) -> None:
+        build = step_block("Build Tauri desktop app")
+        collect = step_block("Collect desktop artifacts")
+        initialize = 'tauri_bundles="${{ matrix.tauri_bundles }}"'
+        append = 'tauri_bundles="${tauri_bundles},updater"'
+        invoke = '--bundles "$tauri_bundles"'
+
+        self.assertIn('[[ "${{ matrix.platform }}" == macos-*', build)
+        self.assertIn('"${UPDATER_SIGNING_ENABLED:-false}" = "true"', build)
+        self.assertIn(initialize, build)
+        self.assertIn(append, build)
+        self.assertIn(invoke, build)
+        self.assertLess(build.index(initialize), build.index(append))
+        self.assertLess(build.index(append), build.index(invoke))
+        self.assertIn('"${UPDATER_SIGNING_ENABLED:-false}" = "true"', collect)
+        self.assertIn('"$DESKTOP_ASSET_VERIFIER" --require-updaters', collect)
+
     def test_macos_dmg_build_has_retry_timeout_and_diagnostics(self) -> None:
         build = step_block("Build Tauri desktop app")
         self.assertIn("timeout-minutes: 70", build)

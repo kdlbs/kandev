@@ -172,6 +172,25 @@ printf 'unsigned macOS artifact\n' > "$macos_artifact"
   "$macos_assets_dir" macos-arm64 >/dev/null
 pass "verify-desktop-assets accepts macOS artifacts without optional updater bundles"
 
+if "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" --require-updaters \
+  "$macos_assets_dir" macos-arm64 >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "verify-desktop-assets should require a key-enabled macOS updater bundle"
+fi
+grep -q "Missing updater artifact for platform: macos-arm64" "$ERR_FILE" || \
+  fail "verify-desktop-assets did not explain the missing macOS updater bundle"
+pass "verify-desktop-assets requires key-enabled updater bundles"
+
+macos_updater="$macos_assets_dir/kandev-desktop-macos-arm64-Kandev.app.tar.gz"
+printf 'signed macOS updater\n' > "$macos_updater"
+printf 'signature\n' > "$macos_updater.sig"
+"$ROOT_DIR/scripts/release/write-sha256.sh" \
+  "$macos_updater" "$macos_updater.sha256"
+"$ROOT_DIR/scripts/release/write-sha256.sh" \
+  "$macos_updater.sig" "$macos_updater.sig.sha256"
+"$ROOT_DIR/scripts/release/verify-desktop-assets.sh" --require-updaters \
+  "$macos_assets_dir" macos-arm64 >/dev/null
+pass "verify-desktop-assets accepts signed required updater bundles"
+
 missing_assets_dir="$TMP_DIR/missing-assets"
 mkdir -p "$missing_assets_dir"
 if "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" \

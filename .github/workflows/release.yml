@@ -848,9 +848,13 @@ jobs:
             unset WINDOWS_TIMESTAMP_URL
             unset WINDOWS_SIGNTOOL_PATH
           fi
+          tauri_bundles="${{ matrix.tauri_bundles }}"
           updater_config='{"bundle":{"createUpdaterArtifacts":false}}'
           if [ "${UPDATER_SIGNING_ENABLED:-false}" = "true" ]; then
             updater_config='{"bundle":{"createUpdaterArtifacts":"v1Compatible"}}'
+            if [[ "${{ matrix.platform }}" == macos-* ]]; then
+              tauri_bundles="${tauri_bundles},updater"
+            fi
           else
             unset TAURI_SIGNING_PRIVATE_KEY
             unset TAURI_SIGNING_PRIVATE_KEY_PASSWORD
@@ -917,7 +921,7 @@ jobs:
               pnpm tauri build \
                 --features desktop-runtime \
                 --target "${{ matrix.rust_target }}" \
-                --bundles "${{ matrix.tauri_bundles }}" \
+                --bundles "$tauri_bundles" \
                 --config "$updater_config"
           }
 
@@ -1070,7 +1074,12 @@ jobs:
             exit 1
           fi
 
-          bash "$DESKTOP_ASSET_VERIFIER" "$out_dir" "${{ matrix.platform }}"
+          if [ "${UPDATER_SIGNING_ENABLED:-false}" = "true" ]; then
+            bash "$DESKTOP_ASSET_VERIFIER" --require-updaters \
+              "$out_dir" "${{ matrix.platform }}"
+          else
+            bash "$DESKTOP_ASSET_VERIFIER" "$out_dir" "${{ matrix.platform }}"
+          fi
           ls -lh "$out_dir"
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
