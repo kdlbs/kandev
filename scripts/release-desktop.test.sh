@@ -172,7 +172,17 @@ printf 'unsigned macOS artifact\n' > "$macos_artifact"
   "$macos_assets_dir" macos-arm64 >/dev/null
 pass "verify-desktop-assets accepts macOS artifacts without optional updater bundles"
 
-if grep -Eq 'updater_(bundles|signatures)=\(' \
+missing_assets_dir="$TMP_DIR/missing-assets"
+mkdir -p "$missing_assets_dir"
+if "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" \
+  "$missing_assets_dir" macos-arm64 >"$OUT_FILE" 2>"$ERR_FILE"; then
+  fail "verify-desktop-assets should reject a missing platform artifact"
+fi
+grep -q "Missing desktop artifact for platform: macos-arm64" "$ERR_FILE" || \
+  fail "verify-desktop-assets did not explain the missing platform artifact"
+pass "verify-desktop-assets reports missing platform artifacts"
+
+if grep -Eq '(artifacts|updater_bundles|updater_signatures)=\(' \
   "$ROOT_DIR/scripts/release/verify-desktop-assets.sh"; then
   fail "verify-desktop-assets uses optional arrays that fail under Bash 3.2 nounset"
 fi

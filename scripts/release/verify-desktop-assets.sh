@@ -62,10 +62,9 @@ updater_suffix_for_platform() {
 }
 
 for platform in "${REQUIRED_PLATFORMS[@]}"; do
-  artifacts=("$ASSETS_DIR"/kandev-desktop-"$platform"-*)
   found=0
 
-  for artifact in "${artifacts[@]}"; do
+  for artifact in "$ASSETS_DIR"/kandev-desktop-"$platform"-*; do
     if [[ "$artifact" == *.sha256 ]]; then
       continue
     fi
