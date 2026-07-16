@@ -162,6 +162,22 @@ printf 'desktop artifact\n' > "$artifact"
 "$ROOT_DIR/scripts/release/verify-desktop-assets.sh" "$assets_dir" linux-x64 >/dev/null
 pass "verify-desktop-assets accepts matching checksums"
 
+macos_assets_dir="$TMP_DIR/macos-assets"
+mkdir -p "$macos_assets_dir"
+macos_artifact="$macos_assets_dir/kandev-desktop-macos-arm64-Kandev.dmg"
+printf 'unsigned macOS artifact\n' > "$macos_artifact"
+"$ROOT_DIR/scripts/release/write-sha256.sh" \
+  "$macos_artifact" "$macos_artifact.sha256"
+"$ROOT_DIR/scripts/release/verify-desktop-assets.sh" \
+  "$macos_assets_dir" macos-arm64 >/dev/null
+pass "verify-desktop-assets accepts macOS artifacts without optional updater bundles"
+
+if grep -Eq 'updater_(bundles|signatures)=\(' \
+  "$ROOT_DIR/scripts/release/verify-desktop-assets.sh"; then
+  fail "verify-desktop-assets uses optional arrays that fail under Bash 3.2 nounset"
+fi
+pass "verify-desktop-assets avoids Bash 3.2 empty-array nounset failures"
+
 if signing_secret_env "$ROOT_DIR/scripts/release/desktop-signing-ready.sh" macos >"$OUT_FILE" 2>"$ERR_FILE"; then
   fail "desktop-signing-ready should report macOS signing not ready without secrets"
 fi

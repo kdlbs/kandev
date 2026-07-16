@@ -87,15 +87,13 @@ for platform in "${REQUIRED_PLATFORMS[@]}"; do
   fi
 
   updater_suffix="$(updater_suffix_for_platform "$platform")"
-  updater_bundles=("$ASSETS_DIR"/kandev-desktop-"$platform"-$updater_suffix)
-  updater_signatures=("$ASSETS_DIR"/kandev-desktop-"$platform"-$updater_suffix.sig)
-  for updater_bundle in "${updater_bundles[@]}"; do
+  for updater_bundle in "$ASSETS_DIR"/kandev-desktop-"$platform"-$updater_suffix; do
     if [ ! -f "$updater_bundle.sig" ]; then
       echo "Missing updater signature: $updater_bundle.sig" >&2
       exit 1
     fi
   done
-  for updater_signature in "${updater_signatures[@]}"; do
+  for updater_signature in "$ASSETS_DIR"/kandev-desktop-"$platform"-$updater_suffix.sig; do
     updater_bundle="${updater_signature%.sig}"
     if [ ! -f "$updater_bundle" ]; then
       echo "Missing updater bundle for signature: $updater_signature" >&2

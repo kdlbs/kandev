@@ -101,6 +101,19 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn('bash "$helper"', detect)
         self.assertNotIn("bash scripts/release/updater-signing-ready.sh", detect)
 
+    def test_desktop_asset_validation_uses_workflow_control_revision(self) -> None:
+        for job in ("build-desktop", "publish-release"):
+            block = job_block(job)
+            self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", block)
+            self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", block)
+            self.assertIn(
+                "scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}",
+                block,
+            )
+            self.assertIn("DESKTOP_ASSET_VERIFIER=$helper", block)
+            self.assertIn('"$DESKTOP_ASSET_VERIFIER"', block)
+            self.assertNotIn('scripts/release/verify-desktop-assets.sh "', block)
+
     def test_macos_dmg_build_has_retry_timeout_and_diagnostics(self) -> None:
         build = step_block("Build Tauri desktop app")
         self.assertIn("timeout-minutes: 70", build)

@@ -585,6 +585,18 @@ jobs:
           ref: ${{ needs.prepare.outputs.ref }}
           persist-credentials: false
 
+      - name: Prepare desktop asset verifier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/verify-desktop-assets.sh"
+          gh api \
+            --header "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}" \
+            > "$helper"
+          echo "DESKTOP_ASSET_VERIFIER=$helper" >> "$GITHUB_ENV"
+
       - name: Prepare macOS desktop diagnostics helper
         if: startsWith(matrix.platform, 'macos-')
         continue-on-error: true
@@ -1056,7 +1068,7 @@ jobs:
             exit 1
           fi
 
-          scripts/release/verify-desktop-assets.sh "$out_dir" "${{ matrix.platform }}"
+          bash "$DESKTOP_ASSET_VERIFIER" "$out_dir" "${{ matrix.platform }}"
           ls -lh "$out_dir"
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
@@ -1427,6 +1439,18 @@ jobs:
           ref: ${{ needs.prepare.outputs.ref }}
           fetch-depth: 0
 
+      - name: Prepare desktop asset verifier
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          helper="$RUNNER_TEMP/verify-desktop-assets.sh"
+          gh api \
+            --header "Accept: application/vnd.github.raw+json" \
+            "repos/${{ github.repository }}/contents/scripts/release/verify-desktop-assets.sh?ref=${{ github.workflow_sha }}" \
+            > "$helper"
+          echo "DESKTOP_ASSET_VERIFIER=$helper" >> "$GITHUB_ENV"
+
       - name: Install updater signature verifier toolchain
         run: rustup toolchain install 1.88.0 --profile minimal
 
@@ -1508,7 +1532,7 @@ jobs:
               exit 1
             fi
           done
-          scripts/release/verify-desktop-assets.sh dist/release-assets
+          bash "$DESKTOP_ASSET_VERIFIER" dist/release-assets
           ls -lh dist/release-assets
 
       - name: Generate and verify updater manifest
