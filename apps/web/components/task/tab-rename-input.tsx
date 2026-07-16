@@ -13,12 +13,15 @@ export function TabRenameInput({
   onCommit,
   onCancel,
   testId = "tab-rename-input",
+  maxLength,
 }: {
   initial: string;
   seqBadge: number | null;
   onCommit: (next: string) => void;
   onCancel: () => void;
   testId?: string;
+  /** Hard cap typed input to match a server-side name length limit. */
+  maxLength?: number;
 }) {
   const [value, setValue] = useState(initial);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -65,6 +68,7 @@ export function TabRenameInput({
           if (doneRef.current) return;
           onCommit(value);
         }}
+        maxLength={maxLength}
         data-testid={testId}
         className="h-5 min-w-[6rem] max-w-[14rem] rounded border border-input bg-background px-1 text-xs outline-none focus:ring-1 focus:ring-ring"
       />

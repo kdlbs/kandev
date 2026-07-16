@@ -136,6 +136,28 @@ func TestHandleSpawnSession_LaunchFailure(t *testing.T) {
 	assert.Empty(t, orch.renameCalls, "no rename after a failed launch")
 }
 
+// A rename failure after a successful launch must not fail the spawn — the
+// session is already running; the label is best-effort.
+func TestHandleSpawnSession_RenameFailure_DoesNotFailSpawn(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+	orch.renameErr = errors.New("rename write failed")
+
+	payload := spawnPayload(target.ID, "do things", target.ID, sess.ID)
+	payload["name"] = "reviewer"
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, payload)
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var out map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &out))
+	assert.Equal(t, "spawned-sess-1", out["session_id"])
+	require.Len(t, orch.renameCalls, 1, "rename was attempted")
+}
+
 // Spawning on a task in another workspace is rejected — unlike message_task,
 // spawn consumes executor resources and must stay workspace-scoped.
 func TestHandleSpawnSession_CrossWorkspace_Forbidden(t *testing.T) {

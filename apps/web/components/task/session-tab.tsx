@@ -125,11 +125,11 @@ function useSessionTabState(sessionId: string | undefined) {
   };
 }
 
-/** Commit a session tab rename: persist via WS and optimistically update the store. */
 /** Mirrors the backend's maxSessionNameLength so the optimistic store update
  * matches what the rename broadcast will echo back. */
 const MAX_SESSION_NAME_LENGTH = 120;
 
+/** Commit a session tab rename: persist via WS and optimistically update the store. */
 function useSessionRenameCommitter(
   sessionId: string | undefined,
   taskId: string | null,
@@ -355,6 +355,7 @@ function SessionTabBody({
         onCommit={onCommitRename}
         onCancel={onCancelRename}
         testId="session-tab-rename-input"
+        maxLength={MAX_SESSION_NAME_LENGTH}
       />
     );
   }

@@ -14,7 +14,13 @@ import (
 // is non-greedy, so an embedded closing tag would end the block early and leak
 // the attribution tail into the visible chat bubble.
 func stripSystemTag(value string) string {
-	return strings.ReplaceAll(value, sysprompt.TagEnd, "")
+	// Replace until stable: a single pass can be evaded by nesting the tag
+	// inside itself (e.g. "</kandev</kandev-system>-system>" collapses to a
+	// live closing tag after one removal).
+	for strings.Contains(value, sysprompt.TagEnd) {
+		value = strings.ReplaceAll(value, sysprompt.TagEnd, "")
+	}
+	return value
 }
 
 // wrapAgentMessage decorates a prompt that arrived via the message_task_kandev

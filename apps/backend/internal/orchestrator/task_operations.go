@@ -1978,16 +1978,20 @@ func (s *Service) RenameSession(ctx context.Context, sessionID, name string) err
 	if runes := []rune(name); len(runes) > maxSessionNameLength {
 		name = string(runes[:maxSessionNameLength])
 	}
+	// Fetch BEFORE the write so a post-write lookup failure can never leave a
+	// durably renamed row without its broadcast (clients would render stale
+	// labels until the next full hydration).
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("failed to load session for rename: %w", err)
+	}
 	if err := s.repo.RenameTaskSession(ctx, sessionID, name); err != nil {
 		return fmt.Errorf("failed to rename session: %w", err)
 	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil {
-		s.logger.Warn("failed to fetch session after rename", zap.Error(err))
-		return nil
-	}
+	session.Name = name
+	updatedAt := time.Now().UTC()
 	s.publishTaskSessionStateChanged(ctx, session.TaskID, sessionID,
-		session.State, session.State, session.ErrorMessage, &session.UpdatedAt, session)
+		session.State, session.State, session.ErrorMessage, &updatedAt, session)
 	return nil
 }
 

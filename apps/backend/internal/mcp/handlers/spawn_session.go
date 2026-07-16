@@ -33,41 +33,11 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if req.TaskID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	if errResp := h.validateSpawnRequest(&req, msg); errResp != nil {
+		return errResp, nil
 	}
-	if req.Prompt == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required", nil)
-	}
-	if req.SenderTaskID == "" {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation,
-			"sender_task_id is required (the calling agent's MCP server must supply this)", nil)
-	}
-	if h.sessionLauncher == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "orchestrator not available", nil)
-	}
-
-	target, err := h.taskSvc.GetTask(ctx, req.TaskID)
-	if err != nil {
-		if errors.Is(err, taskrepo.ErrTaskNotFound) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
-				"task not found: "+req.TaskID+" (pass the full task UUID, not a truncated prefix)", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
-			"failed to look up task: "+err.Error(), nil)
-	}
-	// Unlike message_task (where cross-workspace peer messaging is an
-	// intentional product decision), spawning consumes executor resources and
-	// starts an agent on the target — scope it to the sender's own workspace.
-	if req.SenderTaskID != req.TaskID {
-		sender, err := h.taskSvc.GetTask(ctx, req.SenderTaskID)
-		if err != nil || sender == nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found", nil)
-		}
-		if sender.WorkspaceID != target.WorkspaceID {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
-				"cannot spawn a session on a task in another workspace", nil)
-		}
+	if errResp := h.authorizeSpawnTarget(ctx, &req, msg); errResp != nil {
+		return errResp, nil
 	}
 
 	profileID := h.resolveSpawnAgentProfile(ctx, &req)
@@ -99,6 +69,49 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 		"state":            resp.State,
 		"agent_profile_id": profileID,
 	})
+}
+
+// validateSpawnRequest checks the request's required fields.
+// Returns a ready-to-send WS error message, or nil when valid.
+func (h *Handlers) validateSpawnRequest(req *spawnSessionRequest, msg *ws.Message) *ws.Message {
+	if req.TaskID == "" {
+		return wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required")
+	}
+	if req.Prompt == "" {
+		return wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "prompt is required")
+	}
+	if req.SenderTaskID == "" {
+		return wsError(msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"sender_task_id is required (the calling agent's MCP server must supply this)")
+	}
+	return nil
+}
+
+// authorizeSpawnTarget verifies the target task exists and shares a workspace
+// with the sender. Unlike message_task (where cross-workspace peer messaging
+// is an intentional product decision), spawning consumes executor resources
+// and starts an agent on the target — scope it to the sender's own workspace.
+func (h *Handlers) authorizeSpawnTarget(ctx context.Context, req *spawnSessionRequest, msg *ws.Message) *ws.Message {
+	target, err := h.taskSvc.GetTask(ctx, req.TaskID)
+	if err != nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound,
+				"task not found: "+req.TaskID+" (pass the full task UUID, not a truncated prefix)")
+		}
+		return wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to look up task: "+err.Error())
+	}
+	if req.SenderTaskID == req.TaskID {
+		return nil
+	}
+	sender, err := h.taskSvc.GetTask(ctx, req.SenderTaskID)
+	if err != nil || sender == nil {
+		return wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "sender task not found")
+	}
+	if sender.WorkspaceID != target.WorkspaceID {
+		return wsError(msg.ID, msg.Action, ws.ErrorCodeForbidden,
+			"cannot spawn a session on a task in another workspace")
+	}
+	return nil
 }
 
 // resolveSpawnAgentProfile picks the agent profile for a spawned session:

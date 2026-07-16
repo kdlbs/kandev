@@ -40,6 +40,7 @@ type fakeOrchestrator struct {
 	launchCalls       []*orchestrator.LaunchSessionRequest
 	launchErr         error
 	renameCalls       []renameCall
+	renameErr         error
 
 	// Configurable: error returned by PromptTask. Cleared after first call so
 	// the retry-after-resume path can succeed on the second call.
@@ -165,7 +166,7 @@ func (f *fakeOrchestrator) RenameSession(_ context.Context, sessionID, name stri
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.renameCalls = append(f.renameCalls, renameCall{sessionID: sessionID, name: name})
-	return nil
+	return f.renameErr
 }
 
 type fakePromptReferenceResolver struct {

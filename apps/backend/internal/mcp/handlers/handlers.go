@@ -1683,23 +1683,7 @@ func (h *Handlers) lookupSenderSessionName(ctx context.Context, senderTaskID, se
 // primary session. Returns a ready-to-send WS error message on failure.
 func (h *Handlers) resolveMessageTargetSession(ctx context.Context, msg *ws.Message, taskID, sessionID string) (*models.TaskSession, *ws.Message) {
 	if sessionID != "" {
-		session, err := h.taskSvc.GetTaskSession(ctx, sessionID)
-		if err != nil {
-			// Only genuine no-row lookups are NotFound; transient DB errors
-			// must surface as internal so callers keep retrying instead of
-			// treating a live session as gone.
-			if errors.Is(err, models.ErrTaskSessionNotFound) {
-				return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target session not found: "+sessionID)
-			}
-			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to look up target session: "+err.Error())
-		}
-		if session == nil {
-			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target session not found: "+sessionID)
-		}
-		if session.TaskID != taskID {
-			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id does not belong to task_id")
-		}
-		return session, nil
+		return h.resolveExplicitTargetSession(ctx, msg, taskID, sessionID)
 	}
 	session, err := h.taskSvc.GetPrimarySession(ctx, taskID)
 	if err != nil {
@@ -1707,6 +1691,27 @@ func (h *Handlers) resolveMessageTargetSession(ctx context.Context, msg *ws.Mess
 			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target task exists but has no active session")
 		}
 		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to get session for task: "+err.Error())
+	}
+	return session, nil
+}
+
+// resolveExplicitTargetSession loads and validates a caller-named target
+// session for message_task. Only genuine no-row lookups are NotFound;
+// transient DB errors surface as internal so callers keep retrying instead of
+// treating a live session as gone.
+func (h *Handlers) resolveExplicitTargetSession(ctx context.Context, msg *ws.Message, taskID, sessionID string) (*models.TaskSession, *ws.Message) {
+	session, err := h.taskSvc.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target session not found: "+sessionID)
+		}
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to look up target session: "+err.Error())
+	}
+	if session == nil {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "target session not found: "+sessionID)
+	}
+	if session.TaskID != taskID {
+		return nil, wsError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id does not belong to task_id")
 	}
 	return session, nil
 }
