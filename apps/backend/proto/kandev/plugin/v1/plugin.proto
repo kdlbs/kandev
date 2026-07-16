@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package kandev.plugin.v1;
+
+import "google/protobuf/struct.proto";
+
+option go_package = "github.com/kandev/kandev/proto/kandev/plugin/v1;pluginv1";
+
+// Implemented by the PLUGIN. kandev is the client.
+service Plugin {
+  rpc DeliverEvent(Event) returns (EventAck);
+  rpc InvokeTool(ToolRequest) returns (ToolResponse);
+  rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
+}
+
+// Implemented by KANDEV (served back over the go-plugin broker).
+// Every RPC is capability-gated server-side (§5).
+service Host {
+  rpc GetState(GetStateRequest) returns (GetStateResponse);
+  rpc SetState(SetStateRequest) returns (SetStateResponse);
+  rpc DeleteState(DeleteStateRequest) returns (DeleteStateResponse);
+  rpc ListState(ListStateRequest) returns (ListStateResponse);
+  rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
+  rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
+}
+
+message Event {
+  string event_id = 1; // fresh uuid per delivery
+  string event_type = 2; // bus subject, e.g. "task.created"
+  string occurred_at = 3; // RFC3339 UTC
+  string workspace_id = 4; // empty if not derivable
+  google.protobuf.Struct payload = 5; // marshaled bus event.Data
+}
+message EventAck {}
+
+message ToolRequest {
+  string tool_call_id = 1;
+  string tool_name = 2;
+  google.protobuf.Struct input = 3;
+  ToolContext context = 4;
+}
+message ToolContext {
+  string task_id = 1;
+  string agent_instance_id = 2;
+  string session_id = 3;
+}
+message ToolResponse {
+  google.protobuf.Struct output = 1;
+  string error = 2;
+}
+
+message WebhookRequest {
+  string webhook_key = 1;
+  string method = 2;
+  string path = 3; // remainder after the key
+  string query = 4;
+  map<string, string> headers = 5; // single-valued; multi joined by ", "
+  bytes body = 6;
+}
+message WebhookResponse {
+  int32 status = 1;
+  map<string, string> headers = 2;
+  bytes body = 3;
+}
+
+message GetStateRequest {
+  string scope = 1;
+  string scope_id = 2;
+  string key = 3;
+}
+message GetStateResponse {
+  bool found = 1;
+  google.protobuf.Struct value = 2;
+}
+message SetStateRequest {
+  string scope = 1;
+  string scope_id = 2;
+  string key = 3;
+  google.protobuf.Struct value = 4;
+}
+message SetStateResponse {}
+message DeleteStateRequest {
+  string scope = 1;
+  string scope_id = 2;
+  string key = 3;
+}
+message DeleteStateResponse {}
+message ListStateRequest {
+  string scope = 1;
+  string scope_id = 2;
+}
+message ListStateResponse {
+  repeated StateEntry entries = 1;
+}
+message StateEntry {
+  string key = 1;
+  google.protobuf.Struct value = 2;
+  string updated_at = 3;
+}
+
+message RevealSecretRequest {
+  string ref = 1;
+}
+message RevealSecretResponse {
+  string value = 1;
+}
+
+message EmitEventRequest {
+  string event_name = 1;
+  google.protobuf.Struct payload = 2;
+}
+message EmitEventResponse {}

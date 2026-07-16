@@ -156,6 +156,7 @@ func TestFeatures_DefaultOff(t *testing.T) {
 	// DetectEnvironment returns prod, so FeatureFlagDefaults uses the
 	// prod value ("false") rather than the dev value ("true").
 	t.Setenv("KANDEV_FEATURES_OFFICE", "")
+	t.Setenv("KANDEV_FEATURES_PLUGINS", "")
 	t.Setenv("KANDEV_DEBUG_DEV_MODE", "")
 	t.Setenv("KANDEV_DEBUG_PPROF_ENABLED", "")
 	t.Setenv("KANDEV_E2E_MOCK", "")
@@ -167,6 +168,9 @@ func TestFeatures_DefaultOff(t *testing.T) {
 	}
 	if cfg.Features.Office {
 		t.Errorf("Features.Office = true, want false (production default must be off)")
+	}
+	if cfg.Features.Plugins {
+		t.Errorf("Features.Plugins = true, want false (production default must be off)")
 	}
 }
 
@@ -184,6 +188,21 @@ func TestFeatures_OfficeEnabledByEnv(t *testing.T) {
 	}
 	if !cfg.Features.Office {
 		t.Errorf("Features.Office = false, want true (KANDEV_FEATURES_OFFICE=true must flip the flag)")
+	}
+}
+
+// TestFeatures_PluginsEnabledByEnv proves the documented opt-in path:
+// setting KANDEV_FEATURES_PLUGINS=true flips Features.Plugins to true.
+func TestFeatures_PluginsEnabledByEnv(t *testing.T) {
+	t.Setenv("KANDEV_FEATURES_PLUGINS", "true")
+
+	dir := t.TempDir()
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if !cfg.Features.Plugins {
+		t.Errorf("Features.Plugins = false, want true (KANDEV_FEATURES_PLUGINS=true must flip the flag)")
 	}
 }
 
@@ -206,13 +225,13 @@ func TestServerHostFromEnv(t *testing.T) {
 // without a tag) would surface as a capitalized JSON key and break the
 // frontend's case-sensitive read in apps/web/app/actions/features.ts.
 func TestFeaturesConfig_JSONShape(t *testing.T) {
-	cfg := FeaturesConfig{Office: true}
+	cfg := FeaturesConfig{Office: true, Plugins: true}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
 	got := string(raw)
-	want := `{"office":true}`
+	want := `{"office":true,"plugins":true}`
 	if got != want {
 		t.Errorf("FeaturesConfig JSON = %s; want %s — missing or wrong `json:` struct tag", got, want)
 	}

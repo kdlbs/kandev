@@ -331,6 +331,15 @@ build-backend-quiet:
 	@printf "  $(DIM)Backend$(RESET)\n"
 	@$(MAKE) -s -C $(BACKEND_DIR) build >/dev/null 2>&1
 
+## Package the plugin-fixture SDK plugin used by tests/plugins/plugins.spec.ts.
+## e2e/global-setup.ts checks the resulting tar.gz exists (like it does for
+## the kandev/mock-agent binaries) but does not build it itself — this target
+## is the "make it exist" step, wired into test-e2e* below.
+.PHONY: build-e2e-plugin-package
+build-e2e-plugin-package:
+	@printf "$(CYAN)Packaging e2e fixture plugin...$(RESET)\n"
+	@$(MAKE) -C $(BACKEND_DIR) e2e-plugin-package
+
 .PHONY: build-web
 build-web:
 	@printf "$(CYAN)Building web app...$(RESET)\n"
@@ -430,17 +439,17 @@ test-scripts:
 	@node --test scripts/validate-public-docs.test.mjs
 
 .PHONY: test-e2e
-test-e2e: build-backend build-web
+test-e2e: build-backend build-web build-e2e-plugin-package
 	@printf "$(CYAN)Running E2E tests (headless, parallel)...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e
 
 .PHONY: test-e2e-headed
-test-e2e-headed: build-backend build-web
+test-e2e-headed: build-backend build-web build-e2e-plugin-package
 	@printf "$(CYAN)Running E2E tests (headed)...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:headed
 
 .PHONY: test-e2e-ui
-test-e2e-ui: build-backend build-web
+test-e2e-ui: build-backend build-web build-e2e-plugin-package
 	@printf "$(CYAN)Opening Playwright UI mode...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) --filter @kandev/web e2e:ui
 

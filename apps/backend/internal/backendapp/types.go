@@ -15,6 +15,7 @@ import (
 	office "github.com/kandev/kandev/internal/office"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeservice "github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	promptstore "github.com/kandev/kandev/internal/prompts/store"
 	"github.com/kandev/kandev/internal/runtimeflags"
@@ -88,4 +89,10 @@ type Services struct {
 	// events, webhooks). Independent of Office — has its own scheduler and
 	// creates tasks via the task service.
 	Automation *automation.Components
+	// Plugins is the extensible plugin system service (registration
+	// registry, event delivery, health monitoring). Gated on
+	// features.Plugins for route registration and boot-payload population,
+	// but always constructed (non-nil) when initialization succeeds so
+	// tests/tools can exercise it directly.
+	Plugins *plugins.Service
 }

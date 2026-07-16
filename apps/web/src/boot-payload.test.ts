@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { loadBootPayload, readBootPayload } from "./boot-payload";
 
+const JIRA_BUNDLE_URL = "/api/plugins/jira/bundle";
+
 describe("readBootPayload", () => {
   it("returns an empty initial state when Go has not injected boot data yet", () => {
     const win = {} as Window;
@@ -69,6 +71,55 @@ describe("readBootPayload", () => {
 
     expect(readBootPayload(win).runtime?.debug).toBe(true);
     expect(win.__KANDEV_DEBUG).toBe(true);
+  });
+});
+
+describe("readBootPayload plugins", () => {
+  it("parses active plugins from the boot payload", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        plugins: [
+          {
+            id: "jira",
+            name: "Jira",
+            bundleUrl: JIRA_BUNDLE_URL,
+            styleUrls: ["/api/plugins/jira/style.css"],
+          },
+          { id: "hello", name: "Hello", bundleUrl: "/api/plugins/hello/bundle" },
+        ],
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).plugins).toEqual([
+      {
+        id: "jira",
+        name: "Jira",
+        bundleUrl: JIRA_BUNDLE_URL,
+        styleUrls: ["/api/plugins/jira/style.css"],
+      },
+      { id: "hello", name: "Hello", bundleUrl: "/api/plugins/hello/bundle", styleUrls: undefined },
+    ]);
+  });
+
+  it("drops plugin entries missing required fields and non-string styleUrls entries", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        plugins: [
+          { id: "no-bundle-url", name: "Missing bundleUrl" },
+          { id: "jira", name: "Jira", bundleUrl: JIRA_BUNDLE_URL, styleUrls: ["ok.css", 3] },
+        ],
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).plugins).toEqual([
+      { id: "jira", name: "Jira", bundleUrl: JIRA_BUNDLE_URL, styleUrls: ["ok.css"] },
+    ]);
+  });
+
+  it("leaves plugins undefined when the boot payload has no plugins field", () => {
+    const win = { __KANDEV_BOOT_PAYLOAD__: { version: 1 } } as unknown as Window;
+
+    expect(readBootPayload(win).plugins).toBeUndefined();
   });
 });
 

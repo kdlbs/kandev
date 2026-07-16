@@ -11,6 +11,7 @@ import {
   APP_SIDEBAR_EXPANDED_WIDTH,
   APP_SIDEBAR_SECTION_IDS,
 } from "./app-sidebar-constants";
+import { PluginNavItems } from "@/components/plugins/plugin-nav-items";
 import { AppSidebarFooter } from "./app-sidebar-footer";
 import { AppSidebarHeader } from "./app-sidebar-header";
 import { AppSidebarPrimaryNav } from "./app-sidebar-primary-nav";
@@ -64,6 +65,7 @@ function AppSidebarNavigation({ collapsed, inOffice, settingsMode }: AppSidebarN
             data-testid="app-sidebar-scroll"
           >
             <AppSidebarPrimaryNav collapsed={collapsed} />
+            <PluginNavItems collapsed={collapsed} />
             {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
             <ProjectsSection collapsed={collapsed} />
             <AgentsSection collapsed={collapsed} />

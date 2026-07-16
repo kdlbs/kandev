@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/integrations/secretadapter"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
+	"github.com/kandev/kandev/internal/plugins"
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
@@ -108,6 +109,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
 	slackSvc := initSlackService(dbPool, repos.Secrets, log)
 	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
+	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
 	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
 
 	// Plumb GitHub branch listing into the task service so provider-backed
@@ -144,6 +146,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		WorkflowSync: workflowSyncSvc,
 		Share:        shareHTTP,
 		Automation:   automationComponents,
+		Plugins:      pluginsSvc,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
 		Office: nil,
@@ -450,6 +453,24 @@ func initSlackService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *lo
 	svc, _, err := slack.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), log)
 	if err != nil {
 		log.Warn("Slack service initialization failed (non-fatal)", zap.Error(err))
+	}
+	return svc
+}
+
+// initPluginsService wires up the plugin system's core Service
+// (registration registry, config, plugin_state store). Failures are
+// non-fatal: the rest of the backend still boots without plugins.
+//
+// This only constructs the Service — event delivery (delivery.Deliverer)
+// and health monitoring (plugins.HealthMonitor) are wired separately by
+// startPluginsSubsystems (plugins.go), once addCleanup and ctx are
+// available, mirroring how the Jira/Linear/Sentry pollers are started in
+// startAgentInfrastructure rather than inside their init*Service functions.
+func initPluginsService(cfg *config.Config, dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *plugins.Service {
+	svc, _, err := plugins.Provide(cfg, dbPool, secretadapter.New(secretsStore), eventBus, log)
+	if err != nil {
+		log.Warn("Plugins service initialization failed (non-fatal)", zap.Error(err))
+		return nil
 	}
 	return svc
 }

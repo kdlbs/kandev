@@ -14,6 +14,7 @@ func OptionsFromConfig(cfg *config.Config) Options {
 		RuntimeValues: ValuesFromConfig(cfg),
 		EnvValues: map[string]bool{
 			"KANDEV_FEATURES_OFFICE":      isTruthy(os.Getenv("KANDEV_FEATURES_OFFICE")),
+			"KANDEV_FEATURES_PLUGINS":     isTruthy(os.Getenv("KANDEV_FEATURES_PLUGINS")),
 			"KANDEV_DEBUG_DEV_MODE":       isTruthy(os.Getenv("KANDEV_DEBUG_DEV_MODE")),
 			"KANDEV_DEBUG_PPROF_ENABLED":  isTruthy(os.Getenv("KANDEV_DEBUG_PPROF_ENABLED")),
 			"KANDEV_DEBUG_AGENT_MESSAGES": isTruthy(os.Getenv("KANDEV_DEBUG_AGENT_MESSAGES")),
@@ -28,8 +29,9 @@ func OptionsFromConfig(cfg *config.Config) Options {
 func ValuesFromConfig(cfg *config.Config) map[string]bool {
 	debugEnabled := cfg.Debug.DevMode || cfg.Debug.PprofEnabled
 	return map[string]bool{
-		"features.office": cfg.Features.Office,
-		"debug.devMode":   debugEnabled,
+		"features.office":  cfg.Features.Office,
+		"features.plugins": cfg.Features.Plugins,
+		"debug.devMode":    debugEnabled,
 	}
 }
 
@@ -38,6 +40,8 @@ func ApplyStatesToConfig(cfg *config.Config, states []RuntimeFlagState) {
 		switch state.Key {
 		case "features.office":
 			cfg.Features.Office = state.EffectiveValue
+		case "features.plugins":
+			cfg.Features.Plugins = state.EffectiveValue
 		case "debug.devMode":
 			cfg.Debug.DevMode = state.EffectiveValue
 			cfg.Debug.PprofEnabled = state.EffectiveValue
