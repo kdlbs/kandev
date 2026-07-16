@@ -12,8 +12,11 @@ spec: "../../specs/tasks/quick-chat-expiration.md"
 
 ## Acceptance
 
-- Settings FAB and Command Palette open config setup/real tabs in the responsive Quick Chat modal;
-  config setup preserves its profile/copy/suggestions/placeholder and has no repository controls.
+- Settings FAB opens a floating config setup/session that can transfer into the responsive Quick
+  Chat modal; Command Palette opens the modal directly. Config setup preserves its
+  profile/copy/suggestions/placeholder and has no repository controls.
+- Ordinary Quick Chat setup exposes an explicit ordinary/configuration mode choice before task
+  creation.
 - One typed Quick Chat store owns ordinary/config real and setup tabs; older missing kinds normalize
   to `chat`, workspace changes cannot activate foreign sessions, and passthrough remains supported.
 - Config start seeds the task session and delivers its initial prompt once; confirmed real-tab close

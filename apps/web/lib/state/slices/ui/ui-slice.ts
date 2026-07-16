@@ -244,6 +244,24 @@ function buildNotificationActions(set: ImmerSet) {
 
 function buildQuickChatActions(set: ImmerSet) {
   return {
+    addQuickChatSession: (
+      sessionId: string,
+      workspaceId: string,
+      agentProfileId?: string,
+      kind: "chat" | "config" = "chat",
+    ) =>
+      set((draft) => {
+        const existing = draft.quickChat.sessions.find(
+          (session) => session.sessionId === sessionId,
+        );
+        if (existing) {
+          if (existing.workspaceId !== workspaceId) return;
+          if (agentProfileId) existing.agentProfileId = agentProfileId;
+        } else {
+          draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind });
+        }
+        draft.quickChat.activeSessionId = sessionId;
+      }),
     openQuickChat: (
       sessionId: string,
       workspaceId: string,
@@ -308,6 +326,11 @@ function buildQuickChatActions(set: ImmerSet) {
       });
       if (renamed) setStoredQuickChatName(sessionId, name);
     },
+    setQuickChatInitialPrompt: (sessionId: string, prompt?: string) =>
+      set((draft) => {
+        const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
+        if (session) session.initialPrompt = prompt;
+      }),
   };
 }
 

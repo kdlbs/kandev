@@ -2,14 +2,18 @@ import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 
 async function openConfigChatFromSettings(page: Page): Promise<Locator> {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
   await page.goto("/settings/agents");
   await page.waitForLoadState("networkidle");
+  expect(pageErrors, "settings page should render without client errors").toEqual([]);
   const fab = page.getByRole("button", { name: "Configuration Chat" });
   await expect(fab).toBeVisible({ timeout: 10_000 });
   await fab.click();
-  const dialog = page.getByRole("dialog", { name: "Quick Chat" });
-  await expect(dialog).toBeVisible({ timeout: 10_000 });
-  return dialog;
+  const popover = page.getByTestId("config-chat-popover");
+  await expect(popover).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("dialog", { name: "Quick Chat" })).not.toBeVisible();
+  return popover;
 }
 
 async function startConfigChat(dialog: Locator, prompt: string) {
@@ -35,34 +39,39 @@ async function sendMessage(dialog: Locator, text: string) {
   await editor.press(`${modifier}+Enter`);
 }
 
-test.describe("Configuration Chat in Quick Chat", () => {
+test.describe("Configuration Chat", () => {
   test.beforeEach(async ({ apiClient, seedData }) => {
     await apiClient.updateWorkspace(seedData.workspaceId, {
       default_config_agent_profile_id: seedData.agentProfileId,
     });
   });
 
-  test("launches in the large modal, restores after refresh, continues, and deletes", async ({
+  test("starts floating, expands the same session, restores, continues, and deletes", async ({
     testPage,
   }) => {
-    const dialog = await openConfigChatFromSettings(testPage);
+    const popover = await openConfigChatFromSettings(testPage);
     const viewport = testPage.viewportSize();
-    const box = await dialog.boundingBox();
+    const box = await popover.boundingBox();
     expect(box).not.toBeNull();
     expect(viewport).not.toBeNull();
-    expect(box!.width).toBeGreaterThan(viewport!.width * 0.7);
-    expect(box!.height).toBeGreaterThan(viewport!.height * 0.75);
+    expect(box!.width).toBeLessThan(viewport!.width * 0.7);
 
-    await startConfigChat(dialog, "/e2e:simple-message");
+    await startConfigChat(popover, "/e2e:simple-message");
+    await expect(
+      popover.getByText("simple mock response for e2e testing", { exact: false }),
+    ).toBeVisible({ timeout: 30_000 });
+    await popover.getByRole("button", { name: "Open in Quick Chat" }).click();
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
     await expect(
       dialog.getByText("simple mock response for e2e testing", { exact: false }),
-    ).toBeVisible({ timeout: 30_000 });
+    ).toBeVisible();
 
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
     await expect(testPage.getByRole("dialog", { name: "Quick Chat" })).not.toBeVisible();
     await testPage.getByRole("button", { name: "Configuration Chat" }).click();
-    const restored = testPage.getByRole("dialog", { name: "Quick Chat" });
+    const restored = testPage.getByTestId("config-chat-popover");
     await expect(restored.getByRole("img", { name: "Configuration chat" })).toBeVisible({
       timeout: 10_000,
     });
@@ -75,7 +84,10 @@ test.describe("Configuration Chat in Quick Chat", () => {
       timeout: 30_000,
     });
 
-    await restored.locator("button[aria-label^='Close ']").first().click();
+    await restored
+      .getByTestId("quick-chat-tab")
+      .getByRole("button", { name: /^Close / })
+      .click();
     const deleteDialog = testPage.getByRole("alertdialog");
     await expect(deleteDialog).toContainText("Delete Quick Chat?");
     const deleteResponse = testPage.waitForResponse(
@@ -83,13 +95,13 @@ test.describe("Configuration Chat in Quick Chat", () => {
     );
     await deleteDialog.getByRole("button", { name: "Delete" }).click();
     await deleteResponse;
-    await expect(restored).not.toBeVisible();
+    await expect(restored.getByTestId("config-chat-setup")).toBeVisible();
 
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
     await testPage.getByRole("button", { name: "Configuration Chat" }).click();
     await expect(
-      testPage.getByRole("dialog", { name: "Quick Chat" }).getByTestId("config-chat-setup"),
+      testPage.getByTestId("config-chat-popover").getByTestId("config-chat-setup"),
     ).toBeVisible({ timeout: 10_000 });
   });
 
@@ -111,28 +123,28 @@ test.describe("Configuration Chat in Quick Chat", () => {
   test("keeps conversation context visible around an inline clarification", async ({
     testPage,
   }) => {
-    const dialog = await openConfigChatFromSettings(testPage);
-    await startConfigChat(dialog, 'e2e:message("context before clarification")');
-    const messageList = dialog.locator(".chat-message-list");
+    const popover = await openConfigChatFromSettings(testPage);
+    await startConfigChat(popover, 'e2e:message("context before clarification")');
+    const messageList = popover.locator(".chat-message-list");
     await expect(
       messageList.getByText("context before clarification", { exact: true }),
     ).toBeVisible({
       timeout: 30_000,
     });
 
-    await sendMessage(dialog, "/ask-single");
-    const clarification = dialog.getByTestId("clarification-overlay-container");
+    await sendMessage(popover, "/ask-single");
+    const clarification = popover.getByTestId("clarification-overlay-container");
     await expect(clarification).toContainText("Which database", { timeout: 30_000 });
     const historyBox = await messageList.boundingBox();
     expect(historyBox).not.toBeNull();
-    expect(historyBox!.height).toBeGreaterThan(100);
+    expect(historyBox!.height).toBeGreaterThan(40);
     await expect(
       messageList.getByText("context before clarification", { exact: true }),
     ).toBeVisible();
 
-    await dialog.getByRole("button", { name: "Collapse clarification" }).click();
+    await popover.getByRole("button", { name: "Collapse clarification" }).click();
     await expect(clarification.getByText("Which database", { exact: false })).not.toBeVisible();
-    await dialog.getByRole("button", { name: "Expand clarification" }).click();
+    await popover.getByRole("button", { name: "Expand clarification" }).click();
     await expect(clarification.getByText("Which database", { exact: false })).toBeVisible();
     await clarification.getByText("PostgreSQL", { exact: true }).click();
     await expect(clarification).not.toBeVisible({ timeout: 30_000 });

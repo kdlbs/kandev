@@ -6,6 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { startQuickChat, type QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
+import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 
 const noop = () => {};
 
@@ -40,11 +41,8 @@ function useQuickChatStore(workspaceId: string) {
 
 type QuickChatStore = ReturnType<typeof useQuickChatStore>;
 
-function useWorkspaceQuickChat(store: QuickChatStore, workspaceId: string) {
-  const sessions = useMemo(
-    () => store.sessions.filter((session) => session.workspaceId === workspaceId),
-    [store.sessions, workspaceId],
-  );
+function useWorkspaceQuickChat(store: QuickChatStore) {
+  const sessions = store.sessions;
   const activeSession = sessions.find((session) => session.sessionId === store.activeSessionId);
   useEffect(() => {
     if (store.isOpen && store.activeSessionId !== null && !activeSession) {
@@ -139,12 +137,45 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
   return { pendingAgentId, reset, handleSelectAgent };
 }
 
-export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = noop) {
+function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () => void) {
   const { toast } = useToast();
-  const store = useQuickChatStore(workspaceId);
-  const { sessions, activeSession } = useWorkspaceQuickChat(store, workspaceId);
-  const [setupKey, setSetupKey] = useState(0);
   const [sessionToClose, setSessionToClose] = useState<string | null>(null);
+  const handleCloseTab = useCallback(
+    (sessionId: string) => {
+      resetPendingStarts();
+      if (isQuickChatSetupSessionId(sessionId)) {
+        store.closeQuickChatSession(sessionId);
+        return;
+      }
+      setSessionToClose(sessionId);
+    },
+    [resetPendingStarts, store],
+  );
+  const handleConfirmClose = useCallback(async () => {
+    if (!sessionToClose) return;
+    const sessionId = sessionToClose;
+    setSessionToClose(null);
+    const taskId = store.taskSessions[sessionId]?.task_id;
+    store.closeQuickChatSession(sessionId);
+    if (!taskId) return;
+    try {
+      await deleteQuickChatTask(taskId);
+    } catch (error) {
+      console.error("Failed to delete quick chat task:", error);
+      toast({
+        title: "Failed to delete quick chat",
+        description: error instanceof Error ? error.message : "Unknown error",
+        variant: "error",
+      });
+    }
+  }, [sessionToClose, store, toast]);
+  return { sessionToClose, setSessionToClose, handleCloseTab, handleConfirmClose };
+}
+
+export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = noop) {
+  const store = useQuickChatStore(workspaceId);
+  const { sessions, activeSession } = useWorkspaceQuickChat(store);
+  const [setupKey, setSetupKey] = useState(0);
   const {
     pendingAgentId,
     reset,
@@ -154,6 +185,8 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     reset();
     onSupersedeConfigStart();
   }, [onSupersedeConfigStart, reset]);
+  const { sessionToClose, setSessionToClose, handleCloseTab, handleConfirmClose } =
+    useQuickChatSessionClose(store, resetPendingStarts);
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -176,6 +209,18 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     store.openQuickChat("", workspaceId, undefined, "chat");
   }, [resetPendingStarts, store, workspaceId]);
 
+  const handleSetupKindChange = useCallback(
+    (kind: QuickChatSessionKind) => {
+      resetPendingStarts();
+      if (activeSession && isQuickChatSetupSessionId(activeSession.sessionId)) {
+        store.closeQuickChatSession(activeSession.sessionId);
+      }
+      setSetupKey((key) => key + 1);
+      store.openQuickChat("", workspaceId, undefined, kind);
+    },
+    [activeSession, resetPendingStarts, store, workspaceId],
+  );
+
   const handleSelectAgent = useCallback(
     (agentId: string, repositories: QuickChatRepositoryInput[] = []) =>
       doSelectAgent(agentId, repositories),
@@ -190,18 +235,6 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     [resetPendingStarts, store, workspaceId],
   );
 
-  const handleCloseTab = useCallback(
-    (sessionId: string) => {
-      resetPendingStarts();
-      if (isQuickChatSetupSessionId(sessionId)) {
-        store.closeQuickChatSession(sessionId);
-        return;
-      }
-      setSessionToClose(sessionId);
-    },
-    [resetPendingStarts, store],
-  );
-
   const handleRename = useCallback(
     (sessionId: string, name: string) => {
       if (!sessionId) return;
@@ -209,25 +242,6 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     },
     [store],
   );
-
-  const handleConfirmClose = useCallback(async () => {
-    if (!sessionToClose) return;
-    const sessionId = sessionToClose;
-    setSessionToClose(null);
-    const taskId = store.taskSessions[sessionId]?.task_id;
-    store.closeQuickChatSession(sessionId);
-    if (!taskId) return;
-    try {
-      await deleteQuickChatTask(taskId);
-    } catch (error) {
-      console.error("Failed to delete quick chat task:", error);
-      toast({
-        title: "Failed to delete quick chat",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "error",
-      });
-    }
-  }, [sessionToClose, store, toast]);
 
   return {
     isOpen: store.isOpen,
@@ -244,6 +258,7 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     setSessionToClose,
     handleOpenChange,
     handleNewChat,
+    handleSetupKindChange,
     handleSelectAgent,
     handleCloseTab,
     handleConfirmClose,

@@ -18,6 +18,26 @@ function makeStore() {
 }
 
 describe("typed quick chat sessions", () => {
+  it("registers a shared session without opening the Quick Chat dialog", () => {
+    const store = makeStore();
+
+    store.getState().addQuickChatSession(SESSION_A, WORKSPACE_A, "agent-a", "config");
+    store.getState().setQuickChatInitialPrompt(SESSION_A, "Configure my workflow");
+
+    expect(store.getState().quickChat).toMatchObject({
+      isOpen: false,
+      activeSessionId: SESSION_A,
+      sessions: [
+        {
+          sessionId: SESSION_A,
+          workspaceId: WORKSPACE_A,
+          kind: "config",
+          initialPrompt: "Configure my workflow",
+        },
+      ],
+    });
+  });
+
   it("opens a configuration setup tab in the unified quick chat store", () => {
     const store = makeStore();
     const setupId = getQuickChatSetupSessionId(WORKSPACE_A, "config");

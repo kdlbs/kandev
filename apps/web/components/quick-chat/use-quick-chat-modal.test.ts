@@ -106,6 +106,19 @@ describe("useQuickChatModal — setup lifecycle", () => {
     expect(mockAppState.openQuickChat).toHaveBeenCalledWith("", WORKSPACE_ID, undefined, "chat");
   });
 
+  it("switches a blank setup between ordinary and configuration chat", () => {
+    mockAppState.quickChat.sessions = [
+      { sessionId: CHAT_SETUP_ID, workspaceId: WORKSPACE_ID, kind: "chat" },
+    ];
+    mockAppState.quickChat.activeSessionId = CHAT_SETUP_ID;
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    act(() => result.current.handleSetupKindChange("config"));
+
+    expect(mockAppState.closeQuickChatSession).toHaveBeenCalledWith(CHAT_SETUP_ID);
+    expect(mockAppState.openQuickChat).toHaveBeenCalledWith("", WORKSPACE_ID, undefined, "config");
+  });
+
   it("supersedes an in-flight config start when the user changes tabs", () => {
     const resetConfigStart = vi.fn();
     mockAppState.quickChat.sessions = [

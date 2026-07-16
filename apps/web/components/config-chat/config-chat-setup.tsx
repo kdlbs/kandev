@@ -5,6 +5,8 @@ import { IconLoader2, IconMessageCircle, IconSend2, IconSparkles } from "@tabler
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { useAppStore } from "@/components/state-provider";
+import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
+import { ChatTypeSelector } from "@/components/quick-chat/chat-type-selector";
 
 const SUGGESTION_PROMPTS = [
   "Add a 'Code Review' step to my workflow",
@@ -19,6 +21,7 @@ type ConfigChatSetupProps = {
   error: string | null;
   onStart: (profileId: string, prompt: string) => void;
   onCancel: () => void;
+  onKindChange?: (kind: QuickChatSessionKind) => void;
 };
 
 function ProfileSelector({ onSelect }: { onSelect: (id: string) => void }) {
@@ -89,12 +92,79 @@ function ConfigChatFooter({ onCancel, disabled }: { onCancel: () => void; disabl
   );
 }
 
+type ConfigPromptProps = {
+  value: string;
+  error: string | null;
+  disabled: boolean;
+  canSubmit: boolean;
+  isStarting: boolean;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+};
+
+function ConfigPrompt({
+  value,
+  error,
+  disabled,
+  canSubmit,
+  isStarting,
+  textareaRef,
+  onChange,
+  onSubmit,
+}: ConfigPromptProps) {
+  return (
+    <section className="space-y-2" aria-labelledby="config-chat-prompt-label">
+      <h3 id="config-chat-prompt-label" className="text-sm font-medium">
+        What would you like to configure?
+      </h3>
+      <div className="flex items-end gap-2">
+        <Textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !event.repeat &&
+              !event.nativeEvent.isComposing &&
+              event.keyCode !== 229
+            ) {
+              event.preventDefault();
+              onSubmit();
+            }
+          }}
+          placeholder="Ask anything about your configuration..."
+          disabled={disabled}
+          className="min-h-24 max-h-48 flex-1 resize-y"
+        />
+        <Button
+          size="icon"
+          onClick={onSubmit}
+          disabled={!canSubmit}
+          className="h-11 w-11 shrink-0 cursor-pointer"
+          aria-label="Start configuration chat"
+        >
+          {isStarting ? (
+            <IconLoader2 className="h-4 w-4 animate-spin" aria-hidden />
+          ) : (
+            <IconSend2 className="h-4 w-4" aria-hidden />
+          )}
+        </Button>
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </section>
+  );
+}
+
 export function ConfigChatSetup({
   defaultProfileId,
   isStarting,
   error,
   onStart,
   onCancel,
+  onKindChange,
 }: ConfigChatSetupProps) {
   const profiles = useAppStore((state) => state.agentProfiles.items ?? []);
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId ?? "");
@@ -134,6 +204,10 @@ export function ConfigChatSetup({
             </p>
           </header>
 
+          {onKindChange && (
+            <ChatTypeSelector value="config" disabled={isStarting} onChange={onKindChange} />
+          )}
+
           {profiles.length === 0 && (
             <p className="text-sm text-muted-foreground">
               No agent profiles are available. Create one in Agent settings first.
@@ -147,47 +221,16 @@ export function ConfigChatSetup({
           {profiles.length > 0 && !needsProfileSelection && (
             <>
               <Suggestions onSelect={(prompt) => setInputValue(prompt)} />
-              <section className="space-y-2" aria-labelledby="config-chat-prompt-label">
-                <h3 id="config-chat-prompt-label" className="text-sm font-medium">
-                  What would you like to configure?
-                </h3>
-                <div className="flex items-end gap-2">
-                  <Textarea
-                    ref={textareaRef}
-                    value={inputValue}
-                    onChange={(event) => setInputValue(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Enter" &&
-                        !event.shiftKey &&
-                        !event.repeat &&
-                        !event.nativeEvent.isComposing &&
-                        event.keyCode !== 229
-                      ) {
-                        event.preventDefault();
-                        handleSubmit();
-                      }
-                    }}
-                    placeholder="Ask anything about your configuration..."
-                    disabled={!profileIsResolved || isStarting}
-                    className="min-h-24 max-h-48 flex-1 resize-y"
-                  />
-                  <Button
-                    size="icon"
-                    onClick={handleSubmit}
-                    disabled={!canSubmit}
-                    className="h-11 w-11 shrink-0 cursor-pointer"
-                    aria-label="Start configuration chat"
-                  >
-                    {isStarting ? (
-                      <IconLoader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    ) : (
-                      <IconSend2 className="h-4 w-4" aria-hidden />
-                    )}
-                  </Button>
-                </div>
-                {error && <p className="text-sm text-destructive">{error}</p>}
-              </section>
+              <ConfigPrompt
+                value={inputValue}
+                error={error}
+                disabled={!profileIsResolved || isStarting}
+                canSubmit={canSubmit}
+                isStarting={isStarting}
+                textareaRef={textareaRef}
+                onChange={setInputValue}
+                onSubmit={handleSubmit}
+              />
             </>
           )}
         </div>

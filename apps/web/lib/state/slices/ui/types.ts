@@ -76,6 +76,7 @@ export type QuickChatSession = {
   workspaceId: string;
   name?: string;
   agentProfileId?: string;
+  initialPrompt?: string;
 };
 
 export type QuickChatState = {
@@ -197,10 +198,17 @@ export type UISliceActions = {
     agentProfileId?: string,
     kind?: QuickChatSessionKind,
   ) => void;
+  addQuickChatSession: (
+    sessionId: string,
+    workspaceId: string,
+    agentProfileId?: string,
+    kind?: QuickChatSessionKind,
+  ) => void;
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
+  setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;
   toggleBottomTerminal: () => void;

@@ -378,10 +378,12 @@ export type AppState = {
     agentProfileId?: string,
     kind?: UISliceTypes.QuickChatSessionKind,
   ) => void;
+  addQuickChatSession: UIA["addQuickChatSession"];
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
+  setQuickChatInitialPrompt: UIA["setQuickChatInitialPrompt"];
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
   toggleBottomTerminal: () => void;

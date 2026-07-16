@@ -8,11 +8,11 @@ status: implemented
 
 ## Overview
 
-Unify ordinary and configuration utility chats in the existing Quick Chat modal. The backend first
-restores both kinds with a metadata-derived discriminator; the frontend then replaces the separate
-config tab store/popover with typed setup and session tabs, and the shared clarification region gains
-a collapse control. Focused unit/integration tests precede production changes, followed by desktop
-and mobile Playwright coverage and full verification.
+Unify ordinary and configuration utility chats in one typed session store. The backend first
+restores both kinds with a metadata-derived discriminator; the frontend then shares those sessions
+between the Quick Chat modal and a compact Settings configuration panel, and the shared
+clarification region gains a collapse control. Focused unit/integration tests precede production
+changes, followed by desktop and mobile Playwright coverage and full verification.
 
 ## Backend
 
@@ -40,15 +40,17 @@ and mobile Playwright coverage and full verification.
 
 ### Unified launch, setup, and lifecycle
 
-- Refactor the config launcher under `apps/web/components/config-chat/` to open a `config` setup tab
-  in Quick Chat; remove the fixed popover and second conversation/tab renderer.
+- Refactor `apps/web/components/config-chat/` so the Settings panel and Quick Chat modal use the
+  same typed config sessions, task lifecycle, and conversation renderer.
 - Move config setup presentation into the Quick Chat modal, preserving the configuration profile,
   introduction, suggestions, placeholder, default-profile update, config endpoint, task-session seed,
   passthrough detection, and send-after-subscription initial-prompt behavior.
 - Extend `use-quick-chat-modal.ts`, `quick-chat-modal.tsx`, and tab components for typed sessions,
   accessible config indicators, kind-specific content/toolbar, one explicit delete lifecycle, blank
-  setup cleanup, and workspace changes. Keep the existing `+` action creating an ordinary setup tab.
-- Update Settings FAB and Command Palette launch paths to the same typed modal action.
+  setup cleanup, and workspace changes. Keep the existing `+` action defaulting to ordinary setup,
+  with an explicit ordinary/configuration mode selector before creation.
+- Keep the Settings FAB floating workflow and add a handoff that activates the same setup/session in
+  the large modal. Keep Command Palette launching the typed modal directly.
 
 ### Clarification presentation
 
@@ -73,14 +75,13 @@ and mobile Playwright coverage and full verification.
 
 ## E2E Tests
 
-- Replace the fixed-popover expectations in
-  `apps/web/e2e/tests/settings/config-chat-popover.spec.ts` with a desktop unified-modal flow:
-  Settings or Command Palette launch, config indicator, send/response, refresh/reopen, continue, and
-  confirmed deletion.
+- Update `apps/web/e2e/tests/settings/config-chat-popover.spec.ts` with a desktop shared-session flow:
+  floating Settings launch, modal handoff, config indicator, send/response, refresh/reopen,
+  continue, and confirmed deletion. Command Palette continues to launch the modal directly.
 - Add clarification coverage proving the message list remains visible and the bottom region can be
   collapsed, expanded, resized/scrolled, and answered.
-- Add `apps/web/e2e/tests/settings/mobile-configuration-chat.spec.ts` for full-screen launch, config
-  indicator, clarification controls, and unclipped primary actions.
+- Add `apps/web/e2e/tests/settings/mobile-configuration-chat.spec.ts` for viewport-bounded floating
+  launch, full-screen handoff, config indicator, clarification controls, and unclipped actions.
 - Re-run ordinary repository-backed Quick Chat desktop/mobile specs from PR #1679.
 
 ## Implementation Waves

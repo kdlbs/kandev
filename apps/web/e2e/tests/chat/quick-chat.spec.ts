@@ -96,6 +96,24 @@ async function waitForQuickChatWidth(dialog: Locator) {
 }
 
 test.describe("Quick Chat", () => {
+  test("offers configuration chat while creating a new chat", async ({ testPage }) => {
+    const dialog = await openQuickChatSetup(testPage);
+    const setup = dialog.getByTestId("quick-chat-setup");
+
+    await expect(setup.getByRole("radio", { name: "Quick chat" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await setup.getByRole("radio", { name: "Configuration chat" }).click();
+
+    const configSetup = dialog.getByTestId("config-chat-setup");
+    await expect(configSetup).toBeVisible();
+    await expect(configSetup.getByRole("radio", { name: "Configuration chat" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
   test("resizes from either edge, restores width, and keeps tab actions adjacent", async ({
     testPage,
   }) => {
@@ -353,7 +371,7 @@ test.describe("Quick Chat", () => {
     });
   });
 
-  test("restores multiple chat tabs in creation order after reload", async ({
+  test("restores multiple chat tabs in newest-activity order after reload", async ({
     testPage,
     apiClient,
     seedData,
@@ -443,16 +461,16 @@ test.describe("Quick Chat", () => {
 
     const restoredTabs = restoredDialog.getByTestId("quick-chat-tab");
     await expect(restoredTabs).toHaveCount(2);
-    await expect(restoredTabs.locator("span")).toHaveText(originalNames);
+    await expect(restoredTabs.locator("span")).toHaveText([...originalNames].reverse());
     await expect(restoredDialog.getByTestId("quick-chat-setup")).not.toBeVisible();
 
     await restoredTabs.nth(0).locator("button").first().click();
-    await expect(restoredDialog.getByText("first tab response", { exact: true })).toBeVisible({
+    await expect(restoredDialog.getByText("second tab response", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
 
     await restoredTabs.nth(1).locator("button").first().click();
-    await expect(restoredDialog.getByText("second tab response", { exact: true })).toBeVisible({
+    await expect(restoredDialog.getByText("first tab response", { exact: true })).toBeVisible({
       timeout: 10_000,
     });
   });

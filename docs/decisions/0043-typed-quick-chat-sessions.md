@@ -16,8 +16,11 @@ risk.
 ## Decision
 
 All user-facing utility conversations use one typed Quick Chat session model with
-`kind: "chat" | "config"`, one tab store, and the existing responsive Quick Chat modal.
-`QuickChatContent` remains the single message/composer/clarification renderer. Blank setup tabs are
+`kind: "chat" | "config"` and one tab store. `QuickChatContent` remains the single
+message/composer/clarification renderer. The responsive Quick Chat modal is the primary large
+surface; Settings also provides a compact floating configuration presentation over the same typed
+sessions. Expanding the floating presentation activates the same setup or persisted session in the
+modal rather than creating or copying a conversation. Blank setup tabs are
 typed client-only placeholders with workspace-and-kind-scoped IDs; persisted tabs map to existing
 task sessions. Setup IDs never enter backend hydration and prevent blank ordinary/config tabs from
 aliasing each other while retaining client-side cleanup for abandoned setup.
@@ -46,20 +49,21 @@ dialog on desktop or mobile.
 
 Configuration conversations become durable and readable without a schema migration or a second
 chat implementation. Ordinary and configuration sessions can coexist while preserving distinct
-setup and backend capability contracts. Tab and hydration code must carry an explicit kind, and
-workspace transitions must filter rather than assume all hydrated sessions share the current
-workspace.
+setup and backend capability contracts. The floating Settings panel owns only presentation state;
+shared session state, pending initial prompts, messages, and task identity must remain transferable.
+Tab and hydration code must carry an explicit kind, and workspace transitions must filter rather
+than assume all hydrated sessions share the current workspace.
 
 Config sessions have no automatic idle cleanup. Any creation, delete, or workspace-removal path
 must continue to use task lifecycle services so config-mode tasks cannot become hidden orphans.
-The separate config-chat popover/tab state can be removed; a small provider/launcher may remain to
-host the Settings FAB and profile-default update behavior.
+The separate config-chat tab state is removed. The Settings provider owns the floating panel's open
+and selected-view state while delegating durable sessions and task cleanup to the shared model.
 
 ## Alternatives Considered
 
-- **Make the configuration popover expandable and persist its own tabs.** Rejected because it
-  preserves two competing stores/renderers and duplicates responsive, clarification, and lifecycle
-  behavior.
+- **Persist a separate configuration-popover tab model.** Rejected because it creates competing
+  stores and duplicates restoration, prompt delivery, and task lifecycle behavior. The accepted
+  floating panel is only a presentation over the unified typed-session store.
 - **Infer configuration sessions from task titles.** Rejected because titles are mutable display
   data and must not control elevated backend capabilities.
 - **Add a dedicated configuration-tab table.** Rejected because existing task metadata, primary

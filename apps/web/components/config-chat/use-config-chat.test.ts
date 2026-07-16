@@ -4,8 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const startConfigChat = vi.fn();
 const setTaskSession = vi.fn();
 const openQuickChat = vi.fn();
+const addQuickChatSession = vi.fn();
 const closeQuickChatSession = vi.fn();
 const renameQuickChatSession = vi.fn();
+const setQuickChatInitialPrompt = vi.fn();
 const deleteTask = vi.fn();
 const WORKSPACE_ID = "workspace-1";
 const CONFIG_PROFILE_ID = "profile-config";
@@ -16,8 +18,10 @@ const PROMPT = "Show current workflows";
 
 const appState = {
   openQuickChat,
+  addQuickChatSession,
   closeQuickChatSession,
   renameQuickChatSession,
+  setQuickChatInitialPrompt,
   setTaskSession,
   agentProfiles: {
     items: [
@@ -87,10 +91,24 @@ describe("useConfigChat unified launch", () => {
       "config",
     );
     expect(renameQuickChatSession).toHaveBeenCalledWith(SESSION_ID, PROMPT);
-    expect(result.current.pendingPrompt).toEqual({
-      sessionId: SESSION_ID,
-      prompt: PROMPT,
+    expect(setQuickChatInitialPrompt).toHaveBeenCalledWith(SESSION_ID, PROMPT);
+  });
+
+  it("registers a floating configuration session without opening the large dialog", async () => {
+    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+
+    await act(async () => {
+      await result.current.startSession(CONFIG_PROFILE_ID, PROMPT, { openInQuickChat: false });
     });
+
+    expect(addQuickChatSession).toHaveBeenCalledWith(
+      SESSION_ID,
+      WORKSPACE_ID,
+      CONFIG_PROFILE_ID,
+      "config",
+    );
+    expect(openQuickChat).not.toHaveBeenCalled();
+    expect(setQuickChatInitialPrompt).toHaveBeenCalledWith(SESSION_ID, PROMPT);
   });
 
   it("starts a passthrough profile with its prompt instead of stranding it outside the terminal", async () => {
@@ -104,7 +122,7 @@ describe("useConfigChat unified launch", () => {
       agent_profile_id: PASSTHROUGH_PROFILE_ID,
       prompt: PROMPT,
     });
-    expect(result.current.pendingPrompt).toBeNull();
+    expect(setQuickChatInitialPrompt).not.toHaveBeenCalled();
   });
 
   it("waits for the selected profile before deciding how to deliver the prompt", async () => {

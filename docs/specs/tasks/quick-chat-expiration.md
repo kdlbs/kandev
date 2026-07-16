@@ -9,18 +9,20 @@ owner: kandev
 ## Why
 
 Utility conversations need to remain available across page reloads without becoming detached
-backend tasks. Configuration conversations also need enough room to read reports and answer
-clarification questions while retaining the elevated tools that distinguish them from ordinary
-quick chats.
+backend tasks. Configuration conversations need a compact Settings surface for in-context changes
+and an explicit handoff to the larger Quick Chat dialog for reports and clarification questions,
+while retaining the elevated tools that distinguish them from ordinary quick chats.
 
 ## What
 
-- Quick Chat presents ordinary and configuration conversations as typed sessions in one modal and
-  one tab list. A session has `kind: "chat" | "config"`.
+- Quick Chat presents ordinary and configuration conversations as typed sessions in one session
+  store and one tab model. A session has `kind: "chat" | "config"`.
 - Configuration sessions are clearly identified with a sparkle/configuration indicator and an
   accessible label wherever their tab kind is presented.
-- Settings Configuration Chat and the Command Palette Configuration Chat command open a
-  configuration setup tab or an existing configuration session in the Quick Chat modal.
+- Settings Configuration Chat opens a floating configuration panel. The Command Palette
+  Configuration Chat command opens the same typed setup/session in the Quick Chat modal.
+- The Settings panel can transfer its current setup or real session into the Quick Chat modal
+  without creating a second task, losing messages, or replaying the initial prompt.
 - Blank setup tabs use client-local workspace-and-kind-scoped identities, so ordinary and
   configuration setup can coexist without crossing workspace boundaries.
 - Configuration setup retains its configuration-agent selection, introductory copy, suggestion
@@ -29,11 +31,12 @@ quick chats.
 - Configuration setup never offers repository or branch selectors. Ordinary quick-chat setup
   retains the optional repository context defined by
   [Quick Chat Repository Context](quick-chat-repository-context.md).
-- Creating an ordinary chat remains the default behavior of the existing Quick Chat `+` action. If
-  both session kinds are offered from that action, the user chooses from explicit `Quick chat` and
-  `Configuration chat` commands.
-- Desktop uses the large Quick Chat dialog. Mobile uses the existing full-screen Quick Chat layout
-  with the same creation, tab, clarification, and deletion capabilities.
+- Creating an ordinary chat remains the default behavior of the existing Quick Chat `+` action.
+  New-chat setup offers an explicit `Quick chat` / `Configuration chat` mode choice and switches to
+  the matching setup without creating a backend task.
+- Desktop Settings uses the compact floating configuration panel until the user expands it. Mobile
+  Settings uses a viewport-bounded floating panel and the existing full-screen Quick Chat layout
+  after expansion, with the same creation, tab, clarification, and deletion capabilities.
 - Pending clarification questions remain inline below a visible message history. The clarification
   region is scrollable, resizable on pointer-capable desktop and mobile devices, and collapsible so
   a user can recover conversation context without dismissing the question.
@@ -139,7 +142,9 @@ Sessions are sorted by last activity, newest first. Boot classification always d
 
 | State                                     | Trigger                                     | Result                                                                                                                                                                                                                             |
 | ----------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Closed, restored sessions available       | Quick Chat, Settings FAB, or command action | Modal opens on an eligible session or typed setup tab in the active workspace.                                                                                                                                                     |
+| Closed, restored sessions available       | Quick Chat or command action                | Modal opens on an eligible session or typed setup tab in the active workspace.                                                                                                                                                     |
+| Settings configuration panel closed       | Settings FAB                                | Floating panel opens on an eligible configuration session or configuration setup.                                                                                                                                                  |
+| Floating setup/session                    | Open in Quick Chat                          | Floating panel closes and the same setup/session becomes active in the large dialog without creating a task.                                                                                                                       |
 | Blank `chat` setup                        | Start succeeds                              | Placeholder is replaced by a persisted `chat` session.                                                                                                                                                                             |
 | Blank `config` setup                      | Prompt/profile submit succeeds              | The task session is seeded and the typed persisted tab opens. ACP prompts are delivered once after the chat subscription is ready; passthrough prompts are delivered once by the backend launch path before the terminal attaches. |
 | Persisted session open                    | Switch tab or close modal                   | Session remains persisted and restorable.                                                                                                                                                                                          |
@@ -192,8 +197,13 @@ deletion.
   opens Quick Chat, **THEN** both appear as tabs and the configuration tab has a visible and
   accessible configuration indicator.
 - **GIVEN** a configuration agent is selected in Settings, **WHEN** the user starts Configuration
-  Chat from the Settings FAB, **THEN** the large Quick Chat modal opens a configuration setup/session
-  and the created task retains config-mode MCP tools.
+  Chat from the Settings FAB, **THEN** a floating configuration setup/session opens and the created
+  task retains config-mode MCP tools.
+- **GIVEN** a floating configuration conversation, **WHEN** the user chooses Open in Quick Chat,
+  **THEN** the floating panel closes and the large dialog shows the same session, history, task, and
+  pending initial prompt.
+- **GIVEN** an ordinary Quick Chat setup, **WHEN** the user chooses Configuration chat, **THEN** the
+  modal switches to configuration setup without creating an ordinary chat task.
 - **GIVEN** any application route, **WHEN** the user chooses Configuration Chat from the Command
   Palette, **THEN** the same unified configuration setup/session opens in Quick Chat.
 - **GIVEN** a configuration setup tab, **WHEN** it renders, **THEN** it shows configuration copy,
@@ -241,7 +251,7 @@ deletion.
 
 - Redesigning the agent protocol, configuration MCP tools, or config-chat creation endpoint.
 - A new persistence table for UI tabs or duplicating task/session history in frontend storage.
-- A second expandable configuration popover or a second conversation renderer/tab store.
+- A separate configuration session store, message renderer, or backend conversation.
 - A general task/chat navigation redesign.
 - Repository context for configuration sessions.
 - A user-configurable ordinary-chat retention window or automatic expiration for config sessions.
