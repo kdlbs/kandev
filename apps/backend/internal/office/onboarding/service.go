@@ -693,7 +693,13 @@ func (s *OnboardingService) resolveProviderID(
 	if agent == nil || strings.TrimSpace(agent.Name) == "" {
 		return "", fmt.Errorf("provider %s has no logical name", agentID)
 	}
-	return routing.ProviderID(agent.Name), nil
+	providerID := routing.ProviderID(strings.TrimSpace(agent.Name))
+	for _, known := range routing.KnownProviders(nil) {
+		if providerID == known {
+			return providerID, nil
+		}
+	}
+	return "", fmt.Errorf("provider %s resolves to unsupported provider %q", agentID, providerID)
 }
 
 func applyTierProfileSeed(profile *routing.ProviderProfile, tier routing.Tier, model, profileID string) {

@@ -58,7 +58,7 @@ export function AgentRoutingCard({ agentId, initial }: Props) {
     }
   }, [initial, persistedOverrides]);
 
-  if (!workspace.config) {
+  if (!workspace.config?.enabled) {
     return null;
   }
 
@@ -132,9 +132,10 @@ function tierMissingMappingWarning(
   for (const providerId of order) {
     const profile = cfg.provider_profiles?.[providerId];
     if (!profile) continue;
-    if (profile.tier_map?.[tier]) return null;
+    const executionProfileIDs = profile.execution_profile_ids ?? profile.tier_profile_ids;
+    if (executionProfileIDs?.[tier]) return null;
   }
-  return `No provider in the effective order has the ${tier} tier mapped. Configure a model for ${tier} on at least one provider in Workspace → Provider routing.`;
+  return `No provider in the effective order has the ${tier} tier mapped. Select an execution profile for ${tier} on at least one provider in Workspace → Provider routing.`;
 }
 
 function Header() {

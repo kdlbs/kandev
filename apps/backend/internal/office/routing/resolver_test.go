@@ -45,13 +45,23 @@ func (f *resolverProfileStore) GetAgentProfile(
 }
 
 func (f *resolverProfileStore) ListAgents(context.Context) ([]*settingsmodels.Agent, error) {
-	return nil, nil
+	agents := make([]*settingsmodels.Agent, 0, len(f.agents))
+	for _, agent := range f.agents {
+		agents = append(agents, agent)
+	}
+	return agents, nil
 }
 
 func (f *resolverProfileStore) ListAgentProfiles(
-	context.Context, string,
+	_ context.Context, agentID string,
 ) ([]*settingsmodels.AgentProfile, error) {
-	return nil, nil
+	profiles := make([]*settingsmodels.AgentProfile, 0)
+	for _, profile := range f.profiles {
+		if profile.AgentID == agentID {
+			profiles = append(profiles, profile)
+		}
+	}
+	return profiles, nil
 }
 
 func (f *fakeRepo) GetWorkspaceRouting(
@@ -155,6 +165,7 @@ func TestResolveRoutingDisabled(t *testing.T) {
 func TestResolveValidatesLiveExecutionProfileAndDerivesModel(t *testing.T) {
 	cfg := twoProviderCfg()
 	cfg.ProviderOrder = []routing.ProviderID{"claude-acp"}
+	delete(cfg.ProviderProfiles, "codex-acp")
 	cfg.ProviderProfiles["claude-acp"] = routing.ProviderProfile{
 		ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "claude-sonnet-profile"},
 		TierMap:             routing.TierMap{Balanced: "stale-model"},
@@ -191,6 +202,67 @@ func TestResolveValidatesLiveExecutionProfileAndDerivesModel(t *testing.T) {
 	if _, err := r.Resolve(context.Background(), wsID,
 		agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{}); err == nil {
 		t.Fatal("expected rich Office identity to be rejected as an execution profile")
+	}
+}
+
+func TestResolveExecutionProfileMappingDerivesMissingModel(t *testing.T) {
+	cfg := twoProviderCfg()
+	cfg.ProviderOrder = []routing.ProviderID{"claude-acp"}
+	delete(cfg.ProviderProfiles, "codex-acp")
+	cfg.ProviderProfiles["claude-acp"] = routing.ProviderProfile{
+		ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "claude-sonnet-profile"},
+	}
+	store := &resolverProfileStore{
+		agents: map[string]*settingsmodels.Agent{
+			"claude-agent": {ID: "claude-agent", Name: "claude-acp"},
+		},
+		profiles: map[string]*settingsmodels.AgentProfile{
+			"claude-sonnet-profile": {
+				ID: "claude-sonnet-profile", AgentID: "claude-agent", Model: "sonnet-4.5",
+			},
+		},
+	}
+	r := newResolver(t, &fakeRepo{cfg: cfg})
+	r.SetExecutionProfileStore(store, nil)
+
+	res, err := r.Resolve(context.Background(), wsID,
+		agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(res.Candidates) != 1 || res.Candidates[0].Model != "sonnet-4.5" {
+		t.Fatalf("expected live execution profile candidate, got %+v", res.Candidates)
+	}
+}
+
+func TestResolveLegacyModelMappingFindsUniqueExecutionProfile(t *testing.T) {
+	cfg := twoProviderCfg()
+	cfg.ProviderOrder = []routing.ProviderID{"claude-acp"}
+	delete(cfg.ProviderProfiles, "codex-acp")
+	cfg.ProviderProfiles["claude-acp"] = routing.ProviderProfile{
+		TierMap: routing.TierMap{Balanced: "sonnet-4.5"},
+	}
+	store := &resolverProfileStore{
+		agents: map[string]*settingsmodels.Agent{
+			"claude-agent": {ID: "claude-agent", Name: "claude-acp"},
+		},
+		profiles: map[string]*settingsmodels.AgentProfile{
+			"claude-sonnet-profile": {
+				ID: "claude-sonnet-profile", AgentID: "claude-agent", Model: "sonnet-4.5",
+			},
+		},
+	}
+	r := newResolver(t, &fakeRepo{cfg: cfg})
+	r.SetExecutionProfileStore(store, nil)
+
+	res, err := r.Resolve(context.Background(), wsID,
+		agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(res.Candidates) != 1 ||
+		res.Candidates[0].ExecutionProfileID != "claude-sonnet-profile" {
+		t.Fatalf("expected migrated legacy mapping candidate, got %+v", res.Candidates)
 	}
 }
 

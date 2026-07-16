@@ -275,6 +275,9 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 			return
 		}
 	}
+	if execution.AgentProfileID == "" && prior != nil {
+		execution.AgentProfileID = prior.ExecutionProfileID
+	}
 
 	running := buildRunningFromExecution(execution, prior)
 	// Attach the host-local liveness handle for local/standalone rows. Kept out

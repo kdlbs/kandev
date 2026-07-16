@@ -22,6 +22,7 @@ func newTestRepo(t *testing.T) *sqlite.Repository {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
@@ -40,6 +41,7 @@ func TestInitSchema_AllTablesExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	defer func() { _ = db.Close() }()
 
 	_, err = sqlite.NewWithDB(db, db, nil)
@@ -100,6 +102,7 @@ func TestInitSchema_Idempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	defer func() { _ = db.Close() }()
 
 	// Create repo twice - should not error on second call
@@ -118,6 +121,7 @@ func TestInitSchema_ExecutionProfileRoutingColumnsExist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {
@@ -133,6 +137,7 @@ func TestInitSchema_ExecutionProfileRoutingColumnsReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, err := sqlite.NewWithDB(db, db, nil); err != nil {

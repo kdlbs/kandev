@@ -417,8 +417,8 @@ func checkTierPerReasonMapped(
 }
 
 // tierMappedOnAnyProvider reports whether at least one provider in
-// order has tier mapped to a model. Helper shared by the two override
-// checks above.
+// order has a launchable execution profile for the tier. Helper shared
+// by the two override checks above.
 func tierMappedOnAnyProvider(
 	tier Tier, order []ProviderID,
 	profiles map[ProviderID]ProviderProfile,
@@ -428,7 +428,7 @@ func tierMappedOnAnyProvider(
 		if !ok {
 			continue
 		}
-		if prof.TierMap.IsConfigured(tier) {
+		if prof.ExecutionProfileID(tier) != "" {
 			return true
 		}
 	}
@@ -542,11 +542,11 @@ func validateEnabledRules(cfg WorkspaceConfig) error {
 			})
 			continue
 		}
-		if !prof.TierMap.IsConfigured(cfg.DefaultTier) {
+		if prof.ExecutionProfileID(cfg.DefaultTier) == "" {
 			missingDefault = append(missingDefault, ValidationDetail{
 				ProviderID: p,
-				Field:      "tier_map." + string(cfg.DefaultTier),
-				Message:    "default tier has no model mapping",
+				Field:      "execution_profile_ids." + string(cfg.DefaultTier),
+				Message:    "default tier has no execution profile mapping",
 			})
 		}
 	}
@@ -560,7 +560,7 @@ func validateEnabledRules(cfg WorkspaceConfig) error {
 	if len(missingDefault) > 0 {
 		return &ValidationError{
 			Field:   "provider_profiles",
-			Message: "providers missing default-tier model mapping",
+			Message: "providers missing default-tier execution profile mapping",
 			Details: missingDefault,
 		}
 	}

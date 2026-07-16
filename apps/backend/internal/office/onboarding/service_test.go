@@ -122,6 +122,17 @@ type capturingAgentCreator struct {
 	agent *models.AgentInstance
 }
 
+func TestResolveProviderIDRejectsUnsupportedAgentName(t *testing.T) {
+	svc := &OnboardingService{sourceProfile: fakeSourceProfileReader{
+		agents: map[string]*settingsmodels.Agent{
+			"provider-db-id": {ID: "provider-db-id", Name: "custom-unknown-provider"},
+		},
+	}}
+	if _, err := svc.resolveProviderID(context.Background(), "provider-db-id"); err == nil {
+		t.Fatal("expected unsupported provider to be rejected")
+	}
+}
+
 func (c *capturingAgentCreator) CreateAgentInstance(_ context.Context, agent *models.AgentInstance) error {
 	c.agent = agent
 	return nil

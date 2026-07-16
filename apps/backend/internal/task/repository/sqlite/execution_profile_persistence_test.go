@@ -9,7 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-func TestExecutionProfilePersistenceModelsExposeDistinctIdentity(t *testing.T) {
+func TestExecutionProfileIDFieldsUseExpectedJSONTags(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {

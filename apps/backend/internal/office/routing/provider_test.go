@@ -169,6 +169,24 @@ func TestProvider_OfficeIdentityIsNotAnExecutionProfile(t *testing.T) {
 	}
 }
 
+func TestProvider_ExcludesProviderAgentsOwnedByAnotherWorkspace(t *testing.T) {
+	store := testExecutionProfiles()
+	otherWorkspace := "ws-2"
+	store.agents[0].WorkspaceID = &otherWorkspace
+	p, _ := newProviderTest(nil, nil)
+	p.SetExecutionProfileStore(store)
+
+	profiles, err := p.ListExecutionProfiles(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("list execution profiles: %v", err)
+	}
+	for _, profile := range profiles {
+		if profile.ProviderID == "codex-acp" {
+			t.Fatalf("cross-workspace provider profile leaked into catalogue: %+v", profile)
+		}
+	}
+}
+
 func TestProvider_UpdateConfigRejectsCrossWorkspaceAndWrongProvider(t *testing.T) {
 	tests := []struct {
 		name, profileID, providerID string
@@ -378,7 +396,10 @@ func TestProvider_PreviewAgentRoundTrips(t *testing.T) {
 		DefaultTier:   TierBalanced,
 		ProviderOrder: []ProviderID{"claude-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Balanced: "sonnet"}},
+			"claude-acp": {
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-sonnet"},
+				TierMap:             TierMap{Balanced: "sonnet"},
+			},
 		},
 	}
 	agents := []*models.AgentInstance{{ID: "a1", Name: "Alice", WorkspaceID: "ws-1"}}
@@ -460,7 +481,10 @@ func TestProvider_UpdateClearsParkedOnMaterialChange(t *testing.T) {
 		DefaultTier:   TierFrontier,
 		ProviderOrder: []ProviderID{"claude-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Frontier: "opus"}},
+			"claude-acp": {
+				ExecutionProfileIDs: ExecutionProfileIDs{Frontier: "claude-opus"},
+				TierMap:             TierMap{Frontier: "opus"},
+			},
 		},
 	}
 	if err := p.UpdateConfig(context.Background(), "ws-1", next); err != nil {
@@ -507,7 +531,10 @@ func TestProvider_UpdateDoesNotClearWhenConfigUnchanged(t *testing.T) {
 		DefaultTier:   TierBalanced,
 		ProviderOrder: []ProviderID{"claude-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Balanced: "sonnet"}},
+			"claude-acp": {
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-sonnet"},
+				TierMap:             TierMap{Balanced: "sonnet"},
+			},
 		},
 	}
 	p, repo := newProviderTest(prev, nil)
@@ -516,7 +543,10 @@ func TestProvider_UpdateDoesNotClearWhenConfigUnchanged(t *testing.T) {
 		DefaultTier:   TierBalanced,
 		ProviderOrder: []ProviderID{"claude-acp"},
 		ProviderProfiles: map[ProviderID]ProviderProfile{
-			"claude-acp": {TierMap: TierMap{Balanced: "sonnet"}},
+			"claude-acp": {
+				ExecutionProfileIDs: ExecutionProfileIDs{Balanced: "claude-sonnet"},
+				TierMap:             TierMap{Balanced: "sonnet"},
+			},
 		},
 	}
 	if err := p.UpdateConfig(context.Background(), "ws-1", next); err != nil {

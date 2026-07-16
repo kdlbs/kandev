@@ -172,6 +172,13 @@ func (r *Resolver) Resolve(
 	if cfg == nil || (!cfg.Enabled && len(cfg.ProviderOrder) == 0) {
 		return &Resolution{Enabled: false}, nil
 	}
+	if r.profiles != nil {
+		if _, err := normalizeProfileMappings(
+			ctx, workspaceID, cfg, r.profiles, r.registry,
+		); err != nil {
+			return nil, err
+		}
+	}
 	ov, err := ReadAgentOverrides(agent.Settings)
 	if err != nil {
 		return nil, fmt.Errorf("routing: load agent overrides: %w", err)
@@ -222,7 +229,7 @@ func (r *Resolver) evaluateProvider(
 	prof, ok := cfg.ProviderProfiles[pid]
 	model := prof.TierMap.Model(tier)
 	executionProfileID := prof.ExecutionProfileID(tier)
-	if !ok || model == "" || executionProfileID == "" {
+	if !ok || executionProfileID == "" || (r.profiles == nil && model == "") {
 		res.SkippedDegraded = append(res.SkippedDegraded, SkippedCandidate{
 			ProviderID: pid,
 			Reason:     SkipReasonMissingModelMapping,

@@ -543,7 +543,7 @@ There are no TTLs on agent rows, runtime rows, instructions, skills, run history
 
 - **GIVEN** the same Office agent later resolves from a Codex execution profile to a Claude execution profile, **WHEN** the new route launches, **THEN** the task and Office identity remain stable, Claude receives its own complete runtime configuration, and no Codex-native resume token is sent to Claude.
 
-- **GIVEN** an Office task assigned directly to an Office agent and no existing task session, **WHEN** the task session is prepared, **THEN** the assignee's canonical profile ID is used before the workspace default so the session can start.
+- **GIVEN** an Office task assigned directly to an Office agent and no existing task session, **WHEN** the task session is prepared, **THEN** the assignee's stable `agent_profile_id` is used before the workspace default so the session can start.
 
 - **GIVEN** a running CEO instance, **WHEN** the CEO determines a task requires a frontend specialist and no suitable worker exists, **THEN** the CEO submits a hire request for a new worker with appropriate skills, and the request appears in the user's inbox as a pending approval.
 

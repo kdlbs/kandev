@@ -55,8 +55,8 @@ type AgentRoutePreview struct {
 	Degraded                  bool                `json:"degraded"`
 }
 
-// ProviderModelPair is one (provider, model, tier) triple used to render
-// an agent's fallback chain.
+// ProviderModelPair is one concrete execution-profile route, including
+// its provider, model, and tier, used to render an agent's fallback chain.
 type ProviderModelPair struct {
 	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
 	ProviderID         string `json:"provider_id"`

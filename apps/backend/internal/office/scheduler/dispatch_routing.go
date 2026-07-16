@@ -245,7 +245,9 @@ func (ss *SchedulerService) tryCandidates(
 	var prev *routing.Candidate
 	for i := range res.Candidates {
 		candidate := res.Candidates[i]
-		candidateLaunch := continuationLaunchContext(launch, prior, candidate)
+		candidateLaunch := continuationLaunchContext(
+			launch, prior, run.RouteCycleBaselineSeq, candidate,
+		)
 		seq, err := ss.recordAttemptStart(ctx, run, candidate, res.RequestedTier)
 		if err != nil {
 			return false, nil, err
@@ -281,6 +283,15 @@ func (ss *SchedulerService) tryCandidates(
 		if fatal {
 			return false, nil, launchErr
 		}
+		prior = append(prior, models.RouteAttempt{
+			RunID:              run.ID,
+			Seq:                seq,
+			ExecutionProfileID: candidate.ExecutionProfileID,
+			ProviderID:         string(candidate.ProviderID),
+			Model:              candidate.Model,
+			Tier:               string(res.RequestedTier),
+			Outcome:            RouteAttemptOutcomeFailedProviderUnavail,
+		})
 		// Remember this candidate so the next loop iteration can record
 		// the fallback hop on success.
 		c := candidate
@@ -290,9 +301,10 @@ func (ss *SchedulerService) tryCandidates(
 }
 
 func continuationLaunchContext(
-	launch LaunchContext, prior []models.RouteAttempt, candidate routing.Candidate,
+	launch LaunchContext, prior []models.RouteAttempt, baseline int,
+	candidate routing.Candidate,
 ) LaunchContext {
-	previous, ok := latestFailedExecutionProfile(prior)
+	previous, ok := latestFailedExecutionProfile(prior, baseline)
 	if !ok || previous.ExecutionProfileID == "" ||
 		previous.ExecutionProfileID == candidate.ExecutionProfileID ||
 		strings.Contains(launch.Prompt, providerFallbackPromptMarker) {
@@ -309,8 +321,13 @@ func continuationLaunchContext(
 	return launch
 }
 
-func latestFailedExecutionProfile(prior []models.RouteAttempt) (models.RouteAttempt, bool) {
+func latestFailedExecutionProfile(
+	prior []models.RouteAttempt, baseline int,
+) (models.RouteAttempt, bool) {
 	for i := len(prior) - 1; i >= 0; i-- {
+		if prior[i].Seq <= baseline {
+			break
+		}
 		if prior[i].Outcome == RouteAttemptOutcomeFailedProviderUnavail {
 			return prior[i], true
 		}

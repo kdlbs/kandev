@@ -20,24 +20,25 @@ import (
 
 // fakeRoutingProvider is a hand-rolled stub for dashboard.RoutingProvider.
 type fakeRoutingProvider struct {
-	cfg               *routing.WorkspaceConfig
-	known             []routing.ProviderID
-	updateCfg         routing.WorkspaceConfig
-	updateErr         error
-	retryStatus       string
-	retryErr          error
-	healthRows        []models.ProviderHealth
-	preview           []routing.PreviewItem
-	previewAgent      *routing.PreviewItem
-	agentOverrides    routing.AgentOverrides
-	overridesErr      error
-	executionProfiles []routing.ExecutionProfileSummary
+	cfg                  *routing.WorkspaceConfig
+	known                []routing.ProviderID
+	updateCfg            routing.WorkspaceConfig
+	updateErr            error
+	retryStatus          string
+	retryErr             error
+	healthRows           []models.ProviderHealth
+	preview              []routing.PreviewItem
+	previewAgent         *routing.PreviewItem
+	agentOverrides       routing.AgentOverrides
+	overridesErr         error
+	executionProfiles    []routing.ExecutionProfileSummary
+	executionProfilesErr error
 }
 
 func (f *fakeRoutingProvider) ListExecutionProfiles(
 	_ context.Context, _ string,
 ) ([]routing.ExecutionProfileSummary, error) {
-	return f.executionProfiles, nil
+	return f.executionProfiles, f.executionProfilesErr
 }
 
 func (f *fakeRoutingProvider) GetConfig(_ context.Context, _ string) (*routing.WorkspaceConfig, []routing.ProviderID, error) {
@@ -121,6 +122,17 @@ func TestRouting_GetReturnsDefaultsWhenNoRow(t *testing.T) {
 	}
 	if len(resp.KnownProviders) == 0 {
 		t.Fatalf("known_providers should fall back to static allow-list")
+	}
+}
+
+func TestRouting_GetReturnsErrorWhenExecutionProfilesFail(t *testing.T) {
+	deps, fake := newRoutingTestDeps(t)
+	fake.executionProfilesErr = errors.New("profile catalogue unavailable")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/office/workspaces/ws-1/routing", nil)
+	rec := httptest.NewRecorder()
+	deps.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
 	}
 }
 

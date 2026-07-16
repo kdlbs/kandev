@@ -1,5 +1,6 @@
 "use client";
 
+import { useId } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
@@ -28,6 +29,7 @@ type Props = {
 };
 
 export function ProviderTierMapping(props: Props) {
+  const fieldsetId = useId();
   const available = profilesForProvider(props.executionProfiles, props.providerId);
   const selectedIDs = props.profile.execution_profile_ids ?? props.profile.tier_profile_ids ?? {};
 
@@ -44,10 +46,13 @@ export function ProviderTierMapping(props: Props) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {TIERS.map(({ key, label }) => {
           const value = selectedIDs[label] ?? UNMAPPED;
+          const selectId = `${fieldsetId}-${label}`;
           return (
             <div key={key} className="min-w-0">
               <div className="flex items-center gap-1 mb-1">
-                <Label className="text-xs uppercase">{label}</Label>
+                <Label htmlFor={selectId} className="text-xs uppercase">
+                  {label}
+                </Label>
                 {label === props.defaultTier && value === UNMAPPED && (
                   <Badge variant="destructive" className="text-[10px]">
                     Required
@@ -60,6 +65,7 @@ export function ProviderTierMapping(props: Props) {
                 disabled={props.disabled}
               >
                 <SelectTrigger
+                  id={selectId}
                   className="w-full cursor-pointer"
                   data-testid={`tier-profile-${props.providerId}-${label}`}
                 >
@@ -108,6 +114,8 @@ export function applyExecutionProfileSelection(
     tier_map: { ...profile.tier_map, [tier]: selected?.model },
     execution_profile_ids: { ...selectedIDs, [tier]: selected?.id },
     tier_profile_ids: undefined,
+    // Concrete execution profiles own CLI mode, flags, and environment.
+    // Clear conflicting legacy workspace-level copies on explicit selection.
     mode: undefined,
     flags: undefined,
     env: undefined,

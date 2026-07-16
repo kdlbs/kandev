@@ -311,14 +311,13 @@ func (m *mockRepository) CreateTaskSession(ctx context.Context, session *models.
 	m.mu.Lock()
 	m.createTaskSessionCalls = append(m.createTaskSessionCalls, session)
 	fn := m.createTaskSessionFunc
-	m.mu.Unlock()
-	if fn != nil {
-		return fn(ctx, session)
+	if fn == nil {
+		m.sessions[session.ID] = session
+		m.mu.Unlock()
+		return nil
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.sessions[session.ID] = session
-	return nil
+	m.mu.Unlock()
+	return fn(ctx, session)
 }
 
 func (m *mockRepository) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {

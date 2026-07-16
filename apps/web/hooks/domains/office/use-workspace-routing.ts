@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAppStore } from "@/components/state-provider";
 import {
   getWorkspaceRouting,
@@ -29,29 +29,41 @@ export function useWorkspaceRouting(workspaceName: string | null): UseWorkspaceR
   const setKnownProviders = useAppStore((s) => s.setKnownProviders);
   const [isLoading, setIsLoading] = useState(false);
   const [executionProfiles, setExecutionProfiles] = useState<ExecutionProfileSummary[]>([]);
+  const [profilesWorkspace, setProfilesWorkspace] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
 
   const refresh = useCallback(async () => {
     if (!workspaceName) return;
+    const version = ++requestVersion.current;
     setIsLoading(true);
     setError(null);
     try {
       const res = await getWorkspaceRouting(workspaceName);
+      if (version !== requestVersion.current) return;
       if (res.config) setWorkspaceRouting(workspaceName, res.config);
       if (Array.isArray(res.known_providers)) setKnownProviders(res.known_providers);
       setExecutionProfiles(Array.isArray(res.execution_profiles) ? res.execution_profiles : []);
+      setProfilesWorkspace(workspaceName);
     } catch (e) {
+      if (version !== requestVersion.current) return;
       setError(e instanceof Error ? e.message : "Failed to load routing config");
     } finally {
-      setIsLoading(false);
+      if (version === requestVersion.current) setIsLoading(false);
     }
   }, [workspaceName, setWorkspaceRouting, setKnownProviders]);
 
   useEffect(() => {
-    if (!workspaceName) return;
-    if (config !== undefined) return;
+    if (!workspaceName) {
+      requestVersion.current += 1;
+      setExecutionProfiles([]);
+      setProfilesWorkspace(null);
+      setIsLoading(false);
+      return;
+    }
+    if (profilesWorkspace === workspaceName) return;
     void refresh();
-  }, [workspaceName, config, refresh]);
+  }, [workspaceName, profilesWorkspace, refresh]);
 
   const update = useCallback(
     async (cfg: WorkspaceRouting) => {

@@ -82,6 +82,7 @@ func newTestRepoSched(t *testing.T) *officesqlite.Repository {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
 		t.Fatalf("settings store: %v", err)
@@ -393,6 +394,9 @@ func TestDispatch_FirstQuotaSecondSucceeds(t *testing.T) {
 	if attempts[1].Outcome != scheduler.RouteAttemptOutcomeLaunched {
 		t.Errorf("second outcome = %q, want launched", attempts[1].Outcome)
 	}
+	if prompt := starter.lastCall().launch.Prompt; !strings.Contains(prompt, "[Kandev provider fallback]") {
+		t.Fatalf("fallback launch missing continuation prompt: %q", prompt)
+	}
 }
 
 func TestDispatch_AllAutoRetryableParksRun(t *testing.T) {
@@ -572,13 +576,14 @@ func TestDispatch_LiftedRunIgnoresPriorCycleExclusions(t *testing.T) {
 			t.Fatalf("seed seq bump: %v", err)
 		}
 		if err := repo.AppendRouteAttempt(context.Background(), &officemodels.RouteAttempt{
-			RunID:      run.ID,
-			Seq:        seq,
-			ProviderID: p,
-			Model:      p + "-bal",
-			Tier:       "balanced",
-			Outcome:    scheduler.RouteAttemptOutcomeFailedProviderUnavail,
-			StartedAt:  time.Now().UTC(),
+			RunID:              run.ID,
+			Seq:                seq,
+			ExecutionProfileID: p + "-profile",
+			ProviderID:         p,
+			Model:              p + "-bal",
+			Tier:               "balanced",
+			Outcome:            scheduler.RouteAttemptOutcomeFailedProviderUnavail,
+			StartedAt:          time.Now().UTC(),
 		}); err != nil {
 			t.Fatalf("seed prior attempt: %v", err)
 		}
@@ -610,6 +615,9 @@ func TestDispatch_LiftedRunIgnoresPriorCycleExclusions(t *testing.T) {
 	// erased the cycle-1 exclusion list.
 	if got := starter.lastCall().route.ProviderID; got != "claude-acp" {
 		t.Errorf("expected claude-acp (cycle 2 fresh start); got %s", got)
+	}
+	if prompt := starter.lastCall().launch.Prompt; strings.Contains(prompt, "[Kandev provider fallback]") {
+		t.Fatalf("fresh route cycle must not inject continuation prompt: %q", prompt)
 	}
 }
 

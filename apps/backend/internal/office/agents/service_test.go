@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -18,6 +19,16 @@ import (
 )
 
 type testActivityLogger struct{}
+
+type failingProfileStore struct{}
+
+func (f failingProfileStore) GetAgentProfile(context.Context, string) (*models.AgentInstance, error) {
+	return nil, errors.New("profile unavailable")
+}
+
+func (f failingProfileStore) UpdateAgentProfile(context.Context, *models.AgentInstance) error {
+	return errors.New("profile update failed")
+}
 
 func (t *testActivityLogger) LogActivity(_ context.Context, _, _, _, _, _, _, _ string) {}
 func (t *testActivityLogger) LogActivityWithRun(_ context.Context, _, _, _, _, _, _, _, _, _ string) {
@@ -52,6 +63,7 @@ func newTestAgentService(t *testing.T) (*AgentService, *sqlite.Repository) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
 	if _, _, err := settingsstore.Provide(db, db, nil); err != nil {
@@ -74,6 +86,7 @@ func newTestAgentServiceWithProfileStore(
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = db.Close() })
 
 	profileStore, _, err := settingsstore.Provide(db, db, nil)
@@ -87,6 +100,21 @@ func newTestAgentServiceWithProfileStore(
 	svc := NewAgentService(repo, logger.Default(), &testActivityLogger{})
 	svc.SetProfileStore(profileStore)
 	return svc, repo, profileStore
+}
+
+func TestCreateAgentInstance_RollsBackWhenCanonicalProfileUpdateFails(t *testing.T) {
+	svc, _ := newTestAgentService(t)
+	svc.SetProfileStore(failingProfileStore{})
+	agent := &models.AgentInstance{
+		WorkspaceID: "ws-1", Name: "CTO", Role: models.AgentRoleSpecialist,
+	}
+
+	if err := svc.CreateAgentInstance(context.Background(), agent); err == nil {
+		t.Fatal("expected canonical profile update failure")
+	}
+	if _, err := svc.GetAgentFromConfig(context.Background(), agent.Name); err == nil {
+		t.Fatal("agent row survived failed canonical profile update")
+	}
 }
 
 func TestUpdateAgent_ProfileSelectionDirectsClientsToRouting(t *testing.T) {

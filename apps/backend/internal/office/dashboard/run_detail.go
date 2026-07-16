@@ -346,6 +346,9 @@ func runHasRoutingSnapshot(run *models.Run) bool {
 	if run.LogicalProviderOrder != nil && *run.LogicalProviderOrder != "" {
 		return true
 	}
+	if run.ResolvedExecutionProfileID != nil && *run.ResolvedExecutionProfileID != "" {
+		return true
+	}
 	if run.ResolvedProviderID != nil && *run.ResolvedProviderID != "" {
 		return true
 	}

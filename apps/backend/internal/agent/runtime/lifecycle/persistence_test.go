@@ -12,7 +12,17 @@ import (
 )
 
 type captureExecutorRunningWriter struct {
+	prior   *models.ExecutorRunning
 	running *models.ExecutorRunning
+}
+
+func (w *captureExecutorRunningWriter) GetExecutorRunningBySessionID(
+	context.Context, string,
+) (*models.ExecutorRunning, error) {
+	if w.prior == nil {
+		return nil, models.ErrExecutorRunningNotFound
+	}
+	return w.prior, nil
 }
 
 func (w *captureExecutorRunningWriter) UpsertExecutorRunning(_ context.Context, running *models.ExecutorRunning) error {
@@ -74,6 +84,32 @@ func TestBuildRunningFromExecutionBindsResumeTokenToExecutionProfile(t *testing.
 	}
 	if running.ResumeToken != "" || running.LastMessageUUID != "" {
 		t.Fatalf("cross-profile resume state leaked: %+v", running)
+	}
+}
+
+func TestPersistExecutorRunningRestoresRecoveredExecutionProfile(t *testing.T) {
+	writer := &captureExecutorRunningWriter{prior: &models.ExecutorRunning{
+		ExecutionProfileID: "claude-profile",
+		ResumeToken:        "claude-session",
+		LastMessageUUID:    "last-message",
+	}}
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(writer)
+	execution := &AgentExecution{
+		ID: "exec-recovered", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning,
+	}
+
+	mgr.persistExecutorRunning(context.Background(), execution)
+
+	if execution.AgentProfileID != "claude-profile" {
+		t.Fatalf("recovered AgentProfileID = %q, want persisted execution profile", execution.AgentProfileID)
+	}
+	if writer.running == nil || writer.running.ExecutionProfileID != "claude-profile" {
+		t.Fatalf("persisted execution profile was cleared: %+v", writer.running)
+	}
+	if writer.running.ResumeToken != "claude-session" || writer.running.LastMessageUUID != "last-message" {
+		t.Fatalf("recovered resume state was cleared: %+v", writer.running)
 	}
 }
 

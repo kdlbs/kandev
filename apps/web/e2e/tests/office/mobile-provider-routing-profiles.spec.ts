@@ -3,7 +3,7 @@ import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-asserti
 import { balancedExecutionProfileRouting } from "../../helpers/office-routing";
 
 test.describe("Office execution profile routing on mobile", () => {
-  test("keeps the first-provider profile selector usable with fallback disabled", async ({
+  test("keeps the first-provider profile selector usable with routing disabled", async ({
     testPage,
     backend,
     apiClient,

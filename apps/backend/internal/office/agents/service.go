@@ -500,6 +500,12 @@ func (s *AgentService) persistAgent(ctx context.Context, agent *models.AgentInst
 	}
 	if s.profileStore != nil {
 		if err := s.profileStore.UpdateAgentProfile(ctx, agent); err != nil {
+			if rollbackErr := s.repo.DeleteAgentInstance(ctx, agent.ID); rollbackErr != nil {
+				return fmt.Errorf(
+					"persist agent runtime configuration: %w (rollback failed: %v)",
+					err, rollbackErr,
+				)
+			}
 			return fmt.Errorf("persist agent runtime configuration: %w", err)
 		}
 	}

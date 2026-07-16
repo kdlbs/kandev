@@ -529,7 +529,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if running.AgentExecutionID != "" {
 			if err := e.agentManager.StopAgentWithReason(
 				ctx, running.AgentExecutionID, "execution profile changed", true,
-			); err != nil {
+			); err != nil && !errors.Is(err, lifecycle.ErrExecutionNotFound) {
 				return nil, fmt.Errorf("stop previous execution profile: %w", err)
 			}
 		}
@@ -673,7 +673,8 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 }
 
 func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID string) string {
-	if running == nil || profileID == "" || running.ExecutionProfileID != profileID {
+	if running == nil || profileID == "" ||
+		(running.ExecutionProfileID != "" && running.ExecutionProfileID != profileID) {
 		return ""
 	}
 	return running.ResumeToken

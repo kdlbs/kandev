@@ -202,7 +202,14 @@ func (p *Provider) UpdateConfig(
 func (p *Provider) normalizeProfileMappings(
 	ctx context.Context, workspaceID string, cfg *WorkspaceConfig,
 ) (bool, error) {
-	catalog, err := p.executionProfileCatalog(ctx, workspaceID)
+	return normalizeProfileMappings(ctx, workspaceID, cfg, p.profiles, p.registry)
+}
+
+func normalizeProfileMappings(
+	ctx context.Context, workspaceID string, cfg *WorkspaceConfig,
+	profiles ExecutionProfileStore, reg *registry.Registry,
+) (bool, error) {
+	catalog, err := executionProfileCatalog(ctx, workspaceID, profiles, reg)
 	if err != nil {
 		return false, fmt.Errorf("routing: list execution profiles: %w", err)
 	}
@@ -251,17 +258,26 @@ func (p *Provider) normalizeProfileMappings(
 func (p *Provider) executionProfileCatalog(
 	ctx context.Context, workspaceID string,
 ) ([]ExecutionProfileSummary, error) {
-	agents, err := p.profiles.ListAgents(ctx)
+	return executionProfileCatalog(ctx, workspaceID, p.profiles, p.registry)
+}
+
+func executionProfileCatalog(
+	ctx context.Context, workspaceID string,
+	profiles ExecutionProfileStore, reg *registry.Registry,
+) ([]ExecutionProfileSummary, error) {
+	agents, err := profiles.ListAgents(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]ExecutionProfileSummary, 0)
 	for _, agent := range agents {
-		profiles, err := p.executionProfilesForAgent(ctx, workspaceID, agent)
+		agentProfiles, err := executionProfilesForAgent(
+			ctx, workspaceID, profiles, reg, agent,
+		)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, profiles...)
+		out = append(out, agentProfiles...)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].ProviderID != out[j].ProviderID {
@@ -278,20 +294,23 @@ func (p *Provider) executionProfileCatalog(
 func (p *Provider) executionProfilesForAgent(
 	ctx context.Context, workspaceID string, agent *settingsmodels.Agent,
 ) ([]ExecutionProfileSummary, error) {
-	if agent == nil || agent.Name == "" {
+	return executionProfilesForAgent(ctx, workspaceID, p.profiles, p.registry, agent)
+}
+
+func executionProfilesForAgent(
+	ctx context.Context, workspaceID string,
+	profiles ExecutionProfileStore, reg *registry.Registry,
+	agent *settingsmodels.Agent,
+) ([]ExecutionProfileSummary, error) {
+	if !executionProviderAgentVisible(agent, workspaceID, reg) {
 		return nil, nil
 	}
-	if p.registry != nil {
-		if _, ok := p.registry.Get(agent.Name); !ok {
-			return nil, nil
-		}
-	}
-	profiles, err := p.profiles.ListAgentProfiles(ctx, agent.ID)
+	agentProfiles, err := profiles.ListAgentProfiles(ctx, agent.ID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ExecutionProfileSummary, 0, len(profiles))
-	for _, profile := range profiles {
+	out := make([]ExecutionProfileSummary, 0, len(agentProfiles))
+	for _, profile := range agentProfiles {
 		if profile == nil || profile.DeletedAt != nil || profile.Model == "" || profile.Role != "" {
 			continue
 		}
@@ -304,6 +323,22 @@ func (p *Provider) executionProfilesForAgent(
 		})
 	}
 	return out, nil
+}
+
+func executionProviderAgentVisible(
+	agent *settingsmodels.Agent, workspaceID string, reg *registry.Registry,
+) bool {
+	if agent == nil || agent.Name == "" {
+		return false
+	}
+	if agent.WorkspaceID != nil && *agent.WorkspaceID != "" && *agent.WorkspaceID != workspaceID {
+		return false
+	}
+	if reg == nil {
+		return true
+	}
+	_, ok := reg.Get(agent.Name)
+	return ok
 }
 
 func matchingLegacyProfiles(

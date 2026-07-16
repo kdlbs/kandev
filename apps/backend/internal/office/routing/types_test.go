@@ -101,7 +101,10 @@ func TestValidateWorkspaceConfig(t *testing.T) {
 				DefaultTier:   routing.TierBalanced,
 				ProviderOrder: []routing.ProviderID{"claude-acp"},
 				ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-					"claude-acp": {TierMap: routing.TierMap{Balanced: "sonnet"}},
+					"claude-acp": {
+						ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "claude-sonnet"},
+						TierMap:             routing.TierMap{Balanced: "sonnet"},
+					},
 				},
 			},
 		},
@@ -163,7 +166,10 @@ func TestValidateWorkspaceConfig(t *testing.T) {
 				DefaultTier:   routing.TierBalanced,
 				ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 				ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-					"claude-acp": {TierMap: routing.TierMap{Balanced: "sonnet"}},
+					"claude-acp": {
+						ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "claude-sonnet"},
+						TierMap:             routing.TierMap{Balanced: "sonnet"},
+					},
 				},
 			},
 			wantErr: "no profile",
@@ -175,8 +181,14 @@ func TestValidateWorkspaceConfig(t *testing.T) {
 				DefaultTier:   routing.TierFrontier,
 				ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 				ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-					"claude-acp": {TierMap: routing.TierMap{Frontier: "opus"}},
-					"codex-acp":  {TierMap: routing.TierMap{Balanced: "gpt-5.4"}},
+					"claude-acp": {
+						ExecutionProfileIDs: routing.ExecutionProfileIDs{Frontier: "claude-opus"},
+						TierMap:             routing.TierMap{Frontier: "opus"},
+					},
+					"codex-acp": {
+						ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "codex-balanced"},
+						TierMap:             routing.TierMap{Balanced: "gpt-5.4"},
+					},
 				},
 			},
 			wantErr: "default-tier",
@@ -290,8 +302,16 @@ func TestValidateAgentOverridesAgainstWorkspace(t *testing.T) {
 		DefaultTier:   routing.TierBalanced,
 		ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-			"claude-acp": {TierMap: routing.TierMap{Frontier: "opus", Balanced: "sonnet"}},
-			"codex-acp":  {TierMap: routing.TierMap{Balanced: "gpt-5"}},
+			"claude-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{
+					Frontier: "claude-opus", Balanced: "claude-sonnet",
+				},
+				TierMap: routing.TierMap{Frontier: "opus", Balanced: "sonnet"},
+			},
+			"codex-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "codex-balanced"},
+				TierMap:             routing.TierMap{Balanced: "gpt-5"},
+			},
 		},
 	}
 	balancedOnly := &routing.WorkspaceConfig{
@@ -299,8 +319,14 @@ func TestValidateAgentOverridesAgainstWorkspace(t *testing.T) {
 		DefaultTier:   routing.TierBalanced,
 		ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-			"claude-acp": {TierMap: routing.TierMap{Balanced: "sonnet"}},
-			"codex-acp":  {TierMap: routing.TierMap{Balanced: "gpt-5"}},
+			"claude-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "claude-sonnet"},
+				TierMap:             routing.TierMap{Balanced: "sonnet"},
+			},
+			"codex-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "codex-balanced"},
+				TierMap:             routing.TierMap{Balanced: "gpt-5"},
+			},
 		},
 	}
 

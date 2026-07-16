@@ -110,7 +110,12 @@ func TestUpdateAgent_AcceptsTierOverrideWhenMapped(t *testing.T) {
 		DefaultTier:   routing.TierBalanced,
 		ProviderOrder: []routing.ProviderID{"claude-acp"},
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
-			"claude-acp": {TierMap: routing.TierMap{Frontier: "opus", Balanced: "sonnet"}},
+			"claude-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{
+					Frontier: "claude-opus", Balanced: "claude-sonnet",
+				},
+				TierMap: routing.TierMap{Frontier: "opus", Balanced: "sonnet"},
+			},
 		},
 	}
 	if err := svc.repo.UpsertWorkspaceRouting(ctx, "ws-1", cfg); err != nil {
