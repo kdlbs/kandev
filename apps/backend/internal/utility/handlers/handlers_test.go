@@ -362,11 +362,11 @@ func TestInferenceAgentDTOFromCapsPreservesConfigOptionDescriptions(t *testing.T
 		t.Fatalf("unmarshal config options: %v", err)
 	}
 	if got := payload[0]["description"]; got != "Controls reasoning depth." {
-		t.Errorf("option description = %#v, want provider description", got)
+		t.Errorf("option description = %#v, want %q", got, "Controls reasoning depth.")
 	}
 	values := payload[0]["options"].([]any)
 	if got := values[0].(map[string]any)["description"]; got != "More thorough reasoning." {
-		t.Errorf("value description = %#v, want provider description", got)
+		t.Errorf("value description = %#v, want %q", got, "More thorough reasoning.")
 	}
 }
 
