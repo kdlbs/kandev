@@ -10,9 +10,10 @@ if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
 fi
 
 case "$platform" in
-  macos-aarch64 | macos-x86_64 | windows-x86_64 | linux-x86_64 | linux-aarch64) ;;
+  macos-arm64 | macos-x64 | linux-x64 | linux-arm64 | windows-x64) ;;
   *)
     echo "Unsupported updater platform: $platform" >&2
+    echo "Expected one of: macos-arm64, macos-x64, linux-x64, linux-arm64, windows-x64" >&2
     exit 1
     ;;
 esac

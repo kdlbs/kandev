@@ -81,6 +81,24 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn("if: ${{ !inputs.dry_run", block)
             self.assertNotIn("inputs.backfill_tag == ''", block)
 
+    def test_updater_signing_validation_uses_workflow_control_revision(self) -> None:
+        build_desktop = job_block("build-desktop")
+        self.assertIn("ref: ${{ needs.prepare.outputs.ref }}", build_desktop)
+
+        detect = step_block("Detect Tauri updater signing input")
+        self.assertIn("gh api", detect)
+        self.assertIn("$RUNNER_TEMP/updater-signing-ready.sh", detect)
+        self.assertIn(
+            "scripts/release/updater-signing-ready.sh?ref=${{ github.workflow_sha }}",
+            detect,
+        )
+        self.assertLess(
+            detect.index('if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]'),
+            detect.index("gh api"),
+        )
+        self.assertIn('bash "$helper"', detect)
+        self.assertNotIn("bash scripts/release/updater-signing-ready.sh", detect)
+
     def test_macos_dmg_build_has_retry_timeout_and_diagnostics(self) -> None:
         build = step_block("Build Tauri desktop app")
         self.assertIn("timeout-minutes: 70", build)

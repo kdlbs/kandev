@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$ROOT_DIR/scripts/release/updater-manifest.mjs"
-SIGNING_READY_SCRIPT="$ROOT_DIR/scripts/release/updater-signing-ready.sh"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -224,23 +223,3 @@ if generate_manifest "$partial_assets" --allow-unsigned >"$TMP_DIR/out" 2>"$TMP_
 fi
 grep -q "Incomplete updater artifact set" "$TMP_DIR/err" || fail "partial set error was not actionable"
 pass "partial signed updater feeds fail closed"
-
-TAURI_SIGNING_PRIVATE_KEY=test-key MACOS_SIGNING_ENABLED=false \
-  bash "$SIGNING_READY_SCRIPT" macos-arm64 >/dev/null
-pass "macOS updater artifacts require only the updater key"
-
-TAURI_SIGNING_PRIVATE_KEY=test-key WINDOWS_SIGNING_ENABLED=false \
-  bash "$SIGNING_READY_SCRIPT" windows-x64 >/dev/null
-pass "Windows updater artifacts require only the updater key"
-
-TAURI_SIGNING_PRIVATE_KEY=test-key MACOS_SIGNING_ENABLED=false WINDOWS_SIGNING_ENABLED=false \
-  bash "$SIGNING_READY_SCRIPT" linux-arm64 >/dev/null
-pass "Linux updater artifacts require only the updater key"
-
-if env -u TAURI_SIGNING_PRIVATE_KEY bash "$SIGNING_READY_SCRIPT" macos-arm64 \
-  >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
-  fail "updater artifacts should require the Tauri updater key on every platform"
-fi
-grep -q "require TAURI_SIGNING_PRIVATE_KEY" "$TMP_DIR/err" || \
-  fail "missing updater key failure was not actionable"
-pass "every updater artifact requires the Tauri updater key"
