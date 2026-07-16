@@ -33,13 +33,13 @@ func TestPoller_SyncsDueConfigsOnTick(t *testing.T) {
 		// No sync before the first tick: the loop waits a full interval so
 		// boot doesn't hammer the GitHub API.
 		synctest.Wait()
-		assert.Empty(t, applier.calls)
+		assert.Zero(t, applier.callCount())
 
 		time.Sleep(PollInterval + time.Second)
 		synctest.Wait()
 		p.Stop()
 
-		require.Len(t, applier.calls, 1)
+		require.Equal(t, 1, applier.callCount())
 		cfg, err := svc.GetConfigForWorkspace(context.Background(), "ws-1")
 		require.NoError(t, err)
 		assert.True(t, cfg.LastOk)

@@ -2,6 +2,7 @@ package workflowsync
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -18,13 +19,18 @@ type fakeClients struct {
 
 func (f fakeClients) Client() github.Client { return f.client }
 
+// fakeApplier is mutex-guarded because the poller invokes it from its own
+// goroutine while tests assert on call counts (-race catches unguarded use).
 type fakeApplier struct {
+	mu       sync.Mutex
 	calls    [][]workflowservice.SyncFileExport
 	result   *workflowservice.SyncApplyResult
 	released []string
 }
 
 func (f *fakeApplier) ApplySyncedWorkflows(_ context.Context, _ string, files []workflowservice.SyncFileExport) (*workflowservice.SyncApplyResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, files)
 	if f.result != nil {
 		return f.result, nil
@@ -33,8 +39,16 @@ func (f *fakeApplier) ApplySyncedWorkflows(_ context.Context, _ string, files []
 }
 
 func (f *fakeApplier) ReleaseSyncedWorkflows(_ context.Context, workspaceID string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.released = append(f.released, workspaceID)
 	return []string{"Dev Flow"}, nil
+}
+
+func (f *fakeApplier) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.calls)
 }
 
 const validExportYAML = `version: 1

@@ -43,7 +43,10 @@ type Service struct {
 	logger  *logger.Logger
 	// locks serializes syncs and config mutations per workspace so a force
 	// sync cannot interleave with a config delete/replace and apply stale
-	// definitions (or re-stamp workflows that were just released).
+	// definitions (or re-stamp workflows that were just released). The lock
+	// is deliberately held across the GitHub fetch too: a config change or
+	// delete for that workspace waits (bounded by the HTTP client timeout)
+	// rather than racing an in-flight apply.
 	locks sync.Map // workspaceID → *sync.Mutex
 }
 
