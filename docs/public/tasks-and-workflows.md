@@ -21,9 +21,6 @@ A task is the unit of work. A workflow is the ordered process that task follows.
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
 
-> [!EXPERIMENTAL]
-> Office is in progress and feature-flagged. Its persistent agents, arbitrary-depth task trees, blocker and label properties, named task documents, reviewer/approver quorum, routines, and budgets are not stable features of the regular Kanban task experience.
-
 ## Prepare a workspace
 
 A new workspace created by a user does not automatically receive a workflow.
@@ -194,7 +191,10 @@ Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_
 
 Revision history is not an immutable record of every autosave. Consecutive writes from the same author name and author kind coalesce into the latest revision for five minutes by default. Operators can set `KANDEV_PLAN_COALESCE_WINDOW_MS`; `0` disables coalescing, while an invalid or negative value falls back to five minutes.
 
-### Current availability of documents, labels, and blockers
+## Office documents, labels, and blockers
+
+> [!EXPERIMENTAL]
+> Office is feature-flagged, disabled in the production profile by default, and still in progress. Its named documents, labels, and blocker controls are not stable regular-Kanban features.
 
 | Capability | Regular Kanban | Office |
 |---|---|---|

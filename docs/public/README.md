@@ -34,15 +34,15 @@ The docs header renders a visible status callout from that frontmatter. To invok
 Use a section-level indicator when a stable guide contains one experimental capability. Keep this source syntax as Markdown so older renderers and GitHub still show an explicit callout; the publication layer upgrades it to the styled status component:
 
 ```markdown
-## Coordinate work
-
-Use named sessions for parallel work that shares one task environment.
+## Office dependencies
 
 > [!EXPERIMENTAL]
-> Office is disabled by default and its public workflow is not stable yet.
+> Office is feature-flagged and its dependency editor is not stable yet.
+
+When Office is enabled, it can record blocked-by relationships between tasks. Use parent/child structure and workflow gates for the supported regular-Kanban path.
 ```
 
-Place the indicator inside the substantive section it qualifies and explain the enabling condition, current limit, and supported alternative. Do not create a standalone status section whose only content is the warning. The publication pipeline converts the callout to `FeatureStatus` and opts the generated page into MDX automatically.
+Place the indicator immediately after a descriptive heading that names the experimental capability, then follow it with the instructions or behavior it qualifies. Explain the enabling condition, current limit, and supported alternative. Do not drop a warning between otherwise stable paragraphs or create a standalone status section whose only content is the warning. The publication pipeline converts the callout to `FeatureStatus` and opts the generated page into MDX automatically.
 
 ## Add a page
 

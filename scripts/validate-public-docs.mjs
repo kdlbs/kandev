@@ -29,7 +29,7 @@ export async function validatePublicDocs(docsDir = defaultDocsDir) {
 
     assertFrontmatter(file, markdown);
     assertDocumentStructure(file, markdown);
-    assertExperimentalSectionContent(file, markdown);
+    assertExperimentalCalloutPlacement(file, markdown);
 
     const slug = file.replace(/\.mdx?$/, "").replace(/\/index$/, "");
     const existing = pagesBySlug.get(slug);
@@ -837,40 +837,55 @@ function assertDocumentStructure(file, markdown) {
 }
 
 /**
- * Prevent a status heading from existing only to contain an experimental
- * warning. Experimental context belongs inside the substantive section it
- * qualifies, unless the section also explains the feature itself.
+ * Keep experimental callouts attached to an explicit feature section.
+ * A section-level indicator is the first content under its heading, followed
+ * by the documentation it qualifies.
  *
  * @param {string} file Relative page path used in validation errors.
  * @param {string} markdown Page source.
  * @returns {void}
  */
-function assertExperimentalSectionContent(file, markdown) {
+function assertExperimentalCalloutPlacement(file, markdown) {
   const source = stripMarkdownCode(markdown);
   const headings = [...source.matchAll(/^(#{2,6})\s+([^\n]+?)\s*$/gm)];
+  const callouts = [...source.matchAll(/^>\s*\[!EXPERIMENTAL\]\s*$/gim)];
 
-  for (const [index, heading] of headings.entries()) {
+  for (const callout of callouts) {
+    const headingIndex = headings.findLastIndex(
+      (candidate) => candidate.index < callout.index,
+    );
+    const heading = headings[headingIndex];
+    if (
+      !heading ||
+      source
+        .slice(heading.index + heading[0].length, callout.index)
+        .trim()
+    ) {
+      throw new Error(
+        `${file} experimental callouts must immediately follow a descriptive heading`,
+      );
+    }
+
     const title = heading[2].trim();
-    if (!/\bstatus$/i.test(title)) continue;
-
     const level = heading[1].length;
-    const sectionStart = heading.index + heading[0].length;
     const nextHeading = headings
-      .slice(index + 1)
+      .slice(headingIndex + 1)
       .find((candidate) => candidate[1].length <= level);
     const sectionEnd = nextHeading?.index ?? source.length;
-    const section = source.slice(sectionStart, sectionEnd);
-    if (!/^>\s*\[!EXPERIMENTAL\]\s*$/im.test(section)) continue;
-
-    const withoutCallout = section
-      .replace(
-        /^>\s*\[!EXPERIMENTAL\]\s*\r?\n(?:^>.*(?:\r?\n|$))*/gim,
-        "",
+    const calloutBlock = source
+      .slice(callout.index)
+      .match(
+        /^>\s*\[!EXPERIMENTAL\]\s*\r?\n(?:^>.*(?:\r?\n|$))*/im,
+      )?.[0];
+    const sectionContent = source
+      .slice(
+        callout.index + (calloutBlock?.length ?? callout[0].length),
+        sectionEnd,
       )
       .trim();
-    if (!withoutCallout) {
+    if (!sectionContent) {
       throw new Error(
-        `${file} has a warning-only experimental status section: ${title}`,
+        `${file} has an experimental callout without substantive section content: ${title}`,
       );
     }
   }

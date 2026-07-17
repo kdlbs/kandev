@@ -322,29 +322,43 @@ test("accepts experimental page status frontmatter", async () => {
   await assert.doesNotReject(validatePublicDocs(dir));
 });
 
-test("rejects an experimental warning as the only content in a status section", async () => {
+test("rejects an experimental callout with no substantive section content", async () => {
   const dir = await createDocs(
     {
-      "index.md": `${validPage}\n## Office status\n\n> [!EXPERIMENTAL]\n> Office is disabled by default.\n`,
+      "index.md": `${validPage}\n## Office dependencies\n\n> [!EXPERIMENTAL]\n> Office is disabled by default.\n`,
     },
     { pages: ["index"] },
   );
 
   await assert.rejects(
     validatePublicDocs(dir),
-    /index.md has a warning-only experimental status section: Office status/,
+    /index.md has an experimental callout without substantive section content: Office dependencies/,
   );
 });
 
-test("accepts an experimental status section with substantive content", async () => {
+test("accepts a feature-specific experimental section with substantive content", async () => {
   const dir = await createDocs(
     {
-      "index.md": `${validPage}\n## Office status\n\n> [!EXPERIMENTAL]\n> Office is disabled by default.\n\nUse workflow approval steps for the supported human-gated path.\n`,
+      "index.md": `${validPage}\n## Office dependencies\n\n> [!EXPERIMENTAL]\n> Office is disabled by default.\n\nUse workflow approval steps for the supported human-gated path.\n`,
     },
     { pages: ["index"] },
   );
 
   await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("rejects an experimental callout dropped after unrelated section content", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": `${validPage}\n## Configure workflows\n\nRegular workflows support human review gates.\n\n> [!EXPERIMENTAL]\n> Office is disabled by default.\n\nUse workflow approval steps for stable human gates.\n`,
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md experimental callouts must immediately follow a descriptive heading/,
+  );
 });
 
 test("rejects published pages without title and description frontmatter", async () => {

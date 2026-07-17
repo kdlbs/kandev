@@ -18,9 +18,6 @@ Kandev can coordinate several agents without turning every unit of work into a s
 
 Shared files make handoff cheap but allow concurrent edits to collide. Separate environments isolate file state, but only the executor determines whether host processes and credentials are also isolated.
 
-> [!EXPERIMENTAL]
-> Office is in progress and feature-flagged. Persistent coordinator teams, arbitrary-depth task trees, dependency properties, labels, named documents, reviewer/approver quorum, routines, and budgets are not stable regular-Kanban capabilities.
-
 ## Run parallel sessions in one task
 
 Use an additional session when agents need the same task, repository attachments, and materialized environment.
@@ -195,11 +192,14 @@ The coordinator has only the tools, filesystem access, credentials, and permissi
 
 A human-led flow uses the same primitives but keeps **Do nothing** transitions at planning, review, or release steps. Humans can create each task, approve agent-proposed subtasks, restrict credentials to narrow profiles, and decide what merges or ships.
 
-### Dependencies and Office
+### Office dependencies and deeper coordination
+
+> [!EXPERIMENTAL]
+> Office is feature-flagged, disabled in the production profile by default, and still in progress. Its dependency editor, persistent coordinators, deeper task trees, quorum rules, and routines are not stable regular-Kanban features.
 
 Regular Kanban does not currently expose a dependency editor or blocker filter. Stored blocker data can appear through related-task MCP, but it is not a regular-board planning surface. For supported ordering, use parent/child structure, **When Child Tasks Complete**, explicit messages, workflow gates, and pull-request review.
 
-Office prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation, plus persistent coordinators and deeper trees. Office remains in progress; do not rely on these properties or its advanced quorum/routine behavior for a stable Kanban workflow.
+When Office is enabled, it prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation. Treat these as an evaluation surface rather than a production coordination contract.
 
 ## Troubleshooting
 

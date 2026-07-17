@@ -46,9 +46,6 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 
 Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. Refresh the profile if an agent update changes them. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
-> [!EXPERIMENTAL]
-> Office team roles, reporting lines, budgets, concurrency, and governance add more fields to agent profiles only when the Office feature is enabled. Office is disabled by default and remains in progress; its coordinator routing and approval policy are not a stable public workflow. Regular profiles, workflow approval steps, and task-mode automation provide the supported human-gated path today.
-
 ### Monitor capability and subscription status
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.
@@ -121,7 +118,7 @@ Kandev does not validate a server-name syntax centrally, so blank or unusual nam
 Deleting a profile is irreversible. Kandev checks references before deletion:
 
 - active sessions and watcher references are soft conflicts; force bypasses the active-session check and soft-deletes the profile, while disabling affected watchers is best effort rather than guaranteed cleanup;
-- experimental Office routing-tier references are hard conflicts and cannot be forced;
+- feature-flagged Office routing-tier references are hard conflicts and cannot be forced;
 - Kandev attempts to clean every ephemeral task with a session using the profile, including matching Quick Chat, Configuration Chat, and Run-mode automation work. A cleanup failure is logged and does not prevent profile deletion, so audit leftover resources afterward.
 
 Only custom TUI agents can be deleted from the agent list. Built-in definitions remain registered even when their CLI is not installed.
