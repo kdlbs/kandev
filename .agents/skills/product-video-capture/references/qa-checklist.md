@@ -86,7 +86,7 @@ Verify player behavior:
 - controls, tabs, and carousel semantics remain keyboard-accessible;
 - no `cover` crop hides important UI.
 
-Run landing checks only from the resolved landing repository root:
+Run landing checks only from the resolved landing repository root. Before encoding an editorial landing film, confirm these focused tests recognize `formFactor: "landing"`; stop if the checkout still has only the general desktop profile.
 
 ```bash
 cd "$LANDING_REPO"
