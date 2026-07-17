@@ -1,90 +1,99 @@
 ---
 title: "Architecture"
-description: "Understand Kandev's unified backend, web client, task runtime, persistence, event, and deployment boundaries."
+description: "Understand Kandev's process, code, runtime, persistence, event, protocol, and trust boundaries."
 ---
 
 # Architecture
 
-Kandev is a server-first development workbench. A unified Go binary owns orchestration and persistent state, serves the Vite-built React application, and manages local or remote task environments through agentctl.
+Kandev is a server-first development workbench. A Go backend owns durable product state and orchestration. The browser UI is a Vite-built React SPA. Agent processes run behind an `agentctl` sidecar in local, worktree, container, or remote task environments.
 
 ```mermaid
 flowchart LR
-    Browser["React web client"] -->|HTTP and WebSocket| Backend["Unified Go backend"]
-    Desktop["Tauri desktop shell"] --> Backend
-    Backend --> DB[("SQLite or PostgreSQL")]
-    Backend --> Providers["Git and provider integrations"]
-    Backend --> Local["Local or worktree runtime"]
-    Backend --> Container["Docker runtime"]
-    Backend --> Remote["SSH, remote Docker, or Sprites"]
-    Local --> Agentctl1["agentctl"]
-    Container --> Agentctl2["agentctl"]
-    Remote --> Agentctl3["agentctl"]
-    Agentctl1 --> Agent1["Agent CLI"]
-    Agentctl2 --> Agent2["Agent CLI"]
-    Agentctl3 --> Agent3["Agent CLI"]
+    UI["Browser or Tauri window"] -->|HTTP + WebSocket| BE["Go backend"]
+    BE --> DB[("SQLite or PostgreSQL")]
+    BE --> Providers["Git and provider APIs"]
+    BE -->|control channel| A1["agentctl: local/worktree"]
+    BE -->|control channel| A2["agentctl: Docker/SSH/Sprites"]
+    A1 --> Agent1["Agent CLI + task MCP"]
+    A2 --> Agent2["Agent CLI + task MCP"]
 ```
 
-## Process entry points
+## Processes and launchers
 
-`apps/backend/cmd/kandev/main.go` dispatches between the public launcher and the hidden `__backend` mode. `apps/backend/internal/launcher/` starts the installed runtime and browser. `apps/backend/internal/backendapp/` wires the production server.
+`apps/backend/cmd/kandev/main.go` is the shipped entry point. Normal arguments enter the native launcher in `apps/backend/internal/launcher/`; the hidden `__backend` mode enters the composition root in `apps/backend/internal/backendapp/`.
 
-At startup the backend loads configuration, creates logging and the event bus, opens persistence, constructs domain services, registers HTTP/WebSocket/MCP routes, starts schedulers and watchers, and flips readiness only after the listener and routes are ready.
+These adjacent launch layers have different jobs:
 
-The release binary embeds the built web assets. Development runs Vite separately and the backend proxies web traffic while retaining API and WebSocket ownership.
+- `apps/cli/src/` supplies the TypeScript development supervisor used by `make dev`.
+- The published `apps/cli/bin/` npm shim selects the matching `@kdlbs/runtime-*` package and starts its native `kandev` binary.
+- `apps/backend/internal/launcher/` implements installed `run`, `start`, and service behavior.
+- `apps/desktop/` is a Tauri shell. Rust starts its bundled `kandev --headless` on an owned loopback origin and owns native windows, external links, notifications, and updates. The product UI is still the backend-served SPA.
 
-## Backend domains
+The root build embeds generated web assets in the Go binary. `make dev` instead starts Vite and configures Go to proxy it, so HTTP, API, and WebSocket traffic still enters through Go.
 
-Backend code is organized by domain under `apps/backend/internal/`:
+## Backend ownership
 
-- `task/`, `workflow/`, `orchestrator/`, and `runs/` own work state and dispatch;
-- `agent/` and `agentctl/` own agent discovery, profiles, protocol adapters, process control, terminals, Git, and runtime communication;
-- `worktree/`, `ssh/`, `sprites/`, and `agent/docker/` materialize executor environments;
-- `github/`, `gitlab/`, `jira/`, `linear/`, `sentry/`, and `slack/` own provider adapters;
-- `mcp/` exposes task/config coordination tools;
-- `system/` owns status, database, backups, logs, disk, updates, and build information;
-- `gateway/websocket/` broadcasts state changes to connected clients;
-- `db/` and domain repositories provide SQLite/PostgreSQL persistence.
+Backend code is under `apps/backend/internal/`. Common owners include:
 
-Handlers translate HTTP or WebSocket messages. Services enforce domain behavior. Repositories own persistence. Keep provider SDK shapes and transport DTOs out of the core model where an existing adapter boundary exists.
+- `task/`, `workflow/`, `orchestrator/`, and `runs/` for work state and dispatch;
+- `agent/` for agent definitions, profiles, executor mapping, and lifecycle;
+- `agentctl/` for the sidecar server, process/protocol adapters, Git, files, shell, terminal, and workspace operations;
+- `worktree/` plus runtime implementations for local, Docker, remote Docker, SSH, and Sprites environments;
+- provider domains such as `github/`, `gitlab/`, `jira/`, `linear/`, `sentry/`, and `slack/`;
+- `mcp/` for Kandev tool schemas and backend handlers;
+- `gateway/websocket/` for client broadcasts;
+- `system/`, `persistence/`, and `db/` for status, storage setup, pools, and SQL dialect primitives.
 
-## Web client
+`internal/backendapp/` constructs these domains and registers routes, subscribers, schedulers, and startup recovery.
 
-`apps/web/` is a React 19 application built with Vite. The backend serves its production output as a single-page application. Client routing, initial bootstrap data, HTTP domain clients, a WebSocket connection, and Zustand state keep the UI synchronized with backend state.
+Layouts vary by domain. Handlers translate HTTP or WebSocket requests; some domains add controllers; services own behavior; repositories or stores own persistence; providers adapt external systems. Use the nearest established boundary instead of treating this as a mandatory global stack.
 
-Page-level code lives under `apps/web/app/`; reusable UI and feature components live under `apps/web/components/`; API, routing, state, and shared utilities live under `apps/web/lib/`. Tests are colocated or under `apps/web/e2e/` depending on scope.
+## Web ownership and state flow
 
-The web application should display backend truth rather than reimplement workflow or lifecycle rules in components.
+`apps/web/src/main.tsx` loads the Go boot payload, creates the Zustand state provider, and renders the shell and route dispatcher. Top-level routing lives in `src/spa-routes.tsx`; it is custom SPA routing, not Next.js filesystem routing. Next-shaped `app/**/page.tsx` files are page components.
 
-## Task execution
+HTTP clients in `lib/api/domains/` and domain hooks in `hooks/domains/` issue requests. `lib/state/` hydrates and composes store slices. `lib/ws/` routes live updates into that state. The backend remains authoritative; the client must recover from missed, duplicate, or stale events.
 
-A task selects one or more repositories, an agent profile, and an executor profile. The executor materializes a task environment. The backend launches or reaches agentctl in that environment; agentctl then runs the agent CLI and exposes process, shell, Git, file, terminal, ACP, and task-MCP capabilities through its control channel.
+See [Web development](web-development.md) for settings and workbench ownership.
 
-The task environment can outlive one agent turn and can be shared by several sessions. A worktree separates Git files/branches, while a container or remote host establishes a stronger runtime boundary. None of them automatically narrow the credentials explicitly provided to the agent.
+## Task runtime and agentctl
 
-## Events and real-time state
+A task selects repositories, an agent profile, and an executor profile. Product executor types are `local`, `worktree`, `local_docker`, `remote_docker`, `sprites`, `ssh`, and test-only `mock_remote`. They map to lifecycle backends `standalone`, `docker`, `remote_docker`, `sprites`, or `ssh`; local and worktree share a process backend but prepare different Git environments.
 
-The backend event bus decouples state changes from WebSocket broadcasts, workflow reactions, integration watches, and schedulers. Unified mode uses an in-memory bus; deployments can configure NATS where supported.
+`internal/agent/runtime/` is the intended high-level backend lifecycle facade, but it remains transitional and current callers also use `internal/agent/runtime/lifecycle/` directly. Backend-side clients in `internal/agent/runtime/agentctl/` reach the agentctl server implemented in `internal/agentctl/server/`.
 
-Persist the durable transition before publishing an event. Consumers must tolerate retries, reconnects, and stale clients. The UI refetches authoritative state when an incremental event is insufficient.
+Local and worktree execution share a host agentctl control server that manages multiple task instances. Container and remote backends deliver or start agentctl in the target environment. Its authenticated control and per-instance APIs own the agent subprocess, ACP adapter, workspace, Git, file, process, shell, terminal, port, and MCP relay operations. The backend, not the browser, coordinates that channel.
 
-## Persistence
+A worktree isolates concurrent Git state. It does not isolate processes, the host filesystem, or credentials. Containers and remote hosts add stronger runtime boundaries, but every credential explicitly delivered to an environment remains available there.
 
-SQLite is the default. PostgreSQL support is selected through configuration. Domain repositories own schema and queries; dialect helpers isolate SQL differences.
+## ACP, REST, and MCP
 
-Do not put long-running network or agent work inside database transactions. Use explicit statuses and durable IDs so startup recovery, watchers, and queued work can reconcile partial execution.
+These protocols are separate:
+
+- **ACP** is the structured agent-session protocol. The current agentctl adapter factory accepts ACP.
+- **REST and WebSocket** are backend/client and agentctl control surfaces.
+- **MCP** supplies Kandev and profile-configured tools to an agent. It is not an agent runtime adapter.
+
+agentctl hosts task MCP endpoints and relays tool calls over the agent stream to backend handlers. The backend also exposes external MCP routes. Kandev currently adds no user-auth middleware to those external routes; do not expose them on an untrusted network without binding, proxy authentication, and scoped credentials. See [Automation and MCP](automation-and-mcp.md).
+
+## Events and persistence
+
+The event bus provides live fan-out to WebSocket broadcasters and backend subscribers. It uses an in-memory bus by default and can use NATS when configured. It is not durable replay: persist a transition before publishing, make consumers tolerate duplicates and reconnects, and recover from the database.
+
+SQLite is the default database; PostgreSQL is supported. There is no central migration-file framework. Domain repositories/stores initialize fresh schemas and apply ordered, inline upgrades at startup. `internal/persistence/` opens the database, maintains boot metadata, and records the current binary version after repository initialization succeeds; `internal/db/` provides pools, rebinding, and dialect helpers.
+
+Keep long-running provider or agent work outside transactions. Persist stable IDs and explicit statuses so startup recovery can reconcile partial execution. See [Backend development](backend-development.md) for migration rules.
 
 ## Trust boundaries
 
-Important boundaries are:
+Review each crossing explicitly:
 
-- browser/desktop client to backend;
+- browser or desktop window to backend;
 - backend to provider APIs and Git remotes;
-- backend to agentctl task environments;
-- agentctl to the selected agent process and MCP servers;
-- host to Docker/SSH/Sprites infrastructure.
+- backend to agentctl and a task environment;
+- agentctl to the selected agent and MCP servers;
+- host to Docker, SSH, Sprites, or other remote infrastructure.
 
-Worktrees are concurrency isolation, not OS security. External MCP currently has no Kandev user-auth boundary. Remote deployments must use network access controls and scoped credentials. See [Automation and MCP](automation-and-mcp.md) and [Operations](operations.md).
+Validate scope and identity server-side. Treat provider text, repository content, agent output, URLs, archives, paths, and command arguments as untrusted. Never rely on a frontend-only permission check.
 
-## Office source tree
-
-`apps/backend/internal/office/` contains feature-flagged, in-progress autonomy work. Its source packages are not a supported extension API for the regular task product. Keep public behavior and status explicit when touching it.
+`apps/backend/internal/office/` contains feature-flagged, in-progress autonomy work. Its source tree is not a supported extension API for the regular task product.

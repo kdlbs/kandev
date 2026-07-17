@@ -5,7 +5,13 @@ import { useRouter } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconList, IconLayoutKanban, IconMenu2, IconTimeline } from "@tabler/icons-react";
+import {
+  IconList,
+  IconLayoutKanban,
+  IconMenu2,
+  IconMessageCircle,
+  IconTimeline,
+} from "@tabler/icons-react";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
@@ -19,6 +25,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
+import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import type { ComponentProps, RefObject } from "react";
 
@@ -130,6 +137,7 @@ function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
 function TabletHeader({
   title,
   workspaceLabel,
+  workspaceId,
   searchQuery,
   onSearchChange,
   isSearchLoading,
@@ -142,6 +150,7 @@ function TabletHeader({
 }: {
   title: string;
   workspaceLabel: string;
+  workspaceId?: string;
   searchQuery: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading: boolean;
@@ -153,6 +162,7 @@ function TabletHeader({
   hideTitle?: boolean;
 }) {
   const isHome = title === "Home";
+  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
 
   return (
     <PageTopbar
@@ -174,6 +184,18 @@ function TabletHeader({
             />
           )}
           <TopbarMetrics size="lg" />
+          {workspaceId && (
+            <Button
+              variant="outline"
+              size="icon-lg"
+              onClick={handleOpenQuickChat}
+              className="cursor-pointer"
+              aria-label="Quick Chat"
+              data-testid="tablet-quick-chat-button"
+            >
+              <IconMessageCircle className="h-4 w-4" />
+            </Button>
+          )}
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
@@ -330,6 +352,7 @@ export function KanbanHeader({
           <TabletHeader
             title={title}
             workspaceLabel={workspaceLabel}
+            workspaceId={workspaceId}
             hideTitle={hideTitle}
             {...sharedSearch}
             toggleValue={toggleValue}

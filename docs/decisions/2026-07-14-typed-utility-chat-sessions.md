@@ -1,4 +1,4 @@
-# 0043: Typed Utility Chats Share the Quick Chat Session Model
+# ADR-2026-07-14-typed-utility-chat-sessions: Typed Utility Chats Share the Quick Chat Session Model
 
 **Status:** accepted
 **Date:** 2026-07-14

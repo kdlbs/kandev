@@ -45,14 +45,24 @@ function publish(next: SavedPreset[]) {
 
 function readServerPresets(value: unknown): SavedPreset[] | null {
   if (!Array.isArray(value)) return null;
-  return value.filter(
-    (p): p is SavedPreset =>
-      typeof p === "object" &&
-      p !== null &&
-      typeof (p as SavedPreset).id === "string" &&
-      ((p as SavedPreset).kind === "pr" || (p as SavedPreset).kind === "issue") &&
-      typeof (p as SavedPreset).label === "string",
-  );
+  return value.flatMap((candidate): SavedPreset[] => {
+    if (typeof candidate !== "object" || candidate === null) return [];
+    const preset = candidate as Record<string, unknown>;
+    const kind = preset.kind;
+    if (
+      typeof preset.id !== "string" ||
+      (kind !== "pr" && kind !== "issue") ||
+      typeof preset.label !== "string"
+    ) {
+      return [];
+    }
+    return [
+      {
+        ...(preset as SavedPreset),
+        repoFilter: typeof preset.repoFilter === "string" ? preset.repoFilter : "",
+      },
+    ];
+  });
 }
 
 const syncServer = createQueuedUserSettingsSync<SavedPreset[]>((next) => ({

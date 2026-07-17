@@ -11,6 +11,7 @@ type OpenEditorOptions = {
   column?: number;
   editorId?: string;
   editorType?: string;
+  worktreeId?: string;
 };
 
 /**
@@ -46,6 +47,7 @@ export function useOpenSessionInEditor(sessionId?: string | null) {
         file_path: options?.filePath,
         line: options?.line,
         column: options?.column,
+        worktree_id: options?.worktreeId,
       },
       { cache: "no-store" },
     );

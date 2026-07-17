@@ -1,0 +1,63 @@
+# Kandev feature-guide media capture notes
+
+Candidate generated in disposable capture root. Promote only after final parent review.
+
+## Provenance and isolation
+
+- Capture root: `$CAPTURE_ROOT` (disposable; absolute host path omitted).
+- Source: current shared Kandev checkout, exercised through a worker-scoped E2E backend and real browser controls.
+- Data: fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree roots, browser profile, and non-production ports.
+- Providers/agent: mock-only. No real provider call, production credential, shared user database, or existing task workspace.
+- Encoding metadata: `metadata/capture.json`
+- Source bundle: `source/capture.spec.ts`, `source/encode.mjs`, `source/product-loop-camera-compact.mjs`, `source/qa.mjs`, `source/smoke.spec.ts`
+
+## Commands
+
+- Capture/encoding source and per-clip camera values are retained in the disposable source and metadata bundle listed above.
+- QA: `node "$CAPTURE_ROOT/source/qa.mjs" --visual-pass --teardown-confirmed`
+- Probe template: `ffprobe -v error -show_streams -show_format -of json <file>`
+- Cadence template: `ffprobe -v error -select_streams v:0 -show_entries frame=best_effort_timestamp_time,pkt_duration_time -of json <video>`
+- Frame sampling: FFmpeg at opening, 10%, 25%, 50%, 75%, 90%, and ending timestamps; ImageMagick montage for contact sheets.
+- Browser smoke: Chromium loaded each WebM, MP4, and WebP through a loopback HTTP server with byte-range support; both videos played and sought to 50%.
+
+## Toolchain
+
+- ffmpeg version 6.1.1-3ubuntu5 Copyright (c) 2000-2023 the FFmpeg developers
+- ffprobe version 6.1.1-3ubuntu5 Copyright (c) 2007-2023 the FFmpeg developers
+- Browser: 149.0.7827.55
+
+## Delivery inventory
+
+| Clip | Duration | WebM | MP4 | Poster |
+| --- | ---: | ---: | ---: | ---: |
+| task-create | 7.32s | 173.7 KiB | 205.2 KiB | 8.6 KiB |
+| task-start-agent | 12.80s | 184.2 KiB | 191.4 KiB | 10.4 KiB |
+| plan-review-implement | 13.60s | 393.6 KiB | 423.4 KiB | 19.1 KiB |
+| parallel-named-sessions | 8.80s | 236.0 KiB | 250.4 KiB | 11.6 KiB |
+| diff-line-feedback | 12.80s | 424.1 KiB | 560.6 KiB | 23.2 KiB |
+| code-walkthrough | 8.80s | 481.2 KiB | 545.0 KiB | 23.3 KiB |
+| profile-executor-selection | 8.80s | 188.6 KiB | 250.4 KiB | 8.9 KiB |
+| scheduled-workflow-automation | 13.60s | 414.7 KiB | 469.3 KiB | 13.0 KiB |
+
+- Total docs payload: 5.38 MiB.
+
+## QA
+
+- Technical result: PASS (0 failure(s), 0 warning(s)).
+- Stream checks: codec, 960x600 decoded dimensions, exact 25fps rate metadata, continuous 0.040s decoded timestamps, 6-15s duration, and no audio.
+- Visual samples: PASS — human-reviewed full-resolution samples and mosaics.
+- Automated blank-frame screening: sampled frames require non-trivial standard deviation/entropy.
+- Browser playback: PASS for WebM, MP4, and WebP.
+- Inspect mosaics for clipping, duplicated cursor, browser chrome, fixture/debug text, local paths, private data, unreadable text, and misleading states.
+
+## Teardown
+
+- CONFIRMED: capture owner stopped recorder, browser, backend/frontend, agent processes, and Xvfb; released capture ports/display; removed disposable runtime state. Delivery/proof bundle remains only for handoff.
+
+## Generated proof
+
+- Per-clip full-resolution frames: `frames/<slug>/`
+- Per-clip contact sheets: `mosaics/<slug>.png`
+- Browser playback contact sheet: `mosaics/browser-playback.png`
+- Machine-readable QA: `metadata/qa-report.json`
+- Candidate manifest: `metadata/manifest.candidate.json`

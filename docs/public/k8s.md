@@ -1,295 +1,269 @@
 ---
 title: "Kubernetes"
-description: "Deploy Kandev in Kubernetes environments."
+description: "Deploy a single Kandev control plane to Kubernetes with explicit persistence, security, and lifecycle constraints."
 ---
 
-# Kubernetes Deployment Guide
+# Kubernetes
 
-This guide covers building the Kandev Docker image and deploying it to a Kubernetes cluster.
+Kandev ships example Kubernetes YAML in `k8s/`. It is a single-replica, persistent deployment example—not a Helm chart, operator, or supported high-availability topology. The release workflow publishes container images but does not apply these manifests to a cluster. Review and adapt every manifest before production use.
+
+## Architecture and limitations
+
+The example creates:
+
+| File | Resource | Current value |
+|---|---|---|
+| `k8s/configmap.yaml` | `ConfigMap/kandev-config` | `/data` home, info logs, Docker executor disabled |
+| `k8s/pvc.yaml` | `PersistentVolumeClaim/kandev-data` | 10 GiB, `ReadWriteOnce`, default StorageClass |
+| `k8s/deployment.yaml` | `Deployment/kandev` | one replica, `Recreate`, example resources and probes |
+| `k8s/service.yaml` | `Service/kandev` | `ClusterIP`, TCP 38429 |
+| `k8s/ingress.yaml` | `Ingress/kandev` | ingress-nginx-oriented example for `kandev.example.com` |
+
+One pod serves the SPA, API, WebSocket, external MCP endpoint, and `/health` on port 38429. With SQLite, the same PVC holds the database, workspaces, CLI installs, and authentication files.
+
+Keep `replicas: 1`. PostgreSQL and NATS are useful external dependencies, but they do not by themselves make Kandev horizontally scalable: task workspaces, local agent processes, control connections, and other runtime state remain pod/filesystem-local. A tested shared-filesystem and runtime-ownership design would also be required. No multi-replica product deployment is currently documented or validated.
+
+The supplied `Recreate` strategy intentionally stops the old pod before starting the new one. Upgrades therefore have downtime.
 
 ## Prerequisites
 
-- Docker (for building the image)
-- A container registry (Docker Hub, GHCR, ECR, etc.)
-- A Kubernetes cluster with `kubectl` configured
-- A StorageClass that supports `ReadWriteOnce` PVCs (for SQLite persistence)
+- a Linux `amd64` or `arm64` cluster with `kubectl` configured;
+- registry egress to `ghcr.io`, or a mirrored image;
+- a default StorageClass that can provision `ReadWriteOnce`, or an explicit `storageClassName`;
+- enough PVC capacity for database, repositories, worktrees, caches, and agent CLIs;
+- optional ingress controller, DNS, TLS, and an external authentication gateway;
+- outbound access required by selected repositories, package registries, agents, integrations, SSH hosts, or Sprites.
 
-## Building the Image
+The published image is documented in [Docker](docker.md#published-images). Pin a version or digest; do not use a moving tag for a controlled rollout.
 
-The root `Dockerfile` consumes a prebuilt Linux release bundle; it does not compile the repository inside Docker. On a Linux host matching the cluster architecture, prepare the same build context used by the release workflow:
+## Deploy the example safely
 
-```bash
-make service-bundle
-rm -rf ctx
-mkdir -p ctx/bundle
-cp -R dist/kandev/. ctx/bundle/
-cp docker-entrypoint.sh ctx/
-docker build -f Dockerfile -t kandev:latest ctx
-```
-
-For cross-architecture or multi-architecture images, produce the matching `kandev-linux-x64.tar.gz` and/or `kandev-linux-arm64.tar.gz` bundles first. For each platform, extract the bundle's top-level `kandev/` directory into `ctx/bundle/`, copy `docker-entrypoint.sh` into `ctx/`, and build that context for the matching platform. A `--platform` flag alone does not cross-compile the native binaries. See the [Docker guide](./docker.md#building-from-source) for the context layout.
-
-### Using the Pre-built Image
-
-Kandev publishes images to GitHub Container Registry. Pull directly:
+The checked-in Deployment says `image: kandev:latest`. That is a placeholder, not the published GHCR reference; because the tag is `latest`, Kubernetes also defaults its pull policy to `Always`. Replace it. If you deliberately test a node-preloaded local image, set an appropriate `IfNotPresent` or `Never` pull policy in your own manifest. Apply a pinned published image without editing the source file:
 
 ```bash
-docker pull ghcr.io/kdlbs/kandev:latest
+export KANDEV_IMAGE='ghcr.io/kdlbs/kandev:X.Y.Z'
+
+kubectl apply \
+  -f k8s/configmap.yaml \
+  -f k8s/pvc.yaml \
+  -f k8s/service.yaml
+
+kubectl set image \
+  -f k8s/deployment.yaml \
+  kandev="$KANDEV_IMAGE" \
+  --local -o yaml | kubectl apply -f -
+
+kubectl rollout status deployment/kandev
+kubectl get pod -l app=kandev
 ```
 
-Or reference it in your K8s deployment:
+Replace `X.Y.Z` with a real release. Add `-n <namespace>` consistently if deploying outside `default`; the supplied resources do not declare a namespace.
+
+Do not apply `k8s/ingress.yaml` yet. It contains a placeholder host, no TLS section, no Kandev authentication, and controller-specific annotations.
+
+For private initial access:
+
+```bash
+kubectl port-forward service/kandev 38429:38429
+```
+
+Open `http://localhost:38429`.
+
+## Persistence and filesystem permissions
+
+With `KANDEV_HOME_DIR=/data`, the PVC includes:
+
+- `/data/data/kandev.db`, WAL/SHM files, and SQLite snapshots;
+- `/data/tasks`, `/data/worktrees`, `/data/repos`, `/data/sessions`, and `/data/lsp-servers`;
+- `/data/agent-sessions` for selectively seeded Docker-agent state;
+- `/data/.npm-global` for runtime-installed npm agent CLIs;
+- `/data/home` for CLI auth, Azure config, caches, and user configuration.
+
+The base image starts as root, recursively fixes `/data` ownership, then drops to the `kandev` user at UID 1000. This may violate a restricted Pod Security policy, fail on root-squashed storage, or make a large-volume restart slow. The universal image is configured to run directly as `kandev` and therefore does not perform that ownership repair.
+
+For a non-root pod, provision the volume for UID 1000 and test your CSI driver's `fsGroup` behavior. A common starting point is:
 
 ```yaml
-image: ghcr.io/kdlbs/kandev:latest
+spec:
+  template:
+    spec:
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: kandev
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
 ```
 
-### Choosing your image: vanilla vs. universal
+This is storage-policy guidance, not a universally portable manifest. Some CSI drivers ignore or implement `fsGroup` differently. Verify a write to `/data/data` and `/data/home` before relying on it.
 
-Kandev publishes two flavors: the default vanilla image (smallest, npm-installable agent CLIs only) and a `:universal` image (~1.4 GB) that adds language toolchains (Go, Rust, build-essential), linters, and Playwright Chromium system libs - useful when your agents work on Go/Rust/Python projects or drive headless browsers.
+PVC retention depends on the StorageClass reclaim policy. Deleting `PersistentVolumeClaim/kandev-data` can permanently remove database, repositories, and credentials; back up and verify the target before doing so.
 
-```yaml
-image: ghcr.io/kdlbs/kandev:universal
-```
+## Configuration and secrets
 
-See the [repository image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md) for the full comparison, inclusion policy, and recipes for deriving your own image when you need something neither flavor includes.
-
-## Deploying to Kubernetes
-
-### Quick Start
-
-```bash
-# Apply all manifests
-kubectl apply -f k8s/
-
-# Check status
-kubectl get pods -l app=kandev
-kubectl logs -l app=kandev -f
-```
-
-### What Gets Created
-
-| Resource | File | Purpose |
-|----------|------|---------|
-| Deployment | `deployment.yaml` | Single-replica pod running backend + web |
-| Service | `service.yaml` | ClusterIP exposing port 38429 |
-| ConfigMap | `configmap.yaml` | Non-sensitive environment configuration |
-| PVC | `pvc.yaml` | 10Gi persistent volume for SQLite + worktrees |
-| Ingress | `ingress.yaml` | Example ingress with WebSocket support |
-
-### Accessing the UI
-
-**Port-forward** (quickest for testing):
-
-```bash
-kubectl port-forward svc/kandev 38429:38429
-# Open http://localhost:38429
-```
-
-**Ingress**: Edit `k8s/ingress.yaml` to set your domain, then apply. The ingress routes all traffic to the backend on port 38429; the Go backend serves API, WebSocket, and SPA traffic on that port.
-
-### Custom Domain / Reverse Proxy
-
-No extra configuration is needed. The frontend automatically uses `window.location.origin` to reach the API, which works with any domain, reverse proxy, or ingress setup.
-
-## Installing Agent CLIs
-
-The kandev image ships with `git`, `gh` (GitHub CLI), `node`, and `npm`, but **does not bundle the coding-agent CLIs** (`claude-code`, `codex`, `auggie`, etc.) — agent choice is per-user, and bundling all of them would bloat the image significantly.
-
-> Looking to add tools *beyond* agent CLIs - language toolchains, build tools, internal CLIs? See the [repository image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md) for the universal-image option and recipes for deriving your own image.
-
-To install an agent inside the running pod, open **Settings → Agents** in the UI and click **Install** on the agent card under "Available to Install". The backend runs the agent's hard-coded install script (`npm install -g <pkg>`) and rescans on success.
-
-The image sets `NPM_CONFIG_PREFIX=/data/.npm-global` so user-installed npm globals land on the PV and **survive pod restarts and image upgrades**. The same persistence applies if you `kubectl exec` and install manually:
-
-```bash
-kubectl exec -it deployment/kandev -- npm install -g @anthropic-ai/claude-code
-```
-
-After installing, log in with the agent's own auth (e.g. `claude login`), then click **Rescan** on the agents page.
-
-### Persistent agent and `gh` CLI auth
-
-The image sets `HOME=/data/home` for the `kandev` user, so every CLI that writes its auth state under `$HOME` lands on the PV and survives pod restarts and image upgrades. This includes:
-
-- `gh` CLI — `~/.config/gh/hosts.yml`
-- Claude Code — `~/.claude/.credentials.json`, `~/.claude.json`
-- Codex — `~/.codex/auth.json`, `~/.codex/config.toml`
-- Auggie — `~/.augment/session.json`
-- GitHub Copilot — `~/.copilot/...`
-- OpenCode, Amp — `~/.config/<tool>/...`
-
-So a one-time `kubectl exec -it deployment/kandev -- gh auth login` (or `claude login`, `codex login`, etc.) is enough; you do not need to redo it after `kubectl set image` or a `helm upgrade`.
-
-> The GitHub PAT configured in **Settings → Integrations → GitHub** is stored as a secret in the SQLite DB (or your external Postgres) and has always persisted. The `HOME=/data/home` setup covers the separate `gh auth login` flow that the backend falls back to when no `GITHUB_TOKEN` secret is set.
-
-## Configuration
-
-Kandev reads configuration via `KANDEV_`-prefixed environment variables (Viper). Put only non-sensitive values in `k8s/configmap.yaml`; inject passwords and signing keys into the Deployment from a Kubernetes Secret.
-
-### Core Settings
-
-See [`configuration.md`](./configuration.md) for the full reference (every backend knob and its YAML form). The tables below cover what's most commonly set in K8s manifests.
-
-| Env Var | Required | Default | Description |
-|---------|----------|---------|-------------|
-| `KANDEV_SERVER_PORT` | No | `38429` | Server port (API + WebSocket + Web UI) |
-| `KANDEV_HOME_DIR` | No | `/data` | Kandev home directory - contains `data/` (DB), `tasks/`, `worktrees/`, `repos/`, `sessions/`, and `lsp-servers/` |
-| `KANDEV_DATABASE_DRIVER` | No | `sqlite` | Database driver (`sqlite` or `postgres`) |
-| `KANDEV_DATABASE_PATH` | No | `$KANDEV_HOME_DIR/data/kandev.db` | SQLite database file path (override) |
-| `KANDEV_NATS_URL` | No | empty | Shared NATS event bus URL. Required when multiple backend replicas must share events; empty selects a process-local in-memory bus. |
-| `KANDEV_DOCKER_ENABLED` | No | `false` | Enable Docker runtime for agents (requires DinD) |
-| `KANDEV_LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `KANDEV_LOGGING_FORMAT` | No | environment-selected (`json` in K8s) | Explicit format: `json` or `text`. The literal value `auto` is not accepted. |
-| `KANDEV_LOGGING_OUTPUTPATH` | No | `stdout` | Log destination: `stdout`, `stderr`, or a file path (rotated when a file) |
-| `KANDEV_LOGGING_MAXSIZEMB` | No | `100` | Rotate the log file when it exceeds this size (MB). File output only. |
-| `KANDEV_LOGGING_MAXBACKUPS` | No | `5` | Max rotated files to retain (`0` = unlimited). File output only. |
-| `KANDEV_LOGGING_MAXAGEDAYS` | No | `30` | Max age of rotated files in days (`0` = unlimited). File output only. |
-| `KANDEV_LOGGING_COMPRESS` | No | `true` | Gzip rotated files. File output only. |
-
-> **Logging in K8s:** prefer the default `stdout` so kubelet collects logs. If you set `KANDEV_LOGGING_OUTPUTPATH` to a file, the active log is created with mode `0600` (owner read/write only); any sidecar reading it must run as the same user.
->
-> **Upgrading from a pre-`KANDEV_HOME_DIR` deployment?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`, and `KANDEV_DATA_DIR` is gone — point `KANDEV_HOME_DIR` at the same volume mount (`/data`) instead. (`KANDEV_WORKTREE_BASEPATH` still works as an explicit override if you want to keep worktrees outside the home dir.) The backend auto-migrates the legacy `kandev.db` (plus any `-wal`/`-shm` files) on first boot — look for `Migrated SQLite database from pre-KANDEV_HOME_DIR location` in the pod logs. If you'd rather pin the old path, set `KANDEV_DATABASE_PATH=/data/kandev.db` in the ConfigMap.
-
-Keep `KANDEV_DATABASE_PASSWORD`, `KANDEV_AUTH_JWTSECRET`, and `KANDEV_OFFICE_JWTSIGNINGKEY` out of ConfigMaps. Reference Secret keys from the Deployment instead:
+Non-sensitive values may stay in `kandev-config`. Put database passwords and deployment credentials in a Kubernetes `Secret`, then reference keys from the container:
 
 ```yaml
 env:
   - name: KANDEV_DATABASE_PASSWORD
     valueFrom:
       secretKeyRef:
-        name: kandev-secrets
-        key: database-password
-  - name: KANDEV_AUTH_JWTSECRET
-    valueFrom:
-      secretKeyRef:
-        name: kandev-secrets
-        key: auth-jwt-secret
-  - name: KANDEV_OFFICE_JWTSIGNINGKEY
-    valueFrom:
-      secretKeyRef:
-        name: kandev-secrets
-        key: office-jwt-signing-key
+        name: kandev-database
+        key: password
 ```
 
-### PostgreSQL Settings (when `KANDEV_DATABASE_DRIVER=postgres`)
-
-| Env Var | Required | Default | Description |
-|---------|----------|---------|-------------|
-| `KANDEV_DATABASE_HOST` | No | `localhost` | PostgreSQL host |
-| `KANDEV_DATABASE_PORT` | No | `5432` | PostgreSQL port |
-| `KANDEV_DATABASE_USER` | Yes | `kandev` | Database user |
-| `KANDEV_DATABASE_PASSWORD` | Usually | (empty) | Database password - required unless your Postgres allows passwordless auth |
-| `KANDEV_DATABASE_DBNAME` | Yes | `kandev` | Database name |
-| `KANDEV_DATABASE_SSLMODE` | No | `disable` | SSL mode (`disable`, `require`, `verify-ca`, `verify-full`) |
-
-## Database: SQLite vs PostgreSQL
-
-### SQLite (default)
-
-- Zero-config, works out of the box
-- Database stored at `/data/data/kandev.db` on the PV (derived from `KANDEV_HOME_DIR=/data`)
-- **Single replica only** (SQLite is single-writer)
-- Deployment strategy is `Recreate` to prevent concurrent writes
-- Good for small teams / personal use
-
-### PostgreSQL (recommended for production)
-
-- Supports multiple replicas for horizontal scaling when paired with shared NATS
-- Change deployment strategy to `RollingUpdate`
-- Set via environment variables:
-
-```yaml
-# Non-sensitive values in configmap.yaml
-KANDEV_DATABASE_DRIVER: postgres
-KANDEV_DATABASE_HOST: postgres.default.svc.cluster.local
-KANDEV_DATABASE_PORT: "5432"
-KANDEV_DATABASE_USER: kandev
-KANDEV_DATABASE_DBNAME: kandev
-KANDEV_NATS_URL: nats://nats.default.svc.cluster.local:4222
-```
-
-Supply `KANDEV_DATABASE_PASSWORD` from a Secret as shown above. When using Postgres, the PVC is still needed for worktree storage but the database itself is external. An empty `KANDEV_NATS_URL` selects an isolated in-memory event bus in each process, so notifications and orchestration events do not coordinate across replicas; do not scale beyond one backend replica without shared NATS.
-
-## Persistent Storage
-
-The PVC at `/data` stores:
-
-- **SQLite database** (`/data/data/kandev.db`, `/data/data/kandev.db-wal`, `/data/data/kandev.db-shm`)
-- **Git worktrees** (`/data/worktrees/`), **tasks** (`/data/tasks/`), **repos** (`/data/repos/`), **sessions** (`/data/sessions/`), and **LSP servers** (`/data/lsp-servers/`)
-- **User home** (`/data/home/`) — `$HOME` for the in-pod `kandev` user; holds `gh` CLI auth and agent CLI auth state (see [Persistent agent and `gh` CLI auth](#persistent-agent-and-gh-cli-auth) above)
-- **npm globals** (`/data/.npm-global/`) — agent CLIs installed via `npm install -g`
-
-The PVC uses `ReadWriteOnce` access mode. If your cluster requires a specific StorageClass, add it to `k8s/pvc.yaml`:
-
-```yaml
-spec:
-  storageClassName: your-storage-class
-```
-
-## Health Checks
-
-The deployment includes both probes on the `/health` endpoint:
-
-- **Liveness probe**: Restarts the pod if the backend becomes unresponsive (30s interval, 3 failures)
-- **Readiness probe**: Removes the pod from service during startup or issues (10s interval, 3 failures)
-
-The CLI launcher also performs an internal health check — it waits for the backend to be healthy before starting the web server.
-
-## Scaling
-
-**Single replica (SQLite)**: The default configuration uses `replicas: 1` with `Recreate` strategy. This ensures only one instance writes to SQLite at a time.
-
-**Multiple replicas (PostgreSQL + NATS)**: Switch to Postgres, configure the same `KANDEV_NATS_URL` on every replica, change the deployment strategy to `RollingUpdate`, and increase replicas:
-
-```yaml
-spec:
-  replicas: 3
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
-```
-
-## Upgrading
-
-Rebuild the release bundle and refresh `ctx/` using [Building the Image](#building-the-image) before running the image build below.
+Create the example secret without committing its value:
 
 ```bash
-# Build and push new image
-docker build -f Dockerfile -t your-registry.com/kandev:v1.1.0 ctx
-docker push your-registry.com/kandev:v1.1.0
-
-# Update deployment
-kubectl set image deployment/kandev kandev=your-registry.com/kandev:v1.1.0
-
-# Or edit the deployment directly
-kubectl edit deployment kandev
+kubectl create secret generic kandev-database \
+  --from-literal=password='<replace-me>'
 ```
 
-SQLite migrations run automatically on startup — no manual migration step needed.
+Shell history and the Kubernetes API still see this literal. Prefer your cluster's normal encrypted secret-delivery workflow. Kandev secrets created in the UI live in its database, so database backups are sensitive too.
 
-> **Upgrading across the `HOME=/data/home` change:** if you used `kubectl exec` to `gh auth login` or log in to agent CLIs on a pre-`HOME=/data/home` image, that state lived in the ephemeral `/home/kandev` and is not carried over. Log in once on the new pod and it will persist for all subsequent upgrades. If you want to keep the old state, copy it onto the PV before upgrading:
->
-> ```bash
-> kubectl exec deployment/kandev -- sh -c 'cp -a /home/kandev/. /data/home/ 2>/dev/null || true'
-> ```
+See [Configuration](configuration.md) for exact YAML and `KANDEV_` names. Important image/example values:
+
+| Setting | Example value | Meaning |
+|---|---|---|
+| `KANDEV_HOME_DIR` | `/data` | Persistent Kandev root |
+| `KANDEV_DOCKER_ENABLED` | `false` | No Docker daemon in the supplied pod |
+| `KANDEV_LOG_LEVEL` | `info` | Backend log threshold |
+| `KANDEV_DATABASE_DRIVER` | `sqlite` by default | Set `postgres` for an external database |
+
+Kubernetes detection makes the default log format JSON. Logs remain on stdout unless `logging.outputPath` is changed.
+
+### PostgreSQL
+
+For PostgreSQL, configure at least:
+
+```yaml
+env:
+  - name: KANDEV_DATABASE_DRIVER
+    value: postgres
+  - name: KANDEV_DATABASE_HOST
+    value: postgres.example.internal
+  - name: KANDEV_DATABASE_PORT
+    value: "5432"
+  - name: KANDEV_DATABASE_USER
+    value: kandev
+  - name: KANDEV_DATABASE_DBNAME
+    value: kandev
+  - name: KANDEV_DATABASE_SSLMODE
+    value: verify-full
+  - name: KANDEV_DATABASE_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: kandev-database
+        key: password
+```
+
+Use the SSL mode and trust material required by your database. PostgreSQL moves only database data; keep the `/data` PVC. Kandev's built-in backup/restore is SQLite-only, so schedule `pg_dump` and test restoration independently.
+
+## Agent execution in a pod
+
+Local and Worktree profiles run agents inside the Kandev pod. Install agent CLIs from **Settings > Agents**, or derive an image that contains them. Runtime npm installs persist under `/data/.npm-global`. Choose the universal image when tasks need its additional build toolchains, but account for the larger image and non-root volume requirement.
+
+The checked-in ConfigMap disables Local Docker. Do not add only a Docker socket mount: the current runtime also needs helper, credential-session, and local-clone bind sources to exist at identical paths on the Docker daemon host, and it currently selects a Linux/amd64 helper. See [containerized control plane limitation](docker.md#containerized-control-plane-limitation). A privileged Docker-in-Docker sidecar has a separate security and persistence model and no supplied Kandev manifest.
+
+SSH and Sprites profiles can run from Kubernetes if the pod can reach their endpoints and has the required secrets/helper bundle. SSH currently does not materialize attached repositories; review [SSH limitations](executors.md#current-repository-limitation). Remote Docker is unimplemented.
+
+Interactive commands should run as the service user. With the base image, a Kubernetes exec starts as root, so use:
+
+```bash
+kubectl exec -it deployment/kandev -- gosu kandev gh auth login
+```
+
+The universal image already runs as `kandev`; use `kubectl exec -it deployment/kandev -- gh auth login`. Prefer Kandev secret/profile flows over ad hoc pod login where possible.
+
+## Resources and probes
+
+The example requests 250 millicores and 512 MiB, with limits of 2 CPU and 2 GiB. Those are placeholders, not capacity recommendations. Local/Worktree agents share the pod limit with the control plane and can exceed it during builds. Measure workload memory, CPU, ephemeral storage, PVC growth, and process counts; then set requests/limits accordingly.
+
+Both example probes call `/health`. That endpoint returns 503 during startup and 200 once routes are wired and the TCP listener accepts connections. It is a readiness signal, not a deep check of database, repository, Docker, provider, or agent health. The supplied liveness probe therefore tests the same shallow condition.
+
+Long migrations or slow storage may need a startup probe to prevent premature liveness restarts:
+
+```yaml
+startupProbe:
+  httpGet:
+    path: /health
+    port: backend
+  periodSeconds: 5
+  failureThreshold: 60
+```
+
+Tune from observed startup time. Keep readiness on `/health`; use separate external monitoring for dependencies and real workflows.
+
+## Ingress and exposure
+
+Kandev has no built-in user-auth boundary. Do not expose the example Ingress publicly until an authenticated gateway and TLS are in place.
+
+Before applying `k8s/ingress.yaml`:
+
+1. replace `kandev.example.com`;
+2. configure the real `ingressClassName` or class annotation;
+3. add TLS/certificate configuration;
+4. add an identity-aware authentication layer;
+5. preserve WebSocket upgrades and long idle timeouts;
+6. ensure clients cannot bypass the gateway through the Service or node network.
+
+The example's `nginx.ingress.kubernetes.io/configuration-snippet` is ingress-nginx-specific and is disabled by policy in many clusters. Adapt it to your controller; modern controllers may handle WebSocket upgrades without a custom snippet. Proxy the application at `/` on a dedicated host. A subpath deployment is not a documented base-path configuration.
+
+Apply only after review:
+
+```bash
+kubectl apply -f k8s/ingress.yaml
+kubectl describe ingress kandev
+```
+
+## Backup, upgrade, and rollback
+
+Before an upgrade, create and verify a database backup and preserve any irreplaceable task branches. See [Operations](operations.md).
+
+```bash
+kubectl set image deployment/kandev \
+  kandev=ghcr.io/kdlbs/kandev:X.Y.Z
+kubectl rollout status deployment/kandev
+kubectl logs deployment/kandev --tail=200
+```
+
+The `Recreate` strategy stops active local agents. SQLite migrations run on startup and create a pre-migration snapshot when required. PostgreSQL migrations do not invoke `pg_dump`.
+
+`kubectl rollout undo` changes the image, not the database schema. A binary downgrade may not understand a newer schema; restore the matching pre-upgrade database backup when required. Reapplying the checked-in `k8s/deployment.yaml` without the image transformation resets the image to `kandev:latest`, so keep your production customization in your own overlay or deployment repository.
+
+## Remove while retaining data
+
+Delete compute and routing resources separately from the PVC:
+
+```bash
+kubectl delete ingress kandev --ignore-not-found
+kubectl delete deployment kandev
+kubectl delete service kandev
+kubectl delete configmap kandev-config
+kubectl get pvc kandev-data
+```
+
+Do not delete the PVC until its database, workspaces, auth state, and backups have been exported or intentionally discarded.
 
 ## Troubleshooting
 
 ```bash
-# Check pod status
-kubectl get pods -l app=kandev
-
-# View logs
-kubectl logs -l app=kandev -f
-
-# Shell into the pod (if needed)
-kubectl exec -it deployment/kandev -- /bin/bash
-
-# Check PVC status
-kubectl get pvc kandev-data
-
-# Describe pod for events
+kubectl get pod -l app=kandev -o wide
 kubectl describe pod -l app=kandev
+kubectl logs deployment/kandev --tail=200
+kubectl get pvc kandev-data
+kubectl describe pvc kandev-data
+kubectl get events --sort-by=.lastTimestamp
 ```
+
+- **`ImagePullBackOff`:** the example's placeholder `kandev:latest` was not replaced, the tag is wrong, registry egress is blocked, or image-pull credentials are missing.
+- **`CrashLoopBackOff` with permission errors:** check PVC ownership, Pod Security admission, root-squash, UID 1000, and universal/base image behavior.
+- **Liveness kills startup:** inspect migration/storage timing and add/tune a startup probe.
+- **UI works through port-forward but not ingress:** check host/DNS, TLS, auth-gateway route, WebSocket support, and controller-rejected annotations.
+- **Agent CLI missing:** install it through Settings or bake it into a derived image; confirm `/data/.npm-global/bin` is on `PATH`.
+- **SQLite locked or pod pending after scaling:** return to one replica and `Recreate`; do not share one SQLite database between pods.
+- **PVC full:** inspect worktrees, repositories, caches, CLI installs, logs, and retained task state before expanding or deleting anything.
+
+Related pages: [Docker](docker.md), [Configuration](configuration.md), [Executors](executors.md), and [Operations](operations.md).

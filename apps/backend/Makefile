@@ -75,7 +75,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet help
 
 ## Default target
 all: build
@@ -166,6 +166,31 @@ build-mock-agent-linux:
 	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/mock-agent-linux-amd64 ./cmd/mock-agent
 
 
+## Package the plugin-fixture SDK plugin (cmd/plugin-fixture) as a kandev
+## plugin tar.gz for backend integration tests and Playwright e2e: stages
+## fixture-package/ (manifest.yaml + ui/) into a temp dir, builds the
+## plugin-fixture binary for the HOST platform into <stage>/server/, then
+## packs it with cmd/plugin-pack (-platform-only: host binary only, smaller
+## package) into .build/kandev-plugin-e2e-1.0.0.tar.gz. e2e tests upload
+## this file to install the plugin.
+FIXTURE_PACKAGE_DIR := cmd/plugin-fixture/fixture-package
+FIXTURE_STAGE_DIR := .build/fixture-stage
+FIXTURE_PACKAGE_OUT := .build/kandev-plugin-e2e-1.0.0.tar.gz
+HOST_GOOS := $(shell $(GO) env GOOS)
+HOST_GOARCH := $(shell $(GO) env GOARCH)
+
+.PHONY: e2e-plugin-package
+e2e-plugin-package:
+	@echo "Packaging plugin-fixture for e2e ($(HOST_GOOS)-$(HOST_GOARCH))..."
+	@$(RMDIR) $(FIXTURE_STAGE_DIR)
+	@$(MKDIR) $(FIXTURE_STAGE_DIR)/server
+	cp $(FIXTURE_PACKAGE_DIR)/manifest.yaml $(FIXTURE_STAGE_DIR)/manifest.yaml
+	cp -r $(FIXTURE_PACKAGE_DIR)/ui $(FIXTURE_STAGE_DIR)/ui
+	$(GO) build $(GOFLAGS) -o $(FIXTURE_STAGE_DIR)/server/plugin-$(HOST_GOOS)-$(HOST_GOARCH)$(EXE) ./cmd/plugin-fixture
+	$(GO) run ./cmd/plugin-pack -dir $(FIXTURE_STAGE_DIR) -out $(FIXTURE_PACKAGE_OUT) -platform-only
+	@$(RMDIR) $(FIXTURE_STAGE_DIR)
+	@echo "Wrote $(FIXTURE_PACKAGE_OUT)"
+
 ## Clean build artifacts
 clean:
 	@echo "Cleaning..."
@@ -234,6 +259,25 @@ test-coverage:
 	$(CGO_PREFIX) $(GO) test -tags fts5 -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
 
+## Regenerate Go stubs from proto/kandev/plugin/v1/plugin.proto (§3 of
+## docs/plans/plugins/GRPC-CONTRACT.md). Installs protoc-gen-go and
+## protoc-gen-go-grpc into a local .tools/bin (not committed) and drives them
+## via `go run` buf — no system protoc required. Requires network access for
+## the first run (tool + buf module downloads); output is committed so
+## `go build` never needs this target.
+PROTO_TOOLS_BIN := $(CURDIR)/.tools/bin
+BUF_VERSION := v1.47.2
+PROTOC_GEN_GO_VERSION := v1.36.11
+PROTOC_GEN_GO_GRPC_VERSION := v1.5.1
+
+.PHONY: proto
+proto:
+	@echo "Generating proto stubs..."
+	@$(MKDIR) $(PROTO_TOOLS_BIN)
+	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION)
+	GOBIN=$(PROTO_TOOLS_BIN) $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION)
+	cd proto && PATH="$(PROTO_TOOLS_BIN):$$PATH" $(GO) run github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION) generate
+
 ## Run linter (requires golangci-lint)
 lint:
 	@echo "Running linter..."
@@ -288,6 +332,7 @@ help:
 	@echo "  test          Run tests (full suite — fails on Windows pending fixture cleanup)"
 	@echo "  test-windows  Run only the Windows-clean subset (matches CI windows-latest job)"
 	@echo "  test-e2e      Run E2E adapter tests (real agents, costs money)"
+	@echo "  e2e-plugin-package  Package the plugin-fixture SDK plugin into .build/kandev-plugin-e2e-1.0.0.tar.gz"
 	@echo "  test-lifecycle-goleak  Stress-run lifecycle goleak suite (override LIFECYCLE_GOLEAK_COUNT=N)"
 	@echo "  test-coverage Run tests with coverage report"
 	@echo "  lint          Run golangci-lint"

@@ -77,6 +77,12 @@ jobs:
       - name: Build backend and web
         run: make build-backend build-web
 
+      # Fixture plugin package consumed by the plugin E2E specs. Built here
+      # (the build job has the Go toolchain) and shipped to the shards as its
+      # own artifact; global-setup fails fast if it is missing.
+      - name: Build E2E fixture plugin package
+        run: make -C apps/backend e2e-plugin-package
+
       # Linux/amd64 helper binaries (agentctl + mock-agent) bind-mounted into
       # containers by the Docker E2E project. Cheap to build (~1s each) so we
       # always do it; the regular E2E job ignores them.
@@ -88,6 +94,13 @@ jobs:
         with:
           name: e2e-backend-build
           path: apps/backend/bin/
+          retention-days: 1
+
+      - name: Upload E2E fixture plugin package
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: e2e-plugin-package
+          path: apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz
           retention-days: 1
 
       # Tar the Vite dist directory so shards can reuse the same static web build.
@@ -164,6 +177,12 @@ jobs:
 
       - name: Make backend binaries executable
         run: chmod +x apps/backend/bin/*
+
+      - name: Download E2E fixture plugin package
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: e2e-plugin-package
+          path: apps/backend/.build/
 
       - name: Download web build
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
@@ -327,6 +346,12 @@ jobs:
 
       - name: Make backend binaries executable
         run: chmod +x apps/backend/bin/*
+
+      - name: Download E2E fixture plugin package
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: e2e-plugin-package
+          path: apps/backend/.build/
 
       - name: Download web build
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5

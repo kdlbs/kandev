@@ -7,6 +7,7 @@ export const defaultFeaturesState: FeaturesSliceState = {
   // The SSR layer overwrites this with whatever the backend reports.
   features: {
     office: false,
+    plugins: false,
   },
 };
 

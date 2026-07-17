@@ -13,6 +13,7 @@ import { EnsureSessionErrorBanner } from "@/components/task/ensure-session-error
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
 import { SessionCommands } from "@/components/session-commands";
+import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import {
   buildDebugEntries,
@@ -269,6 +270,7 @@ export function TaskPageInner({
             hasWorktree={Boolean(merged.worktreeBranch)}
             isPassthrough={sessionPanel.isSessionPassthrough}
           />
+          <TaskPRShortcut taskId={taskProps.taskId} />
           {debugEntries && <DebugOverlay title="Task Debug" entries={debugEntries} />}
           {!isMobile && <TaskTopBar {...topBarProps} />}
           {ensureSession.status === "error" && (

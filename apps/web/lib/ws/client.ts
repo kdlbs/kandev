@@ -2,6 +2,7 @@ import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend"
 import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { dispatchToPluginWsHandlers } from "@/lib/ws/plugin-bridge";
 
 const debugDispatch = createDebugLogger("ws:dispatch");
 
@@ -438,6 +439,9 @@ export class WebSocketClient {
     if (handlers) {
       handlers.forEach((handler) => handler(message));
     }
+    // Plugin bridge: forward the same notification to any handlers a loaded
+    // plugin registered for this action (registry.registerWsHandler).
+    dispatchToPluginWsHandlers(action, message.payload);
   }
 
   private resolvePendingRequest(msgId: string, payload: unknown) {

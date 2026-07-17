@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, memo } from "react";
-import { IconPlus } from "@tabler/icons-react";
+import { IconMessageCircle, IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
@@ -22,6 +22,7 @@ import { SidebarLinkDialogs } from "../task-session-sidebar-dialogs";
 import { useSidebarLinkActions } from "../task-session-sidebar-link-actions";
 import { useSidebarTaskLinking } from "../task-session-sidebar-task-linking";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
+import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
@@ -131,6 +132,58 @@ export function MobileTaskList({
   );
 }
 
+function TaskSwitcherSheetHeader({
+  workspaceId,
+  workspaces,
+  onWorkspaceChange,
+  onQuickChat,
+  onNewTask,
+}: {
+  workspaceId: string | null;
+  workspaces: Array<{ id: string; name: string }>;
+  onWorkspaceChange: (workspaceId: string) => void;
+  onQuickChat: () => void;
+  onNewTask: () => void;
+}) {
+  return (
+    <SheetHeader className="p-4 pb-2 border-b border-border">
+      <div className="flex items-center justify-between">
+        <SheetTitle className="text-base">Tasks</SheetTitle>
+        <div className="flex items-center gap-2">
+          {workspaceId && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 cursor-pointer"
+              onClick={onQuickChat}
+              data-testid="mobile-sheet-quick-chat"
+            >
+              <IconMessageCircle className="h-4 w-4" />
+              Chat
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 gap-1 cursor-pointer"
+            onClick={onNewTask}
+          >
+            <IconPlus className="h-4 w-4" />
+            New
+          </Button>
+        </div>
+      </div>
+      <div className="pt-2">
+        <WorkspaceSwitcher
+          workspaces={workspaces}
+          activeWorkspaceId={workspaceId}
+          onSelect={onWorkspaceChange}
+        />
+      </div>
+    </SheetHeader>
+  );
+}
+
 export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   open,
   onOpenChange,
@@ -141,6 +194,11 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const data = useSheetData(workspaceId);
   const actions = useSheetActions(workspaceId, onOpenChange);
   const linking = useMobileTaskLinking(workspaceId);
+  const openQuickChat = useQuickChatLauncher(workspaceId);
+  const handleQuickChat = useCallback(() => {
+    onOpenChange(false);
+    openQuickChat();
+  }, [onOpenChange, openQuickChat]);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -149,27 +207,13 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         side="left"
         className="w-[85vw] max-w-sm p-0 flex flex-col"
       >
-        <SheetHeader className="p-4 pb-2 border-b border-border">
-          <div className="flex items-center justify-between">
-            <SheetTitle className="text-base">Tasks</SheetTitle>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 cursor-pointer"
-              onClick={() => setDialogOpen(true)}
-            >
-              <IconPlus className="h-4 w-4" />
-              New
-            </Button>
-          </div>
-          <div className="pt-2">
-            <WorkspaceSwitcher
-              workspaces={data.workspaces.map((w) => ({ id: w.id, name: w.name }))}
-              activeWorkspaceId={workspaceId}
-              onSelect={actions.handleWorkspaceChange}
-            />
-          </div>
-        </SheetHeader>
+        <TaskSwitcherSheetHeader
+          workspaceId={workspaceId}
+          workspaces={data.workspaces.map((w) => ({ id: w.id, name: w.name }))}
+          onWorkspaceChange={actions.handleWorkspaceChange}
+          onQuickChat={handleQuickChat}
+          onNewTask={() => setDialogOpen(true)}
+        />
 
         <SidebarFilterBar />
 

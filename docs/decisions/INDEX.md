@@ -4,9 +4,9 @@ Architecture Decision Records (ADRs) for the Kandev project. Each decision captu
 
 Read individual ADRs for full context. Create new ones via `/record decision` or manually following the template in `0001-file-based-knowledge-system.md`.
 
-| #    | Title                                                                                                                               | Status     | Area                        | Date       |
+| ID   | Title                                                                                                                               | Status     | Area                        | Date       |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------- | --------------------------- | ---------- |
-| 0001 | [File-based knowledge system](0001-file-based-knowledge-system.md)                                                                  | accepted   | infra                       | 2026-03-28 |
+| 0001 | [File-based knowledge system](0001-file-based-knowledge-system.md)                                                                  | accepted (amended 2026-07-16) | infra             | 2026-03-28 |
 | 0002 | [Host utility agentctl for sessionless ACP flows](0002-host-utility-agentctl-for-sessionless-flows.md)                              | accepted   | backend                     | 2026-04-08 |
 | 0003 | [executors_running as the single source of truth for agent_execution_id](0003-executors-running-as-execution-id-source-of-truth.md) | accepted   | backend                     | 2026-05-03 |
 | 0004 | [Task model unification — shared base, per-strategy meta, shared kernel](0004-task-model-unification.md)                            | proposed   | backend, frontend           | 2026-05-05 |
@@ -48,4 +48,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0040 | [Separate updater integrity from OS publisher identity](0040-separate-updater-integrity-from-os-publisher-identity.md)                  | accepted   | desktop, infra, workflow    | 2026-07-15 |
 | 0041 | [Backend-owned portable user settings](0041-backend-owned-portable-user-settings.md)                                               | accepted   | backend, frontend           | 2026-07-15 |
 | 0042 | [Project shell output and fetch it on demand](0042-project-shell-output-and-fetch-on-demand.md)                                    | accepted   | backend, frontend, protocol | 2026-07-16 |
-| 0043 | [Typed Utility Chats Share the Quick Chat Session Model](0043-typed-quick-chat-sessions.md)                                         | accepted   | backend, frontend           | 2026-07-14 |
+| 0043 | [Plugins read/write kandev data via capability-gated Host gRPC RPCs](0043-plugin-host-data-api.md)                                  | accepted   | backend, protocol           | 2026-07-17 |
+| 2026-07-14-typed-utility-chat-sessions | [Typed Utility Chats Share the Quick Chat Session Model](2026-07-14-typed-utility-chat-sessions.md) | accepted   | backend, frontend           | 2026-07-14 |

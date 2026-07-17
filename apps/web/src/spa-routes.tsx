@@ -22,6 +22,11 @@ import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-ap
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { hasHydratedKanbanRouteState } from "@/lib/routing/kanban-route-hydration";
 import { usePathname, useSearchParams } from "@/lib/routing/client-router";
+import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
+import {
+  PluginErrorBoundary,
+  PluginRouteFallback,
+} from "@/components/plugins/plugin-error-boundary";
 import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
@@ -65,7 +70,8 @@ type SpaRoute =
   | { kind: "linear" }
   | { kind: "stats"; range?: RangeKey }
   | { kind: "settings"; pathname: string }
-  | { kind: "office"; pathname: string };
+  | { kind: "office"; pathname: string }
+  | { kind: "plugin"; path: string };
 
 type DataBackedSpaRoute = Exclude<SpaRoute, { kind: "kanban" | "settings" | "office" }>;
 
@@ -82,8 +88,19 @@ export function resolveSpaRoute(pathname: string, searchParams: URLSearchParams)
     resolveTaskDetailRoute(normalized, searchParams) ??
     resolveTopLevelRoute(normalized, searchParams) ??
     resolveNestedRoute(normalized) ??
+    resolvePluginRoute(normalized) ??
     resolveKanbanRoute(searchParams)
   );
+}
+
+/**
+ * Dynamic plugin routes (`registry.registerRoute(path, Component)`) — consulted
+ * after every static/nested route and before the kanban catch-all, so a plugin
+ * can never shadow a first-class route but does own any otherwise-unmatched path.
+ */
+function resolvePluginRoute(normalized: string): SpaRoute | null {
+  const match = pluginRegistry.getRoutes().find((route) => route.path === normalized);
+  return match ? { kind: "plugin", path: normalized } : null;
 }
 
 function resolveTaskDetailRoute(
@@ -144,10 +161,16 @@ function resolveKanbanRoute(searchParams: URLSearchParams): SpaRoute {
 }
 
 export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
+  // Subscribe so a plugin route registered after first paint (async bundle
+  // load) re-resolves without requiring a navigation.
+  usePluginRegistry();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const route = resolveSpaRoute(pathname, searchParams);
 
+  if (route.kind === "plugin") {
+    return <PluginRoute path={route.path} />;
+  }
   if (route.kind === "kanban") {
     return <KanbanRoute route={route} />;
   }
@@ -179,6 +202,23 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   }
 
   return <DataBackedRoute route={route} routeData={routeData} />;
+}
+
+/**
+ * Renders the plugin-registered component for a `kind: "plugin"` route,
+ * inside the normal app shell. Wrapped in a `PluginErrorBoundary` so a
+ * throwing plugin route renders a fallback instead of white-screening the
+ * rest of the SPA.
+ */
+function PluginRoute({ path }: { path: string }) {
+  const match = pluginRegistry.getRoutes().find((route) => route.path === path);
+  if (!match) return null;
+  const Component = match.Component;
+  return (
+    <PluginErrorBoundary context={`route "${path}"`} fallback={<PluginRouteFallback />}>
+      <Component />
+    </PluginErrorBoundary>
+  );
 }
 
 function KanbanRoute({ route }: { route: Extract<SpaRoute, { kind: "kanban" }> }) {

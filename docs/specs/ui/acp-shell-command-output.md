@@ -118,6 +118,7 @@ The extension is additive: agents that ignore it continue through their current 
 - Output exceeding the bound is truncated deterministically and remains valid UTF-8.
 - Unknown exit status never renders a success check or a failure cross solely because the value is absent.
 - ACP `failed` and `cancelled` statuses terminate active-call tracking even when no exit code is available.
+- A terminal tool update received after its originating turn settled reconciles the existing tool message without opening a new turn or changing session or task state.
 - A failed on-demand request leaves the disclosure open, retains the last successful snapshot, and shows an output-unavailable state until a retry succeeds. It never falls back to a body from the normal message payload.
 - Poll responses that arrive after collapse, unmount, or a newer request, including the final terminal snapshot request, are ignored.
 
@@ -133,6 +134,7 @@ Live output updates use the existing tool-message update path and are persisted 
 - **GIVEN** Auggie returns XML-like output with `<return-code>0</return-code>`, **WHEN** the command completes, **THEN** the parsed output is visible and the row shows `Exit code 0` as success.
 - **GIVEN** an agent returns plain output with no structured or embedded exit status, **WHEN** the command completes, **THEN** the output is visible and the row shows `Exit code unavailable` with neutral status.
 - **GIVEN** a command is cancelled without an exit code, **WHEN** its terminal update is persisted, **THEN** the transcript remains expandable and shows `Exit code unavailable`.
+- **GIVEN** a command's turn has settled and the provider later emits a terminal tool update, **WHEN** the update is persisted, **THEN** the existing transcript is reconciled without creating a turn, waking the session or task, or producing an empty-output warning.
 - **GIVEN** terminal output exceeds 256 KiB, **WHEN** live and final updates are normalized, **THEN** stored output remains within the bound, keeps the newest valid UTF-8 text, and the expanded row indicates truncation.
 - **GIVEN** a persisted shell message with a long command, **WHEN** chat opens on desktop or mobile, **THEN** the complete command wraps visibly while its output disclosure remains collapsed.
 - **GIVEN** a collapsed shell command with persisted output, **WHEN** task boot state, message REST/WS lists, and live message notifications reach the browser, **THEN** they contain byte counts and result metadata but no stdout or stderr body, and no output endpoint request occurs.

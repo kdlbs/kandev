@@ -196,29 +196,33 @@ type TaskSessionDTO struct {
 	TaskID string `json:"task_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
-	Name                 string                  `json:"name"`
-	AgentExecutionID     string                  `json:"agent_execution_id,omitempty"`
-	ContainerID          string                  `json:"container_id,omitempty"`
-	AgentProfileID       string                  `json:"agent_profile_id,omitempty"`
-	ExecutorID           string                  `json:"executor_id,omitempty"`
-	ExecutorProfileID    string                  `json:"executor_profile_id,omitempty"`
-	EnvironmentID        string                  `json:"environment_id,omitempty"`
-	RepositoryID         string                  `json:"repository_id,omitempty"`
-	BaseBranch           string                  `json:"base_branch,omitempty"`
-	BaseCommitSHA        string                  `json:"base_commit_sha,omitempty"`
-	WorktreeID           string                  `json:"worktree_id,omitempty"`
-	WorktreePath         string                  `json:"worktree_path,omitempty"`
-	WorktreeBranch       string                  `json:"worktree_branch,omitempty"`
-	State                models.TaskSessionState `json:"state"`
-	ErrorMessage         string                  `json:"error_message,omitempty"`
-	Metadata             map[string]interface{}  `json:"metadata,omitempty"`
-	AgentProfileSnapshot map[string]interface{}  `json:"agent_profile_snapshot,omitempty"`
-	ExecutorSnapshot     map[string]interface{}  `json:"executor_snapshot,omitempty"`
-	EnvironmentSnapshot  map[string]interface{}  `json:"environment_snapshot,omitempty"`
-	RepositorySnapshot   map[string]interface{}  `json:"repository_snapshot,omitempty"`
-	StartedAt            time.Time               `json:"started_at"`
-	CompletedAt          *time.Time              `json:"completed_at,omitempty"`
-	UpdatedAt            time.Time               `json:"updated_at"`
+	Name              string `json:"name"`
+	AgentExecutionID  string `json:"agent_execution_id,omitempty"`
+	ContainerID       string `json:"container_id,omitempty"`
+	AgentProfileID    string `json:"agent_profile_id,omitempty"`
+	ExecutorID        string `json:"executor_id,omitempty"`
+	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
+	EnvironmentID     string `json:"environment_id,omitempty"`
+	RepositoryID      string `json:"repository_id,omitempty"`
+	BaseBranch        string `json:"base_branch,omitempty"`
+	BaseCommitSHA     string `json:"base_commit_sha,omitempty"`
+	WorktreeID        string `json:"worktree_id,omitempty"`
+	WorktreePath      string `json:"worktree_path,omitempty"`
+	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
+	// the flattened Worktree* fields above carry only the first for
+	// backward compatibility.
+	Worktrees            []*models.TaskSessionWorktree `json:"worktrees,omitempty"`
+	State                models.TaskSessionState       `json:"state"`
+	ErrorMessage         string                        `json:"error_message,omitempty"`
+	Metadata             map[string]interface{}        `json:"metadata,omitempty"`
+	AgentProfileSnapshot map[string]interface{}        `json:"agent_profile_snapshot,omitempty"`
+	ExecutorSnapshot     map[string]interface{}        `json:"executor_snapshot,omitempty"`
+	EnvironmentSnapshot  map[string]interface{}        `json:"environment_snapshot,omitempty"`
+	RepositorySnapshot   map[string]interface{}        `json:"repository_snapshot,omitempty"`
+	StartedAt            time.Time                     `json:"started_at"`
+	CompletedAt          *time.Time                    `json:"completed_at,omitempty"`
+	UpdatedAt            time.Time                     `json:"updated_at"`
 	// Workflow fields
 	IsPrimary         bool                `json:"is_primary"`
 	IsPassthrough     bool                `json:"is_passthrough"`
@@ -233,29 +237,33 @@ type TaskSessionSummaryDTO struct {
 	TaskID string `json:"task_id"`
 	// Name is the user-supplied session tab label. Serialized without
 	// omitempty so a cleared name ("") overwrites stale client state.
-	Name              string                  `json:"name"`
-	AgentExecutionID  string                  `json:"agent_execution_id,omitempty"`
-	ContainerID       string                  `json:"container_id,omitempty"`
-	AgentProfileID    string                  `json:"agent_profile_id,omitempty"`
-	ExecutorID        string                  `json:"executor_id,omitempty"`
-	ExecutorProfileID string                  `json:"executor_profile_id,omitempty"`
-	EnvironmentID     string                  `json:"environment_id,omitempty"`
-	RepositoryID      string                  `json:"repository_id,omitempty"`
-	BaseBranch        string                  `json:"base_branch,omitempty"`
-	BaseCommitSHA     string                  `json:"base_commit_sha,omitempty"`
-	WorktreeID        string                  `json:"worktree_id,omitempty"`
-	WorktreePath      string                  `json:"worktree_path,omitempty"`
-	WorktreeBranch    string                  `json:"worktree_branch,omitempty"`
-	State             models.TaskSessionState `json:"state"`
-	ErrorMessage      string                  `json:"error_message,omitempty"`
-	Metadata          map[string]interface{}  `json:"metadata,omitempty"`
-	StartedAt         time.Time               `json:"started_at"`
-	CompletedAt       *time.Time              `json:"completed_at,omitempty"`
-	UpdatedAt         time.Time               `json:"updated_at"`
-	IsPrimary         bool                    `json:"is_primary"`
-	IsPassthrough     bool                    `json:"is_passthrough"`
-	ReviewStatus      models.ReviewStatus     `json:"review_status,omitempty"`
-	TaskEnvironmentID string                  `json:"task_environment_id,omitempty"`
+	Name              string `json:"name"`
+	AgentExecutionID  string `json:"agent_execution_id,omitempty"`
+	ContainerID       string `json:"container_id,omitempty"`
+	AgentProfileID    string `json:"agent_profile_id,omitempty"`
+	ExecutorID        string `json:"executor_id,omitempty"`
+	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
+	EnvironmentID     string `json:"environment_id,omitempty"`
+	RepositoryID      string `json:"repository_id,omitempty"`
+	BaseBranch        string `json:"base_branch,omitempty"`
+	BaseCommitSHA     string `json:"base_commit_sha,omitempty"`
+	WorktreeID        string `json:"worktree_id,omitempty"`
+	WorktreePath      string `json:"worktree_path,omitempty"`
+	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
+	// the flattened Worktree* fields above carry only the first for
+	// backward compatibility.
+	Worktrees         []*models.TaskSessionWorktree `json:"worktrees,omitempty"`
+	State             models.TaskSessionState       `json:"state"`
+	ErrorMessage      string                        `json:"error_message,omitempty"`
+	Metadata          map[string]interface{}        `json:"metadata,omitempty"`
+	StartedAt         time.Time                     `json:"started_at"`
+	CompletedAt       *time.Time                    `json:"completed_at,omitempty"`
+	UpdatedAt         time.Time                     `json:"updated_at"`
+	IsPrimary         bool                          `json:"is_primary"`
+	IsPassthrough     bool                          `json:"is_passthrough"`
+	ReviewStatus      models.ReviewStatus           `json:"review_status,omitempty"`
+	TaskEnvironmentID string                        `json:"task_environment_id,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
@@ -662,6 +670,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
 		result.WorktreePath = session.Worktrees[0].WorktreePath
 		result.WorktreeBranch = session.Worktrees[0].WorktreeBranch
+		result.Worktrees = session.Worktrees
 	}
 	return result
 }
@@ -700,6 +709,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
 		result.WorktreePath = session.Worktrees[0].WorktreePath
 		result.WorktreeBranch = session.Worktrees[0].WorktreeBranch
+		result.Worktrees = session.Worktrees
 	}
 	return result
 }

@@ -12,6 +12,7 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
+import { RepoFilterCombobox } from "./repo-filter-combobox";
 
 type SavePresetDialogProps = {
   open: boolean;
@@ -19,14 +20,16 @@ type SavePresetDialogProps = {
   kind: "pr" | "issue";
   customQuery: string;
   repoFilter: string;
+  repoOptions: string[];
   suggestedLabel: string;
-  onSave: (label: string) => void;
+  onSave: (label: string, repoFilter: string) => void;
 };
 
 function SavePresetForm({
   kind,
   customQuery,
   repoFilter,
+  repoOptions,
   suggestedLabel,
   onSave,
   onClose,
@@ -34,19 +37,21 @@ function SavePresetForm({
   kind: "pr" | "issue";
   customQuery: string;
   repoFilter: string;
+  repoOptions: string[];
   suggestedLabel: string;
-  onSave: (label: string) => void;
+  onSave: (label: string, repoFilter: string) => void;
   onClose: () => void;
 }) {
   const [value, setValue] = useState(suggestedLabel);
+  const [defaultRepoFilter, setDefaultRepoFilter] = useState(repoFilter);
   const trimmed = value.trim();
   const canSubmit = trimmed.length > 0;
 
   const handleSubmit = useCallback(() => {
     if (!canSubmit) return;
-    onSave(trimmed);
+    onSave(trimmed, defaultRepoFilter);
     onClose();
-  }, [canSubmit, trimmed, onSave, onClose]);
+  }, [canSubmit, trimmed, defaultRepoFilter, onSave, onClose]);
 
   return (
     <>
@@ -80,14 +85,21 @@ function SavePresetForm({
               </code>
             </div>
           )}
-          {repoFilter && (
-            <div className="flex gap-2">
-              <span className="text-muted-foreground shrink-0 w-16">Repo</span>
-              <code className="font-mono text-[11px] bg-muted rounded px-1.5 py-0.5 break-all">
-                {repoFilter}
-              </code>
-            </div>
-          )}
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Default repository</Label>
+          <RepoFilterCombobox
+            repoFilter={defaultRepoFilter}
+            onRepoFilterChange={setDefaultRepoFilter}
+            repoOptions={repoOptions}
+            ariaLabel="Default repository"
+            triggerClassName="h-11 border border-input bg-background px-3 py-2 text-sm hover:bg-secondary/50 md:h-9 md:py-1.5"
+            testId="github-save-query-repo-trigger"
+            dropdownTestId="github-save-query-repo-dropdown"
+          />
+          <p className="text-xs text-muted-foreground">
+            This repository opens by default. You can change the filter after opening the query.
+          </p>
         </div>
       </div>
       <DialogFooter>
@@ -108,6 +120,7 @@ export function SavePresetDialog({
   kind,
   customQuery,
   repoFilter,
+  repoOptions,
   suggestedLabel,
   onSave,
 }: SavePresetDialogProps) {
@@ -120,6 +133,7 @@ export function SavePresetDialog({
             kind={kind}
             customQuery={customQuery}
             repoFilter={repoFilter}
+            repoOptions={repoOptions}
             suggestedLabel={suggestedLabel}
             onSave={onSave}
             onClose={handleClose}
