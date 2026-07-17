@@ -20,7 +20,6 @@ Start with the page that matches the job in front of you:
 - [Integrations](integrations.md): configure GitHub, GitLab, Jira, Linear, Sentry, and Slack for a workspace.
 - [Developer tools](developer-tools.md): use quick chat, prompts, utility agents, voice input, editors, terminal, shortcuts, and notifications.
 - [Automation and MCP](automation-and-mcp.md): create scheduled or event-driven work, use task MCP, and connect an external MCP client.
-- [Plugins](plugins.md): opt into the experimental plugin runtime, install trusted packages, and understand its process, UI, webhook, and tool boundaries.
 - [Feature status](feature-status.md): check support boundaries, dependencies, experimental features, and unfinished work.
 - [Security and trust](security.md): choose a safe deployment boundary, constrain agent access, protect credentials, and preserve human review.
 

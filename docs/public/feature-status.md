@@ -82,7 +82,6 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | Fixed cron timezone behavior | Limited | The UI accepts fixed cron and timezone values, but the current interval scheduler does not honor the configured timezone and some fixed cron expressions may never fire. Prefer tested presets or `@every` intervals. |
 | GitHub push and CI automation triggers | In progress | Trigger types and UI labels exist as coming-soon/stub paths; they are not working production triggers. GitHub's separate opt-in PR CI-fix automation is shipped. |
 | Automation Run mode | Limited | Creates a hidden ephemeral task and starts immediately. It cannot require user input. Automatic worktree/branch reaping applies only when a Worktree runtime ID is present; other executors follow their own lifecycle. |
-| Backend and native-UI plugins | Experimental | Production defaults `KANDEV_FEATURES_PLUGINS=false`. Trusted package install, supervised gRPC processes, event delivery, webhooks, scoped state/secrets, sync, and native UI bundles are shipped. Signature verification is not wired by default; URL install retains an SSRF boundary; plugin webhooks have no host-provided authentication; declared tools are listed but not injected into agent toolsets; and general `api_read`/`api_write` Host RPCs remain reserved. |
 
 ## MCP, clients, and operation
 
@@ -99,7 +98,7 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | Statistics and host resource metrics | Supported | Workspace stats and on-demand CPU/memory/disk display are shipped. Execution-environment metrics depend on executor/runtime support. |
 | SQLite backups, database maintenance, status, and logs | Supported | Backups use SQLite `VACUUM INTO` snapshots under the data root. Retention, free space, file permissions, and off-host copies remain operator responsibilities. |
 | Update checking and applying updates | Dependency-bound | Checking is shipped. Package-manager installs update through their package manager; backend self-update is service-install-specific; desktop updater support varies by artifact/platform. |
-| Feature Toggle settings | Supported | The page exposes Office, Plugins, and Debug overrides, environment locks, and restart-required state. Plugins execute trusted extension code; Debug can expose prompt, file, and tool data. A toggle being present does not promote its target feature to supported. |
+| Feature Toggle settings | Supported | The page exposes Office and Debug overrides, environment locks, and restart-required state. Debug is high risk because logs/endpoints can expose prompt, file, and tool data. A toggle being present does not promote its target feature to supported. |
 | Office mode | In progress | Production defaults `KANDEV_FEATURES_OFFICE=false`; development and E2E enable it for implementation/testing. Its routes, agents, labels, documents, dependencies, routines, skills, routing, costs, and approvals may change between releases. |
 | Mock providers and E2E-only routes | Internal | They are selected only by development/test runtime profiles and must not be exposed as product integrations. |
 

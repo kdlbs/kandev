@@ -279,17 +279,16 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 
 ## Runtime feature toggles
 
-**Settings → System → Feature Toggles** manages three startup-time flags:
+**Settings → System → Feature Toggles** manages two startup-time flags:
 
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
 | `features.office` | `KANDEV_FEATURES_OFFICE` | off | Experimental autonomous-agent Office surfaces and automation. |
-| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | off | Experimental backend and native-UI plugin runtime. Installed plugin code runs with Kandev backend/browser privileges. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` (also locked by explicit legacy/debug-message vars) | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
 
-The source checkout's `make dev` activates the embedded development profile, which enables Office, plugins, debug surfaces, ACP logging, and a mock agent. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
+The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
 
 ## Credentials and product settings
 

@@ -76,14 +76,6 @@ Webhook secrets are a separate case. A workspace automation stores its webhook s
 
 See [Configuration](configuration.md) for storage and environment fields and [Operations](operations.md) for backup, restore, logs, and reset behavior.
 
-## Treat plugins as executable code
-
-The experimental plugin system loads a platform binary as the Kandev service account and can load a frontend bundle into the Kandev browser origin. Executor isolation does not contain either surface. Install only packages you would run directly on the backend host.
-
-Package checksums detect changed files, but the current runtime does not wire a publisher-signature verifier. An unsigned label is therefore expected and must not be treated as a trust decision. URL installation can request arbitrary HTTP(S) hosts visible to the backend, including internal services. Plugin webhook routes also provide no Kandev-level authentication; the plugin or an upstream gateway must verify each caller.
-
-Keep plugins off unless needed, restrict the management page and API to trusted operators, review manifest capabilities and source before installation, and test packages on a disposable instance. Uninstall removes package files, writable plugin data, and plugin-scoped state, but it cannot undo actions the process already took or revoke credentials it used. See [Plugins](plugins.md) for the full operating contract.
-
 ## Keep a human in the loop
 
 Kandev can automate planning, implementation, review preparation, and pull-request operations without making the agent the final authority.
@@ -118,7 +110,6 @@ Before shared or remote use, confirm:
 
 - the backend is not directly reachable from an untrusted network;
 - an authenticated access layer protects HTTP, WebSocket, and MCP traffic;
-- experimental plugins are disabled or every installed package and webhook boundary has been reviewed;
 - the Kandev process runs as a dedicated, non-root account where practical;
 - repository, provider, agent, Docker, SSH, and cloud credentials are narrowly scoped;
 - Docker daemon access is absent unless a task requires it;
