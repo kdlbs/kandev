@@ -361,6 +361,20 @@ test("rejects an experimental callout dropped after unrelated section content", 
   );
 });
 
+test("rejects an experimental callout not under a descriptive section heading", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": `${validPage}\n> [!EXPERIMENTAL]\n> Office is disabled by default.\n\nSome content.\n`,
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /index.md experimental callouts must immediately follow a descriptive heading/,
+  );
+});
+
 test("rejects published pages without title and description frontmatter", async () => {
   const dir = await createDocs(
     { "index.md": "# Kandev\n" },
