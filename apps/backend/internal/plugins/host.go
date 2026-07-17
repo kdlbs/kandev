@@ -27,12 +27,30 @@ import (
 // (§5) only names state and secrets (api_read/api_write reserved for
 // future); event emission has no boolean capability to gate on.
 type pluginHost struct {
+	// UnimplementedHostData is embedded so pluginHost satisfies
+	// pluginsdk.Host even when one of the data-source fields below is nil
+	// (e.g. a test pluginHost built without SetDataSources' wiring, or a
+	// capability the manifest doesn't declare — see host_data.go's denied
+	// readers for the capability-gated path). Every accessor
+	// (Tasks/Sessions/Workspaces/Workflows/AgentProfiles/Repositories) is
+	// overridden with a real, capability-gated implementation in
+	// host_data.go; this embed only remains as defense-in-depth.
+	pluginsdk.UnimplementedHostData
+
 	pluginID     string
 	capabilities manifest.Capabilities
 
 	state   *state.Store
 	secrets SecretRevealer
 	bus     bus.EventBus
+
+	// Host data API (ADR 0043) service-layer dependencies, wired by
+	// Service.hostForPlugin from Service.SetDataSources. See host_data.go.
+	taskData         taskDataSource
+	workflows        workflowLister
+	workflowSteps    workflowStepLister
+	agentProfiles    agentProfileDataSource
+	sessionCodeStats sessionCodeStatsSource
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)
@@ -43,6 +61,14 @@ var _ pluginsdk.Host = (*pluginHost)(nil)
 // declared".
 func permissionDenied(capability string) error {
 	return status.Errorf(codes.PermissionDenied, "capability '%s' not declared", capability)
+}
+
+// taskNotFound builds the gRPC error taskReader.Get returns for an id that
+// doesn't resolve to a task — the SAME error, in-process or over the wire
+// (grpcHostServer.GetTask forwards it as-is), so a plugin never observes a
+// (nil, nil) success for a missing task.
+func taskNotFound(id string) error {
+	return status.Errorf(codes.NotFound, "task %q not found", id)
 }
 
 func (h *pluginHost) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {

@@ -159,8 +159,12 @@ type setStateCall struct {
 }
 
 // fakeHost is a minimal pluginsdk.Host test double that only records
-// SetState calls; the fixture plugin never exercises the other methods.
+// SetState calls; the fixture plugin never exercises the other methods. It
+// embeds UnimplementedHostData to satisfy the Host data API (ADR 0043)
+// sub-accessors without wiring them.
 type fakeHost struct {
+	pluginsdk.UnimplementedHostData
+
 	setStateCalls []setStateCall
 	setStateErr   error
 }

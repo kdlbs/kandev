@@ -20,8 +20,13 @@ import (
 
 // fakeHost is a minimal in-memory pluginsdk.Host for end-to-end tests: it
 // only implements SetState (with a channel so tests can synchronize on
-// delivery without a sleep), and errors on everything else.
+// delivery without a sleep), and errors on everything else. It embeds
+// UnimplementedHostData to satisfy the Host data API (ADR 0043)
+// sub-accessors without wiring them; see docs/plans/plugins/host-data-api/
+// task-04-host-data-impl.md for the real implementation.
 type fakeHost struct {
+	pluginsdk.UnimplementedHostData
+
 	mu     sync.Mutex
 	states map[string]map[string]any
 	setCh  chan struct{}

@@ -15,13 +15,30 @@ func (m *Manifest) HasEvent(name string) bool {
 // CanRead reports whether the manifest declares read access to resource via
 // Capabilities.APIRead.
 func (m *Manifest) CanRead(resource string) bool {
-	return containsString(m.Capabilities.APIRead, resource)
+	return m.Capabilities.CanRead(resource)
 }
 
 // CanWrite reports whether the manifest declares write access to resource
 // via Capabilities.APIWrite.
 func (m *Manifest) CanWrite(resource string) bool {
-	return containsString(m.Capabilities.APIWrite, resource)
+	return m.Capabilities.CanWrite(resource)
+}
+
+// CanRead reports whether c declares read access to resource via APIRead
+// (ADR 0043's api_read:<resource> capabilities, e.g. "tasks", "sessions").
+// Exposed on Capabilities directly (not just Manifest) so callers that only
+// hold a plugin's currently-registered Capabilities snapshot — such as
+// internal/plugins.pluginHost, bound at spawn time — can gate without a full
+// Manifest.
+func (c Capabilities) CanRead(resource string) bool {
+	return containsString(c.APIRead, resource)
+}
+
+// CanWrite reports whether c declares write access to resource via
+// APIWrite. See CanRead's doc comment for why this also lives on
+// Capabilities directly.
+func (c Capabilities) CanWrite(resource string) bool {
+	return containsString(c.APIWrite, resource)
 }
 
 // HasUIBundle reports whether the manifest declares a native UI bundle via
