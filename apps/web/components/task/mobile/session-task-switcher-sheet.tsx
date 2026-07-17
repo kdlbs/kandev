@@ -208,6 +208,16 @@ function TaskSwitcherSurfaceHeader({
 function surfaceAction<TArgs extends unknown[]>(
   presentation: "sheet" | "drawer",
   onOpenChange: (open: boolean) => void,
+  action: (...args: TArgs) => unknown,
+): (...args: TArgs) => void;
+function surfaceAction<TArgs extends unknown[]>(
+  presentation: "sheet" | "drawer",
+  onOpenChange: (open: boolean) => void,
+  action: ((...args: TArgs) => unknown) | undefined,
+): ((...args: TArgs) => void) | undefined;
+function surfaceAction<TArgs extends unknown[]>(
+  presentation: "sheet" | "drawer",
+  onOpenChange: (open: boolean) => void,
   action: ((...args: TArgs) => unknown) | undefined,
 ): ((...args: TArgs) => void) | undefined {
   if (!action || presentation === "sheet") return action;
@@ -262,8 +272,8 @@ function TaskSwitcherSurfaceContent({
           selectedTaskId={data.selectedTaskId}
           onSelectTask={actions.handleSelectTask}
           onRenameTask={surfaceAction(presentation, onOpenChange, rename.handleRenameTask)}
-          onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)!}
-          onDeleteTask={surfaceAction(presentation, onOpenChange, actions.handleDeleteTask)!}
+          onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)}
+          onDeleteTask={surfaceAction(presentation, onOpenChange, actions.handleDeleteTask)}
           onLinkPullRequest={surfaceAction(
             presentation,
             onOpenChange,

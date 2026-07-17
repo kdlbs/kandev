@@ -75,6 +75,7 @@ export function useTaskSubmitHandlers({
   const { toast } = useToast();
   const setActiveDocument = useAppStore((state) => state.setActiveDocument);
   const setPlanMode = useAppStore((state) => state.setPlanMode);
+  const isStartedEdit = computeIsTaskStarted(isEditMode, editingTask);
 
   const isFreshBranchActive =
     freshBranchEnabled && isLocalExecutor && !useRemote && repositoryLocalPath !== "";
@@ -233,7 +234,6 @@ export function useTaskSubmitHandlers({
     if (!editingTask) return null;
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return null;
-    const isStartedEdit = computeIsTaskStarted(isEditMode, editingTask);
     const description = isStartedEdit
       ? (editingTask.description ?? "")
       : (descriptionInputRef.current?.getValue() ?? "");
@@ -248,7 +248,7 @@ export function useTaskSubmitHandlers({
 
     const updatedTask = await updateTask(editingTask.id, updatePayload);
     return { updatedTask, trimmedDescription };
-  }, [editingTask, taskName, descriptionInputRef, getRepositoriesPayload, isEditMode]);
+  }, [editingTask, taskName, descriptionInputRef, getRepositoriesPayload, isStartedEdit]);
 
   const handleEditSubmit = useCallback(async () => {
     setIsCreatingTask(true);
@@ -610,14 +610,15 @@ export function useTaskSubmitHandlers({
     setIsCreatingTask,
   ]);
 
+  const editSubmitHandler = isStartedEdit ? handleUpdateWithoutAgent : handleEditSubmit;
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
       e.preventDefault();
       if (isSessionMode) return handleSessionSubmit();
-      if (isEditMode) return handleEditSubmit();
+      if (isEditMode) return editSubmitHandler();
       return handleCreateSubmit();
     },
-    [isSessionMode, isEditMode, handleSessionSubmit, handleEditSubmit, handleCreateSubmit],
+    [isSessionMode, isEditMode, handleSessionSubmit, editSubmitHandler, handleCreateSubmit],
   );
 
   const handleCancel = useCallback(() => {
