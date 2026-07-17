@@ -24,6 +24,7 @@ import { SwipeableColumns } from "./swipeable-columns";
 import { MobileDropTargets } from "./mobile-drop-targets";
 import { getKanbanColumnGridTemplate } from "./kanban-grid-template";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 import {
   type KanbanExternalLinkAvailability,
@@ -47,6 +48,7 @@ export type SwimlaneKanbanContentProps = {
   onToggleSelect?: (taskId: string) => void;
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
+  mobileWorkflowNavigation?: MobileWorkflowNavigation;
 };
 
 type SwimlaneKanbanDndOptions = {
@@ -193,6 +195,7 @@ function MobileKanbanLayout({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  mobileWorkflowNavigation,
 }: {
   steps: WorkflowStep[];
   tasks: Task[];
@@ -213,6 +216,7 @@ function MobileKanbanLayout({
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
+  mobileWorkflowNavigation?: MobileWorkflowNavigation;
 }) {
   const taskCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -229,32 +233,44 @@ function MobileKanbanLayout({
       className="flex h-full min-h-0 flex-col overflow-hidden"
       data-testid="mobile-kanban-layout"
     >
-      <MobileColumnTabs
-        steps={steps}
-        activeIndex={activeIndex}
-        taskCounts={taskCounts}
-        onColumnChange={onIndexChange}
-      />
-      <SwipeableColumns
-        steps={steps}
-        tasks={tasks}
-        activeIndex={activeIndex}
-        onIndexChange={onIndexChange}
-        onPreviewTask={onPreviewTask}
-        onOpenTask={onOpenTask}
-        onEditTask={onEditTask}
-        onDeleteTask={onDeleteTask}
-        onArchiveTask={onArchiveTask}
-        onMoveTask={moveTaskToStep}
-        showMaximizeButton={showMaximizeButton}
-        deletingTaskId={deletingTaskId}
-        archivingTaskId={archivingTaskId}
-        selectedIds={selectedIds}
-        onToggleSelect={onToggleSelect}
-        onSelectRange={onSelectRange}
-        isMultiSelectMode={isMultiSelectMode}
-        externalLinkAvailability={externalLinkAvailability}
-      />
+      {mobileWorkflowNavigation && (
+        <MobileColumnTabs
+          steps={steps}
+          activeIndex={activeIndex}
+          taskCounts={taskCounts}
+          onColumnChange={onIndexChange}
+          workflowNavigation={mobileWorkflowNavigation}
+        />
+      )}
+      {steps.length === 0 ? (
+        <div
+          className="mx-4 my-3 flex flex-1 items-center justify-center rounded-xl border border-dashed border-border/70 px-6 text-center text-sm text-muted-foreground"
+          data-testid="mobile-kanban-no-steps"
+        >
+          No steps configured. Choose another workflow or add steps in Settings.
+        </div>
+      ) : (
+        <SwipeableColumns
+          steps={steps}
+          tasks={tasks}
+          activeIndex={activeIndex}
+          onIndexChange={onIndexChange}
+          onPreviewTask={onPreviewTask}
+          onOpenTask={onOpenTask}
+          onEditTask={onEditTask}
+          onDeleteTask={onDeleteTask}
+          onArchiveTask={onArchiveTask}
+          onMoveTask={moveTaskToStep}
+          showMaximizeButton={showMaximizeButton}
+          deletingTaskId={deletingTaskId}
+          archivingTaskId={archivingTaskId}
+          selectedIds={selectedIds}
+          onToggleSelect={onToggleSelect}
+          onSelectRange={onSelectRange}
+          isMultiSelectMode={isMultiSelectMode}
+          externalLinkAvailability={externalLinkAvailability}
+        />
+      )}
       <MobileDropTargets steps={steps} currentStepId={currentStepId} isDragging={!!activeTask} />
     </div>
   );
@@ -419,6 +435,7 @@ export function SwimlaneKanbanContent({
   onToggleSelect,
   onSelectRange,
   isMultiSelectMode,
+  mobileWorkflowNavigation,
 }: SwimlaneKanbanContentProps) {
   const { isMobile, isTablet, isCompactDesktop } = useResponsiveBreakpoint();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
@@ -469,7 +486,7 @@ export function SwimlaneKanbanContent({
     ],
   );
 
-  if (steps.length === 0) return null;
+  if (steps.length === 0 && !isMobile) return null;
 
   let layoutContent: React.ReactNode;
   if (isMobile) {
@@ -479,6 +496,7 @@ export function SwimlaneKanbanContent({
         activeIndex={activeIndex}
         onIndexChange={setActiveIndex}
         activeTask={activeTask}
+        mobileWorkflowNavigation={mobileWorkflowNavigation}
       />
     );
   } else if (isTablet) {

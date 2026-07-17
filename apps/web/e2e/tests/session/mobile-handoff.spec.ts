@@ -15,7 +15,7 @@ async function createProfiles(
   const profileB = await apiClient.createAgentProfile(agentId, "Mobile Handoff B", {
     model: "mock-slow",
   });
-  return { profileA, profileB };
+  return { profileA, profileB, agentName: agents[0].name };
 }
 
 test.describe("Session handoff on mobile", () => {
@@ -26,7 +26,7 @@ test.describe("Session handoff on mobile", () => {
   }) => {
     test.setTimeout(120_000);
 
-    const { profileA, profileB } = await createProfiles(apiClient);
+    const { profileA, profileB, agentName } = await createProfiles(apiClient);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -56,6 +56,12 @@ test.describe("Session handoff on mobile", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
+
+    const activeSessionPill = testPage.getByTestId("mobile-sessions-pill");
+    await expect(activeSessionPill.getByTestId("mobile-session-agent-icon")).toHaveAttribute(
+      "data-agent-name",
+      agentName,
+    );
 
     await session.openMobileHandoffDialog(session1Id, profileB.id);
 

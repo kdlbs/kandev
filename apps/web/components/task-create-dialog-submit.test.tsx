@@ -23,8 +23,9 @@ vi.mock("@/components/state-provider", () => ({
     selector({ setActiveDocument: vi.fn(), setPlanMode: vi.fn() }),
 }));
 
+const updateTaskMock = vi.fn();
 vi.mock("@/lib/api", () => ({
-  updateTask: vi.fn(),
+  updateTask: (...args: unknown[]) => updateTaskMock(...args),
 }));
 
 vi.mock("@/lib/services/session-launch-service", () => ({
@@ -61,6 +62,13 @@ vi.mock("@/components/task-create-dialog-helpers", () => ({
   activatePlanMode: vi.fn(),
   buildCreateTaskPayload: (args: BuildCreateTaskPayloadCall) => buildCreateTaskPayloadMock(args),
   buildRepositoriesPayload: () => [],
+  computeIsTaskStarted: (isEditMode: boolean, editingTask?: { state?: string } | null) =>
+    Boolean(
+      isEditMode &&
+      editingTask?.state &&
+      editingTask.state !== "TODO" &&
+      editingTask.state !== "CREATED",
+    ),
   findDuplicateRemoteRepo: () => null,
   validateCreateInputs: (...args: unknown[]) => validateCreateInputsMock(...args),
   toMessageAttachments: () => [],
@@ -154,8 +162,34 @@ beforeEach(() => {
   buildCreateTaskPayloadMock.mockClear();
   validateCreateInputsMock.mockClear();
   createTaskRetryMock.mockClear();
+  updateTaskMock.mockReset();
+  updateTaskMock.mockResolvedValue({ id: "task-1", title: "Renamed task" });
   pushMock.mockClear();
   toastMock.mockClear();
+});
+
+describe("useTaskSubmitHandlers — started task edits", () => {
+  it("updates only the title so a locked prompt cannot be cleared", async () => {
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: "Renamed task",
+      editingTask: {
+        id: "task-1",
+        title: "Original title",
+        description: "Original prompt",
+        workflowStepId: "step-1",
+        state: "IN_PROGRESS",
+      },
+      descriptionInputRef: makeRef(""),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(updateTaskMock).toHaveBeenCalledWith("task-1", { title: "Renamed task" });
+  });
 });
 
 describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () => {

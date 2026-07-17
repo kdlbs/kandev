@@ -16,6 +16,7 @@ import {
   activatePlanMode,
   buildCreateTaskPayload,
   buildRepositoriesPayload,
+  computeIsTaskStarted,
   findDuplicateRemoteRepo,
   validateCreateInputs,
   toMessageAttachments,
@@ -232,19 +233,22 @@ export function useTaskSubmitHandlers({
     if (!editingTask) return null;
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return null;
-    const description = descriptionInputRef.current?.getValue() ?? "";
+    const isStartedEdit = computeIsTaskStarted(isEditMode, editingTask);
+    const description = isStartedEdit
+      ? (editingTask.description ?? "")
+      : (descriptionInputRef.current?.getValue() ?? "");
     const trimmedDescription = description.trim();
     const repositoriesPayload = getRepositoriesPayload();
 
     const updatePayload: Parameters<typeof updateTask>[1] = {
       title: trimmedTitle,
-      description: trimmedDescription,
+      ...(!isStartedEdit && { description: trimmedDescription }),
       ...(repositoriesPayload.length > 0 && { repositories: repositoriesPayload }),
     };
 
     const updatedTask = await updateTask(editingTask.id, updatePayload);
     return { updatedTask, trimmedDescription };
-  }, [editingTask, taskName, descriptionInputRef, getRepositoriesPayload]);
+  }, [editingTask, taskName, descriptionInputRef, getRepositoriesPayload, isEditMode]);
 
   const handleEditSubmit = useCallback(async () => {
     setIsCreatingTask(true);

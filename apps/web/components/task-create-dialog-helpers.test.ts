@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { autoSelectBranch } from "./task-create-dialog-helpers";
+import { autoSelectBranch, shouldShowTaskTitleField } from "./task-create-dialog-helpers";
 const STORAGE_KEYS = { LAST_BRANCH: "kandev.dialog.lastBranch" } as const;
 
 beforeEach(() => {
@@ -86,5 +86,11 @@ describe("autoSelectBranch", () => {
     autoSelectBranch([], setBranch, { lastUsedBranch: "main", userSettingsLoaded: true });
 
     expect(setBranch).not.toHaveBeenCalled();
+  });
+});
+
+describe("shouldShowTaskTitleField", () => {
+  it("keeps the title editable after a task has started", () => {
+    expect(shouldShowTaskTitleField(false, true, true)).toBe(true);
   });
 });

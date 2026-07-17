@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveDesiredWorkflowId } from "./resolve-workflow";
+import { resolveBoardWorkflowId, resolveDesiredWorkflowId } from "./resolve-workflow";
 import type { WorkflowsState } from "@/lib/state/slices";
 
 type Workflow = WorkflowsState["items"][number];
@@ -91,5 +91,40 @@ describe("resolveDesiredWorkflowId", () => {
       workspaceWorkflows: [workflow("wf-hidden", { hidden: true }), workflow("wf-visible")],
     });
     expect(result).toBe("wf-visible");
+  });
+});
+
+describe("resolveBoardWorkflowId", () => {
+  it("uses the selected mobile workflow before its snapshot hydrates", () => {
+    expect(
+      resolveBoardWorkflowId({
+        isMobile: true,
+        selectedWorkflowId: "wf-new",
+        focusedWorkflowId: "wf-new",
+        hydratedWorkflowId: "wf-old",
+      }),
+    ).toBe("wf-new");
+  });
+
+  it("uses the focused workflow for the mobile All-workflows view", () => {
+    expect(
+      resolveBoardWorkflowId({
+        isMobile: true,
+        selectedWorkflowId: null,
+        focusedWorkflowId: "wf-focused",
+        hydratedWorkflowId: null,
+      }),
+    ).toBe("wf-focused");
+  });
+
+  it("keeps desktop actions tied to the hydrated workflow", () => {
+    expect(
+      resolveBoardWorkflowId({
+        isMobile: false,
+        selectedWorkflowId: "wf-selected",
+        focusedWorkflowId: "wf-focused",
+        hydratedWorkflowId: "wf-hydrated",
+      }),
+    ).toBe("wf-hydrated");
   });
 });

@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState, memo } from "react";
 import { IconMessageCircle, IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { Button } from "@kandev/ui/button";
 import { TaskSwitcher } from "../task-switcher";
 import type { TaskSwitcherItem } from "../task-switcher";
@@ -31,6 +32,7 @@ type SessionTaskSwitcherSheetProps = {
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
   workflowId: string | null;
+  presentation?: "sheet" | "drawer";
 };
 
 function useMobileTaskLinking(workspaceId: string | null) {
@@ -137,23 +139,29 @@ export function MobileTaskList({
   );
 }
 
-function TaskSwitcherSheetHeader({
+function TaskSwitcherSurfaceHeader({
   workspaceId,
   workspaces,
   onWorkspaceChange,
   onQuickChat,
   onNewTask,
+  presentation,
 }: {
   workspaceId: string | null;
   workspaces: Array<{ id: string; name: string }>;
   onWorkspaceChange: (workspaceId: string) => void;
   onQuickChat: () => void;
   onNewTask: () => void;
+  presentation: "sheet" | "drawer";
 }) {
-  return (
-    <SheetHeader className="p-4 pb-2 border-b border-border">
+  const content = (
+    <>
       <div className="flex items-center justify-between">
-        <SheetTitle className="text-base">Tasks</SheetTitle>
+        {presentation === "drawer" ? (
+          <DrawerTitle className="text-base">Tasks</DrawerTitle>
+        ) : (
+          <SheetTitle className="text-base">Tasks</SheetTitle>
+        )}
         <div className="flex items-center gap-2">
           {workspaceId && (
             <Button
@@ -185,65 +193,134 @@ function TaskSwitcherSheetHeader({
           onSelect={onWorkspaceChange}
         />
       </div>
-    </SheetHeader>
+    </>
+  );
+  if (presentation === "drawer") {
+    return (
+      <DrawerHeader className="shrink-0 border-b border-border p-4 pb-2 text-left">
+        {content}
+      </DrawerHeader>
+    );
+  }
+  return <SheetHeader className="shrink-0 border-b border-border p-4 pb-2">{content}</SheetHeader>;
+}
+
+function surfaceAction<TArgs extends unknown[]>(
+  presentation: "sheet" | "drawer",
+  onOpenChange: (open: boolean) => void,
+  action: ((...args: TArgs) => unknown) | undefined,
+): ((...args: TArgs) => void) | undefined {
+  if (!action || presentation === "sheet") return action;
+  return (...args) => {
+    onOpenChange(false);
+    action(...args);
+  };
+}
+
+type TaskSwitcherSurfaceContentProps = {
+  presentation: "sheet" | "drawer";
+  workspaceId: string | null;
+  onOpenChange: (open: boolean) => void;
+  onQuickChat: () => void;
+  onNewTask: () => void;
+  data: ReturnType<typeof useSheetData>;
+  actions: ReturnType<typeof useSheetActions>;
+  rename: ReturnType<typeof useMobileTaskRename>;
+  linking: ReturnType<typeof useMobileTaskLinking>;
+};
+
+function TaskSwitcherSurfaceContent({
+  presentation,
+  workspaceId,
+  onOpenChange,
+  onQuickChat,
+  onNewTask,
+  data,
+  actions,
+  rename,
+  linking,
+}: TaskSwitcherSurfaceContentProps) {
+  return (
+    <>
+      <TaskSwitcherSurfaceHeader
+        presentation={presentation}
+        workspaceId={workspaceId}
+        workspaces={data.workspaces.map((w) => ({ id: w.id, name: w.name }))}
+        onWorkspaceChange={actions.handleWorkspaceChange}
+        onQuickChat={onQuickChat}
+        onNewTask={onNewTask}
+      />
+      <div className="shrink-0">
+        <SidebarFilterBar />
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto p-2">
+        <MobileTaskList
+          tasks={data.tasksWithRepositories}
+          workflows={data.workflows}
+          stepsByWorkflowId={data.stepsByWorkflowId}
+          activeTaskId={data.activeTaskId}
+          selectedTaskId={data.selectedTaskId}
+          onSelectTask={actions.handleSelectTask}
+          onRenameTask={surfaceAction(presentation, onOpenChange, rename.handleRenameTask)}
+          onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)!}
+          onDeleteTask={surfaceAction(presentation, onOpenChange, actions.handleDeleteTask)!}
+          onLinkPullRequest={surfaceAction(
+            presentation,
+            onOpenChange,
+            linking.taskListHandlers.onLinkPullRequest,
+          )}
+          onLinkIssue={surfaceAction(
+            presentation,
+            onOpenChange,
+            linking.taskListHandlers.onLinkIssue,
+          )}
+          onLinkJiraTicket={surfaceAction(
+            presentation,
+            onOpenChange,
+            linking.taskListHandlers.onLinkJiraTicket,
+          )}
+          onLinkLinearIssue={surfaceAction(
+            presentation,
+            onOpenChange,
+            linking.taskListHandlers.onLinkLinearIssue,
+          )}
+          onLinkSentryIssue={surfaceAction(
+            presentation,
+            onOpenChange,
+            linking.taskListHandlers.onLinkSentryIssue,
+          )}
+          deletingTaskId={actions.deletingTaskId}
+          isLoading={data.tasksLoading}
+        />
+      </div>
+    </>
   );
 }
 
-export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
-  open,
-  onOpenChange,
+function TaskSwitcherDialogs({
+  dialogOpen,
+  onDialogOpenChange,
   workspaceId,
   workflowId,
-}: SessionTaskSwitcherSheetProps) {
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const data = useSheetData(workspaceId);
-  const actions = useSheetActions(workspaceId, onOpenChange);
-  const rename = useMobileTaskRename();
-  const linking = useMobileTaskLinking(workspaceId);
-  const openQuickChat = useQuickChatLauncher(workspaceId);
-  const handleQuickChat = useCallback(() => {
-    onOpenChange(false);
-    openQuickChat();
-  }, [onOpenChange, openQuickChat]);
-
+  data,
+  actions,
+  rename,
+  linking,
+}: {
+  dialogOpen: boolean;
+  onDialogOpenChange: (open: boolean) => void;
+  workspaceId: string | null;
+  workflowId: string | null;
+  data: ReturnType<typeof useSheetData>;
+  actions: ReturnType<typeof useSheetActions>;
+  rename: ReturnType<typeof useMobileTaskRename>;
+  linking: ReturnType<typeof useMobileTaskLinking>;
+}) {
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        showCloseButton={false}
-        side="left"
-        className="w-[85vw] max-w-sm p-0 flex flex-col"
-      >
-        <TaskSwitcherSheetHeader
-          workspaceId={workspaceId}
-          workspaces={data.workspaces.map((w) => ({ id: w.id, name: w.name }))}
-          onWorkspaceChange={actions.handleWorkspaceChange}
-          onQuickChat={handleQuickChat}
-          onNewTask={() => setDialogOpen(true)}
-        />
-
-        <SidebarFilterBar />
-
-        <div className="flex-1 min-h-0 overflow-y-auto p-2">
-          <MobileTaskList
-            tasks={data.tasksWithRepositories}
-            workflows={data.workflows}
-            stepsByWorkflowId={data.stepsByWorkflowId}
-            activeTaskId={data.activeTaskId}
-            selectedTaskId={data.selectedTaskId}
-            onSelectTask={actions.handleSelectTask}
-            onRenameTask={rename.handleRenameTask}
-            onArchiveTask={actions.handleArchiveTask}
-            onDeleteTask={actions.handleDeleteTask}
-            {...linking.taskListHandlers}
-            deletingTaskId={actions.deletingTaskId}
-            isLoading={data.tasksLoading}
-          />
-        </div>
-      </SheetContent>
-
+    <>
       <TaskCreateDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={onDialogOpenChange}
         mode="create"
         workspaceId={workspaceId}
         workflowId={workflowId}
@@ -251,7 +328,6 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         steps={data.dialogSteps}
         onSuccess={actions.handleTaskCreated}
       />
-
       <TaskArchiveConfirmDialog
         open={actions.archivingTask !== null}
         onOpenChange={(open) => {
@@ -287,6 +363,77 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         repositories={linking.repositories}
         workspaceId={workspaceId}
       />
-    </Sheet>
+    </>
+  );
+}
+
+export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
+  open,
+  onOpenChange,
+  workspaceId,
+  workflowId,
+  presentation = "sheet",
+}: SessionTaskSwitcherSheetProps) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const data = useSheetData(workspaceId);
+  const actions = useSheetActions(workspaceId, onOpenChange);
+  const rename = useMobileTaskRename();
+  const linking = useMobileTaskLinking(workspaceId);
+  const openQuickChat = useQuickChatLauncher(workspaceId);
+  const handleQuickChat = useCallback(() => {
+    onOpenChange(false);
+    openQuickChat();
+  }, [onOpenChange, openQuickChat]);
+
+  const surfaceContent = (
+    <TaskSwitcherSurfaceContent
+      presentation={presentation}
+      workspaceId={workspaceId}
+      onOpenChange={onOpenChange}
+      onQuickChat={handleQuickChat}
+      onNewTask={() => {
+        if (presentation === "drawer") onOpenChange(false);
+        setDialogOpen(true);
+      }}
+      data={data}
+      actions={actions}
+      rename={rename}
+      linking={linking}
+    />
+  );
+
+  const surface =
+    presentation === "drawer" ? (
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerContent className="h-[88dvh] max-h-[88dvh] overflow-hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+          {surfaceContent}
+        </DrawerContent>
+      </Drawer>
+    ) : (
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          showCloseButton={false}
+          side="left"
+          className="w-[85vw] max-w-sm p-0 flex flex-col"
+        >
+          {surfaceContent}
+        </SheetContent>
+      </Sheet>
+    );
+
+  return (
+    <>
+      {surface}
+      <TaskSwitcherDialogs
+        dialogOpen={dialogOpen}
+        onDialogOpenChange={setDialogOpen}
+        workspaceId={workspaceId}
+        workflowId={workflowId}
+        data={data}
+        actions={actions}
+        rename={rename}
+        linking={linking}
+      />
+    </>
   );
 });

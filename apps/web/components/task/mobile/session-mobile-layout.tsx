@@ -64,7 +64,7 @@ function MobileChatPanelContent({
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <div className="flex items-center px-1 py-2">
-        <MobileSessionsPicker taskId={activeTaskId} fullWidth />
+        <MobileSessionsPicker taskId={activeTaskId} sessionId={effectiveSessionId} fullWidth />
       </div>
       {isPassthroughMode ? (
         <div className="flex-1 min-h-0">
@@ -452,6 +452,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout({
         onOpenChange={setMobileSessionTaskSwitcherOpen}
         workspaceId={workspaceId}
         workflowId={workflowId}
+        presentation="drawer"
       />
 
       <MobileReviewDialogMount

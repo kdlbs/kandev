@@ -7,6 +7,7 @@ test.describe("Mobile kanban view", () => {
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       system_metrics_display: { show_in_topbar: false },
       workflow_filter_id: "",
+      kanban_view_mode: "",
     });
   });
 
@@ -47,9 +48,95 @@ test.describe("Mobile kanban view", () => {
     // Search is collapsed behind a topbar icon by default
     await expect(mobile.mobileSearchToggle).toBeVisible();
     await expect(mobile.mobileSearchBar).not.toBeVisible();
-    await expect(mobile.stepTrigger).toBeVisible();
+    await expect(mobile.boardNavigator).toBeVisible();
+    await expect(mobile.boardNavigator).toContainText("E2E Workflow");
+    const startStep = seedData.steps.find((step) => step.id === seedData.startStepId);
+    if (!startStep) throw new Error("seeded start step not found");
+    await expect(mobile.boardNavigator).toContainText(startStep.name);
     // Task card should be visible
     await expect(mobile.taskCardByTitle("Mobile Layout Task")).toBeVisible();
+  });
+
+  test("keeps workflow navigation visible when every mobile board is empty", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const secondWorkflow = await apiClient.createWorkflow(seedData.workspaceId, "Empty Workflow");
+    await apiClient.createWorkflowStep(secondWorkflow.id, "Empty queue", 0, {
+      is_start_step: true,
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: "",
+    });
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await expect(mobile.boardNavigator).toContainText("E2E Workflow");
+    await mobile.boardNavigator.click();
+    await expect(mobile.workflowItem(seedData.workflowId)).toBeVisible();
+    await expect(mobile.workflowItem(secondWorkflow.id)).toBeVisible();
+
+    await testPage.keyboard.press("Escape");
+    await mobile.mobileFab.click();
+    await expect(testPage.getByTestId("workflow-selector-trigger")).toContainText("E2E Workflow");
+  });
+
+  test("does not expose hidden workflows in the mobile navigator", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const hiddenWorkflow = await apiClient.e2eCreateHiddenWorkflow(
+      seedData.workspaceId,
+      "Hidden system workflow",
+    );
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: "",
+    });
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await expect(mobile.boardNavigator).toContainText("E2E Workflow");
+    await mobile.boardNavigator.click();
+    await expect(mobile.workflowItem(hiddenWorkflow.id)).toHaveCount(0);
+  });
+
+  test("keeps the workflow navigator usable for a workflow without steps", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const steplessWorkflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Stepless Workflow",
+    );
+    await apiClient.createTask(seedData.workspaceId, "Visible workflow task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: "",
+    });
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await mobile.boardNavigator.click();
+    await mobile.workflowItem(steplessWorkflow.id).click();
+    await expect(mobile.boardNavigator).toBeVisible();
+    await expect(mobile.boardNavigator).toContainText("Stepless Workflow");
+    await expect(mobile.boardNavigator).toContainText("No steps configured");
+    await expect(testPage.getByTestId("mobile-kanban-no-steps")).toBeVisible();
+
+    await mobile.boardNavigator.click();
+    await mobile.workflowItem(seedData.workflowId).click();
+    await expect(mobile.boardNavigator).toContainText("E2E Workflow");
   });
 
   test("renders kanban card dropdown as a mobile bottom sheet", async ({
@@ -86,7 +173,43 @@ test.describe("Mobile kanban view", () => {
     expect(itemBox.height).toBeGreaterThanOrEqual(44);
   });
 
-  test("focuses one workflow at a time and switches it from a bottom drawer", async ({
+  test("edits a started task title while keeping its prompt locked", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Started mobile task", {
+      description: "Prompt must stay unchanged",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.updateTaskState(task.id, "IN_PROGRESS");
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await mobile.taskCard(task.id).getByRole("button", { name: "More options" }).click();
+    await testPage
+      .locator('[data-slot="dropdown-menu-content"]:visible')
+      .getByRole("menuitem", { name: "Edit", exact: true })
+      .click();
+
+    const dialog = testPage.getByRole("dialog");
+    const titleInput = dialog.getByTestId("task-title-input");
+    const promptInput = dialog.getByTestId("task-description-input");
+    await expect(titleInput).toBeVisible();
+    await expect(titleInput).toBeEnabled();
+    await expect(promptInput).toBeDisabled();
+    await expect(promptInput).toHaveValue("Prompt must stay unchanged");
+    await titleInput.fill("Renamed started mobile task");
+    await dialog.getByRole("button", { name: "Update", exact: true }).click();
+
+    await expect(dialog).toHaveCount(0);
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).title)
+      .toBe("Renamed started mobile task");
+  });
+
+  test("shows workflow and step together and switches active workflow from one drawer", async ({
     testPage,
     apiClient,
     seedData,
@@ -119,53 +242,119 @@ test.describe("Mobile kanban view", () => {
     });
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
-      workflow_filter_id: "",
+      workflow_filter_id: seedData.workflowId,
     });
 
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
 
-    await expect(mobile.workflowTrigger).toBeVisible();
-    const workflowTriggerBox = await mobile.workflowTrigger.boundingBox();
-    if (!workflowTriggerBox) throw new Error("mobile workflow trigger has no layout box");
-    expect(workflowTriggerBox.height).toBeGreaterThanOrEqual(44);
+    await expect(mobile.boardNavigator).toContainText("E2E Workflow");
+    const startStep = seedData.steps.find((step) => step.id === seedData.startStepId);
+    if (!startStep) throw new Error("seeded start step not found");
+    await expect(mobile.boardNavigator).toContainText(startStep.name);
+    const navigatorBox = await mobile.boardNavigator.boundingBox();
+    if (!navigatorBox) throw new Error("mobile board navigator has no layout box");
+    expect(navigatorBox.height).toBeGreaterThanOrEqual(44);
     await expect(mobile.mobileKanbanLayout()).toHaveCount(1);
-    await mobile.workflowTrigger.click();
-    await expect(testPage.getByTestId("mobile-workflow-picker")).toBeVisible();
+    await mobile.boardNavigator.click();
+    await expect(testPage.getByTestId("mobile-board-navigator-drawer")).toBeVisible();
+    await expect(testPage.getByTestId("column-tab-0")).toBeVisible();
     const secondWorkflowItem = mobile.workflowItem(secondWorkflow.id);
     const workflowItemBox = await secondWorkflowItem.boundingBox();
     if (!workflowItemBox) throw new Error("mobile workflow item has no layout box");
     expect(workflowItemBox.height).toBeGreaterThanOrEqual(44);
     await secondWorkflowItem.click();
 
+    await mobile.mobileFab.click();
+    const createDialog = testPage.getByRole("dialog");
+    await expect(createDialog.getByTestId("workflow-selector-trigger")).toContainText(
+      "Mobile Product Workflow",
+    );
+    await createDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+
     await expect(mobile.taskCardByTitle("Product workflow mobile task")).toBeVisible();
     await expect(mobile.taskCardByTitle("Operations workflow mobile task")).toHaveCount(0);
     await expect(mobile.mobileKanbanLayout()).toHaveCount(1);
     await expect
       .poll(async () => (await apiClient.getUserSettings()).settings.workflow_filter_id)
-      .toBe("");
+      .toBe(secondWorkflow.id);
     const pageWidth = await testPage.evaluate(() => ({
       scroll: document.documentElement.scrollWidth,
       client: document.documentElement.clientWidth,
     }));
     expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
 
-    await mobile.openSearch();
-    await mobile.searchInput().fill("Default workflow mobile task");
-    await expect(mobile.workflowTrigger).toHaveCount(0);
-    await expect(mobile.taskCardByTitle("Default workflow mobile task")).toBeVisible();
-    await expect(mobile.taskCardByTitle("Product workflow mobile task")).toHaveCount(0);
-    await expect(mobile.mobileKanbanLayout()).toHaveCount(1);
-
-    await mobile.searchInput().fill("");
-    await mobile.workflowTrigger.click();
+    await mobile.boardNavigator.click();
     await expect(secondWorkflowItem).toBeVisible();
-    await expect(mobile.workflowItem(seedData.workflowId)).toHaveAttribute("data-active", "true");
-    await expect(secondWorkflowItem).toHaveAttribute("data-active", "false");
+    await expect(mobile.workflowItem(seedData.workflowId)).toHaveAttribute("data-active", "false");
+    await expect(secondWorkflowItem).toHaveAttribute("data-active", "true");
     await testPage.keyboard.press("Escape");
-    await expect(mobile.workflowTrigger).toContainText("E2E Workflow");
-    await expect(mobile.taskCardByTitle("Default workflow mobile task")).toBeVisible();
-    await expect(mobile.taskCardByTitle("Product workflow mobile task")).toHaveCount(0);
+    await expect(mobile.boardNavigator).toContainText("Mobile Product Workflow");
+    await expect(mobile.taskCardByTitle("Product workflow mobile task")).toBeVisible();
+    await expect(mobile.taskCardByTitle("Default workflow mobile task")).toHaveCount(0);
+  });
+
+  test("uses Kanban and removes Pipeline choices on mobile without changing desktop preference", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.createTask(seedData.workspaceId, "Pipeline preference mobile task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.saveUserSettings({ kanban_view_mode: "graph2" });
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await expect(mobile.mobileKanbanLayout()).toBeVisible();
+    await mobile.mobileMenuButton.click();
+    const menuCard = testPage.getByTestId("mobile-home-menu-card");
+    await expect(menuCard).toBeVisible();
+    await expect(menuCard.getByText("Pipeline", { exact: true })).toHaveCount(0);
+    await expect(menuCard.getByText("Workflow", { exact: true })).toHaveCount(0);
+    await expect(menuCard.getByText("Kanban", { exact: true })).toBeVisible();
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.kanban_view_mode)
+      .toBe("graph2");
+    await menuCard.evaluate((element) => {
+      const surface = element.closest('[data-slot="drawer-content"]') ?? element;
+      return Promise.all(
+        surface.getAnimations({ subtree: true }).map((animation) => animation.finished),
+      );
+    });
+
+    const [cardBox, viewport] = await Promise.all([
+      menuCard.boundingBox(),
+      testPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
+    ]);
+    if (!cardBox) throw new Error("mobile Home menu card has no layout box");
+    expect(cardBox.x).toBeGreaterThanOrEqual(7);
+    expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(viewport.width - 7);
+    expect(viewport.height - (cardBox.y + cardBox.height)).toBeGreaterThanOrEqual(7);
+  });
+
+  test("keeps the desktop Pipeline preference when returning from mobile List", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      kanban_view_mode: "graph2",
+    });
+    await testPage.goto("/tasks");
+    await testPage.getByRole("button", { name: "Open menu" }).click();
+
+    const menuCard = testPage.getByTestId("mobile-home-menu-card");
+    await menuCard.getByText("Kanban", { exact: true }).click();
+
+    await expect(testPage).toHaveURL(/\/$/);
+    await expect(testPage.getByTestId("mobile-kanban-layout")).toBeVisible();
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.kanban_view_mode)
+      .toBe("graph2");
   });
 
   test("search toggle reveals and hides the search input", async ({
@@ -324,11 +513,11 @@ test.describe("Mobile kanban view", () => {
 
     // If there are multiple steps, switch to the second step through the drawer.
     if (steps.length > 1) {
-      const stepTriggerBox = await mobile.stepTrigger.boundingBox();
-      if (!stepTriggerBox) throw new Error("mobile step trigger has no layout box");
-      expect(stepTriggerBox.height).toBeGreaterThanOrEqual(44);
-      await mobile.stepTrigger.click();
-      await expect(testPage.getByTestId("mobile-step-picker")).toBeVisible();
+      const navigatorBox = await mobile.boardNavigator.boundingBox();
+      if (!navigatorBox) throw new Error("mobile board navigator has no layout box");
+      expect(navigatorBox.height).toBeGreaterThanOrEqual(44);
+      await mobile.boardNavigator.click();
+      await expect(testPage.getByTestId("mobile-board-navigator-drawer")).toBeVisible();
       const firstTab = testPage.getByTestId("column-tab-0");
       const secondTab = testPage.getByTestId("column-tab-1");
       const secondTabBox = await secondTab.boundingBox();
@@ -344,8 +533,8 @@ test.describe("Mobile kanban view", () => {
 
       // Click second tab — active tab should switch
       await secondTab.click();
-      await expect(testPage.getByTestId("mobile-step-picker")).not.toBeVisible();
-      await expect(mobile.stepTrigger).toContainText(steps[1].name);
+      await expect(testPage.getByTestId("mobile-board-navigator-drawer")).not.toBeVisible();
+      await expect(mobile.boardNavigator).toContainText(steps[1].name);
 
       // Second step task should be the visible active column
       await expect(mobile.taskCardByTitle("Task In Second Step")).toBeVisible();
@@ -353,7 +542,7 @@ test.describe("Mobile kanban view", () => {
       await expect(mobile.taskCardByTitle("Task In First Step")).not.toBeInViewport();
 
       await testPage.getByRole("button", { name: "Previous step" }).click();
-      await expect(mobile.stepTrigger).toContainText(steps[0].name);
+      await expect(mobile.boardNavigator).toContainText(steps[0].name);
       await expect(mobile.taskCardByTitle("Task In First Step")).toBeInViewport();
 
       const pageWidth = await testPage.evaluate(() => ({
@@ -387,7 +576,7 @@ test.describe("Mobile kanban view", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
 
-    await mobile.stepTrigger.click();
+    await mobile.boardNavigator.click();
     await expect(testPage.getByTestId("column-tab-0")).toContainText("2/1");
   });
 
@@ -417,8 +606,12 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.taskCardByTitle("Hidden Beta")).not.toBeVisible({ timeout: 5000 });
   });
 
-  test("tapping a task card opens bottom sheet", async ({ testPage, apiClient, seedData }) => {
-    const task = await apiClient.createTask(seedData.workspaceId, "Sheet Test Task", {
+  test("tapping a task card navigates directly to the task", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Direct Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -426,15 +619,10 @@ test.describe("Mobile kanban view", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
 
-    // Tap on the task card
     await mobile.taskCard(task.id).click();
 
-    // Bottom sheet should appear with task title and action buttons
-    await expect(mobile.mobileTaskSheet).toBeVisible({ timeout: 5000 });
-    await expect(mobile.mobileTaskSheet.getByText("Sheet Test Task")).toBeVisible();
-    await expect(mobile.sheetGoToSession()).toBeVisible();
-    await expect(mobile.sheetEditButton()).toBeVisible();
-    await expect(mobile.sheetDeleteButton()).toBeVisible();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
+    await expect(testPage.getByTestId("mobile-task-sheet")).toHaveCount(0);
   });
 
   test("FAB opens create task dialog", async ({ testPage }) => {
@@ -455,7 +643,7 @@ test.describe("Mobile kanban view", () => {
     // Enable preview-on-click to test that it's still hidden on mobile
     await apiClient.saveUserSettings({ enable_preview_on_click: true });
 
-    await apiClient.createTask(seedData.workspaceId, "No Preview Task", {
+    const task = await apiClient.createTask(seedData.workspaceId, "No Preview Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -463,14 +651,11 @@ test.describe("Mobile kanban view", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
 
-    // Tap task card
     await mobile.taskCardByTitle("No Preview Task").click();
 
-    // Bottom sheet should appear, NOT the desktop preview panel
-    await expect(mobile.mobileTaskSheet).toBeVisible({ timeout: 5000 });
-    // Desktop preview panel should NOT exist in the DOM at all
+    await expect(testPage).toHaveURL(new RegExp(`/t/${task.id}$`));
+    await expect(testPage.getByTestId("mobile-task-sheet")).toHaveCount(0);
     await expect(testPage.getByTestId("preview-panel")).toHaveCount(0);
-    // No ?taskId= URL param (that's the desktop preview behavior)
     await expect(testPage).not.toHaveURL(/taskId=/);
   });
 
@@ -487,13 +672,13 @@ test.describe("Mobile kanban view", () => {
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
 
-    // With a single workflow, the swimlane header badge should not be shown
-    // (the swimlane section header contains the workflow name in a badge)
+    // With a single workflow, the workflow is still evident in the board navigator.
     await expect(mobile.swimlaneContainer).toBeVisible();
     await expect(mobile.taskCardByTitle("Single Workflow Task")).toBeVisible();
 
     // The swimlane header (collapse toggle) should not exist for single workflow
     await expect(testPage.getByTestId("swimlane-header")).not.toBeVisible();
-    await expect(mobile.workflowTrigger).toHaveCount(0);
+    await expect(mobile.boardNavigator).toContainText("E2E Workflow");
+    await expect(mobile.boardNavigator).toContainText(seedData.steps[0].name);
   });
 });

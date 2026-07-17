@@ -2,6 +2,97 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
+  test("opens the phone task switcher as an inset bottom card", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.seedTask(seedData.workspaceId, "Mobile task drawer surface", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    await testPage.goto(`/t/${task.task_id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").click();
+
+    const surface = testPage.getByRole("dialog", { name: "Tasks" });
+    await expect(surface).toBeVisible();
+    await expect(surface).toHaveAttribute("data-slot", "drawer-content");
+    await surface.evaluate((element) =>
+      Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => undefined)),
+      ),
+    );
+
+    const card = surface.locator('[data-slot="drawer-header"]');
+    const [cardBox, viewport] = await Promise.all([
+      card.boundingBox(),
+      testPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
+    ]);
+    if (!cardBox) throw new Error("mobile task drawer card has no layout box");
+    expect(cardBox.x).toBeGreaterThanOrEqual(7);
+    expect(cardBox.x + cardBox.width).toBeLessThanOrEqual(viewport.width - 7);
+    expect(cardBox.y).toBeGreaterThan(0);
+  });
+
+  test("keeps the tablet task switcher as a left-side sheet", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 820, height: 900 });
+    const task = await apiClient.seedTask(seedData.workspaceId, "Tablet task sheet surface", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    await testPage.goto(`/t/${task.task_id}`);
+    await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
+    await testPage.evaluate(
+      "window.__KANDEV_E2E_STORE__?.getState().setMobileSessionTaskSwitcherOpen(true)",
+    );
+
+    const surface = testPage.getByRole("dialog", { name: "Tasks" });
+    await expect(surface).toBeVisible();
+    await expect(surface).toHaveAttribute("data-slot", "sheet-content");
+    await expect(surface).toHaveAttribute("data-side", "left");
+  });
+
+  test("returns to the tablet task switcher after canceling a task action", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await testPage.setViewportSize({ width: 820, height: 900 });
+    const title = "Tablet task action target";
+    const task = await apiClient.seedTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    await testPage.goto(`/t/${task.task_id}`);
+    await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
+    await testPage.evaluate(
+      "window.__KANDEV_E2E_STORE__?.getState().setMobileSessionTaskSwitcherOpen(true)",
+    );
+
+    const surface = testPage.getByRole("dialog", { name: "Tasks" });
+    const taskRow = surface.getByTestId("sidebar-task-item").filter({ hasText: title });
+    await taskRow.click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: "Rename", exact: true }).click();
+
+    const renameDialog = testPage.getByRole("dialog", { name: "Rename task" });
+    await expect(renameDialog).toBeVisible();
+    await expect(surface).toBeVisible();
+    await renameDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(renameDialog).toHaveCount(0);
+    await expect(surface).toBeVisible();
+  });
+
   test("opens a viewport-bound action sheet without covering diff stats", async ({
     testPage,
     apiClient,
