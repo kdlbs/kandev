@@ -77,7 +77,7 @@ The camera section for a focused docs clip has this shape; add story keyframes b
 
 An editorial landing config uses the same matched-loop rule with `formFactor: "landing"`, a 3840x2400 source, and a 1920x1200 delivery. At 2x, the source crop is exactly 1920x1200, so the encoder does not invent detail by upscaling it. Add intermediate wide keyframes around travel instead of combining a deep zoom and long pan in one segment.
 
-Example config shape. Replace `<capture-root>` with the unique resolved `CAPTURE_ROOT` before encoding:
+Example general-desktop config shape. Replace `<capture-root>` with the unique resolved `CAPTURE_ROOT` before encoding:
 
 ```json
 {
