@@ -68,7 +68,7 @@ describe("useSavedPresetActions", () => {
     vi.mocked(useSavedPresets).mockReset();
   });
 
-  it("saves the current query, selects it, and applies its repository", () => {
+  it("saves the current query, commits it, selects it, and applies its repository", () => {
     const save = vi.fn(() => savedPreset);
     const remove = vi.fn();
     vi.mocked(useSavedPresets).mockReturnValue({ presets: [savedPreset], save, remove });
@@ -91,7 +91,7 @@ describe("useSavedPresetActions", () => {
       id: savedPreset.id,
     });
     expect(setRepoFilter).toHaveBeenCalledWith(REPO);
-    expect(setQueryImmediate).not.toHaveBeenCalled();
+    expect(setQueryImmediate).toHaveBeenCalledWith(QUERY);
     expect(result.current.savedPresets).toEqual([savedPreset]);
   });
 

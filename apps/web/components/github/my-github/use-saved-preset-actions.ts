@@ -52,6 +52,7 @@ export function useSavedPresetActions({
     });
     if (!created) return;
     setProgrammaticSelection({ kind: selection.kind, source: "saved", id: created.id });
+    setQueryImmediate(customQuery);
     setRepoFilter(defaultRepoFilter);
   };
 
