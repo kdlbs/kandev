@@ -52,7 +52,7 @@ const pluginsMock = vi.hoisted(() => ({
 }));
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => pluginsMock.enabled,
+  useFeature: (flag: string) => flag === "plugins" && pluginsMock.enabled,
 }));
 
 vi.mock("@/lib/plugins/registry", () => ({
