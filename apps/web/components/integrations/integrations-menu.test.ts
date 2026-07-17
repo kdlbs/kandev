@@ -9,6 +9,7 @@ import {
   MobileIntegrationsSection,
 } from "./integrations-menu";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import type { NavItem } from "@/lib/plugins/types";
 import type { GitHubStatus } from "@/lib/types/github";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
@@ -89,8 +90,6 @@ afterEach(() => {
   vi.clearAllMocks();
   activeWorkspaceRef.id = null;
   activeWorkspaceRef.items = [];
-  pluginRegistry.unregisterPlugin("plugin-a");
-  pluginRegistry.unregisterPlugin("plugin-b");
 });
 
 describe("getGitHubIntegrationStatus", () => {
@@ -232,14 +231,29 @@ describe("MobileIntegrationsSection", () => {
   const HELLO_LABEL = "Hello Integration";
   const HELLO_PATH = "/plugins/hello";
 
+  // Track every plugin registered through this suite so the singleton
+  // pluginRegistry is fully cleared after each test — a new test adding a new
+  // plugin id can't leak nav items into the ones that follow.
+  const registeredPluginIds: string[] = [];
+
+  function registerNavItem(pluginId: string, item: NavItem) {
+    registeredPluginIds.push(pluginId);
+    pluginRegistry.forPlugin(pluginId).registerNavItem(item);
+  }
+
   function registerHelloIntegrationItem() {
-    pluginRegistry.forPlugin("plugin-a").registerNavItem({
+    registerNavItem("plugin-a", {
       id: "hello",
       label: HELLO_LABEL,
       path: HELLO_PATH,
       section: "integrations",
     });
   }
+
+  afterEach(() => {
+    for (const id of registeredPluginIds) pluginRegistry.unregisterPlugin(id);
+    registeredPluginIds.length = 0;
+  });
 
   function renderMobileSection(onNavigate = vi.fn()) {
     return {
@@ -267,7 +281,7 @@ describe("MobileIntegrationsSection", () => {
     useFeatureMock.mockImplementation((flag: string) => flag === "plugins");
     mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
     registerHelloIntegrationItem();
-    pluginRegistry.forPlugin("plugin-b").registerNavItem({
+    registerNavItem("plugin-b", {
       id: "main-item",
       label: "Main Item",
       path: "/plugins/main",
