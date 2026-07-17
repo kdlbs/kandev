@@ -1,11 +1,12 @@
 "use client";
 
 import { Button } from "@kandev/ui/button";
-import { IconMenu2, IconSearch } from "@tabler/icons-react";
+import { IconMenu2, IconMessageCircle, IconSearch } from "@tabler/icons-react";
 import { PageTopbar } from "@/components/page-topbar";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import { useAppStore } from "@/components/state-provider";
+import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
@@ -36,6 +37,7 @@ export function KanbanHeaderMobile({
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
   const isSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const setSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
+  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const isHome = title === "Home";
 
   const toggleSearch = () => {
@@ -69,6 +71,18 @@ export function KanbanHeaderMobile({
         actions={
           <>
             <TopbarMetrics size="lg" />
+            {workspaceId && (
+              <Button
+                variant="outline"
+                size="icon-lg"
+                onClick={handleOpenQuickChat}
+                className="cursor-pointer"
+                aria-label="Quick Chat"
+                data-testid="mobile-quick-chat-button"
+              >
+                <IconMessageCircle className="h-4 w-4" />
+              </Button>
+            )}
             {onSearchChange && (
               <Button
                 variant={isSearchOpen ? "secondary" : "outline"}

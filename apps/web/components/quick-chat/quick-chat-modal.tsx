@@ -4,7 +4,7 @@ import { memo, type CSSProperties } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
-import { IconPlus } from "@tabler/icons-react";
+import { IconPlus, IconX } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import { QuickChatContent } from "./quick-chat-content";
@@ -25,6 +25,7 @@ function QuickChatTabs({
   onTabClose,
   onNewChat,
   onRename,
+  onCloseModal,
 }: {
   sessions: Array<{ sessionId: string; workspaceId: string; name?: string }>;
   activeSessionId: string;
@@ -32,6 +33,7 @@ function QuickChatTabs({
   onTabClose: (sessionId: string) => void;
   onNewChat: () => void;
   onRename: (sessionId: string, name: string) => void;
+  onCloseModal: () => void;
 }) {
   if (sessions.length === 0) return null;
 
@@ -63,6 +65,18 @@ function QuickChatTabs({
           <IconPlus className="h-3.5 w-3.5" />
         </Button>
       </div>
+      {/* Touch devices have no Escape key or visible overlay to dismiss the
+          full-screen dialog, so give them an explicit close control. */}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-6 w-6 p-0 cursor-pointer shrink-0 sm:hidden"
+        onClick={onCloseModal}
+        aria-label="Close quick chat"
+        data-testid="quick-chat-close"
+      >
+        <IconX className="h-3.5 w-3.5" />
+      </Button>
     </div>
   );
 }
@@ -160,6 +174,7 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
             onTabClose={handleCloseTab}
             onNewChat={handleNewChat}
             onRename={handleRename}
+            onCloseModal={() => handleOpenChange(false)}
           />
           {activeSessionId && !activeSessionNeedsAgent && (
             <QuickChatSessionView sessionId={activeSessionId} />
