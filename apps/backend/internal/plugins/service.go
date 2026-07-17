@@ -359,35 +359,46 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	if err := validateConfigSchema(merged, rec.ConfigSchema); err != nil {
 		return err
 	}
-	stored, err := s.storeConfigSecrets(ctx, rec, merged, existing)
+	stored, removedSecrets, err := s.storeConfigSecrets(ctx, rec, merged)
 	if err != nil {
 		return err
 	}
 	if err := s.store.SetConfig(id, stored); err != nil {
 		return err
 	}
+	// Vault entries for removed secret fields are deleted only AFTER the
+	// config commit succeeds: a failed SetConfig must never leave the old
+	// (still-current) config referencing an already-deleted vault entry.
+	s.cleanupRemovedConfigSecrets(ctx, rec.ID, removedSecrets, existing)
 	return s.restartForConfigChange(rec)
 }
 
 // storeConfigSecrets moves each secret config field's cleartext value into
 // the encrypted vault (id pluginConfigSecretID) and replaces it with the
 // configVaultRef marker, so <id>.config.yml never persists a cleartext
-// secret. A field already carrying its ref (the mask-merge round trip) is
-// left alone; a secret field removed from the config deletes its vault
-// entry best-effort. With no vault wired (NewService without SetSecrets —
-// tests, embedded uses) values fall back to the config file itself, with a
-// warning: functional, but without at-rest encryption.
+// secret (validateConfigSchema has already rejected non-string secret
+// values, so nothing can slip past the string path here). A field already
+// carrying its ref (the mask-merge round trip) is left alone. Secret fields
+// absent from merged are returned as removedSecrets for the caller to
+// delete from the vault AFTER the config commit — deleting here would leave
+// the still-current config pointing at a missing entry if SetConfig then
+// failed. A vault.Set failure aborts before any config write; the entry it
+// may have already overwritten holds the operator's newly intended value
+// under the same deterministic id, which the retry will overwrite again.
+// With no vault wired (NewService without SetSecrets — tests, embedded
+// uses) values fall back to the config file itself, with a warning:
+// functional, but without at-rest encryption.
 func (s *Service) storeConfigSecrets(
-	ctx context.Context, rec *store.Record, merged, existing map[string]any,
-) (map[string]any, error) {
+	ctx context.Context, rec *store.Record, merged map[string]any,
+) (stored map[string]any, removedSecrets []string, err error) {
 	secretFields := secretPropertyKeys(rec.ConfigSchema)
 	if len(secretFields) == 0 {
-		return merged, nil
+		return merged, nil, nil
 	}
 	if s.secrets == nil {
 		s.log.Warn("plugins: no secret vault wired; storing secret config fields in the config file",
 			zap.String("plugin_id", rec.ID))
-		return merged, nil
+		return merged, nil, nil
 	}
 
 	out := make(map[string]any, len(merged))
@@ -397,7 +408,7 @@ func (s *Service) storeConfigSecrets(
 	for field := range secretFields {
 		value, present := out[field]
 		if !present {
-			s.deleteConfigSecret(ctx, rec.ID, field, existing)
+			removedSecrets = append(removedSecrets, field)
 			continue
 		}
 		cleartext, ok := value.(string)
@@ -406,23 +417,29 @@ func (s *Service) storeConfigSecrets(
 		}
 		vaultID := pluginConfigSecretID(rec.ID, field)
 		if err := s.secrets.Set(ctx, vaultID, vaultID, cleartext); err != nil {
-			return nil, fmt.Errorf("plugins: store secret config field %q: %w", field, err)
+			return nil, nil, fmt.Errorf("plugins: store secret config field %q: %w", field, err)
 		}
 		out[field] = configVaultRef(rec.ID, field)
 	}
-	return out, nil
+	return out, removedSecrets, nil
 }
 
-// deleteConfigSecret best-effort removes the vault entry backing a secret
-// config field that was removed from the config, if the stored config
-// actually pointed at it.
-func (s *Service) deleteConfigSecret(ctx context.Context, pluginID, field string, existing map[string]any) {
-	if !isConfigVaultRef(pluginID, field, existing[field]) {
-		return
-	}
-	if err := s.secrets.Delete(ctx, pluginConfigSecretID(pluginID, field)); err != nil {
-		s.log.Warn("plugins: failed to delete removed secret config field from vault",
-			zap.String("plugin_id", pluginID), zap.String("field", field), zap.Error(err))
+// cleanupRemovedConfigSecrets best-effort deletes the vault entries backing
+// secret config fields that the just-committed config no longer contains,
+// when the previous config actually pointed at them. Runs only after a
+// successful SetConfig (see UpdateConfig); a deletion failure leaves an
+// orphaned vault entry, which uninstall's namespace purge also sweeps.
+func (s *Service) cleanupRemovedConfigSecrets(
+	ctx context.Context, pluginID string, removed []string, existing map[string]any,
+) {
+	for _, field := range removed {
+		if !isConfigVaultRef(pluginID, field, existing[field]) {
+			continue
+		}
+		if err := s.secrets.Delete(ctx, pluginConfigSecretID(pluginID, field)); err != nil {
+			s.log.Warn("plugins: failed to delete removed secret config field from vault",
+				zap.String("plugin_id", pluginID), zap.String("field", field), zap.Error(err))
+		}
 	}
 }
 
@@ -658,6 +675,14 @@ func (s *Service) Uninstall(id string) error {
 	if _, err := s.Get(id); err != nil {
 		return err
 	}
+	// Purge the plugin's vault namespace FIRST, and fail the uninstall on
+	// any cleanup error: once the package/record are gone there is no retry
+	// path, and a reinstall under the same id would silently inherit the
+	// stale secrets. Failing here leaves everything intact (the plugin is
+	// still running), so the operator just retries the uninstall.
+	if err := s.deletePluginSecrets(id); err != nil {
+		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
+	}
 	if s.runtime != nil {
 		s.runtime.Stop(id)
 	}
@@ -669,35 +694,35 @@ func (s *Service) Uninstall(id string) error {
 	}
 	s.registry.Remove(id)
 	s.deletePluginState(id)
-	s.deletePluginSecrets(id)
 	s.notifyDeliverer()
 	return nil
 }
 
-// deletePluginSecrets best-effort removes every vault entry in id's
-// namespace ("plugin:<id>:..." — both SetSecret-owned and config-backed
-// entries), so a reinstall under the same id never inherits stale secrets.
-// Mirrors deletePluginState: a nil vault or a listing failure is logged,
-// not fatal — the package/record are already gone by this point.
-func (s *Service) deletePluginSecrets(id string) {
+// deletePluginSecrets removes every vault entry in id's namespace
+// ("plugin:<id>:..." — both SetSecret-owned and config-backed entries), so
+// a reinstall under the same id never inherits stale secrets. Unlike
+// deletePluginState it is NOT best-effort: it runs before any destructive
+// uninstall step, and a failure aborts the uninstall while it can still be
+// retried. A nil vault (no secrets possible) is a no-op.
+func (s *Service) deletePluginSecrets(id string) error {
 	if s.secrets == nil {
-		return
+		return nil
 	}
 	ctx := context.Background()
 	ids, err := s.secrets.ListIDs(ctx)
 	if err != nil {
-		s.log.Warn("plugins: failed to list vault ids on uninstall", zap.String("plugin_id", id), zap.Error(err))
-		return
+		return fmt.Errorf("list vault ids: %w", err)
 	}
+	var errs []error
 	for _, vaultID := range ids {
 		if !hasPluginVaultPrefix(vaultID, id) {
 			continue
 		}
 		if err := s.secrets.Delete(ctx, vaultID); err != nil {
-			s.log.Warn("plugins: failed to delete plugin secret on uninstall",
-				zap.String("plugin_id", id), zap.String("vault_id", vaultID), zap.Error(err))
+			errs = append(errs, fmt.Errorf("delete %s: %w", vaultID, err))
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // deletePluginState best-effort removes every plugin_state row for id. A

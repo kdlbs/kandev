@@ -174,6 +174,9 @@ func validateConfigSchema(config map[string]any, schema map[string]any) error {
 	if err := checkRequiredKeys(config, schema); err != nil {
 		return err
 	}
+	if err := checkSecretFieldsAreStrings(config, schema); err != nil {
+		return err
+	}
 	props := schemaProperties(schema)
 	for name, raw := range props {
 		prop, ok := raw.(map[string]any)
@@ -186,6 +189,26 @@ func validateConfigSchema(config map[string]any, schema map[string]any) error {
 		}
 		if err := checkPropertyValue(name, value, prop); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// checkSecretFieldsAreStrings rejects a non-string value on any declared
+// secret field. Secrets are vault-backed and the vault stores strings; a
+// numeric/boolean secret would otherwise skip vault storage in
+// storeConfigSecrets and persist in cleartext — the exact invariant this
+// feature exists to uphold. Credentials are strings in practice, so this is
+// a contract, not a limitation: authors wanting a secret value declare it
+// `type: string`. nil (unset) is allowed.
+func checkSecretFieldsAreStrings(config map[string]any, schema map[string]any) error {
+	for field := range secretPropertyKeys(schema) {
+		value, present := config[field]
+		if !present || value == nil {
+			continue
+		}
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("%w: secret field %q must be a string", ErrConfigInvalid, field)
 		}
 	}
 	return nil

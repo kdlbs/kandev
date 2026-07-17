@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	goruntime "runtime"
 	"testing"
 
@@ -602,5 +603,136 @@ func TestValidateConfigSchemaNumericEnumAcceptsJSONFloat(t *testing.T) {
 	}
 	if err := validateConfigSchema(map[string]any{"level": float64(9)}, schema); !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("out-of-enum numeric should still be rejected, got %v", err)
+	}
+}
+
+func TestValidateConfigSchemaRejectsNonStringSecretValues(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			"pin": map[string]any{"type": "integer", "secret": true},
+		},
+	}
+	// A non-string secret would bypass vault storage and persist cleartext —
+	// it must be rejected before it can ever reach the store.
+	if err := validateConfigSchema(map[string]any{"pin": float64(1234)}, schema); !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("non-string secret must be rejected, got %v", err)
+	}
+	// Absent stays allowed (an explicit null is already rejected by the
+	// property type check — clients omit unset keys).
+	if err := validateConfigSchema(map[string]any{}, schema); err != nil {
+		t.Fatalf("absent secret should be fine, got %v", err)
+	}
+}
+
+func TestServiceUpdateConfigNonStringSecretRejectedNothingPersisted(t *testing.T) {
+	svc, fsStore, vault := newTestServiceWithVault(t)
+	installConfigPlugin(t, svc, "kandev-plugin-github")
+
+	// webhook_key is declared type string + format password; submit a number.
+	err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{
+		"github_token": "ghp_x", "webhook_key": float64(42),
+	})
+	if !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("error = %v, want ErrConfigInvalid", err)
+	}
+	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	if len(stored) != 0 {
+		t.Fatalf("rejected config must not persist, got %v", stored)
+	}
+	if _, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "github_token")); ok {
+		t.Fatalf("rejected config must not reach the vault")
+	}
+}
+
+// failingVault wraps fakeSecretRevealer to inject failures for the
+// fail-closed uninstall and delete-after-commit paths.
+type failingVault struct {
+	*fakeSecretRevealer
+	listErr error
+}
+
+func (v *failingVault) ListIDs(ctx context.Context) ([]string, error) {
+	if v.listErr != nil {
+		return nil, v.listErr
+	}
+	return v.fakeSecretRevealer.ListIDs(ctx)
+}
+
+func TestServiceUninstallFailsClosedWhenSecretCleanupFails(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	vault := &failingVault{fakeSecretRevealer: newFakeSecretRevealer(), listErr: errors.New("vault down")}
+	svc.SetSecrets(vault)
+	rec := installConfigPlugin(t, svc, "kandev-plugin-github")
+
+	err := svc.Uninstall("kandev-plugin-github")
+	if err == nil {
+		t.Fatalf("Uninstall must fail when secret cleanup cannot run")
+	}
+	// Nothing destructive happened: record still installed, package on disk.
+	if _, getErr := svc.Get("kandev-plugin-github"); getErr != nil {
+		t.Fatalf("record should survive a failed uninstall, got %v", getErr)
+	}
+	if _, statErr := os.Stat(rec.InstallPath); statErr != nil {
+		t.Fatalf("package dir should survive a failed uninstall, got %v", statErr)
+	}
+
+	// Vault recovers -> retry succeeds.
+	vault.listErr = nil
+	if err := svc.Uninstall("kandev-plugin-github"); err != nil {
+		t.Fatalf("retry after vault recovery should succeed: %v", err)
+	}
+}
+
+// failingStore wraps store.Store to fail SetConfig, proving vault entries
+// referenced by the still-current config survive a failed commit.
+type failingStore struct {
+	store.Store
+	setConfigErr error
+}
+
+func (s *failingStore) SetConfig(id string, config map[string]any) error {
+	if s.setConfigErr != nil {
+		return s.setConfigErr
+	}
+	return s.Store.SetConfig(id, config)
+}
+
+func TestServiceUpdateConfigFailedCommitKeepsReferencedVaultEntry(t *testing.T) {
+	svc, fsStore, vault := newTestServiceWithVault(t)
+	installConfigPlugin(t, svc, "kandev-plugin-github")
+	ctx := context.Background()
+
+	// Store token + optional webhook_key secret.
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{
+		"github_token": "ghp_x", "webhook_key": "whsec_1",
+	}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+
+	// Now remove webhook_key, but make the config commit fail.
+	failing := &failingStore{Store: fsStore, setConfigErr: errors.New("disk full")}
+	svc.store = failing
+	err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{
+		"github_token": configSecretMask,
+	})
+	if err == nil {
+		t.Fatalf("UpdateConfig should surface the commit failure")
+	}
+	// The still-current config references webhook_key's vault entry — it
+	// must NOT have been deleted (delete happens only after a successful
+	// commit).
+	if _, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "webhook_key")); !ok {
+		t.Fatalf("vault entry referenced by the current config must survive a failed commit")
+	}
+
+	// Commit works again -> removal now deletes the entry.
+	svc.store = fsStore
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{
+		"github_token": configSecretMask,
+	}); err != nil {
+		t.Fatalf("UpdateConfig retry: %v", err)
+	}
+	if _, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "webhook_key")); ok {
+		t.Fatalf("vault entry should be deleted after the successful commit")
 	}
 }
