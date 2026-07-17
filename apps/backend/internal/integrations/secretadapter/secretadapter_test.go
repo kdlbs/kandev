@@ -65,6 +65,9 @@ func (f *fakeStore) Update(_ context.Context, id string, req *secrets.UpdateSecr
 }
 
 func (f *fakeStore) Delete(_ context.Context, id string) error {
+	if _, ok := f.rows[id]; !ok {
+		return fmt.Errorf("%w: %s", secrets.ErrNotFound, id)
+	}
 	delete(f.rows, id)
 	return nil
 }

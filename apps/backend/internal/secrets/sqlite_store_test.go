@@ -20,6 +20,9 @@ func newTestSQLiteStore(t *testing.T) *sqliteStore {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	sqlxDB := sqlx.NewDb(conn, "sqlite3")
+	t.Cleanup(func() {
+		_ = sqlxDB.Close()
+	})
 
 	crypto, err := NewMasterKeyProvider(dir)
 	if err != nil {
@@ -32,7 +35,6 @@ func newTestSQLiteStore(t *testing.T) *sqliteStore {
 	}
 	t.Cleanup(func() {
 		_ = cleanup()
-		_ = sqlxDB.Close()
 	})
 	return store
 }
