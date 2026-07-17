@@ -58,6 +58,8 @@ Use one capture-only overlay:
 - OS pointer disabled through `-draw_mouse 0`;
 - pointer overlay hidden for poster capture.
 
+Keep the complete rendered glyph inside the raw viewport. Preserve the hotspot on the real target and switch to an edge-safe glyph orientation near the right or bottom edge instead of clipping the overlay. Record both the hotspot and glyph bounds so post-camera validation can use the visible footprint.
+
 Move real input and overlay together. Use 10-12 manually timed samples over roughly 300ms with cubic easing. Record for every arrival:
 
 ```json
@@ -73,7 +75,9 @@ Move real input and overlay together. Use 10-12 manually timed samples over roug
 }
 ```
 
-Bounds use CSS pixels. Keep targets inside viewport and store the raw-story start time separately from event story time.
+Bounds use CSS pixels. Keep targets inside viewport and store the raw-story start time separately from event story time. Persist enough waypoints to reconstruct the complete intentional journey: the previous settled position, movement start, intermediate samples or easing contract, arrival, and the next movement start. Click-only metadata cannot prove cursor containment.
+
+Before camera work, normalize pointer coordinates against the exact camera source. For full-frame capture, divide CSS coordinates by the CSS viewport. For a physical-pixel ROI, first multiply CSS coordinates by DPR, subtract the ROI origin, then divide by ROI dimensions. Reject a static ROI when any visible pointer waypoint falls outside it; use a dynamic full-frame camera instead.
 
 ## Choreography
 

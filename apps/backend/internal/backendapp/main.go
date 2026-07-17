@@ -1024,12 +1024,14 @@ func wireOfficeProviderRouting(
 ) {
 	scheduler := services.OfficeSvcs.Scheduler
 	resolver := routing.NewResolver(&officeRoutingRepoAdapter{repo: repos.Office}, nil)
+	resolver.SetExecutionProfileStore(repos.AgentSettings, agentRegistry)
 	scheduler.SetResolver(resolver)
 	scheduler.SetTaskStarter(&schedulerTaskStarterAdapter{orch: orchestratorSvc})
 	scheduler.SetEventBus(eventBus)
 	services.Office.SetRoutingDispatcher(scheduler)
 
 	provider := routing.NewProvider(repos.Office, agentRegistry, resolver, scheduler)
+	provider.SetExecutionProfileStore(repos.AgentSettings)
 	services.OfficeSvcs.Dashboard.SetRoutingProvider(provider)
 	services.OfficeSvcs.Dashboard.SetRouteAttemptLister(repos.Office)
 	services.OfficeSvcs.Agents.SetKnownProvidersFn(func() []routing.ProviderID {
@@ -1092,12 +1094,13 @@ func (a *schedulerTaskStarterAdapter) StartTaskWithRoute(
 			Env:               launch.Env,
 		},
 		orchexecutor.RouteOverride{
-			ProviderID: route.ProviderID,
-			Model:      route.Model,
-			Tier:       route.Tier,
-			Mode:       route.Mode,
-			Flags:      route.Flags,
-			Env:        route.Env,
+			ExecutionProfileID: route.ExecutionProfileID,
+			ProviderID:         route.ProviderID,
+			Model:              route.Model,
+			Tier:               route.Tier,
+			Mode:               route.Mode,
+			Flags:              route.Flags,
+			Env:                route.Env,
 		})
 }
 
@@ -1506,6 +1509,7 @@ func buildOfficeFeatureServices(
 	activity := officeshared.NewActivityLogger(repo, log)
 
 	agentSvc := officeagents.NewAgentService(repo, log, activity)
+	agentSvc.SetProfileStore(settingsRepo)
 	agentSvc.SetAuth(newAgentAuth(jwtSigningKey, log))
 	if services.Office != nil {
 		services.Office.SetAgentTokenMinter(agentSvc)

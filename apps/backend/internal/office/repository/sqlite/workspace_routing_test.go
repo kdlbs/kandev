@@ -2,10 +2,47 @@ package sqlite_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/routing"
 )
+
+func TestGetWorkspaceRouting_LegacyProfileIDsRewriteCanonically(t *testing.T) {
+	repo, db := newTestRepoWithDB(t)
+	ctx := context.Background()
+	legacyProfiles := `{"claude-acp":{"tier_map":{"balanced":"sonnet"},"tier_profile_ids":{"balanced":"legacy-profile"}}}`
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO office_workspace_routing
+			(workspace_id, enabled, default_tier, provider_order, provider_profiles, updated_at)
+		VALUES (?, 1, 'balanced', '["claude-acp"]', ?, datetime('now'))
+	`, "ws-legacy", legacyProfiles); err != nil {
+		t.Fatalf("insert legacy routing row: %v", err)
+	}
+
+	cfg, err := repo.GetWorkspaceRouting(ctx, "ws-legacy")
+	if err != nil {
+		t.Fatalf("get legacy routing: %v", err)
+	}
+	if got := cfg.ProviderProfiles["claude-acp"].ExecutionProfileID(routing.TierBalanced); got != "legacy-profile" {
+		t.Fatalf("balanced execution profile = %q, want legacy-profile", got)
+	}
+	if err := repo.UpsertWorkspaceRouting(ctx, "ws-legacy", cfg); err != nil {
+		t.Fatalf("rewrite legacy routing: %v", err)
+	}
+	var stored string
+	if err := db.GetContext(ctx, &stored, `
+		SELECT provider_profiles FROM office_workspace_routing WHERE workspace_id = ?
+	`, "ws-legacy"); err != nil {
+		t.Fatalf("read rewritten profiles: %v", err)
+	}
+	if !strings.Contains(stored, `"execution_profile_ids":{"balanced":"legacy-profile"}`) {
+		t.Fatalf("canonical execution profile mapping missing: %s", stored)
+	}
+	if strings.Contains(stored, "tier_profile_ids") {
+		t.Fatalf("legacy mapping key survived rewrite: %s", stored)
+	}
+}
 
 func TestGetWorkspaceRouting_DefaultOnEmpty(t *testing.T) {
 	repo := newTestRepo(t)
@@ -42,11 +79,11 @@ func TestUpsertAndGetWorkspaceRouting_RoundTrip(t *testing.T) {
 		ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
 			"claude-acp": {
-				TierMap:        routing.TierMap{Frontier: "opus", Balanced: "sonnet"},
-				TierProfileIDs: routing.TierProfileIDs{Frontier: "profile-frontier", Balanced: "profile-balanced"},
-				Mode:           "default",
-				Flags:          []string{"--quiet"},
-				Env:            map[string]string{"FOO": "bar"},
+				TierMap:             routing.TierMap{Frontier: "opus", Balanced: "sonnet"},
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{Frontier: "profile-frontier", Balanced: "profile-balanced"},
+				Mode:                "default",
+				Flags:               []string{"--quiet"},
+				Env:                 map[string]string{"FOO": "bar"},
 			},
 			"codex-acp": {
 				TierMap: routing.TierMap{Balanced: "gpt-5.4"},
@@ -82,8 +119,8 @@ func TestUpsertAndGetWorkspaceRouting_RoundTrip(t *testing.T) {
 	if len(claude.Flags) != 1 || claude.Flags[0] != "--quiet" {
 		t.Errorf("claude flags = %v", claude.Flags)
 	}
-	if claude.TierProfileIDs.Frontier != "profile-frontier" {
-		t.Errorf("claude tier profile ids lost: %+v", claude.TierProfileIDs)
+	if claude.ExecutionProfileIDs.Frontier != "profile-frontier" {
+		t.Errorf("claude execution profile ids lost: %+v", claude.ExecutionProfileIDs)
 	}
 }
 
@@ -101,7 +138,7 @@ func TestListRoutingTierReferencesByAgentProfile(t *testing.T) {
 					Balanced: "gpt-5-medium",
 					Economy:  "gpt-5-low",
 				},
-				TierProfileIDs: routing.TierProfileIDs{
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{
 					Frontier: "profile-frontier",
 					Balanced: "profile-balanced",
 					Economy:  "profile-economy",
@@ -142,10 +179,10 @@ func TestListRoutingTierReferencesByAgentProfile_IgnoresRemovedProviders(t *test
 		ProviderOrder: []routing.ProviderID{"codex-acp"},
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
 			"codex-acp": {
-				TierProfileIDs: routing.TierProfileIDs{Balanced: "active-profile"},
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "active-profile"},
 			},
 			"claude-acp": {
-				TierProfileIDs: routing.TierProfileIDs{Balanced: "removed-profile"},
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "removed-profile"},
 			},
 		},
 	}

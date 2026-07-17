@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"time"
 
@@ -13,6 +14,25 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
+func TestExecutionProfilePersistence_ModelFields(t *testing.T) {
+	assertModelField(t, reflect.TypeOf(models.Run{}), "ResolvedExecutionProfileID",
+		"resolved_execution_profile_id")
+	assertModelField(t, reflect.TypeOf(models.RouteAttempt{}), "ExecutionProfileID",
+		"execution_profile_id")
+}
+
+func assertModelField(t *testing.T, model reflect.Type, fieldName, dbName string) {
+	t.Helper()
+	field, ok := model.FieldByName(fieldName)
+	if !ok {
+		t.Errorf("%s.%s not found", model.Name(), fieldName)
+		return
+	}
+	if got := field.Tag.Get("db"); got != dbName {
+		t.Errorf("%s.%s db tag = %q, want %q", model.Name(), fieldName, got, dbName)
+	}
+}
+
 func TestAppendAndListRouteAttempts_RoundTrip(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -23,33 +43,35 @@ func TestAppendAndListRouteAttempts_RoundTrip(t *testing.T) {
 	exitCode := 137
 	finished := now.Add(time.Minute)
 	first := &models.RouteAttempt{
-		RunID:           "run-1",
-		Seq:             1,
-		ProviderID:      "claude-acp",
-		Model:           "sonnet",
-		Tier:            "balanced",
-		Outcome:         "failed_provider_unavailable",
-		ErrorCode:       "quota_limited",
-		ErrorConfidence: "high",
-		AdapterPhase:    "session_init",
-		ClassifierRule:  "claude.stderr.quota.v1",
-		ExitCode:        &exitCode,
-		RawExcerpt:      "anthropic_quota_exceeded",
-		StartedAt:       now,
-		FinishedAt:      &finished,
+		RunID:              "run-1",
+		Seq:                1,
+		ExecutionProfileID: "profile-claude",
+		ProviderID:         "claude-acp",
+		Model:              "sonnet",
+		Tier:               "balanced",
+		Outcome:            "failed_provider_unavailable",
+		ErrorCode:          "quota_limited",
+		ErrorConfidence:    "high",
+		AdapterPhase:       "session_init",
+		ClassifierRule:     "claude.stderr.quota.v1",
+		ExitCode:           &exitCode,
+		RawExcerpt:         "anthropic_quota_exceeded",
+		StartedAt:          now,
+		FinishedAt:         &finished,
 	}
 	if err := repo.AppendRouteAttempt(ctx, first); err != nil {
 		t.Fatalf("append first: %v", err)
 	}
 
 	second := &models.RouteAttempt{
-		RunID:      "run-1",
-		Seq:        2,
-		ProviderID: "codex-acp",
-		Model:      "gpt-5.4",
-		Tier:       "balanced",
-		Outcome:    "launched",
-		StartedAt:  now.Add(time.Minute),
+		RunID:              "run-1",
+		Seq:                2,
+		ExecutionProfileID: "profile-codex",
+		ProviderID:         "codex-acp",
+		Model:              "gpt-5.4",
+		Tier:               "balanced",
+		Outcome:            "launched",
+		StartedAt:          now.Add(time.Minute),
 	}
 	if err := repo.AppendRouteAttempt(ctx, second); err != nil {
 		t.Fatalf("append second: %v", err)
@@ -67,6 +89,10 @@ func TestAppendAndListRouteAttempts_RoundTrip(t *testing.T) {
 	}
 	if attempts[0].ErrorCode != "quota_limited" {
 		t.Errorf("error code lost: %q", attempts[0].ErrorCode)
+	}
+	if attempts[0].ExecutionProfileID != "profile-claude" ||
+		attempts[1].ExecutionProfileID != "profile-codex" {
+		t.Errorf("execution profile IDs lost: %#v", attempts)
 	}
 	if attempts[0].ExitCode == nil || *attempts[0].ExitCode != 137 {
 		t.Errorf("exit code lost: %v", attempts[0].ExitCode)

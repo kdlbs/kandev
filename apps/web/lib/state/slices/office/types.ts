@@ -505,10 +505,21 @@ export type TierMap = {
 
 export type ProviderProfile = {
   tier_map: TierMap;
+  execution_profile_ids?: Partial<Record<Tier, string>>;
+  /** @deprecated Accepted only while reading pre-migration routing payloads. */
   tier_profile_ids?: Partial<Record<Tier, string>>;
   mode?: string;
   flags?: string[];
   env?: Record<string, string>;
+};
+
+export type ExecutionProfileSummary = {
+  id: string;
+  name: string;
+  provider_id: string;
+  model: string;
+  mode?: string;
+  workspace_id?: string;
 };
 
 // Wake reasons the workspace can map onto specific tiers. v1 keeps the
@@ -564,6 +575,7 @@ export type RouteAttemptOutcome =
 
 export type RouteAttempt = {
   seq: number;
+  execution_profile_id?: string;
   provider_id: string;
   model?: string;
   tier: Tier | "";
@@ -580,6 +592,7 @@ export type RouteAttempt = {
 };
 
 export type ProviderModelPair = {
+  execution_profile_id?: string;
   provider_id: string;
   model: string;
   tier: Tier | "";
@@ -594,11 +607,13 @@ export type AgentRoutePreview = {
   // effective provider order, even when that provider is currently
   // skipped (degraded / missing mapping).
   primary_provider_id?: string;
+  primary_execution_profile_id?: string;
   primary_model?: string;
   // current_* reflects the candidate the next launch would actually
   // pick; equal to primary when not degraded. Empty when every
   // candidate is skipped.
   current_provider_id?: string;
+  current_execution_profile_id?: string;
   current_model?: string;
   fallback_chain: ProviderModelPair[];
   missing: string[];

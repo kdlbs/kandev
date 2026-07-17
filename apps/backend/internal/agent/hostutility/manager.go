@@ -595,14 +595,16 @@ func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.Inference
 		choices := make([]ConfigOptionChoice, 0, len(opt.Options))
 		for _, choice := range opt.Options {
 			choices = append(choices, ConfigOptionChoice{
-				Value: choice.Value,
-				Name:  choice.Name,
+				Value:       choice.Value,
+				Name:        choice.Name,
+				Description: choice.Description,
 			})
 		}
 		caps.ConfigOptions = append(caps.ConfigOptions, ConfigOption{
 			Type:         opt.Type,
 			ID:           opt.ID,
 			Name:         opt.Name,
+			Description:  opt.Description,
 			CurrentValue: opt.CurrentValue,
 			Category:     opt.Category,
 			Options:      choices,

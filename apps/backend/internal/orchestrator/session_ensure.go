@@ -221,9 +221,9 @@ func (s *Service) tryEnsureExecution(ctx context.Context, sessionID string) {
 	}
 }
 
-// resolveTaskAgentProfile applies the 4-step resolution chain on the backend:
+// resolveTaskAgentProfile applies the 5-step resolution chain on the backend:
 // 1) task.metadata.agent_profile_id, 2) workflow step override,
-// 3) workflow default, 4) workspace default. Returns the resolved profile id
+// 3) workflow default, 4) Office task assignee, 5) workspace default. Returns the resolved profile id
 // (or "" when none resolve) along with the workflow step it loaded (or nil).
 // Returning the step lets callers reuse it (e.g. to gate auto-start) without a
 // second DB lookup.
@@ -236,6 +236,9 @@ func (s *Service) resolveTaskAgentProfile(ctx context.Context, task *models.Task
 		if id := s.resolveStepAgentProfile(ctx, step); id != "" {
 			return id, step
 		}
+	}
+	if task.AssigneeAgentProfileID != "" {
+		return task.AssigneeAgentProfileID, step
 	}
 	ws, err := s.repo.GetWorkspace(ctx, task.WorkspaceID)
 	if err == nil && ws != nil && ws.DefaultAgentProfileID != nil && *ws.DefaultAgentProfileID != "" {

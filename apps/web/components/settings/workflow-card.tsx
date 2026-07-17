@@ -3,13 +3,14 @@
 import { useState, useEffect } from "react";
 import { IconDownload, IconTrash } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
-import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
+import { Badge } from "@kandev/ui/badge";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
+import type { WorkflowReplayCycleDiagnostic } from "@/lib/workflows/replay-cycle-analysis";
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
 import { useRequest } from "@/lib/http/use-request";
 import { useToast } from "@/components/toast-provider";
@@ -26,6 +27,8 @@ import {
   useWorkflowSaveActions,
   handleExportWorkflow,
 } from "./workflow-card-actions";
+import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
+import { WorkflowCycleGuardDialog } from "./workflow-cycle-diagnostic";
 
 type WorkflowCardProps = {
   workflow: Workflow;
@@ -76,16 +79,7 @@ function useWorkflowSteps(
     };
   }, [workflowId, initialSteps, isNewWorkflow, toast]);
 
-  const refreshWorkflowSteps = async () => {
-    try {
-      const res = await listWorkflowStepsAction(workflowId);
-      setWorkflowSteps(res.steps ?? []);
-    } catch {
-      /* ignore */
-    }
-  };
-
-  return { workflowSteps, setWorkflowSteps, workflowLoading, refreshWorkflowSteps };
+  return { workflowSteps, setWorkflowSteps, workflowLoading };
 }
 
 type WorkflowDeleteState = {
@@ -176,17 +170,13 @@ type WorkflowCardActionsProps = {
 };
 
 const SYNCED_READ_ONLY_REASON =
-  "Managed by workflow sync — edit or remove it in the synced repository";
+  "Managed by workflow sync - edit or remove it in the synced repository";
 
 function DeleteWorkflowButton({
   onDeleteClick,
   deleteDisabled,
   readOnly,
-}: {
-  onDeleteClick: () => Promise<void>;
-  deleteDisabled: boolean;
-  readOnly: boolean;
-}) {
+}: Pick<WorkflowCardActionsProps, "onDeleteClick" | "deleteDisabled" | "readOnly">) {
   const button = (
     <Button
       type="button"
@@ -202,7 +192,6 @@ function DeleteWorkflowButton({
   );
 
   if (!readOnly) return button;
-
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -264,10 +253,12 @@ type WorkflowCardDialogsProps = {
     handleMigrateAndDeleteStep: () => Promise<void>;
     handleDeleteStepAndTasks: () => Promise<void>;
   };
+  mutationGuard: ReturnType<typeof useWorkflowMutationGuard>;
 };
 
 type WorkflowCardBodyProps = {
   workflow: Workflow;
+  readOnly: boolean;
   isWorkflowDirty: boolean;
   onUpdateWorkflow: (updates: {
     name?: string;
@@ -276,21 +267,18 @@ type WorkflowCardBodyProps = {
   }) => void;
   activeSaveRequest: { isLoading: boolean; status: "idle" | "loading" | "success" | "error" };
   handleSaveWorkflow: () => Promise<void>;
+  mutationPending: boolean;
   workflowLoading: boolean;
   workflowSteps: WorkflowStep[];
+  diagnostics: WorkflowReplayCycleDiagnostic[];
   stepActions: {
     handleUpdateWorkflowStep: (id: string, updates: Partial<WorkflowStep>) => Promise<void>;
     handleAddWorkflowStep: () => Promise<void>;
     handleRemoveWorkflowStep: (id: string) => Promise<void>;
     handleReorderWorkflowSteps: (steps: WorkflowStep[]) => Promise<void>;
   };
-  readOnly: boolean;
 };
 
-// SyncedBadge marks workflows managed by workflow sync (workflow.source ===
-// "github"). Hovering / focusing shows which repo-relative file it came from
-// so users don't accidentally edit a workflow that the next poll will
-// overwrite.
 function SyncedBadge({ sourcePath }: { sourcePath?: string }) {
   return (
     <Tooltip>
@@ -305,7 +293,7 @@ function SyncedBadge({ sourcePath }: { sourcePath?: string }) {
         </Badge>
       </TooltipTrigger>
       <TooltipContent>
-        Read-only — managed by workflow sync from {sourcePath || "a configured repository"}. Edit or
+        Read-only - managed by workflow sync from {sourcePath || "a configured repository"}. Edit or
         remove it in the synced repository.
       </TooltipContent>
     </Tooltip>
@@ -314,14 +302,16 @@ function SyncedBadge({ sourcePath }: { sourcePath?: string }) {
 
 function WorkflowCardBody({
   workflow,
+  readOnly,
   isWorkflowDirty,
   onUpdateWorkflow,
   activeSaveRequest,
   handleSaveWorkflow,
+  mutationPending,
   workflowLoading,
   workflowSteps,
+  diagnostics,
   stepActions,
-  readOnly,
 }: WorkflowCardBodyProps) {
   const healthyProfiles = useHealthyAgentProfiles(workflow.agent_profile_id);
 
@@ -333,11 +323,6 @@ function WorkflowCardBody({
             <span>Workflow Name</span>
             {isWorkflowDirty && <UnsavedChangesBadge />}
             {readOnly && <SyncedBadge sourcePath={workflow.source_path} />}
-            {readOnly && (
-              <span className="text-xs text-muted-foreground">
-                Read-only — managed by workflow sync
-              </span>
-            )}
           </Label>
           <Input
             value={workflow.name}
@@ -352,10 +337,10 @@ function WorkflowCardBody({
           </Label>
           <Select
             value={workflow.agent_profile_id || "none"}
+            disabled={readOnly}
             onValueChange={(value) =>
               onUpdateWorkflow({ agent_profile_id: value === "none" ? "" : value })
             }
-            disabled={readOnly}
           >
             <SelectTrigger
               className="w-full cursor-pointer"
@@ -380,7 +365,7 @@ function WorkflowCardBody({
           isLoading={activeSaveRequest.isLoading}
           status={activeSaveRequest.status}
           onClick={handleSaveWorkflow}
-          disabled={readOnly}
+          disabled={mutationPending || readOnly}
         />
       </div>
       <div className="space-y-2">
@@ -390,11 +375,12 @@ function WorkflowCardBody({
         ) : (
           <WorkflowPipelineEditor
             steps={workflowSteps}
+            diagnostics={diagnostics}
             onUpdateStep={stepActions.handleUpdateWorkflowStep}
             onAddStep={stepActions.handleAddWorkflowStep}
             onRemoveStep={stepActions.handleRemoveWorkflowStep}
             onReorderSteps={stepActions.handleReorderWorkflowSteps}
-            readOnly={readOnly}
+            readOnly={mutationPending || readOnly}
           />
         )}
       </div>
@@ -413,6 +399,7 @@ function WorkflowCardDialogs({
   stepDel,
   stepsForStepMigration,
   stepDeleteHandlers,
+  mutationGuard,
 }: WorkflowCardDialogsProps) {
   return (
     <>
@@ -448,6 +435,11 @@ function WorkflowCardDialogs({
         onMigrateAndDelete={stepDeleteHandlers.handleMigrateAndDeleteStep}
         onDeleteAndTasks={stepDeleteHandlers.handleDeleteStepAndTasks}
       />
+      <WorkflowCycleGuardDialog
+        proposal={mutationGuard.proposal}
+        onCancel={mutationGuard.cancelProposal}
+        onConfirm={mutationGuard.confirmProposal}
+      />
     </>
   );
 }
@@ -461,25 +453,27 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   const wfDel = useWorkflowDeleteState();
   const stepDel = useStepDeleteState();
   const isNewWorkflow = workflow.id.startsWith("temp-");
-  // Workflows synced from a configured GitHub repo are read-only: the
-  // backend rejects definition mutations with a 409, so the UI disables the
-  // matching affordances (name/agent-profile/steps/delete) up front.
   const readOnly = workflow.source === "github";
   const deleteWorkflowRequest = useRequest(onDeleteWorkflow);
-  const { workflowSteps, setWorkflowSteps, workflowLoading, refreshWorkflowSteps } =
-    useWorkflowSteps(workflow.id, initialWorkflowSteps, isNewWorkflow, toast);
+  const { workflowSteps, setWorkflowSteps, workflowLoading } = useWorkflowSteps(
+    workflow.id,
+    initialWorkflowSteps,
+    isNewWorkflow,
+    toast,
+  );
+  const mutationGuard = useWorkflowMutationGuard(workflowSteps);
   const stepActions = useWorkflowStepActions({
     workflow,
     isNewWorkflow,
     readOnly,
     workflowSteps,
     setWorkflowSteps,
-    refreshWorkflowSteps,
     setStepToDelete: stepDel.setStepToDelete,
     setStepTaskCount: stepDel.setStepTaskCount,
     setTargetStepForMigration: stepDel.setTargetStepForMigration,
     setStepDeleteOpen: stepDel.setStepDeleteOpen,
     toast,
+    mutationGuard,
   });
   const { activeSaveRequest, handleSaveWorkflow } = useWorkflowSaveActions({
     workflow,
@@ -490,6 +484,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     onSaveWorkflow,
     onWorkflowCreated,
     toast,
+    mutationGuard,
   });
   const wfDeleteHandlers = useWorkflowDeleteHandlers({
     workflow,
@@ -503,7 +498,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
   const stepDeleteHandlers = useStepDeleteHandlers({
     workflow,
     stepDel,
-    refreshWorkflowSteps,
+    setWorkflowSteps,
     toast,
   });
   const stepsForStepMigration = stepDel.stepToDelete
@@ -522,6 +517,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
     deleteWorkflowRequest,
     workflowSteps,
     workflowLoading,
+    mutationGuard,
     stepActions,
     activeSaveRequest,
     handleSaveWorkflow,
@@ -544,14 +540,16 @@ export function WorkflowCard(props: WorkflowCardProps) {
         <div className="space-y-4">
           <WorkflowCardBody
             workflow={workflow}
+            readOnly={s.readOnly}
             isWorkflowDirty={isWorkflowDirty}
             onUpdateWorkflow={onUpdateWorkflow}
             activeSaveRequest={s.activeSaveRequest}
             handleSaveWorkflow={s.handleSaveWorkflow}
+            mutationPending={s.mutationGuard.isMutationPending}
             workflowLoading={s.workflowLoading}
             workflowSteps={s.workflowSteps}
+            diagnostics={s.mutationGuard.diagnostics}
             stepActions={s.stepActions}
-            readOnly={s.readOnly}
           />
           <WorkflowCardActions
             isNewWorkflow={s.isNewWorkflow}
@@ -561,7 +559,10 @@ export function WorkflowCard(props: WorkflowCardProps) {
             toast={s.toast}
             onDeleteClick={s.wfDeleteHandlers.handleDeleteWorkflowClick}
             deleteDisabled={
-              s.deleteWorkflowRequest.isLoading || s.wfDel.workflowDeleteLoading || s.readOnly
+              s.mutationGuard.isMutationPending ||
+              s.deleteWorkflowRequest.isLoading ||
+              s.wfDel.workflowDeleteLoading ||
+              s.readOnly
             }
             readOnly={s.readOnly}
           />
@@ -578,6 +579,7 @@ export function WorkflowCard(props: WorkflowCardProps) {
         stepDel={s.stepDel}
         stepsForStepMigration={s.stepsForStepMigration}
         stepDeleteHandlers={s.stepDeleteHandlers}
+        mutationGuard={s.mutationGuard}
       />
     </Card>
   );

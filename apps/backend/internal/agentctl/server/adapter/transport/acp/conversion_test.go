@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -9,6 +10,76 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+func TestConvertACPConfigOptions_PreservesDescriptions(t *testing.T) {
+	description := "Controls how much reasoning the model performs."
+	valueDescription := "Uses more reasoning for complex tasks."
+	options := acp.SessionConfigSelectOptionsUngrouped{{
+		Value:       "high",
+		Name:        "High",
+		Description: &valueDescription,
+	}}
+
+	converted := convertACPConfigOptions([]acp.SessionConfigOption{{
+		Select: &acp.SessionConfigOptionSelect{
+			Type:         "select",
+			Id:           "reasoning_effort",
+			Name:         "Reasoning effort",
+			Description:  &description,
+			CurrentValue: "high",
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &options},
+		},
+	}})
+
+	raw, err := json.Marshal(converted)
+	if err != nil {
+		t.Fatalf("marshal converted config options: %v", err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal converted config options: %v", err)
+	}
+	if got := payload[0]["description"]; got != description {
+		t.Errorf("option description = %#v, want %q", got, description)
+	}
+	values := payload[0]["options"].([]any)
+	if got := values[0].(map[string]any)["description"]; got != valueDescription {
+		t.Errorf("value description = %#v, want %q", got, valueDescription)
+	}
+}
+
+func TestExtractConfigOptions_PreservesDescriptions(t *testing.T) {
+	converted := extractConfigOptions(map[string]any{
+		"configOptions": []any{map[string]any{
+			"type":         "select",
+			"id":           "fast_mode",
+			"name":         "Fast mode",
+			"description":  "Controls fast execution.",
+			"currentValue": "off",
+			"options": []any{map[string]any{
+				"value":       "off",
+				"name":        "Off",
+				"description": "Uses standard execution.",
+			}},
+		}},
+	})
+
+	raw, err := json.Marshal(converted)
+	if err != nil {
+		t.Fatalf("marshal extracted config options: %v", err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal extracted config options: %v", err)
+	}
+	if got := payload[0]["description"]; got != "Controls fast execution." {
+		t.Errorf("option description = %#v, want provider description", got)
+	}
+	values := payload[0]["options"].([]any)
+	if got := values[0].(map[string]any)["description"]; got != "Uses standard execution." {
+		t.Errorf("value description = %#v, want provider description", got)
+	}
+}
 
 // newTestAdapter creates a minimal Adapter suitable for unit testing conversion functions.
 // It uses a nop logger and a buffered updates channel so tests can drain events.

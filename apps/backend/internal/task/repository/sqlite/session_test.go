@@ -5,12 +5,14 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -170,6 +172,46 @@ func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
 	}
 	if err := repo.UpdateTaskSessionState(ctx, "session-found", models.TaskSessionStateCompleted, ""); err != nil {
 		t.Fatalf("UpdateTaskSessionState existing row: %v", err)
+	}
+}
+
+func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-baseline", "session-baseline", "turn-baseline")
+	ctx := context.Background()
+
+	stored, err := repo.SetSessionMetadataKeyIfAbsent(ctx, "session-baseline", "baseline", map[string]string{"effort": "high"})
+	if err != nil {
+		t.Fatalf("first SetSessionMetadataKeyIfAbsent: %v", err)
+	}
+	if !stored {
+		t.Fatal("first SetSessionMetadataKeyIfAbsent should store")
+	}
+	stored, err = repo.SetSessionMetadataKeyIfAbsent(ctx, "session-baseline", "baseline", map[string]string{"effort": "low"})
+	if err != nil {
+		t.Fatalf("second SetSessionMetadataKeyIfAbsent: %v", err)
+	}
+	if stored {
+		t.Fatal("second SetSessionMetadataKeyIfAbsent should not overwrite")
+	}
+
+	session, err := repo.GetTaskSession(ctx, "session-baseline")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	baseline, ok := session.Metadata["baseline"].(map[string]interface{})
+	if !ok || baseline["effort"] != "high" {
+		t.Fatalf("baseline = %#v, want effort=high", session.Metadata["baseline"])
+	}
+}
+
+func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
+	query := setSessionMetadataKeyIfAbsentQuery(dialect.PGX)
+	if strings.Contains(query, "json_set") || strings.Contains(query, "json_type") || strings.Contains(query, "json(?)") {
+		t.Fatalf("postgres write-once query uses SQLite JSON functions: %s", query)
+	}
+	if !strings.Contains(query, "jsonb_set") || !strings.Contains(query, "jsonb_extract_path") {
+		t.Fatalf("postgres write-once query must use JSONB set/existence operations: %s", query)
 	}
 }
 

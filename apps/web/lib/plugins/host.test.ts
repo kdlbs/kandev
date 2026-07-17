@@ -30,9 +30,10 @@ function makeHostFactory(pluginId: string): PluginHostApi {
       setState: () => {},
       subscribe: () => () => {},
     },
-    api: { fetch: async () => new Response() },
+    api: { fetch: async () => new Response(), baseUrl: "" },
     ui: {},
     theme: "light",
+    navigate: () => {},
   };
 }
 

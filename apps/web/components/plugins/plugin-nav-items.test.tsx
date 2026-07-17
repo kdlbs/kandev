@@ -77,6 +77,24 @@ describe("PluginNavItems", () => {
     expect(container.innerHTML).toBe("");
   });
 
+  it("renders the named curated icon, falling back to the puzzle glyph", () => {
+    pluginRegistry
+      .forPlugin("plugin-a")
+      .registerNavItem({ id: "hello", label: "Hello", path: HELLO_PATH, icon: "ticket" });
+    pluginRegistry
+      .forPlugin("plugin-b")
+      .registerNavItem({ id: "other", label: "Other", path: "/plugins/other", icon: "nope" });
+
+    renderNavItems();
+
+    expect(
+      screen.getByTestId("plugin-nav-item-hello").querySelector("svg.tabler-icon-ticket"),
+    ).not.toBeNull();
+    expect(
+      screen.getByTestId("plugin-nav-item-other").querySelector("svg.tabler-icon-puzzle"),
+    ).not.toBeNull();
+  });
+
   it("navigates to item.path when clicked", () => {
     pluginRegistry
       .forPlugin("plugin-a")

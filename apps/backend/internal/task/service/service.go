@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -194,6 +195,7 @@ type Service struct {
 	blockers              BlockerRepository
 	comments              CommentRepository
 	baseBranchPusher      AgentBaseBranchPusher
+	runtimeOverridesMu    sync.Mutex
 	// cleanupDoneForTest lets unit tests wait for async cleanup; nil in production.
 	cleanupDoneForTest chan struct{}
 }

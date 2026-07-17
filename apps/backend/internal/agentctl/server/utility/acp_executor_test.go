@@ -1,6 +1,7 @@
 package utility
 
 import (
+	"encoding/json"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -11,6 +12,43 @@ import (
 )
 
 func ptr[T any](v T) *T { return &v }
+
+func TestProbeConfigOptions_PreservesDescriptions(t *testing.T) {
+	t.Parallel()
+
+	options := acp.SessionConfigSelectOptionsUngrouped{{
+		Value:       "high",
+		Name:        "High",
+		Description: ptr("More thorough reasoning."),
+	}}
+
+	converted := probeConfigOptions([]acp.SessionConfigOption{{
+		Select: &acp.SessionConfigOptionSelect{
+			Type:         "select",
+			Id:           "reasoning_effort",
+			Name:         "Reasoning effort",
+			Description:  ptr("Controls reasoning depth."),
+			CurrentValue: "high",
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &options},
+		},
+	}})
+
+	raw, err := json.Marshal(converted)
+	if err != nil {
+		t.Fatalf("marshal config options: %v", err)
+	}
+	var payload []map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal config options: %v", err)
+	}
+	if got := payload[0]["description"]; got != "Controls reasoning depth." {
+		t.Errorf("option description = %#v, want %q", got, "Controls reasoning depth.")
+	}
+	values := payload[0]["options"].([]any)
+	if got := values[0].(map[string]any)["description"]; got != "More thorough reasoning." {
+		t.Errorf("value description = %#v, want %q", got, "More thorough reasoning.")
+	}
+}
 
 func TestResolveProbeCommand_AllowsEveryListedBinary(t *testing.T) {
 	t.Parallel()

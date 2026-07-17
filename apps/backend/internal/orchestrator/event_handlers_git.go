@@ -338,7 +338,7 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 		return
 	}
 
-	size, remaining, efficiency, ok := s.resolveContextWindowValues(ctx, data)
+	size, remaining, efficiency, source, ok := s.resolveContextWindowValues(ctx, data)
 	if !ok {
 		return
 	}
@@ -348,6 +348,7 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 		"used":       data.ContextWindowUsed,
 		"remaining":  remaining,
 		"efficiency": efficiency,
+		"source":     source,
 	}
 
 	// Persist to database asynchronously using json_set to atomically set one
@@ -382,28 +383,28 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	}
 }
 
-func (s *Service) resolveContextWindowValues(ctx context.Context, data watcher.ContextWindowData) (int64, int64, float64, bool) {
+func (s *Service) resolveContextWindowValues(ctx context.Context, data watcher.ContextWindowData) (int64, int64, float64, string, bool) {
 	if data.ContextWindowSize > 0 {
-		return data.ContextWindowSize, data.ContextWindowRemaining, data.ContextEfficiency, true
+		return data.ContextWindowSize, data.ContextWindowRemaining, data.ContextEfficiency, "acp", true
 	}
 	lookup := s.currentModelInfoLookup()
 	if lookup == nil {
-		return 0, 0, 0, false
+		return 0, 0, 0, "", false
 	}
 	modelID := s.currentRuntimeModel(ctx, data.TaskSessionID)
 	if modelID == "" {
-		return 0, 0, 0, false
+		return 0, 0, 0, "", false
 	}
 	info, ok := lookup.LookupModelInfo(ctx, modelID)
 	if !ok || info.ContextWindow <= 0 {
-		return 0, 0, 0, false
+		return 0, 0, 0, "", false
 	}
 	remaining := info.ContextWindow - data.ContextWindowUsed
 	if remaining < 0 {
 		remaining = 0
 	}
 	efficiency := float64(data.ContextWindowUsed) / float64(info.ContextWindow) * 100
-	return info.ContextWindow, remaining, efficiency, true
+	return info.ContextWindow, remaining, efficiency, "api", true
 }
 
 func (s *Service) currentRuntimeModel(ctx context.Context, sessionID string) string {

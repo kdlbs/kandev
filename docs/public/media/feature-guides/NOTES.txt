@@ -1,6 +1,6 @@
 # Kandev feature-guide media capture notes
 
-Candidate generated in disposable capture root. Promote only after final parent review.
+Reviewed delivery generated from disposable captures and cursor-tracked again on 2026-07-17.
 
 ## Provenance and isolation
 
@@ -10,10 +10,14 @@ Candidate generated in disposable capture root. Promote only after final parent 
 - Providers/agent: mock-only. No real provider call, production credential, shared user database, or existing task workspace.
 - Encoding metadata: `metadata/capture.json`
 - Source bundle: `source/capture.spec.ts`, `source/encode.mjs`, `source/product-loop-camera-compact.mjs`, `source/qa.mjs`, `source/smoke.spec.ts`
+- Reframe source: full 3840x2400 masters, never the previously cropped delivery files.
+- Reframe profile: Landing `scripts/product-loop-camera.mjs` docs profile, 1.50x maximum zoom, cosine easing, and frame-by-frame pointer containment. The two task clips use identical focused start/end crops to keep the feature legible while excluding the fixture-only Files toolbar and host path.
 
 ## Commands
 
 - Capture/encoding source and per-clip camera values are retained in the disposable source and metadata bundle listed above.
+- Camera validation: `createCameraTrack({ pointerTrack, pointerSafeMargin, ... })` checks every 25fps output frame and blocks a crop that loses the pointer.
+- Long pointer journeys widen before travel and ease back into the destination instead of panning a tight crop after the pointer has left it.
 - QA: `node "$CAPTURE_ROOT/source/qa.mjs" --visual-pass --teardown-confirmed`
 - Probe template: `ffprobe -v error -show_streams -show_format -of json <file>`
 - Cadence template: `ffprobe -v error -select_streams v:0 -show_entries frame=best_effort_timestamp_time,pkt_duration_time -of json <video>`
@@ -30,22 +34,23 @@ Candidate generated in disposable capture root. Promote only after final parent 
 
 | Clip | Duration | WebM | MP4 | Poster |
 | --- | ---: | ---: | ---: | ---: |
-| task-create | 7.32s | 173.7 KiB | 205.2 KiB | 8.6 KiB |
-| task-start-agent | 12.80s | 184.2 KiB | 191.4 KiB | 10.4 KiB |
-| plan-review-implement | 13.60s | 393.6 KiB | 423.4 KiB | 19.1 KiB |
-| parallel-named-sessions | 8.80s | 236.0 KiB | 250.4 KiB | 11.6 KiB |
-| diff-line-feedback | 12.80s | 424.1 KiB | 560.6 KiB | 23.2 KiB |
-| code-walkthrough | 8.80s | 481.2 KiB | 545.0 KiB | 23.3 KiB |
-| profile-executor-selection | 8.80s | 188.6 KiB | 250.4 KiB | 8.9 KiB |
-| scheduled-workflow-automation | 13.60s | 414.7 KiB | 469.3 KiB | 13.0 KiB |
+| task-create | 6.80s | 120.0 KiB | 225.4 KiB | 10.2 KiB |
+| task-start-agent | 8.80s | 72.8 KiB | 136.6 KiB | 3.2 KiB |
+| plan-review-implement | 8.64s | 233.1 KiB | 273.2 KiB | 12.6 KiB |
+| parallel-named-sessions | 8.80s | 265.6 KiB | 281.8 KiB | 10.1 KiB |
+| diff-line-feedback | 12.80s | 540.1 KiB | 840.0 KiB | 17.1 KiB |
+| code-walkthrough | 8.80s | 478.1 KiB | 504.2 KiB | 19.5 KiB |
+| profile-executor-selection | 8.80s | 216.7 KiB | 294.1 KiB | 7.7 KiB |
+| scheduled-workflow-automation | 13.60s | 432.4 KiB | 438.7 KiB | 9.5 KiB |
 
-- Total docs payload: 5.38 MiB.
+- Total docs payload: 5.32 MiB.
 
 ## QA
 
 - Technical result: PASS (0 failure(s), 0 warning(s)).
 - Stream checks: codec, 960x600 decoded dimensions, exact 25fps rate metadata, continuous 0.040s decoded timestamps, 6-15s duration, and no audio.
 - Visual samples: PASS — human-reviewed full-resolution samples and mosaics.
+- Cursor containment: PASS — semantic journeys remain inside an edge-aware safe frame at every encoded frame; long-distance movements widen before travel. The task clips' matched focused loops were also reviewed at full resolution to confirm `/tmp`, host paths, and the Files toolbar never enter the delivery frame.
 - Automated blank-frame screening: sampled frames require non-trivial standard deviation/entropy.
 - Browser playback: PASS for WebM, MP4, and WebP.
 - Inspect mosaics for clipping, duplicated cursor, browser chrome, fixture/debug text, local paths, private data, unreadable text, and misleading states.
@@ -60,4 +65,4 @@ Candidate generated in disposable capture root. Promote only after final parent 
 - Per-clip contact sheets: `mosaics/<slug>.png`
 - Browser playback contact sheet: `mosaics/browser-playback.png`
 - Machine-readable QA: `metadata/qa-report.json`
-- Candidate manifest: `metadata/manifest.candidate.json`
+- Published manifest: `manifest.json`

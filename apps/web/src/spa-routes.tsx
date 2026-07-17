@@ -27,6 +27,7 @@ import {
   PluginErrorBoundary,
   PluginRouteFallback,
 } from "@/components/plugins/plugin-error-boundary";
+import { PluginPageFrame } from "@/components/plugins/plugin-page";
 import { mapWorkspaceItem, readActiveWorkspaceCookie } from "@/lib/routing/route-bootstrap";
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
@@ -206,9 +207,10 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
 
 /**
  * Renders the plugin-registered component for a `kind: "plugin"` route,
- * inside the normal app shell. Wrapped in a `PluginErrorBoundary` so a
- * throwing plugin route renders a fallback instead of white-screening the
- * rest of the SPA.
+ * inside the normal app shell. `PluginPageFrame` gives it the same title-bar
+ * chrome first-party pages have (configurable per registration), and the
+ * `PluginErrorBoundary` makes a throwing plugin route render a fallback
+ * instead of white-screening the rest of the SPA.
  */
 function PluginRoute({ path }: { path: string }) {
   const match = pluginRegistry.getRoutes().find((route) => route.path === path);
@@ -216,7 +218,9 @@ function PluginRoute({ path }: { path: string }) {
   const Component = match.Component;
   return (
     <PluginErrorBoundary context={`route "${path}"`} fallback={<PluginRouteFallback />}>
-      <Component />
+      <PluginPageFrame registration={match}>
+        <Component />
+      </PluginPageFrame>
     </PluginErrorBoundary>
   );
 }

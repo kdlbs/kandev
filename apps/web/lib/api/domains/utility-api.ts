@@ -55,9 +55,10 @@ export type InferenceConfigOption = {
   type: string;
   id: string;
   name: string;
+  description?: string;
   current_value: string;
   category?: string;
-  options?: { value: string; name: string }[];
+  options?: { value: string; name: string; description?: string }[];
 };
 
 /**

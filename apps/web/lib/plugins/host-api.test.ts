@@ -3,6 +3,36 @@ import * as React from "react";
 import { createAppStore } from "@/lib/state/store";
 import { buildHostApi } from "./host-api";
 
+/** Curated primitives a plugin needs to build a full native-feeling page. */
+const EXPECTED_UI_PRIMITIVES = [
+  "Alert",
+  "Badge",
+  "Button",
+  "Card",
+  "Checkbox",
+  "Dialog",
+  "DropdownMenu",
+  "Input",
+  "Label",
+  "Pagination",
+  "ScrollArea",
+  "Select",
+  "Sheet",
+  "SheetClose",
+  "SheetContent",
+  "SheetDescription",
+  "SheetFooter",
+  "SheetHeader",
+  "SheetTitle",
+  "SheetTrigger",
+  "Spinner",
+  "Switch",
+  "Table",
+  "Tabs",
+  "Textarea",
+  "Tooltip",
+];
+
 describe("buildHostApi", () => {
   const originalFetch = global.fetch;
 
@@ -65,9 +95,37 @@ describe("buildHostApi", () => {
     const host = buildHostApi("jira", createAppStore(), "dark");
 
     expect(host.theme).toBe("dark");
-    expect(host.ui.Button).toBeDefined();
-    expect(host.ui.Card).toBeDefined();
-    expect(host.ui.Badge).toBeDefined();
+    // Expanded primitive set for full native-feeling plugin pages.
+    for (const name of EXPECTED_UI_PRIMITIVES) {
+      expect(host.ui[name], `host.ui.${name}`).toBeDefined();
+    }
+  });
+
+  it("exposes first-party app components for native flows and page chrome", () => {
+    const host = buildHostApi("jira", createAppStore(), "light");
+    expect(host.ui.PageTopbar).toBeDefined();
+    expect(host.ui.TaskCreateDialog).toBeDefined();
+    expect(host.ui.Combobox).toBeDefined();
+  });
+
+  it("exposes navigate() that soft-navigates via history push/replace", () => {
+    const host = buildHostApi("jira", createAppStore(), "light");
+    const pushSpy = vi.spyOn(window.history, "pushState");
+    const replaceSpy = vi.spyOn(window.history, "replaceState");
+
+    host.navigate("/somewhere");
+    expect(pushSpy).toHaveBeenCalledWith({}, "", "/somewhere");
+
+    host.navigate("/elsewhere", { replace: true });
+    expect(replaceSpy).toHaveBeenCalledWith({}, "", "/elsewhere");
+
+    pushSpy.mockRestore();
+    replaceSpy.mockRestore();
+  });
+
+  it("exposes the backend API origin on api.baseUrl", () => {
+    const host = buildHostApi("jira", createAppStore(), "light");
+    expect(typeof host.api.baseUrl).toBe("string");
   });
 
   it("sets pluginId on the returned host api", () => {

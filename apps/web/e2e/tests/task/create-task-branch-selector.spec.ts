@@ -161,7 +161,7 @@ test.describe("Branch selector behavior with executor types", () => {
       // Switch to Remote tab and paste via the chip popover.
       await testPage.getByTestId("source-mode-remote").click();
       await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-      const pasteInput = testPage.getByTestId("remote-paste-url-input");
+      const pasteInput = testPage.getByTestId("remote-repo-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
 
@@ -433,7 +433,7 @@ test.describe("Fresh-branch flow", () => {
       // Switch to Remote tab and paste via the chip popover.
       await testPage.getByTestId("source-mode-remote").click();
       await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-      const pasteInput = testPage.getByTestId("remote-paste-url-input");
+      const pasteInput = testPage.getByTestId("remote-repo-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
       await testPage.getByTestId("executor-profile-selector").click();

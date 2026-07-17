@@ -49,6 +49,19 @@ func TestBuildRunRouting_NilWhenNoAttemptsAndNoSnapshot(t *testing.T) {
 	}
 }
 
+func TestBuildRunRouting_IncludesExecutionProfileOnlySnapshot(t *testing.T) {
+	profileID := "claude-opus"
+	out, err := buildRunRouting(context.Background(), &fakeRunDetailRepo{}, &models.Run{
+		ID: "r", ResolvedExecutionProfileID: &profileID,
+	})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if out == nil || out.ResolvedExecutionProfileID != profileID {
+		t.Fatalf("execution-profile-only snapshot missing: %+v", out)
+	}
+}
+
 func TestBuildRunRouting_PopulatesAttemptsAndSnapshot(t *testing.T) {
 	order := `["claude-acp","codex-acp"]`
 	tier := "frontier"

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -666,6 +667,103 @@ func TestBootTaskDetailMessagesProjectShellOutput(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"stdout_bytes":20`) {
 		t.Fatalf("boot message payload missing shell output summary: %s", raw)
+	}
+}
+
+func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
+		WorkflowStepID: steps[0].ID, Title: "Hydrated model selector",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	session := &models.TaskSession{
+		ID: "boot-model-session", TaskID: task.ID, IsPrimary: true,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPConfigBaseline: map[string]string{"effort": "medium"},
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID: "gpt-5.6-sol",
+				Models:         []streams.SessionModelInfo{{ModelID: "gpt-5.6-sol", Name: "GPT-5.6-Sol"}},
+				ConfigOptions: []streams.ConfigOption{{
+					Type: "select", ID: "effort", Name: "Reasoning effort",
+					Description: "Provider option help", CurrentValue: "high",
+					Options: []streams.ConfigOptionValue{{Value: "high", Name: "High", Description: "Provider value help"}},
+				}},
+			},
+		},
+	}
+	if err := harness.taskRepo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	routeData := bootRouteData(ctx, nil, routeParams{
+		taskSvc:  harness.taskSvc,
+		services: &Services{Workflow: harness.workflowSvc},
+	}, webapp.ClassifyRoute("/t/"+task.ID))
+	raw, err := json.Marshal(routeData)
+	if err != nil {
+		t.Fatalf("Marshal route data: %v", err)
+	}
+	var decoded struct {
+		TaskDetail struct {
+			InitialState struct {
+				SessionModels struct {
+					BySessionID map[string]struct {
+						CurrentModelID string `json:"currentModelId"`
+						Models         []struct {
+							ModelID string `json:"modelId"`
+						} `json:"models"`
+						ConfigOptions []struct {
+							ID           string                      `json:"id"`
+							Description  string                      `json:"description"`
+							CurrentValue string                      `json:"currentValue"`
+							Options      []streams.ConfigOptionValue `json:"options"`
+						} `json:"configOptions"`
+						ConfigBaseline map[string]string `json:"configBaseline"`
+					} `json:"bySessionId"`
+				} `json:"sessionModels"`
+			} `json:"initialState"`
+		} `json:"taskDetail"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal route data: %v", err)
+	}
+	got := decoded.TaskDetail.InitialState.SessionModels.BySessionID[session.ID]
+	if got.CurrentModelID != "gpt-5.6-sol" || len(got.Models) != 1 || got.Models[0].ModelID != "gpt-5.6-sol" {
+		t.Fatalf("boot model state = %#v", got)
+	}
+	if len(got.ConfigOptions) != 1 || got.ConfigOptions[0].CurrentValue != "high" {
+		t.Fatalf("boot config options = %#v", got.ConfigOptions)
+	}
+	if got.ConfigOptions[0].Description != "Provider option help" || got.ConfigOptions[0].Options[0].Description != "Provider value help" {
+		t.Fatalf("provider descriptions missing from boot config: %#v", got.ConfigOptions[0])
+	}
+	if got.ConfigBaseline["effort"] != "medium" {
+		t.Fatalf("boot config baseline = %#v, want effort=medium", got.ConfigBaseline)
+	}
+}
+
+func TestTaskSessionModelsBootStateOmitsUnavailableBaseline(t *testing.T) {
+	state := taskSessionModelsBootState(lifecycle.SessionModelsSnapshot{
+		CurrentModelID: "gpt-5.6-sol",
+	}, nil)
+	if _, ok := state["configBaseline"]; ok {
+		t.Fatal("boot selector state must omit an unavailable baseline")
 	}
 }
 

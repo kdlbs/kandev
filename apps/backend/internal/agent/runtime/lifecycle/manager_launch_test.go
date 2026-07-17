@@ -201,6 +201,126 @@ func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 	}
 }
 
+func TestBuildEnvForExecution_SeparatesOfficeAndExecutionProfiles(t *testing.T) {
+	mgr := newTestManager(t)
+	profileInfo := &AgentProfileInfo{
+		ProfileID: "claude-profile",
+		EnvVars: []settingsmodels.ProfileEnvVar{
+			{Key: "CLAUDE_CONFIG_DIR", Value: "/accounts/claude"},
+			{Key: "KANDEV_AGENT_PROFILE_ID", Value: "must-not-win"},
+		},
+	}
+
+	env, err := mgr.buildEnvForExecution(
+		context.Background(),
+		"exec-1",
+		&LaunchRequest{
+			AgentProfileID:     "office-cto",
+			ExecutionProfileID: "claude-profile",
+			TaskID:             "task-1",
+			SessionID:          "session-1",
+		},
+		nil,
+		profileInfo,
+	)
+	if err != nil {
+		t.Fatalf("buildEnvForExecution: %v", err)
+	}
+	if env["CLAUDE_CONFIG_DIR"] != "/accounts/claude" {
+		t.Fatalf("execution profile env missing: %+v", env)
+	}
+	if env["KANDEV_AGENT_PROFILE_ID"] != "office-cto" {
+		t.Fatalf("KANDEV_AGENT_PROFILE_ID = %q, want office-cto", env["KANDEV_AGENT_PROFILE_ID"])
+	}
+	if env["KANDEV_EXECUTION_PROFILE_ID"] != "claude-profile" {
+		t.Fatalf("KANDEV_EXECUTION_PROFILE_ID = %q, want claude-profile", env["KANDEV_EXECUTION_PROFILE_ID"])
+	}
+}
+
+type recordingEnvProfileResolver struct {
+	profileID string
+}
+
+func (r *recordingEnvProfileResolver) ResolveProfile(
+	_ context.Context, profileID string,
+) (*AgentProfileInfo, error) {
+	r.profileID = profileID
+	return &AgentProfileInfo{
+		ProfileID: profileID,
+		EnvVars:   []settingsmodels.ProfileEnvVar{{Key: "PROFILE_ENV", Value: profileID}},
+	}, nil
+}
+
+func TestBuildEnvForExecution_NilSnapshotResolvesExecutionProfile(t *testing.T) {
+	mgr := newTestManager(t)
+	resolver := &recordingEnvProfileResolver{}
+	mgr.profileResolver = resolver
+	env, err := mgr.buildEnvForExecution(context.Background(), "exec-1", &LaunchRequest{
+		AgentProfileID: "office-cto", ExecutionProfileID: "claude-profile",
+	}, nil, nil)
+	if err != nil {
+		t.Fatalf("build env: %v", err)
+	}
+	if resolver.profileID != "claude-profile" || env["PROFILE_ENV"] != "claude-profile" {
+		t.Fatalf("resolved profile=%q env=%q, want execution profile",
+			resolver.profileID, env["PROFILE_ENV"])
+	}
+}
+
+func TestExecutionProfileIDFallsBackToOfficeProfile(t *testing.T) {
+	req := &LaunchRequest{AgentProfileID: "profile-1"}
+	if got := executionProfileID(req); got != "profile-1" {
+		t.Fatalf("executionProfileID = %q, want profile-1", got)
+	}
+	req.ExecutionProfileID = "profile-2"
+	if got := executionProfileID(req); got != "profile-2" {
+		t.Fatalf("executionProfileID = %q, want profile-2", got)
+	}
+}
+
+func TestConcreteExecutionProfileIgnoresLegacyRouteFlagsAndEnv(t *testing.T) {
+	req := &LaunchRequest{
+		ExecutionProfileID: "claude-profile",
+		Env:                map[string]string{"PROFILE_ENV": "profile"},
+		RouteOverride: &RouteOverride{
+			ExecutionProfileID: "claude-profile",
+			Flags:              []string{"--legacy-route-flag"},
+			Env:                map[string]string{"PROFILE_ENV": "route", "ROUTE_ONLY": "value"},
+		},
+	}
+
+	flags := appendRouteOverrideFlags([]string{"--profile-flag"}, req)
+	if len(flags) != 1 || flags[0] != "--profile-flag" {
+		t.Fatalf("flags = %v, want execution profile flags only", flags)
+	}
+	mergeRouteOverrideEnv(req)
+	if req.Env["PROFILE_ENV"] != "profile" {
+		t.Fatalf("PROFILE_ENV = %q, want execution profile value", req.Env["PROFILE_ENV"])
+	}
+	if _, ok := req.Env["ROUTE_ONLY"]; ok {
+		t.Fatalf("legacy route env leaked into concrete execution profile: %v", req.Env)
+	}
+}
+
+func TestLegacyRouteStillAppliesFlagsAndEnv(t *testing.T) {
+	req := &LaunchRequest{
+		Env: map[string]string{"BASE": "value"},
+		RouteOverride: &RouteOverride{
+			Flags: []string{"--legacy-route-flag"},
+			Env:   map[string]string{"ROUTE_ONLY": "value"},
+		},
+	}
+
+	flags := appendRouteOverrideFlags([]string{"--profile-flag"}, req)
+	if len(flags) != 2 || flags[1] != "--legacy-route-flag" {
+		t.Fatalf("flags = %v, want legacy route flag appended", flags)
+	}
+	mergeRouteOverrideEnv(req)
+	if req.Env["ROUTE_ONLY"] != "value" {
+		t.Fatalf("legacy route env missing: %v", req.Env)
+	}
+}
+
 func TestBuildEnvForExecution_DoesNotCopyTaskDescriptionToEnv(t *testing.T) {
 	mgr := newTestManager(t)
 	env, err := mgr.buildEnvForExecution(

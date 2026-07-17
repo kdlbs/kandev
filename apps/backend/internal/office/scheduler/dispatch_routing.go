@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -34,6 +35,8 @@ const (
 // Once the cap is reached the dispatcher parks the run as
 // blocked_provider_action_required so a human notices.
 const MaxAttemptsPerRun = 20
+
+const providerFallbackPromptMarker = "[Kandev provider fallback]"
 
 // DispatchWithRouting attempts the configured providers in order. Three
 // outcomes are possible:
@@ -77,7 +80,7 @@ func (ss *SchedulerService) DispatchWithRouting(
 	if err != nil {
 		return false, false, fmt.Errorf("dispatch: resolve: %w", err)
 	}
-	if !res.Enabled {
+	if !res.Enabled && len(res.Candidates) == 0 {
 		return false, false, nil
 	}
 	if err := ss.persistRoutingDecision(ctx, run, res); err != nil {
@@ -87,7 +90,7 @@ func (ss *SchedulerService) DispatchWithRouting(
 		_, _, perr := ss.parkRunBlocked(ctx, run, agent.WorkspaceID, res)
 		return false, true, perr
 	}
-	launched, _, terr := ss.tryCandidates(ctx, run, agent, res, launch)
+	launched, _, terr := ss.tryCandidates(ctx, run, agent, res, launch, prior)
 	if terr != nil {
 		return false, false, terr
 	}
@@ -236,17 +239,20 @@ func skipOutcome(reason string) models.RouteAttemptOutcome {
 func (ss *SchedulerService) tryCandidates(
 	ctx context.Context, run *models.Run,
 	agent *models.AgentInstance, res *routing.Resolution,
-	launch LaunchContext,
+	launch LaunchContext, prior []models.RouteAttempt,
 ) (bool, *routing.BlockReason, error) {
 	taskID := extractRunTaskID(run.Payload)
 	var prev *routing.Candidate
 	for i := range res.Candidates {
 		candidate := res.Candidates[i]
+		candidateLaunch := continuationLaunchContext(
+			launch, prior, run.RouteCycleBaselineSeq, candidate,
+		)
 		seq, err := ss.recordAttemptStart(ctx, run, candidate, res.RequestedTier)
 		if err != nil {
 			return false, nil, err
 		}
-		launchErr := ss.launchCandidate(ctx, taskID, agent.ID, candidate, launch)
+		launchErr := ss.launchCandidate(ctx, taskID, agent.ID, candidate, candidateLaunch)
 		if launchErr == nil {
 			if prev != nil {
 				// We walked past at least one prior candidate — that's
@@ -277,12 +283,56 @@ func (ss *SchedulerService) tryCandidates(
 		if fatal {
 			return false, nil, launchErr
 		}
+		prior = append(prior, models.RouteAttempt{
+			RunID:              run.ID,
+			Seq:                seq,
+			ExecutionProfileID: candidate.ExecutionProfileID,
+			ProviderID:         string(candidate.ProviderID),
+			Model:              candidate.Model,
+			Tier:               string(res.RequestedTier),
+			Outcome:            RouteAttemptOutcomeFailedProviderUnavail,
+		})
 		// Remember this candidate so the next loop iteration can record
 		// the fallback hop on success.
 		c := candidate
 		prev = &c
 	}
 	return ss.exhaustedCandidates(ctx, run, agent, res.RequestedTier)
+}
+
+func continuationLaunchContext(
+	launch LaunchContext, prior []models.RouteAttempt, baseline int,
+	candidate routing.Candidate,
+) LaunchContext {
+	previous, ok := latestFailedExecutionProfile(prior, baseline)
+	if !ok || previous.ExecutionProfileID == "" ||
+		previous.ExecutionProfileID == candidate.ExecutionProfileID ||
+		strings.Contains(launch.Prompt, providerFallbackPromptMarker) {
+		return launch
+	}
+	launch.Prompt += fmt.Sprintf("\n\n%s\n"+
+		"This is a fresh provider-native session replacing execution profile %q (%s). "+
+		"Its provider chat and resume token are not available here. Before continuing, "+
+		"inspect the durable task description, comments/messages, task status, current "+
+		"run state, and the current worktree with git status, git diff, and recent git log. "+
+		"Continue the same task from that durable state; do not redo completed work unless "+
+		"the repository evidence requires it.",
+		providerFallbackPromptMarker, previous.ExecutionProfileID, previous.ProviderID)
+	return launch
+}
+
+func latestFailedExecutionProfile(
+	prior []models.RouteAttempt, baseline int,
+) (models.RouteAttempt, bool) {
+	for i := len(prior) - 1; i >= 0; i-- {
+		if prior[i].Seq <= baseline {
+			break
+		}
+		if prior[i].Outcome == RouteAttemptOutcomeFailedProviderUnavail {
+			return prior[i], true
+		}
+	}
+	return models.RouteAttempt{}, false
 }
 
 // recordAttemptStart increments the attempt sequence and appends the
@@ -297,13 +347,14 @@ func (ss *SchedulerService) recordAttemptStart(
 	}
 	run.CurrentRouteAttemptSeq = seq
 	attempt := models.RouteAttempt{
-		RunID:      run.ID,
-		Seq:        seq,
-		ProviderID: string(candidate.ProviderID),
-		Model:      candidate.Model,
-		Tier:       string(tier),
-		Outcome:    RouteAttemptOutcomeLaunched,
-		StartedAt:  time.Now().UTC(),
+		RunID:              run.ID,
+		Seq:                seq,
+		ExecutionProfileID: candidate.ExecutionProfileID,
+		ProviderID:         string(candidate.ProviderID),
+		Model:              candidate.Model,
+		Tier:               string(tier),
+		Outcome:            RouteAttemptOutcomeLaunched,
+		StartedAt:          time.Now().UTC(),
 	}
 	if err := ss.repo.AppendRouteAttempt(ctx, &attempt); err != nil {
 		return 0, err
@@ -343,12 +394,13 @@ func (ss *SchedulerService) launchCandidate(
 		})
 	}
 	return ss.taskStarter.StartTaskWithRoute(ctx, taskID, agentID, launch, RouteOverride{
-		ProviderID: string(candidate.ProviderID),
-		Model:      candidate.Model,
-		Tier:       string(candidate.Tier),
-		Mode:       candidate.Mode,
-		Flags:      candidate.Flags,
-		Env:        candidate.Env,
+		ExecutionProfileID: candidate.ExecutionProfileID,
+		ProviderID:         string(candidate.ProviderID),
+		Model:              candidate.Model,
+		Tier:               string(candidate.Tier),
+		Mode:               candidate.Mode,
+		Flags:              candidate.Flags,
+		Env:                candidate.Env,
 	})
 }
 
@@ -359,8 +411,8 @@ func (ss *SchedulerService) handleLaunchSuccess(
 	ctx context.Context, run *models.Run,
 	agent *models.AgentInstance, candidate routing.Candidate,
 ) (bool, *routing.BlockReason, error) {
-	if err := ss.repo.SetRunResolvedProvider(ctx,
-		run.ID, string(candidate.ProviderID), candidate.Model); err != nil {
+	if err := ss.repo.SetRunResolvedRoute(ctx,
+		run.ID, candidate.ExecutionProfileID, string(candidate.ProviderID), candidate.Model); err != nil {
 		return false, nil, err
 	}
 	ss.markHealthScopes(ctx, agent.WorkspaceID, candidate)

@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/office-fixture";
 import type { APIRequestContext } from "@playwright/test";
+import { balancedExecutionProfileRouting } from "../../helpers/office-routing";
 
 /**
  * Phase 7 spec #5 — agent-level provider override.
@@ -55,6 +56,7 @@ test.describe("Office provider routing — agent override", () => {
 
   test("single-provider override never falls back outside the list", async ({
     backend,
+    apiClient,
     request,
     officeApi,
     officeSeed,
@@ -64,15 +66,13 @@ test.describe("Office provider routing — agent override", () => {
       KANDEV_PROVIDER_FAILURES: "claude-acp:quota_limited",
     });
 
-    await officeApi.updateRouting(officeSeed.workspaceId, {
-      enabled: true,
-      provider_order: ["claude-acp", "codex-acp"],
-      default_tier: "balanced",
-      provider_profiles: {
-        "claude-acp": { tier_map: { balanced: "sonnet" }, mode: "default" },
-        "codex-acp": { tier_map: { balanced: "gpt-5" }, mode: "default" },
-      },
-    });
+    await officeApi.updateRouting(
+      officeSeed.workspaceId,
+      await balancedExecutionProfileRouting(apiClient, officeApi, officeSeed.workspaceId, [
+        "claude-acp",
+        "codex-acp",
+      ]),
+    );
 
     await patchAgentOverrides(request, backend.baseUrl, officeSeed.agentId, {
       provider_order_source: "override",

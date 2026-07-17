@@ -10,11 +10,60 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // Tests
+
+func TestResumeTokenForExecutionProfile(t *testing.T) {
+	tests := []struct {
+		name      string
+		running   *models.ExecutorRunning
+		profileID string
+		want      string
+	}{
+		{
+			name: "same profile resumes",
+			running: &models.ExecutorRunning{
+				ExecutionProfileID: "claude-profile",
+				ResumeToken:        "claude-session",
+			},
+			profileID: "claude-profile",
+			want:      "claude-session",
+		},
+		{
+			name: "cross provider token suppressed",
+			running: &models.ExecutorRunning{
+				ExecutionProfileID: "codex-profile",
+				ResumeToken:        "codex-session",
+			},
+			profileID: "claude-profile",
+		},
+		{
+			name:      "legacy unbound token resumes",
+			running:   &models.ExecutorRunning{ResumeToken: "unknown-session"},
+			profileID: "claude-profile",
+			want:      "unknown-session",
+		},
+		{
+			name:      "nil running",
+			profileID: "claude-profile",
+		},
+		{
+			name:    "empty requested profile",
+			running: &models.ExecutorRunning{ResumeToken: "session"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resumeTokenForExecutionProfile(tt.running, tt.profileID); got != tt.want {
+				t.Fatalf("resume token = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestPrepareSession_Success(t *testing.T) {
 	repo := newMockRepository()
@@ -906,12 +955,13 @@ func TestLaunchPreparedSession_FullPath_CarriesResumeToken(t *testing.T) {
 	// HasExecutorRunningRow is true → fast path is tried; the live execution
 	// is gone (office IDLE) → ErrStaleExecution → fall through to full path.
 	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
-		ID:               session.ID,
-		SessionID:        session.ID,
-		TaskID:           session.TaskID,
-		AgentExecutionID: "stale-exec-id",
-		ResumeToken:      "acp-session-abc",
-		Status:           "ready",
+		ID:                 session.ID,
+		SessionID:          session.ID,
+		TaskID:             session.TaskID,
+		AgentExecutionID:   "stale-exec-id",
+		ExecutionProfileID: "profile-123",
+		ResumeToken:        "acp-session-abc",
+		Status:             "ready",
 	}
 
 	var capturedReq *LaunchAgentRequest
@@ -923,12 +973,13 @@ func TestLaunchPreparedSession_FullPath_CarriesResumeToken(t *testing.T) {
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			capturedReq = req
 			repo.executorsRunning[req.SessionID] = &models.ExecutorRunning{
-				ID:               req.SessionID,
-				SessionID:        req.SessionID,
-				TaskID:           req.TaskID,
-				AgentExecutionID: "new-exec-id",
-				ResumeToken:      "acp-session-abc",
-				Status:           "starting",
+				ID:                 req.SessionID,
+				SessionID:          req.SessionID,
+				TaskID:             req.TaskID,
+				AgentExecutionID:   "new-exec-id",
+				ExecutionProfileID: req.AgentProfileID,
+				ResumeToken:        "acp-session-abc",
+				Status:             "starting",
 			}
 			return &LaunchAgentResponse{
 				AgentExecutionID: "new-exec-id",
@@ -964,6 +1015,41 @@ func TestLaunchPreparedSession_FullPath_CarriesResumeToken(t *testing.T) {
 	// path we do NOT clear TaskDescription.
 	if capturedReq.TaskDescription == "" {
 		t.Error("Expected req.TaskDescription to remain set for wakeup; it was cleared")
+	}
+}
+
+func TestLaunchPreparedSession_ProfileSwitchIgnoresMissingStaleExecution(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", AgentProfileID: "office-cto",
+		State: models.TaskSessionStateCreated, StartedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	repo.sessions[session.ID] = session
+	repo.executorsRunning[session.ID] = &models.ExecutorRunning{
+		ID: session.ID, SessionID: session.ID, TaskID: session.TaskID,
+		AgentExecutionID: "stale-codex-exec", ExecutionProfileID: "codex-profile",
+	}
+	launched := false
+	agentManager := &mockAgentManager{
+		stopAgentFunc: func(context.Context, string, bool) error {
+			return fmt.Errorf("stale execution: %w", lifecycle.ErrExecutionNotFound)
+		},
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			launched = true
+			return &LaunchAgentResponse{AgentExecutionID: "claude-exec"}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	task := &v1.Task{ID: session.TaskID, WorkspaceID: "workspace-123", Title: "Test Task"}
+
+	_, err := exec.LaunchPreparedSession(context.Background(), task, session.ID, LaunchOptions{
+		AgentProfileID: "claude-profile", OfficeAgentProfileID: "office-cto", StartAgent: true,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession: %v", err)
+	}
+	if !launched {
+		t.Fatal("expected profile switch to continue with a fresh launch")
 	}
 }
 

@@ -44,6 +44,8 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
 func (r *Repository) runMigrations() error {
+	r.migrate.Apply("task_sessions.execution_profile_id", `ALTER TABLE task_sessions ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
+	r.migrate.Apply("executors_running.execution_profile_id", `ALTER TABLE executors_running ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
 	r.migrate.Apply("executors_running.metadata", `ALTER TABLE executors_running ADD COLUMN metadata TEXT DEFAULT '{}'`)
 	// local_pid holds a host-local liveness handle (the standalone agentctl
@@ -335,6 +337,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
 			agent_profile_id TEXT,
+			execution_profile_id TEXT NOT NULL DEFAULT '',
 			executor_id TEXT DEFAULT '',
 			executor_profile_id TEXT DEFAULT '',
 			environment_id TEXT DEFAULT '',
@@ -361,7 +364,7 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_sessions_new SELECT
-			id, task_id, agent_profile_id,
+			id, task_id, agent_profile_id, execution_profile_id,
 			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,
@@ -566,6 +569,7 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			agent_execution_id TEXT NOT NULL DEFAULT '',
 			container_id TEXT NOT NULL DEFAULT '',
 			agent_profile_id TEXT,
+			execution_profile_id TEXT NOT NULL DEFAULT '',
 			executor_id TEXT DEFAULT '',
 			executor_profile_id TEXT DEFAULT '',
 			environment_id TEXT DEFAULT '',
@@ -589,7 +593,7 @@ func (r *Repository) migrateSessionsRemoveWorkflowStepID() error {
 			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 		)`,
 		`INSERT INTO task_sessions_new SELECT
-			id, task_id, agent_execution_id, container_id, agent_profile_id,
+			id, task_id, agent_execution_id, container_id, agent_profile_id, execution_profile_id,
 			executor_id, executor_profile_id, environment_id, repository_id, base_branch,
 			agent_profile_snapshot, executor_snapshot, environment_snapshot, repository_snapshot,
 			state, error_message, metadata, started_at, completed_at, updated_at,

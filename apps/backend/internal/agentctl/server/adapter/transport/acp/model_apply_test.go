@@ -7,18 +7,46 @@ import (
 	"testing"
 
 	sdk "github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agentctl/sessionmodel"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 type fakeModelApplier struct {
-	configErr error
-	legacyErr error
-	calls     []string
+	configErr      error
+	legacyErr      error
+	configResponse sdk.SetSessionConfigOptionResponse
+	calls          []string
 }
 
 func (f *fakeModelApplier) SetSessionConfigOption(_ context.Context, req sdk.SetSessionConfigOptionRequest) (sdk.SetSessionConfigOptionResponse, error) {
 	f.calls = append(f.calls, "config:"+string(req.ValueId.ConfigId)+":"+string(req.ValueId.Value))
-	return sdk.SetSessionConfigOptionResponse{}, f.configErr
+	return f.configResponse, f.configErr
+}
+
+func TestApplySessionModelWithConfigOptionsReturnsAuthoritativeResponse(t *testing.T) {
+	t.Parallel()
+	options := sdk.SessionConfigSelectOptionsUngrouped{{Value: "low", Name: "Low"}}
+	responseConfig := []sdk.SessionConfigOption{{Select: &sdk.SessionConfigOptionSelect{
+		Type: "select", Id: "reasoning_effort", Name: "Reasoning effort",
+		CurrentValue: "low", Options: sdk.SessionConfigSelectOptions{Ungrouped: &options},
+	}}}
+	conn := &fakeModelApplier{configResponse: sdk.SetSessionConfigOptionResponse{ConfigOptions: responseConfig}}
+
+	method, got, configID, err := applySessionModelWithConfigOptions(
+		context.Background(), conn, "sess-1", "gpt-5", []streams.ConfigOption{{
+			ID: "model", Category: "model",
+		}},
+	)
+
+	if err != nil {
+		t.Fatalf("applySessionModelWithConfigOptions() error = %v", err)
+	}
+	if method != sessionmodel.MethodSetConfigOption || configID != "model" {
+		t.Fatalf("method/configID = %q/%q, want set_config_option/model", method, configID)
+	}
+	if !reflect.DeepEqual(got, responseConfig) {
+		t.Fatalf("response config = %#v, want %#v", got, responseConfig)
+	}
 }
 
 func (f *fakeModelApplier) UnstableSetSessionModel(_ context.Context, req sdk.UnstableSetSessionModelRequest) (sdk.UnstableSetSessionModelResponse, error) {

@@ -264,27 +264,30 @@ type AgentProfileInfo struct {
 
 // LaunchAgentRequest contains parameters for launching an agent
 type LaunchAgentRequest struct {
-	TaskID              string
-	WorkspaceID         string // Kandev workspace ID — used to build scratch dir for repo-less tasks
-	SessionID           string
-	TaskEnvironmentID   string // Env owning this session (shared across sessions in the same task)
-	TaskTitle           string // Human-readable task title for semantic worktree naming
-	AgentProfileID      string
-	RepositoryURL       string
-	Branch              string
-	TaskDescription     string                 // Task description to send via ACP prompt
-	Attachments         []v1.MessageAttachment // Attachments for the initial prompt (images/files)
-	Priority            string
-	Metadata            map[string]interface{}
-	Env                 map[string]string
-	ACPSessionID        string            // ACP session ID to resume, if available
-	ModelOverride       string            // If set, use this model instead of the profile's model
-	ExecutorType        string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
-	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
-	PreviousExecutionID string            // Previous execution ID for runtime reconnect
-	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
-	IsEphemeral         bool              // Ephemeral task (quick chat) — enables fallback workspace creation
-	WorkspacePath       string            // Optional host folder for repo-less tasks (overrides scratch fallback)
+	TaskID            string
+	WorkspaceID       string // Kandev workspace ID — used to build scratch dir for repo-less tasks
+	SessionID         string
+	TaskEnvironmentID string // Env owning this session (shared across sessions in the same task)
+	TaskTitle         string // Human-readable task title for semantic worktree naming
+	AgentProfileID    string
+	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
+	// the concrete execution profile inside the executor for compatibility.
+	OfficeAgentProfileID string
+	RepositoryURL        string
+	Branch               string
+	TaskDescription      string                 // Task description to send via ACP prompt
+	Attachments          []v1.MessageAttachment // Attachments for the initial prompt (images/files)
+	Priority             string
+	Metadata             map[string]interface{}
+	Env                  map[string]string
+	ACPSessionID         string            // ACP session ID to resume, if available
+	ModelOverride        string            // If set, use this model instead of the profile's model
+	ExecutorType         string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig       map[string]string // Executor config (docker_host, git_token, etc.)
+	PreviousExecutionID  string            // Previous execution ID for runtime reconnect
+	McpMode              string            // MCP tool mode: "task" (default), "config", or "office"
+	IsEphemeral          bool              // Ephemeral task (quick chat) — enables fallback workspace creation
+	WorkspacePath        string            // Optional host folder for repo-less tasks (overrides scratch fallback)
 
 	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
 	// at session-creation time. Forwarded to the lifecycle manager so
@@ -383,14 +386,15 @@ const McpModeOffice = "office"
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
-	AgentProfileID string
-	ExecutorID     string
-	Prompt         string
-	WorkflowStepID string
-	StartAgent     bool
-	McpMode        string // MCP tool mode: empty task default, McpModeConfig, or McpModeOffice
-	Attachments    []v1.MessageAttachment
-	Env            map[string]string
+	AgentProfileID       string
+	OfficeAgentProfileID string
+	ExecutorID           string
+	Prompt               string
+	WorkflowStepID       string
+	StartAgent           bool
+	McpMode              string // MCP tool mode: empty task default, McpModeConfig, or McpModeOffice
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. When nil, launch behavior is identical to today.
 	RouteOverride *RouteOverride
@@ -399,12 +403,13 @@ type LaunchOptions struct {
 // RouteOverride is the orchestrator-side mirror of routing.Candidate
 // fields that need to flow into the lifecycle launch.
 type RouteOverride struct {
-	ProviderID string
-	Model      string
-	Tier       string
-	Mode       string
-	Flags      []string
-	Env        map[string]string
+	ExecutionProfileID string
+	ProviderID         string
+	Model              string
+	Tier               string
+	Mode               string
+	Flags              []string
+	Env                map[string]string
 }
 
 // LaunchContext is the orchestrator-side mirror of the Office launch

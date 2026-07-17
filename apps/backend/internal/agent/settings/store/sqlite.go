@@ -734,7 +734,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles
-		SET name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?,
+		SET agent_id = ?, name = ?, agent_display_name = ?, model = ?, mode = ?, migrated_from = ?,
 			auto_approve = ?, dangerously_skip_permissions = ?, allow_indexing = ?,
 			cli_passthrough = ?, user_modified = ?, cli_flags = ?, env_vars = ?, updated_at = ?,
 			workspace_id = ?, role = ?, icon = ?, reports_to = ?,
@@ -745,7 +745,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 			executor_preference = ?,
 			budget_monthly_cents = ?, settings = ?, permissions = ?
 		WHERE id = ? AND deleted_at IS NULL
-	`), profile.Name, profile.AgentDisplayName, profile.Model,
+	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
 		dialect.BoolToInt(profile.AutoApprove),
 		dialect.BoolToInt(profile.DangerouslySkipPermissions), dialect.BoolToInt(profile.AllowIndexing),

@@ -8,7 +8,7 @@ import { SessionPage } from "../../pages/session-page";
 useRegularMode();
 
 /**
- * Helper: switch the create-task dialog to the Remote tab and paste a URL
+ * Helper: switch the create-task dialog to the Remote tab and type a URL
  * into the (newly nested) chip popover. Replaces the old "click
  * toggle-github-url + fill github-url-input" pair after Task 5/8 swapped the
  * top-level URL input for a per-row chip + popover.
@@ -17,10 +17,10 @@ async function openRemoteAndPasteURL(testPage: Page, url: string): Promise<void>
   await testPage.getByTestId("source-mode-remote").click();
   // The chip popover holds the paste input. Open the first chip.
   await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-  const pasteInput = testPage.getByTestId("remote-paste-url-input");
-  await expect(pasteInput).toBeVisible();
-  await pasteInput.fill(url);
-  await pasteInput.press("Enter");
+  const urlInput = testPage.getByTestId("remote-repo-input");
+  await expect(urlInput).toBeVisible();
+  await urlInput.fill(url);
+  await urlInput.press("Tab");
 }
 
 test.describe("Task creation from GitHub URL", () => {

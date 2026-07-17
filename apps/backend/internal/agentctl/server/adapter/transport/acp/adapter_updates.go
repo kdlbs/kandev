@@ -237,6 +237,7 @@ func (a *Adapter) convertNotification(n acp.SessionNotification) *AgentEvent {
 				CurrentModelID: currentModelFromConfig(configOptions),
 				SessionModels:  convertSessionModels(cachedModels),
 				ConfigOptions:  configOptions,
+				Data:           map[string]any{"config_options_source": "provider_update"},
 			}
 		}
 	}

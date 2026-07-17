@@ -64,10 +64,12 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
           type: o.type,
           id: o.id,
           name: o.name,
+          description: o.description,
           currentValue: o.current_value,
           category: o.category,
           options: o.options,
         })),
+        configBaseline: payload.config_baseline,
       });
 
       clearStaleActiveModel(state, sessionId, acpModels);

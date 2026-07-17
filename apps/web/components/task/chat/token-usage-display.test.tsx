@@ -13,6 +13,7 @@ vi.mock("@/hooks/domains/session/use-session-agent-usage", () => ({
 }));
 
 vi.mock("@kandev/ui/tooltip", () => ({
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Tooltip: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
     <div data-testid="tooltip-root" data-open={open}>
       {children}
@@ -63,20 +64,6 @@ describe("TokenUsageDisplay", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders the indicator for valid usage under the window", () => {
-    vi.mocked(useSessionContextWindow).mockReturnValue({
-      size: 200_000,
-      used: 56_047,
-      remaining: 143_953,
-      efficiency: 28,
-    });
-
-    const { container } = render(<TokenUsageDisplay sessionId="sess-1" />);
-
-    expect(container.querySelector(".cursor-help")).not.toBeNull();
-    expect(container.querySelector("svg")).not.toBeNull();
-  });
-
   it("opens the tooltip when the context ring is tapped", () => {
     vi.mocked(useSessionContextWindow).mockReturnValue({
       size: 200_000,
@@ -90,6 +77,22 @@ describe("TokenUsageDisplay", () => {
     fireEvent.click(getByRole("button", { name: "Context window: 28% used" }));
 
     expect(getByTestId("tooltip-root").getAttribute("data-open")).toBe("true");
+  });
+
+  it("closes a tapped tooltip when Escape is pressed", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+    });
+
+    const { getByRole, getByTestId } = render(<TokenUsageDisplay sessionId="sess-1" />);
+
+    fireEvent.click(getByRole("button", { name: "Context window: 28% used" }));
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(getByTestId("tooltip-root").getAttribute("data-open")).toBe("false");
   });
 
   it("shows subscription usage rows in the tooltip when the agent has them", () => {
@@ -158,5 +161,49 @@ describe("TokenUsageDisplay", () => {
     const { container } = render(<TokenUsageDisplay sessionId="sess-1" />);
 
     expect(container.querySelector('[data-testid="doughnut-subscription-usage"]')).toBeNull();
+  });
+});
+
+describe("TokenUsageDisplay context source", () => {
+  it("labels agent-reported ACP data", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      source: "acp",
+    });
+
+    const { container, getAllByTestId, getByText, getByLabelText } = render(
+      <TokenUsageDisplay sessionId="sess-1" />,
+    );
+
+    const tokenCount = getByText("56.0K of 200.0K tokens");
+    const source = getByText("ACP");
+
+    expect(container.querySelector(".cursor-help")).not.toBeNull();
+    expect(container.querySelector("svg")).not.toBeNull();
+    expect(tokenCount.closest('[data-testid="context-window-token-row"]')).toBe(
+      source.closest('[data-testid="context-window-token-row"]'),
+    );
+    expect(getAllByTestId("tooltip-root")).toHaveLength(1);
+    expect(getByLabelText("About context window source")).toBeDefined();
+    expect(getByText(/ACP is the active session's effective window/i)).toBeDefined();
+  });
+
+  it("labels model API fallback data", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 128_000,
+      used: 64_000,
+      remaining: 64_000,
+      efficiency: 50,
+      source: "api",
+    });
+
+    const { getByText, getByLabelText } = render(<TokenUsageDisplay sessionId="sess-1" />);
+
+    expect(getByText("API")).toBeDefined();
+    expect(getByLabelText("About context window source")).toBeDefined();
+    expect(getByText(/model's advertised maximum from the catalogue/i)).toBeDefined();
   });
 });

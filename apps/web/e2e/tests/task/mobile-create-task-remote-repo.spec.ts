@@ -13,12 +13,19 @@ async function openRemotePicker(testPage: Page): Promise<void> {
 
 async function expectPopoverFitsViewport(testPage: Page): Promise<void> {
   const viewport = testPage.viewportSize();
-  const box = await testPage.getByTestId("remote-repo-popover-content").boundingBox();
+  const input = testPage.getByTestId("remote-repo-input");
+  const [box, inputBox] = await Promise.all([
+    testPage.getByTestId("remote-repo-popover-content").boundingBox(),
+    input.boundingBox(),
+  ]);
   expect(viewport).not.toBeNull();
   expect(box).not.toBeNull();
+  expect(inputBox).not.toBeNull();
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
   expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+  expect(inputBox!.y - box!.y).toBeLessThan(16);
+  await expect(input).toHaveCSS("height", "44px");
 }
 
 test.describe("Create task Remote repo picker on mobile", () => {
@@ -43,7 +50,7 @@ test.describe("Create task Remote repo picker on mobile", () => {
 
     await openRemotePicker(testPage);
     await expectPopoverFitsViewport(testPage);
-    const pasteInput = testPage.getByTestId("remote-paste-url-input").last();
+    const pasteInput = testPage.getByTestId("remote-repo-input").last();
     await pasteInput.fill("https://github.com/issue-owner/issue-repo/issues/1456");
     await pasteInput.press("Enter");
 

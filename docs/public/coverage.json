@@ -250,7 +250,7 @@
       "id": "office-mode",
       "audiences": ["user", "operator"],
       "stability": "experimental",
-      "docs": ["coordination", "feature-status"],
+      "docs": ["coordination", "feature-status", "office-provider-routing"],
       "sources": ["apps/backend/internal/office/routes.go", "apps/web/src/office-routes.tsx"],
       "tests": ["apps/backend/internal/office/onboarding/service_test.go", "apps/web/src/office-routes.test.ts"]
     },
