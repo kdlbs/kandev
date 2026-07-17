@@ -14,7 +14,8 @@ export type ConfigurableShortcutId =
   | "TASK_SWITCHER"
   | "TASK_SWITCHER_REVERSE"
   | "VOICE_INPUT_TOGGLE"
-  | "REVERSE_SEARCH";
+  | "REVERSE_SEARCH"
+  | "OPEN_TASK_PR";
 
 export type StoredShortcutOverrides = Record<
   string,
@@ -56,6 +57,7 @@ export const CONFIGURABLE_SHORTCUTS: Record<
   },
   VOICE_INPUT_TOGGLE: { label: "Voice Input", default: SHORTCUTS.VOICE_INPUT_TOGGLE },
   REVERSE_SEARCH: { label: "Reverse Chat Search", default: SHORTCUTS.REVERSE_SEARCH },
+  OPEN_TASK_PR: { label: "Open Task Pull Request", default: SHORTCUTS.OPEN_TASK_PR },
 };
 
 export function getShortcut(
