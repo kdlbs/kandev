@@ -25,6 +25,10 @@ type fakeTaskDataSource struct {
 	repositories     map[string][]*taskmodels.Repository
 	sessionsByTask   map[string][]*taskmodels.TaskSession
 	executorRunning  map[string]*taskmodels.ExecutorRunning
+
+	// gotIncludeArchived records the includeArchived flag of every
+	// ListTasksByWorkspace call, in call order.
+	gotIncludeArchived []bool
 }
 
 func (f *fakeTaskDataSource) ListWorkspaces(context.Context) ([]*taskmodels.Workspace, error) {
@@ -32,8 +36,9 @@ func (f *fakeTaskDataSource) ListWorkspaces(context.Context) ([]*taskmodels.Work
 }
 
 func (f *fakeTaskDataSource) ListTasksByWorkspace(
-	_ context.Context, workspaceID, _, _, _ string, _, _ int, _ string, _, _, _, _ bool,
+	_ context.Context, workspaceID, _, _, _ string, _, _ int, _ string, includeArchived, _, _, _ bool,
 ) ([]*taskmodels.Task, int, error) {
+	f.gotIncludeArchived = append(f.gotIncludeArchived, includeArchived)
 	tasks := f.tasksByWorkspace[workspaceID]
 	return tasks, len(tasks), nil
 }
@@ -488,5 +493,29 @@ func TestTaskModelToDTO_EmptyParentIDIsNil(t *testing.T) {
 	dto := taskModelToDTO(&taskmodels.Task{ID: "task-1"})
 	if dto.ParentID != nil {
 		t.Fatalf("ParentID = %v, want nil for a root task", dto.ParentID)
+	}
+}
+
+// ── Archived-task visibility ────────────────────────────────────────────
+
+// Sessions().List must fetch tasks WITH archived included (an archived
+// task's sessions are still real sessions), while Tasks().List keeps
+// archived tasks out of plugin-visible work items.
+func TestPluginHost_ArchivedTaskFetchFlags(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"sessions", "tasks"}})
+	d.tasks.workspaces = []*taskmodels.Workspace{{ID: "ws-1"}}
+	d.tasks.tasksByWorkspace = map[string][]*taskmodels.Task{"ws-1": {{ID: "task-1", WorkspaceID: "ws-1"}}}
+
+	if _, _, err := d.host.Sessions().List(context.Background(), pluginsdk.SessionFilter{}, pluginsdk.Page{}); err != nil {
+		t.Fatalf("Sessions().List unexpected error: %v", err)
+	}
+	if _, _, err := d.host.Tasks().List(context.Background(), pluginsdk.TaskFilter{}, pluginsdk.Page{}); err != nil {
+		t.Fatalf("Tasks().List unexpected error: %v", err)
+	}
+
+	want := []bool{true, false} // sessions read first (archived in), tasks read second (archived out)
+	if len(d.tasks.gotIncludeArchived) != 2 ||
+		d.tasks.gotIncludeArchived[0] != want[0] || d.tasks.gotIncludeArchived[1] != want[1] {
+		t.Fatalf("includeArchived per call = %v, want %v", d.tasks.gotIncludeArchived, want)
 	}
 }

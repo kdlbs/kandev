@@ -295,7 +295,7 @@ func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page 
 	if err != nil {
 		return nil, nil, err
 	}
-	tasks, err := r.host.fetchTasksForWorkspaces(ctx, workspaceIDs, filter.IncludeEphemeral)
+	tasks, err := r.host.fetchTasksForWorkspaces(ctx, workspaceIDs, filter.IncludeEphemeral, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -475,12 +475,12 @@ func (h *pluginHost) resolveWorkspaceIDs(ctx context.Context, requested []string
 // workspace in workspaceIDs. excludeConfig is always true: office config-mode
 // tasks (json_extract(metadata, '$.config_mode')) are internal bookkeeping,
 // not plugin-visible work items.
-func (h *pluginHost) fetchTasksForWorkspaces(ctx context.Context, workspaceIDs []string, includeEphemeral bool) ([]*taskmodels.Task, error) {
+func (h *pluginHost) fetchTasksForWorkspaces(ctx context.Context, workspaceIDs []string, includeEphemeral, includeArchived bool) ([]*taskmodels.Task, error) {
 	var all []*taskmodels.Task
 	for _, workspaceID := range workspaceIDs {
 		tasks, _, err := h.taskData.ListTasksByWorkspace(
 			ctx, workspaceID, "", "", "", 1, taskFetchPageSize, "",
-			false, includeEphemeral, false, true,
+			includeArchived, includeEphemeral, false, true,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("plugins: list tasks for workspace %q: %w", workspaceID, err)
@@ -554,7 +554,12 @@ func (h *pluginHost) fetchSessionsForFilter(ctx context.Context, filter pluginsd
 		if err != nil {
 			return nil, err
 		}
-		tasks, err := h.fetchTasksForWorkspaces(ctx, workspaceIDs, true)
+		// includeEphemeral AND includeArchived: a session is still a real
+		// session from the Sessions resource's point of view whether its
+		// task is a quick-chat or has since been archived. CodeStats makes
+		// the same call at the SQL layer (no task-state filtering), so the
+		// two session reads stay consistent.
+		tasks, err := h.fetchTasksForWorkspaces(ctx, workspaceIDs, true, true)
 		if err != nil {
 			return nil, err
 		}
@@ -602,6 +607,7 @@ func (h *pluginHost) sessionToDTO(ctx context.Context, s *taskmodels.TaskSession
 		TaskID:           s.TaskID,
 		AgentProfileID:   s.AgentProfileID,
 		AgentDisplayName: sessionSnapshotString(s.AgentProfileSnapshot, "agent_display_name"),
+		AgentProfileName: sessionSnapshotString(s.AgentProfileSnapshot, "name"),
 		Model:            sessionSnapshotModel(s.AgentProfileSnapshot),
 		ACPSessionID:     h.resolveACPSessionID(ctx, s),
 		State:            string(s.State),

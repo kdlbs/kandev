@@ -536,6 +536,7 @@ type Session struct {
 	State            string
 	StartedAt        string
 	EndedAt          *string
+	AgentProfileName string // profile name from the snapshot at run time
 }
 
 func (s Session) toProto() *pluginv1.Session {
@@ -549,6 +550,7 @@ func (s Session) toProto() *pluginv1.Session {
 		State:            s.State,
 		StartedAt:        s.StartedAt,
 		EndedAt:          s.EndedAt,
+		AgentProfileName: s.AgentProfileName,
 	}
 }
 
@@ -566,6 +568,7 @@ func sessionFromProto(p *pluginv1.Session) Session {
 		State:            p.GetState(),
 		StartedAt:        p.GetStartedAt(),
 		EndedAt:          p.EndedAt,
+		AgentProfileName: p.GetAgentProfileName(),
 	}
 }
 

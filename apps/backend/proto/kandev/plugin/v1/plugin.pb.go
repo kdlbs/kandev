@@ -2605,6 +2605,7 @@ type Session struct {
 	State            string                 `protobuf:"bytes,7,opt,name=state,proto3" json:"state,omitempty"`
 	StartedAt        string                 `protobuf:"bytes,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	EndedAt          *string                `protobuf:"bytes,9,opt,name=ended_at,json=endedAt,proto3,oneof" json:"ended_at,omitempty"`
+	AgentProfileName string                 `protobuf:"bytes,10,opt,name=agent_profile_name,json=agentProfileName,proto3" json:"agent_profile_name,omitempty"` // profile name from the snapshot at run time
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -2698,6 +2699,13 @@ func (x *Session) GetStartedAt() string {
 func (x *Session) GetEndedAt() string {
 	if x != nil && x.EndedAt != nil {
 		return *x.EndedAt
+	}
+	return ""
+}
+
+func (x *Session) GetAgentProfileName() string {
+	if x != nil {
+		return x.AgentProfileName
 	}
 	return ""
 }
@@ -3567,7 +3575,7 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x04page\x18\x02 \x01(\v2\x16.kandev.plugin.v1.PageR\x04page\"\x95\x01\n" +
 	"\x18ListRepositoriesResponse\x12@\n" +
 	"\frepositories\x18\x01 \x03(\v2\x1c.kandev.plugin.v1.RepositoryR\frepositories\x127\n" +
-	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\xa8\x02\n" +
+	"\tpage_info\x18\x02 \x01(\v2\x1a.kandev.plugin.v1.PageInfoR\bpageInfo\"\xd6\x02\n" +
 	"\aSession\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\atask_id\x18\x02 \x01(\tR\x06taskId\x12(\n" +
@@ -3578,7 +3586,9 @@ const file_kandev_plugin_v1_plugin_proto_rawDesc = "" +
 	"\x05state\x18\a \x01(\tR\x05state\x12\x1d\n" +
 	"\n" +
 	"started_at\x18\b \x01(\tR\tstartedAt\x12\x1e\n" +
-	"\bended_at\x18\t \x01(\tH\x00R\aendedAt\x88\x01\x01B\v\n" +
+	"\bended_at\x18\t \x01(\tH\x00R\aendedAt\x88\x01\x01\x12,\n" +
+	"\x12agent_profile_name\x18\n" +
+	" \x01(\tR\x10agentProfileNameB\v\n" +
 	"\t_ended_at\"g\n" +
 	"\rSessionFilter\x12\x19\n" +
 	"\btask_ids\x18\x01 \x03(\tR\ataskIds\x12#\n" +

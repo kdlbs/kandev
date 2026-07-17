@@ -167,6 +167,7 @@ message Session {
   string state = 7;
   string started_at = 8;
   optional string ended_at = 9;
+  string agent_profile_name = 10;  // profile name from the snapshot at run time
 }
 message SessionFilter {
   repeated string task_ids = 1;
