@@ -30,6 +30,10 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
     () => flags.some((flag) => flag.requires_restart_to_apply),
     [flags],
   );
+  const savedFlagsByKey = useMemo(
+    () => new Map(savedFlags.map((flag) => [flag.key, flag])),
+    [savedFlags],
+  );
   const onRestartComplete = useCallback(() => void reload(), [reload]);
   const restart = useKandevRestart({ onComplete: onRestartComplete });
 
@@ -46,10 +50,7 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
         <FeatureToggleCard
           key={flag.key}
           flag={flag}
-          isDirty={
-            flag.override_value !==
-            savedFlags.find((candidate) => candidate.key === flag.key)?.override_value
-          }
+          isDirty={flag.override_value !== savedFlagsByKey.get(flag.key)?.override_value}
           saving={restart.isRestarting}
           onChange={(next) => setOverride(flag, next)}
           onReset={() => setOverride(flag, null)}
