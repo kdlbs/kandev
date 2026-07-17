@@ -242,7 +242,10 @@ func TestServiceUpdateConfigPreservesMaskedSecret(t *testing.T) {
 	if v, _ := vault.get(pluginConfigSecretID("kandev-plugin-github", "github_token")); v != "ghp_real" {
 		t.Fatalf("vault value = %q, want preserved ghp_real", v)
 	}
-	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	stored, err := fsStore.GetConfig("kandev-plugin-github")
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
 	if stored["org"] != "kdlbs" {
 		t.Fatalf("stored org = %v, want kdlbs", stored["org"])
 	}
@@ -315,7 +318,10 @@ func TestServiceUpdateConfigRestartFailurePersistsConfigAndSetsError(t *testing.
 	}
 	// The config commit and vault write succeeded (only the restart failed):
 	// the config file keeps the ref, the vault keeps the value.
-	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	stored, err := fsStore.GetConfig("kandev-plugin-github")
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
 	if stored["github_token"] != configVaultRef("kandev-plugin-github", "github_token") {
 		t.Fatalf("config should persist despite restart failure, got %v", stored)
 	}
@@ -427,7 +433,10 @@ func TestServiceUpdateConfigStoresSecretInVaultNotConfigFile(t *testing.T) {
 		t.Fatalf("UpdateConfig: %v", err)
 	}
 
-	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	stored, err := fsStore.GetConfig("kandev-plugin-github")
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
 	wantRef := configVaultRef("kandev-plugin-github", "github_token")
 	if stored["github_token"] != wantRef {
 		t.Fatalf("stored github_token = %v, want vault ref %q", stored["github_token"], wantRef)
@@ -460,7 +469,10 @@ func TestServiceUpdateConfigMaskRoundTripKeepsVaultValue(t *testing.T) {
 		t.Fatalf("UpdateConfig (mask round trip): %v", err)
 	}
 
-	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	stored, err := fsStore.GetConfig("kandev-plugin-github")
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
 	if stored["github_token"] != configVaultRef("kandev-plugin-github", "github_token") {
 		t.Fatalf("stored github_token = %v, want vault ref", stored["github_token"])
 	}

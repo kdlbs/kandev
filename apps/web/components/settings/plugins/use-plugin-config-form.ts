@@ -106,13 +106,13 @@ export function usePluginConfigForm(plugin: PluginRecord | null) {
   // mask (so cleartext never lingers) and rebase initialValues onto the
   // masked snapshot — the config IS saved, so the masked form is the new
   // baseline and must not read as dirty (e.g. a previously-unset secret the
-  // user just entered).
+  // user just entered). Computed from the current `values` and applied to
+  // both state setters directly, rather than as a side effect inside a
+  // functional updater (which would run twice under StrictMode).
   const maskSecretValues = () => {
-    setValues((prev) => {
-      const masked = maskSecretsIn(prev);
-      setInitialValues(masked);
-      return masked;
-    });
+    const masked = maskSecretsIn(values);
+    setValues(masked);
+    setInitialValues(masked);
   };
 
   const maskSecretsIn = (source: FormValues): FormValues => {
