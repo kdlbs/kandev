@@ -280,12 +280,12 @@ func (deniedRepositoryReader) List(context.Context, string, pluginsdk.Page) ([]p
 // Only ever returned once the resource's capability gate has passed (see the
 // accessors above), so none of these re-check it.
 
-// taskFetchPageSize bounds a single ListTasksByWorkspace call made while
-// assembling a workspace's tasks for in-memory filter/sort/paginate. Large
-// enough for realistic instance sizes; a workspace with more tasks than this
-// would silently lose the excess from Host data API reads — a known v1
-// limitation of fetch-then-paginate-in-memory, acceptable per ADR 0043(a)'s
-// "global-with-hook" v1 scoping recommendation.
+// taskFetchPageSize bounds each individual ListTasksByWorkspace call made
+// while assembling a workspace's tasks for in-memory filter/sort/paginate.
+// fetchTasksForWorkspaces loops pagination to completion per workspace (see
+// its doc comment), so this only bounds one round trip's page size — it does
+// NOT bound how many tasks a workspace can have before Host data API reads
+// start silently dropping them.
 const taskFetchPageSize = 1000
 
 type taskReader struct{ host *pluginHost }
@@ -305,11 +305,14 @@ func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page 
 	return items, info, nil
 }
 
+// Get returns a gRPC NotFound error (not a (nil, nil) success) when id
+// doesn't resolve to a task, so the in-process contract matches exactly what
+// a real plugin observes over the wire via grpcHostServer.GetTask.
 func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error) {
 	task, err := r.host.taskData.GetTask(ctx, id)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
-			return nil, nil
+			return nil, taskNotFound(id)
 		}
 		return nil, err
 	}
@@ -319,6 +322,12 @@ func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error)
 
 type sessionReader struct{ host *pluginHost }
 
+// List paginates the raw, already-sorted sessions BEFORE converting to DTOs:
+// sessionToDTO resolves ACPSessionID via resolveACPSessionID, which issues a
+// GetExecutorRunningBySessionID query for any session lacking the id in its
+// metadata. Converting every fetched session (as opposed to just the
+// returned page) would turn that into an O(N) fan-out of DB queries per read
+// instead of O(limit).
 func (r sessionReader) List(ctx context.Context, filter pluginsdk.SessionFilter, page pluginsdk.Page) ([]pluginsdk.Session, *pluginsdk.PageInfo, error) {
 	sessions, err := r.host.fetchSessionsForFilter(ctx, filter)
 	if err != nil {
@@ -327,12 +336,12 @@ func (r sessionReader) List(ctx context.Context, filter pluginsdk.SessionFilter,
 	sessions = filterSessionsByState(sessions, filter.States)
 	sortSessionsNewestFirst(sessions)
 
-	dtos := make([]pluginsdk.Session, len(sessions))
-	for i, s := range sessions {
+	pageSessions, info := paginate(sessions, page)
+	dtos := make([]pluginsdk.Session, len(pageSessions))
+	for i, s := range pageSessions {
 		dtos[i] = r.host.sessionToDTO(ctx, s)
 	}
-	items, info := paginate(dtos, page)
-	return items, info, nil
+	return dtos, info, nil
 }
 
 // CodeStats delegates straight to the analytics service, which already
@@ -478,16 +487,40 @@ func (h *pluginHost) resolveWorkspaceIDs(ctx context.Context, requested []string
 func (h *pluginHost) fetchTasksForWorkspaces(ctx context.Context, workspaceIDs []string, includeEphemeral, includeArchived bool) ([]*taskmodels.Task, error) {
 	var all []*taskmodels.Task
 	for _, workspaceID := range workspaceIDs {
-		tasks, _, err := h.taskData.ListTasksByWorkspace(
-			ctx, workspaceID, "", "", "", 1, taskFetchPageSize, "",
+		tasks, err := h.fetchAllTasksForWorkspace(ctx, workspaceID, includeEphemeral, includeArchived)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, tasks...)
+	}
+	return all, nil
+}
+
+// fetchAllTasksForWorkspace loops ListTasksByWorkspace's page/pageSize
+// pagination to completion for a single workspace, so a workspace with more
+// tasks than one taskFetchPageSize page is never silently truncated (and
+// this reader's downstream HasMore/paginate stays accurate). Bounded by
+// ListTasksByWorkspace's own returned total, plus a break on an empty page
+// as a defensive guard against ever looping forever on an inconsistent total.
+func (h *pluginHost) fetchAllTasksForWorkspace(ctx context.Context, workspaceID string, includeEphemeral, includeArchived bool) ([]*taskmodels.Task, error) {
+	var out []*taskmodels.Task
+	for page := 1; ; page++ {
+		tasks, total, err := h.taskData.ListTasksByWorkspace(
+			ctx, workspaceID, "", "", "", page, taskFetchPageSize, "",
 			includeArchived, includeEphemeral, false, true,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("plugins: list tasks for workspace %q: %w", workspaceID, err)
 		}
-		all = append(all, tasks...)
+		if len(tasks) == 0 {
+			break
+		}
+		out = append(out, tasks...)
+		if len(out) >= total {
+			break
+		}
 	}
-	return all, nil
+	return out, nil
 }
 
 // filterTasks applies TaskFilter's WorkflowIDs/States/ParentID narrowing
@@ -527,8 +560,18 @@ func toSet(values []string) map[string]bool {
 	return set
 }
 
+// sortTasksNewestFirst orders by CreatedAt descending, tie-broken by ID
+// ascending: sort.Slice is unstable, and offset-cursor pagination needs a
+// total order across calls — two tasks with equal CreatedAt (a plausible
+// seed/batch-import scenario) must land in the same relative position on
+// every call, or an offset page can skip or duplicate one across reads.
 func sortTasksNewestFirst(tasks []*taskmodels.Task) {
-	sort.Slice(tasks, func(i, j int) bool { return tasks[i].CreatedAt.After(tasks[j].CreatedAt) })
+	sort.Slice(tasks, func(i, j int) bool {
+		if !tasks[i].CreatedAt.Equal(tasks[j].CreatedAt) {
+			return tasks[i].CreatedAt.After(tasks[j].CreatedAt)
+		}
+		return tasks[i].ID < tasks[j].ID
+	})
 }
 
 func tasksToDTOs(tasks []*taskmodels.Task) []pluginsdk.Task {
@@ -539,34 +582,15 @@ func tasksToDTOs(tasks []*taskmodels.Task) []pluginsdk.Task {
 	return out
 }
 
-// fetchSessionsForFilter resolves filter.TaskIDs directly when given, or
-// otherwise enumerates every task across filter.WorkspaceIDs (or every
-// workspace) and lists each task's sessions — a Host data API session read
-// with no TaskIDs filter is, unavoidably, an N+1 fan-out over the instance's
-// tasks in v1 (no session listing endpoint spans multiple tasks directly at
-// the service layer today). includeEphemeral is always true here: an
-// ephemeral (quick-chat) task's sessions are still real sessions from the
-// Sessions resource's point of view.
+// fetchSessionsForFilter resolves the task ids to list sessions for (see
+// resolveSessionTaskIDs) and lists each task's sessions — a Host data API
+// session read is, unavoidably, an N+1 fan-out over the resolved tasks in v1
+// (no session listing endpoint spans multiple tasks directly at the service
+// layer today).
 func (h *pluginHost) fetchSessionsForFilter(ctx context.Context, filter pluginsdk.SessionFilter) ([]*taskmodels.TaskSession, error) {
-	taskIDs := filter.TaskIDs
-	if len(taskIDs) == 0 {
-		workspaceIDs, err := h.resolveWorkspaceIDs(ctx, filter.WorkspaceIDs)
-		if err != nil {
-			return nil, err
-		}
-		// includeEphemeral AND includeArchived: a session is still a real
-		// session from the Sessions resource's point of view whether its
-		// task is a quick-chat or has since been archived. CodeStats makes
-		// the same call at the SQL layer (no task-state filtering), so the
-		// two session reads stay consistent.
-		tasks, err := h.fetchTasksForWorkspaces(ctx, workspaceIDs, true, true)
-		if err != nil {
-			return nil, err
-		}
-		taskIDs = make([]string, len(tasks))
-		for i, t := range tasks {
-			taskIDs[i] = t.ID
-		}
+	taskIDs, err := h.resolveSessionTaskIDs(ctx, filter)
+	if err != nil {
+		return nil, err
 	}
 
 	var sessions []*taskmodels.TaskSession
@@ -578,6 +602,63 @@ func (h *pluginHost) fetchSessionsForFilter(ctx context.Context, filter pluginsd
 		sessions = append(sessions, s...)
 	}
 	return sessions, nil
+}
+
+// resolveSessionTaskIDs returns the task ids fetchSessionsForFilter should
+// list sessions for. filter.TaskIDs and filter.WorkspaceIDs are ANDed
+// together, never one bypassing the other: with both set, a task id whose
+// task lives outside the requested workspaces is dropped, so it can't leak
+// sessions from a workspace the caller didn't ask for. With only TaskIDs set,
+// they're used as-is (unscoped by design — an explicit task id is itself a
+// narrowing filter). With neither set (or only WorkspaceIDs), every task
+// across resolveWorkspaceIDs(filter.WorkspaceIDs) is enumerated.
+// includeEphemeral AND includeArchived when enumerating by workspace: a
+// session is still a real session from the Sessions resource's point of view
+// whether its task is a quick-chat or has since been archived. CodeStats
+// makes the same call at the SQL layer (no task-state filtering), so the two
+// session reads stay consistent.
+func (h *pluginHost) resolveSessionTaskIDs(ctx context.Context, filter pluginsdk.SessionFilter) ([]string, error) {
+	if len(filter.TaskIDs) == 0 {
+		workspaceIDs, err := h.resolveWorkspaceIDs(ctx, filter.WorkspaceIDs)
+		if err != nil {
+			return nil, err
+		}
+		tasks, err := h.fetchTasksForWorkspaces(ctx, workspaceIDs, true, true)
+		if err != nil {
+			return nil, err
+		}
+		taskIDs := make([]string, len(tasks))
+		for i, t := range tasks {
+			taskIDs[i] = t.ID
+		}
+		return taskIDs, nil
+	}
+	if len(filter.WorkspaceIDs) == 0 {
+		return filter.TaskIDs, nil
+	}
+	return h.filterTaskIDsByWorkspace(ctx, filter.TaskIDs, filter.WorkspaceIDs)
+}
+
+// filterTaskIDsByWorkspace keeps only the taskIDs whose task's WorkspaceID is
+// in workspaceIDs; a taskID that no longer resolves to a task is dropped
+// (not an error) — a session read shouldn't fail just because a stale id was
+// passed in TaskIDs.
+func (h *pluginHost) filterTaskIDsByWorkspace(ctx context.Context, taskIDs, workspaceIDs []string) ([]string, error) {
+	allowed := toSet(workspaceIDs)
+	out := make([]string, 0, len(taskIDs))
+	for _, taskID := range taskIDs {
+		task, err := h.taskData.GetTask(ctx, taskID)
+		if err != nil {
+			if errors.Is(err, repoerrors.ErrTaskNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf("plugins: get task %q: %w", taskID, err)
+		}
+		if allowed[task.WorkspaceID] {
+			out = append(out, taskID)
+		}
+	}
+	return out, nil
 }
 
 func filterSessionsByState(sessions []*taskmodels.TaskSession, states []string) []*taskmodels.TaskSession {
@@ -594,8 +675,15 @@ func filterSessionsByState(sessions []*taskmodels.TaskSession, states []string) 
 	return out
 }
 
+// sortSessionsNewestFirst mirrors sortTasksNewestFirst's ID tie-break, for
+// the same offset-cursor pagination stability reason.
 func sortSessionsNewestFirst(sessions []*taskmodels.TaskSession) {
-	sort.Slice(sessions, func(i, j int) bool { return sessions[i].StartedAt.After(sessions[j].StartedAt) })
+	sort.Slice(sessions, func(i, j int) bool {
+		if !sessions[i].StartedAt.Equal(sessions[j].StartedAt) {
+			return sessions[i].StartedAt.After(sessions[j].StartedAt)
+		}
+		return sessions[i].ID < sessions[j].ID
+	})
 }
 
 // sessionToDTO maps a TaskSession to the Go-native Session DTO, resolving

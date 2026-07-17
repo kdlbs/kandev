@@ -226,16 +226,20 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // Implemented by KANDEV (served back over the go-plugin broker).
-// Every RPC is capability-gated server-side (§5).
+// Reads (§5) are capability-gated server-side by an inline per-resource
+// check at the start of each handler — there is no unary interceptor
+// enforcing this centrally. The deferred write RPCs below currently return
+// gRPC Unimplemented unconditionally, regardless of the caller's declared
+// capabilities, until their handlers land.
 //
 // Host data API (ADR 0043): the read/write data RPCs below live on this same
 // `service Host` rather than a separate `service HostData`. They reuse the
-// single broker connection and the existing capability-gated unary
-// interceptor; splitting into a second service would only duplicate both for
-// no benefit. Reads require manifest capability `api_read:<resource>`;
-// writes require `api_write:<resource>` (e.g. `api_read:tasks`,
-// `api_write:comments`). An undeclared capability returns gRPC
-// PermissionDenied with `capability 'api_read:tasks' not declared`.
+// single broker connection; splitting into a second service would only
+// duplicate that for no benefit. Reads require manifest capability
+// `api_read:<resource>`; writes require `api_write:<resource>` (e.g.
+// `api_read:tasks`, `api_write:comments`). An undeclared capability on a read
+// RPC returns gRPC PermissionDenied with `capability 'api_read:tasks' not
+// declared`.
 //
 // DTOs below are a HAND-DEFINED public contract: the backend maps internal
 // models → these messages explicitly, never generates them from domain
@@ -253,7 +257,7 @@ type HostClient interface {
 	EmitEvent(ctx context.Context, in *EmitEventRequest, opts ...grpc.CallOption) (*EmitEventResponse, error)
 	// Reads — capability api_read:<resource>
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*ListTasksResponse, error)
-	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*Task, error)
+	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error)
 	ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error)
 	ListWorkflows(ctx context.Context, in *ListWorkflowsRequest, opts ...grpc.CallOption) (*ListWorkflowsResponse, error)
 	ListWorkflowSteps(ctx context.Context, in *ListWorkflowStepsRequest, opts ...grpc.CallOption) (*ListWorkflowStepsResponse, error)
@@ -270,9 +274,9 @@ type HostClient interface {
 	// contract; handlers land in a later phase (not implemented by this RPC
 	// addition). Route through service methods so the corresponding task.*
 	// events fire — the whole reason not to let plugins write the DB.
-	CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*Task, error)
-	UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts ...grpc.CallOption) (*Task, error)
-	CreateComment(ctx context.Context, in *CreateCommentRequest, opts ...grpc.CallOption) (*Comment, error)
+	CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*CreateTaskResponse, error)
+	UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts ...grpc.CallOption) (*UpdateTaskResponse, error)
+	CreateComment(ctx context.Context, in *CreateCommentRequest, opts ...grpc.CallOption) (*CreateCommentResponse, error)
 }
 
 type hostClient struct {
@@ -353,9 +357,9 @@ func (c *hostClient) ListTasks(ctx context.Context, in *ListTasksRequest, opts .
 	return out, nil
 }
 
-func (c *hostClient) GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*Task, error) {
+func (c *hostClient) GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Task)
+	out := new(GetTaskResponse)
 	err := c.cc.Invoke(ctx, Host_GetTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -433,9 +437,9 @@ func (c *hostClient) ListSessionCodeStats(ctx context.Context, in *ListSessionCo
 	return out, nil
 }
 
-func (c *hostClient) CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*Task, error) {
+func (c *hostClient) CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*CreateTaskResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Task)
+	out := new(CreateTaskResponse)
 	err := c.cc.Invoke(ctx, Host_CreateTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -443,9 +447,9 @@ func (c *hostClient) CreateTask(ctx context.Context, in *CreateTaskRequest, opts
 	return out, nil
 }
 
-func (c *hostClient) UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts ...grpc.CallOption) (*Task, error) {
+func (c *hostClient) UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts ...grpc.CallOption) (*UpdateTaskResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Task)
+	out := new(UpdateTaskResponse)
 	err := c.cc.Invoke(ctx, Host_UpdateTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -453,9 +457,9 @@ func (c *hostClient) UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts
 	return out, nil
 }
 
-func (c *hostClient) CreateComment(ctx context.Context, in *CreateCommentRequest, opts ...grpc.CallOption) (*Comment, error) {
+func (c *hostClient) CreateComment(ctx context.Context, in *CreateCommentRequest, opts ...grpc.CallOption) (*CreateCommentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Comment)
+	out := new(CreateCommentResponse)
 	err := c.cc.Invoke(ctx, Host_CreateComment_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -468,16 +472,20 @@ func (c *hostClient) CreateComment(ctx context.Context, in *CreateCommentRequest
 // for forward compatibility.
 //
 // Implemented by KANDEV (served back over the go-plugin broker).
-// Every RPC is capability-gated server-side (§5).
+// Reads (§5) are capability-gated server-side by an inline per-resource
+// check at the start of each handler — there is no unary interceptor
+// enforcing this centrally. The deferred write RPCs below currently return
+// gRPC Unimplemented unconditionally, regardless of the caller's declared
+// capabilities, until their handlers land.
 //
 // Host data API (ADR 0043): the read/write data RPCs below live on this same
 // `service Host` rather than a separate `service HostData`. They reuse the
-// single broker connection and the existing capability-gated unary
-// interceptor; splitting into a second service would only duplicate both for
-// no benefit. Reads require manifest capability `api_read:<resource>`;
-// writes require `api_write:<resource>` (e.g. `api_read:tasks`,
-// `api_write:comments`). An undeclared capability returns gRPC
-// PermissionDenied with `capability 'api_read:tasks' not declared`.
+// single broker connection; splitting into a second service would only
+// duplicate that for no benefit. Reads require manifest capability
+// `api_read:<resource>`; writes require `api_write:<resource>` (e.g.
+// `api_read:tasks`, `api_write:comments`). An undeclared capability on a read
+// RPC returns gRPC PermissionDenied with `capability 'api_read:tasks' not
+// declared`.
 //
 // DTOs below are a HAND-DEFINED public contract: the backend maps internal
 // models → these messages explicitly, never generates them from domain
@@ -495,7 +503,7 @@ type HostServer interface {
 	EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error)
 	// Reads — capability api_read:<resource>
 	ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error)
-	GetTask(context.Context, *GetTaskRequest) (*Task, error)
+	GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error)
 	ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error)
 	ListWorkflows(context.Context, *ListWorkflowsRequest) (*ListWorkflowsResponse, error)
 	ListWorkflowSteps(context.Context, *ListWorkflowStepsRequest) (*ListWorkflowStepsResponse, error)
@@ -512,9 +520,9 @@ type HostServer interface {
 	// contract; handlers land in a later phase (not implemented by this RPC
 	// addition). Route through service methods so the corresponding task.*
 	// events fire — the whole reason not to let plugins write the DB.
-	CreateTask(context.Context, *CreateTaskRequest) (*Task, error)
-	UpdateTask(context.Context, *UpdateTaskRequest) (*Task, error)
-	CreateComment(context.Context, *CreateCommentRequest) (*Comment, error)
+	CreateTask(context.Context, *CreateTaskRequest) (*CreateTaskResponse, error)
+	UpdateTask(context.Context, *UpdateTaskRequest) (*UpdateTaskResponse, error)
+	CreateComment(context.Context, *CreateCommentRequest) (*CreateCommentResponse, error)
 	mustEmbedUnimplementedHostServer()
 }
 
@@ -546,7 +554,7 @@ func (UnimplementedHostServer) EmitEvent(context.Context, *EmitEventRequest) (*E
 func (UnimplementedHostServer) ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTasks not implemented")
 }
-func (UnimplementedHostServer) GetTask(context.Context, *GetTaskRequest) (*Task, error) {
+func (UnimplementedHostServer) GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetTask not implemented")
 }
 func (UnimplementedHostServer) ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error) {
@@ -570,13 +578,13 @@ func (UnimplementedHostServer) ListSessions(context.Context, *ListSessionsReques
 func (UnimplementedHostServer) ListSessionCodeStats(context.Context, *ListSessionCodeStatsRequest) (*ListSessionCodeStatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSessionCodeStats not implemented")
 }
-func (UnimplementedHostServer) CreateTask(context.Context, *CreateTaskRequest) (*Task, error) {
+func (UnimplementedHostServer) CreateTask(context.Context, *CreateTaskRequest) (*CreateTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
 }
-func (UnimplementedHostServer) UpdateTask(context.Context, *UpdateTaskRequest) (*Task, error) {
+func (UnimplementedHostServer) UpdateTask(context.Context, *UpdateTaskRequest) (*UpdateTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateTask not implemented")
 }
-func (UnimplementedHostServer) CreateComment(context.Context, *CreateCommentRequest) (*Comment, error) {
+func (UnimplementedHostServer) CreateComment(context.Context, *CreateCommentRequest) (*CreateCommentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateComment not implemented")
 }
 func (UnimplementedHostServer) mustEmbedUnimplementedHostServer() {}

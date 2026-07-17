@@ -1,7 +1,7 @@
 ---
 id: "05-rewrite-agent-stats-plugin"
 title: "Rewrite kandev-plugin-agent-stats to use the SDK data API"
-status: pending
+status: done
 wave: 4
 depends_on: ["03-sdk-data-accessors", "04-host-data-impl"]
 plan: "plan.md"

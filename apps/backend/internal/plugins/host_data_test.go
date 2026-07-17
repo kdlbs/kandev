@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/kandev/kandev/pkg/pluginsdk"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // ── fakes for the narrow Host data API interfaces ───────────────────────
@@ -29,18 +32,42 @@ type fakeTaskDataSource struct {
 	// gotIncludeArchived records the includeArchived flag of every
 	// ListTasksByWorkspace call, in call order.
 	gotIncludeArchived []bool
+
+	// executorRunningCalls counts GetExecutorRunningBySessionID calls, so
+	// tests can prove Sessions().List only resolves ACPSessionID for the
+	// page it actually returns, not every session it fetched.
+	executorRunningCalls int
+
+	// listTasksByWorkspaceCalls counts ListTasksByWorkspace calls, so tests
+	// can prove a workspace with more tasks than a single page issues
+	// multiple calls instead of returning a truncated first page.
+	listTasksByWorkspaceCalls int
 }
 
 func (f *fakeTaskDataSource) ListWorkspaces(context.Context) ([]*taskmodels.Workspace, error) {
 	return f.workspaces, nil
 }
 
+// ListTasksByWorkspace mirrors the real repository's page/pageSize semantics
+// (1-based page, offset = (page-1)*pageSize, total = the full unpaginated
+// count) so tests can prove callers that need every task actually loop
+// pagination to completion instead of assuming a single page has it all.
 func (f *fakeTaskDataSource) ListTasksByWorkspace(
-	_ context.Context, workspaceID, _, _, _ string, _, _ int, _ string, includeArchived, _, _, _ bool,
+	_ context.Context, workspaceID, _, _, _ string, page, pageSize int, _ string, includeArchived, _, _, _ bool,
 ) ([]*taskmodels.Task, int, error) {
 	f.gotIncludeArchived = append(f.gotIncludeArchived, includeArchived)
-	tasks := f.tasksByWorkspace[workspaceID]
-	return tasks, len(tasks), nil
+	f.listTasksByWorkspaceCalls++
+	all := f.tasksByWorkspace[workspaceID]
+	total := len(all)
+	offset := (page - 1) * pageSize
+	if offset < 0 || offset >= total {
+		return []*taskmodels.Task{}, total, nil
+	}
+	end := offset + pageSize
+	if end > total {
+		end = total
+	}
+	return all[offset:end], total, nil
 }
 
 func (f *fakeTaskDataSource) GetTask(_ context.Context, id string) (*taskmodels.Task, error) {
@@ -60,6 +87,7 @@ func (f *fakeTaskDataSource) ListTaskSessions(_ context.Context, taskID string) 
 }
 
 func (f *fakeTaskDataSource) GetExecutorRunningBySessionID(_ context.Context, sessionID string) (*taskmodels.ExecutorRunning, error) {
+	f.executorRunningCalls++
 	running, ok := f.executorRunning[sessionID]
 	if !ok {
 		return nil, taskmodels.ErrExecutorRunningNotFound
@@ -220,11 +248,16 @@ func TestPluginHost_Tasks_SucceedsWithCapability(t *testing.T) {
 		t.Fatalf("Get() = %+v, want Task 1", got)
 	}
 
-	// A missing task is (nil, nil), not an error, per grpcHostServer.GetTask's
-	// contract of translating that into gRPC NotFound.
+	// A missing task returns a gRPC NotFound error directly, matching what a
+	// real plugin observes over the wire (grpcHostServer.GetTask forwards
+	// this error as-is) rather than a (nil, nil) success that only the
+	// in-process caller would ever see.
 	got, err = d.host.Tasks().Get(context.Background(), "no-such-task")
-	if err != nil || got != nil {
-		t.Fatalf("Get() for missing task = (%+v, %v), want (nil, nil)", got, err)
+	if got != nil {
+		t.Fatalf("Get() for missing task = (%+v, %v), want (nil, NotFound)", got, err)
+	}
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("Get() for missing task error = %v, want codes.NotFound", err)
 	}
 }
 
@@ -305,6 +338,64 @@ func TestPluginHost_Repositories_SucceedsWithCapability(t *testing.T) {
 	}
 }
 
+// TestFetchTasksForWorkspaces_DoesNotTruncateBeyondPageSize proves a
+// workspace with more tasks than a single taskFetchPageSize page is fully
+// enumerated, not silently cut off at the first page.
+func TestFetchTasksForWorkspaces_DoesNotTruncateBeyondPageSize(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	const total = taskFetchPageSize + 1
+	tasks := make([]*taskmodels.Task, total)
+	for i := 0; i < total; i++ {
+		tasks[i] = &taskmodels.Task{ID: fmt.Sprintf("task-%04d", i), WorkspaceID: "ws-1"}
+	}
+	d.tasks.tasksByWorkspace = map[string][]*taskmodels.Task{"ws-1": tasks}
+
+	got, err := d.host.fetchTasksForWorkspaces(context.Background(), []string{"ws-1"}, false, false)
+	if err != nil {
+		t.Fatalf("fetchTasksForWorkspaces() unexpected error: %v", err)
+	}
+	if len(got) != total {
+		t.Fatalf("fetchTasksForWorkspaces() returned %d tasks, want %d (must not silently truncate at taskFetchPageSize)", len(got), total)
+	}
+	if d.tasks.listTasksByWorkspaceCalls < 2 {
+		t.Fatalf("ListTasksByWorkspace called %d times, want >= 2 (a single %d-task page can't hold %d tasks)",
+			d.tasks.listTasksByWorkspaceCalls, taskFetchPageSize, total)
+	}
+}
+
+// TestPluginHost_Tasks_List_DoesNotTruncateBeyondPageSize is the
+// end-to-end version of the above: Tasks().List's HasMore/pagination must
+// stay accurate even when the underlying per-workspace fetch spans more than
+// one taskFetchPageSize page.
+func TestPluginHost_Tasks_List_DoesNotTruncateBeyondPageSize(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	const total = taskFetchPageSize + 1
+	tasks := make([]*taskmodels.Task, total)
+	for i := 0; i < total; i++ {
+		tasks[i] = &taskmodels.Task{ID: fmt.Sprintf("task-%04d", i), WorkspaceID: "ws-1"}
+	}
+	d.tasks.tasksByWorkspace = map[string][]*taskmodels.Task{"ws-1": tasks}
+
+	// maxPageLimit caps a single RPC page at 200 items, so walk every page
+	// via cursor and count the total returned across the whole read.
+	seen := 0
+	cursor := ""
+	for {
+		page, info, err := d.host.Tasks().List(context.Background(), pluginsdk.TaskFilter{WorkspaceIDs: []string{"ws-1"}}, pluginsdk.Page{Limit: 200, Cursor: cursor})
+		if err != nil {
+			t.Fatalf("List() unexpected error: %v", err)
+		}
+		seen += len(page)
+		if info == nil || !info.HasMore {
+			break
+		}
+		cursor = info.NextCursor
+	}
+	if seen != total {
+		t.Fatalf("Tasks().List() across all pages returned %d tasks, want %d (must not silently truncate at taskFetchPageSize)", seen, total)
+	}
+}
+
 // ── Session DTO mapping: acp_session_id sourcing ────────────────────────
 
 func TestPluginHost_Sessions_ACPSessionIDFromMetadata(t *testing.T) {
@@ -371,6 +462,49 @@ func TestPluginHost_Sessions_ACPSessionIDEmptyWhenNeitherSourceHasIt(t *testing.
 	}
 	if len(sessions) != 1 || sessions[0].ACPSessionID != "" {
 		t.Fatalf("List() = %+v, want empty ACPSessionID", sessions)
+	}
+}
+
+// TestPluginHost_Sessions_PaginatesBeforeResolvingACPSessionID proves
+// Sessions().List resolves ACPSessionID (a per-item DB call via
+// resolveACPSessionID's GetExecutorRunningBySessionID fallback) only for the
+// page it returns, not for every session it fetched — pagination must happen
+// on the raw, already-sorted sessions BEFORE the per-item DTO conversion, or
+// a Page{Limit: 2} read over 5 sessions would issue 5 lookups instead of 2.
+func TestPluginHost_Sessions_PaginatesBeforeResolvingACPSessionID(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"sessions"}})
+	d.tasks.workspaces = []*taskmodels.Workspace{{ID: "ws-1"}}
+	d.tasks.tasksByWorkspace = map[string][]*taskmodels.Task{"ws-1": {{ID: "task-1", WorkspaceID: "ws-1"}}}
+
+	const total = 5
+	sessions := make([]*taskmodels.TaskSession, total)
+	base := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < total; i++ {
+		// No Metadata: resolveACPSessionID always falls through to
+		// GetExecutorRunningBySessionID for every one of these sessions.
+		sessions[i] = &taskmodels.TaskSession{
+			ID:        fmt.Sprintf("session-%d", i),
+			TaskID:    "task-1",
+			State:     taskmodels.TaskSessionStateRunning,
+			StartedAt: base.Add(time.Duration(total-i) * time.Hour), // session-0 newest
+		}
+	}
+	d.tasks.sessionsByTask = map[string][]*taskmodels.TaskSession{"task-1": sessions}
+
+	const limit = 2
+	page, info, err := d.host.Sessions().List(context.Background(), pluginsdk.SessionFilter{}, pluginsdk.Page{Limit: limit})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(page) != limit {
+		t.Fatalf("List() returned %d sessions, want %d", len(page), limit)
+	}
+	if info == nil || !info.HasMore {
+		t.Fatalf("PageInfo = %+v, want HasMore=true", info)
+	}
+	if d.tasks.executorRunningCalls != limit {
+		t.Fatalf("GetExecutorRunningBySessionID called %d times, want %d (only the returned page, not all %d fetched sessions)",
+			d.tasks.executorRunningCalls, limit, total)
 	}
 }
 
@@ -443,6 +577,79 @@ func TestPluginHost_SessionsCodeStats_PropagatesAnalyticsError(t *testing.T) {
 	_, _, err := d.host.Sessions().CodeStats(context.Background(), pluginsdk.SessionFilter{}, pluginsdk.Page{})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("CodeStats() error = %v, want %v", err, wantErr)
+	}
+}
+
+// TestPluginHost_Sessions_TaskIDsScopedToWorkspaceIDs proves SessionFilter's
+// TaskIDs and WorkspaceIDs are ANDed together: a task id that resolves to a
+// task outside the requested workspaces must not leak its sessions, even
+// though the id itself was explicitly requested.
+func TestPluginHost_Sessions_TaskIDsScopedToWorkspaceIDs(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"sessions"}})
+	task1 := &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1"}
+	task2 := &taskmodels.Task{ID: "task-2", WorkspaceID: "ws-2"}
+	d.tasks.tasksByID = map[string]*taskmodels.Task{"task-1": task1, "task-2": task2}
+	d.tasks.sessionsByTask = map[string][]*taskmodels.TaskSession{
+		"task-1": {{ID: "session-1", TaskID: "task-1", State: taskmodels.TaskSessionStateRunning, StartedAt: time.Now()}},
+		"task-2": {{ID: "session-2", TaskID: "task-2", State: taskmodels.TaskSessionStateRunning, StartedAt: time.Now()}},
+	}
+
+	filter := pluginsdk.SessionFilter{TaskIDs: []string{"task-1", "task-2"}, WorkspaceIDs: []string{"ws-1"}}
+	sessions, _, err := d.host.Sessions().List(context.Background(), filter, pluginsdk.Page{})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].ID != "session-1" {
+		t.Fatalf("List() = %+v, want only session-1 (task-2 is outside the requested workspace)", sessions)
+	}
+}
+
+// ── Stable sort: deterministic pagination across equal timestamps ───────
+
+// TestSortTasksNewestFirst_TiesBrokenByID proves sortTasksNewestFirst orders
+// equal-CreatedAt tasks deterministically by ID, not by whatever order
+// sort.Slice's unstable algorithm happens to leave them in — an offset-based
+// paginated read of tasks sharing a CreatedAt second (a plausible seed/batch
+// scenario) must return the same order on every call, or successive pages
+// can skip or duplicate a task.
+func TestSortTasksNewestFirst_TiesBrokenByID(t *testing.T) {
+	same := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tasks := []*taskmodels.Task{
+		{ID: "c", CreatedAt: same},
+		{ID: "a", CreatedAt: same},
+		{ID: "b", CreatedAt: same},
+	}
+
+	sortTasksNewestFirst(tasks)
+
+	got := []string{tasks[0].ID, tasks[1].ID, tasks[2].ID}
+	want := []string{"a", "b", "c"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sortTasksNewestFirst() order = %v, want %v (equal CreatedAt must tie-break by ID)", got, want)
+		}
+	}
+}
+
+// TestSortSessionsNewestFirst_TiesBrokenByID mirrors
+// TestSortTasksNewestFirst_TiesBrokenByID for sessions (StartedAt instead of
+// CreatedAt).
+func TestSortSessionsNewestFirst_TiesBrokenByID(t *testing.T) {
+	same := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	sessions := []*taskmodels.TaskSession{
+		{ID: "c", StartedAt: same},
+		{ID: "a", StartedAt: same},
+		{ID: "b", StartedAt: same},
+	}
+
+	sortSessionsNewestFirst(sessions)
+
+	got := []string{sessions[0].ID, sessions[1].ID, sessions[2].ID}
+	want := []string{"a", "b", "c"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sortSessionsNewestFirst() order = %v, want %v (equal StartedAt must tie-break by ID)", got, want)
+		}
 	}
 }
 

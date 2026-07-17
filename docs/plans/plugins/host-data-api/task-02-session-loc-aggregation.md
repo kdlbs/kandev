@@ -1,7 +1,7 @@
 ---
 id: "02-session-loc-aggregation"
 title: "Per-session LOC aggregation (committed + peak-pending)"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

@@ -21,7 +21,7 @@ import "google/protobuf/struct.proto";
 service HostData {
   // Reads — capability api_read:<resource>
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
-  rpc GetTask(GetTaskRequest) returns (Task);
+  rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
   rpc ListWorkflows(ListWorkflowsRequest) returns (ListWorkflowsResponse);
   rpc ListWorkflowSteps(ListWorkflowStepsRequest) returns (ListWorkflowStepsResponse);
@@ -39,9 +39,9 @@ service HostData {
   // Writes — capability api_write:<resource>. Route through service methods so
   // the corresponding task.* events fire; this is the whole reason not to let
   // plugins write the DB.
-  rpc CreateTask(CreateTaskRequest) returns (Task);
-  rpc UpdateTask(UpdateTaskRequest) returns (Task);
-  rpc CreateComment(CreateCommentRequest) returns (Comment);
+  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
+  rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
+  rpc CreateComment(CreateCommentRequest) returns (CreateCommentResponse);
 }
 
 // ── Common ──────────────────────────────────────────────────────────────────
@@ -95,6 +95,7 @@ message TaskFilter {
 message ListTasksRequest { TaskFilter filter = 1; Page page = 2; }
 message ListTasksResponse { repeated Task tasks = 1; PageInfo page_info = 2; }
 message GetTaskRequest { string id = 1; }
+message GetTaskResponse { Task task = 1; }
 
 // ── Workspace / Workflow / Steps ─────────────────────────────────────────────
 message Workspace {
@@ -201,6 +202,7 @@ message CreateTaskRequest {
   bool start_agent = 7;
   // kandev stamps source = "plugin:<id>" server-side; not settable here.
 }
+message CreateTaskResponse { Task task = 1; }
 message UpdateTaskRequest {
   string id = 1;
   optional string title = 2;
@@ -208,6 +210,7 @@ message UpdateTaskRequest {
   optional string state = 4;
   optional string workflow_step_id = 5;
 }
+message UpdateTaskResponse { Task task = 1; }
 message Comment {
   string id = 1;
   string task_id = 2;
@@ -216,3 +219,4 @@ message Comment {
   string created_at = 5;
 }
 message CreateCommentRequest { string task_id = 1; string body = 2; }
+message CreateCommentResponse { Comment comment = 1; }

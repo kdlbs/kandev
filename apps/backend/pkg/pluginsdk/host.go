@@ -237,7 +237,7 @@ func (r grpcTaskReader) Get(ctx context.Context, id string) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	task, err := taskFromProto(resp)
+	task, err := taskFromProto(resp.GetTask())
 	if err != nil {
 		return nil, err
 	}
@@ -430,7 +430,14 @@ func (s *grpcHostServer) ListTasks(ctx context.Context, req *pluginv1.ListTasksR
 	return &pluginv1.ListTasksResponse{Tasks: protoTasks, PageInfo: pageInfo.toProto()}, nil
 }
 
-func (s *grpcHostServer) GetTask(ctx context.Context, req *pluginv1.GetTaskRequest) (*pluginv1.Task, error) {
+// GetTask dispatches to the impl's TaskReader.Get and wraps the result in
+// GetTaskResponse (Buf RPC_RESPONSE_STANDARD_NAME/RPC_REQUEST_RESPONSE_UNIQUE:
+// no bare-DTO RPC responses). The Host contract is that a missing task is a
+// gRPC NotFound *error* from Get, never a (nil, nil) success — the nil check
+// below is defense-in-depth for a Host implementation that doesn't follow
+// that contract, so a plugin still gets NotFound instead of a zero-value
+// GetTaskResponse.
+func (s *grpcHostServer) GetTask(ctx context.Context, req *pluginv1.GetTaskRequest) (*pluginv1.GetTaskResponse, error) {
 	task, err := s.impl.Tasks().Get(ctx, req.GetId())
 	if err != nil {
 		return nil, err
@@ -438,7 +445,11 @@ func (s *grpcHostServer) GetTask(ctx context.Context, req *pluginv1.GetTaskReque
 	if task == nil {
 		return nil, status.Error(codes.NotFound, "task not found")
 	}
-	return task.toProto()
+	protoTask, err := task.toProto()
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.GetTaskResponse{Task: protoTask}, nil
 }
 
 func (s *grpcHostServer) ListWorkspaces(ctx context.Context, req *pluginv1.ListWorkspacesRequest) (*pluginv1.ListWorkspacesResponse, error) {

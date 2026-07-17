@@ -1,7 +1,7 @@
 ---
 id: "03-sdk-data-accessors"
 title: "SDK Go-native data DTOs, Host interface, and author accessors"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-proto-contract"]
 plan: "plan.md"

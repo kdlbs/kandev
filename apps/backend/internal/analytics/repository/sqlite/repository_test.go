@@ -60,6 +60,7 @@ func createTestDB(t *testing.T) *sqlx.DB {
 		title TEXT NOT NULL,
 		state TEXT DEFAULT 'TODO',
 		is_ephemeral INTEGER NOT NULL DEFAULT 0,
+		metadata TEXT DEFAULT '{}',
 		archived_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL

@@ -114,6 +114,23 @@ func seedSessionsWireFixture(d *testDataHost, n int) {
 	d.codeStats.stats = stats
 }
 
+// TestPluginHostData_Wire_GetTaskNotFound proves a missing task surfaces as
+// gRPC NotFound over the real broker transport (GetTaskResponse's wrapper
+// doesn't change that), matching *pluginHost's in-process taskReader.Get
+// contract exactly — see host_data_test.go's
+// TestPluginHost_Tasks_SucceedsWithCapability for the in-process half.
+func TestPluginHostData_Wire_GetTaskNotFound(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"tasks"}})
+	host := dialPluginHostOverWire(t, d.host)
+
+	task, err := host.Tasks().Get(context.Background(), "no-such-task")
+	require.Nil(t, task)
+	require.Error(t, err)
+	st, ok := status.FromError(err)
+	require.True(t, ok, "expected a gRPC status error, got %v", err)
+	require.Equal(t, codes.NotFound, st.Code())
+}
+
 // TestPluginHostData_Wire_SessionsRoundTrip proves canned Sessions +
 // SessionCodeStats data round-trips correctly, over the real broker
 // transport, through a *pluginHost whose manifest declares api_read:sessions

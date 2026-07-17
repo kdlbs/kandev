@@ -1,7 +1,7 @@
 ---
 id: "04-host-data-impl"
 title: "kandev-side Host data RPC implementation + capability gating + wiring"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-proto-contract", "02-session-loc-aggregation", "03-sdk-data-accessors"]
 plan: "plan.md"

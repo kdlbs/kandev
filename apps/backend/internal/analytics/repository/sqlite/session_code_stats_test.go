@@ -230,6 +230,42 @@ func TestListSessionCodeStats_FiltersBySessionIDs(t *testing.T) {
 	}
 }
 
+// TestListSessionCodeStats_ExcludesConfigModeTaskSessions proves
+// ListSessionCodeStats applies the same office config-mode exclusion that
+// Sessions().List applies (via fetchTasksForWorkspaces' excludeConfig=true):
+// a session belonging to a config-mode task (internal bookkeeping, not a
+// plugin-visible work item) must not appear in CodeStats, so the two Host
+// data API session reads cover the same session set.
+func TestListSessionCodeStats_ExcludesConfigModeTaskSessions(t *testing.T) {
+	dbConn := createTestDB(t)
+	repo, err := NewWithDB(dbConn, dbConn)
+	if err != nil {
+		t.Fatalf("NewWithDB failed: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	nowStr := now.Format(time.RFC3339)
+
+	execOrFatal(t, dbConn, `INSERT INTO workspaces (id, name, created_at, updated_at) VALUES ('ws-1', 'Test', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO boards (id, workspace_id, name, created_at, updated_at) VALUES ('board-1', 'ws-1', 'Board', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, metadata, created_at, updated_at) VALUES ('task-normal', 'ws-1', 'board-1', '', 'Normal task', 0, '{}', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO tasks (id, workspace_id, board_id, workflow_step_id, title, is_ephemeral, metadata, created_at, updated_at) VALUES ('task-config', 'ws-1', 'board-1', '', 'Config task', 0, '{"config_mode":true}', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-normal', 'task-normal', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+	execOrFatal(t, dbConn, `INSERT INTO task_sessions (id, task_id, agent_profile_id, state, started_at, updated_at) VALUES ('sess-config', 'task-config', 'agent-1', 'COMPLETED', ?, ?)`, nowStr, nowStr)
+
+	results, err := repo.ListSessionCodeStats(ctx, models.SessionCodeStatsFilter{})
+	if err != nil {
+		t.Fatalf("ListSessionCodeStats failed: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 session (config-mode task's session excluded), got %d: %+v", len(results), results)
+	}
+	if results[0].SessionID != "sess-normal" {
+		t.Errorf("SessionID: want sess-normal, got %s", results[0].SessionID)
+	}
+}
+
 func TestListSessionCodeStats_FiltersByWorkspaceIDs(t *testing.T) {
 	dbConn := createTestDB(t)
 	repo, err := NewWithDB(dbConn, dbConn)

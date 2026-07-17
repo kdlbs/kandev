@@ -609,7 +609,13 @@ func (r *Repository) ListSessionCodeStats(
 	ctx context.Context,
 	filter models.SessionCodeStatsFilter,
 ) ([]*models.SessionCodeStats, error) {
+	driver := r.ro.DriverName()
 	where, args := buildSessionCodeStatsFilter(filter)
+	// Exclude office config-mode tasks' sessions (internal bookkeeping, not
+	// plugin-visible work items) — the same exclusion Sessions().List applies
+	// via fetchTasksForWorkspaces' excludeConfig=true, so the Host data API's
+	// List and CodeStats reads cover the same session set.
+	where += " AND " + dialect.ExcludeConfigModePredicate(driver, "t.metadata")
 	query := fmt.Sprintf(`
 		SELECT
 			ts.id AS session_id,
@@ -630,7 +636,7 @@ func (r *Repository) ListSessionCodeStats(
 		WHERE %s
 		ORDER BY ts.started_at ASC, ts.id ASC
 		LIMIT ? OFFSET ?
-	`, peakPendingSnapshotSubquery(r.ro.DriverName()), where)
+	`, peakPendingSnapshotSubquery(driver), where)
 
 	inQuery, inArgs, err := sqlx.In(query, args...)
 	if err != nil {

@@ -63,6 +63,14 @@ func permissionDenied(capability string) error {
 	return status.Errorf(codes.PermissionDenied, "capability '%s' not declared", capability)
 }
 
+// taskNotFound builds the gRPC error taskReader.Get returns for an id that
+// doesn't resolve to a task — the SAME error, in-process or over the wire
+// (grpcHostServer.GetTask forwards it as-is), so a plugin never observes a
+// (nil, nil) success for a missing task.
+func taskNotFound(id string) error {
+	return status.Errorf(codes.NotFound, "task %q not found", id)
+}
+
 func (h *pluginHost) GetState(ctx context.Context, scope, scopeID, key string) (map[string]any, bool, error) {
 	if !h.capabilities.State {
 		return nil, false, permissionDenied("state")

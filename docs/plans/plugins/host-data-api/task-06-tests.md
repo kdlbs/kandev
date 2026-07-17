@@ -1,7 +1,7 @@
 ---
 id: "06-tests"
 title: "Capability-gating, DTO-mapping, and plugin-reads-sessions integration tests"
-status: pending
+status: done
 wave: 4
 depends_on: ["04-host-data-impl"]
 plan: "plan.md"

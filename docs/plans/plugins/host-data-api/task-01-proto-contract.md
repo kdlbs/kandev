@@ -1,7 +1,7 @@
 ---
 id: "01-proto-contract"
 title: "Host data proto contract + regenerated stubs"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
