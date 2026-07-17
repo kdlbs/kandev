@@ -3,6 +3,36 @@ import * as React from "react";
 import { createAppStore } from "@/lib/state/store";
 import { buildHostApi } from "./host-api";
 
+/** Curated primitives a plugin needs to build a full native-feeling page. */
+const EXPECTED_UI_PRIMITIVES = [
+  "Alert",
+  "Badge",
+  "Button",
+  "Card",
+  "Checkbox",
+  "Dialog",
+  "DropdownMenu",
+  "Input",
+  "Label",
+  "Pagination",
+  "ScrollArea",
+  "Select",
+  "Sheet",
+  "SheetClose",
+  "SheetContent",
+  "SheetDescription",
+  "SheetFooter",
+  "SheetHeader",
+  "SheetTitle",
+  "SheetTrigger",
+  "Spinner",
+  "Switch",
+  "Table",
+  "Tabs",
+  "Textarea",
+  "Tooltip",
+];
+
 describe("buildHostApi", () => {
   const originalFetch = global.fetch;
 
@@ -66,27 +96,7 @@ describe("buildHostApi", () => {
 
     expect(host.theme).toBe("dark");
     // Expanded primitive set for full native-feeling plugin pages.
-    for (const name of [
-      "Alert",
-      "Badge",
-      "Button",
-      "Card",
-      "Checkbox",
-      "Dialog",
-      "DropdownMenu",
-      "Input",
-      "Label",
-      "Pagination",
-      "ScrollArea",
-      "Select",
-      "Sheet",
-      "Spinner",
-      "Switch",
-      "Table",
-      "Tabs",
-      "Textarea",
-      "Tooltip",
-    ]) {
+    for (const name of EXPECTED_UI_PRIMITIVES) {
       expect(host.ui[name], `host.ui.${name}`).toBeDefined();
     }
   });

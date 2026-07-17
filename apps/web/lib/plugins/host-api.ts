@@ -48,7 +48,16 @@ import {
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@kandev/ui/sheet";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { Spinner } from "@kandev/ui/spinner";
 import { Switch } from "@kandev/ui/switch";
@@ -117,9 +126,13 @@ const PLUGIN_UI: Record<string, unknown> = {
   SelectValue,
   Separator,
   Sheet,
+  SheetClose,
   SheetContent,
+  SheetDescription,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
+  SheetTrigger,
   Skeleton,
   Spinner,
   Switch,
