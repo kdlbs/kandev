@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -324,6 +325,7 @@ func TestEnsureRoutineWorkflow_KeepsUserWorkflowVisible(t *testing.T) {
 func TestRepositoryInitialization_HealsBuiltinWorkflowVisibility(t *testing.T) {
 	repo := newRepoForBuiltinWorkflowTests(t)
 	ctx := context.Background()
+	legacyTime := time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
 
 	for _, workflow := range []struct {
 		id         string
@@ -335,8 +337,8 @@ func TestRepositoryInitialization_HealsBuiltinWorkflowVisibility(t *testing.T) {
 		_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
 			INSERT INTO workflows (
 				id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
-			) VALUES (?, 'ws-1', 'System workflow', ?, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-		`), workflow.id, workflow.templateID)
+			) VALUES (?, 'ws-1', 'System workflow', ?, 1, 0, ?, ?)
+		`), workflow.id, workflow.templateID, legacyTime, legacyTime)
 		if err != nil {
 			t.Fatalf("insert stale %s workflow: %v", workflow.templateID, err)
 		}
@@ -347,6 +349,16 @@ func TestRepositoryInitialization_HealsBuiltinWorkflowVisibility(t *testing.T) {
 	}
 	assertBuiltinWorkflowHidden(t, repo, "stale-office")
 	assertBuiltinWorkflowHidden(t, repo, "stale-routine")
+
+	for _, workflowID := range []string{"stale-office", "stale-routine"} {
+		var updatedAt time.Time
+		if err := repo.db.QueryRowContext(ctx, `SELECT updated_at FROM workflows WHERE id = ?`, workflowID).Scan(&updatedAt); err != nil {
+			t.Fatalf("query workflow updated_at: %v", err)
+		}
+		if !updatedAt.After(legacyTime) {
+			t.Errorf("workflow %q updated_at = %v, want after %v", workflowID, updatedAt, legacyTime)
+		}
+	}
 }
 
 // TestRoutineWorkflowTasks_FlaggedSystem verifies tasks created in the

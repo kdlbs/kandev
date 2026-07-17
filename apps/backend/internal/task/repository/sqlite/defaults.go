@@ -43,16 +43,18 @@ func (r *Repository) hideBuiltinWorkflows() error {
 		return fmt.Errorf("load hidden workflow templates: %w", err)
 	}
 	templateIDs := make([]string, 0, len(hidden))
-	for templateID := range hidden {
-		templateIDs = append(templateIDs, templateID)
+	for templateID, isHidden := range hidden {
+		if isHidden {
+			templateIDs = append(templateIDs, templateID)
+		}
 	}
 	if len(templateIDs) == 0 {
 		return nil
 	}
 	query, args, err := sqlx.In(`
-		UPDATE workflows SET hidden = 1
-		WHERE is_system = 1 AND workflow_template_id IN (?)
-	`, templateIDs)
+		UPDATE workflows SET hidden = 1, updated_at = ?
+		WHERE is_system = 1 AND workflow_template_id IN (?) AND hidden != 1
+	`, time.Now().UTC(), templateIDs)
 	if err != nil {
 		return fmt.Errorf("build hidden workflow reconciliation: %w", err)
 	}
@@ -352,9 +354,11 @@ func (r *Repository) ensureBuiltinWorkflow(ctx context.Context, workspaceID, tem
 		return "", err
 	}
 	if existing != "" {
+		hidden := dialect.BoolToInt(tmpl.Hidden)
 		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
-			UPDATE workflows SET hidden = ? WHERE id = ? AND is_system = 1
-		`), dialect.BoolToInt(tmpl.Hidden), existing); err != nil {
+			UPDATE workflows SET hidden = ?, updated_at = ?
+			WHERE id = ? AND is_system = 1 AND hidden != ?
+		`), hidden, time.Now().UTC(), existing, hidden); err != nil {
 			return "", fmt.Errorf("update builtin workflow visibility: %w", err)
 		}
 		return existing, nil
