@@ -9,6 +9,7 @@ import type {
   SortSpec,
 } from "./sidebar-view-types";
 import { toApiSidebarDraft, toApiSidebarView } from "./sidebar-view-wire";
+import { createDefaultSidebarView, MAX_SIDEBAR_VIEWS } from "./sidebar-view-builtins";
 
 type ImmerSet = (recipe: (draft: UISlice) => void, shouldReplace?: false | undefined) => void;
 
@@ -31,7 +32,14 @@ function reorderViewsById(
   return next;
 }
 
-let viewsSyncRequestId = 0;
+function nextNewViewName(views: SidebarView[]): string {
+  const names = new Set(views.map((view) => view.name));
+  if (!names.has("New view")) return "New view";
+  let suffix = 2;
+  while (names.has(`New view ${suffix}`)) suffix += 1;
+  return `New view ${suffix}`;
+}
+
 const sidebarSettingsQueues = new WeakMap<ImmerSet, Promise<void>>();
 
 type SidebarSnapshot = {
@@ -39,6 +47,21 @@ type SidebarSnapshot = {
   activeViewId: string;
   draft: SidebarViewDraft | null;
 };
+
+type ViewMutationSyncState = {
+  latestRequestId: number;
+  failedRollback?: SidebarSnapshot;
+};
+
+const viewMutationSyncStates = new WeakMap<ImmerSet, ViewMutationSyncState>();
+
+function getViewMutationSyncState(set: ImmerSet): ViewMutationSyncState {
+  const existing = viewMutationSyncStates.get(set);
+  if (existing) return existing;
+  const created = { latestRequestId: 0 };
+  viewMutationSyncStates.set(set, created);
+  return created;
+}
 
 function snapshotSidebar(s: UISliceState["sidebarViews"]): SidebarSnapshot {
   return {
@@ -103,22 +126,40 @@ function mutateViews(
   if (!committed) return;
   const after = get().sidebarViews;
   const afterSnapshot = snapshotSidebar(after);
-  const thisRequestId = ++viewsSyncRequestId;
+  const syncState = getViewMutationSyncState(set);
+  const thisRequestId = ++syncState.latestRequestId;
   const request = enqueueSidebarSettingsSync(set, toSidebarSettingsPayload(after));
-  request.catch((err) => {
-    if (thisRequestId !== viewsSyncRequestId) return;
-    const message = err instanceof Error ? err.message : "Failed to sync sidebar views";
-    set((draft) => {
-      draft.sidebarViews.views = snapshot.views;
-      if (draft.sidebarViews.activeViewId === afterSnapshot.activeViewId) {
-        draft.sidebarViews.activeViewId = snapshot.activeViewId;
-      }
-      if (draftsEqual(draft.sidebarViews.draft, afterSnapshot.draft)) {
-        draft.sidebarViews.draft = snapshot.draft;
-      }
-      draft.sidebarViews.syncError = message;
-    });
-  });
+  request.then(
+    () => {
+      syncState.failedRollback = undefined;
+    },
+    (err) => {
+      const rollback = syncState.failedRollback ?? snapshot;
+      syncState.failedRollback = rollback;
+      if (thisRequestId !== syncState.latestRequestId) return;
+      const message = err instanceof Error ? err.message : "Failed to sync sidebar views";
+      set((draft) => {
+        draft.sidebarViews.views = rollback.views;
+        const activeViewStillExists = rollback.views.some(
+          (view) => view.id === draft.sidebarViews.activeViewId,
+        );
+        if (
+          draft.sidebarViews.activeViewId === afterSnapshot.activeViewId ||
+          !activeViewStillExists
+        ) {
+          draft.sidebarViews.activeViewId = rollback.activeViewId;
+        }
+        const currentDraft = draft.sidebarViews.draft;
+        const draftBaseStillExists =
+          !currentDraft || rollback.views.some((view) => view.id === currentDraft.baseViewId);
+        if (draftsEqual(currentDraft, afterSnapshot.draft) || !draftBaseStillExists) {
+          draft.sidebarViews.draft = rollback.draft;
+        }
+        draft.sidebarViews.syncError = message;
+      });
+      syncState.failedRollback = undefined;
+    },
+  );
 }
 
 function buildSidebarLocalActions(set: ImmerSet, get: () => UISlice) {
@@ -185,6 +226,17 @@ function buildSidebarBackendActions(set: ImmerSet, get: () => UISlice) {
   const mv = (mutate: (s: UISliceState["sidebarViews"]) => boolean | void) =>
     mutateViews(set, get, mutate);
   return {
+    createSidebarView: () => {
+      let createdViewId: string | null = null;
+      mv((s) => {
+        if (s.draft || s.views.length >= MAX_SIDEBAR_VIEWS) return false;
+        const view = createDefaultSidebarView(makeId("view"), nextNewViewName(s.views));
+        s.views.push(view);
+        s.activeViewId = view.id;
+        createdViewId = view.id;
+      });
+      return createdViewId;
+    },
     toggleSidebarGroupCollapsed: (viewId: string, groupKey: string) =>
       mv((s) => {
         const view = s.views.find((v) => v.id === viewId);

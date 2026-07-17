@@ -15,7 +15,7 @@
  *   - Filter add/remove, negation, live list update
  *   - Sort + direction toggle
  *   - Group-by (repository, state, none)
- *   - Saved views CRUD (save-as, rename, delete)
+ *   - Direct saved-view creation plus save-as, rename, and delete
  *   - Persistence across reload
  *   - Draft semantics + discard
  *   - Last-view deletion guard
@@ -252,6 +252,125 @@ test.describe("Sidebar filter — group + sort", () => {
 });
 
 test.describe("Sidebar filter — saved views CRUD", () => {
+  test("direct creation starts from canonical defaults, focuses rename, and persists", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Direct View Task"]);
+
+    // Make the active source visibly non-default before creating the blank view.
+    await filters.addFilterRow();
+    await filters.setClauseDimension(0, "Title");
+    await filters.setClauseTextValue(0, "source-only");
+    await filters.setSort("Updated", "desc");
+    await filters.setGroup("State");
+    await filters.saveAs("Custom source");
+    await filters.close();
+
+    const renameInput = await filters.beginNewView();
+    await expect(renameInput).toHaveValue("New view");
+    await expect(filters.popover.getByTestId("filter-clause-row")).toHaveCount(0);
+    await expect(filters.popover.getByTestId("sort-key-select")).toContainText("Status");
+    await expect(filters.popover.getByTestId("sort-direction-toggle")).toHaveAttribute(
+      "data-direction",
+      "asc",
+    );
+    await expect(filters.popover.getByTestId("group-key-select")).toContainText("Repository");
+
+    await renameInput.fill("Planning view");
+    await filters.popover.getByTestId("view-rename-confirm").click();
+    await expect(filters.popover).toBeVisible();
+    await expect(filters.popover.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "Planning view",
+    );
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
+          (view) => view.name === "Planning view",
+        );
+      })
+      .toBe(true);
+
+    await testPage.reload();
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await new SidebarFilterPopoverPage(testPage).expectActiveViewChip("Planning view");
+  });
+
+  test("cancelling optional rename keeps automatic names and creates the next gap", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Auto Name Task"]);
+
+    await filters.beginNewView();
+    await filters.popover.getByRole("button", { name: "Cancel" }).click();
+    await expect(filters.popover.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "New view",
+    );
+    await filters.close();
+
+    const secondName = await filters.beginNewView();
+    await expect(secondName).toHaveValue("New view 2");
+    await filters.popover.getByRole("button", { name: "Cancel" }).click();
+    await filters.close();
+    await filters.expectChipOrder(["All tasks", "New view", "New view 2"]);
+  });
+
+  test("direct creation explains dirty-draft and saved-view-limit blocks", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Blocked View Task"]);
+    await filters.addFilterRow();
+    await filters.close();
+    await filters.openViewPicker();
+    await expect(filters.newViewAction).toHaveAttribute("aria-disabled", "true");
+    await expect(filters.newViewAction).toHaveAttribute("aria-label", /save or discard changes/i);
+    await filters.closeViewPicker();
+    await filters.open();
+    await expect(filters.popover.getByTestId("sidebar-filter-dirty-indicator")).toBeVisible();
+    await filters.discard();
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return settings.sidebar_draft ?? null;
+      })
+      .toBeNull();
+
+    const limitViews = Array.from({ length: 50 }, (_, index) => ({
+      id: `limit-view-${index}`,
+      name: `Limit view ${index + 1}`,
+      filters: [],
+      sort: { key: "state", direction: "asc" },
+      group: "repository",
+      collapsed_groups: [],
+    }));
+    const response = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      sidebar_views: limitViews,
+      sidebar_active_view_id: limitViews[0].id,
+      sidebar_draft: null,
+    });
+    expect(response.ok).toBe(true);
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return (settings.sidebar_views as unknown[] | undefined)?.length;
+      })
+      .toBe(50);
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    const reloaded = new SidebarFilterPopoverPage(testPage);
+    await reloaded.openViewPicker();
+    await reloaded.newViewAction.scrollIntoViewIfNeeded();
+    await expect(reloaded.newViewAction).toHaveAttribute("aria-disabled", "true");
+    await expect(reloaded.newViewAction).toHaveAttribute("aria-label", /up to 50 views/i);
+  });
+
   test("save-as creates a new chip and selects it", async ({ testPage, apiClient, seedData }) => {
     const { filters } = await openWithSeed(testPage, apiClient, seedData, ["View CRUD Task"]);
     await filters.addFilterRow();

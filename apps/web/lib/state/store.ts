@@ -524,6 +524,7 @@ export type AppState = {
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
+  createSidebarView: UIA["createSidebarView"];
   updateSidebarDraft: UIA["updateSidebarDraft"];
   saveSidebarDraftAs: UIA["saveSidebarDraftAs"];
   saveSidebarDraftOverwrite: UIA["saveSidebarDraftOverwrite"];

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
 import type { SidebarView } from "@/lib/state/slices/ui/sidebar-view-types";
@@ -16,16 +16,20 @@ type HeaderProps = {
   onRename: (id: string, name: string) => void;
   onDiscard: () => void;
   onDelete: () => void;
+  renameRequestedViewId?: string | null;
+  onRenameRequestHandled?: (viewId: string) => void;
 };
 
 export function ViewHeaderRow(props: HeaderProps) {
   const [mode, setMode] = useState<HeaderMode>("view");
   const [nameDraft, setNameDraft] = useState("");
+  const [editingViewId, setEditingViewId] = useState<string | null>(null);
   const isEditing = mode !== "view";
 
   function enterRename() {
     if (!props.activeView) return;
     setNameDraft(props.activeView.name);
+    setEditingViewId(props.activeView.id);
     setMode("rename");
   }
   function enterSaveAs() {
@@ -35,6 +39,7 @@ export function ViewHeaderRow(props: HeaderProps) {
   function exit() {
     setMode("view");
     setNameDraft("");
+    setEditingViewId(null);
   }
   function submit() {
     const trimmed = nameDraft.trim();
@@ -43,6 +48,22 @@ export function ViewHeaderRow(props: HeaderProps) {
     else if (mode === "saveAs") props.onSaveAs(trimmed);
     exit();
   }
+
+  useLayoutEffect(() => {
+    const requestedViewId = props.renameRequestedViewId;
+    if (!requestedViewId || props.activeView?.id !== requestedViewId) return;
+    setNameDraft(props.activeView.name);
+    setEditingViewId(requestedViewId);
+    setMode("rename");
+    props.onRenameRequestHandled?.(requestedViewId);
+  }, [props.activeView, props.onRenameRequestHandled, props.renameRequestedViewId]);
+
+  useLayoutEffect(() => {
+    if (mode !== "rename" || !editingViewId || props.activeView?.id === editingViewId) return;
+    setMode("view");
+    setNameDraft("");
+    setEditingViewId(null);
+  }, [editingViewId, mode, props.activeView?.id]);
 
   return (
     <div className="flex items-center justify-between gap-2">
@@ -112,9 +133,17 @@ function NameInput({
   onSubmit: () => void;
   onCancel: () => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useLayoutEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
   return (
     <Input
-      autoFocus
+      ref={inputRef}
+      aria-label={mode === "rename" ? "View name" : "New view name"}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       onKeyDown={(e) => {

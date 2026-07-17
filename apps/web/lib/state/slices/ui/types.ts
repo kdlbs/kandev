@@ -217,6 +217,7 @@ export type UISliceActions = {
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;
   setSidebarActiveView: (viewId: string) => void;
+  createSidebarView: () => string | null;
   updateSidebarDraft: (
     patch: Partial<{ filters: FilterClause[]; sort: SortSpec; group: GroupKey }>,
   ) => void;
