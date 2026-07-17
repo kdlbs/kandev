@@ -336,6 +336,17 @@ test("rejects an experimental warning as the only content in a status section", 
   );
 });
 
+test("accepts an experimental status section with substantive content", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": `${validPage}\n## Office status\n\n> [!EXPERIMENTAL]\n> Office is disabled by default.\n\nUse workflow approval steps for the supported human-gated path.\n`,
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
 test("rejects published pages without title and description frontmatter", async () => {
   const dir = await createDocs(
     { "index.md": "# Kandev\n" },
