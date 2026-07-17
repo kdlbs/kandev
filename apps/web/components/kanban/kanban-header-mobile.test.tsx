@@ -7,14 +7,17 @@ import { KanbanHeaderMobile } from "./kanban-header-mobile";
 vi.mock("@/components/page-topbar", () => ({
   PageTopbar: ({
     backLabel,
+    leading,
     leftActions,
     actions,
   }: {
     backLabel?: string;
+    leading?: ReactNode;
     leftActions?: ReactNode;
     actions?: ReactNode;
   }) => (
     <header>
+      {leading}
       <span>{backLabel}</span>
       <div data-testid="topbar-left-actions">{leftActions}</div>
       <div>{actions}</div>
@@ -44,12 +47,13 @@ afterEach(() => {
   quickChatMocks.openQuickChat.mockClear();
 });
 
-function renderHeader(title: string, workspaceId?: string) {
+function renderHeader(title: string, workspaceId?: string, onSearchChange?: () => void) {
   return render(
     <StateProvider>
       <KanbanHeaderMobile
         title={title}
         workspaceId={workspaceId}
+        onSearchChange={onSearchChange}
         workspaceLabel="/root/kandev"
         showHealthIndicator={false}
         onOpenHealthDialog={() => undefined}
@@ -59,12 +63,13 @@ function renderHeader(title: string, workspaceId?: string) {
 }
 
 describe("KanbanHeaderMobile", () => {
-  it("renders the Home title in compact root chrome", () => {
-    renderHeader("Home");
+  it("links the Kandev brand home and omits the redundant Home title", () => {
+    renderHeader("Home", "workspace-1");
 
-    expect(screen.getByText("Kandev")).toBeTruthy();
-    expect(screen.getByTestId(LEFT_ACTIONS_TEST_ID).textContent).toContain("Home");
-    expect(screen.getByTestId(LEFT_ACTIONS_TEST_ID).textContent).not.toContain("/root/kandev");
+    expect(screen.getByRole("link", { name: "Kandev home" }).getAttribute("href")).toBe(
+      "/?workspaceId=workspace-1",
+    );
+    expect(screen.getByTestId(LEFT_ACTIONS_TEST_ID).textContent).toBe("");
   });
 
   it("renders page title and workspace label for non-Home pages", () => {
@@ -87,5 +92,13 @@ describe("KanbanHeaderMobile", () => {
     renderHeader("Home");
 
     expect(screen.queryByTestId(QUICK_CHAT_TEST_ID)).toBeNull();
+  });
+
+  it("places quick chat immediately before search", () => {
+    renderHeader("Home", "workspace-1", vi.fn());
+
+    const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
+    const search = screen.getByTestId("mobile-search-toggle");
+    expect(quickChat.nextElementSibling).toBe(search);
   });
 });
