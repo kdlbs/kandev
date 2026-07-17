@@ -37,15 +37,18 @@ test.describe("Workflow settings", () => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
-    // Create a new workflow from the first available template
-    await page.createWorkflow("Template Test Workflow");
+    // Select a known template so the step-level assertions do not depend on template ordering.
+    await page.createWorkflow("Template Test Workflow", "Kanban");
 
     // Verify the new card appears
     const card = await page.findWorkflowCard("Template Test Workflow");
     await expect(card).toBeVisible();
     await expect(card).toHaveAttribute("data-settings-dirty", "true");
     await expect(card.locator("input").first()).toHaveAttribute("data-settings-dirty", "true");
-    await expect(page.stepNodeByName(card, "Todo")).toHaveAttribute("data-settings-dirty", "true");
+    await expect(page.stepNodeByName(card, "Backlog")).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
 
     const beforeSave = await apiClient.listWorkflows(seedData.workspaceId);
     expect(
@@ -56,7 +59,7 @@ test.describe("Workflow settings", () => {
 
     const savedCard = await page.findWorkflowCard("Template Test Workflow");
     await expect(savedCard).toHaveAttribute("data-settings-dirty", "false");
-    await expect(page.stepNodeByName(savedCard, "Todo")).toHaveAttribute(
+    await expect(page.stepNodeByName(savedCard, "Backlog")).toHaveAttribute(
       "data-settings-dirty",
       "false",
     );
