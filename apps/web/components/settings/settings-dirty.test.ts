@@ -5,6 +5,8 @@ describe("settings dirty comparisons", () => {
   it("compares membership without depending on array order", () => {
     expect(isSetMembershipDirty(["go", "typescript"], ["typescript", "go"])).toBe(false);
     expect(isSetMembershipDirty(["go"], ["go", "typescript"])).toBe(true);
+    expect(isSetMembershipDirty(["go", "go"], ["go", "typescript"])).toBe(true);
+    expect(isSetMembershipDirty(["go", "go"], ["go"])).toBe(false);
   });
 
   it("marks only the changed record entry", () => {

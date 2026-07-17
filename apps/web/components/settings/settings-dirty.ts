@@ -2,8 +2,10 @@ export function isSetMembershipDirty(
   draft: readonly string[],
   baseline: readonly string[],
 ): boolean {
-  if (draft.length !== baseline.length) return true;
-  return draft.some((value) => !baseline.includes(value));
+  const draftValues = new Set(draft);
+  const baselineValues = new Set(baseline);
+  if (draftValues.size !== baselineValues.size) return true;
+  return [...draftValues].some((value) => !baselineValues.has(value));
 }
 
 export function isDraftEntryDirty(
