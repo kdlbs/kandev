@@ -124,6 +124,9 @@ function ConfigFieldControl({
     <Input
       id={inputId}
       type={inputType(field)}
+      // step="1" on integer fields nudges the browser to flag non-integral
+      // input in-place; serializeConfigValues still rejects it as a backstop.
+      step={!field.secret && field.type === "integer" ? "1" : undefined}
       value={typeof value === "string" ? value : ""}
       disabled={disabled}
       autoComplete={field.secret ? "off" : undefined}

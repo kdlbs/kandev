@@ -179,11 +179,18 @@ func mergeMaskedSecrets(incoming, existing map[string]any, schema map[string]any
 }
 
 // validateConfigSchema checks config against the author-declared
-// config_schema. Deliberately a small JSON-Schema subset — required fields,
-// primitive types (string/boolean/number/integer), and enum membership on
-// declared properties. Undeclared keys and richer schema constructs are
-// permitted: the schema is advisory authoring metadata, not a hard sandbox.
-func validateConfigSchema(config map[string]any, schema map[string]any) error {
+// config_schema for pluginID. Deliberately a small JSON-Schema subset —
+// required fields, primitive types (string/boolean/number/integer), and enum
+// membership on declared properties. Undeclared keys and richer schema
+// constructs are permitted: the schema is advisory authoring metadata, not a
+// hard sandbox.
+//
+// A secret field that was left unchanged carries its own vault reference (an
+// internal storage marker) rather than a user value — the cleartext was
+// already validated when it was first set. Such a value is skipped, so a
+// field declaring both `secret: true` and e.g. `enum: [...]` does not 400 on
+// every save that keeps the mask (the ref is not one of the enum values).
+func validateConfigSchema(pluginID string, config map[string]any, schema map[string]any) error {
 	if err := checkRequiredKeys(config, schema); err != nil {
 		return err
 	}
@@ -198,6 +205,9 @@ func validateConfigSchema(config map[string]any, schema map[string]any) error {
 		}
 		value, present := config[name]
 		if !present {
+			continue
+		}
+		if isConfigVaultRef(pluginID, name, value) {
 			continue
 		}
 		if err := checkPropertyValue(name, value, prop); err != nil {

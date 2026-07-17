@@ -356,7 +356,7 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 		return err
 	}
 	merged := mergeMaskedSecrets(config, existing, rec.ConfigSchema)
-	if err := validateConfigSchema(merged, rec.ConfigSchema); err != nil {
+	if err := validateConfigSchema(rec.ID, merged, rec.ConfigSchema); err != nil {
 		return err
 	}
 	stored, removedSecrets, rollbackVault, err := s.storeConfigSecrets(ctx, rec, merged)
@@ -453,17 +453,32 @@ func (s *Service) storeConfigSecrets(
 		vaultID := pluginConfigSecretID(rec.ID, field)
 		restore, snapErr := s.vaultRestoreFunc(ctx, rollbackCtx, vaultID)
 		if snapErr != nil {
-			_ = runRollback()
+			s.warnIfRollbackFailed(rec.ID, runRollback())
 			return nil, nil, noRollback, snapErr
 		}
 		if err := s.secrets.Set(ctx, vaultID, vaultID, cleartext); err != nil {
-			_ = runRollback()
+			s.warnIfRollbackFailed(rec.ID, runRollback())
 			return nil, nil, noRollback, fmt.Errorf("plugins: store secret config field %q: %w", field, err)
 		}
 		restores = append(restores, restore)
 		out[field] = configVaultRef(rec.ID, field)
 	}
 	return out, removedSecrets, runRollback, nil
+}
+
+// warnIfRollbackFailed logs a mid-loop vault rollback failure. A double
+// fault (a vault write succeeded, then its rollback also failed) can leave
+// earlier fields' vault entries at their new values while the config file is
+// unchanged — making a failed request silently change effective config for
+// those fields. It is very unlikely (needs a transient vault failure on both
+// the write and the compensating write) and uninstall's namespace purge is a
+// backstop, but surfacing it makes the inconsistency observable rather than
+// silent.
+func (s *Service) warnIfRollbackFailed(pluginID string, err error) {
+	if err != nil {
+		s.log.Warn("plugins: vault rollback failed after a store error; config may be inconsistent",
+			zap.String("plugin_id", pluginID), zap.Error(err))
+	}
 }
 
 // vaultRestoreFunc snapshots vaultID's current value (read on readCtx) and

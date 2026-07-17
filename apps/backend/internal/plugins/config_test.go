@@ -167,7 +167,7 @@ func TestValidateConfigSchema(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := validateConfigSchema(tc.config, schema)
+			err := validateConfigSchema("test-plugin", tc.config, schema)
 			if tc.wantErr && !errors.Is(err, ErrConfigInvalid) {
 				t.Fatalf("error = %v, want ErrConfigInvalid", err)
 			}
@@ -179,7 +179,7 @@ func TestValidateConfigSchema(t *testing.T) {
 }
 
 func TestValidateConfigSchemaNilSchemaIsPermissive(t *testing.T) {
-	if err := validateConfigSchema(map[string]any{"anything": 1}, nil); err != nil {
+	if err := validateConfigSchema("test-plugin", map[string]any{"anything": 1}, nil); err != nil {
 		t.Fatalf("nil schema should accept anything, got %v", err)
 	}
 }
@@ -635,11 +635,101 @@ func TestValidateConfigSchemaNumericEnumAcceptsJSONFloat(t *testing.T) {
 		},
 	}
 	// ...while an HTTP JSON submit arrives as float64.
-	if err := validateConfigSchema(map[string]any{"level": float64(2)}, schema); err != nil {
+	if err := validateConfigSchema("test-plugin", map[string]any{"level": float64(2)}, schema); err != nil {
 		t.Fatalf("numeric enum should accept float64(2) against int enum: %v", err)
 	}
-	if err := validateConfigSchema(map[string]any{"level": float64(9)}, schema); !errors.Is(err, ErrConfigInvalid) {
+	if err := validateConfigSchema("test-plugin", map[string]any{"level": float64(9)}, schema); !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("out-of-enum numeric should still be rejected, got %v", err)
+	}
+}
+
+func TestValidateConfigSchemaSkipsOwnVaultRefForSecretEnumField(t *testing.T) {
+	const pluginID = "kandev-plugin-github"
+	// A field that is BOTH secret and enum: on an unchanged save it carries
+	// its vault ref, which is none of the enum values.
+	schema := map[string]any{
+		"properties": map[string]any{
+			"env": map[string]any{"type": "string", "secret": true, "enum": []any{"dev", "ops"}},
+		},
+	}
+
+	// The field's own vault ref (an internal marker) must validate — it was
+	// checked when the cleartext was first set.
+	if err := validateConfigSchema(pluginID, map[string]any{"env": configVaultRef(pluginID, "env")}, schema); err != nil {
+		t.Fatalf("own vault ref for a secret+enum field should validate, got %v", err)
+	}
+	// A freshly-entered value is still validated against the enum.
+	if err := validateConfigSchema(pluginID, map[string]any{"env": "dev"}, schema); err != nil {
+		t.Fatalf("valid enum value should pass, got %v", err)
+	}
+	if err := validateConfigSchema(pluginID, map[string]any{"env": "prod"}, schema); !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("out-of-enum value should still be rejected, got %v", err)
+	}
+	// A ref belonging to a DIFFERENT plugin is not this field's ref, so it is
+	// not skipped and fails the enum check.
+	if err := validateConfigSchema(pluginID, map[string]any{"env": configVaultRef("other", "env")}, schema); !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("a foreign vault ref must not bypass validation, got %v", err)
+	}
+}
+
+// testPackageWithSecretEnumSchema builds a package whose manifest declares a
+// field that is both secret and enum — the combination Greptile flagged as
+// 400-ing on every unchanged save.
+func testPackageWithSecretEnumSchema(t *testing.T, id string) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: 1.0.0
+display_name: Secret Enum Plugin
+capabilities:
+  state: true
+config_schema:
+  type: object
+  required: ["env"]
+  properties:
+    env:
+      type: string
+      secret: true
+      enum: ["dev", "ops"]
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+`, id, platformKey)
+
+	var buf bytes.Buffer
+	files := map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}
+	if err := pkgtartest.WritePackage(&buf, files); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
+func TestServiceUpdateConfigUnchangedSecretEnumFieldSaves(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	svc.SetSecrets(newFakeSecretRevealer())
+	if _, err := svc.Install(context.Background(), testPackageWithSecretEnumSchema(t, "kandev-plugin-se")); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	ctx := context.Background()
+
+	// First save with a valid enum value.
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-se", map[string]any{"env": "dev"}); err != nil {
+		t.Fatalf("initial UpdateConfig: %v", err)
+	}
+	// Re-save unchanged (mask): the stored value is now a vault ref, which must
+	// not 400 on the enum check.
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-se", map[string]any{"env": configSecretMask}); err != nil {
+		t.Fatalf("unchanged re-save of a secret+enum field must succeed, got %v", err)
+	}
+	// Changing to an out-of-enum value is still rejected.
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-se", map[string]any{"env": "prod"}); !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("out-of-enum value should be rejected, got %v", err)
 	}
 }
 
@@ -651,12 +741,12 @@ func TestValidateConfigSchemaRejectsNonStringSecretValues(t *testing.T) {
 	}
 	// A non-string secret would bypass vault storage and persist cleartext —
 	// it must be rejected before it can ever reach the store.
-	if err := validateConfigSchema(map[string]any{"pin": float64(1234)}, schema); !errors.Is(err, ErrConfigInvalid) {
+	if err := validateConfigSchema("test-plugin", map[string]any{"pin": float64(1234)}, schema); !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("non-string secret must be rejected, got %v", err)
 	}
 	// Absent stays allowed (an explicit null is already rejected by the
 	// property type check — clients omit unset keys).
-	if err := validateConfigSchema(map[string]any{}, schema); err != nil {
+	if err := validateConfigSchema("test-plugin", map[string]any{}, schema); err != nil {
 		t.Fatalf("absent secret should be fine, got %v", err)
 	}
 }
