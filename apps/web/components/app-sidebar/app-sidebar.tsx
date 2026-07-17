@@ -201,6 +201,8 @@ export function AppSidebar() {
           "absolute inset-y-0 left-0 flex min-h-0 flex-col border-r border-border bg-background",
           // The panel is outside root flex flow, so its transition cannot make
           // the workbench or Dockview reflow on intermediate animation frames.
+          // On collapse it briefly overdraws the snapped layout slot and stays
+          // interactive so the new rail can be expanded again immediately.
           isResizing
             ? "transition-none"
             : "transition-[width] duration-300 ease-out motion-reduce:transition-none",

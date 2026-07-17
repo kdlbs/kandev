@@ -52,7 +52,7 @@ type SidebarToggleFrame = {
 
 type SidebarToggleCapture = {
   frames: SidebarToggleFrame[];
-  transitionDurationMs: number;
+  widthTransitionDurationMs: number;
   transitionProperties: string[];
 };
 
@@ -102,15 +102,18 @@ async function captureSidebarToggleFrames(
       };
 
       const panelStyle = getComputedStyle(panel);
-      const transitionDurationMs = Math.max(
-        ...panelStyle.transitionDuration.split(",").map((duration) => {
-          const value = Number.parseFloat(duration);
-          return duration.trim().endsWith("ms") ? value : value * 1000;
-        }),
-      );
       const transitionProperties = panelStyle.transitionProperty
         .split(",")
         .map((property) => property.trim());
+      const transitionDurationsMs = panelStyle.transitionDuration.split(",").map((duration) => {
+        const value = Number.parseFloat(duration);
+        return duration.trim().endsWith("ms") ? value : value * 1000;
+      });
+      const widthTransitionIndex = transitionProperties.indexOf("width");
+      const widthTransitionDurationMs =
+        widthTransitionIndex < 0
+          ? 0
+          : (transitionDurationsMs[widthTransitionIndex % transitionDurationsMs.length] ?? 0);
       const frames = [readFrame()];
       button.click();
       const sampleUntil = performance.now() + 400;
@@ -122,7 +125,7 @@ async function captureSidebarToggleFrames(
         });
         frames.push(readFrame());
       } while (performance.now() < sampleUntil);
-      return { frames, transitionDurationMs, transitionProperties };
+      return { frames, widthTransitionDurationMs, transitionProperties };
     },
     { label: buttonLabel, paneTarget: target },
   );
@@ -152,8 +155,8 @@ function expectStableAnimatedToggle(capture: SidebarToggleCapture): void {
   expectStable("Right pane content width", (frame) => frame.contentWidth);
 
   expect(capture.transitionProperties).toContain("width");
-  expect(capture.transitionDurationMs).toBeGreaterThanOrEqual(290);
-  expect(capture.transitionDurationMs).toBeLessThanOrEqual(310);
+  expect(capture.widthTransitionDurationMs).toBeGreaterThanOrEqual(290);
+  expect(capture.widthTransitionDurationMs).toBeLessThanOrEqual(310);
 
   const layoutChanges = changedFrames((frame) => frame.layoutWidth);
   expect(
@@ -250,14 +253,18 @@ test.describe("Toggle sidebar shortcut (global)", () => {
       path.join(backend.tmpDir, "repos", "e2e-repo"),
       makeGitEnv(backend.tmpDir),
     );
-    git.modifyFile("walkthrough_base.txt", "changed while checking sidebar stability\n");
+    try {
+      git.modifyFile("walkthrough_base.txt", "changed while checking sidebar stability\n");
 
-    await session.clickTab("Changes");
-    await expect(session.changes).toBeVisible();
-    await expect(session.changesFileRow("walkthrough_base.txt")).toBeVisible({ timeout: 15_000 });
-    await expectStablePaneDuringSidebarToggle(testPage, {
-      panelTestId: "changes-panel",
-      contentSelector: '[data-changes-file="walkthrough_base.txt"]',
-    });
+      await session.clickTab("Changes");
+      await expect(session.changes).toBeVisible();
+      await expect(session.changesFileRow("walkthrough_base.txt")).toBeVisible({ timeout: 15_000 });
+      await expectStablePaneDuringSidebarToggle(testPage, {
+        panelTestId: "changes-panel",
+        contentSelector: '[data-changes-file="walkthrough_base.txt"]',
+      });
+    } finally {
+      git.exec('git checkout -- "walkthrough_base.txt"');
+    }
   });
 });

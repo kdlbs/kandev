@@ -67,22 +67,14 @@ test.describe("Sidebar header / top bar alignment", () => {
     const topbar = testPage.getByTestId("task-topbar");
     await expect(topbar).toBeVisible({ timeout: 30_000 });
 
-    // The sidebar header is the first child of the sidebar aside; tag-agnostic,
-    // we measure the aside-relative header via its testid-less first row by
-    // reading the task-topbar against the sidebar header height (both 40px).
-    const headerBottom = await testPage.evaluate(() => {
-      const aside = document.querySelector('[data-testid="app-sidebar"]');
-      const header = aside?.firstElementChild as HTMLElement | null;
-      if (!header) return null;
-      const r = header.getBoundingClientRect();
-      return r.y + r.height;
-    });
-    expect(headerBottom).not.toBeNull();
-
+    // Read the named header directly so layout wrappers can change without
+    // weakening the alignment check (both top bars are 40px high).
+    await expect(testPage.getByTestId("app-sidebar-header")).toBeVisible();
+    const headerBottom = await bottomOf(testPage, "app-sidebar-header");
     const topbarBottom = await bottomOf(testPage, "task-topbar");
 
     // Allow 1px for sub-pixel rounding of the shared border line.
-    expect(Math.abs((headerBottom as number) - topbarBottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs(headerBottom - topbarBottom)).toBeLessThanOrEqual(1);
   });
 
   test("task metrics match the height of the task action controls", async ({
