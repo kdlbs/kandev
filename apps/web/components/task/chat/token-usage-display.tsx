@@ -120,6 +120,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   const strokeDashoffset = circumference * (1 - progress);
 
   return (
+    // The UI wrapper defaults this to true; nested source help must remain reachable.
     <TooltipProvider disableHoverableContent={false}>
       <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
         <TooltipTrigger asChild>

@@ -178,8 +178,10 @@ describe("TokenUsageDisplay context source", () => {
       source: "api",
     });
 
-    const { getByText } = render(<TokenUsageDisplay sessionId="sess-1" />);
+    const { getByText, getByLabelText } = render(<TokenUsageDisplay sessionId="sess-1" />);
 
     expect(getByText("API")).toBeDefined();
+    expect(getByLabelText("About context window source")).toBeDefined();
+    expect(getByText(/model's advertised maximum from the catalogue/i)).toBeDefined();
   });
 });

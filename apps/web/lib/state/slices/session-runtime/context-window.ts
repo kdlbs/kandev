@@ -18,6 +18,6 @@ export function parseContextWindowEntry(
     remaining: (contextWindow.remaining as number) ?? 0,
     efficiency: (contextWindow.efficiency as number) ?? 0,
     source,
-    timestamp: timestamp ?? (contextWindow.timestamp as string) ?? undefined,
+    timestamp: timestamp ?? (contextWindow.timestamp as string | undefined),
   };
 }
