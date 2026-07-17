@@ -1,7 +1,7 @@
 // Package secretadapter wraps a global secrets.SecretStore so per-integration
 // services (jira, linear, future) can use a small, upsert-style API without
 // each one re-implementing the Create-or-Update fallback or the
-// "secret not found:" string-prefix check.
+// secrets.ErrNotFound absence check.
 //
 // A single Adapter satisfies any integration's local SecretStore interface
 // shaped as { Reveal, Set, Delete, Exists } — Go's structural typing means
@@ -10,7 +10,7 @@ package secretadapter
 
 import (
 	"context"
-	"strings"
+	"errors"
 
 	"github.com/kandev/kandev/internal/secrets"
 )
@@ -33,8 +33,8 @@ func (a *Adapter) Reveal(ctx context.Context, id string) (string, error) {
 // Set upserts the secret value: tries Update first, falls back to Create
 // when the secret does not yet exist.
 func (a *Adapter) Set(ctx context.Context, id, name, value string) error {
-	// Detect existence via Exists (which inspects the "secret not found:"
-	// prefix) instead of treating any Get error as "not found": a transient
+	// Detect existence via Exists (which matches secrets.ErrNotFound)
+	// instead of treating any Get error as "not found": a transient
 	// DB error on an existing row would otherwise turn into a constraint-
 	// violation Create that masks the real cause.
 	exists, err := a.Exists(ctx, id)
@@ -77,9 +77,9 @@ func (a *Adapter) ListIDs(ctx context.Context) ([]string, error) {
 func (a *Adapter) Exists(ctx context.Context, id string) (bool, error) {
 	_, err := a.store.Get(ctx, id)
 	if err != nil {
-		// secrets layer reports "not found" via fmt.Errorf with the
-		// "secret not found:" prefix; treat that as the absence case.
-		if strings.HasPrefix(err.Error(), "secret not found:") {
+		// secrets layer reports an absent entry via secrets.ErrNotFound;
+		// treat that as the absence case, any other error as a fault.
+		if errors.Is(err, secrets.ErrNotFound) {
 			return false, nil
 		}
 		return false, err

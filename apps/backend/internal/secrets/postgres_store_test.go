@@ -2,7 +2,7 @@ package secrets
 
 import (
 	"context"
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/testutil"
@@ -86,7 +86,7 @@ func TestPostgresStoreRoundTrip(t *testing.T) {
 	if err := store.Delete(ctx, secret.ID); err != nil {
 		t.Fatalf("delete secret: %v", err)
 	}
-	if _, err := store.Get(ctx, secret.ID); err == nil || !strings.Contains(err.Error(), "secret not found") {
-		t.Fatalf("get deleted secret error = %v, want not found", err)
+	if _, err := store.Get(ctx, secret.ID); err == nil || !errors.Is(err, ErrNotFound) {
+		t.Fatalf("get deleted secret error = %v, want secrets.ErrNotFound", err)
 	}
 }

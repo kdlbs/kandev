@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/store"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
@@ -197,7 +198,7 @@ func (v *fakeSecretRevealer) Reveal(_ context.Context, ref string) (string, erro
 	defer v.mu.Unlock()
 	value, ok := v.values[ref]
 	if !ok {
-		return "", fmt.Errorf("secret not found: %s", ref)
+		return "", fmt.Errorf("%w: %s", secrets.ErrNotFound, ref)
 	}
 	return value, nil
 }
@@ -213,7 +214,7 @@ func (v *fakeSecretRevealer) Delete(_ context.Context, id string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if _, ok := v.values[id]; !ok {
-		return fmt.Errorf("secret not found: %s", id)
+		return fmt.Errorf("%w: %s", secrets.ErrNotFound, id)
 	}
 	delete(v.values, id)
 	return nil

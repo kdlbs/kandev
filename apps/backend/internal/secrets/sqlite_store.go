@@ -84,7 +84,7 @@ func (s *sqliteStore) Get(ctx context.Context, id string) (*Secret, error) {
 		FROM secrets WHERE id = ?`), id)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("secret not found: %s", id)
+			return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
 		}
 		return nil, fmt.Errorf("get secret: %w", err)
 	}
@@ -98,7 +98,7 @@ func (s *sqliteStore) Reveal(ctx context.Context, id string) (string, error) {
 		Scan(&ciphertext, &nonce)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", fmt.Errorf("secret not found: %s", id)
+			return "", fmt.Errorf("%w: %s", ErrNotFound, id)
 		}
 		return "", fmt.Errorf("reveal secret: %w", err)
 	}
@@ -155,7 +155,7 @@ func (s *sqliteStore) Delete(ctx context.Context, id string) error {
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("secret not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrNotFound, id)
 	}
 	return nil
 }

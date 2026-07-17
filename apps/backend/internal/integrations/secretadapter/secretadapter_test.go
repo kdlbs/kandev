@@ -3,6 +3,7 @@ package secretadapter
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/secrets"
@@ -37,7 +38,7 @@ func (f *fakeStore) Get(_ context.Context, id string) (*secrets.Secret, error) {
 		return nil, f.getErr
 	}
 	if _, ok := f.rows[id]; !ok {
-		return nil, errors.New("secret not found: " + id)
+		return nil, fmt.Errorf("%w: %s", secrets.ErrNotFound, id)
 	}
 	return &secrets.Secret{ID: id}, nil
 }
@@ -45,7 +46,7 @@ func (f *fakeStore) Get(_ context.Context, id string) (*secrets.Secret, error) {
 func (f *fakeStore) Reveal(_ context.Context, id string) (string, error) {
 	v, ok := f.rows[id]
 	if !ok {
-		return "", errors.New("secret not found: " + id)
+		return "", fmt.Errorf("%w: %s", secrets.ErrNotFound, id)
 	}
 	return v, nil
 }
@@ -55,7 +56,7 @@ func (f *fakeStore) Update(_ context.Context, id string, req *secrets.UpdateSecr
 		return err
 	}
 	if _, ok := f.rows[id]; !ok {
-		return errors.New("secret not found: " + id)
+		return fmt.Errorf("%w: %s", secrets.ErrNotFound, id)
 	}
 	if req.Value != nil {
 		f.rows[id] = *req.Value

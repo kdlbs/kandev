@@ -1,6 +1,15 @@
 package secrets
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+// ErrNotFound is the sentinel returned (wrapped) by store implementations when
+// a secret id is absent. Consumers that must tell "absent entry" apart from a
+// genuine backend fault should match with errors.Is(err, secrets.ErrNotFound)
+// rather than string-matching the error text.
+var ErrNotFound = errors.New("secret not found")
 
 // SecretStore abstracts secret storage. Implementations handle
 // encryption/decryption internally.
