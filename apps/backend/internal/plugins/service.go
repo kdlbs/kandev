@@ -368,7 +368,10 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 		// unchanged — restore the vault to match it, otherwise a field's
 		// unchanged ref would resolve to the new (uncommitted) value and a
 		// request reported as failed would have changed effective config.
-		rollbackVault()
+		if rbErr := rollbackVault(); rbErr != nil {
+			return errors.Join(fmt.Errorf("plugins: persist config: %w", err),
+				fmt.Errorf("plugins: vault rollback failed, effective config may be inconsistent: %w", rbErr))
+		}
 		return err
 	}
 	// Vault entries for removed secret fields are deleted only AFTER the
@@ -377,6 +380,13 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	s.cleanupRemovedConfigSecrets(ctx, rec.ID, removedSecrets, existing)
 	return s.restartForConfigChange(rec)
 }
+
+// errSecretVaultRequired is returned by storeConfigSecrets when a plugin
+// declares secret config fields but no vault is wired. It fails closed
+// rather than silently persisting the secret in cleartext — production
+// always wires the vault (Provide), so this only guards a misconfigured or
+// test setup.
+var errSecretVaultRequired = errors.New("plugins: a secret vault is required to store secret config fields")
 
 // storeConfigSecrets moves each secret config field's cleartext value into
 // the encrypted vault (id pluginConfigSecretID) and replaces it with the
@@ -387,7 +397,8 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 // absent from merged are returned as removedSecrets for the caller to
 // delete from the vault AFTER the config commit — deleting here would leave
 // the still-current config pointing at a missing entry if SetConfig then
-// failed.
+// failed. When a plugin declares secret fields but no vault is wired, it
+// fails closed (errSecretVaultRequired) rather than writing cleartext.
 //
 // The returned rollback restores every vault entry this call overwrote to
 // its prior value (or deletes it if it did not exist before), so the whole
@@ -395,34 +406,36 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 // earlier writes before returning, and the caller runs rollback if the
 // subsequent config commit fails — in both cases the vault ends up matching
 // the unchanged config file, so a failed request never changes the value a
-// still-current ref resolves to.
-//
-// With no vault wired (NewService without SetSecrets — tests, embedded uses)
-// values fall back to the config file itself, with a warning: functional,
-// but without at-rest encryption.
+// still-current ref resolves to. Rollback writes run on a context detached
+// from the caller's (context.WithoutCancel), so a request cancelled mid-save
+// cannot abort the rollback and leave the vault inconsistent with the
+// unchanged config file.
 func (s *Service) storeConfigSecrets(
 	ctx context.Context, rec *store.Record, merged map[string]any,
-) (stored map[string]any, removedSecrets []string, rollback func(), err error) {
-	noRollback := func() {}
+) (stored map[string]any, removedSecrets []string, rollback func() error, err error) {
+	noRollback := func() error { return nil }
 	secretFields := secretPropertyKeys(rec.ConfigSchema)
 	if len(secretFields) == 0 {
 		return merged, nil, noRollback, nil
 	}
 	if s.secrets == nil {
-		s.log.Warn("plugins: no secret vault wired; storing secret config fields in the config file",
-			zap.String("plugin_id", rec.ID))
-		return merged, nil, noRollback, nil
+		return nil, nil, noRollback, fmt.Errorf("%w (plugin %q)", errSecretVaultRequired, rec.ID)
 	}
 
 	out := make(map[string]any, len(merged))
 	for k, v := range merged {
 		out[k] = v
 	}
-	var restores []func()
-	runRollback := func() {
+	rollbackCtx := context.WithoutCancel(ctx)
+	var restores []func() error
+	runRollback := func() error {
+		var errs []error
 		for i := len(restores) - 1; i >= 0; i-- {
-			restores[i]()
+			if e := restores[i](); e != nil {
+				errs = append(errs, e)
+			}
 		}
+		return errors.Join(errs...)
 	}
 	for field := range secretFields {
 		value, present := out[field]
@@ -435,9 +448,13 @@ func (s *Service) storeConfigSecrets(
 			continue
 		}
 		vaultID := pluginConfigSecretID(rec.ID, field)
-		restore := s.vaultRestoreFunc(ctx, vaultID)
+		restore, snapErr := s.vaultRestoreFunc(ctx, rollbackCtx, vaultID)
+		if snapErr != nil {
+			_ = runRollback()
+			return nil, nil, noRollback, snapErr
+		}
 		if err := s.secrets.Set(ctx, vaultID, vaultID, cleartext); err != nil {
-			runRollback()
+			_ = runRollback()
 			return nil, nil, noRollback, fmt.Errorf("plugins: store secret config field %q: %w", field, err)
 		}
 		restores = append(restores, restore)
@@ -446,28 +463,30 @@ func (s *Service) storeConfigSecrets(
 	return out, removedSecrets, runRollback, nil
 }
 
-// vaultRestoreFunc snapshots vaultID's current value and returns a closure
-// that restores it: reset to the prior cleartext if the entry existed, or
-// delete it if it did not. Used to undo a config-secret write when the
-// config commit that would reference it fails. An unreadable prior value
-// (any Reveal error, including a genuine backend fault) is treated as
-// "absent" so rollback deletes the entry we created — the conservative
-// choice, since we could not confirm a value to restore.
-func (s *Service) vaultRestoreFunc(ctx context.Context, vaultID string) func() {
-	prior, err := s.secrets.Reveal(ctx, vaultID)
-	existed := err == nil
-	return func() {
-		if existed {
-			if setErr := s.secrets.Set(ctx, vaultID, vaultID, prior); setErr != nil {
-				s.log.Warn("plugins: failed to roll back secret config field in vault",
-					zap.String("vault_id", vaultID), zap.Error(setErr))
+// vaultRestoreFunc snapshots vaultID's current value (read on readCtx) and
+// returns a closure that restores it (writes on restoreCtx): reset to the
+// prior cleartext if the entry existed, or delete it if it did not. Used to
+// undo a config-secret write when the config commit that would reference it
+// fails. A not-found snapshot means "absent" (rollback deletes what we
+// create); any other Reveal error is a genuine backend fault where the prior
+// value cannot be determined — it returns an error so the caller aborts
+// before writing rather than risk a rollback that deletes a real secret.
+// restoreCtx is detached from the request so a cancelled save cannot abort
+// the rollback.
+func (s *Service) vaultRestoreFunc(readCtx, restoreCtx context.Context, vaultID string) (func() error, error) {
+	prior, err := s.secrets.Reveal(readCtx, vaultID)
+	switch {
+	case err == nil:
+		return func() error { return s.secrets.Set(restoreCtx, vaultID, vaultID, prior) }, nil
+	case isSecretNotFound(err):
+		return func() error {
+			if delErr := s.secrets.Delete(restoreCtx, vaultID); delErr != nil && !isSecretNotFound(delErr) {
+				return delErr
 			}
-			return
-		}
-		if delErr := s.secrets.Delete(ctx, vaultID); delErr != nil && !isSecretNotFound(delErr) {
-			s.log.Warn("plugins: failed to roll back (delete) secret config field in vault",
-				zap.String("vault_id", vaultID), zap.Error(delErr))
-		}
+			return nil
+		}, nil
+	default:
+		return nil, fmt.Errorf("plugins: cannot snapshot secret config field %q for rollback: %w", vaultID, err)
 	}
 }
 
@@ -731,10 +750,22 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	if _, err := s.Get(id); err != nil {
 		return err
 	}
+	wasRunning := s.runtime != nil && s.runtime.Running(id)
 	if s.runtime != nil {
 		s.runtime.Stop(id)
 	}
 	if err := s.deletePluginSecrets(ctx, id); err != nil {
+		// The process is stopped but nothing else was removed. If it had been
+		// running, its persisted status still says active — reconcile it to
+		// error and notify observers so it isn't reported as running while no
+		// process is, before returning the retryable failure.
+		if wasRunning {
+			if setErr := s.SetStatus(id, StatusError); setErr != nil {
+				s.log.Warn("plugins: could not mark plugin errored after an aborted uninstall",
+					zap.String("plugin_id", id), zap.Error(setErr))
+			}
+			s.notifyDeliverer()
+		}
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {

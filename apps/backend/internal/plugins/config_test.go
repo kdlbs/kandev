@@ -186,8 +186,8 @@ func TestValidateConfigSchemaNilSchemaIsPermissive(t *testing.T) {
 
 // --- service tests ---
 
-func TestServiceGetMaskedConfigMasksSecretsButStoresCleartext(t *testing.T) {
-	svc, fsStore, _ := newTestService(t)
+func TestServiceGetMaskedConfigMasksSecrets(t *testing.T) {
+	svc, fsStore, vault := newTestServiceWithVault(t)
 	installConfigPlugin(t, svc, "kandev-plugin-github")
 
 	err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{
@@ -208,17 +208,22 @@ func TestServiceGetMaskedConfigMasksSecretsButStoresCleartext(t *testing.T) {
 		t.Fatalf("masked org = %v, want kdlbs", masked["org"])
 	}
 
+	// The config file holds a vault ref, never the cleartext; the vault holds
+	// the cleartext.
 	stored, err := fsStore.GetConfig("kandev-plugin-github")
 	if err != nil {
 		t.Fatalf("store GetConfig: %v", err)
 	}
-	if stored["github_token"] != "ghp_real" {
-		t.Fatalf("stored github_token = %v, want cleartext ghp_real", stored["github_token"])
+	if stored["github_token"] != configVaultRef("kandev-plugin-github", "github_token") {
+		t.Fatalf("stored github_token = %v, want vault ref", stored["github_token"])
+	}
+	if v, _ := vault.get(pluginConfigSecretID("kandev-plugin-github", "github_token")); v != "ghp_real" {
+		t.Fatalf("vault value = %q, want cleartext ghp_real", v)
 	}
 }
 
 func TestServiceUpdateConfigPreservesMaskedSecret(t *testing.T) {
-	svc, fsStore, _ := newTestService(t)
+	svc, fsStore, vault := newTestServiceWithVault(t)
 	installConfigPlugin(t, svc, "kandev-plugin-github")
 
 	must := func(err error) {
@@ -233,10 +238,11 @@ func TestServiceUpdateConfigPreservesMaskedSecret(t *testing.T) {
 		"github_token": configSecretMask, "org": "kdlbs",
 	}))
 
-	stored, _ := fsStore.GetConfig("kandev-plugin-github")
-	if stored["github_token"] != "ghp_real" {
-		t.Fatalf("stored github_token = %v, want preserved ghp_real", stored["github_token"])
+	// The masked round trip keeps the vault's cleartext value; org updates.
+	if v, _ := vault.get(pluginConfigSecretID("kandev-plugin-github", "github_token")); v != "ghp_real" {
+		t.Fatalf("vault value = %q, want preserved ghp_real", v)
 	}
+	stored, _ := fsStore.GetConfig("kandev-plugin-github")
 	if stored["org"] != "kdlbs" {
 		t.Fatalf("stored org = %v, want kdlbs", stored["org"])
 	}
@@ -258,6 +264,7 @@ func TestServiceUpdateConfigInvalidRejectedAndNotPersisted(t *testing.T) {
 
 func TestServiceUpdateConfigRestartsRunningPlugin(t *testing.T) {
 	svc, _, rt := newTestService(t)
+	svc.SetSecrets(newFakeSecretRevealer())
 	installConfigPlugin(t, svc, "kandev-plugin-github") // Install activates -> running
 
 	if err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_x"}); err != nil {
@@ -277,6 +284,7 @@ func TestServiceUpdateConfigRestartsRunningPlugin(t *testing.T) {
 
 func TestServiceUpdateConfigDoesNotSpawnStoppedPlugin(t *testing.T) {
 	svc, _, rt := newTestService(t)
+	svc.SetSecrets(newFakeSecretRevealer())
 	installConfigPlugin(t, svc, "kandev-plugin-github")
 	if err := svc.Disable("kandev-plugin-github"); err != nil {
 		t.Fatalf("Disable: %v", err)
@@ -293,6 +301,8 @@ func TestServiceUpdateConfigDoesNotSpawnStoppedPlugin(t *testing.T) {
 
 func TestServiceUpdateConfigRestartFailurePersistsConfigAndSetsError(t *testing.T) {
 	svc, fsStore, rt := newTestService(t)
+	vault := newFakeSecretRevealer()
+	svc.SetSecrets(vault)
 	installConfigPlugin(t, svc, "kandev-plugin-github")
 	rt.setStartErr("kandev-plugin-github", errors.New("spawn boom"))
 
@@ -300,9 +310,14 @@ func TestServiceUpdateConfigRestartFailurePersistsConfigAndSetsError(t *testing.
 	if err == nil {
 		t.Fatalf("UpdateConfig should surface the restart failure")
 	}
+	// The config commit and vault write succeeded (only the restart failed):
+	// the config file keeps the ref, the vault keeps the value.
 	stored, _ := fsStore.GetConfig("kandev-plugin-github")
-	if stored["github_token"] != "ghp_x" {
+	if stored["github_token"] != configVaultRef("kandev-plugin-github", "github_token") {
 		t.Fatalf("config should persist despite restart failure, got %v", stored)
+	}
+	if v, _ := vault.get(pluginConfigSecretID("kandev-plugin-github", "github_token")); v != "ghp_x" {
+		t.Fatalf("vault value = %q, want ghp_x", v)
 	}
 	rec, _ := svc.Get("kandev-plugin-github")
 	if rec.Status != StatusError {
@@ -313,13 +328,20 @@ func TestServiceUpdateConfigRestartFailurePersistsConfigAndSetsError(t *testing.
 // --- host RPC tests ---
 
 func TestPluginHostGetConfigReturnsCleartextConfig(t *testing.T) {
-	svc, fsStore, _ := newTestService(t)
-	installConfigPlugin(t, svc, "kandev-plugin-github")
+	svc, fsStore, vault := newTestServiceWithVault(t)
+	rec := installConfigPlugin(t, svc, "kandev-plugin-github")
 	if err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_real"}); err != nil {
 		t.Fatalf("UpdateConfig: %v", err)
 	}
 
-	host := &pluginHost{pluginID: "kandev-plugin-github", configs: fsStore}
+	// The host resolves the config file's vault ref back to cleartext for the
+	// plugin process.
+	host := &pluginHost{
+		pluginID:     "kandev-plugin-github",
+		configSchema: rec.ConfigSchema,
+		configs:      fsStore,
+		secrets:      vault,
+	}
 	config, err := host.GetConfig(context.Background())
 	if err != nil {
 		t.Fatalf("GetConfig: %v", err)
@@ -673,9 +695,14 @@ func TestServiceUninstallFailsClosedWhenSecretCleanupFails(t *testing.T) {
 	if !rt.stopped("kandev-plugin-github") {
 		t.Fatalf("plugin must be stopped before the vault purge, even when the purge fails")
 	}
-	// Nothing destructive happened: record still installed, package on disk.
-	if _, getErr := svc.Get("kandev-plugin-github"); getErr != nil {
+	// Since the process was stopped, the persisted status must reflect that
+	// (error) rather than lie that the plugin is still active.
+	stoppedRec, getErr := svc.Get("kandev-plugin-github")
+	if getErr != nil {
 		t.Fatalf("record should survive a failed uninstall, got %v", getErr)
+	}
+	if stoppedRec.Status != StatusError {
+		t.Fatalf("status = %q, want error after an aborted uninstall stopped the process", stoppedRec.Status)
 	}
 	if _, statErr := os.Stat(rec.InstallPath); statErr != nil {
 		t.Fatalf("package dir should survive a failed uninstall, got %v", statErr)
@@ -786,5 +813,104 @@ func TestServiceUpdateConfigFailedCommitRollsBackNewlyCreatedSecret(t *testing.T
 	// it — no orphan left behind by a failed request.
 	if _, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "webhook_key")); ok {
 		t.Fatalf("newly-created secret must be rolled back (deleted) on a failed commit")
+	}
+}
+
+func TestServiceUpdateConfigFailsClosedWithoutVault(t *testing.T) {
+	svc, fsStore, _ := newTestService(t) // no vault wired
+	installConfigPlugin(t, svc, "kandev-plugin-github")
+
+	// A plugin declaring a secret field cannot store config without a vault:
+	// fail closed rather than persist the secret in cleartext.
+	err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_x"})
+	if !errors.Is(err, errSecretVaultRequired) {
+		t.Fatalf("error = %v, want errSecretVaultRequired", err)
+	}
+	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	if len(stored) != 0 {
+		t.Fatalf("nothing must persist when failing closed, got %v", stored)
+	}
+}
+
+// ctxAwareVault wraps fakeSecretRevealer and honors context cancellation on
+// Set/Delete, so a test can prove rollback writes run on a context detached
+// from a cancelled request.
+type ctxAwareVault struct {
+	*fakeSecretRevealer
+}
+
+func (v *ctxAwareVault) Set(ctx context.Context, id, name, value string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return v.fakeSecretRevealer.Set(ctx, id, name, value)
+}
+
+func (v *ctxAwareVault) Delete(ctx context.Context, id string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return v.fakeSecretRevealer.Delete(ctx, id)
+}
+
+func TestStoreConfigSecretsRollbackUsesDetachedContext(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	vault := &ctxAwareVault{fakeSecretRevealer: newFakeSecretRevealer()}
+	svc.SetSecrets(vault)
+	rec := installConfigPlugin(t, svc, "kandev-plugin-github")
+	vaultID := pluginConfigSecretID("kandev-plugin-github", "github_token")
+	vault.set(vaultID, "ghp_old")
+
+	// Stage a new value under a context that we then cancel before rollback,
+	// simulating the operator's browser closing mid-save.
+	ctx, cancel := context.WithCancel(context.Background())
+	_, _, rollback, err := svc.storeConfigSecrets(ctx, rec, map[string]any{"github_token": "ghp_new"})
+	if err != nil {
+		t.Fatalf("storeConfigSecrets: %v", err)
+	}
+	cancel()
+
+	// Rollback must still restore the prior value despite the cancelled ctx —
+	// it runs on a detached context.
+	if rbErr := rollback(); rbErr != nil {
+		t.Fatalf("rollback should succeed on a detached context, got %v", rbErr)
+	}
+	if v, _ := vault.get(vaultID); v != "ghp_old" {
+		t.Fatalf("vault value = %q, want restored ghp_old", v)
+	}
+}
+
+// revealErrVault injects a non-not-found Reveal error for one id, to prove
+// storeConfigSecrets refuses to write when a prior value cannot be
+// determined (rather than risk a rollback that deletes a real secret).
+type revealErrVault struct {
+	*fakeSecretRevealer
+	failRevealID string
+}
+
+func (v *revealErrVault) Reveal(ctx context.Context, id string) (string, error) {
+	if id == v.failRevealID {
+		return "", errors.New("vault backend unavailable")
+	}
+	return v.fakeSecretRevealer.Reveal(ctx, id)
+}
+
+func TestServiceUpdateConfigAbortsWhenPriorSecretUnreadable(t *testing.T) {
+	svc, fsStore, _ := newTestService(t)
+	vaultID := pluginConfigSecretID("kandev-plugin-github", "github_token")
+	vault := &revealErrVault{fakeSecretRevealer: newFakeSecretRevealer(), failRevealID: vaultID}
+	svc.SetSecrets(vault)
+	installConfigPlugin(t, svc, "kandev-plugin-github")
+
+	err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_x"})
+	if err == nil {
+		t.Fatalf("UpdateConfig must abort when the prior secret cannot be read")
+	}
+	if _, ok := vault.get(vaultID); ok {
+		t.Fatalf("no vault write should happen when the snapshot read fails")
+	}
+	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	if len(stored) != 0 {
+		t.Fatalf("nothing must persist when the update aborts, got %v", stored)
 	}
 }

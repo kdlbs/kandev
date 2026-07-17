@@ -48,6 +48,10 @@ func newTestRouter(t *testing.T) (*gin.Engine, *Service) {
 	gin.SetMode(gin.TestMode)
 	svc, _, _ := newTestService(t)
 	svc.SetState(newTestStateStore(t))
+	// A vault is mandatory for plugins with secret config fields (Service
+	// fails closed without one), so wire an in-memory one, matching prod
+	// where Provide always attaches the shared vault.
+	svc.SetSecrets(newFakeSecretRevealer())
 	router := gin.New()
 	RegisterRoutes(router, svc, nil, testLogger(t))
 	return router, svc
