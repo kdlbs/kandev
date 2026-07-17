@@ -49,9 +49,17 @@ export function TaskPRPickerDialog({ open, onOpenChange, prs }: TaskPRPickerDial
     rows[(idx + delta + rows.length) % rows.length].focus();
   };
 
+  // Focus the first PR row explicitly on open instead of relying on Radix's
+  // implicit first-focusable ordering, so keyboard flow (ArrowDown/Enter)
+  // stays stable if the dialog template's DOM order changes.
+  const focusFirstRow = (e: Event) => {
+    e.preventDefault();
+    listRef.current?.querySelector<HTMLButtonElement>("button[data-pr-row]")?.focus();
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
+      <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg" onOpenAutoFocus={focusFirstRow}>
         <DialogHeader>
           <DialogTitle>Open pull request</DialogTitle>
           <DialogDescription>

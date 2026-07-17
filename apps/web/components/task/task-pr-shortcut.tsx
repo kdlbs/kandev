@@ -36,8 +36,9 @@ export function TaskPRShortcut({ taskId }: { taskId: string | null }) {
       setPickerOpen(true);
     },
     // Capture + stopPropagation so the binding wins over focus-trapped
-    // surfaces (xterm.js, editors) — mirrors useEditorKeybinds.
-    { capture: true, stopPropagation: true },
+    // surfaces (xterm.js, editors) — mirrors useEditorKeybinds. Disabled
+    // until the task id resolves so a transient null doesn't toast.
+    { capture: true, stopPropagation: true, enabled: !!taskId },
   );
 
   return <TaskPRPickerDialog open={pickerOpen} onOpenChange={setPickerOpen} prs={prs} />;
