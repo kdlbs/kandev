@@ -25,6 +25,8 @@ type recordingHost struct {
 		value               map[string]any
 	}
 	listStateEntries []StateEntry
+	configValues     map[string]any
+	ownedSecrets     map[string]string
 	revealSecretFn   func(ctx context.Context, ref string) (string, error)
 	emitEvent        struct {
 		name    string
@@ -51,8 +53,30 @@ func (h *recordingHost) ListState(context.Context, string, string) ([]StateEntry
 	return h.listStateEntries, nil
 }
 
+func (h *recordingHost) GetConfig(context.Context) (map[string]any, error) {
+	return h.configValues, nil
+}
+
 func (h *recordingHost) RevealSecret(ctx context.Context, ref string) (string, error) {
 	return h.revealSecretFn(ctx, ref)
+}
+
+func (h *recordingHost) GetSecret(_ context.Context, key string) (string, bool, error) {
+	value, ok := h.ownedSecrets[key]
+	return value, ok, nil
+}
+
+func (h *recordingHost) SetSecret(_ context.Context, key, value string) error {
+	if h.ownedSecrets == nil {
+		h.ownedSecrets = map[string]string{}
+	}
+	h.ownedSecrets[key] = value
+	return nil
+}
+
+func (h *recordingHost) DeleteSecret(_ context.Context, key string) error {
+	delete(h.ownedSecrets, key)
+	return nil
 }
 
 func (h *recordingHost) EmitEvent(_ context.Context, name string, payload map[string]any) error {
@@ -138,6 +162,28 @@ func TestHost_ListState(t *testing.T) {
 	require.Equal(t, impl.listStateEntries, entries)
 }
 
+func TestHost_GetConfig(t *testing.T) {
+	impl := &recordingHost{configValues: map[string]any{
+		"github_token": "ghp_real",
+		"org":          "kdlbs",
+		"max_items":    float64(25),
+	}}
+	host := dialHostOverBufconn(t, impl)
+
+	config, err := host.GetConfig(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, impl.configValues, config)
+}
+
+func TestHost_GetConfig_EmptyIsNonNil(t *testing.T) {
+	host := dialHostOverBufconn(t, &recordingHost{})
+
+	config, err := host.GetConfig(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, config)
+	require.Empty(t, config)
+}
+
 func TestHost_RevealSecret(t *testing.T) {
 	impl := &recordingHost{revealSecretFn: func(_ context.Context, ref string) (string, error) {
 		if ref == "known" {
@@ -153,6 +199,27 @@ func TestHost_RevealSecret(t *testing.T) {
 
 	_, err = host.RevealSecret(context.Background(), "unknown")
 	require.Error(t, err)
+}
+
+func TestHost_PluginSecrets_RoundTripOverWire(t *testing.T) {
+	impl := &recordingHost{}
+	host := dialHostOverBufconn(t, impl)
+	ctx := context.Background()
+
+	_, found, err := host.GetSecret(ctx, "pat")
+	require.NoError(t, err)
+	require.False(t, found)
+
+	require.NoError(t, host.SetSecret(ctx, "pat", "ghp_owned"))
+	value, found, err := host.GetSecret(ctx, "pat")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "ghp_owned", value)
+
+	require.NoError(t, host.DeleteSecret(ctx, "pat"))
+	_, found, err = host.GetSecret(ctx, "pat")
+	require.NoError(t, err)
+	require.False(t, found)
 }
 
 func TestHost_EmitEvent(t *testing.T) {

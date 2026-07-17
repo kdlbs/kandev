@@ -2,6 +2,7 @@
 
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
+import Link from "@/components/routing/app-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
 import type { PluginRecord } from "@/lib/types/plugins";
 
@@ -30,9 +31,13 @@ export function PluginRow({ plugin, busy, onEnable, onDisable, onUninstall }: Pl
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-foreground truncate">
+            <Link
+              href={`/settings/plugins/${encodeURIComponent(plugin.id)}`}
+              data-testid={`plugin-row-link-${plugin.id}`}
+              className="text-sm font-medium text-foreground truncate cursor-pointer hover:underline"
+            >
               {plugin.display_name}
-            </span>
+            </Link>
             <PluginStatusBadge status={plugin.status} />
             {plugin.signed === false && (
               <Badge

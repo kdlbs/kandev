@@ -54,6 +54,27 @@ service Host {
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
 
+  // The plugin's own operator-editable config (Settings > Plugins > <plugin>,
+  // driven by the manifest's config_schema). Ungated; secret values arrive
+  // in cleartext — this RPC is how an operator-configured credential (e.g. a
+  // PAT) reaches the plugin. At rest, secret config fields live in kandev's
+  // encrypted vault (the config file holds only a vault reference); the Host
+  // resolves them before responding. kandev restarts a running plugin on
+  // config change, so reading config at startup is sufficient.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+
+  // Plugin-scoped secret primitives — capability `secrets`. Keys are
+  // namespaced server-side to the calling plugin (vault id
+  // "plugin:<id>:secret:<key>", key must match
+  // [a-zA-Z0-9][a-zA-Z0-9._-]{0,127}), so a plugin can only ever touch its
+  // OWN entries; RevealSecret remains the way to resolve an
+  // operator-provided reference to a shared/global secret. Values live in
+  // kandev's encrypted vault (AES-256-GCM at rest) and the whole
+  // "plugin:<id>:" namespace is deleted on uninstall.
+  rpc GetSecret(GetSecretRequest) returns (GetSecretResponse);
+  rpc SetSecret(SetSecretRequest) returns (SetSecretResponse);
+  rpc DeleteSecret(DeleteSecretRequest) returns (DeleteSecretResponse);
+
   // Host data API (ADR 0043, §3a below) — reads, capability api_read:<resource>.
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
   rpc GetTask(GetTaskRequest) returns (Task);
@@ -111,6 +132,16 @@ message DeleteStateResponse {}
 message ListStateRequest { string scope = 1; string scope_id = 2; }
 message ListStateResponse { repeated StateEntry entries = 1; }
 message StateEntry { string key = 1; google.protobuf.Struct value = 2; string updated_at = 3; }
+
+message GetConfigRequest {}
+message GetConfigResponse { google.protobuf.Struct config = 1; }
+
+message GetSecretRequest { string key = 1; }
+message GetSecretResponse { bool found = 1; string value = 2; }
+message SetSecretRequest { string key = 1; string value = 2; }
+message SetSecretResponse {}
+message DeleteSecretRequest { string key = 1; }
+message DeleteSecretResponse {}
 
 message RevealSecretRequest { string ref = 1; }
 message RevealSecretResponse { string value = 1; }
@@ -222,7 +253,11 @@ type Plugin interface {
 }
 type Host interface {                                        // injected before Serve returns
     GetState/SetState/DeleteState/ListState(...)
-    RevealSecret(ctx, ref string) (string, error)
+    GetConfig(ctx) (map[string]any, error)                   // own operator config, cleartext
+    RevealSecret(ctx, ref string) (string, error)            // operator-provided shared-secret ref
+    GetSecret(ctx, key) (value string, found bool, err error) // plugin-owned, vault-backed
+    SetSecret(ctx, key, value string) error
+    DeleteSecret(ctx, key string) error
     EmitEvent(ctx, name string, payload map[string]any) error
 
     // Host data API (ADR 0043, §3a) — each accessor is capability-gated by

@@ -24,6 +24,7 @@ runtime:
 capabilities:
   events: ["task.created"]
   state: true
+  secrets: true
 
 tools:
   - name: "echo"
@@ -37,3 +38,16 @@ webhooks:
 
 ui:
   bundle: "/ui/bundle.js"
+
+config_schema:
+  type: object
+  required: ["api_token"]
+  properties:
+    api_token:
+      type: string
+      title: "API token"
+      description: "Secret token; masked on the operator API, delivered to the plugin via the Host GetConfig RPC."
+      secret: true
+    greeting:
+      type: string
+      title: "Greeting"
