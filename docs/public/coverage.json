@@ -193,6 +193,23 @@
       "mcpTools": ["get_mcp_config_kandev", "update_mcp_config_kandev"]
     },
     {
+      "id": "plugins",
+      "audiences": ["user", "operator", "contributor"],
+      "stability": "experimental",
+      "docs": ["plugins", "configuration", "security", "feature-status", "extending-kandev"],
+      "sources": [
+        "apps/backend/internal/plugins/service.go",
+        "apps/backend/pkg/pluginsdk/plugin.go",
+        "apps/web/components/settings/plugins/plugins-settings.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/plugins/service_install_test.go",
+        "apps/backend/internal/plugins/runtime/manager_test.go",
+        "apps/web/app/settings/plugins/page.test.tsx"
+      ],
+      "settingsRoutes": ["/settings/plugins"]
+    },
+    {
       "id": "personal-settings-and-secrets",
       "audiences": ["user"],
       "stability": "stable",

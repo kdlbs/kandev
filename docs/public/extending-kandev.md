@@ -45,6 +45,14 @@ A domain may contain a client, store/repository, service, provider, handlers, an
 
 Preserve the chosen global/workspace/instance scope through storage, secrets, routes, and UI. Validate custom hosts against SSRF, redact tokens and provider errors, handle pagination/rate limits, deduplicate polls/webhooks, expose health, and treat external titles/descriptions/comments as untrusted content. Add provider fakes and user-journey coverage.
 
+## Build an experimental plugin
+
+Use a plugin when an independently released extension needs event delivery, plugin-scoped state or secrets, webhooks, a supervised Go backend, or native Kandev UI. Plugins are still experimental; a core integration remains the right choice when Kandev must guarantee a stable first-party contract.
+
+The backend authoring API lives under `apps/backend/pkg/pluginsdk`. A managed package contains `manifest.yaml`, one or more platform binaries, `checksums.txt`, and optional UI files. The service under `internal/plugins/` owns validation, install/sync, process lifecycle, state, events, webhook relay, and browser bundle delivery. Read [Plugins](plugins.md) for the user and trust boundary, then use the repository's current plugin specification and package/transport plan as source-level contracts.
+
+Keep declared capabilities minimal. Plugin event handling must be idempotent, webhook handlers must authenticate their provider, and frontend bundles must tolerate unload/reload without leaving global state behind. Test tampered packages, missing platform executables, process crashes, retries, disabled/re-enabled UI, path traversal, oversized input, uninstall cleanup, and upgrades. Do not claim agent-tool support merely because a manifest can declare tools: active tools are currently listed but not injected into agent MCP/tool sets.
+
 ## Add workflow or automation behavior
 
 `internal/workflow/` owns workflow models, repository, service, engine, adapters, and transitions. `internal/automation/` owns workspace rules that can create or react to work. Preserve the distinction between a task transition and an automation trigger.
