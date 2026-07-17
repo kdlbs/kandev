@@ -63,7 +63,7 @@ Follow [qa-checklist.md](references/qa-checklist.md). Do not ship until:
 - raw and delivery dimensions are proven by decoded pixels, not only container metadata;
 - cadence is constant and timestamps have no gaps;
 - 10/25/50/75/90% frames and full playback pass visual review;
-- camera motion is smooth, reaches intended depth, and uses the profile's tested loop frame: centered 1x for general-purpose masters, or one identical focused start/end crop for an editorial landing film or short docs clip when it removes irrelevant chrome or fixture-only detail;
+- camera motion is smooth, reaches intended depth, and uses the profile's tested loop frame: centered 1x for general-purpose masters, or one identical focused start/end crop for an editorial landing film or short docs clip when it improves readability or removes irrelevant chrome or fixture-only detail while preserving identifying context;
 - text, menus, diffs, pointer, and touch targets remain inside frame; frame-by-frame pointer containment passes with a deliberate edge margin;
 - WebM, MP4, poster, responsive source selection, lazy loading, and reduced-motion behavior pass;
 - all capture processes, ports, temporary specs, and temp data are gone.

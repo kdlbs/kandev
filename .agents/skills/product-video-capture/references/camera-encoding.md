@@ -19,7 +19,7 @@ Run focused tests from `$LANDING_REPO` before encoding. Current contract:
 
 - 25 fps constant cadence;
 - general desktop delivery 2560x1600 from at least 3840x2400 source;
-- editorial landing delivery 1920x1200 from at least 3840x2400 source, with a 2x focused camera and higher text-preserving encode quality;
+- editorial landing delivery 1920x1200 from at least 3840x2400 source, with a 2x focused camera, VP9 CRF 26, and H.264 CRF 18;
 - mobile delivery 1290x2796 from native 1290x2796 source;
 - general desktop and focused documentation clips reach 1.50x; editorial landing clips reach 2x; native mobile reaches 1.18x;
 - centered 1x opening and ending by default;
@@ -31,11 +31,13 @@ Run focused tests from `$LANDING_REPO` before encoding. Current contract:
 
 Treat tests as source of truth if these values evolve.
 
+Before using the editorial landing profile, confirm the focused tests recognize `formFactor: "landing"`; do not encode against an older landing checkout that lacks this profile.
+
 ## Camera Design
 
 Design keyframes from semantic story events and the recorded pointer journey:
 
-1. Start centered at 1x for a general-purpose delivery. Start on one matched focused frame for an editorial landing film or short docs clip whose subject would be unreadable at the actual embed size.
+1. Start centered at 1x for a general-purpose delivery. Start on one matched focused frame for an editorial landing film or short docs clip when it improves readability or removes irrelevant chrome or fixture-only detail while preserving identifying context.
 2. Hold context briefly.
 3. Ease toward the first important target while the pointer travels.
 4. Hold or drift gently across related actions. Ignore micro-jitter, but never let intentional pointer travel leave the crop.
