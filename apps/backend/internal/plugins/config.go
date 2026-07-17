@@ -105,21 +105,41 @@ func secretPropertyKeys(schema map[string]any) map[string]bool {
 	return keys
 }
 
-// maskSecrets returns a copy of config with every non-empty secret string
-// value replaced by configSecretMask.
+// maskSecrets returns a copy of config with every set secret value replaced
+// by configSecretMask — regardless of runtime type, since masking is the
+// primary cleartext boundary on the operator API and a schema may declare a
+// non-string property secret (or a stored value may be malformed). Only
+// zero values (nil, "", false, 0) pass through, so the UI can distinguish
+// "not set" from "set".
 func maskSecrets(config map[string]any, schema map[string]any) map[string]any {
 	secrets := secretPropertyKeys(schema)
 	out := make(map[string]any, len(config))
 	for k, v := range config {
-		if secrets[k] {
-			if s, ok := v.(string); ok && s != "" {
-				out[k] = configSecretMask
-				continue
-			}
+		if secrets[k] && !isZeroConfigValue(v) {
+			out[k] = configSecretMask
+			continue
 		}
 		out[k] = v
 	}
 	return out
+}
+
+// isZeroConfigValue reports whether v is an unset/zero config value that
+// maskSecrets leaves unmasked: nil, empty string, false, or numeric zero.
+func isZeroConfigValue(v any) bool {
+	switch value := v.(type) {
+	case nil:
+		return true
+	case string:
+		return value == ""
+	case bool:
+		return !value
+	default:
+		if f, ok := numericValue(v); ok {
+			return f == 0
+		}
+		return false
+	}
 }
 
 // mergeMaskedSecrets resolves an incoming config write against the stored
@@ -196,13 +216,44 @@ func checkPropertyValue(name string, value any, prop map[string]any) error {
 	}
 	if enum, ok := prop["enum"].([]any); ok && len(enum) > 0 {
 		for _, allowed := range enum {
-			if reflect.DeepEqual(value, allowed) {
+			if enumValueMatches(value, allowed) {
 				return nil
 			}
 		}
 		return fmt.Errorf("%w: field %q must be one of the declared enum values", ErrConfigInvalid, name)
 	}
 	return nil
+}
+
+// enumValueMatches compares a submitted value against a declared enum
+// entry. Numeric values are normalized first: the manifest YAML decodes an
+// enum entry like 5 as int, while the same value submitted over HTTP JSON
+// arrives as float64 — reflect.DeepEqual would wrongly reject that valid
+// selection. Everything else falls back to DeepEqual.
+func enumValueMatches(value, allowed any) bool {
+	vf, vOK := numericValue(value)
+	af, aOK := numericValue(allowed)
+	if vOK && aOK {
+		return vf == af
+	}
+	return reflect.DeepEqual(value, allowed)
+}
+
+// numericValue converts the numeric types a config value can realistically
+// carry (JSON float64, YAML int/int64/uint64) to float64 for comparison.
+func numericValue(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
 }
 
 // valueMatchesType reports whether value satisfies the JSON-Schema primitive

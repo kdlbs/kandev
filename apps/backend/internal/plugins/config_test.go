@@ -570,3 +570,37 @@ func TestPluginHostSecretPrimitivesRequireCapabilityAndValidKey(t *testing.T) {
 func manifestCapsWithSecrets() manifest.Capabilities {
 	return manifest.Capabilities{Secrets: true}
 }
+
+func TestMaskSecretsMasksNonStringSecretValues(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			"pin":     map[string]any{"type": "integer", "secret": true},
+			"enabled": map[string]any{"type": "boolean", "secret": true},
+		},
+	}
+	masked := maskSecrets(map[string]any{"pin": 1234, "enabled": true}, schema)
+	if masked["pin"] != configSecretMask || masked["enabled"] != configSecretMask {
+		t.Fatalf("non-string secrets must be masked, got %v", masked)
+	}
+	// Zero values stay visible so the UI can tell "not set" apart.
+	masked = maskSecrets(map[string]any{"pin": 0, "enabled": false}, schema)
+	if masked["pin"] != 0 || masked["enabled"] != false {
+		t.Fatalf("zero-value secrets should pass through, got %v", masked)
+	}
+}
+
+func TestValidateConfigSchemaNumericEnumAcceptsJSONFloat(t *testing.T) {
+	schema := map[string]any{
+		"properties": map[string]any{
+			// Manifest YAML decodes these as int...
+			"level": map[string]any{"type": "integer", "enum": []any{1, 2, 3}},
+		},
+	}
+	// ...while an HTTP JSON submit arrives as float64.
+	if err := validateConfigSchema(map[string]any{"level": float64(2)}, schema); err != nil {
+		t.Fatalf("numeric enum should accept float64(2) against int enum: %v", err)
+	}
+	if err := validateConfigSchema(map[string]any{"level": float64(9)}, schema); !errors.Is(err, ErrConfigInvalid) {
+		t.Fatalf("out-of-enum numeric should still be rejected, got %v", err)
+	}
+}

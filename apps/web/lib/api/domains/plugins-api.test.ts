@@ -8,6 +8,7 @@ import {
   disablePlugin,
   enablePlugin,
   getPlugin,
+  getPluginConfig,
   installPluginFromUrl,
   installPluginUpload,
   listPlugins,
@@ -330,5 +331,29 @@ describe("syncPlugins", () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ error: "sync failed" }, 500));
 
     await expect(syncPlugins()).rejects.toMatchObject({ status: 500, message: "sync failed" });
+  });
+});
+
+describe("getPluginConfig", () => {
+  it("fetches GET /api/plugins/:id/config and unwraps the config object", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ config: { default_channel: "#dev" } }));
+
+    const result = await getPluginConfig(PLUGIN_ID);
+
+    const [url] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe(`${PLUGIN_URL}/config`);
+    expect(result).toEqual({ default_channel: "#dev" });
+  });
+
+  it("returns an empty object when the backend omits config", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({}));
+    expect(await getPluginConfig(PLUGIN_ID)).toEqual({});
+  });
+
+  it("URL-encodes the plugin id", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ config: {} }));
+    await getPluginConfig("my plugin");
+    const [url] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toContain("my%20plugin");
   });
 });

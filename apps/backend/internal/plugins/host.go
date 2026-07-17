@@ -167,10 +167,16 @@ func (h *pluginHost) GetConfig(ctx context.Context) (map[string]any, error) {
 // resolveConfigSecrets replaces each secret config field's vault reference
 // with the cleartext value from the vault. A resolution failure is an error
 // (not a silent drop): the plugin must never mistake a broken vault for
-// "the operator cleared this setting".
+// "the operator cleared this setting". Works on a copy — writing cleartext
+// into the caller's map would leak it into any future cached configReader
+// value, even though today's FSStore.GetConfig always returns a fresh map.
 func (h *pluginHost) resolveConfigSecrets(ctx context.Context, config map[string]any) (map[string]any, error) {
+	out := make(map[string]any, len(config))
+	for k, v := range config {
+		out[k] = v
+	}
 	for field := range secretPropertyKeys(h.configSchema) {
-		if !isConfigVaultRef(h.pluginID, field, config[field]) {
+		if !isConfigVaultRef(h.pluginID, field, out[field]) {
 			continue
 		}
 		if h.secrets == nil {
@@ -180,9 +186,9 @@ func (h *pluginHost) resolveConfigSecrets(ctx context.Context, config map[string
 		if err != nil {
 			return nil, fmt.Errorf("plugins: resolve secret config field %q: %w", field, err)
 		}
-		config[field] = cleartext
+		out[field] = cleartext
 	}
-	return config, nil
+	return out, nil
 }
 
 // GetSecret reads a plugin-owned secret previously stored via SetSecret.

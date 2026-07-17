@@ -90,6 +90,25 @@ describe("serializeConfigValues", () => {
     const config = serializeConfigValues(fields, { max_items: "abc", verbose: true });
     expect(config).not.toHaveProperty("max_items");
   });
+
+  it("rejects (omits) non-integral input for integer fields instead of truncating", () => {
+    const fields = parseConfigSchema(githubSchema);
+    // parseInt would silently turn "1.5" into 1 — the field must be omitted
+    // so the operator is told rather than getting a corrupted value.
+    const config = serializeConfigValues(fields, { max_items: "1.5", verbose: true });
+    expect(config).not.toHaveProperty("max_items");
+    expect(
+      serializeConfigValues(fields, { max_items: "Infinity", verbose: true }),
+    ).not.toHaveProperty("max_items");
+  });
+
+  it("submits numeric enum selections with their original type", () => {
+    const fields = parseConfigSchema({
+      properties: { level: { type: "integer", enum: [1, 2, 3] } },
+    });
+    const config = serializeConfigValues(fields, { level: "2" });
+    expect(config.level).toBe(2);
+  });
 });
 
 describe("missingRequiredFields", () => {

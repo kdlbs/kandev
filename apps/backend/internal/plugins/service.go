@@ -456,7 +456,13 @@ func (s *Service) restartForConfigChange(rec *store.Record) error {
 	ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
 	defer cancel()
 	if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-		_ = s.SetStatus(rec.ID, StatusError)
+		if setErr := s.SetStatus(rec.ID, StatusError); setErr != nil {
+			// The restart error stays the returned error (it is the primary
+			// signal), but a failed status write means the registry may show
+			// StatusActive with no process running — don't lose that.
+			s.log.Warn("plugins: could not transition to error status after restart failure",
+				zap.String("plugin_id", rec.ID), zap.Error(setErr))
+		}
 		s.notifyDeliverer()
 		return fmt.Errorf("plugins: config saved but restart of %q failed: %w", rec.ID, err)
 	}

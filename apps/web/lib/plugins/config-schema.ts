@@ -21,7 +21,12 @@ export interface PluginConfigField {
   description?: string;
   required: boolean;
   secret: boolean;
+  /** Display strings for the select control, parallel to enumRawValues. */
   enumValues?: string[];
+  /** The schema's original typed enum values (numbers/booleans survive the
+   * round trip — the backend validates against these, not their string
+   * forms). */
+  enumRawValues?: unknown[];
   defaultValue?: unknown;
 }
 
@@ -79,6 +84,7 @@ export function parseConfigSchema(
       required: required.has(name),
       secret: isSecretProp(prop),
       enumValues: Array.isArray(prop.enum) ? prop.enum.map((v) => String(v)) : undefined,
+      enumRawValues: Array.isArray(prop.enum) ? prop.enum : undefined,
       defaultValue: prop.default,
     });
   }
@@ -107,8 +113,24 @@ export function buildInitialValues(
 }
 
 function coerceNumeric(field: PluginConfigField, raw: string): number | undefined {
-  const parsed = field.type === "integer" ? Number.parseInt(raw, 10) : Number(raw);
-  return Number.isNaN(parsed) ? undefined : parsed;
+  // Never Number.parseInt here: it silently truncates "1.5" to 1, persisting
+  // a value the operator did not type. Reject non-integral input instead so
+  // the field is omitted and the required-field/backend validation surfaces
+  // the problem.
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return undefined;
+  if (field.type === "integer" && !Number.isInteger(parsed)) return undefined;
+  return parsed;
+}
+
+/** Maps a select control's string back to the schema's original typed enum
+ * value, so numeric/boolean enums are submitted with their real types. */
+function coerceEnum(field: PluginConfigField, raw: string): unknown {
+  const index = (field.enumValues ?? []).indexOf(raw);
+  if (index >= 0 && field.enumRawValues && index < field.enumRawValues.length) {
+    return field.enumRawValues[index];
+  }
+  return raw;
 }
 
 /**
@@ -133,6 +155,10 @@ export function serializeConfigValues(
     if (field.type === "number" || field.type === "integer") {
       const parsed = coerceNumeric(field, value);
       if (parsed !== undefined) config[field.name] = parsed;
+      continue;
+    }
+    if (field.type === "enum") {
+      config[field.name] = coerceEnum(field, value);
       continue;
     }
     config[field.name] = value;

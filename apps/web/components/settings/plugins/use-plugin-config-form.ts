@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { getPluginConfig, updatePluginConfig } from "@/lib/api/domains/plugins-api";
 import {
+  SECRET_MASK,
   buildInitialValues,
   missingRequiredFields,
   parseConfigSchema,
@@ -80,16 +81,40 @@ export function usePluginConfigForm(plugin: PluginRecord | null) {
     setSaveStatus("loading");
     try {
       await updatePluginConfig(pluginId, serializeConfigValues(fields, values));
+    } catch (err) {
+      setSaveStatus("error");
+      toast.error(err instanceof Error ? err.message : "Failed to save plugin settings");
+      return;
+    }
+    // The config IS persisted from here on — a refetch failure (e.g. a
+    // transient hiccup while the plugin restarts) must not be reported as a
+    // save failure, and the typed cleartext secret must not stay on screen.
+    try {
       const refreshed = await getPluginConfig(pluginId, { cache: "no-store" });
       const initial = buildInitialValues(fields, refreshed);
       setValues(initial);
       setInitialValues(initial);
-      setSaveStatus("success");
       toast.success("Plugin settings saved");
-    } catch (err) {
-      setSaveStatus("error");
-      toast.error(err instanceof Error ? err.message : "Failed to save plugin settings");
+    } catch {
+      maskSecretValues();
+      toast.warning("Settings saved, but reloading them failed — refresh to confirm.");
     }
+    setSaveStatus("success");
+  };
+
+  // Replaces any typed secret input with the mask when the post-save
+  // refetch fails, so cleartext never lingers in the form.
+  const maskSecretValues = () => {
+    setValues((prev) => {
+      const cleared = { ...prev };
+      for (const field of fields) {
+        const current = cleared[field.name];
+        if (field.secret && typeof current === "string" && current !== "") {
+          cleared[field.name] = SECRET_MASK;
+        }
+      }
+      return cleared;
+    });
   };
 
   return {

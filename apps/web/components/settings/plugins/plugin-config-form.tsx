@@ -6,6 +6,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@kandev/ui/switch";
 import type { PluginConfigField } from "@/lib/plugins/config-schema";
 
+/** Sentinel for the "Not set" select item — an actual enum option can never
+ * collide with it, and Radix rejects value="" items. */
+const ENUM_UNSET_SENTINEL = "__kandev_enum_unset__";
+
 type PluginConfigFormProps = {
   fields: PluginConfigField[];
   values: Record<string, string | boolean>;
@@ -85,16 +89,27 @@ function ConfigFieldControl({
   }
 
   if (field.type === "enum") {
+    // Radix Select forbids an item with value="", so an explicit "Not set"
+    // sentinel lets optional enums be cleared back to unset (serialization
+    // omits empty strings).
     return (
       <Select
         value={typeof value === "string" ? value : ""}
         disabled={disabled}
-        onValueChange={(next) => onChange(field.name, next)}
+        onValueChange={(next) => onChange(field.name, next === ENUM_UNSET_SENTINEL ? "" : next)}
       >
         <SelectTrigger id={inputId} className="max-w-md cursor-pointer">
           <SelectValue placeholder="Select..." />
         </SelectTrigger>
         <SelectContent>
+          {!field.required && (
+            <SelectItem
+              value={ENUM_UNSET_SENTINEL}
+              className="cursor-pointer text-muted-foreground"
+            >
+              Not set
+            </SelectItem>
+          )}
           {(field.enumValues ?? []).map((option) => (
             <SelectItem key={option} value={option} className="cursor-pointer">
               {option}
