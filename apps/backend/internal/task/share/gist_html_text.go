@@ -31,6 +31,9 @@ func removeImages(node ast.Node) {
 			node.RemoveChild(node, child)
 		} else {
 			removeImages(child)
+			if child.Kind() == ast.KindLink && child.FirstChild() == nil {
+				node.RemoveChild(node, child)
+			}
 		}
 		child = next
 	}

@@ -138,7 +138,7 @@ func TestBuildShareHTML_RendersMarkdownWithoutUnsafeHTML(t *testing.T) {
 		Messages: []Message{
 			{Role: roleAssistant, Blocks: []Block{{
 				Kind: blockKindText,
-				Text: "## Summary\n\n**Pushed** successfully.\n\n- tests passed\n- lint passed\n\n[docs](https://example.com)\n\n![tracker](https://attacker.example/pixel)\n\n<script>alert('xss')</script>\n\n[bad](javascript:alert('xss'))",
+				Text: "## Summary\n\n**Pushed** successfully.\n\n- tests passed\n- lint passed\n\n[docs](https://example.com)\n\n![tracker](https://attacker.example/pixel)\n\n[![linked tracker](https://attacker.example/pixel)](https://linked.example/target)\n\n<script>alert('xss')</script>\n\n[bad](javascript:alert('xss'))\n\n[data](data:text/html;base64,PHNjcmlwdD4=)",
 			}}},
 		},
 	}
@@ -149,10 +149,10 @@ func TestBuildShareHTML_RendersMarkdownWithoutUnsafeHTML(t *testing.T) {
 	assertContains(t, doc, "<strong>Pushed</strong>")
 	assertContains(t, doc, "<li>tests passed</li>")
 	assertContains(t, doc, `<a href="https://example.com">docs</a>`)
-	if strings.Contains(doc, "<script>") || strings.Contains(doc, `href="javascript:`) {
+	if strings.Contains(doc, "<script>") || strings.Contains(doc, `href="javascript:`) || strings.Contains(doc, `href="data:`) {
 		t.Fatalf("unsafe markdown content leaked into rendered HTML:\n%s", doc)
 	}
-	if strings.Contains(doc, "<img") || strings.Contains(doc, "attacker.example") {
+	if strings.Contains(doc, "<img") || strings.Contains(doc, "attacker.example") || strings.Contains(doc, "linked.example") {
 		t.Fatalf("external markdown image leaked into rendered HTML:\n%s", doc)
 	}
 }
