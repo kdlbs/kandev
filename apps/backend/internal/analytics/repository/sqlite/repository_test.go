@@ -120,6 +120,13 @@ func createTestDB(t *testing.T) *sqlx.DB {
 		deletions INTEGER DEFAULT 0,
 		created_at TIMESTAMP NOT NULL
 	);
+	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		snapshot_type TEXT NOT NULL DEFAULT '',
+		files TEXT DEFAULT '{}',
+		created_at TIMESTAMP NOT NULL
+	);
 	`
 	if _, err := sqlxDB.Exec(schema); err != nil {
 		t.Fatalf("failed to create schema: %v", err)

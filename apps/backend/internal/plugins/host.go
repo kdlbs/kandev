@@ -27,6 +27,13 @@ import (
 // (§5) only names state and secrets (api_read/api_write reserved for
 // future); event emission has no boolean capability to gate on.
 type pluginHost struct {
+	// UnimplementedHostData satisfies the Host data API (ADR 0042)
+	// sub-accessors (Tasks/Sessions/Workspaces/Workflows/AgentProfiles/
+	// Repositories) with Unimplemented defaults. Wiring these to the real,
+	// capability-gated service-layer calls is a separate task; see
+	// docs/plans/plugins/host-data-api/task-04-*.md.
+	pluginsdk.UnimplementedHostData
+
 	pluginID     string
 	capabilities manifest.Capabilities
 
