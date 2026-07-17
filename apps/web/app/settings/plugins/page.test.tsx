@@ -1,6 +1,13 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render as renderWithoutSettingsProvider,
+  screen,
+} from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
+import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import type { PluginRecord, SyncResult } from "@/lib/types/plugins";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
@@ -89,6 +96,10 @@ const SYNC_BUTTON_TESTID = "plugins-sync-button";
 const INSTALL_TRIGGER_TESTID = "install-plugin-trigger";
 const NEW_PLUGIN_URL = "https://example.test/new-plugin-1.0.0.tar.gz";
 const UPLOAD_FILENAME = "new-plugin-1.0.0.tar.gz";
+
+function render(element: ReactElement) {
+  return renderWithoutSettingsProvider(<SettingsSaveProvider>{element}</SettingsSaveProvider>);
+}
 
 function activePlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
   return {
