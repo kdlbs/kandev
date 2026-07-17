@@ -103,6 +103,13 @@ jobs:
             echo "::warning::Docs preview deploy is not configured. Add CLOUDFLARE_API_TOKEN as a repository secret and CLOUDFLARE_ACCOUNT_ID as a repository variable."
           fi
 
+      - name: Prepare isolated Wrangler environment
+        if: steps.cloudflare.outputs.enabled == 'true'
+        run: |
+          mkdir -p landing/.wrangler
+          cd landing/.wrangler
+          npm init --yes
+
       - name: Deploy preview to Cloudflare Pages
         id: deploy
         if: steps.cloudflare.outputs.enabled == 'true'
@@ -110,9 +117,11 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: landing
+          workingDirectory: landing/.wrangler
+          packageManager: npm
+          wranglerVersion: 3.90.0
           command: >-
-            pages deploy out
+            pages deploy ../out
             --project-name=landing
             --branch=docs-pr-${{ github.event.pull_request.number }}
             --commit-dirty=true
