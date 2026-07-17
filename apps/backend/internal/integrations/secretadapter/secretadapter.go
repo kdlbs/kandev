@@ -55,6 +55,22 @@ func (a *Adapter) Delete(ctx context.Context, id string) error {
 	return a.store.Delete(ctx, id)
 }
 
+// ListIDs returns the ids of every stored secret (metadata only, no
+// values). Used by consumers that own a namespaced id range (e.g. the
+// plugin service's "plugin:<id>:..." entries) to find their own rows for
+// bulk cleanup.
+func (a *Adapter) ListIDs(ctx context.Context) ([]string, error) {
+	items, err := a.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(items))
+	for i, item := range items {
+		ids[i] = item.ID
+	}
+	return ids, nil
+}
+
 // Exists reports whether a secret with id exists. Returns (false, nil) when
 // the row is absent, and (false, err) on any other error so callers can
 // distinguish "not configured" from a backend outage.

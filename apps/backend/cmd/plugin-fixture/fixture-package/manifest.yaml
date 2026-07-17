@@ -24,6 +24,7 @@ runtime:
 capabilities:
   events: ["task.created"]
   state: true
+  secrets: true
 
 tools:
   - name: "echo"

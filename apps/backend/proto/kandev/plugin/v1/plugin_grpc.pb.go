@@ -207,6 +207,9 @@ const (
 	Host_ListState_FullMethodName            = "/kandev.plugin.v1.Host/ListState"
 	Host_RevealSecret_FullMethodName         = "/kandev.plugin.v1.Host/RevealSecret"
 	Host_EmitEvent_FullMethodName            = "/kandev.plugin.v1.Host/EmitEvent"
+	Host_GetSecret_FullMethodName            = "/kandev.plugin.v1.Host/GetSecret"
+	Host_SetSecret_FullMethodName            = "/kandev.plugin.v1.Host/SetSecret"
+	Host_DeleteSecret_FullMethodName         = "/kandev.plugin.v1.Host/DeleteSecret"
 	Host_GetConfig_FullMethodName            = "/kandev.plugin.v1.Host/GetConfig"
 	Host_ListTasks_FullMethodName            = "/kandev.plugin.v1.Host/ListTasks"
 	Host_GetTask_FullMethodName              = "/kandev.plugin.v1.Host/GetTask"
@@ -256,6 +259,16 @@ type HostClient interface {
 	ListState(ctx context.Context, in *ListStateRequest, opts ...grpc.CallOption) (*ListStateResponse, error)
 	RevealSecret(ctx context.Context, in *RevealSecretRequest, opts ...grpc.CallOption) (*RevealSecretResponse, error)
 	EmitEvent(ctx context.Context, in *EmitEventRequest, opts ...grpc.CallOption) (*EmitEventResponse, error)
+	// Plugin-scoped secret primitives — capability `secrets`, like
+	// RevealSecret. Keys are namespaced server-side to the calling plugin
+	// (vault id "plugin:<id>:secret:<key>"), so a plugin can only ever read,
+	// write, or delete its OWN secrets; RevealSecret remains the way to
+	// resolve an operator-provided reference to a shared/global secret.
+	// Values are stored in kandev's encrypted secret vault (AES-256-GCM at
+	// rest), never on the plugin record or config file.
+	GetSecret(ctx context.Context, in *GetSecretRequest, opts ...grpc.CallOption) (*GetSecretResponse, error)
+	SetSecret(ctx context.Context, in *SetSecretRequest, opts ...grpc.CallOption) (*SetSecretResponse, error)
+	DeleteSecret(ctx context.Context, in *DeleteSecretRequest, opts ...grpc.CallOption) (*DeleteSecretResponse, error)
 	// GetConfig returns the plugin's own operator-editable config (the values
 	// set in Settings > Plugins > <plugin> against the manifest's
 	// config_schema). Ungated: a plugin can always read its own config, secret
@@ -348,6 +361,36 @@ func (c *hostClient) EmitEvent(ctx context.Context, in *EmitEventRequest, opts .
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EmitEventResponse)
 	err := c.cc.Invoke(ctx, Host_EmitEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetSecret(ctx context.Context, in *GetSecretRequest, opts ...grpc.CallOption) (*GetSecretResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSecretResponse)
+	err := c.cc.Invoke(ctx, Host_GetSecret_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) SetSecret(ctx context.Context, in *SetSecretRequest, opts ...grpc.CallOption) (*SetSecretResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SetSecretResponse)
+	err := c.cc.Invoke(ctx, Host_SetSecret_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) DeleteSecret(ctx context.Context, in *DeleteSecretRequest, opts ...grpc.CallOption) (*DeleteSecretResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteSecretResponse)
+	err := c.cc.Invoke(ctx, Host_DeleteSecret_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -518,6 +561,16 @@ type HostServer interface {
 	ListState(context.Context, *ListStateRequest) (*ListStateResponse, error)
 	RevealSecret(context.Context, *RevealSecretRequest) (*RevealSecretResponse, error)
 	EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error)
+	// Plugin-scoped secret primitives — capability `secrets`, like
+	// RevealSecret. Keys are namespaced server-side to the calling plugin
+	// (vault id "plugin:<id>:secret:<key>"), so a plugin can only ever read,
+	// write, or delete its OWN secrets; RevealSecret remains the way to
+	// resolve an operator-provided reference to a shared/global secret.
+	// Values are stored in kandev's encrypted secret vault (AES-256-GCM at
+	// rest), never on the plugin record or config file.
+	GetSecret(context.Context, *GetSecretRequest) (*GetSecretResponse, error)
+	SetSecret(context.Context, *SetSecretRequest) (*SetSecretResponse, error)
+	DeleteSecret(context.Context, *DeleteSecretRequest) (*DeleteSecretResponse, error)
 	// GetConfig returns the plugin's own operator-editable config (the values
 	// set in Settings > Plugins > <plugin> against the manifest's
 	// config_schema). Ungated: a plugin can always read its own config, secret
@@ -573,6 +626,15 @@ func (UnimplementedHostServer) RevealSecret(context.Context, *RevealSecretReques
 }
 func (UnimplementedHostServer) EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EmitEvent not implemented")
+}
+func (UnimplementedHostServer) GetSecret(context.Context, *GetSecretRequest) (*GetSecretResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSecret not implemented")
+}
+func (UnimplementedHostServer) SetSecret(context.Context, *SetSecretRequest) (*SetSecretResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetSecret not implemented")
+}
+func (UnimplementedHostServer) DeleteSecret(context.Context, *DeleteSecretRequest) (*DeleteSecretResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteSecret not implemented")
 }
 func (UnimplementedHostServer) GetConfig(context.Context, *GetConfigRequest) (*GetConfigResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetConfig not implemented")
@@ -738,6 +800,60 @@ func _Host_EmitEvent_Handler(srv interface{}, ctx context.Context, dec func(inte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).EmitEvent(ctx, req.(*EmitEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSecretRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetSecret_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetSecret(ctx, req.(*GetSecretRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_SetSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SetSecretRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).SetSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_SetSecret_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).SetSecret(ctx, req.(*SetSecretRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_DeleteSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteSecretRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).DeleteSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_DeleteSecret_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).DeleteSecret(ctx, req.(*DeleteSecretRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1006,6 +1122,18 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EmitEvent",
 			Handler:    _Host_EmitEvent_Handler,
+		},
+		{
+			MethodName: "GetSecret",
+			Handler:    _Host_GetSecret_Handler,
+		},
+		{
+			MethodName: "SetSecret",
+			Handler:    _Host_SetSecret_Handler,
+		},
+		{
+			MethodName: "DeleteSecret",
+			Handler:    _Host_DeleteSecret_Handler,
 		},
 		{
 			MethodName: "GetConfig",

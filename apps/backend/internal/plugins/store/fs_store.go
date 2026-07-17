@@ -273,8 +273,9 @@ func (s *FSStore) GetConfig(id string) (map[string]any, error) {
 // same guarantee writeRecord gives Save, and is additionally serialized by
 // s.mu so two concurrent SetConfig calls for the same id (e.g. two operator
 // UpdateConfig PATCH requests racing) can never interleave. Mode 0600, like
-// the record file: config may carry cleartext secret values (config_schema
-// fields marked secret, e.g. a PAT), so it must not be world-readable.
+// the record file: secret config fields are normally stored as encrypted-
+// vault references (internal/plugins/config.go), but the no-vault fallback
+// stores cleartext, so the file must not be world-readable either way.
 func (s *FSStore) SetConfig(id string, config map[string]any) error {
 	if err := safePluginID(id); err != nil {
 		return err

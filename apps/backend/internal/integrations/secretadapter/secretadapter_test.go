@@ -69,7 +69,11 @@ func (f *fakeStore) Delete(_ context.Context, id string) error {
 }
 
 func (f *fakeStore) List(_ context.Context) ([]*secrets.SecretListItem, error) {
-	return nil, errors.New("not implemented")
+	items := make([]*secrets.SecretListItem, 0, len(f.rows))
+	for id := range f.rows {
+		items = append(items, &secrets.SecretListItem{ID: id})
+	}
+	return items, nil
 }
 
 func (f *fakeStore) Close() error { return nil }
@@ -155,5 +159,30 @@ func TestAdapter_Delete_DelegatesToStore(t *testing.T) {
 	}
 	if _, ok := store.rows["k1"]; ok {
 		t.Error("Delete did not remove the row")
+	}
+}
+
+func TestAdapter_ListIDs(t *testing.T) {
+	store := newFakeStore()
+	a := New(store)
+	ctx := context.Background()
+
+	if err := a.Set(ctx, "plugin:p1:secret:a", "plugin:p1:secret:a", "v1"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if err := a.Set(ctx, "other", "other", "v2"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+
+	ids, err := a.ListIDs(ctx)
+	if err != nil {
+		t.Fatalf("ListIDs: %v", err)
+	}
+	got := map[string]bool{}
+	for _, id := range ids {
+		got[id] = true
+	}
+	if len(ids) != 2 || !got["plugin:p1:secret:a"] || !got["other"] {
+		t.Fatalf("ListIDs = %v, want both stored ids", ids)
 	}
 }

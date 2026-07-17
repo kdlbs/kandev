@@ -176,7 +176,7 @@ func (r *fakeRuntime) stopped(id string) bool {
 	return false
 }
 
-// fakeSecretRevealer is a minimal in-memory SecretRevealer for tests.
+// fakeSecretRevealer is a minimal in-memory SecretVault for tests.
 type fakeSecretRevealer struct {
 	mu     sync.Mutex
 	values map[string]string
@@ -197,9 +197,43 @@ func (v *fakeSecretRevealer) Reveal(_ context.Context, ref string) (string, erro
 	defer v.mu.Unlock()
 	value, ok := v.values[ref]
 	if !ok {
-		return "", store.ErrNotFound
+		return "", fmt.Errorf("secret not found: %s", ref)
 	}
 	return value, nil
+}
+
+func (v *fakeSecretRevealer) Set(_ context.Context, id, _, value string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.values[id] = value
+	return nil
+}
+
+func (v *fakeSecretRevealer) Delete(_ context.Context, id string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if _, ok := v.values[id]; !ok {
+		return fmt.Errorf("secret not found: %s", id)
+	}
+	delete(v.values, id)
+	return nil
+}
+
+func (v *fakeSecretRevealer) ListIDs(_ context.Context) ([]string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	ids := make([]string, 0, len(v.values))
+	for id := range v.values {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func (v *fakeSecretRevealer) get(id string) (string, bool) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	value, ok := v.values[id]
+	return value, ok
 }
 
 // testPackage builds a valid, runtime-managed plugin tar.gz for the CURRENT
@@ -293,7 +327,7 @@ func TestServiceUpdateConfigPersists(t *testing.T) {
 	svc, fsStore, _ := newTestService(t)
 	installTestPlugin(t, svc, "kandev-plugin-slack")
 
-	if err := svc.UpdateConfig("kandev-plugin-slack", map[string]any{"default_channel": "#dev"}); err != nil {
+	if err := svc.UpdateConfig(context.Background(), "kandev-plugin-slack", map[string]any{"default_channel": "#dev"}); err != nil {
 		t.Fatalf("UpdateConfig() unexpected error: %v", err)
 	}
 
@@ -308,7 +342,7 @@ func TestServiceUpdateConfigPersists(t *testing.T) {
 
 func TestServiceUpdateConfigMissingReturnsNotFound(t *testing.T) {
 	svc, _, _ := newTestService(t)
-	err := svc.UpdateConfig("missing", map[string]any{"a": "b"})
+	err := svc.UpdateConfig(context.Background(), "missing", map[string]any{"a": "b"})
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("UpdateConfig() error = %v, want store.ErrNotFound", err)
 	}

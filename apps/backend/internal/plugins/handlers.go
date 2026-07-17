@@ -174,7 +174,7 @@ func (c *Controller) updateConfig(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
-	if err := c.svc.UpdateConfig(ctx.Param("id"), req.Config); err != nil {
+	if err := c.svc.UpdateConfig(ctx.Request.Context(), ctx.Param("id"), req.Config); err != nil {
 		if errors.Is(err, ErrConfigInvalid) {
 			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return

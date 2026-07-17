@@ -44,6 +44,17 @@ service Host {
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
 
+  // Plugin-scoped secret primitives — capability `secrets`, like
+  // RevealSecret. Keys are namespaced server-side to the calling plugin
+  // (vault id "plugin:<id>:secret:<key>"), so a plugin can only ever read,
+  // write, or delete its OWN secrets; RevealSecret remains the way to
+  // resolve an operator-provided reference to a shared/global secret.
+  // Values are stored in kandev's encrypted secret vault (AES-256-GCM at
+  // rest), never on the plugin record or config file.
+  rpc GetSecret(GetSecretRequest) returns (GetSecretResponse);
+  rpc SetSecret(SetSecretRequest) returns (SetSecretResponse);
+  rpc DeleteSecret(DeleteSecretRequest) returns (DeleteSecretResponse);
+
   // GetConfig returns the plugin's own operator-editable config (the values
   // set in Settings > Plugins > <plugin> against the manifest's
   // config_schema). Ungated: a plugin can always read its own config, secret
@@ -155,6 +166,23 @@ message GetConfigRequest {}
 message GetConfigResponse {
   google.protobuf.Struct config = 1;
 }
+
+message GetSecretRequest {
+  string key = 1;
+}
+message GetSecretResponse {
+  bool found = 1;
+  string value = 2;
+}
+message SetSecretRequest {
+  string key = 1;
+  string value = 2;
+}
+message SetSecretResponse {}
+message DeleteSecretRequest {
+  string key = 1;
+}
+message DeleteSecretResponse {}
 
 message RevealSecretRequest {
   string ref = 1;

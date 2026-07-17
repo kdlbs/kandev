@@ -17,12 +17,65 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"regexp"
+	"strings"
 )
 
 // configSecretMask is the placeholder returned in place of a secret config
 // value on the operator API, and recognized on write as "leave the stored
 // value unchanged". Deliberately implausible as a real credential.
 const configSecretMask = "********"
+
+// pluginVaultIDPrefix is the reserved id namespace every plugin-owned vault
+// entry lives under: "plugin:<plugin_id>:...". Uninstall deletes the whole
+// prefix.
+const pluginVaultIDPrefix = "plugin:"
+
+// pluginSecretKeyPattern bounds the keys plugins may use with the
+// GetSecret/SetSecret/DeleteSecret Host RPCs: a single sane identifier, so
+// a key can never smuggle separators into the vault-id namespace.
+var pluginSecretKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$`)
+
+// pluginVaultPrefix returns the vault-id prefix owned by pluginID.
+func pluginVaultPrefix(pluginID string) string {
+	return pluginVaultIDPrefix + pluginID + ":"
+}
+
+// pluginSecretID is the vault id for a plugin-owned secret stored via the
+// SetSecret Host RPC.
+func pluginSecretID(pluginID, key string) string {
+	return pluginVaultPrefix(pluginID) + "secret:" + key
+}
+
+// pluginConfigSecretID is the vault id backing a secret config_schema field
+// saved from the plugin settings page. Distinct sub-namespace from
+// pluginSecretID so a plugin's own SetSecret keys can never collide with
+// config-managed entries.
+func pluginConfigSecretID(pluginID, field string) string {
+	return pluginVaultPrefix(pluginID) + "config:" + field
+}
+
+// configVaultRef is the value persisted in <id>.config.yml in place of a
+// secret config field's cleartext: "vault:" + the exact vault id holding
+// the value. isConfigVaultRef only treats a value as a reference when it
+// equals the ref derived for that specific plugin+field, so a cleartext
+// secret that merely starts with "vault:" can never be misread.
+func configVaultRef(pluginID, field string) string {
+	return "vault:" + pluginConfigSecretID(pluginID, field)
+}
+
+// isConfigVaultRef reports whether value is the vault reference marker for
+// pluginID's config field.
+func isConfigVaultRef(pluginID, field string, value any) bool {
+	s, ok := value.(string)
+	return ok && s == configVaultRef(pluginID, field)
+}
+
+// hasPluginVaultPrefix reports whether vault id belongs to pluginID's
+// namespace.
+func hasPluginVaultPrefix(id, pluginID string) bool {
+	return strings.HasPrefix(id, pluginVaultPrefix(pluginID))
+}
 
 // ErrConfigInvalid marks a config rejected by validateConfigSchema so the
 // HTTP layer can map it to 400 instead of 500.

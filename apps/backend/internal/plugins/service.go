@@ -79,7 +79,7 @@ type Service struct {
 
 	deliverer Deliverer
 	runtime   PluginRuntime
-	secrets   SecretRevealer
+	secrets   SecretVault
 
 	// Host data API (ADR 0043) service-layer dependencies, wired via
 	// SetDataSources and handed to every pluginHost hostForPlugin builds.
@@ -174,8 +174,8 @@ func (s *Service) StateStore() *state.Store {
 	return s.state
 }
 
-// SetSecrets wires the secret revealer Provide was constructed with.
-func (s *Service) SetSecrets(v SecretRevealer) {
+// SetSecrets wires the secret vault Provide was constructed with.
+func (s *Service) SetSecrets(v SecretVault) {
 	s.secrets = v
 }
 
@@ -294,6 +294,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 	return &pluginHost{
 		pluginID:         pluginID,
 		capabilities:     rec.Capabilities,
+		configSchema:     rec.ConfigSchema,
 		state:            s.state,
 		secrets:          s.secrets,
 		bus:              s.eventBus,
@@ -336,10 +337,12 @@ func (s *Service) Get(id string) (*store.Record, error) {
 // secret fields carrying the mask placeholder keep their stored value
 // (mergeMaskedSecrets), the result is validated against the manifest's
 // config_schema (ErrConfigInvalid on mismatch, mapped to 400 by the HTTP
-// layer), and a currently-running plugin is restarted so the new config
-// takes effect — hostForPlugin rebuilds the Host per spawn, and plugins
-// read config at startup via the Host GetConfig RPC.
-func (s *Service) UpdateConfig(id string, config map[string]any) error {
+// layer), secret fields are moved into the encrypted vault
+// (storeConfigSecrets — the config file persists only a vault reference),
+// and a currently-running plugin is restarted so the new config takes
+// effect — hostForPlugin rebuilds the Host per spawn, and plugins read
+// config at startup via the Host GetConfig RPC.
+func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string]any) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -356,10 +359,71 @@ func (s *Service) UpdateConfig(id string, config map[string]any) error {
 	if err := validateConfigSchema(merged, rec.ConfigSchema); err != nil {
 		return err
 	}
-	if err := s.store.SetConfig(id, merged); err != nil {
+	stored, err := s.storeConfigSecrets(ctx, rec, merged, existing)
+	if err != nil {
+		return err
+	}
+	if err := s.store.SetConfig(id, stored); err != nil {
 		return err
 	}
 	return s.restartForConfigChange(rec)
+}
+
+// storeConfigSecrets moves each secret config field's cleartext value into
+// the encrypted vault (id pluginConfigSecretID) and replaces it with the
+// configVaultRef marker, so <id>.config.yml never persists a cleartext
+// secret. A field already carrying its ref (the mask-merge round trip) is
+// left alone; a secret field removed from the config deletes its vault
+// entry best-effort. With no vault wired (NewService without SetSecrets —
+// tests, embedded uses) values fall back to the config file itself, with a
+// warning: functional, but without at-rest encryption.
+func (s *Service) storeConfigSecrets(
+	ctx context.Context, rec *store.Record, merged, existing map[string]any,
+) (map[string]any, error) {
+	secretFields := secretPropertyKeys(rec.ConfigSchema)
+	if len(secretFields) == 0 {
+		return merged, nil
+	}
+	if s.secrets == nil {
+		s.log.Warn("plugins: no secret vault wired; storing secret config fields in the config file",
+			zap.String("plugin_id", rec.ID))
+		return merged, nil
+	}
+
+	out := make(map[string]any, len(merged))
+	for k, v := range merged {
+		out[k] = v
+	}
+	for field := range secretFields {
+		value, present := out[field]
+		if !present {
+			s.deleteConfigSecret(ctx, rec.ID, field, existing)
+			continue
+		}
+		cleartext, ok := value.(string)
+		if !ok || cleartext == "" || isConfigVaultRef(rec.ID, field, value) {
+			continue
+		}
+		vaultID := pluginConfigSecretID(rec.ID, field)
+		if err := s.secrets.Set(ctx, vaultID, vaultID, cleartext); err != nil {
+			return nil, fmt.Errorf("plugins: store secret config field %q: %w", field, err)
+		}
+		out[field] = configVaultRef(rec.ID, field)
+	}
+	return out, nil
+}
+
+// deleteConfigSecret best-effort removes the vault entry backing a secret
+// config field that was removed from the config, if the stored config
+// actually pointed at it.
+func (s *Service) deleteConfigSecret(ctx context.Context, pluginID, field string, existing map[string]any) {
+	if !isConfigVaultRef(pluginID, field, existing[field]) {
+		return
+	}
+	if err := s.secrets.Delete(ctx, pluginConfigSecretID(pluginID, field)); err != nil {
+		s.log.Warn("plugins: failed to delete removed secret config field from vault",
+			zap.String("plugin_id", pluginID), zap.String("field", field), zap.Error(err))
+	}
 }
 
 // GetMaskedConfig returns id's stored config with secret values (per the
@@ -599,8 +663,35 @@ func (s *Service) Uninstall(id string) error {
 	}
 	s.registry.Remove(id)
 	s.deletePluginState(id)
+	s.deletePluginSecrets(id)
 	s.notifyDeliverer()
 	return nil
+}
+
+// deletePluginSecrets best-effort removes every vault entry in id's
+// namespace ("plugin:<id>:..." — both SetSecret-owned and config-backed
+// entries), so a reinstall under the same id never inherits stale secrets.
+// Mirrors deletePluginState: a nil vault or a listing failure is logged,
+// not fatal — the package/record are already gone by this point.
+func (s *Service) deletePluginSecrets(id string) {
+	if s.secrets == nil {
+		return
+	}
+	ctx := context.Background()
+	ids, err := s.secrets.ListIDs(ctx)
+	if err != nil {
+		s.log.Warn("plugins: failed to list vault ids on uninstall", zap.String("plugin_id", id), zap.Error(err))
+		return
+	}
+	for _, vaultID := range ids {
+		if !hasPluginVaultPrefix(vaultID, id) {
+			continue
+		}
+		if err := s.secrets.Delete(ctx, vaultID); err != nil {
+			s.log.Warn("plugins: failed to delete plugin secret on uninstall",
+				zap.String("plugin_id", id), zap.String("vault_id", vaultID), zap.Error(err))
+		}
+	}
 }
 
 // deletePluginState best-effort removes every plugin_state row for id. A

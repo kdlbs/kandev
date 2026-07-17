@@ -9,6 +9,7 @@ import (
 	goruntime "runtime"
 	"testing"
 
+	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/store"
 )
@@ -188,7 +189,7 @@ func TestServiceGetMaskedConfigMasksSecretsButStoresCleartext(t *testing.T) {
 	svc, fsStore, _ := newTestService(t)
 	installConfigPlugin(t, svc, "kandev-plugin-github")
 
-	err := svc.UpdateConfig("kandev-plugin-github", map[string]any{
+	err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{
 		"github_token": "ghp_real", "org": "kdlbs",
 	})
 	if err != nil {
@@ -225,9 +226,9 @@ func TestServiceUpdateConfigPreservesMaskedSecret(t *testing.T) {
 			t.Fatalf("UpdateConfig: %v", err)
 		}
 	}
-	must(svc.UpdateConfig("kandev-plugin-github", map[string]any{"github_token": "ghp_real"}))
+	must(svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_real"}))
 	// Re-submitting the form: token comes back as the mask, org changes.
-	must(svc.UpdateConfig("kandev-plugin-github", map[string]any{
+	must(svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{
 		"github_token": configSecretMask, "org": "kdlbs",
 	}))
 
@@ -244,7 +245,7 @@ func TestServiceUpdateConfigInvalidRejectedAndNotPersisted(t *testing.T) {
 	svc, fsStore, _ := newTestService(t)
 	installConfigPlugin(t, svc, "kandev-plugin-github")
 
-	err := svc.UpdateConfig("kandev-plugin-github", map[string]any{"org": "no-token"})
+	err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"org": "no-token"})
 	if !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("error = %v, want ErrConfigInvalid", err)
 	}
@@ -258,7 +259,7 @@ func TestServiceUpdateConfigRestartsRunningPlugin(t *testing.T) {
 	svc, _, rt := newTestService(t)
 	installConfigPlugin(t, svc, "kandev-plugin-github") // Install activates -> running
 
-	if err := svc.UpdateConfig("kandev-plugin-github", map[string]any{"github_token": "ghp_x"}); err != nil {
+	if err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_x"}); err != nil {
 		t.Fatalf("UpdateConfig: %v", err)
 	}
 	if !rt.stopped("kandev-plugin-github") {
@@ -281,7 +282,7 @@ func TestServiceUpdateConfigDoesNotSpawnStoppedPlugin(t *testing.T) {
 	}
 	before := rt.startCallCount("kandev-plugin-github")
 
-	if err := svc.UpdateConfig("kandev-plugin-github", map[string]any{"github_token": "ghp_x"}); err != nil {
+	if err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_x"}); err != nil {
 		t.Fatalf("UpdateConfig: %v", err)
 	}
 	if got := rt.startCallCount("kandev-plugin-github"); got != before {
@@ -294,7 +295,7 @@ func TestServiceUpdateConfigRestartFailurePersistsConfigAndSetsError(t *testing.
 	installConfigPlugin(t, svc, "kandev-plugin-github")
 	rt.setStartErr("kandev-plugin-github", errors.New("spawn boom"))
 
-	err := svc.UpdateConfig("kandev-plugin-github", map[string]any{"github_token": "ghp_x"})
+	err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_x"})
 	if err == nil {
 		t.Fatalf("UpdateConfig should surface the restart failure")
 	}
@@ -313,7 +314,7 @@ func TestServiceUpdateConfigRestartFailurePersistsConfigAndSetsError(t *testing.
 func TestPluginHostGetConfigReturnsCleartextConfig(t *testing.T) {
 	svc, fsStore, _ := newTestService(t)
 	installConfigPlugin(t, svc, "kandev-plugin-github")
-	if err := svc.UpdateConfig("kandev-plugin-github", map[string]any{"github_token": "ghp_real"}); err != nil {
+	if err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_real"}); err != nil {
 		t.Fatalf("UpdateConfig: %v", err)
 	}
 
@@ -343,7 +344,7 @@ func TestPluginHostGetConfigWithoutStoreReturnsEmpty(t *testing.T) {
 func TestGetConfigHandlerReturnsMaskedConfig(t *testing.T) {
 	router, svc := newTestRouter(t)
 	installConfigPlugin(t, svc, "kandev-plugin-github")
-	if err := svc.UpdateConfig("kandev-plugin-github", map[string]any{"github_token": "ghp_real"}); err != nil {
+	if err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{"github_token": "ghp_real"}); err != nil {
 		t.Fatalf("UpdateConfig: %v", err)
 	}
 
@@ -377,4 +378,195 @@ func TestUpdateConfigHandlerInvalidSchemaReturns400(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400, body=%s", rec.Code, rec.Body.String())
 	}
+}
+
+// --- vault-backed config + plugin-scoped secret tests ---
+
+func newTestServiceWithVault(t *testing.T) (*Service, *store.FSStore, *fakeSecretRevealer) {
+	t.Helper()
+	svc, fsStore, _ := newTestService(t)
+	vault := newFakeSecretRevealer()
+	svc.SetSecrets(vault)
+	return svc, fsStore, vault
+}
+
+func TestServiceUpdateConfigStoresSecretInVaultNotConfigFile(t *testing.T) {
+	svc, fsStore, vault := newTestServiceWithVault(t)
+	installConfigPlugin(t, svc, "kandev-plugin-github")
+
+	err := svc.UpdateConfig(context.Background(), "kandev-plugin-github", map[string]any{
+		"github_token": "ghp_real", "org": "kdlbs",
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+
+	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	wantRef := configVaultRef("kandev-plugin-github", "github_token")
+	if stored["github_token"] != wantRef {
+		t.Fatalf("stored github_token = %v, want vault ref %q", stored["github_token"], wantRef)
+	}
+	if value, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "github_token")); !ok || value != "ghp_real" {
+		t.Fatalf("vault entry = %q (found=%v), want cleartext ghp_real", value, ok)
+	}
+
+	masked, err := svc.GetMaskedConfig("kandev-plugin-github")
+	if err != nil {
+		t.Fatalf("GetMaskedConfig: %v", err)
+	}
+	if masked["github_token"] != configSecretMask {
+		t.Fatalf("masked github_token = %v, want mask", masked["github_token"])
+	}
+}
+
+func TestServiceUpdateConfigMaskRoundTripKeepsVaultValue(t *testing.T) {
+	svc, fsStore, vault := newTestServiceWithVault(t)
+	installConfigPlugin(t, svc, "kandev-plugin-github")
+
+	ctx := context.Background()
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{"github_token": "ghp_real"}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+	// Re-submit with the mask: the ref stays a ref, the vault keeps the value.
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{
+		"github_token": configSecretMask, "org": "kdlbs",
+	}); err != nil {
+		t.Fatalf("UpdateConfig (mask round trip): %v", err)
+	}
+
+	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	if stored["github_token"] != configVaultRef("kandev-plugin-github", "github_token") {
+		t.Fatalf("stored github_token = %v, want vault ref", stored["github_token"])
+	}
+	if value, _ := vault.get(pluginConfigSecretID("kandev-plugin-github", "github_token")); value != "ghp_real" {
+		t.Fatalf("vault value = %q, want preserved ghp_real", value)
+	}
+}
+
+func TestServiceUpdateConfigRemovedSecretDeletesVaultEntry(t *testing.T) {
+	svc, _, vault := newTestServiceWithVault(t)
+	installConfigPlugin(t, svc, "kandev-plugin-github")
+
+	ctx := context.Background()
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{"github_token": "ghp_real"}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+	// github_token is required by the schema, so drop the optional secret
+	// path via a schema-less check: submit without the field entirely is
+	// rejected; instead prove deletion through Uninstall below and via the
+	// optional webhook_key secret here.
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{
+		"github_token": configSecretMask, "webhook_key": "whsec_1",
+	}); err != nil {
+		t.Fatalf("UpdateConfig (add webhook_key): %v", err)
+	}
+	if _, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "webhook_key")); !ok {
+		t.Fatalf("webhook_key should be in the vault")
+	}
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{
+		"github_token": configSecretMask,
+	}); err != nil {
+		t.Fatalf("UpdateConfig (remove webhook_key): %v", err)
+	}
+	if _, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "webhook_key")); ok {
+		t.Fatalf("removed secret field should be deleted from the vault")
+	}
+}
+
+func TestServiceUninstallPurgesPluginVaultNamespace(t *testing.T) {
+	svc, _, vault := newTestServiceWithVault(t)
+	installConfigPlugin(t, svc, "kandev-plugin-github")
+
+	ctx := context.Background()
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{"github_token": "ghp_real"}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+	vault.set(pluginSecretID("kandev-plugin-github", "own-key"), "own-value")
+	vault.set("unrelated", "keep-me")
+
+	if err := svc.Uninstall("kandev-plugin-github"); err != nil {
+		t.Fatalf("Uninstall: %v", err)
+	}
+	if _, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "github_token")); ok {
+		t.Fatalf("config secret should be purged on uninstall")
+	}
+	if _, ok := vault.get(pluginSecretID("kandev-plugin-github", "own-key")); ok {
+		t.Fatalf("plugin-owned secret should be purged on uninstall")
+	}
+	if _, ok := vault.get("unrelated"); !ok {
+		t.Fatalf("secrets outside the plugin namespace must survive uninstall")
+	}
+}
+
+func TestPluginHostGetConfigResolvesVaultRef(t *testing.T) {
+	svc, fsStore, vault := newTestServiceWithVault(t)
+	rec := installConfigPlugin(t, svc, "kandev-plugin-github")
+
+	ctx := context.Background()
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{"github_token": "ghp_real"}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+
+	host := &pluginHost{
+		pluginID:     "kandev-plugin-github",
+		configSchema: rec.ConfigSchema,
+		configs:      fsStore,
+		secrets:      vault,
+	}
+	config, err := host.GetConfig(ctx)
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
+	if config["github_token"] != "ghp_real" {
+		t.Fatalf("host GetConfig github_token = %v, want resolved cleartext", config["github_token"])
+	}
+}
+
+func TestPluginHostSecretPrimitives(t *testing.T) {
+	vault := newFakeSecretRevealer()
+	host := &pluginHost{
+		pluginID:     "kandev-plugin-github",
+		capabilities: manifestCapsWithSecrets(),
+		secrets:      vault,
+	}
+	ctx := context.Background()
+
+	_, found, err := host.GetSecret(ctx, "pat")
+	if err != nil || found {
+		t.Fatalf("GetSecret(missing) = found=%v err=%v, want false,nil", found, err)
+	}
+	if err := host.SetSecret(ctx, "pat", "ghp_owned"); err != nil {
+		t.Fatalf("SetSecret: %v", err)
+	}
+	if value, ok := vault.get("plugin:kandev-plugin-github:secret:pat"); !ok || value != "ghp_owned" {
+		t.Fatalf("vault entry = %q (found=%v), want namespaced ghp_owned", value, ok)
+	}
+	value, found, err := host.GetSecret(ctx, "pat")
+	if err != nil || !found || value != "ghp_owned" {
+		t.Fatalf("GetSecret = %q,%v,%v, want ghp_owned,true,nil", value, found, err)
+	}
+	if err := host.DeleteSecret(ctx, "pat"); err != nil {
+		t.Fatalf("DeleteSecret: %v", err)
+	}
+	if err := host.DeleteSecret(ctx, "pat"); err != nil {
+		t.Fatalf("DeleteSecret(missing) should be a no-op, got %v", err)
+	}
+}
+
+func TestPluginHostSecretPrimitivesRequireCapabilityAndValidKey(t *testing.T) {
+	host := &pluginHost{pluginID: "p", secrets: newFakeSecretRevealer()}
+	if err := host.SetSecret(context.Background(), "k", "v"); err == nil {
+		t.Fatalf("SetSecret without secrets capability should be denied")
+	}
+
+	host.capabilities = manifestCapsWithSecrets()
+	for _, bad := range []string{"", "a b", "x:y", "../etc", ".hidden"} {
+		if err := host.SetSecret(context.Background(), bad, "v"); err == nil {
+			t.Fatalf("SetSecret(%q) should reject invalid key", bad)
+		}
+	}
+}
+
+func manifestCapsWithSecrets() manifest.Capabilities {
+	return manifest.Capabilities{Secrets: true}
 }

@@ -248,12 +248,15 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(tokenInput).toHaveValue("********", { timeout: 15_000 });
     await expect(greetingInput).toHaveValue("hello from e2e");
 
-    // --- The cleartext IS stored server-side (fs store config file)... ---
+    // --- The config file never persists the cleartext: the secret field is
+    // a reference into kandev's encrypted vault. ---
     const configPath = path.join(pluginsDir, `${PLUGIN_ID}.config.yml`);
     await expect.poll(() => fs.existsSync(configPath), { timeout: 10_000 }).toBe(true);
-    expect(fs.readFileSync(configPath, "utf8")).toContain(secretToken);
+    const configFile = fs.readFileSync(configPath, "utf8");
+    expect(configFile).not.toContain(secretToken);
+    expect(configFile).toContain(`vault:plugin:${PLUGIN_ID}:config:api_token`);
 
-    // --- ...and the operator API never returns it. ---
+    // --- The operator API never returns the cleartext either. ---
     const configRes = await apiClient.rawRequest("GET", `/api/plugins/${PLUGIN_ID}/config`);
     const configBody = (await configRes.json()) as { config: Record<string, unknown> };
     expect(configBody.config.api_token).toBe("********");
@@ -284,6 +287,20 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
         { timeout: 15_000, intervals: [250, 500, 1000] },
       )
       .toBe(secretToken);
+
+    // --- And the plugin-scoped secret primitives: the same webhook makes
+    // the fixture SetSecret("probe") then GetSecret it back through the
+    // vault, writing the round-tripped value to secret-probe.json. ---
+    const probePath = path.join(pluginsDir, PLUGIN_ID, "data", "secret-probe.json");
+    await expect
+      .poll(
+        () => {
+          if (!fs.existsSync(probePath)) return null;
+          return (JSON.parse(fs.readFileSync(probePath, "utf8")) as Record<string, unknown>).probe;
+        },
+        { timeout: 15_000, intervals: [250, 500, 1000] },
+      )
+      .toBe("s3cret-roundtrip");
   });
 
   test("uploading a corrupted package surfaces install-plugin-error", async ({ testPage }) => {

@@ -50,6 +50,9 @@ func (f *fakeHost) ListState(context.Context, string, string) ([]StateEntry, err
 	return nil, nil
 }
 func (f *fakeHost) GetConfig(context.Context) (map[string]any, error)       { return nil, nil }
+func (f *fakeHost) GetSecret(context.Context, string) (string, bool, error) { return "", false, nil }
+func (f *fakeHost) SetSecret(context.Context, string, string) error         { return nil }
+func (f *fakeHost) DeleteSecret(context.Context, string) error              { return nil }
 func (f *fakeHost) RevealSecret(context.Context, string) (string, error)    { return "", nil }
 func (f *fakeHost) EmitEvent(context.Context, string, map[string]any) error { return nil }
 

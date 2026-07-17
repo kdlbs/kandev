@@ -18,6 +18,7 @@ const (
 	deliveriesFileName     = "deliveries.jsonl"
 	webhooksFileName       = "webhooks.jsonl"
 	configSnapshotFileName = "config.json"
+	secretProbeFileName    = "secret-probe.json"
 
 	toolNameEcho = "echo"
 )
@@ -135,7 +136,31 @@ func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.Webhoo
 		return nil, err
 	}
 	p.snapshotConfigBestEffort(ctx)
+	p.snapshotSecretProbeBestEffort(ctx)
 	return &pluginsdk.WebhookResponse{Status: 200, Body: []byte("ok")}, nil
+}
+
+// snapshotSecretProbeBestEffort exercises the plugin-scoped secret
+// primitives end to end: SetSecret then GetSecret through the Host, writing
+// the read-back value to secret-probe.json as evidence for e2e that a
+// plugin-owned secret survives a vault round trip over the real transport.
+func (p *fixturePlugin) snapshotSecretProbeBestEffort(ctx context.Context) {
+	host := p.Host()
+	if host == nil {
+		return
+	}
+	if err := host.SetSecret(ctx, "probe", "s3cret-roundtrip"); err != nil {
+		return
+	}
+	value, found, err := host.GetSecret(ctx, "probe")
+	if err != nil || !found {
+		return
+	}
+	data, err := json.Marshal(map[string]string{"probe": value})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(p.dataDir, secretProbeFileName), data, 0o600)
 }
 
 // snapshotConfigBestEffort writes the current Host.GetConfig result to

@@ -214,6 +214,8 @@ POST   /api/plugins/sync              # Reconcile the registry with the plugins 
 GET    /api/plugins                    # List installed plugins
 GET    /api/plugins/{id}              # Get plugin detail
 GET    /api/plugins/{id}/config       # Stored operator config; secret values masked
+                                      # (secret fields live in the encrypted vault; the
+                                      # config file persists only a vault reference)
 PATCH  /api/plugins/{id}              # Update plugin config (masked secrets keep stored values; restarts a running plugin)
 DELETE /api/plugins/{id}              # Uninstall plugin (stops subprocess, removes package + state)
 POST   /api/plugins/{id}/enable

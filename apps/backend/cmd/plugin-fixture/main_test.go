@@ -184,8 +184,11 @@ func (h *fakeHost) ListState(context.Context, string, string) ([]pluginsdk.State
 	return nil, nil
 }
 
-func (h *fakeHost) GetConfig(context.Context) (map[string]any, error)    { return nil, nil }
-func (h *fakeHost) RevealSecret(context.Context, string) (string, error) { return "", nil }
+func (h *fakeHost) GetConfig(context.Context) (map[string]any, error)       { return nil, nil }
+func (h *fakeHost) GetSecret(context.Context, string) (string, bool, error) { return "", false, nil }
+func (h *fakeHost) SetSecret(context.Context, string, string) error         { return nil }
+func (h *fakeHost) DeleteSecret(context.Context, string) error              { return nil }
+func (h *fakeHost) RevealSecret(context.Context, string) (string, error)    { return "", nil }
 
 func (h *fakeHost) EmitEvent(context.Context, string, map[string]any) error { return nil }
 

@@ -26,6 +26,7 @@ type recordingHost struct {
 	}
 	listStateEntries []StateEntry
 	configValues     map[string]any
+	ownedSecrets     map[string]string
 	revealSecretFn   func(ctx context.Context, ref string) (string, error)
 	emitEvent        struct {
 		name    string
@@ -58,6 +59,24 @@ func (h *recordingHost) GetConfig(context.Context) (map[string]any, error) {
 
 func (h *recordingHost) RevealSecret(ctx context.Context, ref string) (string, error) {
 	return h.revealSecretFn(ctx, ref)
+}
+
+func (h *recordingHost) GetSecret(_ context.Context, key string) (string, bool, error) {
+	value, ok := h.ownedSecrets[key]
+	return value, ok, nil
+}
+
+func (h *recordingHost) SetSecret(_ context.Context, key, value string) error {
+	if h.ownedSecrets == nil {
+		h.ownedSecrets = map[string]string{}
+	}
+	h.ownedSecrets[key] = value
+	return nil
+}
+
+func (h *recordingHost) DeleteSecret(_ context.Context, key string) error {
+	delete(h.ownedSecrets, key)
+	return nil
 }
 
 func (h *recordingHost) EmitEvent(_ context.Context, name string, payload map[string]any) error {
@@ -180,6 +199,27 @@ func TestHost_RevealSecret(t *testing.T) {
 
 	_, err = host.RevealSecret(context.Background(), "unknown")
 	require.Error(t, err)
+}
+
+func TestHost_PluginSecrets_RoundTripOverWire(t *testing.T) {
+	impl := &recordingHost{}
+	host := dialHostOverBufconn(t, impl)
+	ctx := context.Background()
+
+	_, found, err := host.GetSecret(ctx, "pat")
+	require.NoError(t, err)
+	require.False(t, found)
+
+	require.NoError(t, host.SetSecret(ctx, "pat", "ghp_owned"))
+	value, found, err := host.GetSecret(ctx, "pat")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "ghp_owned", value)
+
+	require.NoError(t, host.DeleteSecret(ctx, "pat"))
+	_, found, err = host.GetSecret(ctx, "pat")
+	require.NoError(t, err)
+	require.False(t, found)
 }
 
 func TestHost_EmitEvent(t *testing.T) {
