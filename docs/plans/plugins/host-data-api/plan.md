@@ -2,7 +2,7 @@
 spec: docs/specs/plugins/spec.md
 adr: docs/decisions/0043-plugin-host-data-api.md
 created: 2026-07-17
-status: draft
+status: implemented
 ---
 
 # Implementation Plan: Plugin Host data API
@@ -117,18 +117,18 @@ path.
 
 ```
 Wave 1 (parallel):
-- [ ] [task-01-proto-contract](task-01-proto-contract.md)
-- [ ] [task-02-session-loc-aggregation](task-02-session-loc-aggregation.md)
+- [x] [task-01-proto-contract](task-01-proto-contract.md)
+- [x] [task-02-session-loc-aggregation](task-02-session-loc-aggregation.md)
 
 Wave 2:
-- [ ] [task-03-sdk-data-accessors](task-03-sdk-data-accessors.md)
+- [x] [task-03-sdk-data-accessors](task-03-sdk-data-accessors.md)
 
 Wave 3:
-- [ ] [task-04-host-data-impl](task-04-host-data-impl.md)
+- [x] [task-04-host-data-impl](task-04-host-data-impl.md)
 
 Wave 4 (parallel):
-- [ ] [task-05-rewrite-agent-stats-plugin](task-05-rewrite-agent-stats-plugin.md)
-- [ ] [task-06-tests](task-06-tests.md)
+- [x] [task-05-rewrite-agent-stats-plugin](task-05-rewrite-agent-stats-plugin.md)
+- [x] [task-06-tests](task-06-tests.md)
 - [x] [task-07-docs](task-07-docs.md)
 ```
 
