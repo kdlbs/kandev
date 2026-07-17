@@ -27,6 +27,21 @@ describe("parseContextWindowEntry", () => {
     );
   });
 
+  it("prefers a caller-supplied timestamp over embedded metadata", () => {
+    expect(
+      parseContextWindowEntry(
+        {
+          size: 128_000,
+          used: 64_000,
+          remaining: 64_000,
+          efficiency: 50,
+          timestamp: "stored",
+        },
+        "live-2026-07-17T11:00:00.000Z",
+      ),
+    ).toEqual(expect.objectContaining({ timestamp: "live-2026-07-17T11:00:00.000Z" }));
+  });
+
   it("rejects non-object metadata", () => {
     expect(parseContextWindowEntry(null)).toBeNull();
   });

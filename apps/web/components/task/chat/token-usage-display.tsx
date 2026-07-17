@@ -125,6 +125,10 @@ function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) 
   const helpId = useId();
 
   if (!source) return null;
+  const description =
+    source === "acp"
+      ? "ACP is the active session's effective window, reported by the agent."
+      : "API is the model's advertised maximum from the catalogue and is used when ACP omits the window.";
 
   return (
     <div className="group relative flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
@@ -143,8 +147,7 @@ function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) 
         role="tooltip"
         className="pointer-events-none absolute right-0 bottom-[calc(100%+0.375rem)] z-10 w-60 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
       >
-        ACP is the active session&apos;s effective window, reported by the agent. API is the
-        model&apos;s advertised maximum from the catalogue and is used when ACP omits the window.
+        {description}
       </span>
     </div>
   );
