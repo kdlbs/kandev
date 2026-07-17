@@ -27,11 +27,14 @@ import (
 // (§5) only names state and secrets (api_read/api_write reserved for
 // future); event emission has no boolean capability to gate on.
 type pluginHost struct {
-	// UnimplementedHostData satisfies the Host data API (ADR 0042)
-	// sub-accessors (Tasks/Sessions/Workspaces/Workflows/AgentProfiles/
-	// Repositories) with Unimplemented defaults. Wiring these to the real,
-	// capability-gated service-layer calls is a separate task; see
-	// docs/plans/plugins/host-data-api/task-04-*.md.
+	// UnimplementedHostData is embedded so pluginHost satisfies
+	// pluginsdk.Host even when one of the data-source fields below is nil
+	// (e.g. a test pluginHost built without SetDataSources' wiring, or a
+	// capability the manifest doesn't declare — see host_data.go's denied
+	// readers for the capability-gated path). Every accessor
+	// (Tasks/Sessions/Workspaces/Workflows/AgentProfiles/Repositories) is
+	// overridden with a real, capability-gated implementation in
+	// host_data.go; this embed only remains as defense-in-depth.
 	pluginsdk.UnimplementedHostData
 
 	pluginID     string
@@ -40,6 +43,14 @@ type pluginHost struct {
 	state   *state.Store
 	secrets SecretRevealer
 	bus     bus.EventBus
+
+	// Host data API (ADR 0042) service-layer dependencies, wired by
+	// Service.hostForPlugin from Service.SetDataSources. See host_data.go.
+	taskData         taskDataSource
+	workflows        workflowLister
+	workflowSteps    workflowStepLister
+	agentProfiles    agentProfileDataSource
+	sessionCodeStats sessionCodeStatsSource
 }
 
 var _ pluginsdk.Host = (*pluginHost)(nil)

@@ -81,6 +81,18 @@ type Service struct {
 	runtime   PluginRuntime
 	secrets   SecretRevealer
 
+	// Host data API (ADR 0042) service-layer dependencies, wired via
+	// SetDataSources and handed to every pluginHost hostForPlugin builds.
+	// nil until backendapp calls SetDataSources (see its doc comment); a
+	// pluginHost built before that falls back to Unimplemented for these
+	// accessors regardless of declared capabilities (see host_data.go's
+	// accessor nil-checks).
+	taskData         taskDataSource
+	workflows        workflowLister
+	workflowSteps    workflowStepLister
+	agentProfiles    agentProfileDataSource
+	sessionCodeStats sessionCodeStatsSource
+
 	// kandevVersion is the currently running kandev build version, used to
 	// enforce a package's manifest.min_kandev_version at Install (see
 	// SetKandevVersion / checkMinKandevVersion). Empty (the default) means
@@ -165,6 +177,34 @@ func (s *Service) StateStore() *state.Store {
 // SetSecrets wires the secret revealer Provide was constructed with.
 func (s *Service) SetSecrets(v SecretRevealer) {
 	s.secrets = v
+}
+
+// SetDataSources wires the Host data API's (ADR 0042) service-layer
+// dependencies, following the same post-construction "SetX" pattern as
+// SetDeliverer/SetSecrets (see the "Extension points" doc comment on
+// Service). backendapp calls this once, passing its already-constructed
+// task, workflow, agent-settings, and analytics services directly — each
+// argument's interface is a narrow slice of one of those services
+// (host_data.go's taskDataSource/workflowLister/workflowStepLister/
+// agentProfileDataSource/sessionCodeStatsSource), satisfied structurally, so
+// no adapter type is needed. Not called by Provide itself: the plugins
+// package cannot import internal/task/service, internal/workflow/service,
+// etc. without an import cycle, mirroring why event delivery is wired the
+// same way. Every pluginHost hostForPlugin builds after this call gets
+// these dependencies; one built before (e.g. very early boot) falls back to
+// Unimplemented for the Host data API regardless of declared capabilities.
+func (s *Service) SetDataSources(
+	tasks taskDataSource,
+	workflows workflowLister,
+	workflowSteps workflowStepLister,
+	agentProfiles agentProfileDataSource,
+	sessionCodeStats sessionCodeStatsSource,
+) {
+	s.taskData = tasks
+	s.workflows = workflows
+	s.workflowSteps = workflowSteps
+	s.agentProfiles = agentProfiles
+	s.sessionCodeStats = sessionCodeStats
 }
 
 // SetKandevVersion wires the currently running kandev build version,
@@ -252,11 +292,16 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		rec = &store.Record{} // every capability check below denies; should not happen in practice
 	}
 	return &pluginHost{
-		pluginID:     pluginID,
-		capabilities: rec.Capabilities,
-		state:        s.state,
-		secrets:      s.secrets,
-		bus:          s.eventBus,
+		pluginID:         pluginID,
+		capabilities:     rec.Capabilities,
+		state:            s.state,
+		secrets:          s.secrets,
+		bus:              s.eventBus,
+		taskData:         s.taskData,
+		workflows:        s.workflows,
+		workflowSteps:    s.workflowSteps,
+		agentProfiles:    s.agentProfiles,
+		sessionCodeStats: s.sessionCodeStats,
 	}
 }
 

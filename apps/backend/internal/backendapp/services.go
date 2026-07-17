@@ -13,6 +13,7 @@ import (
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
 	agentusage "github.com/kandev/kandev/internal/agent/usage"
 	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
+	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -110,6 +111,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	slackSvc := initSlackService(dbPool, repos.Secrets, log)
 	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
 	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
+	if pluginsSvc != nil {
+		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics))
+	}
 	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
 
 	// Plumb GitHub branch listing into the task service so provider-backed
