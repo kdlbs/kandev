@@ -102,19 +102,28 @@ export function usePluginConfigForm(plugin: PluginRecord | null) {
     setSaveStatus("success");
   };
 
-  // Replaces any typed secret input with the mask when the post-save
-  // refetch fails, so cleartext never lingers in the form.
+  // On a post-save refetch failure, replace any typed secret input with the
+  // mask (so cleartext never lingers) and rebase initialValues onto the
+  // masked snapshot — the config IS saved, so the masked form is the new
+  // baseline and must not read as dirty (e.g. a previously-unset secret the
+  // user just entered).
   const maskSecretValues = () => {
     setValues((prev) => {
-      const cleared = { ...prev };
-      for (const field of fields) {
-        const current = cleared[field.name];
-        if (field.secret && typeof current === "string" && current !== "") {
-          cleared[field.name] = SECRET_MASK;
-        }
-      }
-      return cleared;
+      const masked = maskSecretsIn(prev);
+      setInitialValues(masked);
+      return masked;
     });
+  };
+
+  const maskSecretsIn = (source: FormValues): FormValues => {
+    const masked = { ...source };
+    for (const field of fields) {
+      const current = masked[field.name];
+      if (field.secret && typeof current === "string" && current !== "") {
+        masked[field.name] = SECRET_MASK;
+      }
+    }
+    return masked;
   };
 
   return {

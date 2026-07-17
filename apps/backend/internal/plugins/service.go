@@ -376,8 +376,11 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	}
 	// Vault entries for removed secret fields are deleted only AFTER the
 	// config commit succeeds: a failed SetConfig must never leave the old
-	// (still-current) config referencing an already-deleted vault entry.
-	s.cleanupRemovedConfigSecrets(ctx, rec.ID, removedSecrets, existing)
+	// (still-current) config referencing an already-deleted vault entry. The
+	// delete runs on a context detached from the request (like the rollback
+	// path), so a client disconnect right after the commit cannot cancel it
+	// and orphan the now-unreferenced vault entries.
+	s.cleanupRemovedConfigSecrets(context.WithoutCancel(ctx), rec.ID, removedSecrets, existing)
 	return s.restartForConfigChange(rec)
 }
 

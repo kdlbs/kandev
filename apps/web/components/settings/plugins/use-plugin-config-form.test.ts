@@ -148,5 +148,7 @@ describe("usePluginConfigForm", () => {
     expect(toastError).not.toHaveBeenCalled();
     // ...and the cleartext secret must not linger in the form.
     expect(result.current.values.github_token).toBe(SECRET_MASK);
+    // ...and the masked form is the new baseline, so it does not read dirty.
+    expect(result.current.isDirty).toBe(false);
   });
 });

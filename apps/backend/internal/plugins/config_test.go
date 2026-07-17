@@ -256,7 +256,10 @@ func TestServiceUpdateConfigInvalidRejectedAndNotPersisted(t *testing.T) {
 	if !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("error = %v, want ErrConfigInvalid", err)
 	}
-	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	stored, err := fsStore.GetConfig("kandev-plugin-github")
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
 	if len(stored) != 0 {
 		t.Fatalf("invalid config must not persist, got %v", stored)
 	}
@@ -657,7 +660,10 @@ func TestServiceUpdateConfigNonStringSecretRejectedNothingPersisted(t *testing.T
 	if !errors.Is(err, ErrConfigInvalid) {
 		t.Fatalf("error = %v, want ErrConfigInvalid", err)
 	}
-	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	stored, err := fsStore.GetConfig("kandev-plugin-github")
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
 	if len(stored) != 0 {
 		t.Fatalf("rejected config must not persist, got %v", stored)
 	}
@@ -826,7 +832,10 @@ func TestServiceUpdateConfigFailsClosedWithoutVault(t *testing.T) {
 	if !errors.Is(err, errSecretVaultRequired) {
 		t.Fatalf("error = %v, want errSecretVaultRequired", err)
 	}
-	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	stored, err := fsStore.GetConfig("kandev-plugin-github")
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
 	if len(stored) != 0 {
 		t.Fatalf("nothing must persist when failing closed, got %v", stored)
 	}
@@ -909,7 +918,10 @@ func TestServiceUpdateConfigAbortsWhenPriorSecretUnreadable(t *testing.T) {
 	if _, ok := vault.get(vaultID); ok {
 		t.Fatalf("no vault write should happen when the snapshot read fails")
 	}
-	stored, _ := fsStore.GetConfig("kandev-plugin-github")
+	stored, err := fsStore.GetConfig("kandev-plugin-github")
+	if err != nil {
+		t.Fatalf("GetConfig: %v", err)
+	}
 	if len(stored) != 0 {
 		t.Fatalf("nothing must persist when the update aborts, got %v", stored)
 	}
