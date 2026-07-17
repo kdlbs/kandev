@@ -131,14 +131,19 @@ test.describe("Agent profile — ACP-first", () => {
       await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
       const selector = testPage.getByRole("button", { name: "Profile start model settings" });
       await expect(selector).toBeVisible({ timeout: 15_000 });
-      await expect(selector).toContainText("High", { timeout: 10_000 });
+      // Shared profile selectors retain the all-values summary; baseline
+      // compaction applies only to task chat.
+      await expect(selector).toHaveText("Mock Fast / High", { timeout: 10_000 });
 
       await selector.click();
+      await expect(
+        testPage.getByText("Fast mock model for testing", { exact: true }),
+      ).toBeVisible();
       const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
       await expect(effortTrigger).toBeVisible();
       await effortTrigger.click();
       await testPage.getByRole("button", { name: "Low", exact: true }).click();
-      await expect(selector).toContainText("Low");
+      await expect(selector).toHaveText("Mock Fast / Low");
 
       const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
       await expect(saveButton).toBeEnabled({ timeout: 10_000 });
@@ -159,7 +164,7 @@ test.describe("Agent profile — ACP-first", () => {
         .toBe("low");
 
       await testPage.reload();
-      await expect(selector).toContainText("Low", { timeout: 15_000 });
+      await expect(selector).toHaveText("Mock Fast / Low", { timeout: 15_000 });
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
     }

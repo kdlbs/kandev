@@ -22,11 +22,11 @@ func (r *Repository) AppendRouteAttempt(
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO office_run_route_attempts (
-			run_id, seq, provider_id, model, tier, outcome,
+			run_id, seq, execution_profile_id, provider_id, model, tier, outcome,
 			error_code, error_confidence, adapter_phase, classifier_rule,
 			exit_code, raw_excerpt, reset_hint, started_at, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), a.RunID, a.Seq, a.ProviderID, a.Model, a.Tier, a.Outcome,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), a.RunID, a.Seq, a.ExecutionProfileID, a.ProviderID, a.Model, a.Tier, a.Outcome,
 		nullableString(a.ErrorCode), nullableString(string(a.ErrorConfidence)),
 		nullableString(string(a.AdapterPhase)), nullableString(a.ClassifierRule),
 		a.ExitCode, nullableString(a.RawExcerpt), a.ResetHint,
@@ -45,7 +45,7 @@ func (r *Repository) ListRouteAttempts(
 	ctx context.Context, runID string,
 ) ([]models.RouteAttempt, error) {
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
-		SELECT run_id, seq, provider_id, model, tier, outcome,
+		SELECT run_id, seq, execution_profile_id, provider_id, model, tier, outcome,
 			COALESCE(error_code,'') AS error_code,
 			COALESCE(error_confidence,'') AS error_confidence,
 			COALESCE(adapter_phase,'') AS adapter_phase,

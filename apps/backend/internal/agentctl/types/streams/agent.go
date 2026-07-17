@@ -250,6 +250,10 @@ type AgentEvent struct {
 	// ConfigOptions lists session configuration options from ACP _meta.
 	ConfigOptions []ConfigOption `json:"config_options,omitempty"`
 
+	// ConfigBaselineCandidate carries an authoritative response snapshot for
+	// lifecycle settlement without replacing the event's newer live options.
+	ConfigBaselineCandidate []ConfigOption `json:"config_baseline_candidate,omitempty"`
+
 	// --- Session info fields ---
 
 	// SessionTitle is the agent-provided human-readable ACP session title.
@@ -393,6 +397,9 @@ type ConfigOption struct {
 	// Name is a human-readable name.
 	Name string `json:"name"`
 
+	// Description is optional provider-supplied guidance for the option.
+	Description string `json:"description,omitempty"`
+
 	// CurrentValue is the currently selected value.
 	CurrentValue string `json:"current_value"`
 
@@ -410,6 +417,9 @@ type ConfigOptionValue struct {
 
 	// Name is a human-readable label.
 	Name string `json:"name"`
+
+	// Description is optional provider-supplied guidance for the value.
+	Description string `json:"description,omitempty"`
 }
 
 // PromptUsage contains token usage info from an ACP prompt response.

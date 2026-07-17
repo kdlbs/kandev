@@ -1074,9 +1074,10 @@ func TestBuildPassthroughEnv_MergesProfileEnvVars(t *testing.T) {
 	}
 
 	env := mgr.buildPassthroughEnv(context.Background(), &AgentExecution{
-		TaskID:         "task-1",
-		SessionID:      "session-1",
-		AgentProfileID: "profile-1",
+		TaskID:               "task-1",
+		SessionID:            "session-1",
+		AgentProfileID:       "profile-1",
+		OfficeAgentProfileID: "office-cto",
 	}, nil)
 
 	if env["PLAIN"] != "plain-value" {
@@ -1084,6 +1085,12 @@ func TestBuildPassthroughEnv_MergesProfileEnvVars(t *testing.T) {
 	}
 	if env["KANDEV_SESSION_ID"] != "session-1" {
 		t.Fatalf("profile env var must not override KANDEV_SESSION_ID: %+v", env)
+	}
+	if env["KANDEV_AGENT_PROFILE_ID"] != "office-cto" {
+		t.Fatalf("office identity missing: %+v", env)
+	}
+	if env["KANDEV_EXECUTION_PROFILE_ID"] != "profile-1" {
+		t.Fatalf("execution profile missing: %+v", env)
 	}
 }
 

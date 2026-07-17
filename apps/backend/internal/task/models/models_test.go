@@ -36,6 +36,45 @@ func TestLoadSessionRuntimeConfigMapStringExtractsReservedKeys(t *testing.T) {
 	}
 }
 
+func TestLoadSessionRuntimeConfigOverridesUsesDedicatedKey(t *testing.T) {
+	metadata := map[string]interface{}{
+		SessionMetaKeyRuntimeConfig: map[string]interface{}{
+			"config_options": map[string]interface{}{"effort": "medium"},
+		},
+		SessionMetaKeyRuntimeConfigOverrides: map[string]interface{}{
+			"model":          "gpt-5.6-sol",
+			"config_options": map[string]interface{}{"effort": "low"},
+		},
+	}
+	overrides, ok := LoadSessionRuntimeConfigOverrides(metadata)
+	if !ok || overrides.Model != "gpt-5.6-sol" || overrides.ConfigOptions["effort"] != "low" {
+		t.Fatalf("overrides = %#v, %v", overrides, ok)
+	}
+}
+
+func TestLoadSessionACPConfigBaselinePreservesEmptyJSONValues(t *testing.T) {
+	baseline, ok := LoadSessionACPConfigBaseline(map[string]interface{}{
+		SessionMetaKeyACPConfigBaseline: map[string]interface{}{
+			"reasoning_effort": "",
+			"fast_mode":        "off",
+			"ignored":          float64(1),
+		},
+	})
+
+	if !ok {
+		t.Fatal("expected JSON-rehydrated baseline")
+	}
+	if value, exists := baseline["reasoning_effort"]; !exists || value != "" {
+		t.Fatalf("empty baseline value = %q, exists = %v", value, exists)
+	}
+	if baseline["fast_mode"] != "off" {
+		t.Fatalf("fast_mode = %q, want off", baseline["fast_mode"])
+	}
+	if _, exists := baseline["ignored"]; exists {
+		t.Fatal("non-string baseline value should be ignored")
+	}
+}
+
 func TestTaskStateConstants(t *testing.T) {
 	tests := []struct {
 		name     string

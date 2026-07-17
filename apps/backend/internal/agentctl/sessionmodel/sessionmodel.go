@@ -62,17 +62,21 @@ type SDKConn interface {
 
 // SDKApplier applies model changes through a typed ACP SDK connection.
 type SDKApplier struct {
-	Conn SDKConn
+	Conn          SDKConn
+	configOptions *[]acp.SessionConfigOption
 }
 
 func (a SDKApplier) SetConfigOption(ctx context.Context, sessionID, configID, value string) error {
-	_, err := a.Conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
+	resp, err := a.Conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
 		ValueId: &acp.SetSessionConfigOptionValueId{
 			SessionId: acp.SessionId(sessionID),
 			ConfigId:  acp.SessionConfigId(configID),
 			Value:     acp.SessionConfigValueId(value),
 		},
 	})
+	if err == nil && a.configOptions != nil {
+		*a.configOptions = resp.ConfigOptions
+	}
 	return err
 }
 
@@ -86,7 +90,20 @@ func (a SDKApplier) SetModelLegacy(ctx context.Context, sessionID, modelID strin
 
 // ApplySDK applies a model change through the ACP SDK connection.
 func ApplySDK(ctx context.Context, conn SDKConn, req Request) (Method, error) {
-	return Apply(ctx, SDKApplier{Conn: conn}, req)
+	method, _, err := ApplySDKWithConfigOptions(ctx, conn, req)
+	return method, err
+}
+
+// ApplySDKWithConfigOptions applies a model change and returns the complete
+// config option state included in a stable ACP set_config_option response.
+func ApplySDKWithConfigOptions(
+	ctx context.Context,
+	conn SDKConn,
+	req Request,
+) (Method, []acp.SessionConfigOption, error) {
+	var configOptions []acp.SessionConfigOption
+	method, err := Apply(ctx, SDKApplier{Conn: conn, configOptions: &configOptions}, req)
+	return method, configOptions, err
 }
 
 // ApplySDKFromACP applies a model change using typed session config options.

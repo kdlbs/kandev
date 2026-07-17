@@ -8,17 +8,17 @@ owner: cfl
 
 ## Why
 
-Kandev has agent profiles (configuration templates: model, CLI flags, mode) but no concept of a persistent, stateful agent entity. Without agent instances, there is no hierarchy, no delegation, no budget tracking per agent, no autonomous coordination, and no operational visibility into how an agent runs over time.
+Kandev has execution profiles (configuration templates for a concrete CLI, account, model, flags, environment, and MCP setup) but also needs persistent, stateful Office agents. Without a stable Office identity, switching a provider also risks switching or copying the agent's role, instructions, skills, permissions, budget, and history.
 
-Office introduces agent instances: long-lived entities that reference an agent profile for execution config but carry their own identity, role, permissions, skills, instructions, and runtime state. They run inside a narrow capability-scoped runtime, call kandev through a structured CLI rather than raw curl, and expose per-agent dashboards with run history, costs, and per-run detail pages.
+Office therefore treats a workspace-scoped rich `agent_profiles` row as a stable Office identity and selects a separate concrete execution profile for each launch. Both row types remain in the unified table established by ADR 0005, but they have different responsibilities. Office agents run inside a narrow capability-scoped runtime, call kandev through a structured CLI rather than raw curl, and expose per-agent dashboards with run history, costs, and per-run detail pages.
 
 ## What
 
 ### Agent instances
 
-- An agent instance is a persistent entity distinct from `AgentProfile`.
-- `AgentProfile` remains unchanged: it describes how to launch a specific agent CLI (model, flags, mode).
-- An agent instance references a profile via `agent_profile_id` and adds:
+- An Office agent is a persistent `agent_profiles` row scoped by `workspace_id`; its row ID is the logical `agent_profile_id` referenced by assignments, instructions, skills, budgets, permissions, and Office history.
+- A launch separately resolves an `execution_profile_id` from the agent's effective tier and provider order. The referenced execution profile owns the concrete CLI runtime configuration.
+- The Office identity owns:
   - **Name**: human-readable label ("CEO", "Frontend Worker", "QA Bot").
   - **Role**: `ceo`, `worker`, `specialist`, `assistant`, or `reviewer`. Determines default permissions and UI treatment.
   - **Status**: `idle`, `working`, `paused`, `stopped`, plus transitional `pending_approval`.
@@ -29,7 +29,9 @@ Office introduces agent instances: long-lived entities that reference an agent p
   - **Icon**: avatar for UI display.
   - **Executor preference**: optional executor override for this agent.
   - **Channels**: optional external messaging channels (Telegram, Slack).
-- Multiple instances can share the same profile (e.g. three "Claude Sonnet" workers with different skills and budgets).
+- Multiple Office agents can use the same execution profile without sharing Office instructions, skills, permissions, budgets, or history.
+- Changing an agent's tier or provider order changes future execution-profile resolution without changing the Office identity.
+- Provider routing and failover are specified in [routing](./routing.md).
 
 ### Hierarchy
 
@@ -103,9 +105,17 @@ office_agent_runtime
 
 Runtime state must survive restarts (a budget-paused agent stays paused). Not user-editable, not exported. On startup, the reconciliation service merges filesystem config with this DB state: missing runtime rows are created with `status=idle`; orphaned rows (no YAML) are deleted.
 
-### Agent profiles
+### Office identities and execution profiles
 
-Stay in the existing `agent_profiles` DB table. Referenced by `agent_profile_id` from the agent YAML. Managed via the existing settings UI (`/settings/agents/`).
+Office identities and execution profiles stay in the existing `agent_profiles` DB table, as required by ADR 0005, but launch resolution does not treat them as the same logical object:
+
+- A workspace-scoped rich row is the Office identity. Its `agent_profile_id` remains stable across provider changes and is used for hierarchy, instructions, skills, Office permissions, budgets, costs, and task/run ownership.
+- A concrete execution profile is selected per launch and recorded as `execution_profile_id`. It owns the registered CLI/provider, credentials and environment, model, mode, ACP config options, CLI flags, CLI permission behavior, passthrough mode, and MCP configuration.
+- Global shallow profiles are the normal execution-profile choices. Existing same-workspace rows may remain selectable for upgrade compatibility when they carry a valid CLI configuration.
+- An execution profile from another workspace cannot be selected.
+- Non-Office launches remain compatible: when no distinct execution profile is supplied, runtime treats `execution_profile_id = agent_profile_id`.
+
+The CLI-shaped columns on rich Office rows remain in the schema for compatibility with ADR 0005 and existing data, but they are not authoritative for routed Office launches. New Office configuration changes select tiers and provider order instead of copying CLI runtime fields into the identity row.
 
 ### Instructions
 
@@ -503,7 +513,8 @@ Skill list (name, description, source type, which agents use each skill), inline
 
 What survives a kandev backend restart:
 
-- **Agent identity and configuration** persist in `agent_profiles` (office rows: `workspace_id != '' AND deleted_at IS NULL`). Name, role, icon, `reports_to`, permissions JSON, budget cents, `max_concurrent_sessions`, `cooldown_sec`, `desired_skills`, `skill_ids`, `executor_preference`, and `failure_threshold` are all durable. The same row is the canonical "agent profile" — there is no longer a separate agent-profile/agent-instance split (ADR 0005 Wave G).
+- **Agent identity** persists in `agent_profiles` (Office rows: `workspace_id != '' AND deleted_at IS NULL`). Name, role, icon, `reports_to`, Office permissions, budget, concurrency/cooldown settings, skills, instructions, executor preference, and failure policy are durable on the stable identity. Startup profile reconciliation must not replace an Office agent's name with a generated model label.
+- **Execution configuration** is referenced, not copied, for Office launches. The resolved `execution_profile_id` supplies the provider CLI, account environment, model, mode, ACP config options, CLI flags and permissions, passthrough behavior, and MCP configuration. Route attempts and sessions retain that ID for audit and restart recovery.
 - **Runtime status** persists in `office_agent_runtime` (PK `agent_id`). On restart a `paused` agent stays `paused`, `pause_reason` (e.g. `"budget"`) is preserved, and `last_run_finished_at` is retained so the cooldown guard works across restarts.
 - **Reconciliation at startup**: `infra.Reconciler.ReconcileAll` (called once during boot) drops `office_agent_runtime` rows whose `agent_id` no longer exists in `agent_profiles`, deletes `office_channels` and `office_budget_policies` rows that reference removed agents/projects, and seeds default routine triggers for routines without one. Reconciliation is best-effort: any sub-step that errors is logged but does not block boot.
 - **Hire requests** persist as `pending_approval` agent rows plus an approval entry in the inbox. A restart mid-hire leaves the approval visible; the user can still approve or reject and the same activation/deletion paths run.
@@ -527,6 +538,12 @@ There are no TTLs on agent rows, runtime rows, instructions, skills, run history
 ### Agent lifecycle
 
 - **GIVEN** a workspace with no agent instances, **WHEN** the user creates a CEO instance (selecting a profile, role=ceo), **THEN** the instance appears in the agents list with status `idle` and the sidebar shows it under "Agents".
+
+- **GIVEN** an existing CLI profile with a custom mode, permission behavior, flags, config options, environment variables, and MCP setup, **WHEN** routing selects it for an Office launch, **THEN** that complete execution profile is used while the Office name, role, instructions, skills, permissions, budget, and history remain unchanged.
+
+- **GIVEN** the same Office agent later resolves from a Codex execution profile to a Claude execution profile, **WHEN** the new route launches, **THEN** the task and Office identity remain stable, Claude receives its own complete runtime configuration, and no Codex-native resume token is sent to Claude.
+
+- **GIVEN** an Office task assigned directly to an Office agent and no existing task session, **WHEN** the task session is prepared, **THEN** the assignee's stable `agent_profile_id` is used before the workspace default so the session can start.
 
 - **GIVEN** a running CEO instance, **WHEN** the CEO determines a task requires a frontend specialist and no suitable worker exists, **THEN** the CEO submits a hire request for a new worker with appropriate skills, and the request appears in the user's inbox as a pending approval.
 

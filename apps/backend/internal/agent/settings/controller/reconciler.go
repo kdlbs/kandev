@@ -413,9 +413,9 @@ func (r *ProfileReconciler) healProfile(
 
 // healProfileName updates the profile name when it still matches the agent
 // display name (stale seed from before we started naming profiles after the
-// current model). User-modified profiles are skipped.
+// current model). Workspace-scoped and user-modified profiles are skipped.
 func healProfileName(p *models.AgentProfile, caps hostutility.AgentCapabilities) bool {
-	if p.UserModified || p.Name != p.AgentDisplayName || caps.CurrentModelID == "" {
+	if p.WorkspaceID != "" || p.UserModified || p.Name != p.AgentDisplayName || caps.CurrentModelID == "" {
 		return false
 	}
 	for _, m := range caps.Models {

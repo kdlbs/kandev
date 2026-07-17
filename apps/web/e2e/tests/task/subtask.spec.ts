@@ -656,7 +656,7 @@ test.describe("Subtask dialog feature parity", () => {
     const chipTrigger = testPage.getByTestId("remote-repo-chip-trigger").first();
     await expect(chipTrigger).toBeVisible({ timeout: 5_000 });
     await chipTrigger.click();
-    const urlInput = testPage.getByTestId("remote-paste-url-input").last();
+    const urlInput = testPage.getByTestId("remote-repo-input").last();
     await expect(urlInput).toBeVisible({ timeout: 5_000 });
     await urlInput.fill("https://github.com/subtask-owner/subtask-repo");
     await urlInput.press("Enter");

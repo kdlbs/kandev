@@ -119,7 +119,7 @@ async function loadPlugin(
       return;
     }
     const host = hostFactory(plugin.id);
-    const registry = pluginRegistry.forPlugin(plugin.id);
+    const registry = pluginRegistry.forPlugin(plugin.id, plugin.name);
     await raceTimeout(Promise.resolve(registered.initialize(registry, host)), initTimeoutMs, () => {
       console.warn(
         `[plugins] "${plugin.id}" initialize() timed out after ${initTimeoutMs}ms; continuing without it`,

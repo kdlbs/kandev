@@ -521,16 +521,21 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 // repository details, worktree settings, and ACP resume token.
 // Returns the request, repository ID, executor config, existing ExecutorRunning record (may be nil), and error.
 func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, session *models.TaskSession, startAgent bool) (*LaunchAgentRequest, string, executorConfig, *models.TaskEnvironment, *models.ExecutorRunning, error) {
+	executionProfileID := session.ExecutionProfileID
+	if executionProfileID == "" {
+		executionProfileID = session.AgentProfileID
+	}
 	req := &LaunchAgentRequest{
-		TaskID:            task.ID,
-		SessionID:         session.ID,
-		TaskTitle:         task.Title,
-		AgentProfileID:    session.AgentProfileID,
-		TaskDescription:   task.Description,
-		Priority:          task.Priority,
-		IsEphemeral:       task.IsEphemeral,
-		IsPassthrough:     session.IsPassthrough,
-		TaskEnvironmentID: session.TaskEnvironmentID,
+		TaskID:               task.ID,
+		SessionID:            session.ID,
+		TaskTitle:            task.Title,
+		AgentProfileID:       executionProfileID,
+		OfficeAgentProfileID: session.AgentProfileID,
+		TaskDescription:      task.Description,
+		Priority:             task.Priority,
+		IsEphemeral:          task.IsEphemeral,
+		IsPassthrough:        session.IsPassthrough,
+		TaskEnvironmentID:    session.TaskEnvironmentID,
 	}
 
 	metadata := map[string]interface{}{}
@@ -648,8 +653,8 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 		}
 	}
 
-	if running.ResumeToken != "" && startAgent {
-		req.ACPSessionID = running.ResumeToken
+	if token := resumeTokenForExecutionProfile(running, req.AgentProfileID); token != "" && startAgent {
+		req.ACPSessionID = token
 		// Clear TaskDescription so the agent doesn't receive an automatic prompt on resume.
 		// The session context is restored via ACP session/load; sending a prompt here would
 		// cause the agent to start working immediately instead of waiting for user input.

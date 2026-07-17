@@ -338,6 +338,27 @@ func TestProfileReconciler_HealsStaleModel(t *testing.T) {
 	}
 }
 
+func TestProfileReconciler_PreservesOfficeAgentName(t *testing.T) {
+	profile := &models.AgentProfile{
+		Name:             "Researcher",
+		AgentDisplayName: "Researcher",
+		WorkspaceID:      "workspace-1",
+	}
+	caps := hostutility.AgentCapabilities{
+		CurrentModelID: "claude-sonnet",
+		Models: []hostutility.Model{
+			{ID: "claude-sonnet", Name: "Default (recommended)"},
+		},
+	}
+
+	if changed := healProfileName(profile, caps); changed {
+		t.Fatal("office agent name was treated as an untouched global profile name")
+	}
+	if profile.Name != "Researcher" {
+		t.Fatalf("name = %q, want Researcher", profile.Name)
+	}
+}
+
 func TestProfileReconciler_HealsStaleCodexModeAfterBridgeSwap(t *testing.T) {
 	st := newFakeStore()
 	dbAgent := &models.Agent{Name: "codex-acp"}

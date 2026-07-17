@@ -11,6 +11,7 @@ import {
 } from "@/lib/types/http";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import { syncKanbanPrimarySessionState } from "@/lib/ws/handlers/agent-session-kanban-sync";
+import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 
 const debug = createDebugLogger("session:state");
 
@@ -237,15 +238,8 @@ function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payl
   const metadata = payload.metadata;
   if (!metadata || typeof metadata !== "object") return;
   const contextWindow = (metadata as Record<string, unknown>).context_window;
-  if (!contextWindow || typeof contextWindow !== "object") return;
-  const cw = contextWindow as Record<string, unknown>;
-  store.getState().setContextWindow(sessionId, {
-    size: (cw.size as number) ?? 0,
-    used: (cw.used as number) ?? 0,
-    remaining: (cw.remaining as number) ?? 0,
-    efficiency: (cw.efficiency as number) ?? 0,
-    timestamp: new Date().toISOString(),
-  });
+  const entry = parseContextWindowEntry(contextWindow, new Date().toISOString());
+  if (entry) store.getState().setContextWindow(sessionId, entry);
 }
 
 /** Copy agentctl "ready" status from one session to another (same-task switch). */

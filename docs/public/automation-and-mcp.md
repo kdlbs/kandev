@@ -198,7 +198,8 @@ The backend's `/mcp`, `/mcp/sse`, and `/mcp/message` routes currently have no Ka
 
 ## Office status
 
-Office has separate coordinator agents, routines, governance approvals, and an Office MCP/agentctl interface only when its experimental feature flag is enabled. Office is disabled by default and remains in progress; do not treat its coordinator-led automation as a stable public contract. Workspace automations plus workflow approval/review steps are the supported human-gated mechanism today.
+> [!EXPERIMENTAL]
+> Office has separate coordinator agents, routines, governance approvals, and an Office MCP/agentctl interface only when its feature flag is enabled. Office is disabled by default and remains in progress; do not treat its coordinator-led automation as a stable public contract. Workspace automations plus workflow approval/review steps are the supported human-gated mechanism today.
 
 ## Troubleshooting
 

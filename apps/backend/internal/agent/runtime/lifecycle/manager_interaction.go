@@ -1009,6 +1009,12 @@ func (m *Manager) RecoverAgentPromptStream(ctx context.Context, sessionID string
 	if execution.PassthroughProcessID != "" || execution.IsPassthrough || execution.agentctl == nil {
 		return nil
 	}
+	// InitializeAndPrompt owns the first updates stream. Starting a recovery
+	// stream before ACP initialization finishes creates competing consumers and
+	// can split one prompt's events across them.
+	if !execution.sessionInitialized || execution.ACPSessionID == "" {
+		return nil
+	}
 	if execution.agentctl.HasAgentStream() {
 		return nil
 	}

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -951,6 +952,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	environmentBySession := make(map[string]string, len(sessions))
 	worktrees := make(map[string]any)
 	worktreesBySession := make(map[string]any)
+	sessionModelsByID := make(map[string]any)
 	for _, session := range sessions {
 		if session == nil {
 			continue
@@ -971,6 +973,13 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 			}
 			worktreesBySession[session.ID] = []string{dto.WorktreeID}
 		}
+		if snapshot, ok := lifecycle.LoadSessionModelsSnapshot(
+			session.Metadata[taskmodels.SessionMetaKeyACPModelState],
+		); ok {
+			sessionModelsByID[session.ID] = taskSessionModelsBootState(
+				snapshot, sessionACPConfigBaseline(session),
+			)
+		}
 	}
 	state["taskSessions"] = map[string]any{"items": sessionItems}
 	state["taskSessionsByTask"] = map[string]any{
@@ -985,6 +994,45 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	state["environmentIdBySessionId"] = environmentBySession
 	state["worktrees"] = map[string]any{"items": worktrees}
 	state["sessionWorktreesBySessionId"] = map[string]any{"itemsBySessionId": worktreesBySession}
+	if len(sessionModelsByID) > 0 {
+		state["sessionModels"] = map[string]any{"bySessionId": sessionModelsByID}
+	}
+}
+
+func taskSessionModelsBootState(
+	snapshot lifecycle.SessionModelsSnapshot,
+	baseline map[string]string,
+) map[string]any {
+	models := make([]map[string]any, 0, len(snapshot.Models))
+	for _, model := range snapshot.Models {
+		models = append(models, map[string]any{
+			"modelId":         model.ModelID,
+			"name":            model.Name,
+			"description":     model.Description,
+			"usageMultiplier": model.UsageMultiplier,
+		})
+	}
+	options := make([]map[string]any, 0, len(snapshot.ConfigOptions))
+	for _, option := range snapshot.ConfigOptions {
+		options = append(options, map[string]any{
+			"type":         option.Type,
+			"id":           option.ID,
+			"name":         option.Name,
+			"description":  option.Description,
+			"currentValue": option.CurrentValue,
+			"category":     option.Category,
+			"options":      option.Options,
+		})
+	}
+	state := map[string]any{
+		"currentModelId": snapshot.CurrentModelID,
+		"models":         models,
+		"configOptions":  options,
+	}
+	if len(baseline) > 0 {
+		state["configBaseline"] = baseline
+	}
+	return state
 }
 
 func activeTurnBySessionState(sessionID string) map[string]any {

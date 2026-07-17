@@ -20,7 +20,7 @@ Use a Kandev checkout with its web E2E fixtures, Playwright dependencies, pnpm t
 5. Create a fresh bogus repository, workspace, workflow, tasks, sessions, and provider state through supported E2E/API methods.
 6. Seed only enough state to make the story legible. Dense believable data beats empty fixtures; excessive data hides the action.
 7. Open the intended UI and verify every visible label, control, and transition before recording.
-8. Hand the scenario, route, selectors, semantic target bounds, and cleanup command to `/product-video-capture`.
+8. Hand the scenario, route, selectors, semantic target bounds, complete intentional pointer journeys, and cleanup command to `/product-video-capture`.
 
 ## Safety Contract
 

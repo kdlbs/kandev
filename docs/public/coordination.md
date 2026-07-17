@@ -18,7 +18,10 @@ Kandev can coordinate several agents without turning every unit of work into a s
 
 Shared files make handoff cheap but allow concurrent edits to collide. Separate environments isolate file state, but only the executor determines whether host processes and credentials are also isolated.
 
-> **Office status:** Office is in progress and feature-flagged. Persistent coordinator teams, arbitrary-depth task trees, dependency properties, labels, named documents, reviewer/approver quorum, routines, and budgets are not stable regular-Kanban capabilities.
+## Office status
+
+> [!EXPERIMENTAL]
+> Office is in progress and feature-flagged. Persistent coordinator teams, arbitrary-depth task trees, dependency properties, labels, named documents, reviewer/approver quorum, routines, and budgets are not stable regular-Kanban capabilities.
 
 ## Run parallel sessions in one task
 

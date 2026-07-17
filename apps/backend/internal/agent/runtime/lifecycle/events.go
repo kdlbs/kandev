@@ -56,17 +56,18 @@ func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType
 
 func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 	return AgentEventPayload{
-		AgentExecutionID: execution.ID,
-		TaskID:           execution.TaskID,
-		SessionID:        execution.SessionID,
-		AgentProfileID:   execution.AgentProfileID,
-		ContainerID:      execution.ContainerID,
-		Status:           string(execution.Status),
-		StartedAt:        execution.StartedAt,
-		FinishedAt:       execution.FinishedAt,
-		ErrorMessage:     execution.ErrorMessage,
-		ExitCode:         execution.ExitCode,
-		PromptGeneration: execution.promptGeneration,
+		AgentExecutionID:   execution.ID,
+		TaskID:             execution.TaskID,
+		SessionID:          execution.SessionID,
+		AgentProfileID:     execution.officeProfileID(),
+		ExecutionProfileID: execution.AgentProfileID,
+		ContainerID:        execution.ContainerID,
+		Status:             string(execution.Status),
+		StartedAt:          execution.StartedAt,
+		FinishedAt:         execution.FinishedAt,
+		ErrorMessage:       execution.ErrorMessage,
+		ExitCode:           execution.ExitCode,
+		PromptGeneration:   execution.promptGeneration,
 	}
 }
 
@@ -166,6 +167,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		CurrentModelID:          event.CurrentModelID,
 		SessionModels:           event.SessionModels,
 		ConfigOptions:           event.ConfigOptions,
+		ConfigBaselineCandidate: event.ConfigBaselineCandidate,
 		SessionTitle:            event.SessionTitle,
 		SessionUpdatedAt:        event.SessionUpdatedAt,
 		SessionMeta:             event.SessionMeta,

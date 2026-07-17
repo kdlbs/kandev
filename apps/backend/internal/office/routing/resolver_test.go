@@ -2,6 +2,7 @@ package routing_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -20,6 +21,47 @@ type fakeRepo struct {
 
 	health    []models.ProviderHealth
 	healthErr error
+}
+
+type resolverProfileStore struct {
+	agents   map[string]*settingsmodels.Agent
+	profiles map[string]*settingsmodels.AgentProfile
+}
+
+func (f *resolverProfileStore) GetAgent(_ context.Context, id string) (*settingsmodels.Agent, error) {
+	if agent := f.agents[id]; agent != nil {
+		return agent, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (f *resolverProfileStore) GetAgentProfile(
+	_ context.Context, id string,
+) (*settingsmodels.AgentProfile, error) {
+	if profile := f.profiles[id]; profile != nil {
+		return profile, nil
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (f *resolverProfileStore) ListAgents(context.Context) ([]*settingsmodels.Agent, error) {
+	agents := make([]*settingsmodels.Agent, 0, len(f.agents))
+	for _, agent := range f.agents {
+		agents = append(agents, agent)
+	}
+	return agents, nil
+}
+
+func (f *resolverProfileStore) ListAgentProfiles(
+	_ context.Context, agentID string,
+) ([]*settingsmodels.AgentProfile, error) {
+	profiles := make([]*settingsmodels.AgentProfile, 0)
+	for _, profile := range f.profiles {
+		if profile.AgentID == agentID {
+			profiles = append(profiles, profile)
+		}
+	}
+	return profiles, nil
 }
 
 func (f *fakeRepo) GetWorkspaceRouting(
@@ -56,6 +98,11 @@ func twoProviderCfg() *routing.WorkspaceConfig {
 		ProviderOrder: []routing.ProviderID{"claude-acp", "codex-acp"},
 		ProviderProfiles: map[routing.ProviderID]routing.ProviderProfile{
 			"claude-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{
+					Frontier: "claude-opus-profile",
+					Balanced: "claude-sonnet-profile",
+					Economy:  "claude-haiku-profile",
+				},
 				TierMap: routing.TierMap{
 					Frontier: "opus",
 					Balanced: "sonnet",
@@ -66,6 +113,11 @@ func twoProviderCfg() *routing.WorkspaceConfig {
 				Env:   map[string]string{"ANTHROPIC_REGION": "us"},
 			},
 			"codex-acp": {
+				ExecutionProfileIDs: routing.ExecutionProfileIDs{
+					Frontier: "codex-frontier-profile",
+					Balanced: "codex-balanced-profile",
+					Economy:  "codex-economy-profile",
+				},
 				TierMap: routing.TierMap{
 					Frontier: "gpt-5.5",
 					Balanced: "gpt-5",
@@ -91,7 +143,9 @@ func agentWithOverrides(t *testing.T, ov routing.AgentOverrides) settingsmodels.
 }
 
 func TestResolveRoutingDisabled(t *testing.T) {
-	repo := &fakeRepo{cfg: &routing.WorkspaceConfig{Enabled: false}}
+	cfg := twoProviderCfg()
+	cfg.Enabled = false
+	repo := &fakeRepo{cfg: cfg}
 	r := newResolver(t, repo)
 	res, err := r.Resolve(context.Background(), wsID, agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{})
 	if err != nil {
@@ -100,8 +154,115 @@ func TestResolveRoutingDisabled(t *testing.T) {
 	if res.Enabled {
 		t.Fatalf("expected disabled resolution")
 	}
-	if len(res.Candidates) != 0 {
-		t.Fatalf("expected no candidates, got %d", len(res.Candidates))
+	if len(res.Candidates) != 1 {
+		t.Fatalf("expected first configured candidate, got %d", len(res.Candidates))
+	}
+	if got := res.Candidates[0].ExecutionProfileID; got != "claude-sonnet-profile" {
+		t.Fatalf("execution profile = %q, want claude-sonnet-profile", got)
+	}
+}
+
+func TestResolveValidatesLiveExecutionProfileAndDerivesModel(t *testing.T) {
+	cfg := twoProviderCfg()
+	cfg.ProviderOrder = []routing.ProviderID{"claude-acp"}
+	delete(cfg.ProviderProfiles, "codex-acp")
+	cfg.ProviderProfiles["claude-acp"] = routing.ProviderProfile{
+		ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "claude-sonnet-profile"},
+		TierMap:             routing.TierMap{Balanced: "stale-model"},
+	}
+	store := &resolverProfileStore{
+		agents: map[string]*settingsmodels.Agent{
+			"claude-agent": {ID: "claude-agent", Name: "claude-acp"},
+		},
+		profiles: map[string]*settingsmodels.AgentProfile{
+			"claude-sonnet-profile": {
+				ID: "claude-sonnet-profile", AgentID: "claude-agent", Model: "sonnet-4.5",
+			},
+		},
+	}
+	r := newResolver(t, &fakeRepo{cfg: cfg})
+	r.SetExecutionProfileStore(store, nil)
+	res, err := r.Resolve(context.Background(), wsID,
+		agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got := res.Candidates[0].Model; got != "sonnet-4.5" {
+		t.Fatalf("candidate model = %q, want live profile model", got)
+	}
+
+	store.profiles["claude-sonnet-profile"].WorkspaceID = "ws-other"
+	if _, err := r.Resolve(context.Background(), wsID,
+		agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{}); err == nil {
+		t.Fatal("expected cross-workspace execution profile to be rejected")
+	}
+
+	store.profiles["claude-sonnet-profile"].WorkspaceID = wsID
+	store.profiles["claude-sonnet-profile"].Role = settingsmodels.AgentRole("cto")
+	if _, err := r.Resolve(context.Background(), wsID,
+		agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{}); err == nil {
+		t.Fatal("expected rich Office identity to be rejected as an execution profile")
+	}
+}
+
+func TestResolveExecutionProfileMappingDerivesMissingModel(t *testing.T) {
+	cfg := twoProviderCfg()
+	cfg.ProviderOrder = []routing.ProviderID{"claude-acp"}
+	delete(cfg.ProviderProfiles, "codex-acp")
+	cfg.ProviderProfiles["claude-acp"] = routing.ProviderProfile{
+		ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "claude-sonnet-profile"},
+	}
+	store := &resolverProfileStore{
+		agents: map[string]*settingsmodels.Agent{
+			"claude-agent": {ID: "claude-agent", Name: "claude-acp"},
+		},
+		profiles: map[string]*settingsmodels.AgentProfile{
+			"claude-sonnet-profile": {
+				ID: "claude-sonnet-profile", AgentID: "claude-agent", Model: "sonnet-4.5",
+			},
+		},
+	}
+	r := newResolver(t, &fakeRepo{cfg: cfg})
+	r.SetExecutionProfileStore(store, nil)
+
+	res, err := r.Resolve(context.Background(), wsID,
+		agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(res.Candidates) != 1 || res.Candidates[0].Model != "sonnet-4.5" {
+		t.Fatalf("expected live execution profile candidate, got %+v", res.Candidates)
+	}
+}
+
+func TestResolveLegacyModelMappingFindsUniqueExecutionProfile(t *testing.T) {
+	cfg := twoProviderCfg()
+	cfg.ProviderOrder = []routing.ProviderID{"claude-acp"}
+	delete(cfg.ProviderProfiles, "codex-acp")
+	cfg.ProviderProfiles["claude-acp"] = routing.ProviderProfile{
+		TierMap: routing.TierMap{Balanced: "sonnet-4.5"},
+	}
+	store := &resolverProfileStore{
+		agents: map[string]*settingsmodels.Agent{
+			"claude-agent": {ID: "claude-agent", Name: "claude-acp"},
+		},
+		profiles: map[string]*settingsmodels.AgentProfile{
+			"claude-sonnet-profile": {
+				ID: "claude-sonnet-profile", AgentID: "claude-agent", Model: "sonnet-4.5",
+			},
+		},
+	}
+	r := newResolver(t, &fakeRepo{cfg: cfg})
+	r.SetExecutionProfileStore(store, nil)
+
+	res, err := r.Resolve(context.Background(), wsID,
+		agentWithOverrides(t, routing.AgentOverrides{}), routing.ResolveOptions{})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if len(res.Candidates) != 1 ||
+		res.Candidates[0].ExecutionProfileID != "claude-sonnet-profile" {
+		t.Fatalf("expected migrated legacy mapping candidate, got %+v", res.Candidates)
 	}
 }
 
@@ -137,6 +298,9 @@ func TestResolveInheritedDefaults(t *testing.T) {
 	}
 	if got.Mode != "default" || len(got.Flags) != 1 || got.Env["ANTHROPIC_REGION"] != "us" {
 		t.Fatalf("candidate[0] provider profile not carried verbatim: %+v", got)
+	}
+	if got.ExecutionProfileID != "claude-sonnet-profile" {
+		t.Fatalf("execution profile not carried: %+v", got)
 	}
 	if res.Candidates[1].ProviderID != "codex-acp" || res.Candidates[1].Model != "gpt-5" {
 		t.Fatalf("candidate[1] mismatch: %+v", res.Candidates[1])
@@ -372,7 +536,8 @@ func TestResolveExcludeProviders(t *testing.T) {
 	cfg := twoProviderCfg()
 	cfg.ProviderOrder = append(cfg.ProviderOrder, "opencode-acp")
 	cfg.ProviderProfiles["opencode-acp"] = routing.ProviderProfile{
-		TierMap: routing.TierMap{Balanced: "oc-large"},
+		TierMap:             routing.TierMap{Balanced: "oc-large"},
+		ExecutionProfileIDs: routing.ExecutionProfileIDs{Balanced: "opencode-balanced-profile"},
 	}
 	repo := &fakeRepo{cfg: cfg}
 	r := newResolver(t, repo)

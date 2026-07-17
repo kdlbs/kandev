@@ -513,12 +513,8 @@ func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProf
 	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, env, nil)
 }
 
-// StartTaskWithRoute launches a task with a fully resolved provider
-// override resolved by the office routing dispatcher. Workspace, executor
-// selection, instruction files, system prompt, and ACP session settings
-// are inherited from the base AgentProfile referenced by agentProfileID;
-// only the provider-scoped fields (agent_id, model, mode, flags, env,
-// permissions) are overridden via route.
+// StartTaskWithRoute launches a stable Office identity through a complete
+// concrete execution profile selected by the routing dispatcher.
 //
 // launch carries the Office-built launch context (prompt, env, workflow
 // step, attachments, plan-mode flag) so routed launches behave
@@ -526,43 +522,17 @@ func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProf
 // selection. Without launch, routed runs would fall back to
 // task.Description and drop role framing / AGENTS.md / wake context.
 //
-// Env merging: launch.Env carries the office-built env vars (token,
-// KANDEV_*); route.Env carries provider-scoped overrides. The route
-// env wins on key collisions because per-provider env is the more
-// specific authority.
-//
 // Office-routed launches use autoStart=false: the user kicked off the
 // task; the office layer only chose the provider.
 func (s *Service) StartTaskWithRoute(
 	ctx context.Context, taskID, agentProfileID string,
 	launch executor.LaunchContext, route executor.RouteOverride,
 ) error {
-	merged := mergeRouteEnv(launch.Env, route.Env)
 	_, err := s.startTask(ctx, taskID, agentProfileID,
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority,
 		launch.Prompt, launch.WorkflowStepID, launch.PlanMode, false,
-		launch.Attachments, merged, &route)
+		launch.Attachments, launch.Env, &route)
 	return err
-}
-
-// mergeRouteEnv combines the office-built launch env with the
-// per-provider route env. Route entries win on key collisions.
-func mergeRouteEnv(launchEnv, routeEnv map[string]string) map[string]string {
-	if len(launchEnv) == 0 && len(routeEnv) == 0 {
-		return nil
-	}
-	// The size hint is unused intentionally: CodeQL flags
-	// `len(a)+len(b)` as a potential overflow for the make() capacity
-	// argument. Map literals re-grow themselves; the hint was an
-	// optimization, not a correctness requirement.
-	out := make(map[string]string)
-	for k, v := range launchEnv {
-		out[k] = v
-	}
-	for k, v := range routeEnv {
-		out[k] = v
-	}
-	return out
 }
 
 //nolint:cyclop,funlen // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
@@ -603,12 +573,20 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 
 	s.moveTaskToWorkflowStep(ctx, taskID, workflowStepID)
 
+	officeAgentProfileID := ""
+	if isOfficeTask {
+		officeAgentProfileID = agentProfileID
+	}
+
 	// Resolve the workflow step's agent profile override.
 	// The frontend may pass the workspace default profile, but the step may
 	// require a different agent (e.g., Codex on "In Progress", Auggie on "Review").
 	callerProfileID := agentProfileID
 	agentProfileID = s.resolveEffectiveAgentProfile(ctx, taskID, workflowStepID, agentProfileID)
 	overrideApplied := agentProfileID != callerProfileID
+	if route != nil && route.ExecutionProfileID != "" {
+		agentProfileID = route.ExecutionProfileID
+	}
 
 	// Fetch the task from the repository to get complete task info
 	task, err := s.scheduler.GetTask(ctx, taskID)
@@ -704,15 +682,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{
-		AgentProfileID: agentProfileID,
-		ExecutorID:     executorID,
-		Prompt:         effectivePrompt,
-		WorkflowStepID: workflowStepID,
-		StartAgent:     true,
-		McpMode:        mcpMode,
-		Attachments:    attachments,
-		Env:            env,
-		RouteOverride:  route,
+		AgentProfileID:       agentProfileID,
+		OfficeAgentProfileID: officeAgentProfileID,
+		ExecutorID:           executorID,
+		Prompt:               effectivePrompt,
+		WorkflowStepID:       workflowStepID,
+		StartAgent:           true,
+		McpMode:              mcpMode,
+		Attachments:          attachments,
+		Env:                  env,
+		RouteOverride:        route,
 	})
 	if err != nil {
 		return nil, err
@@ -777,15 +756,6 @@ func (s *Service) createStartSession(
 		)
 		if ensureErr != nil {
 			return "", ensureErr
-		}
-		// The office/assignee path bypasses StartCreatedSession's override
-		// mutation: the session is created directly with the assignee
-		// profile (which falls back to the step's agent_profile_id via the
-		// runner projection). If that profile differs from the caller's,
-		// the assignment was workflow-driven, so keep that provenance on
-		// the session metadata.
-		if agentProfileID != "" && session.AgentProfileID != "" && session.AgentProfileID != agentProfileID {
-			s.tagSessionAsWorkflowSwitched(ctx, session.ID)
 		}
 		return session.ID, nil
 	}

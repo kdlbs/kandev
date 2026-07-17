@@ -235,7 +235,7 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 	if profileInfo != nil {
 		m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
 	} else {
-		m.mergeAgentProfileEnv(ctx, req.AgentProfileID, env)
+		m.mergeAgentProfileEnv(ctx, executionProfileID(req), env)
 	}
 
 	// Add standard variables for recovery after backend restart
@@ -243,6 +243,7 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 	env["KANDEV_TASK_ID"] = req.TaskID
 	env["KANDEV_SESSION_ID"] = req.SessionID
 	env["KANDEV_AGENT_PROFILE_ID"] = req.AgentProfileID
+	env["KANDEV_EXECUTION_PROFILE_ID"] = executionProfileID(req)
 
 	// Add agent runtime default env vars (e.g., MCP_TIMEOUT for Claude Code)
 	if agentConfig != nil {

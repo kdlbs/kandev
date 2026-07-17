@@ -28,23 +28,29 @@ type AgentExecution struct {
 	TaskID            string
 	SessionID         string
 	TaskEnvironmentID string // Env owning this execution; sessions in the same task share one env
-	AgentProfileID    string
-	AgentID           string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
-	ContainerID       string
-	ContainerIP       string               // IP address of the container for agentctl communication
-	WorkspacePath     string               // Path to the workspace (worktree or repository path)
-	ACPSessionID      string               // ACP session ID to resume, if available
-	AgentCommand      string               // Command to start the agent subprocess
-	ContinueCommand   string               // Command for follow-up prompts (one-shot agents like Amp)
-	RuntimeName       agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
-	Status            v1.AgentStatus
-	StartedAt         time.Time
-	FinishedAt        *time.Time
-	ExitCode          *int
-	ErrorMessage      string
-	Metadata          map[string]interface{}
-	promptGeneration  uint64
-	promptLifecycleMu sync.Mutex
+	// AgentProfileID is the concrete profile used by the running CLI. The
+	// historical name is retained inside lifecycle because profile resolution,
+	// MCP, env, and command construction all consume this value.
+	AgentProfileID string
+	// OfficeAgentProfileID is the stable Office identity. Empty for non-Office
+	// launches, where AgentProfileID owns both identity and execution config.
+	OfficeAgentProfileID string
+	AgentID              string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
+	ContainerID          string
+	ContainerIP          string               // IP address of the container for agentctl communication
+	WorkspacePath        string               // Path to the workspace (worktree or repository path)
+	ACPSessionID         string               // ACP session ID to resume, if available
+	AgentCommand         string               // Command to start the agent subprocess
+	ContinueCommand      string               // Command for follow-up prompts (one-shot agents like Amp)
+	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
+	Status               v1.AgentStatus
+	StartedAt            time.Time
+	FinishedAt           *time.Time
+	ExitCode             *int
+	ErrorMessage         string
+	Metadata             map[string]interface{}
+	promptGeneration     uint64
+	promptLifecycleMu    sync.Mutex
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
@@ -120,8 +126,11 @@ type AgentExecution struct {
 	modeStateMu sync.RWMutex
 
 	// Cached session model state (for re-sending on subscribe after page refresh)
-	modelState   *CachedModelState
-	modelStateMu sync.RWMutex
+	modelState                   *CachedModelState
+	providerDefaultModelState    *CachedModelState
+	authoritativeConfigResponses map[string]*CachedModelState
+	pendingConfigSettlement      *configSettlement
+	modelStateMu                 sync.RWMutex
 
 	// Cached auth methods from agent_capabilities (for error recovery metadata)
 	authMethods   []streams.AuthMethodInfo
@@ -146,6 +155,16 @@ type AgentExecution struct {
 	// Session-level trace span for grouping all operations under one trace
 	sessionSpan   trace.Span
 	sessionSpanMu sync.RWMutex
+}
+
+func (e *AgentExecution) officeProfileID() string {
+	if e == nil {
+		return ""
+	}
+	if e.OfficeAgentProfileID != "" {
+		return e.OfficeAgentProfileID
+	}
+	return e.AgentProfileID
 }
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
@@ -218,6 +237,13 @@ type CachedModelState struct {
 	CurrentModelID string
 	Models         []streams.SessionModelInfo
 	ConfigOptions  []streams.ConfigOption
+	ConfigSource   string
+	ConfigID       string
+}
+
+type configSettlement struct {
+	configID        string
+	providerDefault *CachedModelState
 }
 
 // SetModeState caches the session mode state on this execution.
@@ -239,13 +265,127 @@ func (ae *AgentExecution) SetModelState(state *CachedModelState) {
 	ae.modelStateMu.Lock()
 	defer ae.modelStateMu.Unlock()
 	ae.modelState = state
+	ae.captureProviderDefaultModelState(state)
+	ae.cacheAuthoritativeConfigResponse(state)
+}
+
+// SettleConfigOptions pairs the initial provider defaults with the live state
+// after the final startup RPC. When that response is still in flight, it keeps
+// both values until the stream dispatcher receives the matching update.
+func (ae *AgentExecution) SettleConfigOptions(
+	configID string,
+	providerDefault *CachedModelState,
+) (*CachedModelState, *CachedModelState, bool) {
+	ae.modelStateMu.Lock()
+	defer ae.modelStateMu.Unlock()
+	providerDefault = cloneCachedModelState(providerDefault)
+	if providerDefault == nil {
+		providerDefault = cloneCachedModelState(ae.providerDefaultModelState)
+	}
+	if configID == "" {
+		if ae.modelState == nil {
+			ae.pendingConfigSettlement = &configSettlement{providerDefault: providerDefault}
+			return nil, nil, false
+		}
+		state := cloneCachedModelState(ae.modelState)
+		if providerDefault == nil {
+			providerDefault = state
+		}
+		return providerDefault, state, true
+	}
+	if response := ae.consumeAuthoritativeConfigResponse(configID); response != nil {
+		if providerDefault == nil {
+			providerDefault = response
+		}
+		return providerDefault, cloneCachedModelState(ae.modelState), true
+	}
+	ae.pendingConfigSettlement = &configSettlement{
+		configID: configID, providerDefault: providerDefault,
+	}
+	return nil, nil, false
+}
+
+// SetModelStateApplyingSettlement caches provider state and applies a pending
+// startup settlement exactly once when stream delivery lagged initialization.
+func (ae *AgentExecution) SetModelStateApplyingSettlement(state *CachedModelState) (*CachedModelState, bool) {
+	ae.modelStateMu.Lock()
+	defer ae.modelStateMu.Unlock()
+	ae.modelState = state
+	ae.captureProviderDefaultModelState(state)
+	ae.cacheAuthoritativeConfigResponse(state)
+
+	settlement := ae.pendingConfigSettlement
+	if settlement == nil {
+		return state, false
+	}
+	if settlement.configID == "" {
+		ae.pendingConfigSettlement = nil
+		if settlement.providerDefault != nil {
+			return cloneCachedModelState(settlement.providerDefault), true
+		}
+		return state, true
+	}
+	response := ae.consumeAuthoritativeConfigResponse(settlement.configID)
+	if response == nil {
+		return state, false
+	}
+	ae.pendingConfigSettlement = nil
+	if settlement.providerDefault != nil {
+		return cloneCachedModelState(settlement.providerDefault), true
+	}
+	if ae.providerDefaultModelState != nil {
+		return cloneCachedModelState(ae.providerDefaultModelState), true
+	}
+	return response, true
+}
+
+func (ae *AgentExecution) captureProviderDefaultModelState(state *CachedModelState) {
+	if ae.providerDefaultModelState == nil && state != nil && len(state.ConfigOptions) > 0 {
+		ae.providerDefaultModelState = cloneCachedModelState(state)
+	}
+}
+
+func (ae *AgentExecution) cacheAuthoritativeConfigResponse(state *CachedModelState) {
+	if state == nil || state.ConfigSource != "provider_response" || state.ConfigID == "" {
+		return
+	}
+	if ae.authoritativeConfigResponses == nil {
+		ae.authoritativeConfigResponses = make(map[string]*CachedModelState)
+	}
+	ae.authoritativeConfigResponses[state.ConfigID] = cloneCachedModelState(state)
+}
+
+func (ae *AgentExecution) consumeAuthoritativeConfigResponse(configID string) *CachedModelState {
+	response := ae.authoritativeConfigResponses[configID]
+	delete(ae.authoritativeConfigResponses, configID)
+	return response
+}
+
+func cloneCachedModelState(state *CachedModelState) *CachedModelState {
+	if state == nil {
+		return nil
+	}
+	cloned := &CachedModelState{
+		CurrentModelID: state.CurrentModelID,
+		Models:         append([]streams.SessionModelInfo(nil), state.Models...),
+		ConfigOptions:  append([]streams.ConfigOption(nil), state.ConfigOptions...),
+		ConfigSource:   state.ConfigSource,
+		ConfigID:       state.ConfigID,
+	}
+	for i := range cloned.ConfigOptions {
+		cloned.ConfigOptions[i].Options = append(
+			[]streams.ConfigOptionValue(nil),
+			state.ConfigOptions[i].Options...,
+		)
+	}
+	return cloned
 }
 
 // GetModelState returns the cached session model state.
 func (ae *AgentExecution) GetModelState() *CachedModelState {
 	ae.modelStateMu.RLock()
 	defer ae.modelStateMu.RUnlock()
-	return ae.modelState
+	return cloneCachedModelState(ae.modelState)
 }
 
 // SetAuthMethods caches the auth methods on this execution.
@@ -327,12 +467,13 @@ type RepoLaunchSpec struct {
 // — so when the dispatcher does NOT supply an override, launch behavior
 // is byte-identical to today.
 type RouteOverride struct {
-	ProviderID string
-	Model      string
-	Tier       string
-	Mode       string
-	Flags      []string
-	Env        map[string]string
+	ExecutionProfileID string
+	ProviderID         string
+	Model              string
+	Tier               string
+	Mode               string
+	Flags              []string
+	Env                map[string]string
 }
 
 // LaunchRequest contains parameters for launching an agent
@@ -342,15 +483,20 @@ type LaunchRequest struct {
 	SessionID         string
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
 	TaskTitle         string // Human-readable task title for semantic worktree naming
-	AgentProfileID    string
-	WorkspacePath     string              // Host path to workspace (original repository path)
-	TaskDescription   string              // Task description to send via ACP prompt
-	Attachments       []MessageAttachment // Attachments (images/files) for the initial prompt
-	Env               map[string]string   // Additional env vars
-	ACPSessionID      string              // ACP session ID to resume, if available
-	Metadata          map[string]interface{}
-	ModelOverride     string         // If set, use this model instead of the profile's model
-	RouteOverride     *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
+	// AgentProfileID is the stable Office identity for routed Office launches.
+	// For non-Office launches it is also the concrete execution profile.
+	AgentProfileID string
+	// ExecutionProfileID selects the complete CLI runtime profile. Empty keeps
+	// backward-compatible behavior by using AgentProfileID.
+	ExecutionProfileID string
+	WorkspacePath      string              // Host path to workspace (original repository path)
+	TaskDescription    string              // Task description to send via ACP prompt
+	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
+	Env                map[string]string   // Additional env vars
+	ACPSessionID       string              // ACP session ID to resume, if available
+	Metadata           map[string]interface{}
+	ModelOverride      string         // If set, use this model instead of the profile's model
+	RouteOverride      *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
 
 	// Ephemeral tasks (quick chat) get fallback workspace directories when no repo is configured.
 	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.
@@ -507,21 +653,22 @@ type McpConfigProvider interface {
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
 type WorkspaceInfo struct {
-	TaskID            string
-	SessionID         string // Task session ID (from task_sessions table)
-	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
-	WorkspacePath     string // Path to the workspace/repository
-	AgentProfileID    string // Optional - agent profile for the task
-	AgentID           string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID      string // Agent's session ID for conversation resumption (from session metadata)
+	TaskID             string
+	SessionID          string // Task session ID (from task_sessions table)
+	TaskEnvironmentID  string // Env this session belongs to (shared across sessions in same task)
+	WorkspacePath      string // Path to the workspace/repository
+	AgentProfileID     string // Stable Office agent identity (or the execution profile for legacy sessions)
+	ExecutionProfileID string // Concrete CLI profile selected for this execution
+	AgentID            string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID       string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
 	// from session metadata, declared via the set_session_mode workflow action or
 	// a user toggle. Applied as a mode override at ACP session init so a fresh
 	// launch starts in the declared mode before the first prompt. See issue #1183.
 	SessionMode string
-	// RuntimeModel/RuntimeConfigOptions are user-selected ACP session runtime
-	// settings persisted in task_sessions.metadata.runtime_config. They take
-	// precedence over profile defaults when resuming or recreating a session.
+	// RuntimeModel/RuntimeConfigOptions are restored ACP session settings built
+	// from provider state plus explicit user overrides. They take precedence over
+	// profile defaults when resuming or recreating a session.
 	RuntimeModel            string
 	RuntimeConfigOptions    map[string]string
 	RuntimeConfigOptionsSet bool
@@ -543,11 +690,12 @@ type WorkspaceInfoProvider interface {
 
 // RecoveredExecution contains info about an execution recovered from a runtime.
 type RecoveredExecution struct {
-	ExecutionID    string
-	TaskID         string
-	SessionID      string
-	ContainerID    string
-	AgentProfileID string
+	ExecutionID        string
+	TaskID             string
+	SessionID          string
+	ContainerID        string
+	AgentProfileID     string
+	ExecutionProfileID string
 }
 
 // PromptResult contains the result of a prompt operation

@@ -125,7 +125,8 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 
 ## Office status
 
-Office team roles, reporting lines, budgets, concurrency, and governance add more fields to agent profiles only when the experimental Office feature is enabled. Office is disabled by default and remains in progress; its coordinator routing and approval policy are not a stable public workflow. Regular profiles, workflow approval steps, and task-mode automation provide the supported human-gated path today.
+> [!EXPERIMENTAL]
+> Office team roles, reporting lines, budgets, concurrency, and governance add more fields to agent profiles only when the Office feature is enabled. Office is disabled by default and remains in progress; its coordinator routing and approval policy are not a stable public workflow. Regular profiles, workflow approval steps, and task-mode automation provide the supported human-gated path today.
 
 ## Troubleshooting
 

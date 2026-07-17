@@ -473,6 +473,13 @@ func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 func (a *Adapter) sendUpdate(event AgentEvent) {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
+	a.sendUpdateLocked(event)
+}
+
+// sendUpdateLocked queues an event while the caller holds a.mu for reading or
+// writing. Session-bound emitters use it to make their session check, cache
+// mutation, and convergence event atomic with session replacement.
+func (a *Adapter) sendUpdateLocked(event AgentEvent) {
 	if a.closed {
 		return
 	}

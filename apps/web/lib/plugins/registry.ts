@@ -11,7 +11,13 @@
  * methods) — this is what `host.ts` passes into a plugin's `initialize()`.
  */
 import { useSyncExternalStore } from "react";
-import type { NavItem, PluginRegistry, SlotComponent, WsHandler } from "./types";
+import type {
+  NavItem,
+  PluginRegistry,
+  PluginRouteOptions,
+  SlotComponent,
+  WsHandler,
+} from "./types";
 import type { ComponentType } from "react";
 
 interface Owned<T> {
@@ -19,9 +25,15 @@ interface Owned<T> {
   value: T;
 }
 
-interface RouteRegistration {
+export interface RouteRegistration {
   path: string;
   Component: ComponentType;
+  options?: PluginRouteOptions;
+}
+
+/** Route registration plus the owning pluginId — what `getRoutes()` returns. */
+export interface PluginRouteRegistration extends RouteRegistration {
+  pluginId: string;
 }
 
 interface SlotRegistration {
@@ -44,6 +56,8 @@ class PluginRegistryStore {
   private navItems: Owned<NavItem>[] = [];
   private slotComponents: Owned<SlotRegistration>[] = [];
   private wsHandlers: Owned<WsHandlerRegistration>[] = [];
+  /** Display names from the boot payload, used for derived page-chrome titles. */
+  private pluginNames = new Map<string, string>();
   private listeners = new Set<() => void>();
   private version = 0;
 
@@ -56,8 +70,13 @@ class PluginRegistryStore {
 
   getVersion = (): number => this.version;
 
-  registerRoute(pluginId: string, path: string, Component: ComponentType): void {
-    this.routes.push({ pluginId, value: { path, Component } });
+  registerRoute(
+    pluginId: string,
+    path: string,
+    Component: ComponentType,
+    options?: PluginRouteOptions,
+  ): void {
+    this.routes.push({ pluginId, value: { path, Component, options } });
     this.notify();
   }
 
@@ -89,11 +108,17 @@ class PluginRegistryStore {
     this.navItems = removeByPlugin(this.navItems, pluginId);
     this.slotComponents = removeByPlugin(this.slotComponents, pluginId);
     this.wsHandlers = removeByPlugin(this.wsHandlers, pluginId);
+    this.pluginNames.delete(pluginId);
     if (this.totalCount() !== before) this.notify();
   }
 
-  getRoutes(): RouteRegistration[] {
-    return this.routes.map((entry) => entry.value);
+  getRoutes(): PluginRouteRegistration[] {
+    return this.routes.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
+  }
+
+  /** Display name recorded by `forPlugin` (boot payload `ActivePlugin.name`). */
+  getPluginName(pluginId: string): string | undefined {
+    return this.pluginNames.get(pluginId);
   }
 
   getSettingsRoutes(): RouteRegistration[] {
@@ -117,9 +142,11 @@ class PluginRegistryStore {
   }
 
   /** Registry view scoped to one plugin — matches the frozen `PluginRegistry` contract. */
-  forPlugin(pluginId: string): PluginRegistry {
+  forPlugin(pluginId: string, pluginName?: string): PluginRegistry {
+    if (pluginName) this.pluginNames.set(pluginId, pluginName);
     return {
-      registerRoute: (path, Component) => this.registerRoute(pluginId, path, Component),
+      registerRoute: (path, Component, options) =>
+        this.registerRoute(pluginId, path, Component, options),
       registerNavItem: (item) => this.registerNavItem(pluginId, item),
       registerSettingsRoute: (path, Component) =>
         this.registerSettingsRoute(pluginId, path, Component),

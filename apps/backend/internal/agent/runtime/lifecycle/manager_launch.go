@@ -24,29 +24,48 @@ import (
 
 // resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
 func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (string, *AgentProfileInfo, error) {
+	profileID := executionProfileID(req)
 	if m.profileResolver == nil {
 		// Fallback: treat AgentProfileID as agent type directly (for backward compat)
 		m.logger.Warn("no profile resolver configured, using profile ID as agent type",
-			zap.String("agent_type", req.AgentProfileID))
-		return req.AgentProfileID, nil, nil
+			zap.String("agent_type", profileID))
+		return profileID, nil, nil
 	}
-	profileInfo, err := m.profileResolver.ResolveProfile(ctx, req.AgentProfileID)
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, profileID)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to resolve agent profile: %w", err)
 	}
-	applyRouteOverrideToProfile(profileInfo, req)
+	// Legacy model-only routes still use overlays until their persisted config
+	// is migrated. A concrete execution profile is authoritative and must not
+	// be mixed with fields from another provider.
+	if !hasConcreteRouteExecutionProfile(req) {
+		applyRouteOverrideToProfile(profileInfo, req)
+	}
 	m.logger.Debug("resolved agent profile",
-		zap.String("profile_id", req.AgentProfileID),
+		zap.String("profile_id", profileID),
 		zap.String("agent_name", profileInfo.AgentName),
 		zap.String("agent_type", profileInfo.AgentName))
 	return profileInfo.AgentName, profileInfo, nil
 }
 
-// appendRouteOverrideFlags returns tokens with the route override's
-// extra CLI flags appended (when set). Order: user-configured flags
-// from the base profile first, route-override flags after.
+func executionProfileID(req *LaunchRequest) string {
+	if req == nil {
+		return ""
+	}
+	if req.ExecutionProfileID != "" {
+		return req.ExecutionProfileID
+	}
+	return req.AgentProfileID
+}
+
+func hasConcreteRouteExecutionProfile(req *LaunchRequest) bool {
+	return req != nil && req.RouteOverride != nil && req.RouteOverride.ExecutionProfileID != ""
+}
+
+// appendRouteOverrideFlags preserves legacy model-only routing overlays.
+// Concrete execution profiles own their complete CLI configuration.
 func appendRouteOverrideFlags(tokens []string, req *LaunchRequest) []string {
-	if req == nil || req.RouteOverride == nil || len(req.RouteOverride.Flags) == 0 {
+	if req == nil || hasConcreteRouteExecutionProfile(req) || req.RouteOverride == nil || len(req.RouteOverride.Flags) == 0 {
 		return tokens
 	}
 	out := make([]string, 0, len(tokens)+len(req.RouteOverride.Flags))
@@ -401,10 +420,10 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 	return reqWithWorktree, executionID
 }
 
-// mergeRouteOverrideEnv copies the routing override's Env map into the
-// launch request's Env map (last-write-wins, route overrides base env).
+// mergeRouteOverrideEnv preserves legacy model-only routing overlays.
+// Concrete execution profiles own their complete environment.
 func mergeRouteOverrideEnv(req *LaunchRequest) {
-	if req == nil || req.RouteOverride == nil || len(req.RouteOverride.Env) == 0 {
+	if req == nil || hasConcreteRouteExecutionProfile(req) || req.RouteOverride == nil || len(req.RouteOverride.Env) == 0 {
 		return
 	}
 	if req.Env == nil {
@@ -506,7 +525,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		return nil, nil, nil, fmt.Errorf("build launch environment: %w", err)
 	}
 
-	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, reqWithWorktree.AgentProfileID, reqWithWorktree.Metadata, agentConfig)
+	acpMcpServers, err := m.resolveMcpServersWithParams(ctx, executionProfileID(reqWithWorktree), reqWithWorktree.Metadata, agentConfig)
 	if err != nil {
 		m.logger.Warn("failed to resolve MCP servers for launch", zap.Error(err))
 	}
@@ -536,7 +555,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		TaskTitle:                      reqWithWorktree.TaskTitle,
 		SessionID:                      reqWithWorktree.SessionID,
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
-		AgentProfileID:                 reqWithWorktree.AgentProfileID,
+		AgentProfileID:                 executionProfileID(reqWithWorktree),
+		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,

@@ -16,12 +16,13 @@ vi.mock("@/lib/api/domains/office-extended-api", () => ({
 
 const setKnownProviders = vi.fn();
 const setWorkspaceRouting = vi.fn();
+let routingByWorkspace: Record<string, unknown> = {};
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (sel: (state: unknown) => unknown) =>
     sel({
       office: {
-        routing: { byWorkspace: {}, knownProviders: [] },
+        routing: { byWorkspace: routingByWorkspace, knownProviders: [] },
       },
       setKnownProviders,
       setWorkspaceRouting,
@@ -32,6 +33,7 @@ describe("useWorkspaceRouting", () => {
   beforeEach(() => {
     setKnownProviders.mockReset();
     setWorkspaceRouting.mockReset();
+    routingByWorkspace = {};
     mocks.getWorkspaceRouting.mockReset();
     mocks.getWorkspaceRouting.mockResolvedValue({
       config: {
@@ -58,5 +60,28 @@ describe("useWorkspaceRouting", () => {
     expect(spy).not.toHaveBeenCalled();
     unmount();
     spy.mockRestore();
+  });
+
+  it("fetches execution profiles even when routing config is cached", async () => {
+    routingByWorkspace = { "ws-1": { enabled: false } };
+    renderHook(() => useWorkspaceRouting("ws-1"));
+    await waitFor(() => expect(mocks.getWorkspaceRouting).toHaveBeenCalledWith("ws-1"));
+  });
+
+  it("discards an in-flight response after the workspace changes", async () => {
+    let resolveFirst!: (value: unknown) => void;
+    let resolveSecond!: (value: unknown) => void;
+    mocks.getWorkspaceRouting
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
+    const { result, rerender } = renderHook(
+      ({ workspace }: { workspace: string }) => useWorkspaceRouting(workspace),
+      { initialProps: { workspace: "ws-1" } },
+    );
+    rerender({ workspace: "ws-2" });
+    resolveFirst({ execution_profiles: [{ id: "stale" }] });
+    resolveSecond({ execution_profiles: [{ id: "current" }] });
+
+    await waitFor(() => expect(result.current.executionProfiles).toEqual([{ id: "current" }]));
   });
 });

@@ -1691,10 +1691,19 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 		return
 	}
 
-	// Persist the agent-reported current model so SSR can render the model
-	// selector trigger with the right value on a page reload instead of
-	// flashing the profile default before the WS catches up.
-	s.persistSessionModelAndRuntimeConfig(ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.ConfigOptions)
+	// Store the write-once baseline before the mutable selector snapshot so a
+	// concurrent task-detail boot cannot observe the new state without its
+	// comparison values.
+	configBaseline, err := s.sessionACPConfigBaselineForEvent(ctx, sessionID, payload.Data)
+	if err != nil {
+		s.logger.Warn("failed to persist ACP config baseline",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	s.persistSessionModelAndRuntimeConfig(
+		ctx, sessionID, payload.Data.CurrentModelID, "", payload.Data.SessionModels, payload.Data.ConfigOptions,
+	)
 
 	eventPayload := lifecycle.SessionModelsEventPayload{
 		TaskID:         payload.TaskID,
@@ -1703,6 +1712,7 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 		CurrentModelID: payload.Data.CurrentModelID,
 		Models:         payload.Data.SessionModels,
 		ConfigOptions:  payload.Data.ConfigOptions,
+		ConfigBaseline: configBaseline,
 		Timestamp:      time.Now().UTC().Format(time.RFC3339),
 	}
 	s.logger.Info("publishing session_models event to WS",
@@ -1712,6 +1722,67 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	)
 	subject := events.BuildSessionModelsSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
+}
+
+func (s *Service) sessionACPConfigBaselineForEvent(
+	ctx context.Context,
+	sessionID string,
+	data *lifecycle.AgentStreamEventData,
+) (map[string]string, error) {
+	baseline := s.loadSessionACPConfigBaseline(ctx, sessionID)
+	if len(baseline) > 0 || data == nil || !configOptionsSettled(data.Data) {
+		return baseline, nil
+	}
+	options := data.ConfigBaselineCandidate
+	if len(options) == 0 {
+		options = data.ConfigOptions
+	}
+	values := configOptionValues(options)
+	if len(values) == 0 {
+		return nil, nil
+	}
+	writeCtx := context.WithoutCancel(ctx)
+	stored, err := s.repo.SetSessionMetadataKeyIfAbsent(
+		writeCtx, sessionID, models.SessionMetaKeyACPConfigBaseline, values,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if stored {
+		return values, nil
+	}
+	return s.loadSessionACPConfigBaseline(writeCtx, sessionID), nil
+}
+
+func configOptionValues(options []streams.ConfigOption) map[string]string {
+	values := make(map[string]string, len(options))
+	for _, option := range options {
+		if option.ID != "" {
+			values[option.ID] = option.CurrentValue
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+func configOptionsSettled(data any) bool {
+	metadata, _ := data.(map[string]any)
+	result, _ := metadata["config_options_settled"].(bool)
+	return result
+}
+
+func (s *Service) loadSessionACPConfigBaseline(ctx context.Context, sessionID string) map[string]string {
+	if s.repo == nil {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return nil
+	}
+	baseline, _ := models.LoadSessionACPConfigBaseline(session.Metadata)
+	return baseline
 }
 
 // persistSessionModel writes the agent-reported current model to the session's
@@ -1736,7 +1807,12 @@ func (s *Service) persistSessionModel(ctx context.Context, sessionID, model stri
 	s.persistSessionModelOnSession(ctx, sessionID, session, model)
 }
 
-func (s *Service) persistSessionModelAndRuntimeConfig(ctx context.Context, sessionID, model, mode string, options []streams.ConfigOption) {
+func (s *Service) persistSessionModelAndRuntimeConfig(
+	ctx context.Context,
+	sessionID, model, mode string,
+	availableModels []streams.SessionModelInfo,
+	options []streams.ConfigOption,
+) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to load session for session model persistence",
@@ -1751,6 +1827,37 @@ func (s *Service) persistSessionModelAndRuntimeConfig(ctx context.Context, sessi
 		s.persistSessionModelOnSession(ctx, sessionID, session, model)
 	}
 	s.persistSessionRuntimeConfigOnSession(ctx, sessionID, session, model, mode, options)
+	s.persistSessionModelsSnapshot(ctx, sessionID, model, availableModels, options)
+}
+
+func (s *Service) persistSessionModelsSnapshot(
+	ctx context.Context,
+	sessionID, currentModelID string,
+	availableModels []streams.SessionModelInfo,
+	options []streams.ConfigOption,
+) {
+	modelsForBoot := make([]streams.SessionModelInfo, 0, len(availableModels))
+	for _, model := range availableModels {
+		modelsForBoot = append(modelsForBoot, streams.SessionModelInfo{
+			ModelID:         model.ModelID,
+			Name:            model.Name,
+			Description:     model.Description,
+			UsageMultiplier: model.UsageMultiplier,
+		})
+	}
+	snapshot := lifecycle.SessionModelsSnapshot{
+		CurrentModelID: currentModelID,
+		Models:         modelsForBoot,
+		ConfigOptions:  options,
+	}
+	writeCtx := context.WithoutCancel(ctx)
+	if err := s.repo.SetSessionMetadataKey(
+		writeCtx, sessionID, models.SessionMetaKeyACPModelState, snapshot,
+	); err != nil {
+		s.logger.Warn("failed to persist ACP model selector state",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 }
 
 func (s *Service) persistSessionRuntimeConfig(ctx context.Context, sessionID, model, mode string, options []streams.ConfigOption) {

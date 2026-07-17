@@ -576,16 +576,30 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		// can filter and re-publish to the dedicated session mode subject.
 
 	case "session_models":
-		execution.SetModelState(&CachedModelState{
+		baselineCandidate, settled := execution.SetModelStateApplyingSettlement(&CachedModelState{
 			CurrentModelID: event.CurrentModelID,
 			Models:         event.SessionModels,
 			ConfigOptions:  event.ConfigOptions,
+			ConfigSource:   agentEventDataString(event.Data, "config_options_source"),
+			ConfigID:       agentEventDataString(event.Data, "config_options_config_id"),
 		})
+		if settled {
+			event.ConfigBaselineCandidate = baselineCandidate.ConfigOptions
+			if event.Data == nil {
+				event.Data = make(map[string]any)
+			}
+			event.Data["config_options_settled"] = true
+		}
 		// No return — must flow through to PublishAgentStreamEvent so the orchestrator
 		// can persist the model and re-publish to the dedicated session models subject.
 	}
 
 	m.eventPublisher.PublishAgentStreamEvent(execution, event)
+}
+
+func agentEventDataString(data map[string]any, key string) string {
+	value, _ := data[key].(string)
+	return value
 }
 
 // handleGitStatusUpdate processes git status updates from the workspace tracker

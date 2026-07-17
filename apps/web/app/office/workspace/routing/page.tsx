@@ -11,6 +11,7 @@ import { useProviderHealth } from "@/hooks/domains/office/use-provider-health";
 import { useRoutingPreview } from "@/hooks/domains/office/use-routing-preview";
 import type {
   ProviderProfile,
+  ExecutionProfileSummary,
   Tier,
   TierPerReason,
   WorkspaceRouting,
@@ -83,6 +84,7 @@ export default function ProviderRoutingPage() {
       draft={draft}
       setDraft={setDraft}
       knownProviders={routing.knownProviders}
+      executionProfiles={routing.executionProfiles}
       saving={saving}
       dirty={!!dirty}
       fieldErrors={fieldErrors}
@@ -99,6 +101,7 @@ type PageBodyProps = {
   draft: WorkspaceRouting;
   setDraft: (cfg: WorkspaceRouting) => void;
   knownProviders: string[];
+  executionProfiles: ExecutionProfileSummary[];
   saving: boolean;
   dirty: boolean;
   fieldErrors: string[];
@@ -113,6 +116,7 @@ function PageBody({
   draft,
   setDraft,
   knownProviders,
+  executionProfiles,
   saving,
   dirty,
   fieldErrors,
@@ -135,7 +139,7 @@ function PageBody({
   const setProfile = (p: string, prof: ProviderProfile) =>
     setDraft({ ...draft, provider_profiles: { ...draft.provider_profiles, [p]: prof } });
 
-  const sectionsDisabled = !draft.enabled;
+  const sectionsDisabled = saving;
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-4">
@@ -149,37 +153,34 @@ function PageBody({
 
       <RoutingEnableCard enabled={draft.enabled} onChange={setEnabled} disabled={saving} />
 
-      {draft.enabled && (
-        <>
-          <DefaultTierSelector
-            value={draft.default_tier}
-            onChange={setTier}
-            disabled={sectionsDisabled || saving}
-          />
-          <WakeReasonTierCard
-            config={draft}
-            value={draft.tier_per_reason ?? {}}
-            onChange={setTierPerReason}
-            disabled={sectionsDisabled || saving}
-          />
-          <ProviderOrderEditor
-            order={draft.provider_order}
-            knownProviders={knownProviders}
-            onChange={setOrder}
-            disabled={sectionsDisabled || saving}
-          />
-          {draft.provider_order.map((pid) => (
-            <ProviderTierMapping
-              key={pid}
-              providerId={pid}
-              profile={draft.provider_profiles[pid] ?? DEFAULT_PROFILE}
-              defaultTier={draft.default_tier}
-              onChange={(prof) => setProfile(pid, prof)}
-              disabled={saving}
-            />
-          ))}
-        </>
-      )}
+      <DefaultTierSelector
+        value={draft.default_tier}
+        onChange={setTier}
+        disabled={sectionsDisabled}
+      />
+      <WakeReasonTierCard
+        config={draft}
+        value={draft.tier_per_reason ?? {}}
+        onChange={setTierPerReason}
+        disabled={sectionsDisabled}
+      />
+      <ProviderOrderEditor
+        order={draft.provider_order}
+        knownProviders={knownProviders}
+        onChange={setOrder}
+        disabled={sectionsDisabled}
+      />
+      {draft.provider_order.map((pid) => (
+        <ProviderTierMapping
+          key={pid}
+          providerId={pid}
+          profile={draft.provider_profiles[pid] ?? DEFAULT_PROFILE}
+          executionProfiles={executionProfiles}
+          defaultTier={draft.default_tier}
+          onChange={(prof) => setProfile(pid, prof)}
+          disabled={saving}
+        />
+      ))}
 
       <AgentPreviewTable agents={previewAgents} isLoading={previewLoading} />
 

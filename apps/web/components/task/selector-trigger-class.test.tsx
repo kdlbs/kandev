@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelSelector } from "@/components/task/model-selector";
 import { ModeSelector } from "@/components/task/mode-selector";
@@ -13,7 +13,23 @@ const mocks = vi.hoisted(() => {
         "session-1": {
           currentModelId: "gpt-5.5",
           models: [{ modelId: "gpt-5.5", name: "GPT-5.5" }],
-          configOptions: [],
+          configOptions: [
+            {
+              type: "select",
+              id: "reasoning_effort",
+              name: "Reasoning Effort",
+              currentValue: "low",
+              options: [{ value: "low", name: "Low" }],
+            },
+            {
+              type: "select",
+              id: "fast_mode",
+              name: "Fast Mode",
+              currentValue: "off",
+              options: [{ value: "off", name: "Off" }],
+            },
+          ],
+          configBaseline: { reasoning_effort: "high", fast_mode: "off" },
         },
       },
     },
@@ -43,11 +59,16 @@ const mocks = vi.hoisted(() => {
 
   return {
     appState,
+    storeSelections: [] as unknown[],
   };
 });
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: typeof mocks.appState) => unknown) => selector(mocks.appState),
+  useAppStore: (selector: (state: typeof mocks.appState) => unknown) => {
+    const result = selector(mocks.appState);
+    mocks.storeSelections.push(result);
+    return result;
+  },
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -68,13 +89,45 @@ vi.mock("@/lib/api/domains/session-api", () => ({
   setSessionModel: vi.fn(),
 }));
 
+afterEach(() => {
+  cleanup();
+  mocks.storeSelections.length = 0;
+});
+
 describe("task selector trigger styling", () => {
   it("forwards custom trigger classes to the model selector trigger", () => {
-    render(<ModelSelector sessionId="session-1" triggerClassName="max-w-model" />);
+    render(
+      <TooltipProvider>
+        <ModelSelector sessionId="session-1" triggerClassName="max-w-model" />
+      </TooltipProvider>,
+    );
 
     expect(screen.getByRole("button", { name: "Session model settings" }).className).toContain(
       "max-w-model",
     );
+  });
+
+  it("opts the task model selector into its changed-values summary", () => {
+    render(
+      <TooltipProvider>
+        <ModelSelector sessionId="session-1" />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("button", { name: "Session model settings" }).textContent).toBe(
+      "GPT-5.5 / Low",
+    );
+  });
+
+  it("subscribes only to the active session model entry", () => {
+    render(
+      <TooltipProvider>
+        <ModelSelector sessionId="session-1" />
+      </TooltipProvider>,
+    );
+
+    expect(mocks.storeSelections).toContain(mocks.appState.sessionModels.bySessionId["session-1"]);
+    expect(mocks.storeSelections).not.toContain(mocks.appState.sessionModels.bySessionId);
   });
 
   it("forwards custom trigger classes to the mode selector trigger", () => {

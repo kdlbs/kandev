@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-17T01:31:31.597Z",
+  "generated_at": "2026-07-17T15:32:00.000Z",
   "qa_status": "accepted",
   "delivery_contract": {
     "dimensions": {
@@ -13,7 +13,12 @@
       "vp9-webm",
       "h264-mp4"
     ],
-    "poster_format": "webp"
+    "poster_format": "webp",
+    "camera": {
+      "max_zoom": 1.5,
+      "pointer_containment": "frame-by-frame edge-aware validation",
+      "profile": "cursor-tracked-v2"
+    }
   },
   "clips": [
     {
@@ -24,7 +29,7 @@
         "section": "Create a task"
       },
       "accessible_caption": "A focused task is entered while its repository, agent profile, worktree isolation, and start mode remain visible for review.",
-      "duration_seconds": 7.32,
+      "duration_seconds": 6.8,
       "dimensions": {
         "width": 960,
         "height": 600
@@ -38,20 +43,27 @@
       "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
       "files": {
         "webm": {
-          "bytes": 177911,
+          "bytes": 122862,
           "codec": "vp9",
-          "sha256": "23eeb2b82befb302fb24656988296b1d5be4626b4e3468dc838bc6c00db65759"
+          "sha256": "811a46756e7010ef7a782d53b4026600f963442be967982d84a63c4c33197b4e"
         },
         "mp4": {
-          "bytes": 210157,
+          "bytes": 230793,
           "codec": "h264",
-          "sha256": "f09e8220b897e06fef898921c85487678d9ce66a3623d5e669dfc886a922acbe"
+          "sha256": "f12c351cd0aa874d1aa32d47417b5608448b33a1eca11c2c66fff352cf94375c"
         },
         "poster": {
-          "bytes": 8824,
+          "bytes": 10456,
           "codec": "webp",
-          "sha256": "1b6c41a8cbc83b7bb5645771330eaee0d4c5bf4bfc4fa2560e57f4beed6eb20e"
+          "sha256": "23c8a463000d6d332a5d4f97072f1113aa10f9e10d33d5501c4303921d68049f"
         }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture",
+        "loop_frame": "matched focused crop",
+        "framing": "task composer only; host Files toolbar excluded"
       }
     },
     {
@@ -62,7 +74,7 @@
         "section": "Start a task"
       },
       "accessible_caption": "A prepared task starts its selected agent in the workbench and reaches a completed response.",
-      "duration_seconds": 12.8,
+      "duration_seconds": 8.8,
       "dimensions": {
         "width": 960,
         "height": 600
@@ -76,20 +88,27 @@
       "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
       "files": {
         "webm": {
-          "bytes": 188571,
+          "bytes": 74553,
           "codec": "vp9",
-          "sha256": "dd5dd5728d4855d2311d684a6c2c11263eebdde3d39879fde56a2c7d33b7c578"
+          "sha256": "127e1e10171e03c61f93b9d17c82e0e2fa679635d3ea28d77002ebebaefda6af"
         },
         "mp4": {
-          "bytes": 196034,
+          "bytes": 139877,
           "codec": "h264",
-          "sha256": "d88bbcf4b17f00eeac26eba4ac68aa69838178f4b1aecacd9f8974da932e27c6"
+          "sha256": "44c6b20ac3b9633429fa6b46d8b40b14450ba433609d1152ca4dc237e8ac92a8"
         },
         "poster": {
-          "bytes": 10634,
+          "bytes": 3270,
           "codec": "webp",
-          "sha256": "627571d40aeba843e88e45ff187b84592c6f243717cf8de4497dfc5b9bc0a000"
+          "sha256": "72f064f427e22c3fd51412ed8ce698741242f1f992909121ed5a37188ad84473"
         }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture",
+        "loop_frame": "matched focused crop",
+        "framing": "agent workbench only; host Files toolbar excluded"
       }
     },
     {
@@ -100,7 +119,7 @@
         "section": "Use the task plan"
       },
       "accessible_caption": "A plan step receives human feedback before the approved plan moves into implementation.",
-      "duration_seconds": 13.6,
+      "duration_seconds": 8.64,
       "dimensions": {
         "width": 960,
         "height": 600
@@ -114,20 +133,25 @@
       "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
       "files": {
         "webm": {
-          "bytes": 403001,
+          "bytes": 238729,
           "codec": "vp9",
-          "sha256": "afb8d8b0f7f8cfeeafbdd3ed969156fd08e777817678ac7fc3cf9acd197a09e9"
+          "sha256": "bacdb7c6ae1ae3cfa9fdfb7a0004a0c5ae324c371914cf75090b9af95e694451"
         },
         "mp4": {
-          "bytes": 433605,
+          "bytes": 279788,
           "codec": "h264",
-          "sha256": "562ce14bfeb2f792090ef9f2b36121a68c4f45335189ba27740c4a373ee5a649"
+          "sha256": "bea9b5de1ae656b4a8e89816597c3adc79b10f72d9654661ad189ff9e59b5784"
         },
         "poster": {
-          "bytes": 19520,
+          "bytes": 12920,
           "codec": "webp",
-          "sha256": "746692a71ad3040090b22eb486bb734a9167893e022984f5939fba5d0fa0cdce"
+          "sha256": "98ddaa049f6c1412bb3dba97caa059e6a7618007d3781ef14bd2ef7db4f71eea"
         }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
       }
     },
     {
@@ -152,20 +176,25 @@
       "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
       "files": {
         "webm": {
-          "bytes": 241631,
+          "bytes": 271939,
           "codec": "vp9",
-          "sha256": "66838456749da7ae1e2811e2cb6ce4199c0ed03ed0cedb3cd4f338e3f6c2a43e"
+          "sha256": "4220345bfbbd19df834d514b29f36aa48706ca5c77a54e51729057c64d275755"
         },
         "mp4": {
-          "bytes": 256388,
+          "bytes": 288579,
           "codec": "h264",
-          "sha256": "fd9b9813c007139db961ba0db167bbd37a139d8f593644ba741f0b4a00cbf14d"
+          "sha256": "5845f1aea8fc8bf0c1011e3d34e4cca32f0eac9bd00436550659b623ab3b1358"
         },
         "poster": {
-          "bytes": 11880,
+          "bytes": 10328,
           "codec": "webp",
-          "sha256": "41e4c395d8879f6a04a2d20515c738b35b0274eca16ec3581c4ea24c359242cf"
+          "sha256": "f50de94baed66df81ad7dfe0dbae5cf9faf98069e15e442864b0c0bbbb4358c6"
         }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
       }
     },
     {
@@ -190,20 +219,25 @@
       "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
       "files": {
         "webm": {
-          "bytes": 434285,
+          "bytes": 553107,
           "codec": "vp9",
-          "sha256": "1c5da30e038a17bb7c3d625460e76db4f31f2bd2a1b146cf2db351f2a8d85c09"
+          "sha256": "8112ea21664cb97d160d72e48ed13d26cbb8d890080d46f8405059582a9858af"
         },
         "mp4": {
-          "bytes": 574058,
+          "bytes": 860171,
           "codec": "h264",
-          "sha256": "fd7607a6292833c4484f3762672b7786c421e5983d9bf4c4c3485544bc98ba14"
+          "sha256": "781dc368611571a9760c14f5178badb3b7e5d2ca2f5a5a5b4cca12ce3c630fdd"
         },
         "poster": {
-          "bytes": 23770,
+          "bytes": 17460,
           "codec": "webp",
-          "sha256": "0b2ec3cc6cde93cd596af5ce0578eb2387b6131315271d6d7aeffef916b99396"
+          "sha256": "3ea895b1cf74e2ec6402f1e3015ebb5d40ad94797b088239eb075dd4e2b746a7"
         }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
       }
     },
     {
@@ -228,20 +262,25 @@
       "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
       "files": {
         "webm": {
-          "bytes": 492774,
+          "bytes": 489615,
           "codec": "vp9",
-          "sha256": "6d5ce2d8e0863930ad89837f321bb9f8b62704d2f1424ac02dd4c3860087761e"
+          "sha256": "2d261513c1cd9f9ba94b4e485ec0fe9f51d07dcf9761b29852bfa9d61a0a3866"
         },
         "mp4": {
-          "bytes": 558064,
+          "bytes": 516332,
           "codec": "h264",
-          "sha256": "aaab819933f8cbba536e3352d465e715dafe132dabb64c39d313fa81d99ca9c1"
+          "sha256": "bc2cc9fcd160b7cd681c0a1028be37f3efce11ecc462272dfccf33ad103e30d8"
         },
         "poster": {
-          "bytes": 23902,
+          "bytes": 19932,
           "codec": "webp",
-          "sha256": "df9742ce5c149ccd07f47ae46964c25234c83d97da596305b9300a07ca0d279f"
+          "sha256": "70936f9e92354d8dda73e2014e81f21ad23e84721d989778e168cc44a843b004"
         }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
       }
     },
     {
@@ -266,20 +305,25 @@
       "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
       "files": {
         "webm": {
-          "bytes": 193080,
+          "bytes": 221944,
           "codec": "vp9",
-          "sha256": "f794b38e9afb250be1e7e43badfe4d714e68d3a8aca518ec275599058d7723c2"
+          "sha256": "245a79f4ec696350c57303a74c6a1185a0fe89f382857000d0d0ee93827ded58"
         },
         "mp4": {
-          "bytes": 256392,
+          "bytes": 301143,
           "codec": "h264",
-          "sha256": "662efd32fc281a98386a29d0ca32c8474eb1c7b6416a71ec8fdbd915e414755e"
+          "sha256": "41b31239432b1018aa1aca9b1543e7bab8a294e3d3931e56845f2a8801ded95b"
         },
         "poster": {
-          "bytes": 9104,
+          "bytes": 7932,
           "codec": "webp",
-          "sha256": "bb800f6a806088afa3e2e632fa279f80023a2e2302e3595dc97a6c41f63ea1fc"
+          "sha256": "a4c3cab2425b83c12051efcba0f59dff6ffaebd2f134423d85d637d0e02704d2"
         }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
       }
     },
     {
@@ -304,20 +348,25 @@
       "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
       "files": {
         "webm": {
-          "bytes": 424609,
+          "bytes": 442820,
           "codec": "vp9",
-          "sha256": "5b91ed825e6db5d11a052652c73dbbd337a074ea28471fa3752780a6fa38f2cb"
+          "sha256": "a20fe293cc217c97c02320769448f6d70b7e1f79d5bcf579774ac9660bb5edc6"
         },
         "mp4": {
-          "bytes": 480537,
+          "bytes": 449247,
           "codec": "h264",
-          "sha256": "56be990c64ebec5e0128ed6f9a96ec69aab5425f4d6ce690da303f9e8bdc5a91"
+          "sha256": "7510585c1c89c10e2437a21dc405aef18192f58716b61bfb2c8d9115533fadf6"
         },
         "poster": {
-          "bytes": 13312,
+          "bytes": 9710,
           "codec": "webp",
-          "sha256": "6a2748d4e26d558ba92142d7ba457b222d09746ce4bb1564cd29a1401ae0bfb8"
+          "sha256": "e39eab0347596152e08b7537ffb09b5b04171aab776d965d6626e3c26b029c2e"
         }
+      },
+      "camera": {
+        "max_zoom": 1.5,
+        "pointer_containment": "validated at every encoded frame",
+        "source_frame": "full 3840x2400 capture"
       }
     }
   ]

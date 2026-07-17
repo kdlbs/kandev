@@ -147,11 +147,12 @@ func (m *Manager) GetRecoveredExecutions() []RecoveredExecution {
 	result := make([]RecoveredExecution, 0, len(executions))
 	for _, exec := range executions {
 		result = append(result, RecoveredExecution{
-			ExecutionID:    exec.ID,
-			TaskID:         exec.TaskID,
-			SessionID:      exec.SessionID,
-			ContainerID:    exec.ContainerID,
-			AgentProfileID: exec.AgentProfileID,
+			ExecutionID:        exec.ID,
+			TaskID:             exec.TaskID,
+			SessionID:          exec.SessionID,
+			ContainerID:        exec.ContainerID,
+			AgentProfileID:     exec.officeProfileID(),
+			ExecutionProfileID: exec.AgentProfileID,
 		})
 	}
 	return result

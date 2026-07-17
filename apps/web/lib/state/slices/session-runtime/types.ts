@@ -153,6 +153,7 @@ export type ContextWindowEntry = {
   used: number;
   remaining: number;
   efficiency: number;
+  source?: "acp" | "api";
   timestamp?: string;
 };
 
@@ -210,9 +211,10 @@ export type ConfigOptionEntry = {
   type: string;
   id: string;
   name: string;
+  description?: string;
   currentValue: string;
   category?: string;
-  options?: { value: string; name: string }[];
+  options?: { value: string; name: string; description?: string }[];
 };
 
 export type AgentCapabilitiesEntry = {
@@ -241,6 +243,7 @@ export type SessionModelsState = {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configBaseline?: Record<string, string>;
     }
   >;
 };
@@ -404,6 +407,7 @@ export type SessionRuntimeSliceActions = {
       currentModelId: string;
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
+      configBaseline?: Record<string, string>;
     },
   ) => void;
   // Prompt usage actions

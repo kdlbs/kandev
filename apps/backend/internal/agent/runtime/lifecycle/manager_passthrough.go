@@ -141,7 +141,8 @@ func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecu
 	env := make(map[string]string)
 	env["KANDEV_TASK_ID"] = execution.TaskID
 	env["KANDEV_SESSION_ID"] = execution.SessionID
-	env["KANDEV_AGENT_PROFILE_ID"] = execution.AgentProfileID
+	env["KANDEV_AGENT_PROFILE_ID"] = execution.officeProfileID()
+	env["KANDEV_EXECUTION_PROFILE_ID"] = execution.AgentProfileID
 	m.mergeAgentProfileEnv(ctx, execution.AgentProfileID, env)
 	if m.credsMgr != nil {
 		for _, credKey := range requiredEnv {

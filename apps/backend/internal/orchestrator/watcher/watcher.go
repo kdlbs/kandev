@@ -25,13 +25,14 @@ type TaskEventData struct {
 
 // AgentEventData contains data from agent events
 type AgentEventData struct {
-	TaskID           string `json:"task_id"`
-	SessionID        string `json:"session_id"`
-	AgentExecutionID string `json:"agent_execution_id"`
-	AgentProfileID   string `json:"agent_profile_id"`
-	ExitCode         *int   `json:"exit_code,omitempty"`
-	ErrorMessage     string `json:"error_message,omitempty"`
-	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
+	TaskID             string `json:"task_id"`
+	SessionID          string `json:"session_id"`
+	AgentExecutionID   string `json:"agent_execution_id"`
+	AgentProfileID     string `json:"agent_profile_id"`
+	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
+	ExitCode           *int   `json:"exit_code,omitempty"`
+	ErrorMessage       string `json:"error_message,omitempty"`
+	PromptGeneration   uint64 `json:"prompt_generation,omitempty"`
 }
 
 // ACPSessionEventData contains data from ACP session events
