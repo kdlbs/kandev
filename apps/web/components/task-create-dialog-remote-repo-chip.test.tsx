@@ -37,6 +37,7 @@ const TRIGGER_TID = "remote-repo-chip-trigger";
 const INPUT_TID = "remote-repo-input";
 const FULL_NAME = "acme/site";
 const URL_ACME_SITE = "https://github.com/acme/site";
+const URL_FOO_BAR_PR = "https://github.com/foo/bar/pull/42";
 
 afterEach(() => {
   cleanup();
@@ -143,9 +144,9 @@ describe("RemoteRepoChip — URL entry", () => {
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
     const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
     fireEvent.paste(input, {
-      clipboardData: { getData: () => "https://github.com/foo/bar/pull/42" },
+      clipboardData: { getData: () => URL_FOO_BAR_PR },
     });
-    expect(onURLChange).toHaveBeenCalledWith("https://github.com/foo/bar/pull/42", "paste");
+    expect(onURLChange).toHaveBeenCalledWith(URL_FOO_BAR_PR, "paste");
   });
 
   it("commits a typed GitHub URL on blur", () => {
@@ -166,6 +167,26 @@ describe("RemoteRepoChip — URL entry", () => {
     fireEvent.change(input, { target: { value: "https://github.com/foo/bar/issues/42" } });
     fireEvent.blur(input);
     expect(onURLChange).toHaveBeenCalledWith("https://github.com/foo/bar/issues/42", "paste");
+  });
+
+  it("commits a typed GitHub PR URL when Tab cannot move focus out of the popover", () => {
+    const onURLChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible()}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: URL_FOO_BAR_PR } });
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(onURLChange).toHaveBeenCalledWith(URL_FOO_BAR_PR, "paste");
   });
 
   it("surfaces an inline error when a URL-shaped non-GitHub value is submitted", () => {

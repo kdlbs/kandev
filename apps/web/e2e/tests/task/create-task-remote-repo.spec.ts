@@ -136,6 +136,14 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     const popover = testPage.getByTestId("remote-repo-popover-content");
     const input = testPage.getByTestId("remote-repo-input");
     await expect(testPage.getByTestId("remote-repo-picker-loading")).toBeVisible();
+    // Measure the loading state after the finite popover entrance animation.
+    // Otherwise its scale transform makes the first box a few pixels smaller
+    // than the loaded-state box even though the layout itself never shifts.
+    await popover.evaluate(async (element) => {
+      await Promise.all(
+        element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
+      );
+    });
     const [loadingPopoverBox, loadingInputBox] = await Promise.all([
       popover.boundingBox(),
       input.boundingBox(),

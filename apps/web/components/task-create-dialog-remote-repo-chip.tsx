@@ -317,6 +317,10 @@ function RemoteRepoPopoverContent({
           setValue(pasted.trim());
         }}
         onKeyDown={(event) => {
+          if (event.key === "Tab") {
+            commitURL(value);
+            return;
+          }
           if (event.key !== "Enter") return;
           const isURL = looksLikeURL(value.trim());
           if (commitURL(value) || isURL) event.preventDefault();
