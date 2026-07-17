@@ -1,6 +1,7 @@
 ---
 title: "Kubernetes"
 description: "Deploy a single Kandev control plane to Kubernetes with explicit persistence, security, and lifecycle constraints."
+status: experimental
 ---
 
 # Kubernetes

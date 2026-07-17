@@ -30,10 +30,10 @@ Produce reusable clean masters first; derive presentation from them later.
 2. Create a unique writable `CAPTURE_ROOT`, for example with `mktemp -d "${TMPDIR:-/tmp}/kandev-product-capture.XXXXXX"`. Use it for every raw, proof, config, and staged delivery path.
 3. Review the seed handoff and rehearse the full native desktop/mobile story once.
 4. Record one continuous, unzoomed, high-resolution master per form factor. Use true physical pixels, not a padded Playwright video canvas.
-5. Record semantic action timestamps, target bounds, and pointer/touch journeys beside the raw file.
+5. Record semantic action timestamps, target bounds, and dense pointer/touch journeys beside the raw file. Include each intentional movement's start, intermediate samples, arrival, and visibility interval.
 6. Stop recording before capturing the clean poster.
 7. Inspect raw frames before post-production. Reject UI bugs, padding, double cursors, fixture text, dead waits, and unreadable states.
-8. Build a smooth post camera from semantic events. Camera follows story focus, not every cursor twitch.
+8. Build a smooth post camera from semantic events. Ignore micro-jitter, but keep every intentional pointer/touch journey inside the tested safe frame. Widen before long travel and ease toward the destination with the pointer.
 9. Encode WebM, MP4, and WebP through landing's tested camera/encoder scripts.
 10. Review fixed-fraction frames and playback on desktop, native mobile, and reduced motion.
 11. Copy only approved delivery assets into `public/product/loops/`; keep raw/proof files outside production unless requested.
@@ -64,7 +64,7 @@ Follow [qa-checklist.md](references/qa-checklist.md). Do not ship until:
 - cadence is constant and timestamps have no gaps;
 - 10/25/50/75/90% frames and full playback pass visual review;
 - camera motion is smooth, reaches intended depth, and settles on centered 1x before looping;
-- text, menus, diffs, pointer, and touch targets remain inside frame;
+- text, menus, diffs, pointer, and touch targets remain inside frame; frame-by-frame pointer containment passes with a deliberate edge margin;
 - WebM, MP4, poster, responsive source selection, lazy loading, and reduced-motion behavior pass;
 - all capture processes, ports, temporary specs, and temp data are gone.
 

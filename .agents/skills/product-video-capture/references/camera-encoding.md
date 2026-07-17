@@ -20,7 +20,7 @@ Run focused tests from `$LANDING_REPO` before encoding. Current contract:
 - 25 fps constant cadence;
 - desktop delivery 2560x1600 from at least 3840x2400 source;
 - mobile delivery 1290x2796 from native 1290x2796 source;
-- desktop reaches 1.20x; mobile reaches 1.14x;
+- landing desktop and focused documentation clips reach 1.50x; native mobile reaches 1.18x;
 - centered 1x opening and ending;
 - at least 240ms settled centered 1x before loop reset;
 - cosine-eased piecewise motion with per-frame smoothness checks;
@@ -31,16 +31,20 @@ Treat tests as source of truth if these values evolve.
 
 ## Camera Design
 
-Design 4-7 keyframes from semantic story events:
+Design keyframes from semantic story events and the recorded pointer journey:
 
 1. Start centered at 1x.
 2. Hold context briefly.
 3. Ease toward the first important target while the pointer travels.
-4. Hold or drift gently across related actions; do not chase every click.
+4. Hold or drift gently across related actions. Ignore micro-jitter, but never let intentional pointer travel leave the crop.
 5. Move focus only when story focus changes materially.
 6. Ease back to centered 1x before the final settled hold.
 
 Use normalized centers from target bounds. Keep full menus/dialogs/diffs inside the crop at maximum zoom. Optical focus may differ from exact pointer center when surrounding context is important.
+
+Pass normalized `pointerTrack` waypoints and a `pointerSafeMargin` to `createCameraTrack`. The camera module checks every output frame, not only click timestamps. Derive the margin from the complete rendered glyph around its hotspot; an asymmetric `{ top, right, bottom, left }` map is valid when the pointer orientation requires it. A failed containment check blocks delivery. Do not claim a clipped source cursor is safe merely because its hotspot remains in frame.
+
+For long journeys between distant regions, do not pan a tight crop after the pointer has already left. Ease out far enough to contain both endpoints, begin the pan before or with the intentional movement, then ease back into the destination. A wide transition is preferable to an unexplained off-screen pointer.
 
 Example config shape. Replace `<capture-root>` with the unique resolved `CAPTURE_ROOT` before encoding:
 
@@ -58,11 +62,18 @@ Example config shape. Replace `<capture-root>` with the unique resolved `CAPTURE
   "camera": {
     "durationMs": 8400,
     "formFactor": "desktop",
+    "pointerSafeMargin": 0.08,
+    "pointerTrack": [
+      { "tMs": 0, "x": 0.5, "y": 0.5 },
+      { "tMs": 2700, "x": 0.62, "y": 0.38 },
+      { "tMs": 5900, "x": 0.56, "y": 0.61 },
+      { "tMs": 8400, "x": 0.5, "y": 0.5 }
+    ],
     "keyframes": [
       { "tMs": 0, "zoom": 1, "x": 0.5, "y": 0.5 },
       { "tMs": 450, "zoom": 1, "x": 0.5, "y": 0.5 },
-      { "tMs": 2700, "zoom": 1.2, "x": 0.57, "y": 0.43 },
-      { "tMs": 5900, "zoom": 1.2, "x": 0.55, "y": 0.57 },
+      { "tMs": 2700, "zoom": 1.5, "x": 0.57, "y": 0.43 },
+      { "tMs": 5900, "zoom": 1.5, "x": 0.55, "y": 0.57 },
       { "tMs": 8100, "zoom": 1, "x": 0.5, "y": 0.5 },
       { "tMs": 8400, "zoom": 1, "x": 0.5, "y": 0.5 }
     ]
@@ -81,7 +92,7 @@ The encoder probes source duration and rejects an overrun. It writes `<slug>.web
 
 ## Avoid Awkward Motion
 
-Jitter usually comes from too many keyframes, short segment durations, pointer-perfect tracking, or camera changes on the same frame as UI transitions. Fix by reducing targets, lengthening easing, and focusing on semantic regions.
+Jitter usually comes from too many keyframes, short segment durations, pointer-perfect tracking, or camera changes on the same frame as UI transitions. Fix by reducing targets, lengthening easing, and focusing on semantic regions. Cursor containment does not require centering every frame; it requires keeping the intentional journey within the safe crop.
 
 Time skips usually come from concatenating holds, removing waits, or speeding mock-agent gaps. Fix source timing and recapture. Do not disguise them with crossfades.
 

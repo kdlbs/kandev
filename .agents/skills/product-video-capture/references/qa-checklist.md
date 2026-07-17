@@ -7,6 +7,7 @@
 - [ ] Raw is continuous 1x with no crop, camera, concat, speed change, or internal cut.
 - [ ] OS cursor disabled; exactly one DOM cursor/touch treatment visible.
 - [ ] Semantic events include timestamps, target bounds, and smooth motion samples.
+- [ ] Every visible pointer/touch waypoint is normalized against the camera source and has an explicit visibility interval.
 - [ ] Poster captured after recorder stops with pointer/touch hidden.
 
 ## 2. Technical Probe
@@ -44,6 +45,7 @@ Watch the complete loop at normal speed and at 0.5x. Check:
 - no pointer teleport, duplicate pointer, or click before arrival;
 - no state jump, cut, speed-up, dead wait, blank beat, or loader hold;
 - camera reaches useful depth without oscillation;
+- every intentional pointer/touch journey stays inside the camera crop with its configured edge-aware glyph margin at every encoded frame;
 - camera remains within safe bounds and returns to centered 1x;
 - loop reset is calm rather than a snap;
 - readable copy remains stable long enough to understand.

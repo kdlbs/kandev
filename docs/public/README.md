@@ -17,6 +17,31 @@ Use source-relative links such as `[CLI](cli.md)`. Publication rewrites links be
 
 State whether behavior is default, optional, platform-dependent, experimental, feature-flagged, internal, or still in progress. An ADR, spec, hidden route, or source package is not evidence that a feature is generally available.
 
+### Mark experimental content
+
+Use page-level status when the whole guide describes an experimental surface:
+
+```yaml
+---
+title: "Kubernetes"
+description: "Deploy Kandev to Kubernetes."
+status: experimental
+---
+```
+
+The docs header renders a visible status callout from that frontmatter. `experimental` is currently the only accepted page status; do not invent values that the publication schema cannot render.
+
+Use a section-level indicator when a stable guide contains one experimental capability. Keep this source syntax as Markdown so older renderers and GitHub still show an explicit callout; the publication layer upgrades it to the styled status component:
+
+```markdown
+## Office status
+
+> [!EXPERIMENTAL]
+> Office is disabled by default and its public workflow is not stable yet.
+```
+
+Keep the indicator next to the relevant heading and explain the enabling condition, current limit, and supported alternative. The publication pipeline converts the callout to `FeatureStatus` and opts the generated page into MDX automatically.
+
 ## Add a page
 
 1. Search existing pages and choose **Use Kandev** or **Contribute to Kandev**.
