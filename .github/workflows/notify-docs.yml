@@ -62,8 +62,10 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: kdlbs/landing
+          # Preview against the current production publisher contract rather than a stale renderer.
           ref: main
           path: landing
+          ssh-key: ${{ secrets.LANDING_REPO_DEPLOY_KEY }}
           persist-credentials: false
 
       - name: Set up pnpm
