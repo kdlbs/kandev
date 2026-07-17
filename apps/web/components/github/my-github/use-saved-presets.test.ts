@@ -45,7 +45,7 @@ function resetTestState() {
 }
 
 function workspaceSettings(
-  savedPresets: SavedPreset[] = [],
+  savedPresets: unknown = [],
 ): Awaited<ReturnType<typeof fetchGitHubWorkspaceSettings>> {
   return {
     workspace_id: WORKSPACE_ID,
@@ -167,5 +167,76 @@ describe("useSavedPresets workspace sync", () => {
     });
 
     expect(updateGitHubWorkspaceSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("useSavedPresets repository defaults", () => {
+  beforeEach(() => {
+    resetTestState();
+  });
+
+  it("preserves the chosen repository in the workspace settings update", async () => {
+    const server = { ...valid, id: "p_server", label: "Server" };
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([server]));
+    vi.mocked(updateGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings());
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await waitFor(() => expect(result.current.presets).toEqual([server]));
+    act(() => {
+      result.current.save({
+        kind: "pr",
+        label: "Kandev PRs",
+        customQuery: "is:open",
+        repoFilter: "kdlbs/kandev",
+      });
+    });
+
+    await waitFor(() =>
+      expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith({
+        workspace_id: WORKSPACE_ID,
+        saved_presets: [
+          server,
+          expect.objectContaining({
+            kind: "pr",
+            label: "Kandev PRs",
+            customQuery: "is:open",
+            repoFilter: "kdlbs/kandev",
+          }),
+        ],
+      }),
+    );
+  });
+
+  it.each([
+    {
+      caseName: "missing",
+      serverPreset: {
+        id: "p_legacy_missing",
+        kind: "pr",
+        label: "Legacy missing repo",
+        customQuery: "author:@me",
+        createdAt: SETTINGS_TIMESTAMP,
+      },
+    },
+    {
+      caseName: "non-string",
+      serverPreset: {
+        id: "p_legacy_invalid",
+        kind: "pr",
+        label: "Legacy invalid repo",
+        customQuery: "author:@me",
+        repoFilter: 42,
+        createdAt: SETTINGS_TIMESTAMP,
+      },
+    },
+  ])("normalizes a $caseName server repoFilter to All repos", async ({ serverPreset }) => {
+    vi.mocked(fetchGitHubWorkspaceSettings).mockResolvedValue(workspaceSettings([serverPreset]));
+
+    const { result } = renderHook(() => useSavedPresets(WORKSPACE_ID));
+
+    await waitFor(() =>
+      expect(result.current.presets).toEqual([{ ...serverPreset, repoFilter: "" }]),
+    );
   });
 });

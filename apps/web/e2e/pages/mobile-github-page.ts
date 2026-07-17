@@ -7,6 +7,8 @@ export class MobileGitHubPage {
   readonly toolbarTitle: Locator;
   readonly repoFilterTrigger: Locator;
   readonly repoSearchInput: Locator;
+  readonly saveQueryRepoTrigger: Locator;
+  readonly saveQueryRepoDropdown: Locator;
 
   constructor(private page: Page) {
     this.mobileMenuButton = page.getByTestId("github-mobile-menu-button");
@@ -17,6 +19,8 @@ export class MobileGitHubPage {
     this.toolbarTitle = page.getByTestId("github-list-toolbar-title");
     this.repoFilterTrigger = page.getByTestId("github-repo-filter-trigger");
     this.repoSearchInput = page.getByTestId("github-repo-filter-dropdown").getByRole("combobox");
+    this.saveQueryRepoTrigger = page.getByTestId("github-save-query-repo-trigger");
+    this.saveQueryRepoDropdown = page.getByTestId("github-save-query-repo-dropdown");
   }
 
   async goto() {
@@ -29,5 +33,13 @@ export class MobileGitHubPage {
 
   presetByLabel(label: string): Locator {
     return this.mobileSidebar.getByRole("button", { name: label });
+  }
+
+  issueRowByTitle(title: string): Locator {
+    return this.page.getByTestId("issue-row").filter({ hasText: title });
+  }
+
+  savedQueryByLabel(label: string): Locator {
+    return this.mobileSidebar.getByText(label, { exact: true });
   }
 }
