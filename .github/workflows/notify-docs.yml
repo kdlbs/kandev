@@ -106,8 +106,8 @@ jobs:
       - name: Prepare isolated Wrangler environment
         if: steps.cloudflare.outputs.enabled == 'true'
         run: |
-          mkdir -p landing/.wrangler
-          cd landing/.wrangler
+          mkdir -p landing/wrangler-deploy
+          cd landing/wrangler-deploy
           npm init --yes
 
       - name: Deploy preview to Cloudflare Pages
@@ -117,7 +117,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: landing/.wrangler
+          workingDirectory: landing/wrangler-deploy
           packageManager: npm
           wranglerVersion: 3.90.0
           command: >-
