@@ -6,7 +6,9 @@ import {
   getGitHubIntegrationStatus,
   IntegrationsMenu,
   IntegrationsTopbarLinks,
+  MobileIntegrationsSection,
 } from "./integrations-menu";
+import { pluginRegistry } from "@/lib/plugins/registry";
 import type { GitHubStatus } from "@/lib/types/github";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
@@ -14,6 +16,7 @@ const useGitHubStatusMock = vi.hoisted(() => vi.fn());
 const useGitLabAvailableMock = vi.hoisted(() => vi.fn());
 const useJiraAvailableMock = vi.hoisted(() => vi.fn());
 const useLinearAvailableMock = vi.hoisted(() => vi.fn());
+const useFeatureMock = vi.hoisted(() => vi.fn());
 const activeWorkspaceRef = vi.hoisted(() => ({
   id: null as string | null,
   items: [] as Array<{ id: string }>,
@@ -33,6 +36,10 @@ vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
 
 vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
   useLinearAvailable: useLinearAvailableMock,
+}));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: useFeatureMock,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -82,6 +89,8 @@ afterEach(() => {
   vi.clearAllMocks();
   activeWorkspaceRef.id = null;
   activeWorkspaceRef.items = [];
+  pluginRegistry.unregisterPlugin("plugin-a");
+  pluginRegistry.unregisterPlugin("plugin-b");
 });
 
 describe("getGitHubIntegrationStatus", () => {
@@ -215,6 +224,93 @@ describe("IntegrationsTopbarLinks", () => {
     mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
 
     const { container } = renderWithTooltip(createElement(IntegrationsTopbarLinks, {}));
+    expect(container.firstChild).toBeNull();
+  });
+});
+
+describe("MobileIntegrationsSection", () => {
+  const HELLO_LABEL = "Hello Integration";
+  const HELLO_PATH = "/plugins/hello";
+
+  function registerHelloIntegrationItem() {
+    pluginRegistry.forPlugin("plugin-a").registerNavItem({
+      id: "hello",
+      label: HELLO_LABEL,
+      path: HELLO_PATH,
+      section: "integrations",
+    });
+  }
+
+  function renderMobileSection(onNavigate = vi.fn()) {
+    return {
+      onNavigate,
+      ...render(createElement(MobileIntegrationsSection, { onNavigate })),
+    };
+  }
+
+  it("renders a touch row for each configured first-party link and closes the sheet on click", () => {
+    useFeatureMock.mockReturnValue(false);
+    mockAvailability({ githubReady: true, jiraAvailable: false, linearAvailable: true });
+
+    const { onNavigate } = renderMobileSection();
+
+    const githubLink = screen.getByRole("link", { name: "GitHub" });
+    expect(githubLink.getAttribute("href")).toBe("/github");
+    expect(screen.getByRole("link", { name: "Linear" }).getAttribute("href")).toBe("/linear");
+    expect(screen.queryByRole("link", { name: "Jira" })).toBeNull();
+
+    fireEvent.click(githubLink);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders plugin nav items targeting the integrations section, gated on the plugins flag", () => {
+    useFeatureMock.mockImplementation((flag: string) => flag === "plugins");
+    mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
+    registerHelloIntegrationItem();
+    pluginRegistry.forPlugin("plugin-b").registerNavItem({
+      id: "main-item",
+      label: "Main Item",
+      path: "/plugins/main",
+      section: "main",
+    });
+
+    renderMobileSection();
+
+    const pluginLink = screen.getByTestId("plugin-nav-item-hello");
+    expect(pluginLink.getAttribute("href")).toBe(HELLO_PATH);
+    expect(screen.getByText(HELLO_LABEL)).toBeTruthy();
+    // A "main" section plugin item belongs to the top-level nav, not here.
+    expect(screen.queryByTestId("plugin-nav-item-main-item")).toBeNull();
+  });
+
+  it("hides plugin nav items when the plugins feature flag is off", () => {
+    useFeatureMock.mockReturnValue(false);
+    mockAvailability({ githubReady: true, jiraAvailable: false, linearAvailable: false });
+    registerHelloIntegrationItem();
+
+    renderMobileSection();
+
+    expect(screen.getByRole("link", { name: "GitHub" })).toBeTruthy();
+    expect(screen.queryByTestId("plugin-nav-item-hello")).toBeNull();
+  });
+
+  it("renders when only plugin items exist and no first-party links are configured", () => {
+    useFeatureMock.mockImplementation((flag: string) => flag === "plugins");
+    mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
+    registerHelloIntegrationItem();
+
+    renderMobileSection();
+
+    expect(screen.getByText("Integrations")).toBeTruthy();
+    expect(screen.getByTestId("plugin-nav-item-hello")).toBeTruthy();
+  });
+
+  it("renders nothing when there are no links and no plugin items", () => {
+    useFeatureMock.mockImplementation((flag: string) => flag === "plugins");
+    mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
+
+    const { container } = renderMobileSection();
+
     expect(container.firstChild).toBeNull();
   });
 });

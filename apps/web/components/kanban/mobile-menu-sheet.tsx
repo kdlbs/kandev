@@ -16,6 +16,7 @@ import {
   IconTimeline,
 } from "@tabler/icons-react";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
+import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 import { TaskSearchInput } from "./task-search-input";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
@@ -354,6 +355,8 @@ export function MobileMenuSheet({
             enablePreviewOnClick={enablePreviewOnClick}
             onTogglePreviewOnClick={onTogglePreviewOnClick}
           />
+
+          <MobileIntegrationsSection onNavigate={() => onOpenChange(false)} />
 
           <MobileUtilityActions
             showHealthIndicator={showHealthIndicator}
