@@ -208,7 +208,12 @@ export async function validateFeatureMedia({ docsDir }) {
   return { clipCount: slugs.size };
 }
 
-/** Require the publication dimensions, cadence, codecs, and no-audio policy. */
+/**
+ * Require the publication dimensions, cadence, codecs, and no-audio policy.
+ *
+ * @param {object} contract Media contract from the feature-guide manifest.
+ * @returns {void}
+ */
 function assertFeatureMediaContract(contract) {
   if (
     contract?.dimensions?.width !== 960 ||
@@ -225,7 +230,12 @@ function assertFeatureMediaContract(contract) {
   }
 }
 
-/** Validate one clip's ownership, provenance, delivery metadata, and file maps. */
+/**
+ * Validate one clip's ownership, provenance, delivery metadata, and file maps.
+ *
+ * @param {object} clip Feature-guide manifest clip entry.
+ * @returns {void}
+ */
 function assertFeatureClipShape(clip) {
   if (!clip || typeof clip !== "object" || Array.isArray(clip)) {
     throw new Error("feature media manifest contains an invalid clip entry");
@@ -294,7 +304,13 @@ function assertFeatureClipShape(clip) {
   }
 }
 
-/** Match each manifest filename to its corresponding DocsVideo attribute. */
+/**
+ * Match each manifest filename to its corresponding DocsVideo attribute.
+ *
+ * @param {string} markdown Published page source.
+ * @param {Record<string, string>} filenames Expected media filenames by format.
+ * @returns {boolean} Whether one DocsVideo embeds the complete media triplet.
+ */
 function hasCompleteFeatureMediaEmbed(markdown, filenames) {
   return [
     ...stripMarkdownCode(markdown).matchAll(/<DocsVideo\b[\s\S]*?\/>/g),
@@ -318,7 +334,12 @@ function hasCompleteFeatureMediaEmbed(markdown, filenames) {
   });
 }
 
-/** Collect visible heading labels for media section-ownership checks. */
+/**
+ * Collect visible heading labels for media section-ownership checks.
+ *
+ * @param {string} markdown Published page source.
+ * @returns {Set<string>} Normalized visible heading labels.
+ */
 function collectHeadingTitles(markdown) {
   const titles = new Set();
   for (const match of stripMarkdownCode(markdown, {
@@ -329,7 +350,12 @@ function collectHeadingTitles(markdown) {
   return titles;
 }
 
-/** Remove supported inline heading markup and reject unterminated HTML tags. */
+/**
+ * Remove supported inline heading markup and reject unterminated HTML tags.
+ *
+ * @param {string} value Raw Markdown heading label.
+ * @returns {string} Visible heading text.
+ */
 function stripHeadingMarkup(value) {
   const linkedText = value
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
@@ -354,6 +380,14 @@ function stripHeadingMarkup(value) {
   return text.replace(/[`*_~]/g, "").trim();
 }
 
+/**
+ * Resolve a relative path while requiring it to remain below the supplied root.
+ *
+ * @param {string} root Allowed filesystem root.
+ * @param {string} relativePath Untrusted repository-relative path.
+ * @param {string} label Human-readable field name for validation errors.
+ * @returns {string} Absolute path inside the root.
+ */
 function resolveInside(root, relativePath, label) {
   const target = path.resolve(root, relativePath);
   const relative = path.relative(root, target);
@@ -363,6 +397,12 @@ function resolveInside(root, relativePath, label) {
   return target;
 }
 
+/**
+ * Check whether a filesystem target is accessible.
+ *
+ * @param {string} target Absolute filesystem path.
+ * @returns {Promise<boolean>} Whether the target can be accessed.
+ */
 async function pathExists(target) {
   try {
     await fs.access(target);
@@ -472,7 +512,12 @@ export async function validateCoverageInventory({ repoRoot, docsDir }) {
   };
 }
 
-/** Require one coverage area to declare audiences, docs, and concrete evidence. */
+/**
+ * Require one coverage area to declare audiences, docs, and concrete evidence.
+ *
+ * @param {object} area Coverage inventory area.
+ * @returns {void}
+ */
 function assertCoverageAreaShape(area) {
   if (!area || typeof area !== "object" || Array.isArray(area)) {
     throw new Error("coverage.json areas must contain objects");
@@ -497,7 +542,15 @@ function assertCoverageAreaShape(area) {
   }
 }
 
-/** Validate a named inventory field as a unique-owner string list. */
+/**
+ * Validate a named inventory field as a string list.
+ *
+ * @param {object} object Inventory object containing the field.
+ * @param {string} field Field name to validate.
+ * @param {string} owner Area identifier used in validation errors.
+ * @param {{allowEmpty?: boolean}} options Empty-list policy.
+ * @returns {void}
+ */
 function assertStringArray(object, field, owner, { allowEmpty = false } = {}) {
   const value = object[field];
   if (
@@ -511,7 +564,15 @@ function assertStringArray(object, field, owner, { allowEmpty = false } = {}) {
   }
 }
 
-/** Require cited implementation or test evidence to be a repository file. */
+/**
+ * Require cited implementation or test evidence to be a repository file.
+ *
+ * @param {string} root Repository root.
+ * @param {string} areaId Coverage area identifier.
+ * @param {string} kind Evidence kind shown in validation errors.
+ * @param {string} relativePath Repository-relative evidence path.
+ * @returns {Promise<void>}
+ */
 async function assertCoverageEvidence(root, areaId, kind, relativePath) {
   const target = path.resolve(root, relativePath);
   const relative = path.relative(root, target);
@@ -531,6 +592,14 @@ async function assertCoverageEvidence(root, areaId, kind, relativePath) {
   }
 }
 
+/**
+ * Add coverage assignments while rejecting duplicate owners.
+ *
+ * @param {Set<string>} target Accumulated assignments.
+ * @param {string[]} values New settings routes or MCP tools.
+ * @param {string} label Surface name shown in validation errors.
+ * @returns {void}
+ */
 function addUniqueCoverageValues(target, values, label) {
   for (const value of values) {
     if (target.has(value)) {
@@ -542,7 +611,14 @@ function addUniqueCoverageValues(target, values, label) {
   }
 }
 
-/** Parse intentionally excluded surfaces and require a durable reason for each. */
+/**
+ * Parse intentionally excluded surfaces and require a durable reason for each.
+ *
+ * @param {object[]} entries Coverage exclusion records.
+ * @param {string} key Property containing the excluded surface identifier.
+ * @param {string} label Surface name shown in validation errors.
+ * @returns {Set<string>} Excluded surface identifiers.
+ */
 function validateCoverageExclusions(entries, key, label) {
   if (!Array.isArray(entries)) {
     throw new Error(`coverage.json excluded ${label}s must be an array`);
@@ -570,7 +646,12 @@ function validateCoverageExclusions(entries, key, label) {
   return values;
 }
 
-/** Extract the shipped Settings route registry from its typed frontend table. */
+/**
+ * Extract the shipped Settings route registry from its typed frontend table.
+ *
+ * @param {string} root Repository root.
+ * @returns {Promise<Set<string>>} Registered Settings routes.
+ */
 async function collectSettingsRoutes(root) {
   const source = await fs.readFile(
     path.join(root, "apps/web/src/settings-routes.tsx"),
@@ -589,7 +670,12 @@ async function collectSettingsRoutes(root) {
   );
 }
 
-/** Extract every registered Kandev MCP tool name from backend server sources. */
+/**
+ * Extract every registered Kandev MCP tool name from backend server sources.
+ *
+ * @param {string} root Repository root.
+ * @returns {Promise<Set<string>>} Registered MCP tool names.
+ */
 async function collectMcpTools(root) {
   const serverDir = path.join(root, "apps/backend/internal/mcp/server");
   const files = await collectFilesWithExtension(serverDir, ".go");
@@ -605,6 +691,13 @@ async function collectMcpTools(root) {
   return tools;
 }
 
+/**
+ * Recursively collect regular files with a requested extension.
+ *
+ * @param {string} dir Directory to traverse.
+ * @param {string} extension Filename extension including the leading dot.
+ * @returns {Promise<string[]>} Absolute matching file paths.
+ */
 async function collectFilesWithExtension(dir, extension) {
   const entries = await fs.readdir(dir, { withFileTypes: true });
   const files = await Promise.all(
@@ -618,7 +711,15 @@ async function collectFilesWithExtension(dir, extension) {
   return files.flat();
 }
 
-/** Require shipped surfaces to form a disjoint covered-or-excluded partition. */
+/**
+ * Require shipped surfaces to form a disjoint covered-or-excluded partition.
+ *
+ * @param {Set<string>} shipped Surfaces registered by the application.
+ * @param {Set<string>} covered Surfaces assigned to documentation areas.
+ * @param {Set<string>} excluded Surfaces intentionally excluded with reasons.
+ * @param {string} label Surface name shown in validation errors.
+ * @returns {void}
+ */
 function assertCompleteSurfaceCoverage(shipped, covered, excluded, label) {
   for (const value of covered) {
     if (excluded.has(value)) {
