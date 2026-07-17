@@ -77,6 +77,38 @@ The camera section for a focused docs clip has this shape; add story keyframes b
 
 An editorial landing config uses the same matched-loop rule with `formFactor: "landing"`, a 3840x2400 source, and a 1920x1200 delivery. At 2x, the source crop is exactly 1920x1200, so the encoder does not invent detail by upscaling it. Add intermediate wide keyframes around travel instead of combining a deep zoom and long pan in one segment.
 
+Minimal editorial-landing config shape. Replace the placeholder coordinates with values from the recorded pointer journey, and add the story keyframes between the matching opening and settled pair:
+
+```jsonc
+{
+  "slug": "landing-<feature>",
+  "rawPath": "<capture-root>/raw/desktop-<feature>.mp4",
+  "outputDir": "<capture-root>/delivery",
+  "trimStartMs": 0,
+  "posterAtMs": 0,
+  "sourceWidth": 3840,
+  "sourceHeight": 2400,
+  "outputWidth": 1920,
+  "outputHeight": 1200,
+  "camera": {
+    "durationMs": 8000,
+    "formFactor": "landing",
+    "loopFrame": "focused",
+    "pointerSafeMargin": 0.08,
+    "pointerTrack": [
+      { "tMs": 0, "x": 0.5, "y": 0.5 },
+      { "tMs": 8000, "x": 0.5, "y": 0.5 }
+    ],
+    "keyframes": [
+      { "tMs": 0, "zoom": 2, "x": 0.5, "y": 0.5 },
+      // Story keyframes follow the recorded pointer journey.
+      { "tMs": 7760, "zoom": 2, "x": 0.5, "y": 0.5 },
+      { "tMs": 8000, "zoom": 2, "x": 0.5, "y": 0.5 }
+    ]
+  }
+}
+```
+
 Example general-desktop config shape. Replace `<capture-root>` with the unique resolved `CAPTURE_ROOT` before encoding:
 
 ```json
