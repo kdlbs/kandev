@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 
 	workflowcfg "github.com/kandev/kandev/config/workflows"
 	"github.com/kandev/kandev/internal/common/config"
@@ -31,6 +32,34 @@ const (
 // new system workflows land.
 var SystemWorkflowTemplateIDs = []string{
 	templateIDRoutine,
+}
+
+// hideBuiltinWorkflows reconciles system workflow rows created before their
+// embedded templates were marked hidden. User-created workflows are left
+// untouched even if they reference the same template.
+func (r *Repository) hideBuiltinWorkflows() error {
+	hidden, err := workflowcfg.HiddenTemplateIDs()
+	if err != nil {
+		return fmt.Errorf("load hidden workflow templates: %w", err)
+	}
+	templateIDs := make([]string, 0, len(hidden))
+	for templateID := range hidden {
+		templateIDs = append(templateIDs, templateID)
+	}
+	if len(templateIDs) == 0 {
+		return nil
+	}
+	query, args, err := sqlx.In(`
+		UPDATE workflows SET hidden = 1
+		WHERE is_system = 1 AND workflow_template_id IN (?)
+	`, templateIDs)
+	if err != nil {
+		return fmt.Errorf("build hidden workflow reconciliation: %w", err)
+	}
+	if _, err := r.db.Exec(r.db.Rebind(query), args...); err != nil {
+		return fmt.Errorf("hide builtin workflows: %w", err)
+	}
+	return nil
 }
 
 // ensureDefaultWorkspace creates a default workspace if none exists
@@ -314,16 +343,21 @@ func (r *Repository) ensureBuiltinWorkflow(ctx context.Context, workspaceID, tem
 	if workspaceID == "" {
 		return "", fmt.Errorf("workspace_id is required")
 	}
+	tmpl, err := loadBuiltinTemplate(templateID)
+	if err != nil {
+		return "", err
+	}
 	existing, err := r.findWorkflowByTemplate(ctx, workspaceID, templateID)
 	if err != nil {
 		return "", err
 	}
 	if existing != "" {
+		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
+			UPDATE workflows SET hidden = ? WHERE id = ?
+		`), dialect.BoolToInt(tmpl.Hidden), existing); err != nil {
+			return "", fmt.Errorf("update builtin workflow visibility: %w", err)
+		}
 		return existing, nil
-	}
-	tmpl, err := loadBuiltinTemplate(templateID)
-	if err != nil {
-		return "", err
 	}
 	return r.createWorkflowFromTemplate(ctx, workspaceID, name, description, tmpl)
 }
@@ -370,9 +404,9 @@ func (r *Repository) createWorkflowFromTemplate(
 	workflowID := uuid.New().String()
 
 	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, is_system, sort_order, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, 1, 999, ?, ?)
-	`), workflowID, workspaceID, name, description, tmpl.ID, now, now); err != nil {
+		INSERT INTO workflows (id, workspace_id, name, description, workflow_template_id, is_system, sort_order, hidden, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, 1, 999, ?, ?, ?)
+	`), workflowID, workspaceID, name, description, tmpl.ID, dialect.BoolToInt(tmpl.Hidden), now, now); err != nil {
 		return "", fmt.Errorf("insert builtin workflow %s: %w", tmpl.ID, err)
 	}
 

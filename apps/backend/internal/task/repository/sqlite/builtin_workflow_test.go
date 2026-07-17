@@ -73,6 +73,21 @@ func loadStepsForWorkflow(t *testing.T, repo *Repository, workflowID string) []*
 	return out
 }
 
+func assertBuiltinWorkflowHidden(t *testing.T, repo *Repository, workflowID string) {
+	t.Helper()
+	var hidden int
+	if err := repo.db.QueryRowContext(
+		context.Background(),
+		repo.db.Rebind(`SELECT hidden FROM workflows WHERE id = ?`),
+		workflowID,
+	).Scan(&hidden); err != nil {
+		t.Fatalf("query workflow visibility: %v", err)
+	}
+	if hidden != 1 {
+		t.Errorf("workflow %q hidden = %d, want 1", workflowID, hidden)
+	}
+}
+
 func TestEnsureOfficeDefaultWorkflow_CreatesFiveSteps(t *testing.T) {
 	repo := newRepoForBuiltinWorkflowTests(t)
 	ctx := context.Background()
@@ -84,6 +99,7 @@ func TestEnsureOfficeDefaultWorkflow_CreatesFiveSteps(t *testing.T) {
 	if id == "" {
 		t.Fatalf("expected non-empty workflow id")
 	}
+	assertBuiltinWorkflowHidden(t, repo, id)
 
 	steps := loadStepsForWorkflow(t, repo, id)
 	if len(steps) != 5 {
@@ -201,6 +217,7 @@ func TestEnsureOfficeDefaultWorkflow_Idempotent(t *testing.T) {
 	if first != second {
 		t.Errorf("expected idempotent id, got %q vs %q", first, second)
 	}
+	assertBuiltinWorkflowHidden(t, repo, first)
 	steps := loadStepsForWorkflow(t, repo, first)
 	if len(steps) != 5 {
 		t.Errorf("expected 5 steps after idempotent ensure, got %d", len(steps))
@@ -226,6 +243,7 @@ func TestEnsureRoutineWorkflow_AutoCompletingShape(t *testing.T) {
 	if first != second {
 		t.Errorf("expected idempotent id, got %q vs %q", first, second)
 	}
+	assertBuiltinWorkflowHidden(t, repo, first)
 
 	steps := loadStepsForWorkflow(t, repo, first)
 	if len(steps) != 2 {
@@ -244,6 +262,59 @@ func TestEnsureRoutineWorkflow_AutoCompletingShape(t *testing.T) {
 	if findStepByNameLocal(steps, "Done") == nil {
 		t.Fatal("missing Done step")
 	}
+}
+
+func TestEnsureRoutineWorkflow_HealsExistingWorkflowVisibility(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO workflows (
+			id, workspace_id, name, workflow_template_id, hidden, created_at, updated_at
+		) VALUES (
+			'stale-routine', 'ws-1', 'Routine', 'routine', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatalf("insert stale routine workflow: %v", err)
+	}
+
+	id, err := repo.EnsureRoutineWorkflow(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ensure routine: %v", err)
+	}
+	if id != "stale-routine" {
+		t.Fatalf("EnsureRoutineWorkflow() id = %q, want stale-routine", id)
+	}
+	assertBuiltinWorkflowHidden(t, repo, id)
+}
+
+func TestRepositoryInitialization_HealsBuiltinWorkflowVisibility(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+
+	for _, workflow := range []struct {
+		id         string
+		templateID string
+	}{
+		{id: "stale-office", templateID: "office-default"},
+		{id: "stale-routine", templateID: "routine"},
+	} {
+		_, err := repo.db.ExecContext(ctx, repo.db.Rebind(`
+			INSERT INTO workflows (
+				id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
+			) VALUES (?, 'ws-1', 'System workflow', ?, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		`), workflow.id, workflow.templateID)
+		if err != nil {
+			t.Fatalf("insert stale %s workflow: %v", workflow.templateID, err)
+		}
+	}
+
+	if err := repo.initSchema(); err != nil {
+		t.Fatalf("reinitialize repository: %v", err)
+	}
+	assertBuiltinWorkflowHidden(t, repo, "stale-office")
+	assertBuiltinWorkflowHidden(t, repo, "stale-routine")
 }
 
 // TestRoutineWorkflowTasks_FlaggedSystem verifies tasks created in the
