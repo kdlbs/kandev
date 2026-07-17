@@ -35,7 +35,7 @@ Produce reusable clean masters first; derive presentation from them later.
 7. Inspect raw frames before post-production. Reject UI bugs, padding, double cursors, fixture text, dead waits, and unreadable states.
 8. Build a smooth post camera from semantic events. Ignore micro-jitter, but keep every intentional pointer/touch journey inside the tested safe frame. Widen before long travel and ease toward the destination with the pointer.
 9. Encode WebM, MP4, and WebP through landing's tested camera/encoder scripts.
-10. Review fixed-fraction frames and playback on desktop, native mobile, and reduced motion.
+10. Review fixed-fraction frames and playback on desktop, native mobile, and reduced motion. For landing films, also review at the actual theater width; full-resolution frames alone do not prove readable marketing media.
 11. Copy only approved delivery assets into the owning production media directory; keep raw/proof files outside production unless requested.
 
 Read [capture-pipeline.md](references/capture-pipeline.md) before recording and [camera-encoding.md](references/camera-encoding.md) before conforming media.
@@ -63,7 +63,7 @@ Follow [qa-checklist.md](references/qa-checklist.md). Do not ship until:
 - raw and delivery dimensions are proven by decoded pixels, not only container metadata;
 - cadence is constant and timestamps have no gaps;
 - 10/25/50/75/90% frames and full playback pass visual review;
-- camera motion is smooth, reaches intended depth, and uses the profile's tested loop frame: centered 1x by default, or one identical focused start/end crop for a short docs clip when it removes irrelevant chrome or fixture-only detail;
+- camera motion is smooth, reaches intended depth, and uses the profile's tested loop frame: centered 1x for general-purpose masters, or one identical focused start/end crop for an editorial landing film or short docs clip when it removes irrelevant chrome or fixture-only detail;
 - text, menus, diffs, pointer, and touch targets remain inside frame; frame-by-frame pointer containment passes with a deliberate edge margin;
 - WebM, MP4, poster, responsive source selection, lazy loading, and reduced-motion behavior pass;
 - all capture processes, ports, temporary specs, and temp data are gone.

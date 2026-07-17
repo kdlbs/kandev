@@ -18,11 +18,12 @@ scripts/product-loop-encoder.test.mjs
 Run focused tests from `$LANDING_REPO` before encoding. Current contract:
 
 - 25 fps constant cadence;
-- desktop delivery 2560x1600 from at least 3840x2400 source;
+- general desktop delivery 2560x1600 from at least 3840x2400 source;
+- editorial landing delivery 1920x1200 from at least 3840x2400 source, with a 2x focused camera and higher text-preserving encode quality;
 - mobile delivery 1290x2796 from native 1290x2796 source;
-- landing desktop and focused documentation clips reach 1.50x; native mobile reaches 1.18x;
+- general desktop and focused documentation clips reach 1.50x; editorial landing clips reach 2x; native mobile reaches 1.18x;
 - centered 1x opening and ending by default;
-- an opt-in docs-only focused loop frame when the first, settled penultimate, and final camera frames match exactly;
+- an opt-in docs or editorial-landing focused loop frame when the first, settled penultimate, and final camera frames match exactly;
 - at least 240ms on the settled loop frame before reset;
 - cosine-eased piecewise motion with per-frame smoothness checks;
 - one trim, no concat, no speed-ramp `setpts`;
@@ -34,7 +35,7 @@ Treat tests as source of truth if these values evolve.
 
 Design keyframes from semantic story events and the recorded pointer journey:
 
-1. Start centered at 1x unless a short docs clip intentionally uses one matched focused loop frame to exclude irrelevant chrome or fixture-only detail.
+1. Start centered at 1x for a general-purpose delivery. Start on one matched focused frame for an editorial landing film or short docs clip whose subject would be unreadable at the actual embed size.
 2. Hold context briefly.
 3. Ease toward the first important target while the pointer travels.
 4. Hold or drift gently across related actions. Ignore micro-jitter, but never let intentional pointer travel leave the crop.
@@ -47,7 +48,9 @@ Pass normalized `pointerTrack` waypoints and a `pointerSafeMargin` to `createCam
 
 For long journeys between distant regions, do not pan a tight crop after the pointer has already left. Ease out far enough to contain both endpoints, begin the pan before or with the intentional movement, then ease back into the destination. A wide transition is preferable to an unexplained off-screen pointer.
 
-Use `loopFrame: "focused"` only with the `docs` form factor. The opening, settled penultimate, and final camera keyframes must be identical, and the crop must still show enough context to identify the feature. This is an editorial framing tool, not a way to hide a product defect or misleading state. Landing desktop/mobile media must keep the standard wide loop reset.
+Use `loopFrame: "focused"` only with the `docs` or `landing` form factor. The opening, settled penultimate, and final camera keyframes must be identical, and the crop must still show enough context to identify the feature. This is an editorial framing tool, not a way to hide a product defect or misleading state. Native mobile media keeps its standard loop contract.
+
+For a landing film, compose for the real theater rather than the master canvas. Review important frames around 760-950 CSS pixels wide. Labels, code, comments, and results must remain readable there. Start on the first meaningful subject, widen around that subject before a long cursor journey, pan while wide, and tighten at the destination. Do not repeatedly return to a full-workspace view merely to prove the product has navigation chrome.
 
 The camera section for a focused docs clip has this shape; add story keyframes between the matching opening and settled pair:
 
@@ -69,6 +72,8 @@ The camera section for a focused docs clip has this shape; add story keyframes b
   ]
 }
 ```
+
+An editorial landing config uses the same matched-loop rule with `formFactor: "landing"`, a 3840x2400 source, and a 1920x1200 delivery. At 2x, the source crop is exactly 1920x1200, so the encoder does not invent detail by upscaling it. Add intermediate wide keyframes around travel instead of combining a deep zoom and long pan in one segment.
 
 Example config shape. Replace `<capture-root>` with the unique resolved `CAPTURE_ROOT` before encoding:
 
@@ -121,6 +126,8 @@ Jitter usually comes from too many keyframes, short segment durations, pointer-p
 Time skips usually come from concatenating holds, removing waits, or speeding mock-agent gaps. Fix source timing and recapture. Do not disguise them with crossfades.
 
 Deeper zoom is useful only when content remains legible and contextual. Desktop can tolerate more lateral movement; mobile should mostly preserve center and use smaller zoom because sheets and bottom navigation already consume space.
+
+A camera can pass pointer containment and still fail editorially. Reject tracks that mechanically center each click, oscillate between wide and tight without a change in subject, spend the opening on unused workspace, or make the viewer search for the action. Each move needs a narrative reason: establish, follow, reveal, compare, or settle.
 
 ## Alternate Deliveries
 
