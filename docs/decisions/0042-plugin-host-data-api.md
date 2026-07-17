@@ -1,6 +1,6 @@
 # 0042 — Plugins read/write kandev data via capability-gated Host gRPC RPCs
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-07-17
 - Area: backend, protocol
 - Related: [docs/specs/plugins/spec.md](../specs/plugins/spec.md) ("Host data API"),

@@ -105,8 +105,8 @@ min_kandev_version: "0.78.0"                 # optional
 
 capabilities:
   events: ["task.created", "task.state_changed", "agent.completed"]
-  api_read: ["tasks", "agents", "projects"]   # reserved for future Host RPCs (see below)
-  api_write: ["tasks", "comments"]            # reserved for future Host RPCs (see below)
+  api_read: ["tasks", "sessions"]             # Host data API reads (see below); live now
+  api_write: ["tasks", "comments"]            # Host data API writes; deferred, no effect yet
   state: true
   secrets: true
 
@@ -148,8 +148,19 @@ restart_count: 0
 
 `capabilities.api_read` / `capabilities.api_write` gate the **Host data API** Host
 RPCs (read RPCs live now; write RPCs are deferred) — the vocabulary is a list of
-resource names (`tasks`, `sessions`, `workspaces`, `workflows`, `agents`,
-`repositories`, `comments`). They are unrelated to office. See "Host data API".
+resource names: `tasks`, `sessions`, `workspaces`, `workflows`, `agent_profiles`,
+`repositories` for `api_read`, plus `comments` for `api_write` only (there is no
+`ListComments` read RPC). They are unrelated to office. See "Host data API".
+
+**Declaring data access.** Listing a resource under `api_read` grants the
+corresponding Host data reads for that resource only — e.g. `api_read:
+["sessions"]` unlocks `Host.Sessions().List(...)` and
+`Host.Sessions().CodeStats(...)` (backed by `ListSessions` /
+`ListSessionCodeStats`) but not `Host.Tasks()`. A resource left off the list
+still resolves to a reader/accessor (no nil pointer), but every method on it
+returns gRPC `PermissionDenied` with message `capability 'api_read:<resource>'
+not declared`. `api_write` entries are accepted and stored but currently have no
+effect (see "Write phase (deferred)").
 
 ### Install pipeline
 
@@ -335,10 +346,14 @@ service Host {
   internal event bus for delivery to subscribers (replaces the old
   `POST /api/plugins/{plugin_id}/events/emit` HTTP endpoint).
 
-Every Host RPC is capability-gated by a **unary server interceptor** that checks the
-plugin's manifest capabilities (`state`, `secrets`; `api_read`/`api_write` reserved)
-before the handler runs, and returns gRPC status `PermissionDenied` with message
-`capability '<name>' not declared` on a miss.
+Every Host RPC is capability-gated: `GetState`/`SetState`/`DeleteState`/`ListState`
+check `capabilities.state`, `RevealSecret` checks `capabilities.secrets`, and each
+Host data API read RPC checks `capabilities.api_read` for its resource (see "Host
+data API" below) — all before the handler runs, returning gRPC status
+`PermissionDenied` with message `capability '<name>' not declared` on a miss.
+`EmitEvent` is ungated (no boolean capability applies). The Host data API write
+RPCs are not implemented yet, so they return gRPC `Unimplemented` unconditionally
+and never reach an `api_write` capability check (see "Write phase (deferred)").
 
 ### Host data API (plugin -> kandev, gRPC)
 
@@ -358,7 +373,7 @@ domain structs. See [ADR 0042](../../decisions/0042-plugin-host-data-api.md) and
 | `ListWorkspaces` | `api_read:workspaces` | Workspaces (id, name, owner, defaults, timestamps) |
 | `ListWorkflows` | `api_read:workflows` | Workflows for a workspace |
 | `ListWorkflowSteps` | `api_read:workflows` | Steps for a workflow (id, name, position, stage type) |
-| `ListAgentProfiles` | `api_read:agents` | Agent profiles (id, agent id, display name, model, mode) |
+| `ListAgentProfiles` | `api_read:agent_profiles` | Agent profiles (id, agent id, display name, model, mode) |
 | `ListRepositories` | `api_read:repositories` | Repositories for a workspace (id, name, default branch) |
 | `ListSessions` | `api_read:sessions` | Session identity + agent context (id, task, agent profile, resolved display name + model, `acp_session_id`, state, timestamps) |
 | `ListSessionCodeStats` | `api_read:sessions` | **Computed** per-session code metrics: committed lines added/deleted, peak pending-diff lines added/deleted |
