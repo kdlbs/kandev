@@ -104,30 +104,19 @@ func (s *Service) storeResumeToken(ctx context.Context, taskID, sessionID, expec
 }
 
 // persistACPSessionID mirrors the agent's ACP session id into the session's
-// "acp" metadata map (merging with whatever session_info already wrote, and
-// skipping the write when the stored id is already current). Best-effort:
-// resume correctness never depends on this copy — it exists so the id
-// survives executors_running cleanup for consumers that join sessions to
-// agent-CLI artifacts (e.g. transcript-based usage stats).
+// "acp" metadata map. Best-effort: resume correctness never depends on this
+// copy — it exists so the id survives executors_running cleanup for consumers
+// that join sessions to agent-CLI artifacts (e.g. transcript-based usage
+// stats). The repo performs the mirror as a single guarded UPDATE: it merges
+// into the existing acp map (preserving session_info keys), skips when the
+// stored id is already current, and only writes while executors_running still
+// holds acpSessionID as the resume token — so a stale event from a rotated
+// execution can never overwrite the live execution's id.
 func (s *Service) persistACPSessionID(ctx context.Context, sessionID, acpSessionID string) {
 	if sessionID == "" || acpSessionID == "" || s.repo == nil {
 		return
 	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil {
-		return
-	}
-	info := map[string]interface{}{}
-	if existing, ok := session.Metadata["acp"].(map[string]interface{}); ok {
-		if existing["session_id"] == acpSessionID {
-			return
-		}
-		for key, value := range existing {
-			info[key] = value
-		}
-	}
-	info["session_id"] = acpSessionID
-	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, "acp", info); err != nil {
+	if _, err := s.repo.SetSessionACPSessionID(ctx, sessionID, acpSessionID); err != nil {
 		s.logger.Warn("failed to persist ACP session id to session metadata",
 			zap.String("session_id", sessionID),
 			zap.String("acp_session_id", acpSessionID),

@@ -646,6 +646,38 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
+// SetSessionACPSessionID mirrors the agent's ACP session id into the session's
+// "acp" metadata map as a single atomic UPDATE. json_patch merges the sub-key,
+// so keys session_info already wrote (title, ...) survive without a
+// read-modify-write round trip. The write only happens while the session's
+// executors_running row still holds acpSessionID as its resume token — i.e.
+// the CAS that stored the token hasn't been superseded by a rotated execution
+// — and is skipped when the stored id is already current, so a no-op never
+// touches updated_at. Returns whether a row was written.
+func (r *Repository) SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error) {
+	patch, err := json.Marshal(map[string]interface{}{"acp": map[string]string{"session_id": acpSessionID}})
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata patch: %w", err)
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET metadata = json_patch(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, json(?)),
+		    updated_at = ?
+		WHERE id = ?
+		  AND json_extract(metadata, '$.acp.session_id') IS NOT ?
+		  AND EXISTS (
+			SELECT 1 FROM executors_running er
+			WHERE er.session_id = task_sessions.id AND er.resume_token = ?
+		  )
+	`), string(patch), now, sessionID, acpSessionID, acpSessionID)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
 func (r *Repository) DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error) {
 	next := expected
 	next.DismissedAt = &dismissedAt
