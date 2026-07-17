@@ -45,6 +45,17 @@ describe("ViewHeaderRow external rename", () => {
     expect(props.onRenameRequestHandled).toHaveBeenCalledWith(NEW_VIEW.id);
   });
 
+  it("does not restart rename for an equivalent active-view object", async () => {
+    const props = headerProps();
+    props.renameRequestedViewId = NEW_VIEW.id;
+    const { rerender } = render(<ViewHeaderRow {...props} />);
+    await screen.findByTestId(RENAME_INPUT_TEST_ID);
+
+    rerender(<ViewHeaderRow {...props} activeView={{ ...NEW_VIEW }} />);
+
+    expect(props.onRenameRequestHandled).toHaveBeenCalledOnce();
+  });
+
   it("keeps the created view when rename is cancelled", async () => {
     const props = headerProps();
     props.renameRequestedViewId = NEW_VIEW.id;

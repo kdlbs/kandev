@@ -66,7 +66,7 @@ export function SidebarFilterBar() {
         variant="ghost"
         size="sm"
         className={cn(
-          "h-10 shrink-0 px-2 text-[11px] md:h-6",
+          "h-10 shrink-0 cursor-pointer px-2 text-[11px] md:h-6",
           newViewDisabledReason && "cursor-not-allowed opacity-45",
         )}
         onClick={() => {

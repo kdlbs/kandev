@@ -24,6 +24,8 @@ export function ViewHeaderRow(props: HeaderProps) {
   const [mode, setMode] = useState<HeaderMode>("view");
   const [nameDraft, setNameDraft] = useState("");
   const [editingViewId, setEditingViewId] = useState<string | null>(null);
+  const activeViewId = props.activeView?.id;
+  const activeViewName = props.activeView?.name;
   const isEditing = mode !== "view";
 
   function enterRename() {
@@ -51,19 +53,20 @@ export function ViewHeaderRow(props: HeaderProps) {
 
   useLayoutEffect(() => {
     const requestedViewId = props.renameRequestedViewId;
-    if (!requestedViewId || props.activeView?.id !== requestedViewId) return;
-    setNameDraft(props.activeView.name);
+    if (!requestedViewId || activeViewId !== requestedViewId || activeViewName === undefined)
+      return;
+    setNameDraft(activeViewName);
     setEditingViewId(requestedViewId);
     setMode("rename");
     props.onRenameRequestHandled?.(requestedViewId);
-  }, [props.activeView, props.onRenameRequestHandled, props.renameRequestedViewId]);
+  }, [activeViewId, activeViewName, props.onRenameRequestHandled, props.renameRequestedViewId]);
 
   useLayoutEffect(() => {
-    if (mode !== "rename" || !editingViewId || props.activeView?.id === editingViewId) return;
+    if (mode !== "rename" || !editingViewId || activeViewId === editingViewId) return;
     setMode("view");
     setNameDraft("");
     setEditingViewId(null);
-  }, [editingViewId, mode, props.activeView?.id]);
+  }, [activeViewId, editingViewId, mode]);
 
   return (
     <div className="flex items-center justify-between gap-2">
