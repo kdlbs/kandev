@@ -108,7 +108,7 @@ export function IntegrationsSection({ collapsed }: IntegrationsSectionProps) {
       label="Integrations"
       collapsed={collapsed}
       icon={IconPlugConnected}
-      headerAction={<IntegrationHeaderShortcuts links={links} />}
+      headerAction={links.length > 0 ? <IntegrationHeaderShortcuts links={links} /> : undefined}
       headerActionVisibility="always"
     >
       {links.map(({ id, label, href }) => (

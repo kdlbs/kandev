@@ -162,14 +162,18 @@ describe("IntegrationsSection", () => {
     expect(screen.queryByRole("link", { name: "Hello" })).toBeNull();
   });
 
-  it("shows the section when only plugin integration items exist", () => {
+  it("shows the section when only plugin integration items exist, with no empty header-action slot", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
     linksMock.mockReturnValue([]);
     pluginsMock.navItems = [costPerModelItem];
 
-    renderSection();
+    const { container } = renderSection();
 
     expect(screen.getByTestId(costPerModelTestId)).toBeTruthy();
+    // Regression for the empty headerAction slot: AppSidebarSection renders
+    // a "shrink-0 mr-1 flex items-center" wrapper whenever headerAction is
+    // non-null, even with zero shortcuts inside it.
+    expect(container.querySelector(".shrink-0.mr-1")).toBeNull();
   });
 
   it("hides plugin items (and an otherwise empty section) when the plugins feature is off", () => {
