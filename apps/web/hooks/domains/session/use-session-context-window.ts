@@ -2,6 +2,7 @@ import { useEffect, useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { ContextWindowEntry } from "@/lib/state/store";
+import { parseContextWindowEntry } from "@/lib/state/slices/session-runtime/context-window";
 
 export function useSessionContextWindow(sessionId: string | null): ContextWindowEntry | undefined {
   // Subscribe to individual primitive values to ensure reactivity
@@ -17,6 +18,9 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
   const efficiency = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.efficiency : undefined,
   );
+  const source = useAppStore((state) =>
+    sessionId ? state.contextWindow.bySessionId[sessionId]?.source : undefined,
+  );
   const timestamp = useAppStore((state) =>
     sessionId ? state.contextWindow.bySessionId[sessionId]?.timestamp : undefined,
   );
@@ -29,9 +33,10 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
       used: used ?? 0,
       remaining: remaining ?? 0,
       efficiency: efficiency ?? 0,
+      source,
       timestamp,
     };
-  }, [size, used, remaining, efficiency, timestamp]);
+  }, [size, used, remaining, efficiency, source, timestamp]);
 
   const session = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId] : undefined,
@@ -48,17 +53,8 @@ export function useSessionContextWindow(sessionId: string | null): ContextWindow
     if (!metadata || typeof metadata !== "object") return;
 
     const storedContextWindow = (metadata as Record<string, unknown>).context_window;
-    if (!storedContextWindow || typeof storedContextWindow !== "object") return;
-
-    // Map stored context window to ContextWindowEntry
-    const cw = storedContextWindow as Record<string, unknown>;
-    const entry: ContextWindowEntry = {
-      size: (cw.size as number) ?? 0,
-      used: (cw.used as number) ?? 0,
-      remaining: (cw.remaining as number) ?? 0,
-      efficiency: (cw.efficiency as number) ?? 0,
-      timestamp: (cw.timestamp as string) ?? undefined,
-    };
+    const entry = parseContextWindowEntry(storedContextWindow);
+    if (!entry) return;
 
     setContextWindow(sessionId, entry);
   }, [sessionId, contextWindow, session?.metadata, setContextWindow]);

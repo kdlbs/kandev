@@ -13,6 +13,7 @@ vi.mock("@/hooks/domains/session/use-session-agent-usage", () => ({
 }));
 
 vi.mock("@kandev/ui/tooltip", () => ({
+  TooltipProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Tooltip: ({ children, open }: { children: React.ReactNode; open?: boolean }) => (
     <div data-testid="tooltip-root" data-open={open}>
       {children}
@@ -61,20 +62,6 @@ describe("TokenUsageDisplay", () => {
     const { container } = render(<TokenUsageDisplay sessionId="sess-1" />);
 
     expect(container.firstChild).toBeNull();
-  });
-
-  it("renders the indicator for valid usage under the window", () => {
-    vi.mocked(useSessionContextWindow).mockReturnValue({
-      size: 200_000,
-      used: 56_047,
-      remaining: 143_953,
-      efficiency: 28,
-    });
-
-    const { container } = render(<TokenUsageDisplay sessionId="sess-1" />);
-
-    expect(container.querySelector(".cursor-help")).not.toBeNull();
-    expect(container.querySelector("svg")).not.toBeNull();
   });
 
   it("opens the tooltip when the context ring is tapped", () => {
@@ -158,5 +145,41 @@ describe("TokenUsageDisplay", () => {
     const { container } = render(<TokenUsageDisplay sessionId="sess-1" />);
 
     expect(container.querySelector('[data-testid="doughnut-subscription-usage"]')).toBeNull();
+  });
+});
+
+describe("TokenUsageDisplay context source", () => {
+  it("labels agent-reported ACP data", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      source: "acp",
+    });
+
+    const { container, getByText, getByLabelText } = render(
+      <TokenUsageDisplay sessionId="sess-1" />,
+    );
+
+    expect(container.querySelector(".cursor-help")).not.toBeNull();
+    expect(container.querySelector("svg")).not.toBeNull();
+    expect(getByText("ACP")).toBeDefined();
+    expect(getByLabelText("About context window source")).toBeDefined();
+    expect(getByText(/ACP is the active session's effective window/i)).toBeDefined();
+  });
+
+  it("labels model API fallback data", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 128_000,
+      used: 64_000,
+      remaining: 64_000,
+      efficiency: 50,
+      source: "api",
+    });
+
+    const { getByText } = render(<TokenUsageDisplay sessionId="sess-1" />);
+
+    expect(getByText("API")).toBeDefined();
   });
 });

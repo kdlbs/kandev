@@ -190,6 +190,35 @@ describe("session.state_changed name propagation", () => {
   });
 });
 
+describe("session.state_changed context window provenance", () => {
+  it("retains the backend context-window source", () => {
+    const setContextWindow = vi.fn();
+    const store = makeStore({ setContextWindow });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: {
+          context_window: {
+            size: 258_400,
+            used: 95_100,
+            remaining: 163_300,
+            efficiency: 36.8,
+            source: "acp",
+          },
+        },
+      }),
+    );
+
+    expect(setContextWindow).toHaveBeenCalledWith(
+      "s-1",
+      expect.objectContaining({ source: "acp" }),
+    );
+  });
+});
+
 describe("session.state_changed recoverable errors", () => {
   it("upserts recoverable error metadata for non-failed session states", () => {
     const upsertTaskSessionFromEvent = vi.fn();

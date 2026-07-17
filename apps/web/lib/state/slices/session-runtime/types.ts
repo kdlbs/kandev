@@ -153,6 +153,7 @@ export type ContextWindowEntry = {
   used: number;
   remaining: number;
   efficiency: number;
+  source?: "acp" | "api";
   timestamp?: string;
 };
 
