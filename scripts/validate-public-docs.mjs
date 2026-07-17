@@ -208,6 +208,7 @@ export async function validateFeatureMedia({ docsDir }) {
   return { clipCount: slugs.size };
 }
 
+/** Require the publication dimensions, cadence, codecs, and no-audio policy. */
 function assertFeatureMediaContract(contract) {
   if (
     contract?.dimensions?.width !== 960 ||
@@ -224,6 +225,7 @@ function assertFeatureMediaContract(contract) {
   }
 }
 
+/** Validate one clip's ownership, provenance, delivery metadata, and file maps. */
 function assertFeatureClipShape(clip) {
   if (!clip || typeof clip !== "object" || Array.isArray(clip)) {
     throw new Error("feature media manifest contains an invalid clip entry");
@@ -292,6 +294,7 @@ function assertFeatureClipShape(clip) {
   }
 }
 
+/** Match each manifest filename to its corresponding DocsVideo attribute. */
 function hasCompleteFeatureMediaEmbed(markdown, filenames) {
   return [
     ...stripMarkdownCode(markdown).matchAll(/<DocsVideo\b[\s\S]*?\/>/g),
@@ -315,6 +318,7 @@ function hasCompleteFeatureMediaEmbed(markdown, filenames) {
   });
 }
 
+/** Collect visible heading labels for media section-ownership checks. */
 function collectHeadingTitles(markdown) {
   const titles = new Set();
   for (const match of stripMarkdownCode(markdown, {
@@ -325,6 +329,7 @@ function collectHeadingTitles(markdown) {
   return titles;
 }
 
+/** Remove supported inline heading markup and reject unterminated HTML tags. */
 function stripHeadingMarkup(value) {
   const linkedText = value
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
@@ -467,6 +472,7 @@ export async function validateCoverageInventory({ repoRoot, docsDir }) {
   };
 }
 
+/** Require one coverage area to declare audiences, docs, and concrete evidence. */
 function assertCoverageAreaShape(area) {
   if (!area || typeof area !== "object" || Array.isArray(area)) {
     throw new Error("coverage.json areas must contain objects");
@@ -491,6 +497,7 @@ function assertCoverageAreaShape(area) {
   }
 }
 
+/** Validate a named inventory field as a unique-owner string list. */
 function assertStringArray(object, field, owner, { allowEmpty = false } = {}) {
   const value = object[field];
   if (
@@ -504,6 +511,7 @@ function assertStringArray(object, field, owner, { allowEmpty = false } = {}) {
   }
 }
 
+/** Require cited implementation or test evidence to be a repository file. */
 async function assertCoverageEvidence(root, areaId, kind, relativePath) {
   const target = path.resolve(root, relativePath);
   const relative = path.relative(root, target);
@@ -534,6 +542,7 @@ function addUniqueCoverageValues(target, values, label) {
   }
 }
 
+/** Parse intentionally excluded surfaces and require a durable reason for each. */
 function validateCoverageExclusions(entries, key, label) {
   if (!Array.isArray(entries)) {
     throw new Error(`coverage.json excluded ${label}s must be an array`);
@@ -561,6 +570,7 @@ function validateCoverageExclusions(entries, key, label) {
   return values;
 }
 
+/** Extract the shipped Settings route registry from its typed frontend table. */
 async function collectSettingsRoutes(root) {
   const source = await fs.readFile(
     path.join(root, "apps/web/src/settings-routes.tsx"),
@@ -579,6 +589,7 @@ async function collectSettingsRoutes(root) {
   );
 }
 
+/** Extract every registered Kandev MCP tool name from backend server sources. */
 async function collectMcpTools(root) {
   const serverDir = path.join(root, "apps/backend/internal/mcp/server");
   const files = await collectFilesWithExtension(serverDir, ".go");
@@ -607,6 +618,7 @@ async function collectFilesWithExtension(dir, extension) {
   return files.flat();
 }
 
+/** Require shipped surfaces to form a disjoint covered-or-excluded partition. */
 function assertCompleteSurfaceCoverage(shipped, covered, excluded, label) {
   for (const value of covered) {
     if (excluded.has(value)) {
