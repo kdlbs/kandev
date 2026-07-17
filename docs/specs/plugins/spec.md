@@ -146,9 +146,10 @@ installed_at: "2026-04-26T10:00:00Z"
 restart_count: 0
 ```
 
-`capabilities.api_read` / `capabilities.api_write` are reserved for **future** Host
-RPCs (e.g. a `CreateTask` RPC) — they are unrelated to office and are not implemented
-by any Host RPC today; see "Read/write kandev data".
+`capabilities.api_read` / `capabilities.api_write` gate the **Host data API** Host
+RPCs (read RPCs live now; write RPCs are deferred) — the vocabulary is a list of
+resource names (`tasks`, `sessions`, `workspaces`, `workflows`, `agents`,
+`repositories`, `comments`). They are unrelated to office. See "Host data API".
 
 ### Install pipeline
 
@@ -339,14 +340,67 @@ plugin's manifest capabilities (`state`, `secrets`; `api_read`/`api_write` reser
 before the handler runs, and returns gRPC status `PermissionDenied` with message
 `capability '<name>' not declared` on a miss.
 
-### Read/write kandev data (future)
+### Host data API (plugin -> kandev, gRPC)
 
-`capabilities.api_read` and `capabilities.api_write` are reserved in the manifest
-schema for **future** Host RPCs (e.g. `CreateTask`, `ListTasks`, `AddComment`) that
-would let a plugin read/write kandev's own data (tasks, agents, comments) the same way
-it reads/writes its own KV state. These RPCs do not exist yet — declaring the
-capability today has no effect. This is unrelated to office; it is a general
-extension point for any future kandev resource. See "Out of scope".
+Plugins read (and, in a later phase, write) kandev's own domain data — tasks,
+sessions, workspaces, workflows, agent profiles, repositories, comments — over the
+same capability-gated Host gRPC channel they use for state and secrets, instead of
+opening the kandev database file. The wire contract is the `kandev.plugin.v1`
+Host data RPCs; DTOs are hand-mapped, versioned proto messages, never internal
+domain structs. See [ADR 0042](../../decisions/0042-plugin-host-data-api.md) and
+`docs/plans/plugins/HOST-DATA-API.proto`.
+
+**Readable resources (v1).** Each is gated by an `api_read:<resource>` capability:
+
+| RPC | Capability | Returns |
+|---|---|---|
+| `ListTasks` / `GetTask` | `api_read:tasks` | Tasks (id, workspace, workflow, title, description, state, priority, timestamps, parent, identifier, repositories, metadata) |
+| `ListWorkspaces` | `api_read:workspaces` | Workspaces (id, name, owner, defaults, timestamps) |
+| `ListWorkflows` | `api_read:workflows` | Workflows for a workspace |
+| `ListWorkflowSteps` | `api_read:workflows` | Steps for a workflow (id, name, position, stage type) |
+| `ListAgentProfiles` | `api_read:agents` | Agent profiles (id, agent id, display name, model, mode) |
+| `ListRepositories` | `api_read:repositories` | Repositories for a workspace (id, name, default branch) |
+| `ListSessions` | `api_read:sessions` | Session identity + agent context (id, task, agent profile, resolved display name + model, `acp_session_id`, state, timestamps) |
+| `ListSessionCodeStats` | `api_read:sessions` | **Computed** per-session code metrics: committed lines added/deleted, peak pending-diff lines added/deleted |
+
+`acp_session_id` on a session is the external usage-attribution join key (e.g.
+`tokscale`): kandev exposes the session identity and code stats but stays out of
+the token business. `SessionCodeStats` is a deliberately computed shape — the
+aggregate the agent-stats plugin previously re-derived by hand from
+`task_session_commits` and `task_session_git_snapshots` — so plugins never touch
+those raw rows.
+
+**Write phase (deferred).** `CreateTask`, `UpdateTask`, and `CreateComment` are
+specified in the proto but not implemented in this phase. When added, each is
+gated by `api_write:<resource>` (`api_write:tasks`, `api_write:comments`), routes
+through the task service methods that publish `task.*` events (never a
+repository), and the server stamps `source = "plugin:<id>"` on the created
+row/comment — a plugin cannot set provenance itself. Declaring an `api_write`
+capability has no effect until the write RPCs ship.
+
+**Conventions.**
+
+- **Pagination** is opaque-cursor based: a request carries `Page{limit, cursor}`
+  and a list response carries `PageInfo{next_cursor, has_more}`. `limit: 0` means
+  the server default; the server caps the maximum. An empty cursor is the first
+  page; echoing `next_cursor` continues. Plugins MUST NOT interpret cursor
+  contents.
+- **Timestamps** are RFC3339 strings.
+- **Nullable** string fields use proto `optional`, so absent (NULL) is
+  distinguishable from empty.
+- **Scoping (v1):** reads are global to the kandev instance (plugins are
+  instance-global; see "Permissions"). Filters (`workspace_ids`, `task_ids`,
+  `states`) narrow results but do not confer or restrict visibility. A
+  server-side scoping hook is reserved for a future per-plugin/per-user
+  restriction without a contract change.
+- **Ephemeral tasks** (quick-chat) are excluded from `ListTasks` unless the
+  request sets `include_ephemeral`.
+
+Every Host data RPC is capability-gated the same way as state/secrets: an
+undeclared capability returns gRPC `PermissionDenied` with message
+`capability '<name>' not declared` before the handler runs. Because the Host
+service instance is bound to the plugin's own ID at spawn time, the check
+evaluates directly against that plugin's installed manifest.
 
 ## Filesystem sideloading & sync
 
@@ -561,6 +615,30 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
   **THEN** the state is persisted in SQLite. A subsequent `Host.GetState` call with the
   same scope/key returns `"PROJ-123"`.
 
+- **GIVEN** a plugin whose manifest declares `api_read: ["sessions"]`, **WHEN** the
+  plugin calls `ListSessionCodeStats`, **THEN** kandev returns per-session committed
+  and peak-pending line counts (plus, via `ListSessions`, each session's
+  `acp_session_id`) computed from the service layer, without the plugin opening the
+  kandev database file.
+
+- **GIVEN** a plugin whose manifest does **not** declare `tasks` in `api_read`,
+  **WHEN** the plugin calls `ListTasks`, **THEN** kandev returns gRPC status
+  `PermissionDenied` with message `capability 'api_read:tasks' not declared`, before
+  the handler runs.
+
+- **GIVEN** a plugin with `api_read: ["tasks"]` and more tasks than one page,
+  **WHEN** it calls `ListTasks` with `Page{limit: 50}` and then again with the
+  returned `PageInfo.next_cursor`, **THEN** the second call returns the next page and
+  `has_more` is false once the last page is reached.
+
+- **GIVEN** a plugin with `api_read: ["tasks"]`, **WHEN** it calls `ListTasks`
+  without `include_ephemeral`, **THEN** quick-chat ephemeral tasks are excluded from
+  the results.
+
+- **GIVEN** a plugin whose manifest declares `api_write: ["tasks"]` in this phase,
+  **WHEN** it calls `CreateTask`, **THEN** kandev returns gRPC status `Unimplemented`
+  (write RPCs are deferred), and declaring the capability has no other effect.
+
 ## Out of scope
 
 - **Remote / operator-hosted plugin tier.** The earlier `base_url` registration model,
@@ -589,6 +667,11 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
 - **Multi-instance plugins.** Each plugin ID maps to exactly one supervised subprocess.
 - **Rate limiting.** No per-plugin rate limits in v1. Misbehaving plugins can be disabled manually.
 - **Plugin database namespaces.** Plugins do not get their own SQLite schemas. KV state is sufficient for v1.
-- **`api_read`/`api_write` Host RPCs.** The capability vocabulary is reserved in the
-  manifest schema, but no Host RPC reads or writes kandev's own data (tasks, agents,
-  comments) yet — see "Read/write kandev data".
+- **Host data API write RPCs.** `CreateTask`, `UpdateTask`, and `CreateComment` are
+  specified but deferred to a later phase; only the read RPCs ship in v1. See "Host
+  data API".
+- **Per-session code-stats precomputation.** `SessionCodeStats` is computed on
+  demand per request in v1; a materialized or cached aggregation is future work.
+- **Workspace-scoped plugin data access.** v1 reads are global to the instance with
+  a reserved scoping hook; per-plugin or per-user workspace restriction is future
+  work (see ADR 0042 open decisions).
