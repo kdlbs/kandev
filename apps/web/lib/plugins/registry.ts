@@ -108,6 +108,7 @@ class PluginRegistryStore {
     this.navItems = removeByPlugin(this.navItems, pluginId);
     this.slotComponents = removeByPlugin(this.slotComponents, pluginId);
     this.wsHandlers = removeByPlugin(this.wsHandlers, pluginId);
+    this.pluginNames.delete(pluginId);
     if (this.totalCount() !== before) this.notify();
   }
 

@@ -147,4 +147,13 @@ describe("pluginRegistry — route options and plugin names", () => {
     expect(route?.options).toEqual({ topbar: { title: "Custom", icon: "ticket" } });
     expect(pluginRegistry.getPluginName("plugin-a")).toBe("Plugin A");
   });
+
+  it("clears the plugin display name on unregisterPlugin", () => {
+    pluginRegistry.forPlugin("plugin-a", "Plugin A");
+    expect(pluginRegistry.getPluginName("plugin-a")).toBe("Plugin A");
+
+    pluginRegistry.unregisterPlugin("plugin-a");
+
+    expect(pluginRegistry.getPluginName("plugin-a")).toBeUndefined();
+  });
 });
