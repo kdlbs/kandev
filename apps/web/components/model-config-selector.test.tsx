@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelConfigSelector } from "@/components/model-config-selector";
@@ -161,35 +162,72 @@ describe("ModelConfigSelector provider descriptions", () => {
     expect(screen.getByText("More thorough reasoning for complex tasks.")).not.toBeNull();
   });
 
-  it("does not show configuration details when the compact task trigger receives focus", () => {
+  it("shows all current option names and values on compact task trigger focus", () => {
     render(
-      <ModelConfigSelector
-        modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
-        currentModel={providerModelId}
-        onModelChange={() => {}}
-        triggerSummary="changed"
-        configBaseline={{ effort: "high" }}
-        configOptions={[
-          {
-            type: "select",
-            id: "effort",
-            name: effortOptionName,
-            description: optionDescription,
-            currentValue: "low",
-            options: [
-              {
-                value: "low",
-                name: "Low",
-                description: "Faster responses with less reasoning.",
-              },
-            ],
-          },
-        ]}
-      />,
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
+          currentModel={providerModelId}
+          onModelChange={() => {}}
+          triggerSummary="changed"
+          configBaseline={{ effort: "high", fast_mode: "off" }}
+          configOptions={[
+            {
+              type: "select",
+              id: "effort",
+              name: effortOptionName,
+              description: optionDescription,
+              currentValue: "low",
+              options: [
+                {
+                  value: "low",
+                  name: "Low",
+                  description: "Faster responses with less reasoning.",
+                },
+              ],
+            },
+            {
+              type: "select",
+              id: "fast_mode",
+              name: "Fast Mode",
+              currentValue: "off",
+              options: [{ value: "off", name: "Off" }],
+            },
+          ]}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.focus(screen.getByRole("button", { name: modelSettingsButtonName }));
+
+    const tooltip = screen.getByRole("tooltip");
+    expect(tooltip.textContent).toContain("Model: GPT-5.6-Sol");
+    expect(tooltip.textContent).toContain("Reasoning Effort: Low");
+    expect(tooltip.textContent).toContain("Fast Mode: Off");
+    expect(tooltip.textContent).not.toContain(optionDescription);
+  });
+
+  it("does not add the task details tooltip to shared selectors", () => {
+    render(
+      <TooltipProvider>
+        <ModelConfigSelector
+          modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
+          currentModel={providerModelId}
+          onModelChange={() => {}}
+          configOptions={[
+            {
+              type: "select",
+              id: "effort",
+              name: effortOptionName,
+              currentValue: "low",
+              options: [{ value: "low", name: "Low" }],
+            },
+          ]}
+        />
+      </TooltipProvider>,
     );
 
     fireEvent.focus(screen.getByRole("button", { name: modelSettingsButtonName }));
     expect(screen.queryByRole("tooltip")).toBeNull();
-    expect(screen.queryByText(optionDescription)).toBeNull();
   });
 });

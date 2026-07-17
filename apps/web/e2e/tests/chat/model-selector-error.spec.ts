@@ -49,6 +49,13 @@ test.describe("Chat model selector — RPC failure", () => {
     // Baseline-matching secondary options stay out of the task-chat trigger.
     await expect(trigger).toContainText("Mock Fast", { timeout: 15_000 });
 
+    await trigger.hover();
+    const tooltip = testPage.getByRole("tooltip");
+    await expect(tooltip).toContainText("Model: Mock Fast");
+    await expect(tooltip).toContainText("Effort: Medium");
+    await expect(tooltip).not.toContainText("Controls how much reasoning the mock model uses");
+    await testPage.mouse.move(0, 0);
+
     const backendErrorMessage = "mock backend rejected model change";
     const fail = (route: import("@playwright/test").Route) =>
       route.fulfill({

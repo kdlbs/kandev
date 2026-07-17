@@ -16,6 +16,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import { Separator } from "@kandev/ui/separator";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 
 export type ModelSelectorOption = {
   id: string;
@@ -41,6 +42,12 @@ export type SelectConfigOption = DynamicConfigOption & {
 type TriggerLabelOptions = {
   summary: "changed";
   configBaseline?: Record<string, string>;
+};
+
+type TriggerDetail = {
+  id: string;
+  name: string;
+  value: string;
 };
 
 const MODEL_CONFIG_CATEGORY = "model";
@@ -127,6 +134,36 @@ export function resolveTriggerLabel(
   const modelValue = currentModel || modelConfig?.currentValue;
   if (!modelValue) return "";
   return triggerLabel(modelOptions, modelValue, configOptions, options);
+}
+
+function triggerDetails(
+  modelOptions: ModelSelectorOption[],
+  currentModel: string | null,
+  modelConfig: SelectConfigOption | undefined,
+  extraConfigOptions: SelectConfigOption[],
+): TriggerDetail[] {
+  let modelValue = "";
+  if (modelConfig) {
+    modelValue = currentOptionName(modelConfig);
+  } else if (currentModel) {
+    modelValue = displayModelName(modelOptions, currentModel);
+  }
+  const details = modelValue
+    ? [
+        {
+          id: modelConfig?.id || MODEL_CONFIG_CATEGORY,
+          name: modelConfig?.name || "Model",
+          value: modelValue,
+        },
+      ]
+    : [];
+  return details.concat(
+    extraConfigOptions.map((option) => ({
+      id: option.id,
+      name: option.name || option.id,
+      value: currentOptionName(option),
+    })),
+  );
 }
 
 function ModelRow({
@@ -383,10 +420,12 @@ type ModelConfigSelectorTriggerProps = Pick<
   "ariaLabel" | "disabled" | "placeholder" | "triggerClassName" | "variant"
 > & {
   label: string;
+  details?: TriggerDetail[];
 };
 
 function ModelConfigSelectorTrigger({
   ariaLabel,
+  details,
   disabled,
   label,
   placeholder,
@@ -397,7 +436,7 @@ function ModelConfigSelectorTrigger({
   const baseClassName = compact
     ? "h-7 max-w-[min(18rem,70vw)] cursor-pointer gap-1 px-2 text-xs hover:bg-muted/40"
     : "w-full justify-between font-normal cursor-pointer";
-  return (
+  const trigger = (
     <PopoverTrigger asChild>
       <Button
         type="button"
@@ -411,6 +450,22 @@ function ModelConfigSelectorTrigger({
         <IconChevronDown className="h-3.5 w-3.5 shrink-0 opacity-70" />
       </Button>
     </PopoverTrigger>
+  );
+  if (!details?.length) return trigger;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipContent>
+        <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1">
+          {details.map((detail) => (
+            <div key={detail.id} className="contents">
+              <span className="font-medium">{detail.name}: </span>
+              <span className="min-w-0 break-words">{detail.value}</span>
+            </div>
+          ))}
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -451,6 +506,10 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     configOptions,
     triggerLabelOptions(triggerSummary, configBaseline),
   );
+  const details =
+    triggerSummary === "changed"
+      ? triggerDetails(modelOptions, currentModel, modelConfig, extraConfigOptions)
+      : undefined;
 
   const hasExtraConfigOptions = extraConfigOptions.length > 0;
   const onModelSelect = (value: string) => {
@@ -472,6 +531,7 @@ export const ModelConfigSelector = memo(function ModelConfigSelector({
     <Popover open={open} onOpenChange={onOpenChange}>
       <ModelConfigSelectorTrigger
         ariaLabel={ariaLabel}
+        details={details}
         disabled={disabled}
         label={label}
         placeholder={placeholder}
