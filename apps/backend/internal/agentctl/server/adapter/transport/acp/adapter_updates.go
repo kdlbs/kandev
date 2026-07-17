@@ -195,7 +195,6 @@ func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any
 		a.mu.Unlock()
 		return nil
 	}
-	a.contextSamples[sessionID] = sample
 	remaining := max(sample.size-sample.used, 0)
 	event := AgentEvent{
 		Type:                   streams.EventTypeContextWindow,
@@ -206,6 +205,9 @@ func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any
 		ContextEfficiency:      float64(sample.used) / float64(sample.size) * 100,
 	}
 	sent := a.sendUpdateLocked(event)
+	if sent {
+		a.contextSamples[sessionID] = sample
+	}
 	a.mu.Unlock()
 	if !sent {
 		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))

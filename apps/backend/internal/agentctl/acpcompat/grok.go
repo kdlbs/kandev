@@ -4,6 +4,7 @@ package acpcompat
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -312,7 +313,11 @@ func nonNegativeInt64(meta map[string]any, key string) (int64, bool) {
 	}
 	switch value := meta[key].(type) {
 	case float64:
-		return int64(value), value >= 0
+		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) ||
+			value != math.Trunc(value) || value >= math.Exp2(63) {
+			return 0, false
+		}
+		return int64(value), true
 	case int64:
 		return value, value >= 0
 	case int:

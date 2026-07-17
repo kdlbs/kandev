@@ -519,6 +519,31 @@ func TestGrokUserMessageEchoIsSuppressedWithoutDroppingContext(t *testing.T) {
 	}
 }
 
+func TestGrokContextRetriesAfterFullUpdateChannel(t *testing.T) {
+	models := []modelInfo{{
+		ModelId: "grok-current",
+		Meta:    map[string]any{"totalContextTokens": float64(500_000)},
+	}}
+	a := grokAdapterWithModels(t, models, []streams.ConfigOption{{
+		Type: "select", ID: configOptionIDModel, Category: configOptionIDModel, CurrentValue: "grok-current",
+	}})
+	a.updatesCh = make(chan AgentEvent, 1)
+	a.updatesCh <- AgentEvent{Type: streams.EventTypeMessageChunk}
+	meta := map[string]any{"totalTokens": float64(42_000)}
+
+	if event := a.emitDialectContextWindow("sess-grok", meta); event != nil {
+		t.Fatalf("emitDialectContextWindow() = %#v with full channel, want nil", event)
+	}
+	if _, cached := a.contextSamples["sess-grok"]; cached {
+		t.Fatal("dropped context sample must not be cached")
+	}
+	<-a.updatesCh
+
+	if event := a.emitDialectContextWindow("sess-grok", meta); event == nil {
+		t.Fatal("same context sample must be retried after channel capacity returns")
+	}
+}
+
 func TestGrokDialect_NormalizesPrivateReasoningTokens(t *testing.T) {
 	response := &acp.PromptResponse{Meta: map[string]any{
 		"usage": map[string]any{
