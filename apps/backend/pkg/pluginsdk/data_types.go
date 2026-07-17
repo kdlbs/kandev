@@ -1,5 +1,5 @@
 // data_types.go defines the Go-native mirrors of the Host data API messages
-// (ADR 0042: docs/decisions/0042-plugin-host-data-api.md) plus the
+// (ADR 0043: docs/decisions/0043-plugin-host-data-api.md) plus the
 // proto<->Go conversion helpers used by host.go's data accessors. As with
 // the rest of types.go, authors and kandev's runtime manager only ever see
 // these Go-native structs; the pluginv1 message types never leak past the

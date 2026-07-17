@@ -44,7 +44,7 @@ type pluginHost struct {
 	secrets SecretRevealer
 	bus     bus.EventBus
 
-	// Host data API (ADR 0042) service-layer dependencies, wired by
+	// Host data API (ADR 0043) service-layer dependencies, wired by
 	// Service.hostForPlugin from Service.SetDataSources. See host_data.go.
 	taskData         taskDataSource
 	workflows        workflowLister

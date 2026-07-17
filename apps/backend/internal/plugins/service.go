@@ -81,7 +81,7 @@ type Service struct {
 	runtime   PluginRuntime
 	secrets   SecretRevealer
 
-	// Host data API (ADR 0042) service-layer dependencies, wired via
+	// Host data API (ADR 0043) service-layer dependencies, wired via
 	// SetDataSources and handed to every pluginHost hostForPlugin builds.
 	// nil until backendapp calls SetDataSources (see its doc comment); a
 	// pluginHost built before that falls back to Unimplemented for these
@@ -179,7 +179,7 @@ func (s *Service) SetSecrets(v SecretRevealer) {
 	s.secrets = v
 }
 
-// SetDataSources wires the Host data API's (ADR 0042) service-layer
+// SetDataSources wires the Host data API's (ADR 0043) service-layer
 // dependencies, following the same post-construction "SetX" pattern as
 // SetDeliverer/SetSecrets (see the "Extension points" doc comment on
 // Service). backendapp calls this once, passing its already-constructed

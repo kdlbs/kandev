@@ -6,7 +6,7 @@ wave: 4
 depends_on: ["04-host-data-impl"]
 plan: "plan.md"
 spec: "../../../specs/plugins/spec.md"
-adr: "../../../decisions/0042-plugin-host-data-api.md"
+adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 
 # Task 07: Author docs for the Host data API
@@ -51,7 +51,7 @@ Document the Host data API for plugin authors: which resources are readable, the
 
 ## Inputs
 - Final RPC set + accessor names from tasks 01/03/04.
-- Spec: "Host data API"; ADR 0042.
+- Spec: "Host data API"; ADR 0043.
 
 ## Dependencies
 Task 04 (behavior finalized).
@@ -61,13 +61,13 @@ Summary, files changed, and status update here + in `plan.md`.
 
 ## Output
 
-**Summary:** Documented the Host data API (ADR 0042) in the wire/SDK contract
+**Summary:** Documented the Host data API (ADR 0043) in the wire/SDK contract
 reference and reconciled the spec section against the shipped code.
 
 **Files changed:**
 - `docs/plans/plugins/GRPC-CONTRACT.md` — added the 9 read RPCs + 3 deferred
   write RPCs to the `service Host` block (§3); added a new "§3a. Host data API
-  (ADR 0042)" subsection covering the resource/capability table, deferred
+  (ADR 0043)" subsection covering the resource/capability table, deferred
   writes, service-layer/DTO conventions, pagination/timestamp/nullable/scoping
   conventions; added the `Host` interface's 6 data accessors plus the 6 reader
   interfaces (`TaskReader`, `SessionReader`, `WorkspaceReader`,
@@ -104,7 +104,7 @@ truth, left unchanged):**
   `pkg/pluginsdk` — each Host/Host-data method checks its own capability
   inline at the top of the handler (`host.go`, `host_data.go`). Reworded to
   describe the actual per-RPC check without implying a shared interceptor
-  layer (this was pre-existing drift, unrelated to ADR 0042, caught while
+  layer (this was pre-existing drift, unrelated to ADR 0043, caught while
   editing the same paragraph).
 - `GRPC-CONTRACT.md`'s pre-ADR text already read "api_read/api_write reserved
   for future" in §5 and the `service Host` proto snippet only listed the 6
@@ -112,7 +112,7 @@ truth, left unchanged):**
   updated in place.
 
 **Not touched (out of scope / already correct):**
-- `docs/decisions/0042-plugin-host-data-api.md` — read for context per the
+- `docs/decisions/0043-plugin-host-data-api.md` — read for context per the
   task's Inputs; its `Status: proposed` front matter looks stale given the
   code is fully implemented, but the task's edit scope was spec.md, not the
   ADR, so it is left for whoever finalizes the ADR's status.

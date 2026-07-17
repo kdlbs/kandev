@@ -1,5 +1,5 @@
 // Package service provides the business-logic seam between callers (HTTP
-// handlers, and — per ADR 0042 — the plugin Host data API) and the analytics
+// handlers, and — per ADR 0043 — the plugin Host data API) and the analytics
 // repository. Callers that need analytics/session aggregation data should
 // depend on Service rather than reaching into repository.Repository
 // directly, so future access rules or derived fields have one place to live.

@@ -25,7 +25,7 @@ func (m *Manifest) CanWrite(resource string) bool {
 }
 
 // CanRead reports whether c declares read access to resource via APIRead
-// (ADR 0042's api_read:<resource> capabilities, e.g. "tasks", "sessions").
+// (ADR 0043's api_read:<resource> capabilities, e.g. "tasks", "sessions").
 // Exposed on Capabilities directly (not just Manifest) so callers that only
 // hold a plugin's currently-registered Capabilities snapshot — such as
 // internal/plugins.pluginHost, bound at spawn time — can gate without a full

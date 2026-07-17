@@ -6,7 +6,7 @@ wave: 4
 depends_on: ["04-host-data-impl"]
 plan: "plan.md"
 spec: "../../../specs/plugins/spec.md"
-adr: "../../../decisions/0042-plugin-host-data-api.md"
+adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 
 # Task 06: Host data API tests

@@ -10,7 +10,7 @@ import (
 )
 
 // dataRecordingHost is a fake Go-native Host implementation whose Host data
-// API (ADR 0042) accessors are backed by in-memory fixtures, used to prove
+// API (ADR 0043) accessors are backed by in-memory fixtures, used to prove
 // grpcHostServer -> grpcHostClient reachability for the read RPCs added in
 // task-03. State/secrets/emit are inherited (unimplemented) from
 // UnimplementedHostData since these tests only exercise the data accessors.

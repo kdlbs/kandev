@@ -55,7 +55,7 @@ type Host interface {
 	EmitEvent(ctx context.Context, name string, payload map[string]any) error
 
 	// Tasks returns the reader for the Host data API's task RPCs
-	// (capability api_read:tasks per ADR 0042).
+	// (capability api_read:tasks per ADR 0043).
 	Tasks() TaskReader
 
 	// Sessions returns the reader for the Host data API's session and
@@ -80,7 +80,7 @@ type Host interface {
 }
 
 // TaskReader is the read-only accessor behind Host.Tasks(), mirroring the
-// Host data API's ListTasks/GetTask RPCs (ADR 0042). Write methods
+// Host data API's ListTasks/GetTask RPCs (ADR 0043). Write methods
 // (CreateTask/UpdateTask) are deferred to a later phase and intentionally
 // not part of this interface yet.
 type TaskReader interface {
@@ -405,7 +405,7 @@ func (s *grpcHostServer) EmitEvent(ctx context.Context, req *pluginv1.EmitEventR
 	return &pluginv1.EmitEventResponse{}, nil
 }
 
-// ── Host data API reads (ADR 0042) ──────────────────────────────────────
+// ── Host data API reads (ADR 0043) ──────────────────────────────────────
 //
 // Each method below dispatches to the injected Go-native impl's resource
 // accessor (impl.Tasks(), impl.Sessions(), ...) and converts proto<->native
@@ -508,7 +508,7 @@ func (s *grpcHostServer) ListSessionCodeStats(ctx context.Context, req *pluginv1
 var _ pluginv1.HostServer = (*grpcHostServer)(nil)
 
 // UnimplementedHostData is an embeddable default for the Host data API
-// (ADR 0042) sub-accessors: Tasks/Sessions/Workspaces/Workflows/
+// (ADR 0043) sub-accessors: Tasks/Sessions/Workspaces/Workflows/
 // AgentProfiles/Repositories. Embed it in a Go-native Host implementation
 // to satisfy the interface before wiring real data access — every method
 // on every returned reader returns a gRPC Unimplemented error. Override

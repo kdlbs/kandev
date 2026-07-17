@@ -6,7 +6,7 @@ wave: 2
 depends_on: ["01-proto-contract"]
 plan: "plan.md"
 spec: "../../../specs/plugins/spec.md"
-adr: "../../../decisions/0042-plugin-host-data-api.md"
+adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 
 # Task 03: SDK Go-native data DTOs, Host interface, and author accessors

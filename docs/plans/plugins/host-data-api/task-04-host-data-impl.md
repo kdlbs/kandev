@@ -6,7 +6,7 @@ wave: 3
 depends_on: ["01-proto-contract", "02-session-loc-aggregation", "03-sdk-data-accessors"]
 plan: "plan.md"
 spec: "../../../specs/plugins/spec.md"
-adr: "../../../decisions/0042-plugin-host-data-api.md"
+adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 
 # Task 04: kandev-side Host data RPC implementation
@@ -30,7 +30,7 @@ gating, and wire the new service dependencies through `plugins.Service`.
      optional/NULL handling). Session DTO must carry `acp_session_id` (from
      session metadata / `executors_running` fallback, as the source plugin did).
 - Apply the v1 scoping rule: global reads, filters narrow results, ephemeral
-  tasks excluded unless requested. Leave a single scoping hook per ADR 0042(a).
+  tasks excluded unless requested. Leave a single scoping hook per ADR 0043(a).
 - Implement opaque-cursor pagination (server-defined cursor encoding + max cap).
 - Write RPC handlers return `codes.Unimplemented`.
 - **Wiring:** add the new service deps to `plugins.Service`, `plugins.NewService`,
@@ -65,7 +65,7 @@ gating, and wire the new service dependencies through `plugins.Service`.
   capability checks), `service.go` `hostForPlugin`, `manifest.CanRead`/`CanWrite`.
 - Service methods: `internal/task/service/service_sessions.go`,
   `internal/workflow/service/service.go`, `internal/agent/settings/store`.
-- Spec: "Host data API"; ADR 0042 (service-layer reads, DTO discipline, scoping).
+- Spec: "Host data API"; ADR 0043 (service-layer reads, DTO discipline, scoping).
 
 ## Dependencies
 Tasks 01, 02, 03.

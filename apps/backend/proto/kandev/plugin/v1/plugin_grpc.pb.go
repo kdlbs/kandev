@@ -228,7 +228,7 @@ const (
 // Implemented by KANDEV (served back over the go-plugin broker).
 // Every RPC is capability-gated server-side (§5).
 //
-// Host data API (ADR 0042): the read/write data RPCs below live on this same
+// Host data API (ADR 0043): the read/write data RPCs below live on this same
 // `service Host` rather than a separate `service HostData`. They reuse the
 // single broker connection and the existing capability-gated unary
 // interceptor; splitting into a second service would only duplicate both for
@@ -240,7 +240,7 @@ const (
 // DTOs below are a HAND-DEFINED public contract: the backend maps internal
 // models → these messages explicitly, never generates them from domain
 // structs, and never marshals domain structs through google.protobuf.Struct.
-// Fields are additive-only after merge (ADR 0042); removing or renaming a
+// Fields are additive-only after merge (ADR 0043); removing or renaming a
 // field is a breaking change requiring a new api_version. Read handlers call
 // the relevant service (never a repository directly); write handlers call
 // service methods that publish task.* events (never repository.TaskRepository).
@@ -470,7 +470,7 @@ func (c *hostClient) CreateComment(ctx context.Context, in *CreateCommentRequest
 // Implemented by KANDEV (served back over the go-plugin broker).
 // Every RPC is capability-gated server-side (§5).
 //
-// Host data API (ADR 0042): the read/write data RPCs below live on this same
+// Host data API (ADR 0043): the read/write data RPCs below live on this same
 // `service Host` rather than a separate `service HostData`. They reuse the
 // single broker connection and the existing capability-gated unary
 // interceptor; splitting into a second service would only duplicate both for
@@ -482,7 +482,7 @@ func (c *hostClient) CreateComment(ctx context.Context, in *CreateCommentRequest
 // DTOs below are a HAND-DEFINED public contract: the backend maps internal
 // models → these messages explicitly, never generates them from domain
 // structs, and never marshals domain structs through google.protobuf.Struct.
-// Fields are additive-only after merge (ADR 0042); removing or renaming a
+// Fields are additive-only after merge (ADR 0043); removing or renaming a
 // field is a breaking change requiring a new api_version. Read handlers call
 // the relevant service (never a repository directly); write handlers call
 // service methods that publish task.* events (never repository.TaskRepository).

@@ -1,6 +1,6 @@
 // host_data.go implements pluginHost's Tasks/Sessions/Workspaces/Workflows/
-// AgentProfiles/Repositories accessors — the Host data API (ADR 0042:
-// docs/decisions/0042-plugin-host-data-api.md). Each accessor is
+// AgentProfiles/Repositories accessors — the Host data API (ADR 0043:
+// docs/decisions/0043-plugin-host-data-api.md). Each accessor is
 // capability-gated at the point it is called: a plugin whose manifest lacks
 // the resource's api_read:<resource> capability gets back a reader whose
 // every method returns gRPC PermissionDenied, so a real reader's methods
@@ -34,7 +34,7 @@ import (
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
-// Resource names gating the Host data API's read RPCs, per ADR 0042: each
+// Resource names gating the Host data API's read RPCs, per ADR 0043: each
 // accessor requires "api_read:<resource>" in the plugin's manifest.
 const (
 	resourceTasks         = "tasks"
@@ -53,7 +53,7 @@ func apiReadCapability(resource string) string {
 
 // Pagination: Page.Cursor is a decimal string offset into the server-side
 // result set. It is an implementation detail plugins must treat as opaque
-// (per ADR 0042's "opaque cursor" convention) — nothing here promises it
+// (per ADR 0043's "opaque cursor" convention) — nothing here promises it
 // stays a plain offset. defaultPageLimit/maxPageLimit bound Page.Limit.
 const (
 	defaultPageLimit = 50
@@ -284,7 +284,7 @@ func (deniedRepositoryReader) List(context.Context, string, pluginsdk.Page) ([]p
 // assembling a workspace's tasks for in-memory filter/sort/paginate. Large
 // enough for realistic instance sizes; a workspace with more tasks than this
 // would silently lose the excess from Host data API reads — a known v1
-// limitation of fetch-then-paginate-in-memory, acceptable per ADR 0042(a)'s
+// limitation of fetch-then-paginate-in-memory, acceptable per ADR 0043(a)'s
 // "global-with-hook" v1 scoping recommendation.
 const taskFetchPageSize = 1000
 
@@ -336,7 +336,7 @@ func (r sessionReader) List(ctx context.Context, filter pluginsdk.SessionFilter,
 }
 
 // CodeStats delegates straight to the analytics service, which already
-// paginates via SQL Limit/Offset (per ADR 0042(b), computed on demand — no
+// paginates via SQL Limit/Offset (per ADR 0043(b), computed on demand — no
 // in-memory fetch-everything like the other readers). It asks for one extra
 // row past the requested limit to derive HasMore without a second count
 // query; NextCursor is offset+limit exactly like the in-memory paginate
@@ -449,7 +449,7 @@ func (r repositoryReader) List(ctx context.Context, workspaceID string, page plu
 	return items, info, nil
 }
 
-// ── Fetch/filter/sort helpers (v1 scoping: ADR 0042(a) "global-with-hook") ─
+// ── Fetch/filter/sort helpers (v1 scoping: ADR 0043(a) "global-with-hook") ─
 
 // resolveWorkspaceIDs returns requested unchanged when non-empty (an
 // explicit filter always narrows), otherwise every workspace the instance
@@ -617,7 +617,7 @@ func (h *pluginHost) sessionToDTO(ctx context.Context, s *taskmodels.TaskSession
 }
 
 // resolveACPSessionID replicates the source agent-stats plugin's join key
-// (docs/decisions/0042-plugin-host-data-api.md, "A real plugin exposed the
+// (docs/decisions/0043-plugin-host-data-api.md, "A real plugin exposed the
 // gap"): the agent CLI's own session UUID at
 // TaskSession.Metadata["acp"]["session_id"], populated once the agent emits
 // a session_info frame. executors_running.resume_token carries the same id

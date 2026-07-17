@@ -11,7 +11,7 @@ import (
 
 // TestService_GetExecutorRunningBySessionID_DelegatesToRepository proves the
 // service-layer accessor (added for the Host data API's acp_session_id
-// fallback, ADR 0042) reaches the real executor repository rather than
+// fallback, ADR 0043) reaches the real executor repository rather than
 // returning a stub, and surfaces the same not-found sentinel repository
 // callers already rely on.
 func TestService_GetExecutorRunningBySessionID_DelegatesToRepository(t *testing.T) {

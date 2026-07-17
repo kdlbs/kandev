@@ -1102,7 +1102,7 @@ func (*EmitEventResponse) Descriptor() ([]byte, []int) {
 	return file_kandev_plugin_v1_plugin_proto_rawDescGZIP(), []int{19}
 }
 
-// ── Host data API (ADR 0042) ─────────────────────────────────────────────────
+// ── Host data API (ADR 0043) ─────────────────────────────────────────────────
 // Pagination is opaque-cursor based so the server can change the underlying
 // ordering/store without breaking plugins.
 type Page struct {

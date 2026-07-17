@@ -590,7 +590,7 @@ const defaultSessionCodeStatsLimit = 500
 // task_session_git_snapshots snapshot, not the latest — the latest snapshot
 // is usually a clean tree after a commit, merge, or archive). This is the
 // per-session line-of-code aggregation the kandev-plugin-agent-stats plugin
-// used to compute by reading the SQLite file directly (see ADR 0042); the
+// used to compute by reading the SQLite file directly (see ADR 0043); the
 // SQL here mirrors that plugin's sessionsQuery.
 //
 // Portability: the committed-sum half of this query is plain SQL and works

@@ -15,7 +15,7 @@ import (
 // recordingHost is a fake Go-native Host implementation used to drive the
 // grpcHostServer adapter without a real state store. It embeds
 // UnimplementedHostData so it satisfies the extended Host interface without
-// wiring the Host data API (ADR 0042) accessors — those are covered by
+// wiring the Host data API (ADR 0043) accessors — those are covered by
 // dataRecordingHost in host_data_test.go.
 type recordingHost struct {
 	UnimplementedHostData

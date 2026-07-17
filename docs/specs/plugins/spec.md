@@ -362,7 +362,7 @@ sessions, workspaces, workflows, agent profiles, repositories, comments — over
 same capability-gated Host gRPC channel they use for state and secrets, instead of
 opening the kandev database file. The wire contract is the `kandev.plugin.v1`
 Host data RPCs; DTOs are hand-mapped, versioned proto messages, never internal
-domain structs. See [ADR 0042](../../decisions/0042-plugin-host-data-api.md) and
+domain structs. See [ADR 0043](../../decisions/0043-plugin-host-data-api.md) and
 `docs/plans/plugins/HOST-DATA-API.proto`.
 
 **Readable resources (v1).** Each is gated by an `api_read:<resource>` capability:
@@ -689,4 +689,4 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
   demand per request in v1; a materialized or cached aggregation is future work.
 - **Workspace-scoped plugin data access.** v1 reads are global to the instance with
   a reserved scoping hook; per-plugin or per-user workspace restriction is future
-  work (see ADR 0042 open decisions).
+  work (see ADR 0043 open decisions).

@@ -376,7 +376,7 @@ func TestPluginHost_Sessions_ACPSessionIDEmptyWhenNeitherSourceHasIt(t *testing.
 
 // TestPluginHost_SessionsCodeStats_DelegatesToAnalyticsService proves
 // Sessions().CodeStats reaches the injected analytics service with the
-// filter translated 1:1, and maps its results back unchanged (ADR 0042(b):
+// filter translated 1:1, and maps its results back unchanged (ADR 0043(b):
 // SessionCodeStats is a stable, computed shape returned as-is).
 func TestPluginHost_SessionsCodeStats_DelegatesToAnalyticsService(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"sessions"}})

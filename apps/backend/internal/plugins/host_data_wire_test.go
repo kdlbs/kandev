@@ -1,4 +1,4 @@
-// host_data_wire_test.go proves the Host data API (ADR 0042) end to end over
+// host_data_wire_test.go proves the Host data API (ADR 0043) end to end over
 // the REAL go-plugin gRPC transport: a plugin-side pluginsdk.Host call
 // travels through proto -> a real grpc.Server/Client pair with a real
 // GRPCBroker (hcplugin.TestPluginGRPCConn — no subprocess, but the same
@@ -117,7 +117,7 @@ func seedSessionsWireFixture(d *testDataHost, n int) {
 // TestPluginHostData_Wire_SessionsRoundTrip proves canned Sessions +
 // SessionCodeStats data round-trips correctly, over the real broker
 // transport, through a *pluginHost whose manifest declares api_read:sessions
-// — the concrete "plugin reads kandev data over gRPC" scenario ADR 0042
+// — the concrete "plugin reads kandev data over gRPC" scenario ADR 0043
 // exists for.
 func TestPluginHostData_Wire_SessionsRoundTrip(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"sessions"}})

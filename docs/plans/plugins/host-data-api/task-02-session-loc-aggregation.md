@@ -6,7 +6,7 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 spec: "../../../specs/plugins/spec.md"
-adr: "../../../decisions/0042-plugin-host-data-api.md"
+adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 
 # Task 02: Per-session LOC aggregation (committed + peak-pending)

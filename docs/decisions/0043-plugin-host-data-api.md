@@ -1,4 +1,4 @@
-# 0042 — Plugins read/write kandev data via capability-gated Host gRPC RPCs
+# 0043 — Plugins read/write kandev data via capability-gated Host gRPC RPCs
 
 - Status: accepted
 - Date: 2026-07-17

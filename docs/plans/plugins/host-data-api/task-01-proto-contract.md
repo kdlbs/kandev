@@ -6,7 +6,7 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 spec: "../../../specs/plugins/spec.md"
-adr: "../../../decisions/0042-plugin-host-data-api.md"
+adr: "../../../decisions/0043-plugin-host-data-api.md"
 ---
 
 # Task 01: Host data proto contract + regenerated stubs
@@ -27,7 +27,7 @@ later task compiles against.
   `service HostData`. Record the choice in a proto comment.
 - Verify DTO fields against the real shapes in
   `apps/backend/pkg/api/v1/{task,workflow,agent,workspace}.go`; keep RFC3339
-  string timestamps and `optional` nullables per ADR 0042.
+  string timestamps and `optional` nullables per ADR 0043.
 
 ## Acceptance
 - `apps/backend/proto/kandev/plugin/v1/plugin.proto` contains the read + deferred
@@ -48,7 +48,7 @@ later task compiles against.
 - Spec: "Host data API" section, capability table.
 - Draft: `docs/plans/plugins/HOST-DATA-API.proto`.
 - DTO shapes: `apps/backend/pkg/api/v1/{task,workflow,agent,workspace}.go`.
-- ADR 0042 (DTO discipline, conventions).
+- ADR 0043 (DTO discipline, conventions).
 
 ## Dependencies
 None.

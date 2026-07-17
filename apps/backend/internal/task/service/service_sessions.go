@@ -68,7 +68,7 @@ func (s *Service) GetTaskSession(ctx context.Context, sessionID string) (*models
 // never started, or has since completed and been cleaned up). Exposed at
 // the service layer — rather than requiring callers to reach into
 // repository.ExecutorRepository directly — for the Host data API's
-// acp_session_id fallback (ADR 0042): a session's ACP conversation id is
+// acp_session_id fallback (ADR 0043): a session's ACP conversation id is
 // normally read from TaskSession.Metadata["acp"]["session_id"], but that key
 // is only populated once the agent has emitted a session_info frame;
 // executors_running.resume_token carries the same id and survives on

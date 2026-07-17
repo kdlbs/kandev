@@ -48,4 +48,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0040 | [Separate updater integrity from OS publisher identity](0040-separate-updater-integrity-from-os-publisher-identity.md)                  | accepted   | desktop, infra, workflow    | 2026-07-15 |
 | 0041 | [Backend-owned portable user settings](0041-backend-owned-portable-user-settings.md)                                               | accepted   | backend, frontend           | 2026-07-15 |
 | 0042 | [Project shell output and fetch it on demand](0042-project-shell-output-and-fetch-on-demand.md)                                    | accepted   | backend, frontend, protocol | 2026-07-16 |
-| 0042 | [Plugins read/write kandev data via capability-gated Host gRPC RPCs](0042-plugin-host-data-api.md)                                  | proposed   | backend, protocol           | 2026-07-17 |
+| 0043 | [Plugins read/write kandev data via capability-gated Host gRPC RPCs](0043-plugin-host-data-api.md)                                  | accepted   | backend, protocol           | 2026-07-17 |

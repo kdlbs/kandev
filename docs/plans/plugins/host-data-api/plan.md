@@ -1,6 +1,6 @@
 ---
 spec: docs/specs/plugins/spec.md
-adr: docs/decisions/0042-plugin-host-data-api.md
+adr: docs/decisions/0043-plugin-host-data-api.md
 created: 2026-07-17
 status: draft
 ---

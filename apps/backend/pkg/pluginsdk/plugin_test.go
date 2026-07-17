@@ -34,7 +34,7 @@ func TestUnimplementedPlugin_SetHostThenHost(t *testing.T) {
 // fakeHost is a minimal Host implementation used only to prove SetHost/Host
 // wiring; broker-backed Host behavior is covered by the integration test in
 // serve_test.go. It embeds UnimplementedHostData to satisfy the Host data
-// API (ADR 0042) sub-accessors without wiring them.
+// API (ADR 0043) sub-accessors without wiring them.
 type fakeHost struct {
 	UnimplementedHostData
 }

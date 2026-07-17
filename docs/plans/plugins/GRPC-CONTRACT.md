@@ -54,7 +54,7 @@ service Host {
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
 
-  // Host data API (ADR 0042, §3a below) — reads, capability api_read:<resource>.
+  // Host data API (ADR 0043, §3a below) — reads, capability api_read:<resource>.
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
   rpc GetTask(GetTaskRequest) returns (Task);
   rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
@@ -123,7 +123,7 @@ Notes: scope ∈ instance|workspace|task|agent (empty scope_id for instance —
 matches the state store). The plugin never passes its own id; the Host service
 instance is bound to the plugin's record at spawn time.
 
-### 3a. Host data API (ADR 0042)
+### 3a. Host data API (ADR 0043)
 
 Read/write RPCs let plugins read (and, later, write) kandev's own domain data —
 tasks, sessions, workspaces, workflows, agent profiles, repositories, comments —
@@ -134,8 +134,8 @@ kandev database file directly. Full message definitions (`Page`, `PageInfo`,
 `CreateTaskRequest`/`UpdateTaskRequest`/`Comment`/`CreateCommentRequest`) live in
 the real proto — `apps/backend/proto/kandev/plugin/v1/plugin.proto` — and are not
 duplicated here; this section covers the RPC list (added to `service Host` above),
-capability gating, and cross-cutting conventions. See ADR 0042
-(`docs/decisions/0042-plugin-host-data-api.md`) for the design rationale.
+capability gating, and cross-cutting conventions. See ADR 0043
+(`docs/decisions/0043-plugin-host-data-api.md`) for the design rationale.
 
 **Readable resources.** Each read RPC requires `api_read:<resource>` in the
 plugin's manifest:
@@ -206,7 +206,7 @@ derived from.
   `task_ids`, `states` on `TaskFilter`/`SessionFilter`) narrow results but do
   not themselves confer or restrict visibility; a server-side scoping hook is
   reserved for a future per-plugin/per-user restriction without a contract
-  change (ADR 0042, open decision (a)).
+  change (ADR 0043, open decision (a)).
 - **Ephemeral tasks** (quick-chat) are excluded from `ListTasks` unless the
   request sets `TaskFilter.include_ephemeral`.
 
@@ -225,7 +225,7 @@ type Host interface {                                        // injected before 
     RevealSecret(ctx, ref string) (string, error)
     EmitEvent(ctx, name string, payload map[string]any) error
 
-    // Host data API (ADR 0042, §3a) — each accessor is capability-gated by
+    // Host data API (ADR 0043, §3a) — each accessor is capability-gated by
     // the corresponding api_read:<resource>; see "Host data API accessors"
     // below for the reader interfaces and Go-native DTOs.
     Tasks() TaskReader
@@ -317,7 +317,7 @@ func (p *statsPlugin) OnEvent(ctx context.Context, e *pluginsdk.Event) error {
 }
 ```
 
-`kandev-plugin-agent-stats` is the plugin ADR 0042 was written for: it
+`kandev-plugin-agent-stats` is the plugin ADR 0043 was written for: it
 originally opened `~/.kandev/data/kandev.db` read-only and hand-aggregated
 `task_session_commits`/`task_session_git_snapshots` to get exactly the numbers
 `Sessions().CodeStats(...)` now returns as a stable, computed DTO — read via
