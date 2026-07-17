@@ -11,7 +11,7 @@ Reviewed delivery generated from disposable captures and cursor-tracked again on
 - Encoding metadata: `metadata/capture.json`
 - Source bundle: `source/capture.spec.ts`, `source/encode.mjs`, `source/product-loop-camera-compact.mjs`, `source/qa.mjs`, `source/smoke.spec.ts`
 - Reframe source: full 3840x2400 masters, never the previously cropped delivery files.
-- Reframe profile: Landing `scripts/product-loop-camera.mjs` docs profile, 1.50x maximum zoom, cosine easing, and frame-by-frame pointer containment.
+- Reframe profile: Landing `scripts/product-loop-camera.mjs` docs profile, 1.50x maximum zoom, cosine easing, and frame-by-frame pointer containment. The two task clips use identical focused start/end crops to keep the feature legible while excluding the fixture-only Files toolbar and host path.
 
 ## Commands
 
@@ -34,8 +34,8 @@ Reviewed delivery generated from disposable captures and cursor-tracked again on
 
 | Clip | Duration | WebM | MP4 | Poster |
 | --- | ---: | ---: | ---: | ---: |
-| task-create | 14.40s | 297.1 KiB | 392.6 KiB | 10.1 KiB |
-| task-start-agent | 14.40s | 330.2 KiB | 401.0 KiB | 12.1 KiB |
+| task-create | 6.80s | 120.0 KiB | 225.4 KiB | 10.2 KiB |
+| task-start-agent | 8.80s | 72.8 KiB | 136.6 KiB | 3.2 KiB |
 | plan-review-implement | 8.64s | 233.1 KiB | 273.2 KiB | 12.6 KiB |
 | parallel-named-sessions | 8.80s | 265.6 KiB | 281.8 KiB | 10.1 KiB |
 | diff-line-feedback | 12.80s | 540.1 KiB | 840.0 KiB | 17.1 KiB |
@@ -43,14 +43,14 @@ Reviewed delivery generated from disposable captures and cursor-tracked again on
 | profile-executor-selection | 8.80s | 216.7 KiB | 294.1 KiB | 7.7 KiB |
 | scheduled-workflow-automation | 13.60s | 432.4 KiB | 438.7 KiB | 9.5 KiB |
 
-- Total docs payload: 6.17 MiB.
+- Total docs payload: 5.32 MiB.
 
 ## QA
 
 - Technical result: PASS (0 failure(s), 0 warning(s)).
 - Stream checks: codec, 960x600 decoded dimensions, exact 25fps rate metadata, continuous 0.040s decoded timestamps, 6-15s duration, and no audio.
 - Visual samples: PASS — human-reviewed full-resolution samples and mosaics.
-- Cursor containment: PASS — semantic journeys remain inside an edge-aware safe frame at every encoded frame; long-distance movements widen before travel.
+- Cursor containment: PASS — semantic journeys remain inside an edge-aware safe frame at every encoded frame; long-distance movements widen before travel. The task clips' matched focused loops were also reviewed at full resolution to confirm `/tmp`, host paths, and the Files toolbar never enter the delivery frame.
 - Automated blank-frame screening: sampled frames require non-trivial standard deviation/entropy.
 - Browser playback: PASS for WebM, MP4, and WebP.
 - Inspect mosaics for clipping, duplicated cursor, browser chrome, fixture/debug text, local paths, private data, unreadable text, and misleading states.

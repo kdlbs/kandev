@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-17T13:44:55.635Z",
+  "generated_at": "2026-07-17T15:32:00.000Z",
   "qa_status": "accepted",
   "delivery_contract": {
     "dimensions": {
@@ -29,7 +29,7 @@
         "section": "Create a task"
       },
       "accessible_caption": "A focused task is entered while its repository, agent profile, worktree isolation, and start mode remain visible for review.",
-      "duration_seconds": 14.4,
+      "duration_seconds": 6.8,
       "dimensions": {
         "width": 960,
         "height": 600
@@ -43,25 +43,27 @@
       "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
       "files": {
         "webm": {
-          "bytes": 304211,
+          "bytes": 122862,
           "codec": "vp9",
-          "sha256": "7d2f2e6214480c9a162ad38fc92424a673ba1619274237d4b21bba6d2896e4e4"
+          "sha256": "811a46756e7010ef7a782d53b4026600f963442be967982d84a63c4c33197b4e"
         },
         "mp4": {
-          "bytes": 402023,
+          "bytes": 230793,
           "codec": "h264",
-          "sha256": "e6d2d061826604b19bb81f2c911b930e520627c9171785957a9b7c6fd3d0a426"
+          "sha256": "f12c351cd0aa874d1aa32d47417b5608448b33a1eca11c2c66fff352cf94375c"
         },
         "poster": {
-          "bytes": 10330,
+          "bytes": 10456,
           "codec": "webp",
-          "sha256": "9fffb9d772cba801a640e4fff95f8cd40e0febb213297d9ae00807f3c558aefd"
+          "sha256": "23c8a463000d6d332a5d4f97072f1113aa10f9e10d33d5501c4303921d68049f"
         }
       },
       "camera": {
         "max_zoom": 1.5,
         "pointer_containment": "validated at every encoded frame",
-        "source_frame": "full 3840x2400 capture"
+        "source_frame": "full 3840x2400 capture",
+        "loop_frame": "matched focused crop",
+        "framing": "task composer only; host Files toolbar excluded"
       }
     },
     {
@@ -72,7 +74,7 @@
         "section": "Start a task"
       },
       "accessible_caption": "A prepared task starts its selected agent in the workbench and reaches a completed response.",
-      "duration_seconds": 14.4,
+      "duration_seconds": 8.8,
       "dimensions": {
         "width": 960,
         "height": 600
@@ -86,25 +88,27 @@
       "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
       "files": {
         "webm": {
-          "bytes": 338137,
+          "bytes": 74553,
           "codec": "vp9",
-          "sha256": "d263dc9a8add715b74f30cafab7a31141c8c2f1c7a5b1e5b547b46eb6cd278aa"
+          "sha256": "127e1e10171e03c61f93b9d17c82e0e2fa679635d3ea28d77002ebebaefda6af"
         },
         "mp4": {
-          "bytes": 410611,
+          "bytes": 139877,
           "codec": "h264",
-          "sha256": "56cd025806126de6549929f2370e40d66243479a9058491224843d3d76860a03"
+          "sha256": "44c6b20ac3b9633429fa6b46d8b40b14450ba433609d1152ca4dc237e8ac92a8"
         },
         "poster": {
-          "bytes": 12386,
+          "bytes": 3270,
           "codec": "webp",
-          "sha256": "a7b790cd9709b458dbaae66a1cfdea2202f6d6f76c5d81ad1379a55148c41430"
+          "sha256": "72f064f427e22c3fd51412ed8ce698741242f1f992909121ed5a37188ad84473"
         }
       },
       "camera": {
         "max_zoom": 1.5,
         "pointer_containment": "validated at every encoded frame",
-        "source_frame": "full 3840x2400 capture"
+        "source_frame": "full 3840x2400 capture",
+        "loop_frame": "matched focused crop",
+        "framing": "agent workbench only; host Files toolbar excluded"
       }
     },
     {

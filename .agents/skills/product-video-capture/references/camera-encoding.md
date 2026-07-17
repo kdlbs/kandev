@@ -21,8 +21,9 @@ Run focused tests from `$LANDING_REPO` before encoding. Current contract:
 - desktop delivery 2560x1600 from at least 3840x2400 source;
 - mobile delivery 1290x2796 from native 1290x2796 source;
 - landing desktop and focused documentation clips reach 1.50x; native mobile reaches 1.18x;
-- centered 1x opening and ending;
-- at least 240ms settled centered 1x before loop reset;
+- centered 1x opening and ending by default;
+- an opt-in docs-only focused loop frame when the first, settled penultimate, and final camera frames match exactly;
+- at least 240ms on the settled loop frame before reset;
 - cosine-eased piecewise motion with per-frame smoothness checks;
 - one trim, no concat, no speed-ramp `setpts`;
 - muted VP9 WebM, H.264 MP4 with fast start, and WebP poster.
@@ -33,18 +34,20 @@ Treat tests as source of truth if these values evolve.
 
 Design keyframes from semantic story events and the recorded pointer journey:
 
-1. Start centered at 1x.
+1. Start centered at 1x unless a short docs clip intentionally uses one matched focused loop frame to exclude irrelevant chrome or fixture-only detail.
 2. Hold context briefly.
 3. Ease toward the first important target while the pointer travels.
 4. Hold or drift gently across related actions. Ignore micro-jitter, but never let intentional pointer travel leave the crop.
 5. Move focus only when story focus changes materially.
-6. Ease back to centered 1x before the final settled hold.
+6. Ease back to the opening loop frame before the final settled hold.
 
 Use normalized centers from target bounds. Keep full menus/dialogs/diffs inside the crop at maximum zoom. Optical focus may differ from exact pointer center when surrounding context is important.
 
 Pass normalized `pointerTrack` waypoints and a `pointerSafeMargin` to `createCameraTrack`. The camera module checks every output frame, not only click timestamps. Derive the margin from the complete rendered glyph around its hotspot; an asymmetric `{ top, right, bottom, left }` map is valid when the pointer orientation requires it. A failed containment check blocks delivery. Do not claim a clipped source cursor is safe merely because its hotspot remains in frame.
 
 For long journeys between distant regions, do not pan a tight crop after the pointer has already left. Ease out far enough to contain both endpoints, begin the pan before or with the intentional movement, then ease back into the destination. A wide transition is preferable to an unexplained off-screen pointer.
+
+Use `loopFrame: "focused"` only with the `docs` form factor. The opening, settled penultimate, and final camera keyframes must be identical, and the crop must still show enough context to identify the feature. This is an editorial framing tool, not a way to hide a product defect or misleading state. Landing desktop/mobile media must keep the standard wide loop reset.
 
 Example config shape. Replace `<capture-root>` with the unique resolved `CAPTURE_ROOT` before encoding:
 

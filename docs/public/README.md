@@ -29,7 +29,7 @@ status: experimental
 ---
 ```
 
-The docs header renders a visible status callout from that frontmatter. `experimental` is currently the only accepted page status; do not invent values that the publication schema cannot render.
+The docs header renders a visible status callout from that frontmatter. To invoke this experimental page indicator, use the exact value `experimental`; the separate `stable`, `beta`, and `experimental` values in `coverage.json` describe inventory stability and do not create page badges.
 
 Use a section-level indicator when a stable guide contains one experimental capability. Keep this source syntax as Markdown so older renderers and GitHub still show an explicit callout; the publication layer upgrades it to the styled status component:
 

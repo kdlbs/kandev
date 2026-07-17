@@ -46,7 +46,7 @@ Watch the complete loop at normal speed and at 0.5x. Check:
 - no state jump, cut, speed-up, dead wait, blank beat, or loader hold;
 - camera reaches useful depth without oscillation;
 - every intentional pointer/touch journey stays inside the camera crop with its configured edge-aware glyph margin at every encoded frame;
-- camera remains within safe bounds and returns to centered 1x;
+- camera remains within safe bounds and returns to its tested loop frame: centered 1x by default, or the same focused frame at both ends for an explicitly focused docs clip;
 - loop reset is calm rather than a snap;
 - readable copy remains stable long enough to understand.
 
@@ -101,6 +101,7 @@ Smoke-check desktop, mobile, and `prefers-reduced-motion` in a real browser. Con
 - [ ] Encode to staging first.
 - [ ] Compare old/new loops side by side.
 - [ ] Promote only approved WebM/MP4/WebP files.
+- [ ] If a docs clip uses a focused loop frame, confirm the first and final crops match, retain identifying feature context, and exclude only irrelevant chrome or fixture-only detail.
 - [ ] Record SHA-256, dimensions, duration, codec, size, source seed, and capture command.
 - [ ] Keep raw/proof bundle outside production assets unless repository policy requests it.
 - [ ] Do not delete previous accepted media until replacement passes build and browser smoke.
