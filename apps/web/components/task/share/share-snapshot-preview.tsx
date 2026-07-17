@@ -2,6 +2,8 @@
 
 import { Badge } from "@kandev/ui/badge";
 import { ScrollArea } from "@kandev/ui/scroll-area";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import type { SnapshotPreview, SnapshotPreviewMessage } from "@/lib/api/domains/share-api";
 
@@ -14,6 +16,15 @@ type Props = {
 // the complete snapshot.
 const PREVIEW_HEAD = 8;
 const PREVIEW_TAIL = 8;
+const previewRemarkPlugins = [remarkGfm];
+
+const previewMarkdownComponents: Components = {
+  table: ({ children }) => (
+    <div className="overflow-x-auto">
+      <table>{children}</table>
+    </div>
+  ),
+};
 
 /**
  * Renders the redacted snapshot as a read-only preview. Intentionally not
@@ -98,7 +109,13 @@ function PreviewMessage({ message }: { message: SnapshotPreviewMessage }) {
 
 function PreviewBlock({ block }: { block: SnapshotPreviewMessage["blocks"][number] }) {
   if (block.kind === "text") {
-    return <p className="whitespace-pre-wrap break-words text-sm">{block.text}</p>;
+    return (
+      <div className="markdown-body min-w-0 text-sm">
+        <ReactMarkdown remarkPlugins={previewRemarkPlugins} components={previewMarkdownComponents}>
+          {block.text ?? ""}
+        </ReactMarkdown>
+      </div>
+    );
   }
   if (block.kind === "tool_call") {
     return (
