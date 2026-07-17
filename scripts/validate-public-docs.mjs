@@ -29,6 +29,7 @@ export async function validatePublicDocs(docsDir = defaultDocsDir) {
 
     assertFrontmatter(file, markdown);
     assertDocumentStructure(file, markdown);
+    assertExperimentalSectionContent(file, markdown);
 
     const slug = file.replace(/\.mdx?$/, "").replace(/\/index$/, "");
     const existing = pagesBySlug.get(slug);
@@ -832,6 +833,46 @@ function assertDocumentStructure(file, markdown) {
     throw new Error(
       `${file} must begin with exactly one level-one heading after frontmatter`,
     );
+  }
+}
+
+/**
+ * Prevent a status heading from existing only to contain an experimental
+ * warning. Experimental context belongs inside the substantive section it
+ * qualifies, unless the section also explains the feature itself.
+ *
+ * @param {string} file Relative page path used in validation errors.
+ * @param {string} markdown Page source.
+ * @returns {void}
+ */
+function assertExperimentalSectionContent(file, markdown) {
+  const source = stripMarkdownCode(markdown);
+  const headings = [...source.matchAll(/^(#{2,6})\s+([^\n]+?)\s*$/gm)];
+
+  for (const [index, heading] of headings.entries()) {
+    const title = heading[2].trim();
+    if (!/\bstatus$/i.test(title)) continue;
+
+    const level = heading[1].length;
+    const sectionStart = heading.index + heading[0].length;
+    const nextHeading = headings
+      .slice(index + 1)
+      .find((candidate) => candidate[1].length <= level);
+    const sectionEnd = nextHeading?.index ?? source.length;
+    const section = source.slice(sectionStart, sectionEnd);
+    if (!/^>\s*\[!EXPERIMENTAL\]\s*$/im.test(section)) continue;
+
+    const withoutCallout = section
+      .replace(
+        /^>\s*\[!EXPERIMENTAL\]\s*\r?\n(?:^>.*(?:\r?\n|$))*/gim,
+        "",
+      )
+      .trim();
+    if (!withoutCallout) {
+      throw new Error(
+        `${file} has a warning-only experimental status section: ${title}`,
+      );
+    }
   }
 }
 

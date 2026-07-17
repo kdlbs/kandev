@@ -23,6 +23,9 @@ Regular workflow entry actions can enable plan mode, reset agent context, or aut
 
 See [Tasks and workflows](tasks-and-workflows.md) for event configuration and defaults.
 
+> [!EXPERIMENTAL]
+> Office has separate coordinator agents, routines, governance approvals, and an Office MCP/agentctl interface only when its feature flag is enabled. Office is disabled by default and remains in progress; do not treat its coordinator-led automation as a stable public contract. Workspace automations plus workflow approval/review steps are the supported human-gated mechanism today.
+
 ## Create a workspace automation
 
 Open **Settings > Workspaces > _Workspace_ > Automations** (`/settings/workspace/{workspaceId}/automations`) and select **New Automation**. The top-level `/settings/automations` route redirects to, or asks you to select, a workspace.
@@ -195,11 +198,6 @@ The backend's `/mcp`, `/mcp/sse`, and `/mcp/message` routes currently have no Ka
 - Do not publish the MCP routes or backend port directly to the internet.
 - Ensure the proxy protects both Streamable HTTP and SSE/message paths and permits long-lived requests.
 - Scope integration, Git, and agent credentials for the damage an unattended client could cause.
-
-## Office status
-
-> [!EXPERIMENTAL]
-> Office has separate coordinator agents, routines, governance approvals, and an Office MCP/agentctl interface only when its feature flag is enabled. Office is disabled by default and remains in progress; do not treat its coordinator-led automation as a stable public contract. Workspace automations plus workflow approval/review steps are the supported human-gated mechanism today.
 
 ## Troubleshooting
 
