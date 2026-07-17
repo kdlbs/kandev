@@ -60,6 +60,7 @@ func createTestDB(t *testing.T) *sqlx.DB {
 		title TEXT NOT NULL,
 		state TEXT DEFAULT 'TODO',
 		is_ephemeral INTEGER NOT NULL DEFAULT 0,
+		metadata TEXT DEFAULT '{}',
 		archived_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
@@ -118,6 +119,13 @@ func createTestDB(t *testing.T) *sqlx.DB {
 		files_changed INTEGER DEFAULT 0,
 		insertions INTEGER DEFAULT 0,
 		deletions INTEGER DEFAULT 0,
+		created_at TIMESTAMP NOT NULL
+	);
+	CREATE TABLE IF NOT EXISTS task_session_git_snapshots (
+		id TEXT PRIMARY KEY,
+		session_id TEXT NOT NULL,
+		snapshot_type TEXT NOT NULL DEFAULT '',
+		files TEXT DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL
 	);
 	`

@@ -80,6 +80,17 @@ build_backend_host() {
   make -C "$BACKEND_DIR" build >/dev/null || die "backend build failed"
 }
 
+# Packages the plugin-fixture SDK plugin (cmd/plugin-fixture) into
+# .build/kandev-plugin-e2e-1.0.0.tar.gz for tests/plugins/plugins.spec.ts.
+# Always built on the host — like mock-agent, e2e/global-setup.ts only checks
+# this file exists (not that it's current), so it must be rebuilt any time
+# cmd/plugin-fixture changes (this runner always rebuilds it via build_fe's
+# sibling call below, unless --no-build is set).
+build_plugin_package() {
+  log "packaging e2e fixture plugin"
+  make -C "$BACKEND_DIR" e2e-plugin-package >/dev/null || die "e2e plugin package build failed"
+}
+
 backend_runs_in() {  # $1=image — does the host-built binary run there? (glibc check, ~2s)
   # Mount to a distinct path, not /bin — overlaying /bin would shadow the
   # container's system utilities (/bin/sh etc.).
@@ -157,7 +168,7 @@ STRICT_ENV=()
 # HOST mode
 # ---------------------------------------------------------------------------
 run_host() {
-  [[ "$DO_BUILD" == 1 ]] && { build_backend_host; build_fe; }
+  [[ "$DO_BUILD" == 1 ]] && { build_backend_host; build_fe; build_plugin_package; }
   local base_args=(playwright test --config e2e/playwright.config.ts --project="$PROJECT")
   if [[ "$SHARDS" -le 1 ]]; then
     ( cd "$WEB_DIR" && env ${STRICT_ENV[@]+"${STRICT_ENV[@]}"} pnpm exec "${base_args[@]}" ${PW_ARGS[@]+"${PW_ARGS[@]}"} )
@@ -187,7 +198,7 @@ run_docker() {
   local img; img="$(resolve_runtime_image)"
   log "runtime image: $img"
   clean_artifacts
-  [[ "$DO_BUILD" == 1 ]] && { build_backend_for_docker "$img"; build_fe; }
+  [[ "$DO_BUILD" == 1 ]] && { build_backend_for_docker "$img"; build_fe; build_plugin_package; }
 
   local strict_flag=()
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)

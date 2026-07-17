@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/analytics/models"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -576,4 +579,169 @@ func (r *Repository) GetGitStats(ctx context.Context, workspaceID string, start 
 	}
 
 	return &stats, nil
+}
+
+// defaultSessionCodeStatsLimit bounds ListSessionCodeStats when the caller
+// does not specify one, mirroring GetTaskStats' default page size.
+const defaultSessionCodeStatsLimit = 500
+
+// ListSessionCodeStats returns, per session, committed LOC (summed from
+// task_session_commits) and PEAK pending-diff LOC (the largest single
+// task_session_git_snapshots snapshot, not the latest — the latest snapshot
+// is usually a clean tree after a commit, merge, or archive). This is the
+// per-session line-of-code aggregation the kandev-plugin-agent-stats plugin
+// used to compute by reading the SQLite file directly (see ADR 0043); the
+// SQL here mirrors that plugin's sessionsQuery.
+//
+// Portability: the committed-sum half of this query is plain SQL and works
+// unchanged on both drivers. The peak-pending half must walk each snapshot's
+// `files` JSON object (keyed by file path, see task/models.GitSnapshot.Files)
+// to sum per-file additions/deletions — SQLite does this with json_each,
+// Postgres with jsonb_each on the same object; peakPendingSnapshotSubquery
+// branches on driver to build the equivalent fragment for each. Both paths
+// are covered by SQLite unit tests here; the Postgres path is exercised by
+// the ADR 0027-style env-gated Postgres suite (KANDEV_TEST_POSTGRES_DSN) at
+// the task/repository layer for the underlying schema, not re-verified here
+// against a live Postgres instance — if jsonb_each ever proves not to match
+// SQLite's json_each semantics for this shape, guard the Postgres branch
+// with a clear error instead of returning silently-wrong pending numbers.
+func (r *Repository) ListSessionCodeStats(
+	ctx context.Context,
+	filter models.SessionCodeStatsFilter,
+) ([]*models.SessionCodeStats, error) {
+	driver := r.ro.DriverName()
+	where, args := buildSessionCodeStatsFilter(filter)
+	// Exclude office config-mode tasks' sessions (internal bookkeeping, not
+	// plugin-visible work items) — the same exclusion Sessions().List applies
+	// via fetchTasksForWorkspaces' excludeConfig=true, so the Host data API's
+	// List and CodeStats reads cover the same session set.
+	where += " AND " + dialect.ExcludeConfigModePredicate(driver, "t.metadata")
+	query := fmt.Sprintf(`
+		SELECT
+			ts.id AS session_id,
+			COALESCE(commit_stats.insertions, 0) AS lines_added_committed,
+			COALESCE(commit_stats.deletions, 0) AS lines_deleted_committed,
+			COALESCE(peak_stats.peak_additions, 0) AS lines_added_peak_pending,
+			COALESCE(peak_stats.peak_deletions, 0) AS lines_deleted_peak_pending
+		FROM task_sessions ts
+		JOIN tasks t ON t.id = ts.task_id
+		LEFT JOIN (
+			SELECT c.session_id,
+				SUM(c.insertions) AS insertions,
+				SUM(c.deletions) AS deletions
+			FROM task_session_commits c
+			GROUP BY c.session_id
+		) commit_stats ON commit_stats.session_id = ts.id
+		LEFT JOIN (%s) peak_stats ON peak_stats.session_id = ts.id
+		WHERE %s
+		ORDER BY ts.started_at ASC, ts.id ASC
+		LIMIT ? OFFSET ?
+	`, peakPendingSnapshotSubquery(driver), where)
+
+	inQuery, inArgs, err := sqlx.In(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	inQuery = r.ro.Rebind(inQuery)
+
+	rows, err := r.ro.QueryContext(ctx, inQuery, inArgs...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanSessionCodeStats(rows)
+}
+
+// buildSessionCodeStatsFilter turns a SessionCodeStatsFilter into a WHERE
+// clause (against the ts/t aliases used by ListSessionCodeStats) and its
+// positional args, including the trailing LIMIT/OFFSET values.
+func buildSessionCodeStatsFilter(filter models.SessionCodeStatsFilter) (string, []any) {
+	var conds []string
+	var args []any
+	if len(filter.SessionIDs) > 0 {
+		conds = append(conds, "ts.id IN (?)")
+		args = append(args, filter.SessionIDs)
+	}
+	if len(filter.TaskIDs) > 0 {
+		conds = append(conds, "ts.task_id IN (?)")
+		args = append(args, filter.TaskIDs)
+	}
+	if len(filter.WorkspaceIDs) > 0 {
+		conds = append(conds, "t.workspace_id IN (?)")
+		args = append(args, filter.WorkspaceIDs)
+	}
+	if len(filter.States) > 0 {
+		conds = append(conds, "ts.state IN (?)")
+		args = append(args, filter.States)
+	}
+	where := "1 = 1"
+	if len(conds) > 0 {
+		where = strings.Join(conds, " AND ")
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = defaultSessionCodeStatsLimit
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+	args = append(args, limit, offset)
+
+	return where, args
+}
+
+// scanSessionCodeStats reads all rows of a ListSessionCodeStats query result.
+func scanSessionCodeStats(rows *sql.Rows) ([]*models.SessionCodeStats, error) {
+	var results []*models.SessionCodeStats
+	for rows.Next() {
+		var stat models.SessionCodeStats
+		if err := rows.Scan(
+			&stat.SessionID,
+			&stat.LinesAddedCommitted, &stat.LinesDeletedCommitted,
+			&stat.LinesAddedPeakPending, &stat.LinesDeletedPeakPending,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, &stat)
+	}
+	return results, rows.Err()
+}
+
+// peakPendingSnapshotSubquery returns a derived-table SELECT (session_id,
+// peak_additions, peak_deletions) that finds, per session, the MAX single
+// git-snapshot total across task_session_git_snapshots.files. additions and
+// deletions are maximized independently (matching the source plugin), so the
+// reported peak-additions and peak-deletions snapshots need not be the same
+// snapshot.
+func peakPendingSnapshotSubquery(drv string) string {
+	if dialect.IsPostgres(drv) {
+		return `
+			SELECT snap.session_id,
+				MAX(snap.additions) AS peak_additions,
+				MAX(snap.deletions) AS peak_deletions
+			FROM (
+				SELECT g.id AS snapshot_id, g.session_id,
+					SUM(COALESCE((f.jvalue->>'additions')::numeric, 0)) AS additions,
+					SUM(COALESCE((f.jvalue->>'deletions')::numeric, 0)) AS deletions
+				FROM task_session_git_snapshots g,
+					jsonb_each(g.files::jsonb) AS f(jkey, jvalue)
+				GROUP BY g.id, g.session_id
+			) snap
+			GROUP BY snap.session_id`
+	}
+	return `
+		SELECT snap.session_id,
+			MAX(snap.additions) AS peak_additions,
+			MAX(snap.deletions) AS peak_deletions
+		FROM (
+			SELECT g.id AS snapshot_id, g.session_id,
+				SUM(COALESCE(json_extract(f.value, '$.additions'), 0)) AS additions,
+				SUM(COALESCE(json_extract(f.value, '$.deletions'), 0)) AS deletions
+			FROM task_session_git_snapshots g, json_each(g.files) f
+			GROUP BY g.id, g.session_id
+		) snap
+		GROUP BY snap.session_id`
 }

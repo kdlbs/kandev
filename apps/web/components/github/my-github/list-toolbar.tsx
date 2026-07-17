@@ -1,14 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
-import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
-
-const ALL_REPOS = "__all__";
+import { RepoFilterCombobox } from "./repo-filter-combobox";
 
 type ListToolbarProps = {
   title: string;
@@ -58,13 +55,6 @@ function RefreshControls({
   );
 }
 
-function buildRepoFilterOptions(repoOptions: string[]): ComboboxOption[] {
-  return [
-    { value: ALL_REPOS, label: "All repos", keywords: ["all", "repositories", "repos"] },
-    ...repoOptions.map((key) => ({ value: key, label: key, keywords: [key] })),
-  ];
-}
-
 export function ListToolbar({
   title,
   count,
@@ -79,9 +69,7 @@ export function ListToolbar({
   repoOptions,
   onRefresh,
 }: ListToolbarProps) {
-  const selectValue = repoFilter || ALL_REPOS;
   const dirty = customQuery !== committedQuery;
-  const repoFilterOptions = useMemo(() => buildRepoFilterOptions(repoOptions), [repoOptions]);
   return (
     <div className="px-4 sm:px-6 py-2.5 border-b shrink-0 flex flex-col md:flex-row md:items-center md:flex-wrap gap-2 md:gap-3">
       <div className="flex items-center gap-2 min-w-0">
@@ -102,17 +90,11 @@ export function ListToolbar({
           />
         </div>
       </div>
-      <Combobox
-        value={selectValue}
-        onValueChange={(v) => {
-          // Combobox signals "toggle off" with ""; All repos is the explicit clear path.
-          if (!v) return;
-          onRepoFilterChange(v === ALL_REPOS ? "" : v);
-        }}
-        options={repoFilterOptions}
-        placeholder="All repos"
-        searchPlaceholder="Filter repositories..."
-        emptyMessage="No repositories found."
+      <RepoFilterCombobox
+        repoFilter={repoFilter}
+        onRepoFilterChange={onRepoFilterChange}
+        repoOptions={repoOptions}
+        ariaLabel="Filter GitHub results by repository"
         triggerClassName="w-full md:w-[220px] h-8 border border-input bg-background hover:bg-secondary/50 px-2 py-1.5 text-xs/relaxed"
         className="md:min-w-[360px]"
         testId="github-repo-filter-trigger"

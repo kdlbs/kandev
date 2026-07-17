@@ -26,7 +26,8 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     expect(ids).toContain("TASK_SWITCHER_REVERSE");
     expect(ids).toContain("VOICE_INPUT_TOGGLE");
     expect(ids).toContain("REVERSE_SEARCH");
-    expect(ids).toHaveLength(14);
+    expect(ids).toContain("OPEN_TASK_PR");
+    expect(ids).toHaveLength(15);
   });
 
   it("each entry has a label and default matching SHORTCUTS", () => {
@@ -65,6 +66,9 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
 
     expect(CONFIGURABLE_SHORTCUTS.REVERSE_SEARCH.label).toBe("Reverse Chat Search");
     expect(CONFIGURABLE_SHORTCUTS.REVERSE_SEARCH.default).toBe(SHORTCUTS.REVERSE_SEARCH);
+
+    expect(CONFIGURABLE_SHORTCUTS.OPEN_TASK_PR.label).toBe("Open Task Pull Request");
+    expect(CONFIGURABLE_SHORTCUTS.OPEN_TASK_PR.default).toBe(SHORTCUTS.OPEN_TASK_PR);
   });
 });
 

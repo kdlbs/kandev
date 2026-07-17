@@ -175,6 +175,11 @@ type FeaturesConfig struct {
 	// Office gates the autonomous-agent feature: backend service construction,
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
+
+	// Plugins gates the extensible plugin system: backend service
+	// construction, HTTP/WS route registration, and frontend nav/route
+	// visibility.
+	Plugins bool `mapstructure:"plugins" json:"plugins"`
 }
 
 // LoggingConfig holds logging configuration.

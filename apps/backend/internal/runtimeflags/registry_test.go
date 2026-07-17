@@ -21,6 +21,25 @@ func TestDefinitionsIncludeOfficeExperimentalMetadata(t *testing.T) {
 	}
 }
 
+func TestDefinitionsIncludePluginsExperimentalMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.plugins")
+	if !ok {
+		t.Fatal("features.plugins definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_PLUGINS" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_PLUGINS", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want %q", def.Stability, StabilityExperimental)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+}
+
 func TestDefinitionsExposeSingleUserFacingDebugToggle(t *testing.T) {
 	def, ok := DefinitionByKey("debug.devMode")
 	if !ok {

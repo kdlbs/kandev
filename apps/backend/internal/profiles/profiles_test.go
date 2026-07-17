@@ -21,13 +21,17 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	if env != EnvProd {
 		t.Errorf("env = %q, want %q (no selector env vars set)", env, EnvProd)
 	}
-	// prod values for the office flag are "false"; everything else in
-	// the prod column is "". Only office should have been written.
-	if count != 1 {
-		t.Errorf("ApplyProfile wrote %d vars in prod; want 1 (KANDEV_FEATURES_OFFICE=false)", count)
+	// prod values for the office and plugins flags are "false"; everything
+	// else in the prod column is "". Only those two should have been
+	// written.
+	if count != 2 {
+		t.Errorf("ApplyProfile wrote %d vars in prod; want 2 (KANDEV_FEATURES_OFFICE=false, KANDEV_FEATURES_PLUGINS=false)", count)
 	}
 	if v := os.Getenv("KANDEV_FEATURES_OFFICE"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_OFFICE = %q after prod ApplyProfile; want %q", v, "false")
+	}
+	if v := os.Getenv("KANDEV_FEATURES_PLUGINS"); v != "false" {
+		t.Errorf("KANDEV_FEATURES_PLUGINS = %q after prod ApplyProfile; want %q", v, "false")
 	}
 }
 
@@ -48,6 +52,9 @@ func TestApplyProfile_DevTurnsOnFeatures(t *testing.T) {
 	}
 	if v := os.Getenv("KANDEV_FEATURES_OFFICE"); v != "true" {
 		t.Errorf("KANDEV_FEATURES_OFFICE = %q in dev; want %q", v, "true")
+	}
+	if v := os.Getenv("KANDEV_FEATURES_PLUGINS"); v != "true" {
+		t.Errorf("KANDEV_FEATURES_PLUGINS = %q in dev; want %q", v, "true")
 	}
 }
 
@@ -130,6 +137,9 @@ func TestFeatureFlagDefaults_LowercasesShortName(t *testing.T) {
 	if _, ok := defaults["office"]; !ok {
 		t.Errorf("FeatureFlagDefaults missing %q key; got %#v", "office", defaults)
 	}
+	if _, ok := defaults["plugins"]; !ok {
+		t.Errorf("FeatureFlagDefaults missing %q key; got %#v", "plugins", defaults)
+	}
 }
 
 func TestMarkApplied_OnlyAllowsKnownDerivedEnvVars(t *testing.T) {
@@ -157,7 +167,7 @@ func TestMarkApplied_OnlyAllowsKnownDerivedEnvVars(t *testing.T) {
 // hell out of whoever debugs it.
 func TestProfilesYAML_ContainsRequiredSections(t *testing.T) {
 	yaml := string(ProfilesYAML())
-	for _, section := range []string{"features:", "mocks:", "debug:", "KANDEV_FEATURES_OFFICE:"} {
+	for _, section := range []string{"features:", "mocks:", "debug:", "KANDEV_FEATURES_OFFICE:", "KANDEV_FEATURES_PLUGINS:"} {
 		if !strings.Contains(yaml, section) {
 			t.Errorf("embedded profiles.yaml missing section/key %q; embed broken or file truncated", section)
 		}

@@ -18,6 +18,7 @@ import IntegrationsJiraPage from "@/app/settings/integrations/jira/page";
 import IntegrationsLinearPage from "@/app/settings/integrations/linear/page";
 import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
 import IntegrationsSlackPage from "@/app/settings/integrations/slack/page";
+import PluginsSettingsPage from "@/app/settings/plugins/page";
 import UtilityAgentsSettingsPage from "@/app/settings/utility-agents/page";
 import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
 import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
@@ -56,6 +57,11 @@ import { TerminalSettings } from "@/components/settings/terminal-settings";
 import { VoiceModeSettings } from "@/components/settings/voice-mode-settings";
 import licenses from "@/generated/licenses.json";
 import { fetchJson } from "@/lib/api/client";
+import {
+  PluginErrorBoundary,
+  PluginRouteFallback,
+} from "@/components/plugins/plugin-error-boundary";
+import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import {
   fetchUserSettings,
@@ -138,6 +144,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/external-mcp": () => <ExternalMcpPage />,
   "/settings/prompts": () => <PromptsSettings />,
   "/settings/voice-mode": () => <VoiceModeSettings />,
+  "/settings/plugins": () => <PluginsSettingsPage />,
   "/settings/integrations": () => renderIntegrationSettingsRoute(null),
   "/settings/integrations/github": () => renderIntegrationSettingsRoute("github"),
   "/settings/integrations/gitlab": () => renderIntegrationSettingsRoute("gitlab"),
@@ -207,6 +214,9 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
 
 export function SettingsRoutes({ pathname }: { pathname: string }) {
   const normalizedPathname = normalizeSettingsPath(pathname);
+  // Subscribe so a plugin settings route registered after first paint
+  // (async bundle load) re-resolves without requiring a navigation.
+  usePluginRegistry();
 
   return (
     <>
@@ -223,7 +233,30 @@ export function settingsRouteKey(pathname: string): string {
 export function renderSettingsRoute(pathname: string) {
   const dynamicRoute = renderDynamicSettingsRoute(pathname);
   if (dynamicRoute) return dynamicRoute;
-  return SETTINGS_ROUTES[pathname]?.() ?? <SettingsRouteFallback pathname={pathname} />;
+  const staticRoute = SETTINGS_ROUTES[pathname]?.();
+  if (staticRoute) return staticRoute;
+  const pluginRoute = renderPluginSettingsRoute(pathname);
+  if (pluginRoute) return pluginRoute;
+  return <SettingsRouteFallback pathname={pathname} />;
+}
+
+/**
+ * `/settings/plugins/{id}/...` routes registered by a plugin
+ * (`registry.registerSettingsRoute(path, Component)`). Scoped to the
+ * `/settings/plugins/` prefix so it never intercepts a first-party path.
+ */
+function renderPluginSettingsRoute(pathname: string) {
+  if (!pathname.startsWith("/settings/plugins/")) return null;
+  const match = pluginRegistry.getSettingsRoutes().find((route) => route.path === pathname);
+  if (!match) return null;
+  return (
+    <PluginErrorBoundary
+      context={`settings route "${pathname}"`}
+      fallback={<PluginRouteFallback />}
+    >
+      <match.Component />
+    </PluginErrorBoundary>
+  );
 }
 
 function renderDynamicSettingsRoute(pathname: string) {

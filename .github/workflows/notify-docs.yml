@@ -39,6 +39,136 @@ jobs:
       - name: Validate public docs
         run: node scripts/validate-public-docs.mjs
 
+  preview:
+    name: Deploy Cloudflare Pages preview
+    needs: validate
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout docs pull request
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Checkout landing publisher
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: kdlbs/landing
+          # Preview against the current production publisher contract rather than a stale renderer.
+          ref: main
+          path: landing
+          ssh-key: ${{ secrets.LANDING_REPO_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
+        with:
+          version: 10.29.3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.12.0
+          cache: pnpm
+          cache-dependency-path: landing/pnpm-lock.yaml
+
+      - name: Install landing dependencies
+        working-directory: landing
+        run: pnpm install --frozen-lockfile
+
+      - name: Build preview from pull request docs
+        working-directory: landing
+        env:
+          KANDEV_DOCS_SOURCE_PATH: ${{ github.workspace }}/docs
+        run: pnpm run build:pages
+
+      - name: Check Cloudflare preview configuration
+        id: cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Docs preview deploy is not configured. Add CLOUDFLARE_API_TOKEN as a repository secret and CLOUDFLARE_ACCOUNT_ID as a repository variable."
+          fi
+
+      - name: Deploy preview to Cloudflare Pages
+        id: deploy
+        if: steps.cloudflare.outputs.enabled == 'true'
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: landing
+          command: >-
+            pages deploy out
+            --project-name=landing
+            --branch=docs-pr-${{ github.event.pull_request.number }}
+            --commit-dirty=true
+
+      - name: Publish docs preview link
+        if: steps.cloudflare.outputs.enabled == 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
+          ALIAS_URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
+        with:
+          script: |
+            const marker = '<!-- kandev-docs-cloudflare-preview -->';
+            const deploymentUrl = process.env.DEPLOYMENT_URL?.replace(/\/$/, '');
+            const aliasUrl = process.env.ALIAS_URL?.replace(/\/$/, '');
+            if (!deploymentUrl) {
+              core.setFailed('Cloudflare Pages did not return a deployment URL; cannot publish the docs preview link.');
+              return;
+            }
+            const shortSha = context.payload.pull_request.head.sha.slice(0, 7);
+            const bodyLines = [
+              marker,
+              '## Cloudflare Pages docs preview',
+              '',
+              `[Open the docs preview](${deploymentUrl}/docs)`,
+              '',
+              `Built from docs commit \`${shortSha}\`.`,
+            ];
+            if (aliasUrl) {
+              bodyLines.push('', `Stable PR alias: [${aliasUrl}/docs](${aliasUrl}/docs)`);
+            }
+            const body = bodyLines.join('\n');
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
   rebuild:
     name: Trigger Cloudflare Pages rebuild
     needs: validate

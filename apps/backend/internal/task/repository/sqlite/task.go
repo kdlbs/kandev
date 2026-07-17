@@ -106,13 +106,11 @@ func isFromOfficeProjection(alias string) string {
 	)`
 }
 
+// excludeConfigModePredicate delegates to the shared dialect helper (also
+// used by internal/analytics/repository/sqlite's CodeStats read, so both
+// cover the same office config-mode exclusion).
 func excludeConfigModePredicate(driver, col string) string {
-	if dialect.IsPostgres(driver) {
-		// Repository writes always marshal metadata as JSON; dirty Postgres rows
-		// with malformed JSON should fail loudly instead of being silently skipped.
-		return fmt.Sprintf("COALESCE(%s, '') NOT IN ('true', '1')", dialect.JSONExtract(driver, col, "config_mode"))
-	}
-	return fmt.Sprintf("%s IS NOT 1", dialect.JSONExtract(driver, col, "config_mode"))
+	return dialect.ExcludeConfigModePredicate(driver, col)
 }
 
 // runnerProjection produces the correlated subquery (without alias) that

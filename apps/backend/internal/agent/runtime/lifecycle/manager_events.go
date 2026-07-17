@@ -322,14 +322,16 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // handleToolCallEvent processes the "tool_call" agent event: flushes the message buffer
 // and stores the tool call in session history.
 // Returns the (possibly updated) event.
+//
+// Subagent-internal tool calls (ParentToolCallID set) stream on the same session
+// concurrently with the parent agent's own text, so they must NOT flush the
+// buffer — flushing would split the parent's in-flight streaming message into
+// separate DB rows mid-sentence, breaking markdown that spans the boundary.
 func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
-	if flushedText := m.flushMessageBuffer(execution); flushedText != "" {
-		event.Text = flushedText
-		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
-			if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
-				m.logger.Warn("failed to store agent message to history", zap.Error(err))
-			}
-		}
+	if event.ParentToolCallID == "" {
+		// flushMessageBuffer publishes any remaining buffered content through
+		// the streaming path itself and always returns "".
+		m.flushMessageBuffer(execution)
 	}
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 		if err := m.historyManager.AppendToolCall(execution.SessionID, event); err != nil {

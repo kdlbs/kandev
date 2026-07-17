@@ -69,6 +69,17 @@ func TestJSONSet(t *testing.T) {
 	}
 }
 
+func TestExcludeConfigModePredicate(t *testing.T) {
+	got := ExcludeConfigModePredicate(SQLite3, "metadata")
+	if got != "json_extract(metadata, '$.config_mode') IS NOT 1" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = ExcludeConfigModePredicate(PGX, "metadata")
+	if got != "COALESCE(metadata::jsonb->>'config_mode', '') NOT IN ('true', '1')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestDurationMs(t *testing.T) {
 	got := DurationMs(SQLite3, "completed_at", "started_at")
 	if got != "(julianday(completed_at) - julianday(started_at)) * 86400000" {

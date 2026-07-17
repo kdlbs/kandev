@@ -6,8 +6,11 @@ import {
   IconMessageCircle,
   IconMicrophone,
   IconPlugConnected,
+  IconPuzzle,
   IconWand,
 } from "@tabler/icons-react";
+import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { AgentsGroup } from "./agents-group";
 import { ExecutorsGroup } from "./executors-group";
 import { GeneralGroup } from "./general-group";
@@ -20,6 +23,7 @@ const VOICE_MODE_HREF = "/settings/voice-mode";
 const UTILITY_HREF = "/settings/utility-agents";
 const SECRETS_HREF = "/settings/general/secrets";
 const EXT_MCP_HREF = "/settings/external-mcp";
+const PLUGINS_HREF = "/settings/plugins";
 const DEFAULT_OPEN_GROUP = "workspaces";
 
 // Single-open accordion: each top-level group owns a route prefix. The group
@@ -51,6 +55,7 @@ export function settingsOpenGroupIdForPath(pathname: string): string {
  * footer gear is active, as the full-height sidebar takeover.
  */
 export function SettingsTree({ pathname }: { pathname: string }) {
+  const pluginsEnabled = useFeature("plugins");
   const [openGroup, setOpenGroup] = useState<string | null>(() =>
     settingsOpenGroupIdForPath(pathname),
   );
@@ -104,6 +109,15 @@ export function SettingsTree({ pathname }: { pathname: string }) {
         isActive={pathname === EXT_MCP_HREF}
       />
       <SystemGroup pathname={pathname} {...groupProps("system")} />
+      {pluginsEnabled && (
+        <SettingsLeaf
+          href={PLUGINS_HREF}
+          label="Plugins"
+          icon={IconPuzzle}
+          isActive={pathname === PLUGINS_HREF}
+        />
+      )}
+      <PluginSlot name="settings-nav" />
     </>
   );
 }

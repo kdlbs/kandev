@@ -19,6 +19,10 @@ const state = {
   executors: {
     items: [],
   },
+  features: {
+    office: false,
+    plugins: false,
+  },
 };
 
 vi.mock("@/components/state-provider", () => ({

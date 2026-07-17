@@ -12,26 +12,19 @@
  */
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-
-async function assertNoHorizontalOverflow(page: import("@playwright/test").Page) {
-  const dimensions = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    clientWidth: document.documentElement.clientWidth,
-  }));
-  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
-}
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
 test.describe("Quick Chat entry points on mobile", () => {
   test("opens from the home header and closes with the touch control", async ({ testPage }) => {
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoDocumentHorizontalOverflow(testPage);
 
     await testPage.getByTestId("mobile-quick-chat-button").click();
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoDocumentHorizontalOverflow(testPage);
 
     await dialog.getByTestId("quick-chat-close").click();
     await expect(dialog).not.toBeVisible();
@@ -52,11 +45,15 @@ test.describe("Quick Chat entry points on mobile", () => {
     await session.waitForLoad();
 
     await testPage.getByTestId("mobile-session-menu").click();
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+    await expect(sheet).toBeVisible();
     await testPage.getByTestId("mobile-sheet-quick-chat").click();
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
-    await assertNoHorizontalOverflow(testPage);
+    // Opening quick chat dismisses the task switcher sheet.
+    await expect(sheet).not.toBeVisible();
+    await assertNoDocumentHorizontalOverflow(testPage);
   });
 
   test("returns to the selected workspace home from the Tasks header", async ({
@@ -76,6 +73,6 @@ test.describe("Quick Chat entry points on mobile", () => {
     });
     const homeHeader = testPage.getByRole("link", { name: "Kandev home" }).locator("..");
     await expect(homeHeader.getByText("Home", { exact: true })).toHaveCount(0);
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoDocumentHorizontalOverflow(testPage);
   });
 });

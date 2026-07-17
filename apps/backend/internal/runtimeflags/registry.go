@@ -15,6 +15,20 @@ var definitions = []RuntimeFlagDefinition{
 		Mutable:         true,
 	},
 	{
+		Key:         "features.plugins",
+		EnvVar:      "KANDEV_FEATURES_PLUGINS",
+		Kind:        KindFeature,
+		Label:       "Plugins",
+		Description: "Enables the extensible plugin system and related settings.",
+		Stability:   StabilityExperimental,
+		RiskLevel:   RiskMedium,
+		RiskDescription: "Plugins are still evolving. Loaded plugin code runs with backend " +
+			"privileges, and behavior may change between releases and should be reviewed " +
+			"before relying on it.",
+		RestartRequired: true,
+		Mutable:         true,
+	},
+	{
 		Key:         "debug.devMode",
 		EnvVar:      "KANDEV_DEBUG_DEV_MODE",
 		Kind:        KindDebug,

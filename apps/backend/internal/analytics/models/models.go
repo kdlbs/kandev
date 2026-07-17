@@ -89,3 +89,37 @@ type GitStats struct {
 	TotalInsertions   int `json:"total_insertions"`
 	TotalDeletions    int `json:"total_deletions"`
 }
+
+// SessionCodeStats is the per-session lines-of-code aggregation: committed
+// sums from task_session_commits, plus the PEAK pending-diff seen across the
+// session's task_session_git_snapshots (not the latest snapshot, which is
+// usually a clean tree after a commit/merge/archive). Committed and pending
+// are reported separately and are never summed together here — a caller that
+// wants a single "effective lines" number (the larger of the two, to avoid
+// double-counting work that was later committed) computes that itself, the
+// same way the source plugin's effectiveLines helper does.
+type SessionCodeStats struct {
+	SessionID               string `json:"session_id"`
+	LinesAddedCommitted     int64  `json:"lines_added_committed"`
+	LinesDeletedCommitted   int64  `json:"lines_deleted_committed"`
+	LinesAddedPeakPending   int64  `json:"lines_added_peak_pending"`
+	LinesDeletedPeakPending int64  `json:"lines_deleted_peak_pending"`
+}
+
+// SessionCodeStatsFilter narrows ListSessionCodeStats to a subset of
+// sessions. Each non-empty list field is an OR-list (standard SQL IN
+// semantics); the fields themselves are ANDed together. All fields are
+// optional; an entirely empty filter matches every session, bounded by
+// Limit/Offset.
+type SessionCodeStatsFilter struct {
+	SessionIDs   []string
+	TaskIDs      []string
+	WorkspaceIDs []string
+	// States filters by task_sessions.state (e.g. "COMPLETED", "RUNNING").
+	States []string
+	// Limit caps the number of returned rows. <= 0 uses the repository's
+	// default page size.
+	Limit int
+	// Offset skips this many rows (after ORDER BY), for simple pagination.
+	Offset int
+}
