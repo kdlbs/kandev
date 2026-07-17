@@ -201,12 +201,24 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Host_GetState_FullMethodName     = "/kandev.plugin.v1.Host/GetState"
-	Host_SetState_FullMethodName     = "/kandev.plugin.v1.Host/SetState"
-	Host_DeleteState_FullMethodName  = "/kandev.plugin.v1.Host/DeleteState"
-	Host_ListState_FullMethodName    = "/kandev.plugin.v1.Host/ListState"
-	Host_RevealSecret_FullMethodName = "/kandev.plugin.v1.Host/RevealSecret"
-	Host_EmitEvent_FullMethodName    = "/kandev.plugin.v1.Host/EmitEvent"
+	Host_GetState_FullMethodName             = "/kandev.plugin.v1.Host/GetState"
+	Host_SetState_FullMethodName             = "/kandev.plugin.v1.Host/SetState"
+	Host_DeleteState_FullMethodName          = "/kandev.plugin.v1.Host/DeleteState"
+	Host_ListState_FullMethodName            = "/kandev.plugin.v1.Host/ListState"
+	Host_RevealSecret_FullMethodName         = "/kandev.plugin.v1.Host/RevealSecret"
+	Host_EmitEvent_FullMethodName            = "/kandev.plugin.v1.Host/EmitEvent"
+	Host_ListTasks_FullMethodName            = "/kandev.plugin.v1.Host/ListTasks"
+	Host_GetTask_FullMethodName              = "/kandev.plugin.v1.Host/GetTask"
+	Host_ListWorkspaces_FullMethodName       = "/kandev.plugin.v1.Host/ListWorkspaces"
+	Host_ListWorkflows_FullMethodName        = "/kandev.plugin.v1.Host/ListWorkflows"
+	Host_ListWorkflowSteps_FullMethodName    = "/kandev.plugin.v1.Host/ListWorkflowSteps"
+	Host_ListAgentProfiles_FullMethodName    = "/kandev.plugin.v1.Host/ListAgentProfiles"
+	Host_ListRepositories_FullMethodName     = "/kandev.plugin.v1.Host/ListRepositories"
+	Host_ListSessions_FullMethodName         = "/kandev.plugin.v1.Host/ListSessions"
+	Host_ListSessionCodeStats_FullMethodName = "/kandev.plugin.v1.Host/ListSessionCodeStats"
+	Host_CreateTask_FullMethodName           = "/kandev.plugin.v1.Host/CreateTask"
+	Host_UpdateTask_FullMethodName           = "/kandev.plugin.v1.Host/UpdateTask"
+	Host_CreateComment_FullMethodName        = "/kandev.plugin.v1.Host/CreateComment"
 )
 
 // HostClient is the client API for Host service.
@@ -215,6 +227,23 @@ const (
 //
 // Implemented by KANDEV (served back over the go-plugin broker).
 // Every RPC is capability-gated server-side (§5).
+//
+// Host data API (ADR 0042): the read/write data RPCs below live on this same
+// `service Host` rather than a separate `service HostData`. They reuse the
+// single broker connection and the existing capability-gated unary
+// interceptor; splitting into a second service would only duplicate both for
+// no benefit. Reads require manifest capability `api_read:<resource>`;
+// writes require `api_write:<resource>` (e.g. `api_read:tasks`,
+// `api_write:comments`). An undeclared capability returns gRPC
+// PermissionDenied with `capability 'api_read:tasks' not declared`.
+//
+// DTOs below are a HAND-DEFINED public contract: the backend maps internal
+// models → these messages explicitly, never generates them from domain
+// structs, and never marshals domain structs through google.protobuf.Struct.
+// Fields are additive-only after merge (ADR 0042); removing or renaming a
+// field is a breaking change requiring a new api_version. Read handlers call
+// the relevant service (never a repository directly); write handlers call
+// service methods that publish task.* events (never repository.TaskRepository).
 type HostClient interface {
 	GetState(ctx context.Context, in *GetStateRequest, opts ...grpc.CallOption) (*GetStateResponse, error)
 	SetState(ctx context.Context, in *SetStateRequest, opts ...grpc.CallOption) (*SetStateResponse, error)
@@ -222,6 +251,28 @@ type HostClient interface {
 	ListState(ctx context.Context, in *ListStateRequest, opts ...grpc.CallOption) (*ListStateResponse, error)
 	RevealSecret(ctx context.Context, in *RevealSecretRequest, opts ...grpc.CallOption) (*RevealSecretResponse, error)
 	EmitEvent(ctx context.Context, in *EmitEventRequest, opts ...grpc.CallOption) (*EmitEventResponse, error)
+	// Reads — capability api_read:<resource>
+	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*ListTasksResponse, error)
+	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*Task, error)
+	ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error)
+	ListWorkflows(ctx context.Context, in *ListWorkflowsRequest, opts ...grpc.CallOption) (*ListWorkflowsResponse, error)
+	ListWorkflowSteps(ctx context.Context, in *ListWorkflowStepsRequest, opts ...grpc.CallOption) (*ListWorkflowStepsResponse, error)
+	ListAgentProfiles(ctx context.Context, in *ListAgentProfilesRequest, opts ...grpc.CallOption) (*ListAgentProfilesResponse, error)
+	ListRepositories(ctx context.Context, in *ListRepositoriesRequest, opts ...grpc.CallOption) (*ListRepositoriesResponse, error)
+	// Sessions + code stats — capability api_read:sessions. Driven by a real
+	// plugin (kandev-plugin-agent-stats) that otherwise read task_sessions,
+	// task_session_commits, and task_session_git_snapshots straight from the
+	// SQLite file. SessionCodeStats is a COMPUTED, stable DTO — deliberately
+	// not the raw commit/snapshot rows, whose JSON schema churns.
+	ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error)
+	ListSessionCodeStats(ctx context.Context, in *ListSessionCodeStatsRequest, opts ...grpc.CallOption) (*ListSessionCodeStatsResponse, error)
+	// Writes — capability api_write:<resource>. Declared now for a stable
+	// contract; handlers land in a later phase (not implemented by this RPC
+	// addition). Route through service methods so the corresponding task.*
+	// events fire — the whole reason not to let plugins write the DB.
+	CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*Task, error)
+	UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts ...grpc.CallOption) (*Task, error)
+	CreateComment(ctx context.Context, in *CreateCommentRequest, opts ...grpc.CallOption) (*Comment, error)
 }
 
 type hostClient struct {
@@ -292,12 +343,149 @@ func (c *hostClient) EmitEvent(ctx context.Context, in *EmitEventRequest, opts .
 	return out, nil
 }
 
+func (c *hostClient) ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*ListTasksResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListTasksResponse)
+	err := c.cc.Invoke(ctx, Host_ListTasks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*Task, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Task)
+	err := c.cc.Invoke(ctx, Host_GetTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListWorkspaces(ctx context.Context, in *ListWorkspacesRequest, opts ...grpc.CallOption) (*ListWorkspacesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWorkspacesResponse)
+	err := c.cc.Invoke(ctx, Host_ListWorkspaces_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListWorkflows(ctx context.Context, in *ListWorkflowsRequest, opts ...grpc.CallOption) (*ListWorkflowsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWorkflowsResponse)
+	err := c.cc.Invoke(ctx, Host_ListWorkflows_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListWorkflowSteps(ctx context.Context, in *ListWorkflowStepsRequest, opts ...grpc.CallOption) (*ListWorkflowStepsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListWorkflowStepsResponse)
+	err := c.cc.Invoke(ctx, Host_ListWorkflowSteps_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListAgentProfiles(ctx context.Context, in *ListAgentProfilesRequest, opts ...grpc.CallOption) (*ListAgentProfilesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAgentProfilesResponse)
+	err := c.cc.Invoke(ctx, Host_ListAgentProfiles_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListRepositories(ctx context.Context, in *ListRepositoriesRequest, opts ...grpc.CallOption) (*ListRepositoriesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListRepositoriesResponse)
+	err := c.cc.Invoke(ctx, Host_ListRepositories_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListSessions(ctx context.Context, in *ListSessionsRequest, opts ...grpc.CallOption) (*ListSessionsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSessionsResponse)
+	err := c.cc.Invoke(ctx, Host_ListSessions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) ListSessionCodeStats(ctx context.Context, in *ListSessionCodeStatsRequest, opts ...grpc.CallOption) (*ListSessionCodeStatsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSessionCodeStatsResponse)
+	err := c.cc.Invoke(ctx, Host_ListSessionCodeStats_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*Task, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Task)
+	err := c.cc.Invoke(ctx, Host_CreateTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts ...grpc.CallOption) (*Task, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Task)
+	err := c.cc.Invoke(ctx, Host_UpdateTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) CreateComment(ctx context.Context, in *CreateCommentRequest, opts ...grpc.CallOption) (*Comment, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Comment)
+	err := c.cc.Invoke(ctx, Host_CreateComment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostServer is the server API for Host service.
 // All implementations must embed UnimplementedHostServer
 // for forward compatibility.
 //
 // Implemented by KANDEV (served back over the go-plugin broker).
 // Every RPC is capability-gated server-side (§5).
+//
+// Host data API (ADR 0042): the read/write data RPCs below live on this same
+// `service Host` rather than a separate `service HostData`. They reuse the
+// single broker connection and the existing capability-gated unary
+// interceptor; splitting into a second service would only duplicate both for
+// no benefit. Reads require manifest capability `api_read:<resource>`;
+// writes require `api_write:<resource>` (e.g. `api_read:tasks`,
+// `api_write:comments`). An undeclared capability returns gRPC
+// PermissionDenied with `capability 'api_read:tasks' not declared`.
+//
+// DTOs below are a HAND-DEFINED public contract: the backend maps internal
+// models → these messages explicitly, never generates them from domain
+// structs, and never marshals domain structs through google.protobuf.Struct.
+// Fields are additive-only after merge (ADR 0042); removing or renaming a
+// field is a breaking change requiring a new api_version. Read handlers call
+// the relevant service (never a repository directly); write handlers call
+// service methods that publish task.* events (never repository.TaskRepository).
 type HostServer interface {
 	GetState(context.Context, *GetStateRequest) (*GetStateResponse, error)
 	SetState(context.Context, *SetStateRequest) (*SetStateResponse, error)
@@ -305,6 +493,28 @@ type HostServer interface {
 	ListState(context.Context, *ListStateRequest) (*ListStateResponse, error)
 	RevealSecret(context.Context, *RevealSecretRequest) (*RevealSecretResponse, error)
 	EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error)
+	// Reads — capability api_read:<resource>
+	ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error)
+	GetTask(context.Context, *GetTaskRequest) (*Task, error)
+	ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error)
+	ListWorkflows(context.Context, *ListWorkflowsRequest) (*ListWorkflowsResponse, error)
+	ListWorkflowSteps(context.Context, *ListWorkflowStepsRequest) (*ListWorkflowStepsResponse, error)
+	ListAgentProfiles(context.Context, *ListAgentProfilesRequest) (*ListAgentProfilesResponse, error)
+	ListRepositories(context.Context, *ListRepositoriesRequest) (*ListRepositoriesResponse, error)
+	// Sessions + code stats — capability api_read:sessions. Driven by a real
+	// plugin (kandev-plugin-agent-stats) that otherwise read task_sessions,
+	// task_session_commits, and task_session_git_snapshots straight from the
+	// SQLite file. SessionCodeStats is a COMPUTED, stable DTO — deliberately
+	// not the raw commit/snapshot rows, whose JSON schema churns.
+	ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error)
+	ListSessionCodeStats(context.Context, *ListSessionCodeStatsRequest) (*ListSessionCodeStatsResponse, error)
+	// Writes — capability api_write:<resource>. Declared now for a stable
+	// contract; handlers land in a later phase (not implemented by this RPC
+	// addition). Route through service methods so the corresponding task.*
+	// events fire — the whole reason not to let plugins write the DB.
+	CreateTask(context.Context, *CreateTaskRequest) (*Task, error)
+	UpdateTask(context.Context, *UpdateTaskRequest) (*Task, error)
+	CreateComment(context.Context, *CreateCommentRequest) (*Comment, error)
 	mustEmbedUnimplementedHostServer()
 }
 
@@ -332,6 +542,42 @@ func (UnimplementedHostServer) RevealSecret(context.Context, *RevealSecretReques
 }
 func (UnimplementedHostServer) EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EmitEvent not implemented")
+}
+func (UnimplementedHostServer) ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListTasks not implemented")
+}
+func (UnimplementedHostServer) GetTask(context.Context, *GetTaskRequest) (*Task, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetTask not implemented")
+}
+func (UnimplementedHostServer) ListWorkspaces(context.Context, *ListWorkspacesRequest) (*ListWorkspacesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkspaces not implemented")
+}
+func (UnimplementedHostServer) ListWorkflows(context.Context, *ListWorkflowsRequest) (*ListWorkflowsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkflows not implemented")
+}
+func (UnimplementedHostServer) ListWorkflowSteps(context.Context, *ListWorkflowStepsRequest) (*ListWorkflowStepsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListWorkflowSteps not implemented")
+}
+func (UnimplementedHostServer) ListAgentProfiles(context.Context, *ListAgentProfilesRequest) (*ListAgentProfilesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAgentProfiles not implemented")
+}
+func (UnimplementedHostServer) ListRepositories(context.Context, *ListRepositoriesRequest) (*ListRepositoriesResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRepositories not implemented")
+}
+func (UnimplementedHostServer) ListSessions(context.Context, *ListSessionsRequest) (*ListSessionsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListSessions not implemented")
+}
+func (UnimplementedHostServer) ListSessionCodeStats(context.Context, *ListSessionCodeStatsRequest) (*ListSessionCodeStatsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListSessionCodeStats not implemented")
+}
+func (UnimplementedHostServer) CreateTask(context.Context, *CreateTaskRequest) (*Task, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
+}
+func (UnimplementedHostServer) UpdateTask(context.Context, *UpdateTaskRequest) (*Task, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateTask not implemented")
+}
+func (UnimplementedHostServer) CreateComment(context.Context, *CreateCommentRequest) (*Comment, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateComment not implemented")
 }
 func (UnimplementedHostServer) mustEmbedUnimplementedHostServer() {}
 func (UnimplementedHostServer) testEmbeddedByValue()              {}
@@ -462,6 +708,222 @@ func _Host_EmitEvent_Handler(srv interface{}, ctx context.Context, dec func(inte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_ListTasks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListTasksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListTasks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListTasks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListTasks(ctx, req.(*ListTasksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetTask(ctx, req.(*GetTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListWorkspaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkspacesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListWorkspaces(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListWorkspaces_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListWorkspaces(ctx, req.(*ListWorkspacesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListWorkflows_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkflowsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListWorkflows(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListWorkflows_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListWorkflows(ctx, req.(*ListWorkflowsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListWorkflowSteps_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListWorkflowStepsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListWorkflowSteps(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListWorkflowSteps_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListWorkflowSteps(ctx, req.(*ListWorkflowStepsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListAgentProfiles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentProfilesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListAgentProfiles(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListAgentProfiles_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListAgentProfiles(ctx, req.(*ListAgentProfilesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListRepositories_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListRepositoriesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListRepositories(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListRepositories_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListRepositories(ctx, req.(*ListRepositoriesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListSessions(ctx, req.(*ListSessionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_ListSessionCodeStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSessionCodeStatsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).ListSessionCodeStats(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_ListSessionCodeStats_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).ListSessionCodeStats(ctx, req.(*ListSessionCodeStatsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_CreateTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CreateTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CreateTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CreateTask(ctx, req.(*CreateTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_UpdateTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).UpdateTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_UpdateTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).UpdateTask(ctx, req.(*UpdateTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_CreateComment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateCommentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).CreateComment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_CreateComment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).CreateComment(ctx, req.(*CreateCommentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Host_ServiceDesc is the grpc.ServiceDesc for Host service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -492,6 +954,54 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EmitEvent",
 			Handler:    _Host_EmitEvent_Handler,
+		},
+		{
+			MethodName: "ListTasks",
+			Handler:    _Host_ListTasks_Handler,
+		},
+		{
+			MethodName: "GetTask",
+			Handler:    _Host_GetTask_Handler,
+		},
+		{
+			MethodName: "ListWorkspaces",
+			Handler:    _Host_ListWorkspaces_Handler,
+		},
+		{
+			MethodName: "ListWorkflows",
+			Handler:    _Host_ListWorkflows_Handler,
+		},
+		{
+			MethodName: "ListWorkflowSteps",
+			Handler:    _Host_ListWorkflowSteps_Handler,
+		},
+		{
+			MethodName: "ListAgentProfiles",
+			Handler:    _Host_ListAgentProfiles_Handler,
+		},
+		{
+			MethodName: "ListRepositories",
+			Handler:    _Host_ListRepositories_Handler,
+		},
+		{
+			MethodName: "ListSessions",
+			Handler:    _Host_ListSessions_Handler,
+		},
+		{
+			MethodName: "ListSessionCodeStats",
+			Handler:    _Host_ListSessionCodeStats_Handler,
+		},
+		{
+			MethodName: "CreateTask",
+			Handler:    _Host_CreateTask_Handler,
+		},
+		{
+			MethodName: "UpdateTask",
+			Handler:    _Host_UpdateTask_Handler,
+		},
+		{
+			MethodName: "CreateComment",
+			Handler:    _Host_CreateComment_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
