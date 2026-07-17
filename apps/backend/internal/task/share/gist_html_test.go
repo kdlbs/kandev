@@ -138,7 +138,7 @@ func TestBuildShareHTML_RendersMarkdownWithoutUnsafeHTML(t *testing.T) {
 		Messages: []Message{
 			{Role: roleAssistant, Blocks: []Block{{
 				Kind: blockKindText,
-				Text: "## Summary\n\n**Pushed** successfully.\n\n- tests passed\n- lint passed\n\n[docs](https://example.com)\n\n<script>alert('xss')</script>\n\n[bad](javascript:alert('xss'))",
+				Text: "## Summary\n\n**Pushed** successfully.\n\n- tests passed\n- lint passed\n\n[docs](https://example.com)\n\n![tracker](https://attacker.example/pixel)\n\n<script>alert('xss')</script>\n\n[bad](javascript:alert('xss'))",
 			}}},
 		},
 	}
@@ -151,6 +151,9 @@ func TestBuildShareHTML_RendersMarkdownWithoutUnsafeHTML(t *testing.T) {
 	assertContains(t, doc, `<a href="https://example.com">docs</a>`)
 	if strings.Contains(doc, "<script>") || strings.Contains(doc, `href="javascript:`) {
 		t.Fatalf("unsafe markdown content leaked into rendered HTML:\n%s", doc)
+	}
+	if strings.Contains(doc, "<img") || strings.Contains(doc, "attacker.example") {
+		t.Fatalf("external markdown image leaked into rendered HTML:\n%s", doc)
 	}
 }
 

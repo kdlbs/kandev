@@ -63,7 +63,7 @@ describe("ShareDialog", () => {
           blocks: [
             {
               kind: "text" as const,
-              text: "## Summary\n\n**Pushed** successfully.\n\n- tests passed\n- lint passed",
+              text: "## Summary\n\n**Pushed** successfully.\n\n- tests passed\n- lint passed\n\n[docs](https://example.com)\n\n![tracker](https://attacker.example/pixel)",
             },
           ],
         },
@@ -75,6 +75,10 @@ describe("ShareDialog", () => {
     expect(await screen.findByRole("heading", { level: 2, name: "Summary" })).toBeTruthy();
     expect(screen.getByText("Pushed").tagName).toBe("STRONG");
     expect(screen.getByRole("list").children).toHaveLength(2);
+    expect(screen.queryByRole("img", { name: "tracker" })).toBeNull();
+    const docsLink = screen.getByRole("link", { name: "docs" });
+    expect(docsLink.getAttribute("target")).toBe("_blank");
+    expect(docsLink.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
   it("publishes on click and shows the URL with a copy button", async () => {

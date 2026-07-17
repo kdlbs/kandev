@@ -19,6 +19,12 @@ const PREVIEW_TAIL = 8;
 const previewRemarkPlugins = [remarkGfm];
 
 const previewMarkdownComponents: Components = {
+  a: ({ children, href }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  ),
+  img: () => null,
   table: ({ children }) => (
     <div className="overflow-x-auto">
       <table>{children}</table>
