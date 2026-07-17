@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState } from "react";
+import { memo, useEffect, useId, useRef, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -42,28 +42,110 @@ function getCircleColor(efficiency: number): string {
   return "text-blue-300";
 }
 
+function usePinnableTooltip() {
+  const [open, setOpen] = useState(false);
+  const pinnedRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const closePinnedTooltip = () => {
+      pinnedRef.current = false;
+      setOpen(false);
+    };
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (!pinnedRef.current || !(event.target instanceof Node)) return;
+      if (
+        triggerRef.current?.contains(event.target) ||
+        (event.target instanceof Element && event.target.closest('[data-slot="tooltip-content"]'))
+      ) {
+        return;
+      }
+      closePinnedTooltip();
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && pinnedRef.current) closePinnedTooltip();
+    };
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  return {
+    open,
+    triggerRef,
+    onOpenChange: (nextOpen: boolean) => {
+      if (!nextOpen && pinnedRef.current) return;
+      setOpen(nextOpen);
+    },
+    onTriggerClick: () => {
+      pinnedRef.current = !pinnedRef.current;
+      setOpen(pinnedRef.current);
+    },
+  };
+}
+
+function ContextWindowRing({ usagePercent }: { usagePercent: number }) {
+  const radius = 10;
+  const strokeWidth = 2.5;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference * (1 - usagePercent / 100);
+
+  return (
+    <svg viewBox="0 0 24 24" className="size-5 -rotate-90" aria-hidden="true">
+      <circle
+        cx="12"
+        cy="12"
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        className="text-muted"
+      />
+      <circle
+        cx="12"
+        cy="12"
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={strokeDashoffset}
+        className={cn(getCircleColor(usagePercent), "transition-all duration-300 ease-out")}
+      />
+    </svg>
+  );
+}
+
 function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) {
+  const helpId = useId();
+
   if (!source) return null;
 
   return (
-    <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+    <div className="group relative flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
       <span>Source</span>
       <span className="font-medium text-foreground">{source.toUpperCase()}</span>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label="About context window source"
-            className="inline-flex cursor-help text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          >
-            <IconInfoCircle className="h-3 w-3" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top" className="max-w-60">
-          ACP is the active session&apos;s effective window, reported by the agent. API is the
-          model&apos;s advertised maximum from the catalogue and is used when ACP omits the window.
-        </TooltipContent>
-      </Tooltip>
+      <button
+        type="button"
+        aria-label="About context window source"
+        aria-describedby={helpId}
+        className="inline-flex size-6 cursor-help items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:size-4"
+      >
+        <IconInfoCircle className="h-3 w-3" />
+      </button>
+      <span
+        id={helpId}
+        role="tooltip"
+        className="pointer-events-none absolute right-0 bottom-[calc(100%+0.375rem)] z-10 w-60 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        ACP is the active session&apos;s effective window, reported by the agent. API is the
+        model&apos;s advertised maximum from the catalogue and is used when ACP omits the window.
+      </span>
     </div>
   );
 }
@@ -99,7 +181,7 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   sessionId,
   className,
 }: TokenUsageDisplayProps) {
-  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const tooltip = usePinnableTooltip();
   const contextWindow = useSessionContextWindow(sessionId);
 
   if (!contextWindow) return null;
@@ -111,53 +193,24 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
   if (!isContextWindowReliable(size, used)) return null;
 
   const usagePercent = (used / size) * 100;
-  const progress = usagePercent / 100;
-
-  // SVG circle parameters
-  const radius = 10;
-  const strokeWidth = 2.5;
-  const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference * (1 - progress);
 
   return (
-    // The UI wrapper defaults this to true; nested source help must remain reachable.
+    // The UI wrapper defaults this to true; the source control must remain reachable inside.
     <TooltipProvider disableHoverableContent={false}>
-      <Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}>
+      <Tooltip open={tooltip.open} onOpenChange={tooltip.onOpenChange}>
         <TooltipTrigger asChild>
           <button
+            ref={tooltip.triggerRef}
             type="button"
             aria-label={`Context window: ${usagePercent.toFixed(0)}% used`}
-            onClick={() => setTooltipOpen(true)}
+            aria-expanded={tooltip.open}
+            onClick={tooltip.onTriggerClick}
             className={cn(
               "flex size-7 cursor-help items-center justify-center rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:size-5",
               className,
             )}
           >
-            <svg viewBox="0 0 24 24" className="size-5 -rotate-90" aria-hidden="true">
-              {/* Background circle */}
-              <circle
-                cx="12"
-                cy="12"
-                r={radius}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={strokeWidth}
-                className="text-muted"
-              />
-              {/* Progress circle */}
-              <circle
-                cx="12"
-                cy="12"
-                r={radius}
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={strokeWidth}
-                strokeLinecap="round"
-                strokeDasharray={circumference}
-                strokeDashoffset={strokeDashoffset}
-                className={cn(getCircleColor(usagePercent), "transition-all duration-300 ease-out")}
-              />
-            </svg>
+            <ContextWindowRing usagePercent={usagePercent} />
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" className="pointer-events-auto">
@@ -182,10 +235,15 @@ export const TokenUsageDisplay = memo(function TokenUsageDisplay({
                   style={{ width: `${usagePercent}%` }}
                 />
               </div>
-              <div className="text-[11px] tabular-nums text-muted-foreground">
-                {formatNumber(used)} of {formatNumber(size)} tokens
+              <div
+                className="flex min-h-6 items-center justify-between gap-3"
+                data-testid="context-window-token-row"
+              >
+                <span className="text-[11px] tabular-nums text-muted-foreground">
+                  {formatNumber(used)} of {formatNumber(size)} tokens
+                </span>
+                <ContextWindowSource source={source} />
               </div>
-              <ContextWindowSource source={source} />
             </div>
             <SessionUsageRows sessionId={sessionId} />
           </div>
