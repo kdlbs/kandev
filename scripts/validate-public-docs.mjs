@@ -803,6 +803,14 @@ function assertFrontmatter(file, markdown) {
       `${file} must start with YAML frontmatter containing title and description`,
     );
   }
+
+  const statusMatch = block.match(/^status:\s*(.*?)\s*$/m);
+  if (statusMatch) {
+    const status = statusMatch[1].replace(/^(["'])(.*)\1$/, "$2");
+    if (status !== "experimental") {
+      throw new Error(`${file} has unsupported page status: ${status}`);
+    }
+  }
 }
 
 /**

@@ -49,6 +49,22 @@ For long journeys between distant regions, do not pan a tight crop after the poi
 
 Use `loopFrame: "focused"` only with the `docs` form factor. The opening, settled penultimate, and final camera keyframes must be identical, and the crop must still show enough context to identify the feature. This is an editorial framing tool, not a way to hide a product defect or misleading state. Landing desktop/mobile media must keep the standard wide loop reset.
 
+The camera section for a focused docs clip has this shape; add story keyframes between the matching opening and settled pair:
+
+```jsonc
+{
+  "durationMs": 8000,
+  "formFactor": "docs",
+  "loopFrame": "focused",
+  "keyframes": [
+    { "tMs": 0, "zoom": 1.5, "x": 0.48, "y": 0.46 },
+    // Story keyframes follow the recorded pointer journey.
+    { "tMs": 7760, "zoom": 1.5, "x": 0.48, "y": 0.46 },
+    { "tMs": 8000, "zoom": 1.5, "x": 0.48, "y": 0.46 }
+  ]
+}
+```
+
 Example config shape. Replace `<capture-root>` with the unique resolved `CAPTURE_ROOT` before encoding:
 
 ```json
