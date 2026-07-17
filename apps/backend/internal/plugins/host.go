@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -200,7 +199,7 @@ func (h *pluginHost) GetSecret(ctx context.Context, key string) (string, bool, e
 	}
 	value, err := h.secrets.Reveal(ctx, pluginSecretID(h.pluginID, key))
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "secret not found:") {
+		if isSecretNotFound(err) {
 			return "", false, nil
 		}
 		return "", false, err
@@ -226,7 +225,7 @@ func (h *pluginHost) DeleteSecret(ctx context.Context, key string) error {
 		return err
 	}
 	err := h.secrets.Delete(ctx, pluginSecretID(h.pluginID, key))
-	if err != nil && strings.HasPrefix(err.Error(), "secret not found:") {
+	if isSecretNotFound(err) {
 		return nil
 	}
 	return err

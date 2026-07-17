@@ -359,11 +359,16 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 	if err := validateConfigSchema(merged, rec.ConfigSchema); err != nil {
 		return err
 	}
-	stored, removedSecrets, err := s.storeConfigSecrets(ctx, rec, merged)
+	stored, removedSecrets, rollbackVault, err := s.storeConfigSecrets(ctx, rec, merged)
 	if err != nil {
 		return err
 	}
 	if err := s.store.SetConfig(id, stored); err != nil {
+		// The config commit failed, so the still-current config file is
+		// unchanged — restore the vault to match it, otherwise a field's
+		// unchanged ref would resolve to the new (uncommitted) value and a
+		// request reported as failed would have changed effective config.
+		rollbackVault()
 		return err
 	}
 	// Vault entries for removed secret fields are deleted only AFTER the
@@ -382,28 +387,42 @@ func (s *Service) UpdateConfig(ctx context.Context, id string, config map[string
 // absent from merged are returned as removedSecrets for the caller to
 // delete from the vault AFTER the config commit — deleting here would leave
 // the still-current config pointing at a missing entry if SetConfig then
-// failed. A vault.Set failure aborts before any config write; the entry it
-// may have already overwritten holds the operator's newly intended value
-// under the same deterministic id, which the retry will overwrite again.
-// With no vault wired (NewService without SetSecrets — tests, embedded
-// uses) values fall back to the config file itself, with a warning:
-// functional, but without at-rest encryption.
+// failed.
+//
+// The returned rollback restores every vault entry this call overwrote to
+// its prior value (or deletes it if it did not exist before), so the whole
+// operation is failure-atomic: a vault.Set failure mid-loop rolls back the
+// earlier writes before returning, and the caller runs rollback if the
+// subsequent config commit fails — in both cases the vault ends up matching
+// the unchanged config file, so a failed request never changes the value a
+// still-current ref resolves to.
+//
+// With no vault wired (NewService without SetSecrets — tests, embedded uses)
+// values fall back to the config file itself, with a warning: functional,
+// but without at-rest encryption.
 func (s *Service) storeConfigSecrets(
 	ctx context.Context, rec *store.Record, merged map[string]any,
-) (stored map[string]any, removedSecrets []string, err error) {
+) (stored map[string]any, removedSecrets []string, rollback func(), err error) {
+	noRollback := func() {}
 	secretFields := secretPropertyKeys(rec.ConfigSchema)
 	if len(secretFields) == 0 {
-		return merged, nil, nil
+		return merged, nil, noRollback, nil
 	}
 	if s.secrets == nil {
 		s.log.Warn("plugins: no secret vault wired; storing secret config fields in the config file",
 			zap.String("plugin_id", rec.ID))
-		return merged, nil, nil
+		return merged, nil, noRollback, nil
 	}
 
 	out := make(map[string]any, len(merged))
 	for k, v := range merged {
 		out[k] = v
+	}
+	var restores []func()
+	runRollback := func() {
+		for i := len(restores) - 1; i >= 0; i-- {
+			restores[i]()
+		}
 	}
 	for field := range secretFields {
 		value, present := out[field]
@@ -416,12 +435,40 @@ func (s *Service) storeConfigSecrets(
 			continue
 		}
 		vaultID := pluginConfigSecretID(rec.ID, field)
+		restore := s.vaultRestoreFunc(ctx, vaultID)
 		if err := s.secrets.Set(ctx, vaultID, vaultID, cleartext); err != nil {
-			return nil, nil, fmt.Errorf("plugins: store secret config field %q: %w", field, err)
+			runRollback()
+			return nil, nil, noRollback, fmt.Errorf("plugins: store secret config field %q: %w", field, err)
 		}
+		restores = append(restores, restore)
 		out[field] = configVaultRef(rec.ID, field)
 	}
-	return out, removedSecrets, nil
+	return out, removedSecrets, runRollback, nil
+}
+
+// vaultRestoreFunc snapshots vaultID's current value and returns a closure
+// that restores it: reset to the prior cleartext if the entry existed, or
+// delete it if it did not. Used to undo a config-secret write when the
+// config commit that would reference it fails. An unreadable prior value
+// (any Reveal error, including a genuine backend fault) is treated as
+// "absent" so rollback deletes the entry we created — the conservative
+// choice, since we could not confirm a value to restore.
+func (s *Service) vaultRestoreFunc(ctx context.Context, vaultID string) func() {
+	prior, err := s.secrets.Reveal(ctx, vaultID)
+	existed := err == nil
+	return func() {
+		if existed {
+			if setErr := s.secrets.Set(ctx, vaultID, vaultID, prior); setErr != nil {
+				s.log.Warn("plugins: failed to roll back secret config field in vault",
+					zap.String("vault_id", vaultID), zap.Error(setErr))
+			}
+			return
+		}
+		if delErr := s.secrets.Delete(ctx, vaultID); delErr != nil && !isSecretNotFound(delErr) {
+			s.log.Warn("plugins: failed to roll back (delete) secret config field in vault",
+				zap.String("vault_id", vaultID), zap.Error(delErr))
+		}
+	}
 }
 
 // cleanupRemovedConfigSecrets best-effort deletes the vault entries backing
@@ -659,15 +706,24 @@ func validateInstallURL(raw string) error {
 	return nil
 }
 
-// Uninstall stops id's process (if running), removes its extracted package
-// tree from disk, deletes its record from both the store and the in-memory
-// registry, and deletes every plugin_state row scoped to id (best-effort —
-// a failure here is logged but does not fail the overall Uninstall, since
-// the package/record are already gone by that point), then notifies the
-// attached Deliverer. Clearing plugin_state matters so a plugin reinstalled
-// under the same id (or an id later reused by a different plugin) never
-// silently inherits stale state from this install.
-func (s *Service) Uninstall(id string) error {
+// Uninstall stops id's process (if running), purges its vault namespace,
+// removes its extracted package tree from disk, deletes its record from both
+// the store and the in-memory registry, and deletes every plugin_state row
+// scoped to id (best-effort — a failure there is logged but does not fail
+// the overall Uninstall, since the package/record are already gone by that
+// point), then notifies the attached Deliverer. Clearing plugin_state and
+// the vault namespace matters so a plugin reinstalled under the same id (or
+// an id later reused by a different plugin) never silently inherits stale
+// state or secrets.
+//
+// Ordering is deliberate: the process is stopped FIRST so the plugin can no
+// longer race the cleanup by writing a fresh secret (SetSecret) between the
+// vault list and the deletes; then the vault namespace is purged and any
+// failure aborts the uninstall — nothing destructive (package/record
+// removal) has happened yet, so the operator simply retries (Stop and the
+// vault deletes are both idempotent). A failed uninstall therefore leaves
+// the plugin stopped-but-installed, resolved by a retry.
+func (s *Service) Uninstall(ctx context.Context, id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
@@ -675,16 +731,11 @@ func (s *Service) Uninstall(id string) error {
 	if _, err := s.Get(id); err != nil {
 		return err
 	}
-	// Purge the plugin's vault namespace FIRST, and fail the uninstall on
-	// any cleanup error: once the package/record are gone there is no retry
-	// path, and a reinstall under the same id would silently inherit the
-	// stale secrets. Failing here leaves everything intact (the plugin is
-	// still running), so the operator just retries the uninstall.
-	if err := s.deletePluginSecrets(id); err != nil {
-		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
-	}
 	if s.runtime != nil {
 		s.runtime.Stop(id)
+	}
+	if err := s.deletePluginSecrets(ctx, id); err != nil {
+		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
 		return fmt.Errorf("plugins: remove installed package: %w", err)
@@ -702,13 +753,15 @@ func (s *Service) Uninstall(id string) error {
 // ("plugin:<id>:..." — both SetSecret-owned and config-backed entries), so
 // a reinstall under the same id never inherits stale secrets. Unlike
 // deletePluginState it is NOT best-effort: it runs before any destructive
-// uninstall step, and a failure aborts the uninstall while it can still be
-// retried. A nil vault (no secrets possible) is a no-op.
-func (s *Service) deletePluginSecrets(id string) error {
+// uninstall step (after the process is stopped, so no concurrent writes can
+// re-populate the namespace), and a failure aborts the uninstall while it
+// can still be retried. Deletion is idempotent, so a partial failure that
+// deleted some entries is safely resumed by a retry. A nil vault (no
+// secrets possible) is a no-op.
+func (s *Service) deletePluginSecrets(ctx context.Context, id string) error {
 	if s.secrets == nil {
 		return nil
 	}
-	ctx := context.Background()
 	ids, err := s.secrets.ListIDs(ctx)
 	if err != nil {
 		return fmt.Errorf("list vault ids: %w", err)

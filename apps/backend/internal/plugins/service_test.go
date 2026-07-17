@@ -353,7 +353,7 @@ func TestServiceUninstallStopsRuntimeRemovesPackageAndRecord(t *testing.T) {
 	rec := installTestPlugin(t, svc, "kandev-plugin-slack")
 	installDir := filepath.Dir(rec.InstallPath) // .../plugins/kandev-plugin-slack
 
-	if err := svc.Uninstall("kandev-plugin-slack"); err != nil {
+	if err := svc.Uninstall(context.Background(), "kandev-plugin-slack"); err != nil {
 		t.Fatalf("Uninstall() unexpected error: %v", err)
 	}
 
@@ -385,7 +385,7 @@ func TestServiceUninstallDeletesPluginState(t *testing.T) {
 		t.Fatalf("seed plugin_state: %v", err)
 	}
 
-	if err := svc.Uninstall("kandev-plugin-slack"); err != nil {
+	if err := svc.Uninstall(context.Background(), "kandev-plugin-slack"); err != nil {
 		t.Fatalf("Uninstall() unexpected error: %v", err)
 	}
 
@@ -400,7 +400,7 @@ func TestServiceUninstallDeletesPluginState(t *testing.T) {
 
 func TestServiceUninstallMissingReturnsNotFound(t *testing.T) {
 	svc, _, _ := newTestService(t)
-	if err := svc.Uninstall("missing"); !errors.Is(err, store.ErrNotFound) {
+	if err := svc.Uninstall(context.Background(), "missing"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("Uninstall() error = %v, want store.ErrNotFound", err)
 	}
 }
@@ -670,7 +670,7 @@ func TestServiceUninstallNotifiesDelivererRefresh(t *testing.T) {
 	deliverer := &fakeDeliverer{}
 	svc.SetDeliverer(deliverer)
 
-	if err := svc.Uninstall("kandev-plugin-slack"); err != nil {
+	if err := svc.Uninstall(context.Background(), "kandev-plugin-slack"); err != nil {
 		t.Fatalf("Uninstall(): %v", err)
 	}
 
@@ -688,7 +688,7 @@ func TestServiceWithoutDelivererDoesNotPanic(t *testing.T) {
 	if err := svc.Disable("kandev-plugin-slack"); err != nil {
 		t.Fatalf("Disable(): %v", err)
 	}
-	if err := svc.Uninstall("kandev-plugin-slack"); err != nil {
+	if err := svc.Uninstall(context.Background(), "kandev-plugin-slack"); err != nil {
 		t.Fatalf("Uninstall(): %v", err)
 	}
 }

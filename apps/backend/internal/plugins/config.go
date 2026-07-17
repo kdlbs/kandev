@@ -26,6 +26,19 @@ import (
 // value unchanged". Deliberately implausible as a real credential.
 const configSecretMask = "********"
 
+// secretNotFoundPrefix is how the secrets layer signals an absent entry
+// (fmt.Errorf("secret not found: ...") in internal/secrets). Centralized
+// here so the several call sites that must tell "absent" apart from a real
+// backend error share one definition instead of each re-hardcoding the
+// prefix (host.go's GetSecret/DeleteSecret, service.go's vault rollback).
+const secretNotFoundPrefix = "secret not found:"
+
+// isSecretNotFound reports whether err is the secrets layer's "absent entry"
+// signal rather than a genuine backend failure.
+func isSecretNotFound(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), secretNotFoundPrefix)
+}
+
 // pluginVaultIDPrefix is the reserved id namespace every plugin-owned vault
 // entry lives under: "plugin:<plugin_id>:...". Uninstall deletes the whole
 // prefix.

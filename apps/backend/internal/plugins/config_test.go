@@ -485,7 +485,7 @@ func TestServiceUninstallPurgesPluginVaultNamespace(t *testing.T) {
 	vault.set(pluginSecretID("kandev-plugin-github", "own-key"), "own-value")
 	vault.set("unrelated", "keep-me")
 
-	if err := svc.Uninstall("kandev-plugin-github"); err != nil {
+	if err := svc.Uninstall(context.Background(), "kandev-plugin-github"); err != nil {
 		t.Fatalf("Uninstall: %v", err)
 	}
 	if _, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "github_token")); ok {
@@ -659,14 +659,19 @@ func (v *failingVault) ListIDs(ctx context.Context) ([]string, error) {
 }
 
 func TestServiceUninstallFailsClosedWhenSecretCleanupFails(t *testing.T) {
-	svc, _, _ := newTestService(t)
+	svc, _, rt := newTestService(t)
 	vault := &failingVault{fakeSecretRevealer: newFakeSecretRevealer(), listErr: errors.New("vault down")}
 	svc.SetSecrets(vault)
 	rec := installConfigPlugin(t, svc, "kandev-plugin-github")
 
-	err := svc.Uninstall("kandev-plugin-github")
+	err := svc.Uninstall(context.Background(), "kandev-plugin-github")
 	if err == nil {
 		t.Fatalf("Uninstall must fail when secret cleanup cannot run")
+	}
+	// The process is stopped BEFORE the vault purge, so the plugin can't race
+	// the cleanup by writing a fresh secret — even on the failure path.
+	if !rt.stopped("kandev-plugin-github") {
+		t.Fatalf("plugin must be stopped before the vault purge, even when the purge fails")
 	}
 	// Nothing destructive happened: record still installed, package on disk.
 	if _, getErr := svc.Get("kandev-plugin-github"); getErr != nil {
@@ -678,7 +683,7 @@ func TestServiceUninstallFailsClosedWhenSecretCleanupFails(t *testing.T) {
 
 	// Vault recovers -> retry succeeds.
 	vault.listErr = nil
-	if err := svc.Uninstall("kandev-plugin-github"); err != nil {
+	if err := svc.Uninstall(context.Background(), "kandev-plugin-github"); err != nil {
 		t.Fatalf("retry after vault recovery should succeed: %v", err)
 	}
 }
@@ -734,5 +739,52 @@ func TestServiceUpdateConfigFailedCommitKeepsReferencedVaultEntry(t *testing.T) 
 	}
 	if _, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "webhook_key")); ok {
 		t.Fatalf("vault entry should be deleted after the successful commit")
+	}
+}
+
+func TestServiceUpdateConfigFailedCommitRollsBackOverwrittenSecret(t *testing.T) {
+	svc, fsStore, vault := newTestServiceWithVault(t)
+	installConfigPlugin(t, svc, "kandev-plugin-github")
+	ctx := context.Background()
+
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{"github_token": "ghp_old"}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+	vaultID := pluginConfigSecretID("kandev-plugin-github", "github_token")
+
+	// Overwrite the token with a new value, but make the config commit fail.
+	svc.store = &failingStore{Store: fsStore, setConfigErr: errors.New("disk full")}
+	err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{"github_token": "ghp_new"})
+	if err == nil {
+		t.Fatalf("UpdateConfig should surface the commit failure")
+	}
+	// The config file was never rewritten, so the vault must resolve to the
+	// OLD value — a failed request must not change effective config.
+	if v, _ := vault.get(vaultID); v != "ghp_old" {
+		t.Fatalf("vault value = %q, want rolled-back ghp_old (a failed commit must not change effective config)", v)
+	}
+}
+
+func TestServiceUpdateConfigFailedCommitRollsBackNewlyCreatedSecret(t *testing.T) {
+	svc, fsStore, vault := newTestServiceWithVault(t)
+	installConfigPlugin(t, svc, "kandev-plugin-github")
+	ctx := context.Background()
+
+	if err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{"github_token": "ghp_x"}); err != nil {
+		t.Fatalf("UpdateConfig: %v", err)
+	}
+
+	// Add a brand-new optional secret (no prior vault entry) with a failing commit.
+	svc.store = &failingStore{Store: fsStore, setConfigErr: errors.New("disk full")}
+	err := svc.UpdateConfig(ctx, "kandev-plugin-github", map[string]any{
+		"github_token": configSecretMask, "webhook_key": "whsec_new",
+	})
+	if err == nil {
+		t.Fatalf("UpdateConfig should surface the commit failure")
+	}
+	// The newly-created vault entry had no prior value, so rollback deletes
+	// it — no orphan left behind by a failed request.
+	if _, ok := vault.get(pluginConfigSecretID("kandev-plugin-github", "webhook_key")); ok {
+		t.Fatalf("newly-created secret must be rolled back (deleted) on a failed commit")
 	}
 }

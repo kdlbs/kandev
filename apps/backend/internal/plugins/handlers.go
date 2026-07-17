@@ -186,7 +186,7 @@ func (c *Controller) updateConfig(ctx *gin.Context) {
 }
 
 func (c *Controller) uninstall(ctx *gin.Context) {
-	if err := c.svc.Uninstall(ctx.Param("id")); err != nil {
+	if err := c.svc.Uninstall(ctx.Request.Context(), ctx.Param("id")); err != nil {
 		c.writeLookupError(ctx, err)
 		return
 	}
