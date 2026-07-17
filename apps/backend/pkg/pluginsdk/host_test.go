@@ -25,6 +25,7 @@ type recordingHost struct {
 		value               map[string]any
 	}
 	listStateEntries []StateEntry
+	configValues     map[string]any
 	revealSecretFn   func(ctx context.Context, ref string) (string, error)
 	emitEvent        struct {
 		name    string
@@ -49,6 +50,10 @@ func (h *recordingHost) DeleteState(context.Context, string, string, string) err
 
 func (h *recordingHost) ListState(context.Context, string, string) ([]StateEntry, error) {
 	return h.listStateEntries, nil
+}
+
+func (h *recordingHost) GetConfig(context.Context) (map[string]any, error) {
+	return h.configValues, nil
 }
 
 func (h *recordingHost) RevealSecret(ctx context.Context, ref string) (string, error) {
@@ -136,6 +141,28 @@ func TestHost_ListState(t *testing.T) {
 	entries, err := host.ListState(context.Background(), "instance", "")
 	require.NoError(t, err)
 	require.Equal(t, impl.listStateEntries, entries)
+}
+
+func TestHost_GetConfig(t *testing.T) {
+	impl := &recordingHost{configValues: map[string]any{
+		"github_token": "ghp_real",
+		"org":          "kdlbs",
+		"max_items":    float64(25),
+	}}
+	host := dialHostOverBufconn(t, impl)
+
+	config, err := host.GetConfig(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, impl.configValues, config)
+}
+
+func TestHost_GetConfig_EmptyIsNonNil(t *testing.T) {
+	host := dialHostOverBufconn(t, &recordingHost{})
+
+	config, err := host.GetConfig(context.Background())
+	require.NoError(t, err)
+	require.NotNil(t, config)
+	require.Empty(t, config)
 }
 
 func TestHost_RevealSecret(t *testing.T) {

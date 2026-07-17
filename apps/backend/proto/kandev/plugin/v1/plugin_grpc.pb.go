@@ -207,6 +207,7 @@ const (
 	Host_ListState_FullMethodName            = "/kandev.plugin.v1.Host/ListState"
 	Host_RevealSecret_FullMethodName         = "/kandev.plugin.v1.Host/RevealSecret"
 	Host_EmitEvent_FullMethodName            = "/kandev.plugin.v1.Host/EmitEvent"
+	Host_GetConfig_FullMethodName            = "/kandev.plugin.v1.Host/GetConfig"
 	Host_ListTasks_FullMethodName            = "/kandev.plugin.v1.Host/ListTasks"
 	Host_GetTask_FullMethodName              = "/kandev.plugin.v1.Host/GetTask"
 	Host_ListWorkspaces_FullMethodName       = "/kandev.plugin.v1.Host/ListWorkspaces"
@@ -255,6 +256,12 @@ type HostClient interface {
 	ListState(ctx context.Context, in *ListStateRequest, opts ...grpc.CallOption) (*ListStateResponse, error)
 	RevealSecret(ctx context.Context, in *RevealSecretRequest, opts ...grpc.CallOption) (*RevealSecretResponse, error)
 	EmitEvent(ctx context.Context, in *EmitEventRequest, opts ...grpc.CallOption) (*EmitEventResponse, error)
+	// GetConfig returns the plugin's own operator-editable config (the values
+	// set in Settings > Plugins > <plugin> against the manifest's
+	// config_schema). Ungated: a plugin can always read its own config, secret
+	// values included — that is how e.g. an operator-configured PAT reaches
+	// the plugin.
+	GetConfig(ctx context.Context, in *GetConfigRequest, opts ...grpc.CallOption) (*GetConfigResponse, error)
 	// Reads — capability api_read:<resource>
 	ListTasks(ctx context.Context, in *ListTasksRequest, opts ...grpc.CallOption) (*ListTasksResponse, error)
 	GetTask(ctx context.Context, in *GetTaskRequest, opts ...grpc.CallOption) (*GetTaskResponse, error)
@@ -341,6 +348,16 @@ func (c *hostClient) EmitEvent(ctx context.Context, in *EmitEventRequest, opts .
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EmitEventResponse)
 	err := c.cc.Invoke(ctx, Host_EmitEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostClient) GetConfig(ctx context.Context, in *GetConfigRequest, opts ...grpc.CallOption) (*GetConfigResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetConfigResponse)
+	err := c.cc.Invoke(ctx, Host_GetConfig_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -501,6 +518,12 @@ type HostServer interface {
 	ListState(context.Context, *ListStateRequest) (*ListStateResponse, error)
 	RevealSecret(context.Context, *RevealSecretRequest) (*RevealSecretResponse, error)
 	EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error)
+	// GetConfig returns the plugin's own operator-editable config (the values
+	// set in Settings > Plugins > <plugin> against the manifest's
+	// config_schema). Ungated: a plugin can always read its own config, secret
+	// values included — that is how e.g. an operator-configured PAT reaches
+	// the plugin.
+	GetConfig(context.Context, *GetConfigRequest) (*GetConfigResponse, error)
 	// Reads — capability api_read:<resource>
 	ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error)
 	GetTask(context.Context, *GetTaskRequest) (*GetTaskResponse, error)
@@ -550,6 +573,9 @@ func (UnimplementedHostServer) RevealSecret(context.Context, *RevealSecretReques
 }
 func (UnimplementedHostServer) EmitEvent(context.Context, *EmitEventRequest) (*EmitEventResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EmitEvent not implemented")
+}
+func (UnimplementedHostServer) GetConfig(context.Context, *GetConfigRequest) (*GetConfigResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetConfig not implemented")
 }
 func (UnimplementedHostServer) ListTasks(context.Context, *ListTasksRequest) (*ListTasksResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListTasks not implemented")
@@ -712,6 +738,24 @@ func _Host_EmitEvent_Handler(srv interface{}, ctx context.Context, dec func(inte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HostServer).EmitEvent(ctx, req.(*EmitEventRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Host_GetConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).GetConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_GetConfig_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).GetConfig(ctx, req.(*GetConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -962,6 +1006,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "EmitEvent",
 			Handler:    _Host_EmitEvent_Handler,
+		},
+		{
+			MethodName: "GetConfig",
+			Handler:    _Host_GetConfig_Handler,
 		},
 		{
 			MethodName: "ListTasks",

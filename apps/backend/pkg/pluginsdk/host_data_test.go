@@ -46,6 +46,7 @@ func (h *dataRecordingHost) DeleteState(context.Context, string, string, string)
 func (h *dataRecordingHost) ListState(context.Context, string, string) ([]StateEntry, error) {
 	return nil, nil
 }
+func (h *dataRecordingHost) GetConfig(context.Context) (map[string]any, error)    { return nil, nil }
 func (h *dataRecordingHost) RevealSecret(context.Context, string) (string, error) { return "", nil }
 func (h *dataRecordingHost) EmitEvent(context.Context, string, map[string]any) error {
 	return nil

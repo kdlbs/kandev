@@ -54,6 +54,13 @@ service Host {
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
 
+  // The plugin's own operator-editable config (Settings > Plugins > <plugin>,
+  // driven by the manifest's config_schema). Ungated; secret values arrive
+  // in cleartext — this RPC is how an operator-configured credential (e.g. a
+  // PAT) reaches the plugin. kandev restarts a running plugin on config
+  // change, so reading config at startup is sufficient.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+
   // Host data API (ADR 0043, §3a below) — reads, capability api_read:<resource>.
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
   rpc GetTask(GetTaskRequest) returns (Task);
@@ -111,6 +118,9 @@ message DeleteStateResponse {}
 message ListStateRequest { string scope = 1; string scope_id = 2; }
 message ListStateResponse { repeated StateEntry entries = 1; }
 message StateEntry { string key = 1; google.protobuf.Struct value = 2; string updated_at = 3; }
+
+message GetConfigRequest {}
+message GetConfigResponse { google.protobuf.Struct config = 1; }
 
 message RevealSecretRequest { string ref = 1; }
 message RevealSecretResponse { string value = 1; }
@@ -222,6 +232,7 @@ type Plugin interface {
 }
 type Host interface {                                        // injected before Serve returns
     GetState/SetState/DeleteState/ListState(...)
+    GetConfig(ctx) (map[string]any, error)                   // own operator config, cleartext
     RevealSecret(ctx, ref string) (string, error)
     EmitEvent(ctx, name string, payload map[string]any) error
 

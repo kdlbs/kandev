@@ -44,6 +44,11 @@ type pluginHost struct {
 	secrets SecretRevealer
 	bus     bus.EventBus
 
+	// configs reads the plugin's operator-editable config for the ungated
+	// GetConfig RPC. Satisfied by store.Store; nil in tests that build a
+	// pluginHost without one (GetConfig then returns an empty map).
+	configs configReader
+
 	// Host data API (ADR 0043) service-layer dependencies, wired by
 	// Service.hostForPlugin from Service.SetDataSources. See host_data.go.
 	taskData         taskDataSource
@@ -125,6 +130,30 @@ func (h *pluginHost) ListState(ctx context.Context, scope, scopeID string) ([]pl
 		}
 	}
 	return out, nil
+}
+
+// configReader is the narrow slice of store.Store pluginHost needs for the
+// GetConfig RPC.
+type configReader interface {
+	GetConfig(id string) (map[string]any, error)
+}
+
+// GetConfig returns the plugin's own operator-editable config, secret values
+// included — this RPC is how a configured credential (e.g. a PAT) reaches
+// the plugin process. Ungated: it is the plugin's own config, set by the
+// operator specifically for it.
+func (h *pluginHost) GetConfig(_ context.Context) (map[string]any, error) {
+	if h.configs == nil {
+		return map[string]any{}, nil
+	}
+	config, err := h.configs.GetConfig(h.pluginID)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		config = map[string]any{}
+	}
+	return config, nil
 }
 
 func (h *pluginHost) RevealSecret(ctx context.Context, ref string) (string, error) {

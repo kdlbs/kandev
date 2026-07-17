@@ -48,6 +48,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	api.GET("", ctrl.list)
 	api.GET("/tools", ctrl.listTools)
 	api.GET("/:id", ctrl.get)
+	api.GET("/:id/config", ctrl.getConfig)
 	api.PATCH("/:id", ctrl.updateConfig)
 	api.DELETE("/:id", ctrl.uninstall)
 	api.POST("/:id/enable", ctrl.enable)
@@ -155,6 +156,18 @@ func (c *Controller) get(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, record)
 }
 
+// getConfig serves GET /api/plugins/:id/config: the stored operator config
+// with secret values (per the manifest's config_schema) masked — cleartext
+// secrets never leave the backend on this surface.
+func (c *Controller) getConfig(ctx *gin.Context) {
+	config, err := c.svc.GetMaskedConfig(ctx.Param("id"))
+	if err != nil {
+		c.writeLookupError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"config": config})
+}
+
 func (c *Controller) updateConfig(ctx *gin.Context) {
 	var req UpdateConfigRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -162,6 +175,10 @@ func (c *Controller) updateConfig(ctx *gin.Context) {
 		return
 	}
 	if err := c.svc.UpdateConfig(ctx.Param("id"), req.Config); err != nil {
+		if errors.Is(err, ErrConfigInvalid) {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		c.writeLookupError(ctx, err)
 		return
 	}

@@ -213,7 +213,8 @@ POST   /api/plugins/install           # Install a plugin: JSON {"url": "..."} or
 POST   /api/plugins/sync              # Reconcile the registry with the plugins directory on disk
 GET    /api/plugins                    # List installed plugins
 GET    /api/plugins/{id}              # Get plugin detail
-PATCH  /api/plugins/{id}              # Update plugin config
+GET    /api/plugins/{id}/config       # Stored operator config; secret values masked
+PATCH  /api/plugins/{id}              # Update plugin config (masked secrets keep stored values; restarts a running plugin)
 DELETE /api/plugins/{id}              # Uninstall plugin (stops subprocess, removes package + state)
 POST   /api/plugins/{id}/enable
 POST   /api/plugins/{id}/disable

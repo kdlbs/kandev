@@ -44,6 +44,13 @@ service Host {
   rpc RevealSecret(RevealSecretRequest) returns (RevealSecretResponse);
   rpc EmitEvent(EmitEventRequest) returns (EmitEventResponse);
 
+  // GetConfig returns the plugin's own operator-editable config (the values
+  // set in Settings > Plugins > <plugin> against the manifest's
+  // config_schema). Ungated: a plugin can always read its own config, secret
+  // values included — that is how e.g. an operator-configured PAT reaches
+  // the plugin.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+
   // Reads — capability api_read:<resource>
   rpc ListTasks(ListTasksRequest) returns (ListTasksResponse);
   rpc GetTask(GetTaskRequest) returns (GetTaskResponse);
@@ -142,6 +149,11 @@ message StateEntry {
   string key = 1;
   google.protobuf.Struct value = 2;
   string updated_at = 3;
+}
+
+message GetConfigRequest {}
+message GetConfigResponse {
+  google.protobuf.Struct config = 1;
 }
 
 message RevealSecretRequest {

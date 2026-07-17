@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	deliveriesFileName = "deliveries.jsonl"
-	webhooksFileName   = "webhooks.jsonl"
+	deliveriesFileName     = "deliveries.jsonl"
+	webhooksFileName       = "webhooks.jsonl"
+	configSnapshotFileName = "config.json"
 
 	toolNameEcho = "echo"
 )
@@ -123,14 +124,38 @@ func (p *fixturePlugin) InvokeTool(_ context.Context, req *pluginsdk.ToolRequest
 	return &pluginsdk.ToolResponse{Output: req.Input}, nil
 }
 
-// HandleWebhook appends a webhooks.jsonl line recording the delivery, and
-// responds 200 "ok".
-func (p *fixturePlugin) HandleWebhook(_ context.Context, req *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error) {
+// HandleWebhook appends a webhooks.jsonl line recording the delivery,
+// best-effort snapshots the plugin's current operator config to
+// config.json (evidence for e2e that the Host GetConfig RPC delivers the
+// values set in Settings > Plugins, secrets in cleartext), and responds
+// 200 "ok".
+func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error) {
 	rec := webhookRecord{WebhookKey: req.WebhookKey, Method: req.Method}
 	if err := appendJSONLine(filepath.Join(p.dataDir, webhooksFileName), rec); err != nil {
 		return nil, err
 	}
+	p.snapshotConfigBestEffort(ctx)
 	return &pluginsdk.WebhookResponse{Status: 200, Body: []byte("ok")}, nil
+}
+
+// snapshotConfigBestEffort writes the current Host.GetConfig result to
+// config.json (overwriting any previous snapshot). Errors — including "no
+// Host injected yet" — are silently ignored: like recordLastEventBestEffort,
+// this exists purely as e2e coverage of the Host round trip.
+func (p *fixturePlugin) snapshotConfigBestEffort(ctx context.Context) {
+	host := p.Host()
+	if host == nil {
+		return
+	}
+	config, err := host.GetConfig(ctx)
+	if err != nil {
+		return
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(p.dataDir, configSnapshotFileName), data, 0o600)
 }
 
 // appendJSONLine marshals v to a single JSON line and appends it to path,

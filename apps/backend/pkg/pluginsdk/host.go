@@ -48,6 +48,14 @@ type Host interface {
 	// ListState returns every state entry for a scope/scopeID pair.
 	ListState(ctx context.Context, scope, scopeID string) ([]StateEntry, error)
 
+	// GetConfig returns the plugin's own operator-editable config: the
+	// values set in kandev's Settings > Plugins > <plugin> page against the
+	// manifest's config_schema. Returns an empty (non-nil) map when no
+	// config has been set yet. Ungated — a plugin can always read its own
+	// config, secret values included. Plugins should re-read config at
+	// startup: kandev restarts a running plugin when its config changes.
+	GetConfig(ctx context.Context) (map[string]any, error)
+
 	// RevealSecret resolves a secret reference to its cleartext value.
 	RevealSecret(ctx context.Context, ref string) (string, error)
 
@@ -177,6 +185,21 @@ func (h *grpcHostClient) ListState(ctx context.Context, scope, scopeID string) (
 		return nil, err
 	}
 	return stateEntriesFromProto(resp.GetEntries())
+}
+
+func (h *grpcHostClient) GetConfig(ctx context.Context) (map[string]any, error) {
+	resp, err := h.client.GetConfig(ctx, &pluginv1.GetConfigRequest{})
+	if err != nil {
+		return nil, err
+	}
+	config, err := structToMap(resp.GetConfig())
+	if err != nil {
+		return nil, err
+	}
+	if config == nil {
+		config = map[string]any{}
+	}
+	return config, nil
 }
 
 func (h *grpcHostClient) RevealSecret(ctx context.Context, ref string) (string, error) {
@@ -384,6 +407,18 @@ func (s *grpcHostServer) ListState(ctx context.Context, req *pluginv1.ListStateR
 		protoEntries[i] = converted
 	}
 	return &pluginv1.ListStateResponse{Entries: protoEntries}, nil
+}
+
+func (s *grpcHostServer) GetConfig(ctx context.Context, req *pluginv1.GetConfigRequest) (*pluginv1.GetConfigResponse, error) {
+	config, err := s.impl.GetConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+	protoConfig, err := mapToStruct(config)
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.GetConfigResponse{Config: protoConfig}, nil
 }
 
 func (s *grpcHostServer) RevealSecret(ctx context.Context, req *pluginv1.RevealSecretRequest) (*pluginv1.RevealSecretResponse, error) {

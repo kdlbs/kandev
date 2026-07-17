@@ -297,6 +297,7 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		state:            s.state,
 		secrets:          s.secrets,
 		bus:              s.eventBus,
+		configs:          s.store,
 		taskData:         s.taskData,
 		workflows:        s.workflows,
 		workflowSteps:    s.workflowSteps,
@@ -331,16 +332,71 @@ func (s *Service) Get(id string) (*store.Record, error) {
 	return rec, nil
 }
 
-// UpdateConfig replaces the operator-editable config for id.
+// UpdateConfig replaces the operator-editable config for id. Incoming
+// secret fields carrying the mask placeholder keep their stored value
+// (mergeMaskedSecrets), the result is validated against the manifest's
+// config_schema (ErrConfigInvalid on mismatch, mapped to 400 by the HTTP
+// layer), and a currently-running plugin is restarted so the new config
+// takes effect — hostForPlugin rebuilds the Host per spawn, and plugins
+// read config at startup via the Host GetConfig RPC.
 func (s *Service) UpdateConfig(id string, config map[string]any) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
 	defer lock.Unlock()
 
-	if _, err := s.Get(id); err != nil {
+	rec, err := s.Get(id)
+	if err != nil {
 		return err
 	}
-	return s.store.SetConfig(id, config)
+	existing, err := s.store.GetConfig(id)
+	if err != nil {
+		return err
+	}
+	merged := mergeMaskedSecrets(config, existing, rec.ConfigSchema)
+	if err := validateConfigSchema(merged, rec.ConfigSchema); err != nil {
+		return err
+	}
+	if err := s.store.SetConfig(id, merged); err != nil {
+		return err
+	}
+	return s.restartForConfigChange(rec)
+}
+
+// GetMaskedConfig returns id's stored config with secret values (per the
+// manifest's config_schema) replaced by the mask placeholder — the shape
+// the operator settings UI is allowed to see.
+func (s *Service) GetMaskedConfig(id string) (map[string]any, error) {
+	rec, err := s.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	config, err := s.store.GetConfig(id)
+	if err != nil {
+		return nil, err
+	}
+	return maskSecrets(config, rec.ConfigSchema), nil
+}
+
+// restartForConfigChange bounces id's process after a config write so the
+// plugin re-reads its config on the fresh spawn. A plugin that is not
+// running (disabled, errored, or no runtime wired) is left alone — it will
+// pick the config up on its next spawn anyway. The config is already
+// persisted by the time this runs; a restart failure transitions the plugin
+// to StatusError and is returned so the operator sees that the save
+// succeeded but the plugin did not come back up.
+func (s *Service) restartForConfigChange(rec *store.Record) error {
+	if s.runtime == nil || !s.runtime.Running(rec.ID) {
+		return nil
+	}
+	s.runtime.Stop(rec.ID)
+	ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
+	defer cancel()
+	if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
+		_ = s.SetStatus(rec.ID, StatusError)
+		s.notifyDeliverer()
+		return fmt.Errorf("plugins: config saved but restart of %q failed: %w", rec.ID, err)
+	}
+	return nil
 }
 
 // Install verifies and extracts r (a tar.gz plugin package) via pkgtar into
