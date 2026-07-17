@@ -270,9 +270,9 @@ func TestEnsureRoutineWorkflow_HealsExistingWorkflowVisibility(t *testing.T) {
 
 	_, err := repo.db.ExecContext(ctx, `
 		INSERT INTO workflows (
-			id, workspace_id, name, workflow_template_id, hidden, created_at, updated_at
+			id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
 		) VALUES (
-			'stale-routine', 'ws-1', 'Routine', 'routine', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+			'stale-routine', 'ws-1', 'Routine', 'routine', 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
 		)
 	`)
 	if err != nil {
@@ -287,6 +287,38 @@ func TestEnsureRoutineWorkflow_HealsExistingWorkflowVisibility(t *testing.T) {
 		t.Fatalf("EnsureRoutineWorkflow() id = %q, want stale-routine", id)
 	}
 	assertBuiltinWorkflowHidden(t, repo, id)
+}
+
+func TestEnsureRoutineWorkflow_KeepsUserWorkflowVisible(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO workflows (
+			id, workspace_id, name, workflow_template_id, is_system, hidden, created_at, updated_at
+		) VALUES (
+			'user-routine', 'ws-1', 'My Routine', 'routine', 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		t.Fatalf("insert user routine workflow: %v", err)
+	}
+
+	id, err := repo.EnsureRoutineWorkflow(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("ensure routine: %v", err)
+	}
+	if id == "user-routine" {
+		t.Fatal("EnsureRoutineWorkflow() reused a user workflow")
+	}
+
+	var hidden int
+	if err := repo.db.QueryRowContext(ctx, `SELECT hidden FROM workflows WHERE id = 'user-routine'`).Scan(&hidden); err != nil {
+		t.Fatalf("query user routine visibility: %v", err)
+	}
+	if hidden != 0 {
+		t.Errorf("user routine hidden = %d, want 0", hidden)
+	}
 }
 
 func TestRepositoryInitialization_HealsBuiltinWorkflowVisibility(t *testing.T) {

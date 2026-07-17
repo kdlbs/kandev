@@ -347,13 +347,13 @@ func (r *Repository) ensureBuiltinWorkflow(ctx context.Context, workspaceID, tem
 	if err != nil {
 		return "", err
 	}
-	existing, err := r.findWorkflowByTemplate(ctx, workspaceID, templateID)
+	existing, err := r.findBuiltinWorkflowByTemplate(ctx, workspaceID, templateID)
 	if err != nil {
 		return "", err
 	}
 	if existing != "" {
 		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
-			UPDATE workflows SET hidden = ? WHERE id = ?
+			UPDATE workflows SET hidden = ? WHERE id = ? AND is_system = 1
 		`), dialect.BoolToInt(tmpl.Hidden), existing); err != nil {
 			return "", fmt.Errorf("update builtin workflow visibility: %w", err)
 		}
@@ -362,13 +362,13 @@ func (r *Repository) ensureBuiltinWorkflow(ctx context.Context, workspaceID, tem
 	return r.createWorkflowFromTemplate(ctx, workspaceID, name, description, tmpl)
 }
 
-// findWorkflowByTemplate returns the workflow id in workspaceID with the
-// given workflow_template_id, or empty string when none exists.
-func (r *Repository) findWorkflowByTemplate(ctx context.Context, workspaceID, templateID string) (string, error) {
+// findBuiltinWorkflowByTemplate returns the system workflow id in workspaceID
+// with the given workflow_template_id, or empty string when none exists.
+func (r *Repository) findBuiltinWorkflowByTemplate(ctx context.Context, workspaceID, templateID string) (string, error) {
 	var id string
 	err := r.db.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT id FROM workflows
-		WHERE workspace_id = ? AND workflow_template_id = ?
+		WHERE workspace_id = ? AND workflow_template_id = ? AND is_system = 1
 		LIMIT 1
 	`), workspaceID, templateID).Scan(&id)
 	if err == sql.ErrNoRows {
