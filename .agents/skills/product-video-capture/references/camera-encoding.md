@@ -56,6 +56,11 @@ The camera section for a focused docs clip has this shape; add story keyframes b
   "durationMs": 8000,
   "formFactor": "docs",
   "loopFrame": "focused",
+  "pointerSafeMargin": 0.08,
+  "pointerTrack": [
+    { "tMs": 0, "x": 0.48, "y": 0.46 },
+    { "tMs": 8000, "x": 0.48, "y": 0.46 }
+  ],
   "keyframes": [
     { "tMs": 0, "zoom": 1.5, "x": 0.48, "y": 0.46 },
     // Story keyframes follow the recorded pointer journey.
