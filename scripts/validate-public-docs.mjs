@@ -398,10 +398,10 @@ function resolveInside(root, relativePath, label) {
 }
 
 /**
- * Check whether a filesystem target is accessible.
+ * Check whether a filesystem target exists.
  *
  * @param {string} target Absolute filesystem path.
- * @returns {Promise<boolean>} Whether the target can be accessed.
+ * @returns {Promise<boolean>} Whether the target exists.
  */
 async function pathExists(target) {
   try {
