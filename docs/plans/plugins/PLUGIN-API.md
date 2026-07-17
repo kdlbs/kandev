@@ -82,7 +82,11 @@ fine.
 // icon: curated icon name (apps/web/lib/plugins/icons.ts — "ticket", "chart",
 // "robot", "database", ...); unknown/missing names render a puzzle glyph in
 // the sidebar.
-interface NavItem { id: string; label: string; path: string; icon?: string; section?: "main" | "settings"; }
+// section: "main" (default) renders as a top-level sidebar entry;
+// "integrations" renders inside the sidebar's Integrations section alongside
+// the first-party integration links (GitHub, Jira, ...). Hosts predating a
+// section value simply don't render items targeting it (additive change).
+interface NavItem { id: string; label: string; path: string; icon?: string; section?: "main" | "settings" | "integrations"; }
 
 // Configuration for the kandev-style title bar the host renders above a plugin
 // route. All fields optional; defaults are derived (see registerRoute below).

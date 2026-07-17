@@ -40,6 +40,27 @@ vi.mock("@/components/integrations/integrations-menu", () => ({
   useConfiguredIntegrationLinks: linksMock,
 }));
 
+const pluginsMock = vi.hoisted(() => ({
+  enabled: true,
+  navItems: [] as Array<{
+    id: string;
+    label: string;
+    path: string;
+    icon?: string;
+    section?: string;
+  }>,
+}));
+
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => pluginsMock.enabled,
+}));
+
+vi.mock("@/lib/plugins/registry", () => ({
+  usePluginRegistry: () => ({
+    getNavItems: () => pluginsMock.navItems,
+  }),
+}));
+
 vi.mock("@kandev/ui/collapsible", () => ({
   Collapsible: ({ children, open }: { children: ReactNode; open?: boolean }) => {
     collapsibleMock.open = !!open;
@@ -69,6 +90,8 @@ describe("IntegrationsSection", () => {
       { id: "github", label: "GitHub", href: "/github" },
       { id: "jira", label: "Jira", href: "/jira" },
     ]);
+    pluginsMock.enabled = true;
+    pluginsMock.navItems = [];
   });
 
   afterEach(() => cleanup());
@@ -114,5 +137,49 @@ describe("IntegrationsSection", () => {
 
     expect(screen.getAllByTestId("integration-header-shortcut")).toHaveLength(4);
     expect(screen.getByRole("link", { name: "Sentry" })).toBeTruthy();
+  });
+
+  const costPerModelItem = {
+    id: "cost-per-model",
+    label: "Cost per Model",
+    path: "/cost-per-model",
+    icon: "chart",
+    section: "integrations",
+  };
+  const costPerModelTestId = `plugin-nav-item-${costPerModelItem.id}`;
+
+  it("renders plugin nav items registered with section integrations after the first-party links", () => {
+    storeState.appSidebar.sectionExpanded.integrations = true;
+    pluginsMock.navItems = [
+      costPerModelItem,
+      { id: "hello", label: "Hello", path: "/hello", section: "main" },
+    ];
+
+    renderSection();
+
+    const pluginRow = screen.getByTestId(costPerModelTestId);
+    expect(pluginRow.getAttribute("href")).toBe(costPerModelItem.path);
+    expect(screen.queryByRole("link", { name: "Hello" })).toBeNull();
+  });
+
+  it("shows the section when only plugin integration items exist", () => {
+    storeState.appSidebar.sectionExpanded.integrations = true;
+    linksMock.mockReturnValue([]);
+    pluginsMock.navItems = [costPerModelItem];
+
+    renderSection();
+
+    expect(screen.getByTestId(costPerModelTestId)).toBeTruthy();
+  });
+
+  it("hides plugin items (and an otherwise empty section) when the plugins feature is off", () => {
+    storeState.appSidebar.sectionExpanded.integrations = true;
+    linksMock.mockReturnValue([]);
+    pluginsMock.enabled = false;
+    pluginsMock.navItems = [costPerModelItem];
+
+    const { container } = renderSection();
+
+    expect(container.textContent).toBe("");
   });
 });
