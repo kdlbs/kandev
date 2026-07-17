@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureWorkspaceWorkflows } from "@/hooks/use-workflows";
@@ -94,9 +94,11 @@ function AppSidebarNavigation({ collapsed, inOffice, settingsMode }: AppSidebarN
  * Unified app sidebar mounted at the root layout. Replaces the legacy
  * WorkspaceRail + OfficeSidebar + dockview-embedded sidebar surfaces.
  *
- * Width: w-60 expanded / w-14 collapsed, smooth 300ms transition. Desktop-only
- * (`hidden md:flex`) — mobile surfaces carry their own nav (mobile headers and
- * menu sheets), so the global rail never overlays mobile content.
+ * Width: at least 320px expanded (user-resizable) / 56px collapsed. The flex
+ * reservation snaps between states so the workbench performs one layout pass,
+ * while the absolutely-positioned visual panel keeps the 300ms width animation.
+ * Desktop-only (`hidden md:block`) — mobile surfaces carry their own nav (mobile
+ * headers and menu sheets), so the global rail never overlays mobile content.
  */
 export function AppSidebar() {
   const collapsed = useAppStore((s) => s.appSidebar.collapsed);
@@ -110,6 +112,7 @@ export function AppSidebar() {
   const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
   const inOffice = useInOffice();
+  const [isResizing, setIsResizing] = useState(false);
 
   // Keep `state.workflows.items` in sync with the active workspace at the top
   // of the always-mounted sidebar. Downstream consumers (the workspace picker,
@@ -121,6 +124,7 @@ export function AppSidebar() {
   const handleResize = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
+      setIsResizing(true);
       const startX = e.clientX;
       const startWidth = storedWidth;
       const maxWidth = Math.floor(window.innerWidth * 0.3);
@@ -133,6 +137,7 @@ export function AppSidebar() {
         setWidth(next);
       };
       const onUp = () => {
+        setIsResizing(false);
         window.removeEventListener("mousemove", onMove);
         window.removeEventListener("mouseup", onUp);
       };
@@ -143,6 +148,7 @@ export function AppSidebar() {
   );
 
   const expandedWidth = Math.max(APP_SIDEBAR_EXPANDED_WIDTH, storedWidth);
+  const targetWidth = collapsed ? APP_SIDEBAR_COLLAPSED_WIDTH : expandedWidth;
   const settingsModeTogglePathnameRef = useRef<string | null>(null);
 
   const handleToggleSettingsMode = useCallback(() => {
@@ -183,29 +189,38 @@ export function AppSidebar() {
   }, [pathname]);
 
   return (
-    <aside
-      data-testid="app-sidebar"
-      data-collapsed={collapsed ? "true" : "false"}
-      className={cn(
-        // Desktop-only: mobile uses its own per-surface nav (mobile headers +
-        // menu sheets), so the global rail is hidden below md to avoid an
-        // always-on overlay covering page content. `md:relative` anchors the
-        // absolute resize handle.
-        "h-full min-h-0 border-r border-border bg-background hidden md:flex flex-col shrink-0",
-        "md:relative",
-        // Animate only the width: `transition-all` makes the browser watch
-        // every animatable property, and any incidental property change on the
-        // aside (border, background) would also animate during open/close.
-        "transition-[width] duration-300 ease-out",
-      )}
-      style={{
-        width: collapsed ? APP_SIDEBAR_COLLAPSED_WIDTH : expandedWidth,
-      }}
+    <div
+      data-testid="app-sidebar-layout"
+      className="relative z-30 hidden h-full min-h-0 shrink-0 overflow-visible md:block"
+      style={{ width: targetWidth }}
     >
-      <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
-      <AppSidebarNavigation collapsed={collapsed} inOffice={inOffice} settingsMode={settingsMode} />
-      <AppSidebarFooter collapsed={collapsed} onToggleSettingsMode={handleToggleSettingsMode} />
-      {!collapsed && <AppSidebarResizeHandle onMouseDown={handleResize} />}
-    </aside>
+      <aside
+        data-testid="app-sidebar"
+        data-collapsed={collapsed ? "true" : "false"}
+        className={cn(
+          "absolute inset-y-0 left-0 flex min-h-0 flex-col border-r border-border bg-background",
+          // The panel is outside root flex flow, so its transition cannot make
+          // the workbench or Dockview reflow on intermediate animation frames.
+          isResizing
+            ? "transition-none"
+            : "transition-[width] duration-300 ease-out motion-reduce:transition-none",
+        )}
+        style={{ width: targetWidth }}
+      >
+        <div
+          data-testid="app-sidebar-content"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
+          <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
+          <AppSidebarNavigation
+            collapsed={collapsed}
+            inOffice={inOffice}
+            settingsMode={settingsMode}
+          />
+          <AppSidebarFooter collapsed={collapsed} onToggleSettingsMode={handleToggleSettingsMode} />
+        </div>
+        {!collapsed && <AppSidebarResizeHandle onMouseDown={handleResize} />}
+      </aside>
+    </div>
   );
 }

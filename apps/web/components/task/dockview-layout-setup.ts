@@ -227,18 +227,31 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
   const parent = dv?.parentElement;
   if (!parent) return () => {};
   const ro = new ResizeObserver(() => {
-    const w = parent.clientWidth;
-    const h = parent.clientHeight;
-    if (w <= 0 || h <= 0) return;
-    if (w === api.width && h === api.height) return;
-    api.layout(w, h);
-    // Dockview's direct `api.layout` path does not consistently emit
-    // `onDidLayoutChange`, so enforce immediately after the proportional
-    // rebalance instead of relying on the subscription above.
-    enforcePinnedTargets(api);
+    syncDockviewContainerSize(api, parent);
   });
   ro.observe(parent);
   return () => ro.disconnect();
+}
+
+/**
+ * Synchronize Dockview to its live container immediately.
+ *
+ * ResizeObserver normally owns this. Root-layout changes also call it from a
+ * React layout effect so stale group coordinates cannot reach a painted frame.
+ */
+export function syncDockviewContainerSize(
+  api: DockviewReadyEvent["api"],
+  container: HTMLElement,
+): void {
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+  if (width <= 0 || height <= 0) return;
+  if (width === api.width && height === api.height) return;
+  api.layout(width, height);
+  // Dockview's direct `api.layout` path does not consistently emit
+  // `onDidLayoutChange`, so enforce immediately after the proportional
+  // rebalance instead of relying on the subscription above.
+  enforcePinnedTargets(api);
 }
 
 export function setupGroupTracking(api: DockviewReadyEvent["api"]): () => void {
