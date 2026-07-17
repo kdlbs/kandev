@@ -329,7 +329,9 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // separate DB rows mid-sentence, breaking markdown that spans the boundary.
 func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
 	if event.ParentToolCallID == "" {
-		event = m.flushBufferIntoEvent(execution, event)
+		// flushMessageBuffer publishes any remaining buffered content through
+		// the streaming path itself and always returns "".
+		m.flushMessageBuffer(execution)
 	}
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 		if err := m.historyManager.AppendToolCall(execution.SessionID, event); err != nil {
@@ -340,22 +342,6 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 		zap.String("execution_id", execution.ID),
 		zap.String("tool_call_id", event.ToolCallID),
 		zap.String("tool_name", event.ToolName))
-	return event
-}
-
-// flushBufferIntoEvent flushes the streaming message buffer and, when it held
-// remaining text, carries that text on the event and stores it in session history.
-func (m *Manager) flushBufferIntoEvent(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
-	flushedText := m.flushMessageBuffer(execution)
-	if flushedText == "" {
-		return event
-	}
-	event.Text = flushedText
-	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
-		if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
-			m.logger.Warn("failed to store agent message to history", zap.Error(err))
-		}
-	}
 	return event
 }
 
