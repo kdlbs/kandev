@@ -81,13 +81,14 @@ function MobileDisplaySelects({
       <div className={mobileFieldClass}>
         <label className={mobileFieldLabelClass}>Workflow</label>
         <Select
-          value={activeWorkflowId ?? ""}
-          onValueChange={(value) => onWorkflowChange(value || null)}
+          value={activeWorkflowId ?? "all"}
+          onValueChange={(value) => onWorkflowChange(value === "all" ? null : value)}
         >
           <SelectTrigger className={mobileControlClass}>
-            <SelectValue placeholder="Select workflow" />
+            <SelectValue placeholder="All workflows" />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value="all">All workflows</SelectItem>
             {workflows.map((workflow: WorkflowsState["items"][number]) => (
               <SelectItem key={workflow.id} value={workflow.id}>
                 {workflow.name}

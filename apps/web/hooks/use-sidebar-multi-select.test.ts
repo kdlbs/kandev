@@ -6,6 +6,7 @@ const deleteTaskById = vi.fn();
 const archiveAndSwitch = vi.fn();
 const removeTaskFromBoard = vi.fn();
 const removeTasksFromStore = vi.fn();
+const getWorkflowIdForTask = vi.fn();
 const moveTasks = vi.fn();
 const toast = vi.fn();
 let activeTaskId: string | null = null;
@@ -24,7 +25,10 @@ vi.mock("@/components/state-provider", () => ({
 }));
 vi.mock("./use-task-multi-select", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./use-task-multi-select")>();
-  return { ...actual, useTaskMultiSelectStore: () => ({ removeTasksFromStore }) };
+  return {
+    ...actual,
+    useTaskMultiSelectStore: () => ({ getWorkflowIdForTask, removeTasksFromStore }),
+  };
 });
 
 import { useSidebarMultiSelect } from "./use-sidebar-multi-select";
@@ -36,6 +40,7 @@ beforeEach(() => {
   archiveAndSwitch.mockReset().mockResolvedValue(undefined);
   removeTaskFromBoard.mockReset().mockResolvedValue(undefined);
   removeTasksFromStore.mockReset();
+  getWorkflowIdForTask.mockReset().mockReturnValue("wf1");
   moveTasks.mockReset().mockResolvedValue(undefined);
   toast.mockReset();
 });
@@ -176,14 +181,27 @@ describe("useSidebarMultiSelect — bulk actions", () => {
       expect.objectContaining({ wasActiveTaskId: "a" }),
     );
   });
+});
 
-  it("bulkMove clears the selection on success", async () => {
+describe("useSidebarMultiSelect — bulk move", () => {
+  it("bulkMove classifies a same-workflow target as a step move", async () => {
     const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
     act(() => result.current.toggleSelect("a"));
     await act(async () => {
       await result.current.bulkMove(["a"], "wf1", "s1");
     });
-    expect(moveTasks).toHaveBeenCalledWith(["a"], "wf1", "s1");
+    expect(moveTasks).toHaveBeenCalledWith(["a"], "wf1", "s1", "step");
+    expect(result.current.selectedIds.size).toBe(0);
+  });
+
+  it("bulkMove classifies a cross-workflow target as a workflow move", async () => {
+    getWorkflowIdForTask.mockReturnValue("wf2");
+    const { result } = renderHook(() => useSidebarMultiSelect("ws1"));
+    act(() => result.current.toggleSelect("a"));
+    await act(async () => {
+      await result.current.bulkMove(["a"], "wf1", "s1");
+    });
+    expect(moveTasks).toHaveBeenCalledWith(["a"], "wf1", "s1", "workflow");
     expect(result.current.selectedIds.size).toBe(0);
   });
 

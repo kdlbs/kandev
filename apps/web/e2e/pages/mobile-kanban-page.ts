@@ -8,6 +8,8 @@ export class MobileKanbanPage {
   readonly mobileMenuButton: Locator;
   readonly mobileTaskSheet: Locator;
   readonly swimlaneContainer: Locator;
+  readonly workflowTrigger: Locator;
+  readonly stepTrigger: Locator;
 
   constructor(private page: Page) {
     this.board = page.getByTestId("kanban-board");
@@ -17,6 +19,8 @@ export class MobileKanbanPage {
     this.mobileMenuButton = page.getByRole("button", { name: "Open menu" });
     this.mobileTaskSheet = page.getByTestId("mobile-task-sheet");
     this.swimlaneContainer = page.getByTestId("swimlane-container");
+    this.workflowTrigger = page.getByTestId("mobile-workflow-trigger");
+    this.stepTrigger = page.getByTestId("mobile-step-trigger");
   }
 
   async goto() {
@@ -32,6 +36,10 @@ export class MobileKanbanPage {
 
   columnTab(name: string): Locator {
     return this.page.getByRole("button", { name });
+  }
+
+  workflowItem(workflowId: string): Locator {
+    return this.page.getByTestId(`mobile-workflow-item-${workflowId}`);
   }
 
   taskCard(taskId: string): Locator {

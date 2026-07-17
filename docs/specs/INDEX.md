@@ -110,6 +110,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [review-file-status](ui/review-file-status.md) | building |
 | [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
+| [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

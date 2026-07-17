@@ -225,7 +225,10 @@ function MobileKanbanLayout({
   const currentStepId = steps[activeIndex]?.id ?? null;
 
   return (
-    <div className="flex flex-col min-h-0" data-testid="mobile-kanban-layout">
+    <div
+      className="flex h-full min-h-0 flex-col overflow-hidden"
+      data-testid="mobile-kanban-layout"
+    >
       <MobileColumnTabs
         steps={steps}
         activeIndex={activeIndex}

@@ -112,8 +112,13 @@ function useKanbanCardMoveMenuActions({
   const moveTasks = useTaskWorkflowMove();
   const { sortByDisplayOrder, getWorkflowIdForTask } = useTaskMultiSelectStore();
 
-  const runMoveTasks = (taskIds: string[], workflowId: string, stepId: string) => {
-    void moveTasks(taskIds, workflowId, stepId).catch(() => {
+  const runMoveTasks = (
+    taskIds: string[],
+    workflowId: string,
+    stepId: string,
+    destination: "step" | "workflow",
+  ) => {
+    void moveTasks(taskIds, workflowId, stepId, destination).catch(() => {
       // useTaskWorkflowMove already shows the failure toast.
     });
   };
@@ -123,7 +128,7 @@ function useKanbanCardMoveMenuActions({
       return;
     }
     if (moveTargets.currentWorkflowId) {
-      runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId);
+      runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId, "step");
     }
   };
   const selectedTaskIds = isSelected && selectedIds?.size ? [...selectedIds] : [task.id];
@@ -137,7 +142,7 @@ function useKanbanCardMoveMenuActions({
       return;
     }
     if (!moveTargets.currentWorkflowId) return;
-    runMoveTasks(orderedSelectedIds(), moveTargets.currentWorkflowId, stepId);
+    runMoveTasks(orderedSelectedIds(), moveTargets.currentWorkflowId, stepId, "step");
   };
 
   return {
@@ -145,10 +150,10 @@ function useKanbanCardMoveMenuActions({
     moveToStepFromDropdown,
     moveSelectedToStep: isMixedWorkflowSelection ? undefined : moveSelectedToStep,
     sendTaskToWorkflow: (workflowId: string, stepId: string) => {
-      runMoveTasks([task.id], workflowId, stepId);
+      runMoveTasks([task.id], workflowId, stepId, "workflow");
     },
     sendSelectionToWorkflow: (workflowId: string, stepId: string) => {
-      runMoveTasks(orderedSelectedIds(), workflowId, stepId);
+      runMoveTasks(orderedSelectedIds(), workflowId, stepId, "workflow");
     },
   };
 }

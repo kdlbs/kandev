@@ -100,7 +100,6 @@ export function TaskItemWithContextMenu({
   const [contextOpen, setContextOpen] = useState(false);
   const [menuKey, setMenuKey] = useState(0);
   const moveTasks = useTaskWorkflowMove();
-  const menuOpen = contextOpen || isDeleting === true;
   const closeMenu = () => {
     setContextOpen(false);
     setMenuKey((k) => k + 1);
@@ -109,7 +108,7 @@ export function TaskItemWithContextMenu({
   return (
     <ContextMenu key={menuKey} onOpenChange={setContextOpen}>
       <ContextMenuTrigger asChild>
-        <div>{cloneWithMenuOpen(children, menuOpen)}</div>
+        <div>{cloneWithMenuOpen(children, contextOpen)}</div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
         <TaskContextMenuItems
@@ -476,7 +475,8 @@ function TaskMoveItems({
       onBulkMove(actingIds, targetWorkflowId, stepId);
       return;
     }
-    void moveTasks(actingIds, targetWorkflowId, stepId).catch(() => {
+    const destination = targetWorkflowId === workflowId ? "step" : "workflow";
+    void moveTasks(actingIds, targetWorkflowId, stepId, destination).catch(() => {
       // useTaskWorkflowMove already shows the failure toast.
     });
   };
@@ -490,7 +490,16 @@ function TaskMoveItems({
       ? undefined
       : (stepId) => runSelectionMove(workflowId, stepId);
   } else {
-    moveToStep = selectMoveAction(task.id, workflowId, onMoveToStep, closeMenu);
+    moveToStep = (stepId) => {
+      closeMenu();
+      if (onMoveToStep) {
+        onMoveToStep(task.id, workflowId, stepId);
+        return;
+      }
+      void moveTasks([task.id], workflowId, stepId, "step").catch(() => {
+        // useTaskWorkflowMove already shows the failure toast.
+      });
+    };
   }
 
   return (
@@ -516,19 +525,6 @@ function TaskMoveItems({
       }}
     />
   );
-}
-
-function selectMoveAction(
-  taskId: string,
-  workflowId: string,
-  handler: ((taskId: string, workflowId: string, targetStepId: string) => void) | undefined,
-  closeMenu: () => void,
-) {
-  if (!handler) return undefined;
-  return (stepId: string) => {
-    closeMenu();
-    handler(taskId, workflowId, stepId);
-  };
 }
 
 function TaskDeleteItem({

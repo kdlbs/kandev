@@ -150,3 +150,21 @@ describe("TaskItem status icon", () => {
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
   });
 });
+
+describe("TaskItem actions", () => {
+  it("announces the task menu state", () => {
+    renderTaskItem({ menuOpen: true });
+
+    const actions = screen.getByRole("button", { name: "Task actions" });
+    expect(actions.getAttribute("aria-haspopup")).toBe("menu");
+    expect(actions.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("does not announce a closed menu as expanded while deleting", () => {
+    renderTaskItem({ isDeleting: true });
+
+    expect(screen.getByRole("button", { name: "Task actions" }).getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+  });
+});

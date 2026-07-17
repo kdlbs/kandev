@@ -109,14 +109,8 @@ export function SwipeableColumns({
 
   useEmblaIndexSync(emblaApi, activeIndex, onIndexChange);
 
-  // Use explicit height calculation for mobile since flex height inheritance doesn't work reliably
-  // 100dvh - header (~56px) - tabs (~44px) - safe area
   return (
-    <div
-      className="flex-1 min-h-0 overflow-hidden"
-      ref={emblaRef}
-      style={{ height: "calc(100dvh - 100px - env(safe-area-inset-bottom, 0px))" }}
-    >
+    <div className="flex-1 min-h-0 overflow-hidden" ref={emblaRef}>
       <div className="flex h-full touch-pan-y">
         {steps.map((step) => (
           <div

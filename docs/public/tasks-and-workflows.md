@@ -106,6 +106,8 @@ The header switches between **Kanban**, **Pipeline**, and **List**. Kanban and P
 - List page sizes are 10, 25, or 50; the default is 25.
 - Parent tasks and direct subtasks are indented as a tree.
 
+On phones, Kanban focuses one workflow and one step at a time. Use the labeled workflow and step drawers to jump directly, or use the previous/next controls and horizontal swipe to move between steps. Task action menus open as touch-sized bottom sheets; **Move to** changes a task's step within its current workflow.
+
 Regular Kanban does not currently expose label editing or label filters. Do not design a supported Kanban process around labels.
 
 ## Configure a workflow

@@ -18,11 +18,13 @@ import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "../task-delete-confirm-dialog";
+import { TaskRenameDialog } from "../task-rename-dialog";
 import { SidebarLinkDialogs } from "../task-session-sidebar-dialogs";
 import { useSidebarLinkActions } from "../task-session-sidebar-link-actions";
 import { useSidebarTaskLinking } from "../task-session-sidebar-task-linking";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
+import { useMobileTaskRename } from "./use-mobile-task-rename";
 
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
@@ -51,6 +53,7 @@ export function MobileTaskList({
   activeTaskId,
   selectedTaskId,
   onSelectTask,
+  onRenameTask,
   onArchiveTask,
   onDeleteTask,
   onLinkPullRequest,
@@ -67,6 +70,7 @@ export function MobileTaskList({
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask: (taskId: string) => void;
   onDeleteTask: (taskId: string) => Promise<void> | void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
@@ -114,6 +118,7 @@ export function MobileTaskList({
       collapsedSubtaskParentIds={collapsedSubtaskParents}
       onToggleSubtasks={toggleSubtaskCollapsed}
       onSelectTask={onSelectTask}
+      onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
       onLinkPullRequest={onLinkPullRequest}
@@ -193,6 +198,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const [dialogOpen, setDialogOpen] = useState(false);
   const data = useSheetData(workspaceId);
   const actions = useSheetActions(workspaceId, onOpenChange);
+  const rename = useMobileTaskRename();
   const linking = useMobileTaskLinking(workspaceId);
   const openQuickChat = useQuickChatLauncher(workspaceId);
   const handleQuickChat = useCallback(() => {
@@ -225,6 +231,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
             activeTaskId={data.activeTaskId}
             selectedTaskId={data.selectedTaskId}
             onSelectTask={actions.handleSelectTask}
+            onRenameTask={rename.handleRenameTask}
             onArchiveTask={actions.handleArchiveTask}
             onDeleteTask={actions.handleDeleteTask}
             {...linking.taskListHandlers}
@@ -255,6 +262,14 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         executorType={actions.archivingTask?.executorType}
         isArchiving={actions.isArchiving}
         onConfirm={({ cascade }) => actions.handleArchiveConfirm({ cascade })}
+      />
+      <TaskRenameDialog
+        open={rename.renamingTask !== null}
+        onOpenChange={(open) => {
+          if (!open) rename.setRenamingTask(null);
+        }}
+        currentTitle={rename.renamingTask?.title ?? ""}
+        onSubmit={rename.handleRenameSubmit}
       />
       <TaskDeleteConfirmDialog
         open={actions.deletingTask !== null}
