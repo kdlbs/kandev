@@ -297,6 +297,7 @@ function RemoteRepoPopoverContent({
     onPaste(trimmed);
     return true;
   };
+  const visibleUrlError = accessible.unavailable ? null : urlError;
 
   return (
     <div className="flex flex-col">
@@ -308,7 +309,17 @@ function RemoteRepoPopoverContent({
           setValue(event.target.value);
           setUrlError(null);
         }}
-        onBlur={() => commitURL(value)}
+        onBlur={(event) => {
+          const popoverContent = event.currentTarget.closest('[data-slot="popover-content"]');
+          if (
+            popoverContent &&
+            event.relatedTarget instanceof Node &&
+            popoverContent.contains(event.relatedTarget)
+          ) {
+            return;
+          }
+          commitURL(value);
+        }}
         onPaste={(event) => {
           const pasted = event.clipboardData.getData("text");
           const isURL = looksLikeURL(pasted.trim());
@@ -327,16 +338,16 @@ function RemoteRepoPopoverContent({
         }}
         placeholder="Search repositories or paste a GitHub URL"
         aria-label="Search repositories or paste a GitHub URL"
-        aria-invalid={urlError ? true : undefined}
+        aria-invalid={visibleUrlError ? true : undefined}
         data-testid="remote-repo-input"
         data-legacy-testid="remote-paste-url-input"
         className={cn(
           "h-11 sm:h-9 mx-2 mt-2 rounded-md px-2 text-xs bg-muted/30 border border-border/60",
           "outline-none focus:bg-muted focus:border-border placeholder:text-muted-foreground",
-          urlError && "border-destructive focus:border-destructive",
+          visibleUrlError && "border-destructive focus:border-destructive",
         )}
       />
-      <PickerList accessible={accessible} onPick={onPick} urlError={urlError} />
+      <PickerList accessible={accessible} onPick={onPick} urlError={visibleUrlError} />
     </div>
   );
 }

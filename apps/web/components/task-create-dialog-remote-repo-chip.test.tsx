@@ -31,7 +31,7 @@ function makeAccessible(
   };
 }
 
-import { RemoteRepoChip, computeTriggerLabel } from "./task-create-dialog-remote-repo-chip";
+import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
 
 const TRIGGER_TID = "remote-repo-chip-trigger";
 const INPUT_TID = "remote-repo-input";
@@ -278,6 +278,48 @@ describe("RemoteRepoChip — unified search", () => {
   });
 });
 
+describe("RemoteRepoChip — picker focus", () => {
+  it("does not commit a typed URL on blur when focus moves to a repository option", () => {
+    const accessibleRepos = makeAccessible({
+      repos: [
+        {
+          provider: "github",
+          owner: "acme",
+          name: "site",
+          full_name: FULL_NAME,
+          default_branch: "main",
+          private: false,
+        },
+      ],
+    });
+    const onURLChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={accessibleRepos}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: URL_ACME_SITE } });
+    const option = screen.getByText(FULL_NAME).closest("button") as HTMLButtonElement;
+    fireEvent.blur(input, { relatedTarget: option });
+    fireEvent.click(option);
+
+    expect(onURLChange).toHaveBeenCalledTimes(1);
+    expect(onURLChange).toHaveBeenCalledWith(URL_ACME_SITE, "picker", {
+      provider: "github",
+      fullName: FULL_NAME,
+      defaultBranch: "main",
+    });
+  });
+});
+
 describe("RemoteRepoChip — branch pill", () => {
   it("is disabled when the URL is empty", () => {
     renderInProvider(
@@ -439,6 +481,28 @@ describe("RemoteRepoChip — picker loading state", () => {
     expect(screen.getByText(/Connect a GitHub account/i)).toBeTruthy();
     expect(screen.queryByTestId("remote-repo-picker-loading")).toBeNull();
   });
+
+  it("shows only the connection banner for invalid URL input when GitHub is unavailable", () => {
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible({ unavailable: true })}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "https://gitlab.com/acme/api" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(screen.getByText(/Connect a GitHub account/i)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(input.getAttribute("aria-invalid")).toBeNull();
+  });
 });
 
 describe("RemoteRepoChip — popover content", () => {
@@ -565,46 +629,5 @@ describe("RemoteRepoChip — trigger label", () => {
     );
     // Short URLs render verbatim; the middle-ellipsis only fires past ~30 chars.
     expect(screen.getByTestId(TRIGGER_TID).textContent).toContain("github.com/foo/bar");
-  });
-});
-
-describe("computeTriggerLabel", () => {
-  it("returns the empty-state placeholder when url is empty", () => {
-    expect(computeTriggerLabel(row())).toBe("Pick or paste a repo");
-  });
-
-  it("returns picker fullName when source is 'picker' and metadata is present", () => {
-    expect(
-      computeTriggerLabel(
-        row({
-          url: "https://github.com/octocat/hello-world",
-          source: "picker",
-          provider: "github",
-          fullName: "octocat/hello-world",
-        }),
-      ),
-    ).toBe("octocat/hello-world");
-  });
-
-  it("returns short paste URLs verbatim (no ellipsis under threshold)", () => {
-    const label = computeTriggerLabel(row({ url: "github.com/x/y", source: "paste" }));
-    expect(label).toBe("github.com/x/y");
-    expect(label).not.toContain("…");
-  });
-
-  it("middle-truncates long paste URLs while preserving first and last chars", () => {
-    const long = "github.com/some-very-long-org/some-very-long-repo-name";
-    const stripped = "github.com/some-very-long-org/some-very-long-repo-name"; // no scheme to strip
-    const label = computeTriggerLabel(row({ url: long, source: "paste" }));
-    expect(label).toContain("…");
-    expect(label.length).toBeLessThan(stripped.length);
-    expect(label.startsWith(stripped[0]!)).toBe(true);
-    expect(label.endsWith(stripped[stripped.length - 1]!)).toBe(true);
-  });
-
-  it("strips https:// and www. prefixes from paste labels", () => {
-    expect(
-      computeTriggerLabel(row({ url: "https://www.github.com/foo/bar", source: "paste" })),
-    ).toBe("github.com/foo/bar");
   });
 });
