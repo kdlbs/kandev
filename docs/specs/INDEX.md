@@ -27,9 +27,16 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [live-updates](office/live-updates.md) | draft |
 | [inbox](office/inbox.md) | draft |
 | [assistant](office/assistant.md) | draft |
-| [plugins](office/plugins.md) | draft |
 | [automations-settings](office/automations-settings.md) | draft |
 | [testing](office/testing.md) | shipped |
+
+## platform/ — cross-cutting capabilities
+
+Product-wide capabilities that are not tied to a single feature area.
+
+| Spec | Status |
+|---|---|
+| [plugins](plugins/spec.md) | draft |
 
 ## tasks/ — task & workflow model
 

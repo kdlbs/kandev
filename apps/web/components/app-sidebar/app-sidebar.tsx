@@ -11,6 +11,7 @@ import {
   APP_SIDEBAR_EXPANDED_WIDTH,
   APP_SIDEBAR_SECTION_IDS,
 } from "./app-sidebar-constants";
+import { PluginNavItems } from "@/components/plugins/plugin-nav-items";
 import { AppSidebarFooter } from "./app-sidebar-footer";
 import { AppSidebarHeader } from "./app-sidebar-header";
 import { AppSidebarPrimaryNav } from "./app-sidebar-primary-nav";
@@ -64,6 +65,7 @@ function AppSidebarNavigation({ collapsed, inOffice, settingsMode }: AppSidebarN
             data-testid="app-sidebar-scroll"
           >
             <AppSidebarPrimaryNav collapsed={collapsed} />
+            <PluginNavItems collapsed={collapsed} />
             {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
             <ProjectsSection collapsed={collapsed} />
             <AgentsSection collapsed={collapsed} />
@@ -103,6 +105,7 @@ export function AppSidebar() {
   const storedWidth = useAppStore((s) => s.appSidebar.width);
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
   const toggleCollapsed = useAppStore((s) => s.toggleAppSidebar);
+  const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
   const setSettingsMode = useAppStore((s) => s.setAppSidebarSettingsMode);
   const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
@@ -140,6 +143,14 @@ export function AppSidebar() {
   );
 
   const expandedWidth = Math.max(APP_SIDEBAR_EXPANDED_WIDTH, storedWidth);
+  const settingsModeTogglePathnameRef = useRef<string | null>(null);
+
+  const handleToggleSettingsMode = useCallback(() => {
+    // History updates before React renders the new pathname; remember which
+    // route the user actually clicked on so delayed route sync cannot undo it.
+    settingsModeTogglePathnameRef.current = window.location.pathname;
+    toggleSettingsMode();
+  }, [toggleSettingsMode]);
 
   // Keep the transient settings takeover aligned with route ownership. It is
   // intentionally not persisted, so direct reloads on `/settings/...` need to
@@ -150,10 +161,11 @@ export function AppSidebar() {
     if (!pathname || prevPathnameRef.current === pathname) return;
     prevPathnameRef.current = pathname;
     if (isSettingsRoute(pathname)) {
+      settingsModeTogglePathnameRef.current = null;
       if (!settingsMode) setSettingsMode(true);
       return;
     }
-    if (settingsMode) {
+    if (settingsMode && settingsModeTogglePathnameRef.current !== pathname) {
       setSettingsMode(false);
     }
   }, [pathname, settingsMode, setSettingsMode]);
@@ -192,7 +204,7 @@ export function AppSidebar() {
     >
       <AppSidebarHeader collapsed={collapsed} onToggleCollapse={toggleCollapsed} />
       <AppSidebarNavigation collapsed={collapsed} inOffice={inOffice} settingsMode={settingsMode} />
-      <AppSidebarFooter collapsed={collapsed} />
+      <AppSidebarFooter collapsed={collapsed} onToggleSettingsMode={handleToggleSettingsMode} />
       {!collapsed && <AppSidebarResizeHandle onMouseDown={handleResize} />}
     </aside>
   );

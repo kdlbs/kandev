@@ -17,7 +17,6 @@ const state = {
     ],
   },
   appSidebar: { settingsMode: false },
-  toggleAppSidebarSettingsMode: mocks.toggleSettingsMode,
 };
 
 let officeEnabled = false;
@@ -64,7 +63,7 @@ import { AppSidebarFooter } from "./app-sidebar-footer";
 function renderFooter() {
   return render(
     <TooltipProvider>
-      <AppSidebarFooter collapsed={false} />
+      <AppSidebarFooter collapsed={false} onToggleSettingsMode={mocks.toggleSettingsMode} />
     </TooltipProvider>,
   );
 }

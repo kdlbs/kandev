@@ -1,4 +1,14 @@
+import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+
+const DEFAULT_REPO = "defaultorg/defaultrepo";
+const DEFAULT_REPO_ISSUE = "Issue in saved default repo";
+const OTHER_REPO_ISSUE = "Issue outside saved default repo";
+const SAVED_QUERY_FILTER = "assignee:@me is:open saved-default-repo-e2e";
+
+function issueRow(testPage: Page, title: string) {
+  return testPage.getByTestId("issue-row").filter({ hasText: title });
+}
 
 // The /github dashboard used to render its own w-60 presets rail next to the
 // global AppSidebar (a redundant "double sidebar"). On desktop that rail is now
@@ -82,5 +92,94 @@ test.describe("Desktop /github scope bar", () => {
     await expect(testPage.getByTestId("github-repo-filter-trigger")).toContainText(
       "testorg/testrepo",
     );
+  });
+
+  test("saved query defaults to its chosen repository and persists", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const savedQuery = "Default repo issues";
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddIssues([
+      {
+        number: 31,
+        title: DEFAULT_REPO_ISSUE,
+        state: "open",
+        author_login: "test-user",
+        repo_owner: "defaultorg",
+        repo_name: "defaultrepo",
+        assignees: ["test-user"],
+      },
+      {
+        number: 32,
+        title: OTHER_REPO_ISSUE,
+        state: "open",
+        author_login: "test-user",
+        repo_owner: "otherorg",
+        repo_name: "otherrepo",
+        assignees: ["test-user"],
+      },
+    ]);
+
+    await testPage.goto("/github");
+
+    const scopeBar = testPage.getByTestId("github-presets-scope-bar");
+    const savedMenu = testPage.getByTestId("github-saved-queries-menu");
+    const repoFilter = testPage.getByTestId("github-repo-filter-trigger");
+    await expect(scopeBar).toBeVisible();
+    await scopeBar.getByRole("button", { name: "Issues", exact: true }).click();
+    const queryInput = testPage.getByPlaceholder(/Custom query/);
+    await queryInput.fill(SAVED_QUERY_FILTER);
+    await queryInput.press("Enter");
+    await expect(testPage.getByTestId("issue-row")).toHaveCount(2, { timeout: 15_000 });
+
+    await savedMenu.click();
+    await testPage.getByRole("menuitem", { name: "Save current query" }).click();
+    const dialog = testPage.getByRole("dialog", { name: "Save query" });
+    await dialog.getByLabel("Name").fill(savedQuery);
+    const saveRepoTrigger = dialog.getByTestId("github-save-query-repo-trigger");
+    await expect(saveRepoTrigger).toBeVisible();
+    await expect
+      .poll(async () => (await saveRepoTrigger.boundingBox())?.height ?? 0)
+      .toBeCloseTo(36, 0);
+    await saveRepoTrigger.click();
+    const saveRepoDropdown = testPage.getByTestId("github-save-query-repo-dropdown");
+    await expect(saveRepoDropdown).toBeVisible();
+    await saveRepoDropdown.getByRole("option", { name: DEFAULT_REPO, exact: true }).click();
+    const saveResponse = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/api/v1/github/workspace-settings") &&
+        response.request().method() === "PUT" &&
+        response.status() === 200,
+    );
+    await dialog.getByRole("button", { name: "Save", exact: true }).click();
+    await saveResponse;
+
+    await expect(repoFilter).toContainText(DEFAULT_REPO);
+    await expect(issueRow(testPage, DEFAULT_REPO_ISSUE)).toBeVisible();
+    await expect(issueRow(testPage, OTHER_REPO_ISSUE)).toHaveCount(0);
+
+    await repoFilter.click();
+    await testPage
+      .getByTestId("github-repo-filter-dropdown")
+      .getByRole("option", { name: "All repos", exact: true })
+      .click();
+    await expect(testPage.getByTestId("issue-row")).toHaveCount(2);
+
+    await savedMenu.click();
+    await testPage.getByRole("menuitem").filter({ hasText: savedQuery }).click();
+    await expect(repoFilter).toContainText(DEFAULT_REPO);
+    await expect(issueRow(testPage, DEFAULT_REPO_ISSUE)).toBeVisible();
+    await expect(issueRow(testPage, OTHER_REPO_ISSUE)).toHaveCount(0);
+
+    await testPage.reload();
+    await expect(scopeBar).toBeVisible();
+    await scopeBar.getByRole("button", { name: "Issues", exact: true }).click();
+    await savedMenu.click();
+    await testPage.getByRole("menuitem").filter({ hasText: savedQuery }).click();
+    await expect(repoFilter).toContainText(DEFAULT_REPO);
+    await expect(issueRow(testPage, DEFAULT_REPO_ISSUE)).toBeVisible();
+    await expect(issueRow(testPage, OTHER_REPO_ISSUE)).toHaveCount(0);
   });
 });

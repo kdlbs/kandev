@@ -29,7 +29,8 @@ import {
   useDefaultQueryPresets,
   resolvePresetOptions,
 } from "@/components/github/my-github/use-default-query-presets";
-import { useSavedPresets, type SavedPreset } from "@/components/github/my-github/use-saved-presets";
+import type { SavedPreset } from "@/components/github/my-github/use-saved-presets";
+import { useSavedPresetActions } from "@/components/github/my-github/use-saved-preset-actions";
 import { useKnownRepos, resetKnownReposStore } from "@/components/github/my-github/use-known-repos";
 import { useCommittedQuery } from "@/components/github/my-github/use-committed-query";
 import { ListToolbar } from "@/components/github/my-github/list-toolbar";
@@ -236,18 +237,6 @@ function useInitialSidebarSelection(
   return { selection, setProgrammaticSelection: setSelection, setUserSelection };
 }
 
-function firstPresetSelection(
-  kind: SidebarSelection["kind"],
-  pr: PresetOption[],
-  issue: PresetOption[],
-) {
-  const preset = (kind === "pr" ? pr : issue)[0];
-  return {
-    selection: { kind, source: "preset", id: preset?.value ?? "" } as SidebarSelection,
-    filter: preset?.filter ?? "",
-  };
-}
-
 function useSidebarSelectionHandler({
   savedPresets,
   resolvedPrPresets,
@@ -331,11 +320,6 @@ function useGitHubPageState(workspaceId: string | null) {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const { autoResetSearchRef, markSearchInteracted, setCustomQuery, setRepoFilter } =
     useSearchInteractionControls(setCustomQueryRaw, setRepoFilterRaw);
-  const {
-    presets: savedPresets,
-    save: saveSavedPreset,
-    remove: removeSavedPreset,
-  } = useSavedPresets(workspaceId);
   const { selection, setProgrammaticSelection, setUserSelection } = useInitialSidebarSelection(
     workspaceId,
     resolvedPrPresets,
@@ -343,6 +327,16 @@ function useGitHubPageState(workspaceId: string | null) {
     setQueryImmediate,
     setRepoFilterRaw,
   );
+  const { savedPresets, onConfirmSave, onDeleteSaved } = useSavedPresetActions({
+    workspaceId,
+    selection,
+    customQuery,
+    resolvedPrPresets,
+    resolvedIssuePresets,
+    setProgrammaticSelection,
+    setQueryImmediate,
+    setRepoFilter: setRepoFilterRaw,
+  });
 
   const presets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
   const search = useGitHubSearch<GitHubPR | GitHubIssue>({
@@ -378,24 +372,6 @@ function useGitHubPageState(workspaceId: string | null) {
   const canSaveCurrent = customQuery.trim().length > 0 || repoFilter.length > 0;
   const suggestedLabel = customQuery.trim() || (repoFilter ? `In ${repoFilter}` : "Saved query");
   const onOpenSaveDialog = () => canSaveCurrent && setSaveDialogOpen(true);
-  const onConfirmSave = (label: string) => {
-    const created = saveSavedPreset({ kind: selection.kind, label, customQuery, repoFilter });
-    if (!created) return;
-    setProgrammaticSelection({ kind: selection.kind, source: "saved", id: created.id });
-  };
-  const onDeleteSaved = (id: string) => {
-    removeSavedPreset(id);
-    if (selection.source === "saved" && selection.id === id) {
-      const fallback = firstPresetSelection(
-        selection.kind,
-        resolvedPrPresets,
-        resolvedIssuePresets,
-      );
-      setProgrammaticSelection(fallback.selection);
-      setQueryImmediate(fallback.filter);
-      setRepoFilterRaw("");
-    }
-  };
 
   return {
     selection,
@@ -579,6 +555,7 @@ export function GitHubPageClient({
         kind={state.selection.kind}
         customQuery={state.customQuery}
         repoFilter={state.repoFilter}
+        repoOptions={state.repoOptions}
         suggestedLabel={state.suggestedLabel}
         onSave={state.onConfirmSave}
       />

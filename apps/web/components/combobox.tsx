@@ -38,6 +38,7 @@ interface ComboboxProps {
   options: ComboboxOption[];
   value: string;
   onValueChange: (value: string) => void;
+  ariaLabel?: string;
   dropdownLabel?: string;
   placeholder?: string;
   searchPlaceholder?: string;
@@ -141,6 +142,7 @@ export const Combobox = memo(function Combobox({
   options,
   value,
   onValueChange,
+  ariaLabel,
   dropdownLabel,
   placeholder = "Select option...",
   searchPlaceholder = "Search...",
@@ -179,6 +181,7 @@ export const Combobox = memo(function Combobox({
         <Button
           variant="ghost"
           role="combobox"
+          aria-label={ariaLabel}
           aria-expanded={open}
           className={cn("w-full justify-between", !disabled && "cursor-pointer", triggerClassName)}
           disabled={disabled}

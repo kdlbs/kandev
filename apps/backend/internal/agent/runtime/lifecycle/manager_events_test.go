@@ -208,6 +208,88 @@ func TestHandleAgentEvent_StreamingThenToolCallThenComplete(t *testing.T) {
 	}
 }
 
+// TestHandleAgentEvent_SubagentToolCallDoesNotSplitStreaming is the regression test
+// for streaming messages being shattered into multiple DB rows: a subagent (Task tool)
+// streams its internal tool calls (tagged with ParentToolCallID) on the same session
+// while the parent agent is still streaming text. Those tool calls must NOT flush the
+// message buffer — otherwise every subagent tool call starts a new message row,
+// splitting the parent's message mid-sentence and breaking markdown across rows.
+func TestHandleAgentEvent_SubagentToolCallDoesNotSplitStreaming(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	// Parent agent starts streaming its message
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "Here's the CI picture\n",
+	})
+
+	execution.messageMu.Lock()
+	msgIDBefore := execution.currentMessageID
+	execution.messageMu.Unlock()
+	if msgIDBefore == "" {
+		t.Fatal("currentMessageID should be set after message_chunk")
+	}
+
+	// A subagent's internal tool call arrives mid-stream (ParentToolCallID set)
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             "tool_call",
+		ToolCallID:       "subagent-tool-1",
+		ParentToolCallID: "parent-task-tool",
+		ToolName:         "execute",
+	})
+
+	// The parent's streaming message must survive the subagent tool call
+	execution.messageMu.Lock()
+	msgIDAfter := execution.currentMessageID
+	execution.messageMu.Unlock()
+	if msgIDAfter != msgIDBefore {
+		t.Errorf("subagent tool_call must not close the streaming message: message ID changed from %q to %q",
+			msgIDBefore, msgIDAfter)
+	}
+
+	// More parent text — must APPEND to the same message, not create a new one
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "on the new PR.\n",
+	})
+
+	var streamingEvents []AgentStreamEventPayload
+	for _, e := range eventBus.getStreamEvents() {
+		if e.Data != nil && e.Data.Type == "message_streaming" {
+			streamingEvents = append(streamingEvents, e)
+		}
+	}
+	if len(streamingEvents) < 2 {
+		t.Fatalf("expected at least 2 message_streaming events, got %d", len(streamingEvents))
+	}
+	last := streamingEvents[len(streamingEvents)-1]
+	if !last.Data.IsAppend {
+		t.Error("text after a subagent tool_call should append to the existing message, got IsAppend=false")
+	}
+	if last.Data.MessageID != msgIDBefore {
+		t.Errorf("text after a subagent tool_call should keep message ID %q, got %q",
+			msgIDBefore, last.Data.MessageID)
+	}
+
+	// A top-level tool call (no ParentToolCallID) must still flush as before
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:       "tool_call",
+		ToolCallID: "tool-1",
+		ToolName:   "read_file",
+	})
+
+	execution.messageMu.Lock()
+	msgIDAfterTopLevel := execution.currentMessageID
+	execution.messageMu.Unlock()
+	if msgIDAfterTopLevel != "" {
+		t.Errorf("currentMessageID should be cleared after a top-level tool_call, got %q", msgIDAfterTopLevel)
+	}
+}
+
 // TestHandleAgentEvent_CompleteWithoutStreaming verifies that complete events are
 // properly handled when no streaming was used (buffer is empty).
 // All adapters now send text via message_chunk events, so this tests the empty buffer case.

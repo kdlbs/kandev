@@ -362,6 +362,20 @@ export type MoveTaskResponse = {
   workflow_step: WorkflowStepDTO;
 };
 
+/** A worktree associated with a task session (one per repo on multi-repo tasks). */
+export type TaskSessionWorktree = {
+  /** Session-worktree association ID. */
+  id: string;
+  session_id: SessionId;
+  worktree_id: string;
+  repository_id?: RepositoryId;
+  branch_slug?: string;
+  position: number;
+  worktree_path?: string;
+  worktree_branch?: string;
+  created_at?: string;
+};
+
 export type TaskSession = {
   id: SessionId;
   task_id: TaskId;
@@ -377,6 +391,7 @@ export type TaskSession = {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   state: TaskSessionState;
   error_message?: string;

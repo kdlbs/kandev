@@ -11,6 +11,22 @@ type BootPayload struct {
 	InitialState map[string]any      `json:"initialState"`
 	RouteData    map[string]any      `json:"routeData,omitempty"`
 	Errors       []BootError         `json:"errors,omitempty"`
+	// Plugins lists every active, UI-bundle-declaring plugin, per
+	// docs/plans/plugins/PLUGIN-API.md ("Loading model"). Populated
+	// only when the plugins feature flag is on; the flag itself is not
+	// carried here (see /api/v1/features) — this is purely active-bundle
+	// data the frontend still gates loading on via useFeature("plugins").
+	Plugins []ActivePluginPayload `json:"plugins,omitempty"`
+}
+
+// ActivePluginPayload is one entry of BootPayload.Plugins: the browser-facing
+// shape the SPA's plugin host (apps/web/lib/plugins/host.ts) iterates to
+// inject styles and dynamically import() each plugin's bundle.
+type ActivePluginPayload struct {
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	BundleURL string   `json:"bundleUrl"`
+	StyleURLs []string `json:"styleUrls,omitempty"`
 }
 
 // RuntimeConfig contains browser-facing runtime endpoints for the SPA.

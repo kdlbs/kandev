@@ -85,11 +85,20 @@ tmp/
 
 apps/backend/bin/
 
+# `make -C apps/backend e2e-plugin-package` output (packaged fixture plugin
+# tar.gz + build staging dir) — e2e tests build this on demand, not committed.
+apps/backend/.build/
+
+# Local protoc-gen-* tool binaries installed by `make -C apps/backend proto`
+apps/backend/.tools/
+
 # Go binaries (built locally)
 apps/backend/kandev
 apps/backend/agentctl
 apps/backend/mock-agent
 apps/backend/acpdbg
+apps/backend/plugin-fixture
+apps/backend/plugin-pack
 
 # acpdbg JSONL output (raw ACP wire frames from debug runs)
 apps/backend/acp-debug/

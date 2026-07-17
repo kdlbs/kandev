@@ -1,12 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
-
-async function assertNoHorizontalOverflow(page: import("@playwright/test").Page) {
-  const dimensions = await page.evaluate(() => ({
-    scrollWidth: document.documentElement.scrollWidth,
-    clientWidth: document.documentElement.clientWidth,
-  }));
-  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth + 1);
-}
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
 test.describe("Quick Chat repository context on mobile", () => {
   test("selects an agent and repository branch without hidden actions", async ({ testPage }) => {
@@ -35,11 +28,11 @@ test.describe("Quick Chat repository context on mobile", () => {
     await expect(dialog.getByTestId("branch-chip-trigger")).toContainText("main", {
       timeout: 10_000,
     });
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoDocumentHorizontalOverflow(testPage);
 
     await dialog.getByTestId("quick-chat-start").click();
     await expect(dialog.locator(".tiptap.ProseMirror")).toBeVisible({ timeout: 30_000 });
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoDocumentHorizontalOverflow(testPage);
 
     await dialog.getByLabel("Start new chat").click();
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 5_000 });
@@ -64,6 +57,6 @@ test.describe("Quick Chat repository context on mobile", () => {
     await expect(restoredTabs).toHaveCount(2);
     await expect(restoredTabs.locator("span")).toHaveText([...originalNames].reverse());
     await expect(restoredDialog.getByTestId("quick-chat-setup")).not.toBeVisible();
-    await assertNoHorizontalOverflow(testPage);
+    await assertNoDocumentHorizontalOverflow(testPage);
   });
 });

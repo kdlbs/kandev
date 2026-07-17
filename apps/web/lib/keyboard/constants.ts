@@ -176,4 +176,10 @@ export const SHORTCUTS = {
     key: KEYS.R,
     modifiers: { ctrl: true },
   },
+  // Cmd+Shift+G on a task screen jumps straight to the task's GitHub PR
+  // (or opens a picker dialog when the task has several linked PRs).
+  OPEN_TASK_PR: {
+    key: KEYS.G,
+    modifiers: { ctrlOrCmd: true, shift: true },
+  },
 } as const;

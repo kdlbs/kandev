@@ -7,7 +7,9 @@ import type { Repository, TaskSession, TaskSessionState, TaskState } from "@/lib
 import type { TaskPR } from "@/lib/types/github";
 import type { KanbanState } from "@/lib/state/slices";
 import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { PluginSlot } from "@/components/plugins/plugin-slot";
 import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
+import { buildTaskSwitcherProps } from "./task-session-sidebar-switcher-props";
 import { SidebarFilterBar } from "./sidebar-filter/sidebar-filter-bar";
 import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
 import { SidebarDialogs } from "./task-session-sidebar-dialogs";
@@ -565,15 +567,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   useBulkGitStatusSubscription(primarySessionIds);
 
   const sidebarActions = useSidebarActions(store);
-  const {
-    deletingTaskId,
-    preparingTaskId,
-    handleSelectTask,
-    handleArchiveTask,
-    handleDeleteTask,
-    handleMoveToStep,
-    handleRenameTask,
-  } = sidebarActions;
+  const { preparingTaskId } = sidebarActions;
   const taskLinkHandlers = useSidebarTaskLinking(workspaceId, sidebarActions);
   const repositories =
     useAppStore((state) =>
@@ -605,35 +599,32 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     (groupKey: string) => toggleSidebarGroupCollapsed(effectiveView.id, groupKey),
     [toggleSidebarGroupCollapsed, effectiveView.id],
   );
+  const switcherProps = buildTaskSwitcherProps({
+    grouped,
+    workflows,
+    stepsByWorkflowId,
+    highlightedTaskId,
+    highlightedSelectedTaskId,
+    effectiveView,
+    handleToggleGroup,
+    collapsedSubtaskParents,
+    toggleSubtaskCollapsed,
+    sidebarActions,
+    taskLinkHandlers,
+    pinnedTaskIds,
+    togglePinnedTask,
+    handleReorderGroup,
+    handleReorderSubtasks,
+    isLoadingWorkflow,
+    totalTaskCount: displayTasks.length,
+    selection,
+  });
   return (
     <PanelRoot data-testid="task-sidebar">
       {!hideFilterBar && <SidebarFilterBar />}
       <PanelBody className="space-y-4 p-0" data-testid="task-sidebar-scroll">
-        <TaskSwitcher
-          grouped={grouped}
-          workflows={workflows}
-          stepsByWorkflowId={stepsByWorkflowId}
-          activeTaskId={highlightedTaskId}
-          selectedTaskId={highlightedSelectedTaskId}
-          collapsedGroupKeys={effectiveView.collapsedGroups}
-          onToggleGroup={handleToggleGroup}
-          collapsedSubtaskParentIds={collapsedSubtaskParents}
-          onToggleSubtasks={toggleSubtaskCollapsed}
-          onSelectTask={handleSelectTask}
-          onRenameTask={handleRenameTask}
-          onArchiveTask={handleArchiveTask}
-          onDeleteTask={handleDeleteTask}
-          {...taskLinkHandlers}
-          onMoveToStep={handleMoveToStep}
-          onTogglePin={togglePinnedTask}
-          onReorderGroup={handleReorderGroup}
-          onReorderSubtasks={handleReorderSubtasks}
-          pinnedTaskIds={pinnedTaskIds}
-          deletingTaskId={deletingTaskId}
-          isLoading={isLoadingWorkflow}
-          totalTaskCount={displayTasks.length}
-          {...selection.switcherProps}
-        />
+        <TaskSwitcher {...switcherProps} />
+        <PluginSlot name="task-sidebar" />
       </PanelBody>
       <SidebarDialogs
         actions={sidebarActions}

@@ -2,6 +2,9 @@ import type { AppState } from "@/lib/state/store";
 import { getBackendConfig } from "@/lib/config";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
 import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
+import type { ActivePlugin } from "@/lib/plugins/types";
+
+export type { ActivePlugin };
 
 export type BootRoute = {
   kind?: string;
@@ -42,6 +45,7 @@ export type BootPayload = {
   runtime?: BootRuntime;
   initialState?: Partial<AppState>;
   routeData?: BootRouteData;
+  plugins?: ActivePlugin[];
 };
 
 type BootWindow = Window & {
@@ -63,7 +67,26 @@ export function readBootPayload(win: Window = window): BootPayload {
     runtime,
     initialState: isRecord(payload.initialState) ? (payload.initialState as Partial<AppState>) : {},
     routeData: isRecord(payload.routeData) ? (payload.routeData as BootRouteData) : undefined,
+    plugins: Array.isArray(payload.plugins) ? readPlugins(payload.plugins) : undefined,
   };
+}
+
+function readPlugins(value: unknown[]): ActivePlugin[] {
+  return value.filter(isRecord).flatMap((entry) => {
+    const plugin = readPlugin(entry);
+    return plugin ? [plugin] : [];
+  });
+}
+
+function readPlugin(value: Record<string, unknown>): ActivePlugin | undefined {
+  const id = readString(value.id);
+  const name = readString(value.name);
+  const bundleUrl = readString(value.bundleUrl);
+  if (!id || !name || !bundleUrl) return undefined;
+  const styleUrls = Array.isArray(value.styleUrls)
+    ? value.styleUrls.filter((entry): entry is string => typeof entry === "string")
+    : undefined;
+  return { id, name, bundleUrl, styleUrls };
 }
 
 export async function loadBootPayload(

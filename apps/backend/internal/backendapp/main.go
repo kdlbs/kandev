@@ -578,6 +578,14 @@ func startAgentInfrastructure(
 		log.Info("Workflow sync poller started")
 	}
 
+	// Start the plugin system's event delivery and health monitor
+	// background loops. Gated on features.Plugins so an unconfigured/
+	// disabled deployment doesn't poll plugin health endpoints that were
+	// never registered.
+	if services.Plugins != nil && cfg.Features.Plugins {
+		startPluginsSubsystems(ctx, services.Plugins, eventBus, log, addCleanup)
+	}
+
 	// Wire automation service into orchestrator for trigger-based task creation.
 	// The Automation subsystem is independent of the Office feature flag — it
 	// has its own cron scheduler, GitHub poller, and webhook handler, and

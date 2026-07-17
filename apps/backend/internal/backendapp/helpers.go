@@ -55,6 +55,8 @@ import (
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officetestharness "github.com/kandev/kandev/internal/office/testharness"
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/plugins"
+	pluginstore "github.com/kandev/kandev/internal/plugins/store"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -671,7 +673,45 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 		bootInitialState(ctx, req, p, route),
 	)
 	payload.RouteData = bootRouteData(ctx, req, p, route)
+	payload.Plugins = bootActivePlugins(p)
 	return payload
+}
+
+// bootActivePlugins populates the boot payload's Plugins list from every
+// active, UI-bundle-declaring plugin, per
+// docs/plans/plugins/PLUGIN-API.md ("Loading model"). Gated on
+// features.Plugins — separate from the /api/v1/features flag map itself,
+// this is active-bundle data the frontend still gates loading on via
+// useFeature("plugins").
+func bootActivePlugins(p routeParams) []webapp.ActivePluginPayload {
+	if !p.features.Plugins || p.services == nil || p.services.Plugins == nil {
+		return nil
+	}
+	records := p.services.Plugins.ActiveUIPlugins()
+	out := make([]webapp.ActivePluginPayload, 0, len(records))
+	for _, rec := range records {
+		out = append(out, webapp.ActivePluginPayload{
+			ID:        rec.ID,
+			Name:      rec.DisplayName,
+			BundleURL: "/api/plugins/" + rec.ID + "/bundle",
+			StyleURLs: pluginStyleURLs(rec),
+		})
+	}
+	return out
+}
+
+// pluginStyleURLs maps a plugin's root-relative ui.styles paths to
+// browser-facing URLs served through the /api/plugins/:id/ui/* proxy (the
+// plugin's own base_url is never exposed to the browser directly).
+func pluginStyleURLs(rec pluginstore.Record) []string {
+	if len(rec.UI.Styles) == 0 {
+		return nil
+	}
+	urls := make([]string, 0, len(rec.UI.Styles))
+	for _, style := range rec.UI.Styles {
+		urls = append(urls, "/api/plugins/"+rec.ID+"/ui"+style)
+	}
+	return urls
 }
 
 func webAssetsFS() (fs.FS, string, bool) {
@@ -936,6 +976,11 @@ func registerSecondaryRoutes(
 	if p.services.Automation != nil {
 		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
 		p.log.Debug("Registered Automation handlers (HTTP + WebSocket)")
+	}
+
+	if p.features.Plugins && p.services.Plugins != nil {
+		plugins.RegisterRoutes(p.router, p.services.Plugins, p.services.Plugins.Deliverer(), p.log)
+		p.log.Debug("Registered Plugins handlers (HTTP)")
 	}
 
 	docker.RegisterDockerRoutes(p.router, p.lifecycleMgr.DockerClientProvider(), dockerTaskTitleProvider(p.taskRepo, p.log), p.log)

@@ -1,15 +1,15 @@
 ---
 title: "Contributing to Kandev"
-description: "Set up the repository, choose the right change boundary, run checks, update public docs, and prepare a reviewable pull request."
+description: "Set up Kandev, find the owning subsystem, run focused checks, update public behavior, and prepare a reviewable change."
 ---
 
 # Contributing to Kandev
 
-Kandev is a Go backend, Vite/React web application, Node launcher, Tauri desktop shell, and a collection of runtime helpers. Start by understanding the user-visible behavior and the ownership boundary of the subsystem you intend to change.
+Kandev combines a Go server and native launcher, a Vite/React web client, a TypeScript development supervisor and npm shim, a Tauri desktop shell, and task-environment helpers. Begin at the subsystem that owns the behavior; do not recreate its rules in a neighboring layer.
 
 ## Set up the repository
 
-The pinned toolchain is defined in `mise.toml`: Node 24, pnpm 9.15.9, Go 1.26.0, and supporting tools.
+The pinned toolchain in `mise.toml` currently includes Node 24, pnpm 9.15.9, Go 1.26.0, and supporting tools.
 
 ```bash
 git clone https://github.com/kdlbs/kandev.git
@@ -17,46 +17,45 @@ cd kandev
 make bootstrap
 ```
 
-For browser end-to-end work, also run:
+`make bootstrap` best-effort installs host prerequisites, installs the pinned tools, runs `pnpm install --frozen-lockfile` in `apps/`, and configures hooks. For browser E2E dependencies, use `make bootstrap-e2e`. Run `make doctor` to re-install the optional pre-commit and commit-message hooks.
 
-```bash
-make bootstrap-e2e
-```
-
-`make bootstrap` installs the pinned tools when needed, installs workspace dependencies, and configures repository hooks. Run `make doctor` when local and CI behavior disagree.
-
-## Start the development application
+## Run locally
 
 ```bash
 make dev
 ```
 
-This starts the Go backend and Vite web development server with automatic port selection. The terminal output shows the actual URLs. Use `make dev-backend` or `make dev-web` when isolating one side.
+This is the normal development path. The TypeScript supervisor starts the Go backend and Vite, selects available ports, points Go at Vite, and isolates application state under the checkout's `.kandev-dev/`. Use the printed URLs.
 
-The production-shaped local path is:
+`make dev-web` starts only Vite on its fixed development port; it has no live API by itself. `make dev-backend` starts only the backend with the normal production-profile home unless you override it. For an intentionally isolated backend-only run:
 
 ```bash
-make build
-make start
+KANDEV_HOME_DIR="$PWD/.kandev-dev" KANDEV_DEBUG_DEV_MODE=true make dev-backend
 ```
 
-## Find the right layer
+Use `make build` for a production build. Use `make start` for a production-shaped local start; it installs dependencies, builds and synchronizes the embedded web application, then launches Kandev.
 
-| Change | Start in |
+## Find the owner
+
+| Change | Start here |
 |---|---|
-| Task, workflow, repository, integration, persistence, or API behavior | `apps/backend/internal/<domain>/` |
-| Agent process, ACP, MCP, terminal, Git, or remote runtime behavior | `apps/backend/internal/agent/`, `agentctl/`, or the executor package |
-| User interface, state, routing, or browser API calls | `apps/web/` |
-| CLI launch/install behavior | `apps/cli/` and `apps/backend/internal/launcher/` |
-| Desktop shell behavior | `apps/desktop/` |
-| Public user documentation | `docs/public/` |
-| CI/release behavior | `.github/workflows/` and `scripts/` |
+| Domain behavior, API, integration, or persistence | `apps/backend/internal/<domain>/` |
+| Server construction and startup wiring | `apps/backend/internal/backendapp/` |
+| Agent definitions, discovery, runtime, or executors | `apps/backend/internal/agent/` |
+| agentctl binary and task-environment sidecar | `apps/backend/cmd/agentctl/`, `apps/backend/internal/agentctl/` |
+| Browser routes, state, API calls, or UI | `apps/web/` |
+| Shared web UI, types, or themes | `apps/packages/` |
+| Development supervisor or npm runtime shim | `apps/cli/` |
+| Installed native launcher behavior | `apps/backend/internal/launcher/` |
+| Tauri process, updater, or native desktop boundary | `apps/desktop/` |
+| Public documentation | `docs/public/` |
+| CI, packaging, or release automation | `.github/workflows/`, `scripts/` |
 
-Read the nearest tests and existing domain types before adding a new abstraction. Prefer an established handler/service/repository or API/state/component path over a parallel framework.
+Read the nearest types, tests, and startup registration before adding an abstraction. Backend domains do not all use one layout: follow the local handler/controller, service, repository/store, and provider pattern.
 
-## Develop with focused checks
+## Test while developing
 
-During iteration, run the narrowest relevant command. Before opening a PR, run:
+Run the narrowest relevant package or workspace test during iteration. Before review, format first, then run:
 
 ```bash
 make fmt
@@ -65,39 +64,34 @@ make test
 make lint
 ```
 
-Any change under `apps/web/` must add or update Playwright coverage in `apps/web/e2e/` and run `make test-e2e`. See [Testing](testing.md) for targeted commands and fixture rules.
+`make test` covers Go, web, CLI, and repository-script tests. Browser Playwright, PostgreSQL, real-agent, container, and desktop-launch suites have separate prerequisites and commands; see [Testing](testing.md).
 
-## Update public behavior and docs together
+Repository policy requires every change under `apps/web/` to add or update a Playwright scenario in `apps/web/e2e/` and run `make test-e2e`.
 
-If a change affects commands, configuration, settings, workflows, executors, integrations, APIs, screenshots, status language, or user-facing terminology, update `docs/public/**` in the same PR.
+## Keep public behavior current
 
-When adding a page:
+Update `docs/public/**` in the same change when commands, configuration, settings, workflows, executors, integrations, APIs, screenshots, support status, or user terminology changes.
 
-1. create a flat, stable Markdown slug in `docs/public/`;
-2. add title and description frontmatter;
-3. add the slug once to `docs/public/meta.json`;
-4. link it from the relevant overview and related pages;
-5. run `node scripts/validate-public-docs.mjs`.
+For a new page, create a stable Markdown slug with title and description frontmatter, add it once to `docs/public/meta.json`, link it from related pages, and run:
 
-The full publication contract is in the [docs contribution guide](README.md).
+```bash
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+```
 
-## Prepare the pull request
+The complete source and Landing build contract is in the [public docs contribution guide](README.md).
 
-- Keep one logical change per PR.
-- Explain user impact and the technical boundary.
-- List exact automated and manual verification.
-- Include screenshots or a short recording for UI behavior.
-- Call out migrations, new credentials, security changes, or compatibility risks.
-- Do not mix generated artifacts, local databases, recordings, or unrelated formatting into the diff.
-- Understand and be able to explain any agent-generated code you submit.
+## Review checklist
 
-The root `CONTRIBUTING.md` contains the community and licensing policy. By contributing, you agree to the repository's AGPL-3.0 license.
+- The change has one clear user impact and owning subsystem.
+- Wire changes update Go DTOs, TypeScript types/clients, compatibility behavior, and protocol docs together.
+- Persistence changes include fresh-schema and upgrade-path tests.
+- Credentials, external text, shell arguments, URLs, paths, and logs respect their trust boundary.
+- Exact automated and manual checks are recorded; skipped suites have a reason.
+- UI changes include Playwright coverage plus screenshots or a short recording.
+- Generated artifacts, local databases, recordings, and unrelated formatting are absent.
+- You understand and can explain all submitted code, including agent-generated code.
 
-## Next guides
+The root `CONTRIBUTING.md` defines community and licensing policy. Contributions are under the repository's AGPL-3.0 license.
 
-- [Architecture](architecture.md)
-- [Backend development](backend-development.md)
-- [Web development](web-development.md)
-- [Testing](testing.md)
-- [Extending Kandev](extending-kandev.md)
-- [Release process](release-process.md)
+Continue with [Architecture](architecture.md), [Backend development](backend-development.md), [Web development](web-development.md), [Testing](testing.md), [Extending Kandev](extending-kandev.md), or [Release process](release-process.md).

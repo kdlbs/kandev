@@ -43,6 +43,13 @@ features:
     dev:  "true"
     e2e:  "true"
 
+  # Plugins (extensible plugin system). Off in prod until the feature
+  # is user-ready; on in dev/e2e so contributors and tests exercise it.
+  KANDEV_FEATURES_PLUGINS:
+    prod: "false"
+    dev:  "true"
+    e2e:  "true"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

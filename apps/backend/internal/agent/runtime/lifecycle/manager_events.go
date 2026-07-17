@@ -14,7 +14,10 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-const toolStatusComplete = "complete"
+const (
+	toolStatusComplete = "complete"
+	toolStatusFailed   = "failed"
+)
 
 // handleMessageChunkEvent handles a "message_chunk" agent event, accumulating and flushing on newlines.
 func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agentctl.AgentEvent) {
@@ -319,14 +322,16 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // handleToolCallEvent processes the "tool_call" agent event: flushes the message buffer
 // and stores the tool call in session history.
 // Returns the (possibly updated) event.
+//
+// Subagent-internal tool calls (ParentToolCallID set) stream on the same session
+// concurrently with the parent agent's own text, so they must NOT flush the
+// buffer — flushing would split the parent's in-flight streaming message into
+// separate DB rows mid-sentence, breaking markdown that spans the boundary.
 func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
-	if flushedText := m.flushMessageBuffer(execution); flushedText != "" {
-		event.Text = flushedText
-		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
-			if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
-				m.logger.Warn("failed to store agent message to history", zap.Error(err))
-			}
-		}
+	if event.ParentToolCallID == "" {
+		// flushMessageBuffer publishes any remaining buffered content through
+		// the streaming path itself and always returns "".
+		m.flushMessageBuffer(execution)
 	}
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 		if err := m.historyManager.AppendToolCall(execution.SessionID, event); err != nil {
@@ -415,6 +420,18 @@ var turnContentEventTypes = map[string]struct{}{
 	"permission_request": {},
 }
 
+func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
+	if event.Type != "tool_update" {
+		return false
+	}
+	switch event.ToolStatus {
+	case toolStatusComplete, "completed", "success", "error", toolStatusFailed, "cancelled":
+		return true
+	default:
+		return false
+	}
+}
+
 // recordActivity updates the last-activity timestamp and, on the very first
 // event from an execution, publishes AgentRunning to transition STARTING → RUNNING.
 //
@@ -447,6 +464,9 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 		return
 	}
 	if m.executionStore == nil {
+		return
+	}
+	if isTerminalToolUpdate(event) {
 		return
 	}
 	if _, ok := turnContentEventTypes[event.Type]; !ok {

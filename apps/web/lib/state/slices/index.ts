@@ -16,6 +16,7 @@ export { createOfficeSlice, defaultOfficeState } from "./office/office-slice";
 export { createFeaturesSlice, defaultFeaturesState } from "./features/features-slice";
 export { createAutomationsSlice, defaultAutomationsState } from "./automations/automations-slice";
 export { createSystemSlice, defaultSystemState } from "./system/system-slice";
+export { createPluginsSlice, defaultPluginsState } from "./plugins/plugins-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -75,6 +76,12 @@ export type {
   SystemLogsState,
   SystemJobsMap,
 } from "./system/types";
+export type {
+  PluginsSlice,
+  PluginsSliceState,
+  PluginsSliceActions,
+  PluginsState,
+} from "./plugins/types";
 
 // Re-export commonly used types from each domain
 export type {

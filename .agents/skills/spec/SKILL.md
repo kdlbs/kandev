@@ -209,7 +209,7 @@ A padded spec is worse than a short one — it hides the requirements behind cer
 ## Style notes
 
 - **Symbols in code font.** File paths, packages, types, table names: `internal/agent/lifecycle`, `TaskSession`, `task_session_worktrees`.
-- **Cross-link, don't duplicate.** Reference ADRs (`../../decisions/NNNN-...md`) and other specs rather than restating their content.
+- **Cross-link, don't duplicate.** Reference ADRs (`../../decisions/<adr-id>.md`) and other specs rather than restating their content.
 - **Specs rarely need diagrams.** A user-flow mermaid is acceptable when it clarifies a multi-step interaction. Architectural diagrams do not belong here — those go in ADRs.
 - **Present tense, active voice.** "The agent resumes the turn" — not "the turn will be resumed by the agent".
 - **Concrete over abstract.** "Wakeups fire at most once per 60s per agent" is testable; "wakeups are rate-limited appropriately" is not.

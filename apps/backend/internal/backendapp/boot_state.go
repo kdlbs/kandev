@@ -40,7 +40,14 @@ func bootInitialState(
 		builder.addUserSettingsState(ctx, state, "")
 		builder.addSettingsRouteState(ctx, state, route.Path)
 	}
-	if route.Route == webapp.RouteHome {
+	// Home and unknown SPA routes both render the full app shell (nav,
+	// workspace picker) without a route-specific data payload. Unknown
+	// covers plugin-owned routes (e.g. /github-plugin) registered at
+	// runtime, which the backend classifier can't enumerate — they still
+	// need the base workspace/workflow/kanban context so native plugin UI
+	// (like host.ui.TaskCreateDialog) has workspaces and workflows to work
+	// with, not an empty store.
+	if route.Route == webapp.RouteHome || route.Route == webapp.RouteUnknown {
 		builder.addHomeKanbanRouteState(ctx, req, state)
 	}
 	if route.Route == webapp.RouteTasks {
