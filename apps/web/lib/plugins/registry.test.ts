@@ -22,7 +22,12 @@ describe("pluginRegistry", () => {
     scoped.registerRoute("/plugin-a", Page);
 
     const routes = pluginRegistry.getRoutes();
-    expect(routes).toContainEqual({ path: "/plugin-a", Component: Page });
+    expect(routes).toContainEqual({
+      pluginId: "plugin-a",
+      path: "/plugin-a",
+      Component: Page,
+      options: undefined,
+    });
   });
 
   it("registers and returns a nav item", () => {
@@ -91,7 +96,9 @@ describe("pluginRegistry", () => {
 
     pluginRegistry.unregisterPlugin("plugin-a");
 
-    expect(pluginRegistry.getRoutes()).toEqual([{ path: "/plugin-b", Component: PageB }]);
+    expect(pluginRegistry.getRoutes()).toEqual([
+      { pluginId: "plugin-b", path: "/plugin-b", Component: PageB, options: undefined },
+    ]);
     expect(pluginRegistry.getNavItems().find((item) => item.id === "nav-a")).toBeUndefined();
     expect(pluginRegistry.getSlotComponents(TASK_SIDEBAR_SLOT)).toEqual([]);
     expect(pluginRegistry.getWsHandlers(TASK_CREATED_ACTION)).toEqual([]);
@@ -120,5 +127,24 @@ describe("pluginRegistry", () => {
 
     unsubscribe();
     expect(notified).toBe(0);
+  });
+});
+
+describe("pluginRegistry — route options and plugin names", () => {
+  afterEach(() => {
+    cleanup("plugin-a");
+  });
+
+  it("stores route options and the plugin display name for page chrome", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a", "Plugin A");
+    function Page() {
+      return null;
+    }
+
+    scoped.registerRoute("/plugin-a", Page, { topbar: { title: "Custom", icon: "ticket" } });
+
+    const route = pluginRegistry.getRoutes().find((entry) => entry.path === "/plugin-a");
+    expect(route?.options).toEqual({ topbar: { title: "Custom", icon: "ticket" } });
+    expect(pluginRegistry.getPluginName("plugin-a")).toBe("Plugin A");
   });
 });

@@ -19,8 +19,49 @@ export interface NavItem {
   id: string;
   label: string;
   path: string;
+  /** Curated icon name (see `lib/plugins/icons.ts`); unknown names render the puzzle glyph. */
   icon?: string;
   section?: "main" | "settings";
+}
+
+/**
+ * Configuration for the kandev-style title bar the host renders above a
+ * plugin route. Every field is optional — an empty object gets the same
+ * derived defaults as omitting options entirely.
+ */
+export interface PluginPageChrome {
+  /**
+   * Topbar title. Defaults to the plugin's nav-item label registered for the
+   * same path, else the plugin's display name.
+   */
+  title?: string;
+  /** Muted subtitle rendered next to the title. */
+  subtitle?: string;
+  /**
+   * Curated icon name (same set as `NavItem.icon`). Defaults to the matching
+   * nav item's icon; unknown/missing names render no icon.
+   */
+  icon?: string;
+  /** Where the topbar back link navigates (host default: "/"). */
+  backHref?: string;
+  /** Label for the back link (host default: "Kandev"). */
+  backLabel?: string;
+  /**
+   * Component rendered on the right side of the topbar — use for dynamic
+   * page actions (buttons, filters). Rendered with the host React instance.
+   */
+  actions?: ReactType.ComponentType;
+}
+
+/** Options accepted by `PluginRegistry.registerRoute`. */
+export interface PluginRouteOptions {
+  /**
+   * Kandev-style title bar above the page. Default: enabled with derived
+   * title. Pass a `PluginPageChrome` to configure it, or `false` to render
+   * the route full-bleed and own the chrome yourself (e.g. with
+   * `host.ui.PageTopbar`).
+   */
+  topbar?: boolean | PluginPageChrome;
 }
 
 /**
@@ -51,10 +92,22 @@ export interface PluginHostApi {
   api: {
     /** fetch scoped to `/api/plugins/{id}/...` via the kandev reverse proxy. */
     fetch(path: string, init?: RequestInit): Promise<Response>;
+    /**
+     * Backend API origin ("" when the SPA and API share an origin). Lets a
+     * plugin reach first-party kandev REST endpoints without re-deriving the
+     * split-origin dev/desktop base URL from window internals.
+     */
+    baseUrl: string;
   };
-  /** Curated subset of `@kandev/ui` components (Button, Card, Badge, ...). */
+  /**
+   * Curated subset of `@kandev/ui` components (Button, Card, Badge, Input,
+   * Tabs, Dialog, Table, ...) plus first-party app UI (PageTopbar,
+   * TaskCreateDialog). See `lib/plugins/host-api.ts` for the full list.
+   */
   ui: Record<string, unknown>;
   theme: "light" | "dark";
+  /** Soft SPA navigation (history push/replace + re-render), same as the app's router. */
+  navigate(href: string, options?: { replace?: boolean }): void;
 }
 
 /**
@@ -64,8 +117,16 @@ export interface PluginHostApi {
  * disable (see `apps/web/lib/plugins/registry.ts`).
  */
 export interface PluginRegistry {
-  /** Top-level SPA route, e.g. "/jira". Exact-match against window.location path. */
-  registerRoute(path: string, Component: ReactType.ComponentType): void;
+  /**
+   * Top-level SPA route, e.g. "/jira". Exact-match against window.location
+   * path. The host wraps the page in kandev chrome (title bar) by default —
+   * configure or opt out via `options.topbar`.
+   */
+  registerRoute(
+    path: string,
+    Component: ReactType.ComponentType,
+    options?: PluginRouteOptions,
+  ): void;
   /** Sidebar/main nav entry, rendered by `<PluginNavItems/>`. */
   registerNavItem(item: NavItem): void;
   /** Route under `/settings/plugins/{id}/...`, rendered inside the settings shell. */

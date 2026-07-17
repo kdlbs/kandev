@@ -69,6 +69,43 @@ describe("SpaRoutes — plugin route rendering", () => {
     expect(screen.getByTestId("plugin-hello-page")).not.toBeNull();
   });
 
+  it("wraps a plugin route in the kandev title bar by default", () => {
+    function HelloPage() {
+      return <div data-testid="plugin-hello-page" />;
+    }
+    pluginRegistry.forPlugin(PLUGIN_ID, "Hello Plugin").registerRoute(PLUGIN_PATH, HelloPage);
+    window.history.pushState({}, "", PLUGIN_PATH);
+
+    render(
+      <StateProvider>
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    expect(screen.getByRole("banner")).not.toBeNull();
+    expect(screen.getByText("Hello Plugin")).not.toBeNull();
+    expect(screen.getByTestId("plugin-hello-page")).not.toBeNull();
+  });
+
+  it("renders the route full-bleed when it opts out via topbar: false", () => {
+    function HelloPage() {
+      return <div data-testid="plugin-hello-page" />;
+    }
+    pluginRegistry
+      .forPlugin(PLUGIN_ID, "Hello Plugin")
+      .registerRoute(PLUGIN_PATH, HelloPage, { topbar: false });
+    window.history.pushState({}, "", PLUGIN_PATH);
+
+    render(
+      <StateProvider>
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(screen.getByTestId("plugin-hello-page")).not.toBeNull();
+  });
+
   it("renders a fallback instead of white-screening when the plugin route component throws", () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     function ThrowingPage(): never {
