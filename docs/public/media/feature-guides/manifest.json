@@ -1,0 +1,724 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-17T01:31:31.597Z",
+  "qa_status": "accepted",
+  "delivery_contract": {
+    "dimensions": {
+      "width": 960,
+      "height": 600
+    },
+    "frame_rate": 25,
+    "audio": false,
+    "video_formats": [
+      "vp9-webm",
+      "h264-mp4"
+    ],
+    "poster_format": "webp"
+  },
+  "clips": [
+    {
+      "slug": "task-create",
+      "title": "Create a task",
+      "intended_docs": {
+        "page": "tasks-and-workflows.md",
+        "section": "Create a task"
+      },
+      "accessible_caption": "A focused task is entered while its repository, agent profile, worktree isolation, and start mode remain visible for review.",
+      "duration_seconds": 7.32,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "task-create.webm",
+        "mp4": "task-create.mp4",
+        "poster": "task-create.webp"
+      },
+      "source_scenario": "Enter a focused repository task and review its launch configuration before creation.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "camera": {
+        "metadataFile": "metadata/capture.json",
+        "trimStartMs": 0,
+        "durationMs": 7320,
+        "roi": {
+          "x": 720,
+          "y": 400,
+          "width": 2400,
+          "height": 1500
+        },
+        "posterAtMs": 7000,
+        "keyframes": [
+          {
+            "tMs": 0,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 1400,
+            "zoom": 1.08,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 5000,
+            "zoom": 1.08,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 6800,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 7320,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "maxZoom": 1.08
+      },
+      "files": {
+        "webm": {
+          "bytes": 177911,
+          "codec": "vp9",
+          "sha256": "23eeb2b82befb302fb24656988296b1d5be4626b4e3468dc838bc6c00db65759"
+        },
+        "mp4": {
+          "bytes": 210157,
+          "codec": "h264",
+          "sha256": "f09e8220b897e06fef898921c85487678d9ce66a3623d5e669dfc886a922acbe"
+        },
+        "poster": {
+          "bytes": 8824,
+          "codec": "webp",
+          "sha256": "1b6c41a8cbc83b7bb5645771330eaee0d4c5bf4bfc4fa2560e57f4beed6eb20e"
+        }
+      },
+      "hashes": {
+        "webm_sha256": "23eeb2b82befb302fb24656988296b1d5be4626b4e3468dc838bc6c00db65759",
+        "mp4_sha256": "f09e8220b897e06fef898921c85487678d9ce66a3623d5e669dfc886a922acbe",
+        "poster_sha256": "1b6c41a8cbc83b7bb5645771330eaee0d4c5bf4bfc4fa2560e57f4beed6eb20e"
+      }
+    },
+    {
+      "slug": "task-start-agent",
+      "title": "Start an agent on a prepared task",
+      "intended_docs": {
+        "page": "tasks-and-workflows.md",
+        "section": "Start a task"
+      },
+      "accessible_caption": "A prepared task starts its selected agent in the workbench and reaches a completed response.",
+      "duration_seconds": 12.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "task-start-agent.webm",
+        "mp4": "task-start-agent.mp4",
+        "poster": "task-start-agent.webp"
+      },
+      "source_scenario": "Start the selected agent from a prepared task and observe the run complete in place.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "camera": {
+        "metadataFile": "metadata/capture.json",
+        "trimStartMs": 0,
+        "durationMs": 12800,
+        "roi": {
+          "x": 520,
+          "y": 100,
+          "width": 2400,
+          "height": 1500
+        },
+        "posterAtMs": 12600,
+        "keyframes": [
+          {
+            "tMs": 0,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 2400,
+            "zoom": 1.08,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 10000,
+            "zoom": 1.08,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 12400,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 12800,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "maxZoom": 1.08
+      },
+      "files": {
+        "webm": {
+          "bytes": 188571,
+          "codec": "vp9",
+          "sha256": "dd5dd5728d4855d2311d684a6c2c11263eebdde3d39879fde56a2c7d33b7c578"
+        },
+        "mp4": {
+          "bytes": 196034,
+          "codec": "h264",
+          "sha256": "d88bbcf4b17f00eeac26eba4ac68aa69838178f4b1aecacd9f8974da932e27c6"
+        },
+        "poster": {
+          "bytes": 10634,
+          "codec": "webp",
+          "sha256": "627571d40aeba843e88e45ff187b84592c6f243717cf8de4497dfc5b9bc0a000"
+        }
+      },
+      "hashes": {
+        "webm_sha256": "dd5dd5728d4855d2311d684a6c2c11263eebdde3d39879fde56a2c7d33b7c578",
+        "mp4_sha256": "d88bbcf4b17f00eeac26eba4ac68aa69838178f4b1aecacd9f8974da932e27c6",
+        "poster_sha256": "627571d40aeba843e88e45ff187b84592c6f243717cf8de4497dfc5b9bc0a000"
+      }
+    },
+    {
+      "slug": "plan-review-implement",
+      "title": "Review a plan before implementation",
+      "intended_docs": {
+        "page": "tasks-and-workflows.md",
+        "section": "Use the task plan"
+      },
+      "accessible_caption": "A plan step receives human feedback before the approved plan moves into implementation.",
+      "duration_seconds": 13.6,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "plan-review-implement.webm",
+        "mp4": "plan-review-implement.mp4",
+        "poster": "plan-review-implement.webp"
+      },
+      "source_scenario": "Review an agent-authored plan, add targeted feedback, and approve implementation.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "camera": {
+        "metadataFile": "metadata/capture.json",
+        "trimStartMs": 0,
+        "durationMs": 13600,
+        "roi": {
+          "x": 1440,
+          "y": 0,
+          "width": 2400,
+          "height": 1500
+        },
+        "posterAtMs": 13400,
+        "keyframes": [
+          {
+            "tMs": 0,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 2400,
+            "zoom": 1.08,
+            "x": 0.62,
+            "y": 0.48
+          },
+          {
+            "tMs": 10800,
+            "zoom": 1.08,
+            "x": 0.62,
+            "y": 0.48
+          },
+          {
+            "tMs": 13200,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 13600,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "maxZoom": 1.08
+      },
+      "files": {
+        "webm": {
+          "bytes": 403001,
+          "codec": "vp9",
+          "sha256": "afb8d8b0f7f8cfeeafbdd3ed969156fd08e777817678ac7fc3cf9acd197a09e9"
+        },
+        "mp4": {
+          "bytes": 433605,
+          "codec": "h264",
+          "sha256": "562ce14bfeb2f792090ef9f2b36121a68c4f45335189ba27740c4a373ee5a649"
+        },
+        "poster": {
+          "bytes": 19520,
+          "codec": "webp",
+          "sha256": "746692a71ad3040090b22eb486bb734a9167893e022984f5939fba5d0fa0cdce"
+        }
+      },
+      "hashes": {
+        "webm_sha256": "afb8d8b0f7f8cfeeafbdd3ed969156fd08e777817678ac7fc3cf9acd197a09e9",
+        "mp4_sha256": "562ce14bfeb2f792090ef9f2b36121a68c4f45335189ba27740c4a373ee5a649",
+        "poster_sha256": "746692a71ad3040090b22eb486bb734a9167893e022984f5939fba5d0fa0cdce"
+      }
+    },
+    {
+      "slug": "parallel-named-sessions",
+      "title": "Coordinate parallel named sessions",
+      "intended_docs": {
+        "page": "coordination.md",
+        "section": "Run parallel sessions in one task"
+      },
+      "accessible_caption": "Two named sessions run in parallel while their responsibilities remain easy to distinguish.",
+      "duration_seconds": 8.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "parallel-named-sessions.webm",
+        "mp4": "parallel-named-sessions.mp4",
+        "poster": "parallel-named-sessions.webp"
+      },
+      "source_scenario": "Open and identify parallel sessions that divide one task into coordinated work streams.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "camera": {
+        "metadataFile": "metadata/capture.json",
+        "trimStartMs": 0,
+        "durationMs": 8800,
+        "roi": {
+          "x": 0,
+          "y": 0,
+          "width": 2400,
+          "height": 1500
+        },
+        "posterAtMs": 8600,
+        "keyframes": [
+          {
+            "tMs": 0,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 2400,
+            "zoom": 1.08,
+            "x": 0.25,
+            "y": 0.25
+          },
+          {
+            "tMs": 6000,
+            "zoom": 1.08,
+            "x": 0.25,
+            "y": 0.25
+          },
+          {
+            "tMs": 8400,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 8800,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "maxZoom": 1.08
+      },
+      "files": {
+        "webm": {
+          "bytes": 241631,
+          "codec": "vp9",
+          "sha256": "66838456749da7ae1e2811e2cb6ce4199c0ed03ed0cedb3cd4f338e3f6c2a43e"
+        },
+        "mp4": {
+          "bytes": 256388,
+          "codec": "h264",
+          "sha256": "fd9b9813c007139db961ba0db167bbd37a139d8f593644ba741f0b4a00cbf14d"
+        },
+        "poster": {
+          "bytes": 11880,
+          "codec": "webp",
+          "sha256": "41e4c395d8879f6a04a2d20515c738b35b0274eca16ec3581c4ea24c359242cf"
+        }
+      },
+      "hashes": {
+        "webm_sha256": "66838456749da7ae1e2811e2cb6ce4199c0ed03ed0cedb3cd4f338e3f6c2a43e",
+        "mp4_sha256": "fd9b9813c007139db961ba0db167bbd37a139d8f593644ba741f0b4a00cbf14d",
+        "poster_sha256": "41e4c395d8879f6a04a2d20515c738b35b0274eca16ec3581c4ea24c359242cf"
+      }
+    },
+    {
+      "slug": "diff-line-feedback",
+      "title": "Send line-level change feedback",
+      "intended_docs": {
+        "page": "sessions-and-review.md",
+        "section": "Review a diff"
+      },
+      "accessible_caption": "A changed line is selected, reviewed, and sent back to the agent as precise feedback.",
+      "duration_seconds": 12.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "diff-line-feedback.webm",
+        "mp4": "diff-line-feedback.mp4",
+        "poster": "diff-line-feedback.webp"
+      },
+      "source_scenario": "Inspect a real changed file and attach actionable feedback to a specific diff line.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "camera": {
+        "metadataFile": "metadata/capture.json",
+        "trimStartMs": 0,
+        "durationMs": 12800,
+        "roi": {
+          "x": 600,
+          "y": 0,
+          "width": 2400,
+          "height": 1500
+        },
+        "posterAtMs": 12600,
+        "keyframes": [
+          {
+            "tMs": 0,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 2400,
+            "zoom": 1.08,
+            "x": 0.5,
+            "y": 0.48
+          },
+          {
+            "tMs": 10000,
+            "zoom": 1.08,
+            "x": 0.5,
+            "y": 0.48
+          },
+          {
+            "tMs": 12400,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 12800,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "maxZoom": 1.08
+      },
+      "files": {
+        "webm": {
+          "bytes": 434285,
+          "codec": "vp9",
+          "sha256": "1c5da30e038a17bb7c3d625460e76db4f31f2bd2a1b146cf2db351f2a8d85c09"
+        },
+        "mp4": {
+          "bytes": 574058,
+          "codec": "h264",
+          "sha256": "fd7607a6292833c4484f3762672b7786c421e5983d9bf4c4c3485544bc98ba14"
+        },
+        "poster": {
+          "bytes": 23770,
+          "codec": "webp",
+          "sha256": "0b2ec3cc6cde93cd596af5ce0578eb2387b6131315271d6d7aeffef916b99396"
+        }
+      },
+      "hashes": {
+        "webm_sha256": "1c5da30e038a17bb7c3d625460e76db4f31f2bd2a1b146cf2db351f2a8d85c09",
+        "mp4_sha256": "fd7607a6292833c4484f3762672b7786c421e5983d9bf4c4c3485544bc98ba14",
+        "poster_sha256": "0b2ec3cc6cde93cd596af5ce0578eb2387b6131315271d6d7aeffef916b99396"
+      }
+    },
+    {
+      "slug": "code-walkthrough",
+      "title": "Follow a code walkthrough",
+      "intended_docs": {
+        "page": "sessions-and-review.md",
+        "section": "Generate a walkthrough"
+      },
+      "accessible_caption": "A guided walkthrough moves from an explanation to the exact file and lines it describes.",
+      "duration_seconds": 8.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "code-walkthrough.webm",
+        "mp4": "code-walkthrough.mp4",
+        "poster": "code-walkthrough.webp"
+      },
+      "source_scenario": "Open an agent-authored walkthrough and follow its anchored source-code step.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "camera": {
+        "metadataFile": "metadata/capture.json",
+        "trimStartMs": 0,
+        "durationMs": 8800,
+        "roi": {
+          "x": 0,
+          "y": 100,
+          "width": 2400,
+          "height": 1500
+        },
+        "posterAtMs": 8600,
+        "keyframes": [
+          {
+            "tMs": 0,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 2400,
+            "zoom": 1.08,
+            "x": 0.38,
+            "y": 0.52
+          },
+          {
+            "tMs": 6000,
+            "zoom": 1.08,
+            "x": 0.38,
+            "y": 0.52
+          },
+          {
+            "tMs": 8400,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 8800,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "maxZoom": 1.08
+      },
+      "files": {
+        "webm": {
+          "bytes": 492774,
+          "codec": "vp9",
+          "sha256": "6d5ce2d8e0863930ad89837f321bb9f8b62704d2f1424ac02dd4c3860087761e"
+        },
+        "mp4": {
+          "bytes": 558064,
+          "codec": "h264",
+          "sha256": "aaab819933f8cbba536e3352d465e715dafe132dabb64c39d313fa81d99ca9c1"
+        },
+        "poster": {
+          "bytes": 23902,
+          "codec": "webp",
+          "sha256": "df9742ce5c149ccd07f47ae46964c25234c83d97da596305b9300a07ca0d279f"
+        }
+      },
+      "hashes": {
+        "webm_sha256": "6d5ce2d8e0863930ad89837f321bb9f8b62704d2f1424ac02dd4c3860087761e",
+        "mp4_sha256": "aaab819933f8cbba536e3352d465e715dafe132dabb64c39d313fa81d99ca9c1",
+        "poster_sha256": "df9742ce5c149ccd07f47ae46964c25234c83d97da596305b9300a07ca0d279f"
+      }
+    },
+    {
+      "slug": "profile-executor-selection",
+      "title": "Choose an agent and executor profile",
+      "intended_docs": {
+        "page": "executors.md",
+        "section": "Create and select a profile"
+      },
+      "accessible_caption": "Agent, model, repository, and executor choices are reviewed before starting a task.",
+      "duration_seconds": 8.8,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "profile-executor-selection.webm",
+        "mp4": "profile-executor-selection.mp4",
+        "poster": "profile-executor-selection.webp"
+      },
+      "source_scenario": "Configure a task with supported agent and executor profiles before launch.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "camera": {
+        "metadataFile": "metadata/capture.json",
+        "trimStartMs": 0,
+        "durationMs": 8800,
+        "roi": {
+          "x": 700,
+          "y": 550,
+          "width": 2400,
+          "height": 1500
+        },
+        "posterAtMs": 8600,
+        "keyframes": [
+          {
+            "tMs": 0,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 2400,
+            "zoom": 1.08,
+            "x": 0.55,
+            "y": 0.52
+          },
+          {
+            "tMs": 6000,
+            "zoom": 1.08,
+            "x": 0.55,
+            "y": 0.52
+          },
+          {
+            "tMs": 8400,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 8800,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "maxZoom": 1.08
+      },
+      "files": {
+        "webm": {
+          "bytes": 193080,
+          "codec": "vp9",
+          "sha256": "f794b38e9afb250be1e7e43badfe4d714e68d3a8aca518ec275599058d7723c2"
+        },
+        "mp4": {
+          "bytes": 256392,
+          "codec": "h264",
+          "sha256": "662efd32fc281a98386a29d0ca32c8474eb1c7b6416a71ec8fdbd915e414755e"
+        },
+        "poster": {
+          "bytes": 9104,
+          "codec": "webp",
+          "sha256": "bb800f6a806088afa3e2e632fa279f80023a2e2302e3595dc97a6c41f63ea1fc"
+        }
+      },
+      "hashes": {
+        "webm_sha256": "f794b38e9afb250be1e7e43badfe4d714e68d3a8aca518ec275599058d7723c2",
+        "mp4_sha256": "662efd32fc281a98386a29d0ca32c8474eb1c7b6416a71ec8fdbd915e414755e",
+        "poster_sha256": "bb800f6a806088afa3e2e632fa279f80023a2e2302e3595dc97a6c41f63ea1fc"
+      }
+    },
+    {
+      "slug": "scheduled-workflow-automation",
+      "title": "Schedule workflow automation",
+      "intended_docs": {
+        "page": "automation-and-mcp.md",
+        "section": "Schedule"
+      },
+      "accessible_caption": "A workflow automation is configured with a schedule and saved for recurring execution.",
+      "duration_seconds": 13.6,
+      "dimensions": {
+        "width": 960,
+        "height": 600
+      },
+      "filenames": {
+        "webm": "scheduled-workflow-automation.webm",
+        "mp4": "scheduled-workflow-automation.mp4",
+        "poster": "scheduled-workflow-automation.webp"
+      },
+      "source_scenario": "Configure a scheduled workspace automation through the current workflow controls.",
+      "data_isolation": "Disposable worker-scoped Kandev E2E instance with a fresh temporary HOME, KANDEV_HOME_DIR, SQLite database, repository, worktree root, ports, and browser profile. External providers and agent behavior are mock-only; no shared user database, existing task workspace, credential, or production service is used.",
+      "camera": {
+        "metadataFile": "metadata/capture.json",
+        "trimStartMs": 0,
+        "durationMs": 13600,
+        "roi": {
+          "x": 0,
+          "y": 100,
+          "width": 2400,
+          "height": 1500
+        },
+        "posterAtMs": 13400,
+        "keyframes": [
+          {
+            "tMs": 0,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 2400,
+            "zoom": 1.08,
+            "x": 0.45,
+            "y": 0.5
+          },
+          {
+            "tMs": 10800,
+            "zoom": 1.08,
+            "x": 0.45,
+            "y": 0.5
+          },
+          {
+            "tMs": 13200,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          },
+          {
+            "tMs": 13600,
+            "zoom": 1,
+            "x": 0.5,
+            "y": 0.5
+          }
+        ],
+        "maxZoom": 1.08
+      },
+      "files": {
+        "webm": {
+          "bytes": 424609,
+          "codec": "vp9",
+          "sha256": "5b91ed825e6db5d11a052652c73dbbd337a074ea28471fa3752780a6fa38f2cb"
+        },
+        "mp4": {
+          "bytes": 480537,
+          "codec": "h264",
+          "sha256": "56be990c64ebec5e0128ed6f9a96ec69aab5425f4d6ce690da303f9e8bdc5a91"
+        },
+        "poster": {
+          "bytes": 13312,
+          "codec": "webp",
+          "sha256": "6a2748d4e26d558ba92142d7ba457b222d09746ce4bb1564cd29a1401ae0bfb8"
+        }
+      },
+      "hashes": {
+        "webm_sha256": "5b91ed825e6db5d11a052652c73dbbd337a074ea28471fa3752780a6fa38f2cb",
+        "mp4_sha256": "56be990c64ebec5e0128ed6f9a96ec69aab5425f4d6ce690da303f9e8bdc5a91",
+        "poster_sha256": "6a2748d4e26d558ba92142d7ba457b222d09746ce4bb1564cd29a1401ae0bfb8"
+      }
+    }
+  ]
+}

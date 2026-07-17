@@ -1,159 +1,186 @@
 ---
 title: "Git Operations"
-description: "Understand how Kandev manages repositories, worktrees, branches, and review surfaces."
+description: "Use Kandev worktrees, commits, remote operations, pull requests, and cleanup safely."
 ---
 
-# Git Operations for Worktrees
+# Git Operations
 
-This document describes the architecture for Git operations (Pull, Push, Rebase, Merge, and Abort) on worktrees in Kandev.
+Kandev runs Git commands in the selected repository workspace for a task session. The Worktree executor gives a session a dedicated host worktree; Local uses the configured shared checkout, while container and remote executors use runtime-specific workspace behavior described in [Executors](executors.md). The browser sends a WebSocket request to the backend, which forwards it to `agentctl` in that executor. This keeps the command's filesystem, Git configuration, network access, SSH agent, and provider CLI in the same environment as the agent.
 
-## Overview
+Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset, or rename a branch. The task toolbar and command panel also expose **Commit Changes**, **Push**, **Pull**, **Create PR**, **Rebase**, and **Merge** when a Git-capable session is selected.
 
-Git operations are executed **in agentctl**, not in the backend. This ensures consistent behavior whether running locally or in Docker/remote environments. The backend acts as a proxy, forwarding requests from the frontend WebSocket to agentctl's HTTP API.
+## Prerequisites and trust boundary
 
-## Supported Operations
+The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials before relying on Pull, Push, Rebase, Merge, or Create PR.
 
-| Operation | Direction | Description |
-|-----------|-----------|-------------|
-| **Pull** | Remote → Worktree | Fetch and merge changes from remote for the worktree's branch |
-| **Push** | Worktree → Remote | Push local commits to remote |
-| **Rebase** | Base → Worktree | Rebase worktree branch onto base branch (rewrites history) |
-| **Merge** | Base → Worktree | Merge base branch into worktree branch (creates merge commit) |
-| **Abort** | - | Abort an in-progress merge or rebase |
+These UI operations enter through Kandev's `/ws` endpoint, which currently has no backend authentication. Anyone who can reach an unprotected backend can invoke destructive Git actions with the executor's permissions. Keep Kandev on loopback or behind an authenticated, origin-protected reverse proxy; see [WebSocket API](websocket-api.md).
 
-## Architecture
+Credentials are resolved where `agentctl` runs. A host SSH agent, credential helper, `gh` login, or `az` login is not automatically available inside every Docker, SSH, or remote executor. Give the executor only the repository access it needs and test with a disposable branch. See [Executors](executors.md) for executor-specific credential handling.
 
-### Request Flow
+When the Worktree executor is selected, its filesystem separation is not a security sandbox. Host worktrees share the repository's Git object database and local refs, and agents can run arbitrary repository commands allowed by their executor.
 
-```mermaid
-flowchart TD
-    A["Frontend UI (Git Actions Dropdown)"] --> B["WebSocket Client"]
-    B -->|"worktree.pull/push/rebase/merge/abort"| C["Backend WebSocket Gateway"]
-    C --> D["Git Handlers"]
-    D -->|"GetExecutionBySessionID"| E["Lifecycle Manager"]
-    E --> F["AgentExecution"]
-    F --> G["agentctl.Client"]
-    G -->|"HTTP POST /api/v1/git/{operation}"| H["agentctl HTTP API"]
-    H --> I["Git Command Execution"]
-    I -->|"exec.Command git"| J["Worktree Directory"]
-    J --> K["HTTP Response"]
-    K --> L["Backend Handler"]
-    L --> M["WebSocket Response"]
-    M --> N["Frontend"]
+## Managed worktree and branch lifecycle
+
+This section describes Kandev's Worktree executor and other executor paths that create managed Git workspaces. Local, Docker, remote Docker, SSH, and Sprites have executor-specific checkout, mount, and cleanup behavior; see [Executors](executors.md) before assuming these host paths or isolation properties apply.
+
+By default, managed worktrees live under the configured task-data directory, commonly:
+
+```text
+~/.kandev/tasks/{task-directory}/{repository-name}
+~/.kandev/tasks/{task-directory}/{repository-name}-{branch-slug}
 ```
 
-### Notification Flow (Git Status Updates)
+Additional branches are siblings of the primary repository worktree, not directories nested inside it. Multi-repository tasks have one worktree per repository. Kandev reuses a valid session/repository worktree; if its directory is missing, it attempts to recreate it from the recorded local or remote branch.
 
-After any git operation, the workspace state changes. Updates flow through the event bus:
+For a new task branch, the repository default template is:
 
-```mermaid
-flowchart TD
-    A["agentctl WorkspaceTracker"] -->|"git_status message"| B["Backend StreamManager"]
-    B -->|"OnGitStatus callback"| C["EventPublisher.PublishGitStatus"]
-    C --> D["Event Bus"]
-    D --> E["TaskNotificationBridge"]
-    E --> F["Hub.BroadcastToSession"]
-    F --> G["Frontend WebSocket"]
-    G --> H["Zustand Store update"]
+```text
+feature/{title}-{suffix}
 ```
 
-## agentctl API
+`{title}` is an ASCII-safe, lower-case task-title slug and `{suffix}` is a short collision-avoidance value. Repository settings can change the template. When `pull_before_worktree` is omitted it defaults to `true`: Kandev best-effort fetches the base branch before creating the worktree. The public configuration defaults both fetch and fast-forward pull timeouts to 60 seconds. An authentication, network, or timeout failure can fall back to an available local or remote-tracking ref with a visible warning; a base branch that cannot be resolved, including its configured fallback, stops creation.
 
-### Endpoints
+When a task opens an existing branch or GitHub PR, Kandev fetches that branch; for a numbered GitHub PR it can fetch `refs/pull/NUMBER/head`, including fork PRs. If the intended branch is already checked out in another worktree, the new worktree uses a suffixed local branch and tracks the original `origin` branch when available. If remote fetch fails but the local branch exists, Kandev can continue with that possibly stale branch and reports the fallback.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/v1/git/pull` | Pull from remote |
-| POST | `/api/v1/git/push` | Push to remote |
-| POST | `/api/v1/git/rebase` | Rebase onto base branch |
-| POST | `/api/v1/git/merge` | Merge base branch in |
-| POST | `/api/v1/git/abort` | Abort merge/rebase |
+After creation, Kandev copies any repository-configured files and runs its setup script. Setup-script failure is non-fatal: the worktree remains and the session surfaces a warning. Cleanup scripts run before worktree removal, but their failure also does not prevent removal.
 
-### Request/Response Format
+## Everyday operations
 
-**Pull Request:**
-```json
-{ "rebase": false }
+All operations below run in the selected repository workspace.
+
+| UI operation | Effective Git behavior | Important consequence |
+|--------------|------------------------|-----------------------|
+| Pull | `git pull origin BRANCH`, optionally with `--rebase`. | Uses the current branch when any upstream exists. With no upstream it falls back to `origin/main`, then `origin/master`, then the current branch. It does not parse an upstream that points to a differently named remote branch. |
+| Push | `git push origin CURRENT_BRANCH`; adds `--set-upstream` when requested or no upstream exists. | Force Push uses `--force-with-lease`, not unconditional `--force`. It still rewrites remote history when the lease is valid. |
+| Rebase | Fetches `origin BASE`, then rebases onto `origin/BASE`. | Rewrites local commits. If conflict files are detected from Git output, Kandev attempts `git rebase --abort` automatically and returns the file list. |
+| Merge | Fetches `origin BASE`, then merges `origin/BASE`. | Conflicts are deliberately left in the worktree. Resolve and commit them, or use Abort Merge. |
+| Abort | Runs `git merge --abort` or `git rebase --abort`. | Fails when that operation is not in progress or the repository cannot be restored. |
+| Stage | With paths, `git add -- PATHS`; with an empty path list, `git add -A`. | Empty means all changes, including deletions. |
+| Unstage | With paths, `git reset HEAD -- PATHS`; with an empty path list, `git reset HEAD`. | Keeps working-tree content. |
+| Commit | Optionally runs `git add -A`, then `git commit -m MESSAGE`; Amend adds `--amend`. | The normal UI defaults to staging all when it invokes this helper. Amend rewrites `HEAD`. |
+| Discard | Restores tracked paths from `HEAD`; added and untracked files are unstaged and deleted. | Removes both staged and unstaged work. Explicit paths are required, but deletion is not recoverable through Kandev. |
+| Edit branch | `git branch -m NEW_NAME` for the current local branch. | Does not rename/delete the old remote branch or automatically repair every external reference. Push the new branch explicitly. |
+
+Only one Git operation can run at a time for a given repository operator. A second concurrent request is rejected as “another git operation is already in progress.” Different repositories in a multi-repository workspace have separate operators.
+
+Most Git command failures are normal responses with `success:false`, `error`, and sometimes `conflict_files`; they are not WebSocket transport errors. Read the result body even when the request itself completed. The web client waits 60 seconds for an ordinary Git operation.
+
+### Multi-repository tasks
+
+In a multi-repository task, every wire request must identify one repository with its `repo` subpath. The workspace root is not itself a Git repository, so omitting `repo` normally fails. The UI handles this for you:
+
+- Per-file Stage, Unstage, and Discard are routed to the file's repository.
+- Stage All and Unstage All fan out to repositories that have files.
+- Commit fans out only to repositories with staged changes.
+- Push fans out only to repositories that are ahead.
+- Pull, Rebase, Merge, and Abort fan out to all listed repositories.
+- The multi-repository toolbar lets you select an individual repository for Commit, Push, Create PR, Pull, Rebase, Merge, or Force Push.
+
+A fan-out can partially succeed. The UI continues after a failure and reports per-repository outcomes; inspect each repository before retrying a history-changing action.
+
+## Commit history and reset behavior
+
+The Changes panel's session history is calculated relative to the session's recorded base commit or current merge base, so it focuses on commits created on the task branch. Kandev refreshes status and emits session Git updates after mutations, but the underlying Git repository remains authoritative.
+
+Two similarly named actions have very different semantics:
+
+- **Revert latest commit** (`worktree.revert_commit`) is not `git revert`. It accepts only the exact current `HEAD` SHA and runs `git reset --soft HEAD~1`, moving the branch back one commit while leaving its changes staged. It creates no inverse commit.
+- **Reset to commit** moves `HEAD` to an existing 4–40 character hexadecimal commit SHA. `soft` leaves changes staged, `mixed` leaves them unstaged, and `hard` discards tracked working-tree and index changes. The current UI offers Soft and Hard and requires the short SHA before Hard; the wire handler also accepts Mixed and defaults a missing mode to `mixed`.
+
+Do not reset or amend commits already consumed by other users unless you intend to rewrite and force-push the branch. Kandev hides some revert/reset actions for commits it knows are pushed, but that UI guard is not a repository policy or API authorization boundary.
+
+## Create a pull request
+
+**Create PR** first runs:
+
+```bash
+git push --set-upstream origin HEAD
 ```
 
-**Push Request:**
-```json
-{ "force": false, "set_upstream": true }
-```
+It then selects a provider from the `origin` hostname:
 
-**Rebase/Merge Request:**
-```json
-{ "base_branch": "main" }
-```
+| Provider | Required runtime tools | Creation behavior |
+|----------|------------------------|-------------------|
+| GitHub | Authenticated `gh` CLI | `gh pr create` with title, body, current head, optional base, and optional `--draft`. |
+| Azure Repos | Authenticated `az` CLI plus the `azure-devops` extension | `az repos pr create` with parsed organization, project, repository, source, optional target, and optional draft. |
 
-**Abort Request:**
-```json
-{ "operation": "merge" }
-```
+Other remote providers are rejected by this action. A normal Git push can still work with another provider. Kandev's GitHub-specific task association is performed only for a returned GitHub `/pull/` URL; an Azure PR can be created without becoming a GitHub watch.
 
-Every request also accepts an optional `repo` subpath for multi-repository task workspaces. Omit it for a single-repository workspace.
+Title is required. Body and base branch may be empty; if base is empty, the provider chooses its default. The web UI defaults new PRs to draft and waits up to 120 seconds. Provider credentials and remote push permission must exist in the executor, and Git hooks or branch policies can still reject the push or PR.
 
-**Response (all operations):**
+## WebSocket operation reference
+
+These are the registered Kandev WebSocket actions. Every payload requires `session_id`; `repo` is optional only for a single-repository workspace.
+
+| Action | Additional payload |
+|--------|--------------------|
+| `worktree.pull` | `rebase` boolean |
+| `worktree.push` | `force` and `set_upstream` booleans |
+| `worktree.rebase` | required `base_branch` |
+| `worktree.merge` | required `base_branch` |
+| `worktree.abort` | `operation`: exactly `merge` or `rebase` |
+| `worktree.commit` | required non-empty `message`; `stage_all`; `amend` |
+| `worktree.stage` | `paths` list; empty means all |
+| `worktree.unstage` | `paths` list; empty means all |
+| `worktree.discard` | required non-empty `paths` list |
+| `worktree.create_pr` | required `title`; `body`; `base_branch`; `draft` |
+| `worktree.revert_commit` | required `commit_sha`, which must be exact `HEAD` |
+| `worktree.rename_branch` | required `new_name` |
+| `worktree.reset` | required `commit_sha`; `mode` is `soft`, `mixed`, or `hard` |
+
+Example request and normal operation result:
+
 ```json
 {
-  "success": true,
-  "operation": "pull",
-  "output": "Already up to date.",
-  "error": null,
-  "conflict_files": []
+  "id": "pull-1",
+  "type": "request",
+  "action": "worktree.pull",
+  "payload": {
+    "session_id": "SESSION_ID",
+    "rebase": false,
+    "repo": "kandev"
+  }
 }
 ```
 
-## Locking
-
-A per-instance mutex in agentctl prevents concurrent git operations on the same worktree. If an operation is already running, new requests return HTTP 409 Conflict.
-
-## Conflict Handling
-
-- **Rebase conflicts**: Automatically aborted (`git rebase --abort`), conflict files returned
-- **Merge conflicts**: Left in place for user/agent resolution, conflict files returned
-- **Abort endpoint**: Allows manual abort of conflicted merge/rebase
-
-## Frontend Integration
-
-### WebSocket Actions
-
-- `worktree.pull` - Pull from remote
-- `worktree.push` - Push to remote
-- `worktree.rebase` - Rebase onto base
-- `worktree.merge` - Merge base branch
-- `worktree.abort` - Abort operation
-
-### Hook Usage
-
-```typescript
-const { pull, push, rebase, merge, abort, isLoading, error } = useGitOperations(sessionId);
-
-// In component
-<Button onClick={() => pull()} disabled={isLoading}>Pull</Button>
-<Button onClick={() => rebase("main")} disabled={isLoading}>Rebase</Button>
-<Button onClick={() => merge("main")} disabled={isLoading}>Merge</Button>
-<Button onClick={() => abort("rebase")} disabled={isLoading}>Abort rebase</Button>
+```json
+{
+  "id": "pull-1",
+  "type": "response",
+  "action": "worktree.pull",
+  "payload": {
+    "success": true,
+    "operation": "pull",
+    "output": "Already up to date."
+  },
+  "timestamp": "2026-07-16T10:00:00Z"
+}
 ```
 
-`rebase` and `merge` require the base branch as their first argument. In a
-multi-repository workspace, pass the repository subpath as the optional second
-argument, for example `rebase("main", "kandev")`.
+Read-only Git actions used by the Changes panel include `session.commit_diff`, `session.git.commits`, `session.cumulative_diff`, and `session.git.snapshots`. See [WebSocket API](websocket-api.md) for transport and subscription behavior.
 
-## Files
+`agentctl` also implements `/api/v1/git/*` HTTP routes inside the execution runtime. Those routes are an internal backend-to-runtime control surface, not the public Kandev backend API. External clients should not discover or expose executor-local agentctl ports; use the registered Kandev WebSocket actions.
 
-### agentctl
+## Cleanup and data loss
 
-- `server/api/git.go` - HTTP handlers
-- `server/process/git.go` - Git command execution
-- `client/git.go` - Client methods
+Worktree cleanup runs the repository cleanup script, forcibly removes the Git worktree directory, and may remove the local branch:
 
-### Backend
+- Normal task deletion cleans all owned task worktrees and runs `git branch -D` for their local branches. Remote branches are not deleted, but uncommitted and unpushed-only work can be lost.
+- **Reset Environment** is allowed only when no task session is `STARTING` or `RUNNING`. It can optionally push first; a failed requested push aborts the reset. Teardown removes the worktree but deliberately preserves the local branch, then the next launch materializes a fresh environment.
+- Office handoff cleanup also preserves the branch when it releases a worktree.
 
-- `internal/agent/handlers/git_handlers.go` - WebSocket handlers
-- `pkg/websocket/actions.go` - Action constants
+Before deleting a task or performing a hard reset, commit and push anything you need. A cleanup-script failure does not save the directory: Kandev logs the failure and proceeds. If `git worktree remove --force` fails, managed cleanup can fall back to deleting the directory and pruning Git's stale worktree record.
 
-### Frontend
+## Troubleshooting
 
-- `lib/types/backend.ts` - TypeScript types
-- `hooks/use-git-operations.ts` - WebSocket action functions and React hook
+- **No agent/client available:** launch or prepare the session and confirm its executor is healthy. Workspace Git actions can reconstruct runtime control after a backend restart, but still need a valid task environment.
+- **Remote/authentication error:** test `git fetch origin` inside the same executor workspace. Verify SSH agent forwarding, token/credential helper availability, remote URL, DNS, and firewall access there.
+- **Pull fetched the wrong branch:** Kandev always uses `origin` and, once any upstream exists, the current local branch name. Align local and remote branch names or use an explicit terminal command.
+- **Rebase failed but no rebase remains:** detected rebase conflicts are auto-aborted. Use the returned `conflict_files`, resolve with a manual workflow, or merge instead.
+- **Merge remains conflicted:** this is expected. Resolve and commit, or choose Abort Merge. Do not start another Git operation until the repository is consistent.
+- **Create PR failed after push:** the branch may already be remote. Fix `gh`/`az` authentication, install the Azure extension if applicable, then retry PR creation without assuming the push was rolled back.
+- **Operation timed out:** inspect status before retrying. A client timeout or lost WebSocket response does not prove the underlying command did nothing.
+- **Multi-repository operation failed at workspace root:** choose the repository in the toolbar or include its exact `repo` subpath in the request.
+- **Missing work after cleanup:** inspect the preserved local branch for Reset Environment/handoff, or the remote branch if it was pushed. Task deletion may already have force-deleted the local branch.
+
+Related guides: [Configuration](configuration.md), [Executors](executors.md), [Operations](operations.md), and [WebSocket API](websocket-api.md).

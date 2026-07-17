@@ -1,95 +1,189 @@
 ---
 title: "Developer Tools"
-description: "Use quick chat, utility agents, voice input, editors, terminals, prompts, notifications, and personal settings."
+description: "Use quick chat, utility agents, saved prompts, voice input, editors, language servers, and task terminals."
 ---
 
 # Developer Tools
 
-Kandev combines task coordination with the developer surfaces needed to inspect and finish work. Most tools operate in the current task environment, while quick chat and utility agents handle shorter work that does not need a full workflow.
+Kandev includes short-lived chat, reusable AI helpers, dictation, file and editor integration, language servers, and terminals. Some tools run in a task environment; others run on the Kandev backend host or in the browser. That boundary determines which files, executables, credentials, and network services they can reach.
 
-## Quick chat
+## Quick Chat
 
-Quick chat opens a focused agent conversation without first creating a kanban task. Use it for short questions, repository orientation, command help, or other disposable interactions.
+Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.
 
-Use a normal task when the work needs durable workflow state, a dedicated branch or worktree, structured documents, review gates, dependencies, or a pull request. Quick chat is not a substitute for that delivery record.
+Select **Quick Chat** beside **New Task** in the expanded sidebar, or select its standalone row in the collapsed sidebar.
+
+### Start a chat
+
+1. Choose an agent profile. Quick Chat requires one and defaults to the workspace's default agent profile when configured.
+2. Optionally add one or more workspace repositories.
+3. For each repository, choose a branch. The same repository cannot be added twice.
+4. Select **Start chat**.
+
+Each selected repository gets an isolated worktree from the chosen branch. Uncommitted changes in your original checkout are not copied. Without a repository, Kandev creates an ephemeral working directory under `<KANDEV_HOME_DIR>/quick-chat/` (by default `~/.kandev/quick-chat/`).
+
+Quick Chat supports multiple tabs, tab renaming, and **+** to create another chat. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
+
+Closing a real chat tab permanently deletes its conversation, hidden backing task data, and associated worktree. There is no undo. Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
+
+If **Start chat** is disabled, select a profile and finish every repository/branch row. If a repository is missing, confirm that it belongs to the current workspace and refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
 
 ## Utility agents
 
-**Settings > Utility Agents** configures small agent-backed jobs used by Kandev itself. Built-in uses include generating or refining:
+Open **Settings > Utility Agents** (`/settings/utility-agents`). Utility agents are one-shot ACP calls used to generate small pieces of text; they do not create a durable task conversation.
 
-- task prompts;
-- branch names;
-- commit messages;
-- pull-request descriptions;
-- session summaries.
+The built-in actions are:
 
-Each utility can select an agent/profile and prompt template. These jobs can send repository or task context to the configured model provider, so choose credentials and profiles with the same care as a normal session. Keep the fallback behavior usable when a utility agent or provider is unavailable.
+- `commit-message`
+- `commit-description`
+- `branch-name`
+- `pr-title`
+- `pr-description`
+- `enhance-prompt`
+- `summarize-session`
 
-## Prompts
+Set a global **Default utility agent model** by choosing an inference-capable agent and one of its models. Each built-in action can inherit that pair or override it, and its prompt template is editable. Kandev probes the agent for its live model list; refresh or retry when model discovery fails.
 
-**Settings > Prompts** manages reusable prompt templates. Workflows, utility agents, and task actions can reference them so a team can standardize planning, implementation, review, and handoff instructions.
+You can also create a custom utility. Name, prompt, agent, and model are required; description is optional. Prompt fields offer autocomplete for supported `{{...}}` template variables. A per-action override must specify a usable agent/model pair; otherwise resolution falls back to the global pair. Buttons that depend on a utility are disabled or return an error when no valid model is available.
 
-Prompts are process policy, not enforcement. Pair them with workflow gates, scoped executor permissions, tests, and branch protection when those controls matter.
+Utility calls run as ephemeral processes on the Kandev backend host. Kandev records the resolved prompt, response, selected model, token counts when provided, duration, status, and error. The prompt can include repository, diff, task, or conversation context, so its content goes to the selected model provider. Apply the same credential, retention, and data-classification rules as a normal agent session.
 
-## Voice mode
+### Configuration Chat
 
-**Settings > Voice Mode** configures dictation in the chat composer. Available engines depend on browser and deployment support:
+The same settings page configures the **Configuration Chat Agent** for each workspace. Choose a profile, choose **No default**, or rely on the workspace default profile. Kandev remembers the first explicit selection as that workspace's configuration-chat default.
 
-- browser Web Speech;
-- local in-browser Whisper Web;
-- server-side Whisper transcription.
+Open Configuration Chat from the floating chat button on Settings pages or run **Configuration Chat** from the `Cmd/Ctrl+K` command menu. It supports multiple tabs and uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
 
-Settings include language, click-to-toggle or hold-to-talk activation, and optional auto-send. Server-side transcription requires its configured provider credential and sends audio outside the browser. Review the privacy and retention policy of the selected engine before using customer or proprietary content.
+Closing a Configuration Chat tab removes only the browser tab state; it does not delete the backing `config_mode` task. Those tasks are excluded from the seven-day Quick Chat sweeper and can accumulate. Profile deletion attempts to clean matching ephemeral tasks, but otherwise there is no equivalent close-to-delete lifecycle in this UI.
 
-## Files, editor, and language servers
+## Saved prompts
 
-The task workbench can browse and edit files, search the workspace, preview images, and show diagnostics or language features when a matching language server is installed. **Settings > General > Editors** controls editor integrations and discovery.
+Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
 
-The file tree reflects the selected task repository or attachment. In a multi-repository task, check the repository label before editing or reviewing. Agent changes can arrive while a file is open, so refresh the diff before commenting on line numbers.
+Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
 
-## Terminal and shell
+Kandev seeds these built-ins:
 
-The integrated terminal runs in the task environment. For local/worktree executors that is the host; for Docker, SSH, or Sprites it is the selected runtime through agentctl.
+- `code-review`
+- `open-pr`
+- `merge-base`
+- `ci-auto-fix`
+- `changes-walkthrough`
 
-**Settings > General > Terminal** controls shell behavior. A command that works in your login shell may fail under a service account, container, or remote environment because PATH, credentials, working directory, or startup files differ.
+Built-ins are marked in the UI but remain editable. Editing `ci-auto-fix` or `changes-walkthrough` changes the corresponding PR repair or walkthrough action. Seed insertion does not overwrite edits. If you delete a built-in, it stays absent for the current backend run and is seeded again on the next service start. There is no reset-to-default button.
 
-## Changes, review, and walkthroughs
+A saved prompt is an instruction, not an authorization or policy boundary. Executor permissions, human gates, tests, and provider protections still control what can happen.
 
-The Changes panel groups repository state, staged/unstaged files, commits, branches, and pull requests. Review comments can be attached to exact lines and sent back to the agent. A generated code walkthrough presents an ordered tour of relevant file ranges.
+## Voice Mode
 
-See [Sessions and review](sessions-and-review.md) for the full review loop and [Git operations](git-operations.md) before rebasing or resolving conflicts.
+Open **Settings > Voice Mode** (`/settings/voice-mode`). Voice Mode inserts a transcript at the cursor in the active chat composer.
 
-## Personal settings
+Defaults are:
 
-General settings include:
+| Setting | Default |
+|---|---|
+| Enabled | On |
+| Engine | Automatic |
+| Language | Auto-detect |
+| Activation | Click to toggle |
+| Auto-send | Off |
+| Whisper Web model | Base, approximately 75 MB |
+| Shortcut | `Cmd/Ctrl+Shift+M` |
 
-- appearance, panel layout, and resource-metric visibility;
-- keyboard shortcuts;
-- desktop/browser notifications;
-- task-action confirmations;
-- terminal and editor preferences;
-- named secrets used by profiles.
+The shortcut is also configurable under **Settings > General > Keyboard Shortcuts**. Hold-to-talk applies on a fine-pointer device. On touch/coarse-pointer devices, Kandev uses toggle behavior while preserving the stored preference. With auto-send enabled, a successful transcript is sent as soon as it is inserted.
 
-Keyboard shortcuts are editable in **Settings > General > Keyboard Shortcuts**. Avoid assigning the same chord to global browser, terminal, editor, and Kandev actions.
+### Choose an engine
 
-Notifications depend on browser/desktop permission and operating-system policy. Treat them as convenience signals rather than the only alert path for an unattended workflow.
+| Engine | Where recognition happens | Requirements and data flow |
+|---|---|---|
+| **Automatic** | First available engine | Selects the first currently available capability in this order: Web Speech, Whisper Web, then Whisper Server. A pinned engine that is unavailable is resolved through the same capability order. |
+| **Web Speech** | Browser-provided implementation | No audio is sent to the Kandev backend. Browser/vendor behavior and privacy policy still apply, and some implementations require a network service. |
+| **Whisper Web** | In the browser | Downloads and caches an ONNX model from Hugging Face, then runs local inference in a worker. Tiny is about 40 MB, Base about 75 MB, and Small about 240 MB. |
+| **Whisper Server** | Kandev backend and OpenAI | The browser uploads audio to Kandev; Kandev sends it to OpenAI's `whisper-1` transcription API. Configure `KANDEV_VOICE_OPENAI_API_KEY` on the backend. |
 
-## Resource and usage visibility
+Whisper Server accepts at most 10 MiB per request and has a 60-second backend timeout. It returns an unavailable error when the key is not configured, a payload-too-large error above the limit, and an upstream error when transcription fails. Automatic selection can choose this unconfigured server when both browser capabilities are unavailable.
 
-Kandev can show host or environment CPU, memory, disk, load, and other supported metrics. It can also surface task/session statistics and provider usage hints where an integration exposes them.
+Engine choice is capability selection, not runtime failover. Once recognition or transcription starts, an error does not retry the request through the next engine. The backend `/api/v1/transcribe` route has no Kandev authentication and spends the configured OpenAI key; protect the whole backend origin and do not publish that endpoint directly.
 
-These values help diagnose capacity and activity; they are not quotas, billing guarantees, or security controls. Configure hard limits in the executor, provider, or host platform.
+Microphone capture requires browser permission and normally HTTPS or localhost. Whisper Web also needs `getUserMedia`, `MediaRecorder`, workers, enough browser storage, and a first-use network download. The UI mentions common Chrome, Edge, and Safari versions, but Kandev does not enforce a browser/version allow-list; runtime availability is determined from the required APIs. If recording fails, check site permission, input device, secure context, model download/cache, browser support, and network access. The composer must remain enabled; switching tasks or disabling the input cancels recording.
+
+## Files and editor integrations
+
+The task **Files** panel browses, searches, opens, and edits task-worktree files. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
+
+**VS Code (Embedded)** runs code-server inside the task environment and displays it in a workbench panel. Opening it starts code-server independently of the agent process. It launches with `--auth none` and binds `0.0.0.0` on a random port inside that runtime; network/firewall isolation is therefore important, especially for Local and SSH environments. If the binary is absent, agentctl attempts to download it into `~/.kandev/tools/code-server`; first use needs a supported host platform and access to the GitHub release. Use the panel error and task-environment logs when installation, startup, or proxying fails.
+
+Use the workbench top bar's split-editor action to open the selected session worktree in the default editor. Its menu lets you choose another configured editor. A file's **Open with** menu can also open a specific editor, copy the path, or ask the operating system to show the folder.
+
+Open **Settings > General > Editors** (`/settings/general/editors`) to set a default and configure integrations. Kandev discovers these built-in desktop editors when installed:
+
+- Visual Studio Code
+- Zed
+- Cursor
+- Windsurf
+- IntelliJ IDEA
+- GoLand
+- PhpStorm
+
+You can add:
+
+- a custom command with `{cwd}`, `{file}`, `{rel}`, `{line}`, and `{column}` placeholders;
+- VS Code Remote SSH with a required host and optional user and URI scheme;
+- a hosted editor base URL, to which Kandev adds file or folder query parameters.
+
+Desktop editor discovery and custom commands run on the Kandev backend host. The executable must be installed there and visible in its `PATH`; in a remote browser deployment, a local-editor command may therefore launch on the server rather than your laptop. Remote SSH needs a reachable SSH host and a registered VS Code URI handler. Hosted URLs need an accessible service and receive the absolute backend-host path in their `file` or folder query parameter. Configure only trusted custom commands because invoking one executes it on the host.
+
+## Language servers
+
+Language-server settings are part of **Settings > General > Editors**. Kandev currently registers servers for:
+
+- TypeScript and JavaScript;
+- Go;
+- Rust;
+- Python.
+
+Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. A file toolbar can start or stop a server manually; browser-local storage remembers manual enablement for that session and language. Kandev disconnects an unused server connection after two minutes.
+
+Server lookup checks installed executables and `<KANDEV_HOME_DIR>/lsp-servers` (by default `~/.kandev/lsp-servers`). Auto-install uses different toolchains:
+
+- TypeScript/JavaScript and Python install npm packages into Kandev's language-server storage;
+- Go runs `go install ...@latest` and therefore needs a working Go toolchain;
+- Rust downloads a release for supported macOS or Linux, x86-64 or ARM64 hosts. Windows is not registered for automatic Rust installation.
+
+The default Go server configuration enables semantic tokens. A custom language-server configuration must be a JSON object; Kandev sends it through the language-server workspace configuration request. Installing a language server does not install project dependencies or make an unsupported language available. If startup fails, check the backend log/status, executable `PATH`, supported host platform, toolchain/network access, project dependencies, and that the file belongs to the active task worktree.
+
+Language-server subprocesses run on the Kandev backend host with the task workspace path as their working directory; they are not launched inside a Docker container, SSH host, or Sprites sandbox. Remote-only paths, binaries, and project dependencies are therefore normally unavailable to this LSP path even when the agent itself can use them.
+
+## Integrated terminal
+
+The task terminal is a PTY in the task environment. Local tasks run through the local environment; Docker, SSH, and other remote executors route the terminal to their configured runtime.
+
+On desktop, select **+ > Terminals > New Terminal**. Parked terminal sessions can appear in the same menu for reopening. The tab context menu offers **Rename** and **Terminate**, not a separate Close action. Selecting the tab's **X** deletes the terminal and asks for confirmation when it is busy. Removing the panel through layout management can instead park it and keep its PTY alive; terminating a live terminal or deleting a parked entry destroys it. On mobile, select **Terminal** in task navigation and use the terminal picker to create another.
+
+Do not confuse a user terminal with a CLI-passthrough agent tab: both use PTYs, but only the agent tab is the agent's native interface. `Cmd/Ctrl+J` toggles the bottom terminal area.
+
+Open **Settings > General > Terminal** (`/settings/general/terminal`) to configure:
+
+- preferred shell, which defaults to the system shell; the built-in choices are zsh, bash, and sh on macOS/Linux, and PowerShell (`pwsh`), Windows PowerShell, and cmd on Windows, plus a custom executable;
+- terminal font, with a default Menlo/Monaco-style stack;
+- font size, default 13 px and allowed range 8–24 px;
+- URL handling, which defaults to a new browser tab and can instead use Kandev's built-in browser panel.
+
+Shell changes apply whenever a new or restarted terminal is created, including inside an existing task. Only an already-live PTY keeps its current shell. A custom shell must exist in the task environment. Fonts render only when available to the browser. Commands can behave differently from your login shell because the executor may use another user, `PATH`, credentials, working directory, or startup files.
+
+If no terminal can be created, wait for the task environment to become ready and confirm its executor is reachable. If a reopened terminal is dead, create a new one; the original PTY or remote connection may have exited.
 
 ## Choose the right surface
 
 | Need | Use |
 |---|---|
-| Short disposable question | Quick chat |
-| Branch, review, or delivery state | Normal task and workflow |
-| Repeatable model-assisted metadata | Utility agent |
-| Shared process instructions | Prompt template and workflow |
-| Inspect or edit task files | Workbench editor |
-| Run project commands | Task terminal |
-| Explain a change to a reviewer | Changes panel and code walkthrough |
+| Disposable question or experiment | Quick Chat |
+| Board history, branch, review, dependency, or PR | A normal task and workflow |
+| Small generated title, summary, or description | Utility agent |
+| Reusable task-chat instructions | Saved prompt |
+| Dictate into chat | Voice Mode |
+| Browse or edit task files | Files and editor integration |
+| Diagnostics for supported languages | Language server |
+| Run a command in the task runtime | Integrated terminal |
 
-Related: [Get started](use-kandev.md), [Tasks and workflows](tasks-and-workflows.md), and [Agents and profiles](agents-and-profiles.md).
+Related: [Use Kandev](use-kandev.md), [Sessions and review](sessions-and-review.md), [Agents and profiles](agents-and-profiles.md), and [Integrations](integrations.md).
