@@ -387,36 +387,70 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 
 	// Determine message type from normalized payload for fallback creation
 	msgType := toolKindToMessageType(payload.Data.Normalized)
-
-	// Handle all status updates (running, complete, error, cancelled, pending, in_progress)
-	switch payload.Data.ToolStatus {
+	status := payload.Data.ToolStatus
+	switch status {
 	case "running", agentEventComplete, agentEventCompleted, "success", agentEventError, agentEventFailed, "cancelled", "pending", "in_progress":
-		if err := s.messageCreator.UpdateToolCallMessage(
-			ctx,
-			payload.TaskID,
-			payload.Data.ToolCallID,
-			payload.Data.ParentToolCallID, // Pass parent for subagent nesting
-			payload.Data.ToolStatus,
-			"", // result - no longer used, tool results in NormalizedPayload
-			payload.SessionID,
-			payload.Data.ToolTitle,               // Include title from update event
-			s.getActiveTurnID(payload.SessionID), // Turn ID for fallback creation
-			msgType,                              // Message type for fallback creation
-			payload.Data.Normalized,              // Pass normalized tool data for message metadata
-		); err != nil {
-			s.logger.Warn("failed to update tool call message",
+	default:
+		return
+	}
+	terminal := isTerminalToolUpdateStatus(status)
+	turnID := ""
+	if terminal {
+		var err error
+		turnID, err = s.peekActiveTurnID(ctx, payload.SessionID)
+		if err != nil {
+			s.logger.Warn("failed to look up active turn for terminal tool update",
 				zap.String("task_id", payload.TaskID),
+				zap.String("session_id", payload.SessionID),
 				zap.String("tool_call_id", payload.Data.ToolCallID),
 				zap.Error(err))
+			// Fail closed: without a confirmed active turn, this must be an
+			// update-only reconciliation and cannot wake a settled session.
+			turnID = ""
 		}
+	} else {
+		turnID = s.getActiveTurnID(payload.SessionID)
+	}
+	fallbackMsgType := msgType
+	if terminal && turnID == "" {
+		// A late terminal update can update its existing card, but must not
+		// create a message (and implicitly a turn) after the turn settled.
+		fallbackMsgType = ""
+	}
 
-		// Update session state for completion events.
-		// Use setSessionRunning so the task flips to IN_PROGRESS alongside —
-		// see comment in handleToolCallEvent for the REVIEW/RUNNING split bug.
-		if payload.Data.ToolStatus == agentEventComplete || payload.Data.ToolStatus == agentEventCompleted ||
-			payload.Data.ToolStatus == "success" || payload.Data.ToolStatus == agentEventError || payload.Data.ToolStatus == agentEventFailed {
-			s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
-		}
+	if err := s.messageCreator.UpdateToolCallMessage(
+		ctx,
+		payload.TaskID,
+		payload.Data.ToolCallID,
+		payload.Data.ParentToolCallID, // Pass parent for subagent nesting
+		status,
+		"", // result - no longer used, tool results in NormalizedPayload
+		payload.SessionID,
+		payload.Data.ToolTitle,  // Include title from update event
+		turnID,                  // Turn ID for fallback creation
+		fallbackMsgType,         // Empty for settled terminal reconciliations
+		payload.Data.Normalized, // Pass normalized tool data for message metadata
+	); err != nil {
+		s.logger.Warn("failed to update tool call message",
+			zap.String("task_id", payload.TaskID),
+			zap.String("tool_call_id", payload.Data.ToolCallID),
+			zap.Error(err))
+	}
+
+	// Terminal updates only wake an async turn that was established by prior
+	// substantive output. A standalone terminal reconciliation belongs to the
+	// already-settled turn that created the tool call.
+	if terminal && status != "cancelled" && turnID != "" {
+		s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
+	}
+}
+
+func isTerminalToolUpdateStatus(status string) bool {
+	switch status {
+	case agentEventComplete, agentEventCompleted, "success", agentEventError, agentEventFailed, "cancelled":
+		return true
+	default:
+		return false
 	}
 }
 

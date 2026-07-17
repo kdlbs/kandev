@@ -68,6 +68,25 @@ func TestHandleACPUpdate_DoesNotEmitIdleCompleteWhilePromptActive(t *testing.T) 
 	})
 }
 
+func TestAsyncTurnComplete_TerminalToolUpdateDoesNotStartTurn(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		setAsyncTurnCompleteIdleForTest(t, 10*time.Millisecond)
+		a := newTestAdapter()
+		defer func() { _ = a.Close() }()
+
+		a.maybeScheduleAsyncTurnComplete(AgentEvent{
+			Type:       streams.EventTypeToolUpdate,
+			SessionID:  "s-late-tool",
+			ToolCallID: "tool-1",
+			ToolStatus: toolStatusComplete,
+		})
+
+		time.Sleep(50 * time.Millisecond)
+		synctest.Wait()
+		assertNoAdapterEvent(t, a, "after a standalone terminal tool update")
+	})
+}
+
 func TestAsyncTurnComplete_CancelledByRealPromptCompletion(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		setAsyncTurnCompleteIdleForTest(t, 50*time.Millisecond)

@@ -1,49 +1,51 @@
 ---
 title: "Kandev Documentation"
-description: "Choose a guide for running agentic development work or contributing to Kandev itself."
+description: "Choose a guide for installing Kandev, running agent work, reviewing changes, or contributing to Kandev."
 ---
 
 # Kandev Documentation
 
-Kandev is an open-source workbench for planning, running, coordinating, and reviewing software work with coding agents. It runs on infrastructure you control, works with multiple agent providers, and keeps the human review surface close to the repository state.
+Kandev is an open-source workbench for assigning repository work to coding agents, coordinating parallel sessions, and reviewing the resulting changes. It runs on infrastructure you control. Agent CLIs, models, executors, and external services remain separate dependencies with their own credentials and limits.
 
-Choose the path that matches what you are doing now.
+## Run work in Kandev
 
-## Use Kandev
+Start with the page that matches the job in front of you:
 
-Start here when you want to install Kandev, connect repositories and tools, run agents, or design a team workflow.
+- [Get started](use-kandev.md): install Kandev, add a local repository, configure an agent, and run a first task.
+- [Tasks and workflows](tasks-and-workflows.md): create tasks, use plans, configure workflow steps, and understand the Office-only document and label boundary.
+- [Sessions and review](sessions-and-review.md): work with named sessions, chat, files, terminal, changes, preview, pull requests, and walkthroughs.
+- [Coordinate work](coordination.md): use parallel sessions, targeted messages, subtasks, dependencies, multiple repositories, and additional branches.
+- [Agents and profiles](agents-and-profiles.md): configure agent CLIs, models, modes, permissions, environment, passthrough, and credentials.
+- [Executors](executors.md): choose local, worktree, Docker, SSH, or Sprites execution and understand the isolation boundary.
+- [Integrations](integrations.md): configure GitHub, GitLab, Jira, Linear, Sentry, and Slack for a workspace.
+- [Developer tools](developer-tools.md): use quick chat, prompts, utility agents, voice input, editors, terminal, shortcuts, and notifications.
+- [Automation and MCP](automation-and-mcp.md): create scheduled or event-driven work, use task MCP, and connect an external MCP client.
+- [Feature status](feature-status.md): check support boundaries, dependencies, experimental features, and unfinished work.
+- [Security and trust](security.md): choose a safe deployment boundary, constrain agent access, protect credentials, and preserve human review.
 
-- [Get started](use-kandev.md): install Kandev and complete a first task.
-- [Tasks and workflows](tasks-and-workflows.md): choose a workflow, create tasks, and move work through gates.
-- [Sessions and review](sessions-and-review.md): use chat, files, terminal, changes, plans, pull requests, and code walkthroughs.
-- [Coordinate work](coordination.md): use subtasks, dependencies, multiple repositories, multiple branches, plans, and handoffs.
-- [Agents and profiles](agents-and-profiles.md): select models and modes, configure CLI flags and environment, and understand permission controls.
-- [Executors](executors.md): choose local, worktree, Docker, SSH, or Sprites execution.
-- [Integrations](integrations.md): connect GitHub, GitLab, Jira, Linear, Sentry, and Slack.
-- [Developer tools](developer-tools.md): quick chat, prompts, utility agents, voice, editors, terminal, shortcuts, and notifications.
-- [Automation and MCP](automation-and-mcp.md): automate workflow transitions and let agents coordinate Kandev tasks.
-- [Feature status](feature-status.md): see what is supported, optional, experimental, or still in progress.
-
-For installation and deployment details, use the [CLI reference](cli.md), [desktop guide](desktop-app.md), [configuration reference](configuration.md), or one of the runtime guides under **Run and Operate**.
+Installation and operation have dedicated references: [CLI](cli.md), [desktop app](desktop-app.md), [configuration](configuration.md), [service](run-as-a-service.md), [Docker](docker.md), [Kubernetes](k8s.md), and [operations](operations.md).
 
 ## Contribute to Kandev
 
-Start here when you are changing Kandev, extending an integration, or maintaining its public documentation.
+These pages describe the current source tree and its development conventions:
 
-- [Contribution workflow](contributing.md): prepare a development environment and open a focused pull request.
-- [Architecture](architecture.md): understand the unified Go backend, embedded web app, persistence, events, agent runtime, and external boundaries.
+- [Contribution workflow](contributing.md): prepare a development environment and submit a focused change.
+- [Architecture](architecture.md): understand the Go backend, embedded web app, persistence, events, agent runtime, and external boundaries.
 - [Backend development](backend-development.md): follow handler, service, repository, event, migration, and WebSocket conventions.
-- [Web development](web-development.md): work with the Vite/React app, state slices, API clients, WebSocket handlers, responsive task UI, and design system.
-- [Testing](testing.md): choose targeted Go, Vitest, CLI, desktop, or Playwright coverage and use isolated fixtures.
+- [Web development](web-development.md): work with the React app, state, API clients, WebSocket handlers, responsive task UI, and design system.
+- [Testing](testing.md): choose targeted Go, Vitest, CLI, desktop, or Playwright coverage.
+- [Remote cloud development](remote-cloud-environment.md): bootstrap and test the Kandev source tree in an ephemeral VM or cloud workspace.
 - [Extension guides](extending-kandev.md): add agents, executors, integrations, settings, MCP tools, prompts, and workflow behavior.
-- [Adding an agent CLI](add-agent-cli.md): implement a new ACP or TUI integration end to end.
-- [Release process](release-process.md): understand versioning, release automation, runtime bundles, desktop artifacts, npm, Homebrew, and containers.
-- [Public docs guide](README.md): update a page or add a new entry to this navigation.
+- [Adding an agent CLI](add-agent-cli.md): implement an ACP or TUI integration end to end.
+- [Release process](release-process.md): understand versioning and the CLI, runtime, desktop, npm, Homebrew, and container release paths.
+- [Public docs guide](README.md): update or add a published page.
 
-## Product Boundary
+## Supported product boundary
 
-The regular task workbench and task-scoped Kandev MCP are shipped features. **Office mode is separate and remains feature-flagged and in progress.** Internal plans, ADRs, and experiments can explain direction, but they are not promises that a feature is generally available. The [feature status page](feature-status.md) records that boundary explicitly.
+The regular Kanban workbench, task sessions, review surfaces, and task-scoped Kandev MCP are the supported product path. Some capabilities still depend on a particular agent, executor, provider, platform, credential, or install channel; those differences are called out on their topic pages.
 
-## Current Version
+**Office is separate, disabled in the production runtime profile, feature-flagged, and still in progress.** Its source, tests, specifications, and internal plans do not make persistent teams, routines, budgets, or coordinator-led autonomy a supported production contract. See [Feature status](feature-status.md).
 
-These docs describe the current `main` branch and are not versioned yet. Commands and configuration are verified against source, but a released build can lag `main`. Check the version in **Settings > System > About** or run `kandev --version`, then consult the corresponding GitHub tag when exact historical behavior matters.
+## Match docs to the running version
+
+These docs describe the current `main` branch and are not versioned. A released build can lag behind them. Check **Settings > System > About** or run `kandev --version`, then use the matching GitHub tag when exact historical behavior matters.

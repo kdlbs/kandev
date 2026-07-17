@@ -15,7 +15,20 @@ Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go
 
 ## Playwright projects
 
-The suite is split into three projects. Pick one with `--project=<name>`.
+The suite is split into four projects. Pick one with `--project=<name>`.
+
+### `routing`
+
+Runs `office-routing-*.spec.ts` in an isolated desktop worker. Those specs restart
+their backend with provider overrides that apply only to the restart/spec that
+supplies them; the next restart rebuilds the environment from its clean baseline.
+Keeping these specs separate also keeps their routing-specific provider and agent
+fixtures away from tests that count agents or assert the active-agent label. Run
+it directly with:
+
+```sh
+pnpm e2e --project=routing
+```
 
 ### `chromium` (default)
 
@@ -71,6 +84,7 @@ This project used to be named `docker`. It was renamed to `containers` once SSH 
 | `pnpm e2e:headed`                  | Run headless project but with a visible browser. |
 | `pnpm e2e --project=containers`    | Run container-backed tests (needs Docker).       |
 | `pnpm e2e --project=mobile-chrome` | Run mobile responsive tests.                     |
+| `pnpm e2e --project=routing`       | Run provider-mutating Office routing tests.      |
 | `E2E_DEBUG=1 pnpm e2e`             | Surface Docker build output + extra logging.     |
 
 Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (flake hunting).

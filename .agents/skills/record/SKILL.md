@@ -1,6 +1,6 @@
 ---
 name: record
-description: 'Keep docs/decisions/ ADRs and docs/specs/ specs in sync with the work happening in the conversation. AUTO-INVOKE proactively the moment the user asks for any change that will alter architecture or observable product behavior — new feature, cross-cutting refactor, dependency swap, data-model or public-API change, new pattern, or a bug fix that changes documented behavior or reveals a spec gap. Also invoke on explicit triggers: "record this", "create an ADR", "document this decision", "update the spec", "ADR for X". Run BEFORE coding when the decision is upfront, or AFTER landing when the right call only became clear during implementation. SKIP for typo/lint fixes, refactors that preserve behavior within an existing pattern, and obvious uncontested choices.'
+description: 'Keep durable architecture decisions and product specs in sync with the work happening in the conversation. AUTO-INVOKE when a request establishes or changes a long-lived architectural boundary, public contract, data ownership rule, operational invariant, or repo-wide convention with meaningful alternatives. Also invoke on explicit triggers: "record this", "create an ADR", "document this decision", "update the spec", "ADR for X". Run BEFORE coding when the decision is upfront, or AFTER landing when the right call only became clear during implementation. Do not create ADRs for simple features, local implementation choices, routine dependency changes, or bug fixes that do not establish a durable rule.'
 ---
 
 # Record Knowledge
@@ -11,17 +11,22 @@ Record architectural decisions for future reference, and keep related feature sp
 
 When a significant architectural or design choice is made, create an ADR:
 
-1. Read `docs/decisions/INDEX.md` to find the next number
-2. Create `docs/decisions/NNNN-short-title.md` using the template below
-3. Update `docs/decisions/INDEX.md` with the new entry
-4. **Reconcile specs** — see "Update or create a spec" below
+1. Choose a decentralized ID in the form `YYYY-MM-DD-short-title`. The short title must be
+   specific enough to remain unique among decisions created on the same date.
+2. Confirm that `docs/decisions/<id>.md` does not already exist.
+3. Create `docs/decisions/<id>.md` using the template below.
+4. Update `docs/decisions/INDEX.md` with the new entry.
+5. **Reconcile specs** — see "Update or create a spec" below.
+
+Existing numeric ADR IDs remain valid and must not be renamed. References use the complete stable
+ID, for example `ADR-2026-07-16-project-shell-output`.
 
 ### ADR template
 
 ```markdown
-# NNNN: Short Title
+# ADR-YYYY-MM-DD-short-title: Short Title
 
-**Status:** accepted | superseded by NNNN | deprecated
+**Status:** accepted | superseded by <adr-id> | deprecated
 **Date:** YYYY-MM-DD
 **Area:** backend | frontend | infra | protocol | workflow
 
@@ -40,16 +45,26 @@ What else was considered and why it was rejected.
 
 ### What warrants an ADR
 
-- Choosing one approach over another (e.g., event bus vs direct calls)
-- Adding a new dependency or library
-- Changing a data model or API contract
-- Selecting a pattern that affects multiple files (e.g., provider pattern for DI)
-- Decisions that future developers will ask "why?" about
+Create an ADR only when all of these are true:
+
+- The choice establishes a durable constraint, boundary, contract, ownership rule, operational
+  invariant, or repo-wide convention.
+- There were meaningful alternatives with materially different trade-offs.
+- Future work will need to follow or deliberately supersede the choice.
+- A spec, plan, code comment, or regression test alone would not preserve enough of the reasoning.
+
+Typical examples include selecting a system-wide communication model, defining ownership across
+subsystems, changing a public API or persisted-data contract, and adopting a cross-cutting security
+or reliability invariant.
 
 ### What does NOT need an ADR
 
-- Bug fixes, refactors within the same pattern, simple features
-- Anything where the choice is obvious and uncontested
+- Simple features whose behavior belongs in a product spec
+- Local implementation tactics and refactors within an existing pattern
+- Routine dependency additions or upgrades
+- Bug fixes unless they establish a new rule that future implementations must follow
+- Plan sequencing, task breakdown, and temporary migration mechanics
+- Anything obvious, uncontested, or easily reversible without cross-system consequences
 
 ## Update or create a spec
 
@@ -57,7 +72,7 @@ ADRs capture *why* a decision was made. Specs capture *what* a feature does and 
 
 1. Read `docs/specs/INDEX.md` and identify any spec whose scope the decision touches (e.g., a routing decision affects `office-provider-routing/spec.md`).
 2. For each affected spec:
-   - **If the decision changes observable behavior, scope, or scenarios:** update `docs/specs/<slug>/spec.md` so the "What" and "Why" sections reflect the new direction. Add a `Decision: ADR-NNNN` reference where relevant.
+   - **If the decision changes observable behavior, scope, or scenarios:** update `docs/specs/<slug>/spec.md` so the "What" and "Why" sections reflect the new direction. Add a `Decision: ADR-<id>` reference where relevant.
    - **If the decision is purely internal (implementation choice with no spec-visible change):** no spec edit needed — the ADR alone is sufficient.
 3. If the decision introduces a new product feature that has no spec yet, invoke `/spec` to create one rather than writing it ad-hoc here.
 4. If no spec applies (pure infra/process decision, like this knowledge system itself), skip — note in the ADR that no spec is needed.

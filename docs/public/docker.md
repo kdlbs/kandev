@@ -1,170 +1,165 @@
 ---
 title: "Docker"
-description: "Run Kandev and agent execution environments with Docker."
+description: "Run the Kandev control plane in Docker and understand Docker-based agent execution."
 ---
 
-# Docker Guide
+# Docker
 
-Run Kandev in a Docker container. For Kubernetes deployment, see [k8s.md](k8s.md).
+The published image runs the Kandev control plane: native backend, web UI, API, WebSocket endpoint, external MCP endpoint, and the host-side `agentctl`. This is different from the **Local Docker executor**, which creates a separate container for an agent.
 
-## Quick Start
+For Kubernetes, see [Kubernetes](k8s.md). For executor profiles, see [Executors](executors.md#local-docker).
 
-```bash
-docker run -p 38429:38429 -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
-```
+## Quick start
 
-Open `http://localhost:38429` in your browser.
-
-## Using the Pre-built Image
-
-Kandev publishes images to GitHub Container Registry for `linux/amd64` and `linux/arm64`:
+Bind to host loopback unless an authenticated reverse proxy protects the service:
 
 ```bash
-# Latest release
-docker pull ghcr.io/kdlbs/kandev:latest
-
-# Specific version
-docker pull ghcr.io/kdlbs/kandev:0.9.0
+docker volume create kandev-data
+docker run -d \
+  --name kandev \
+  --restart unless-stopped \
+  -p 127.0.0.1:38429:38429 \
+  -v kandev-data:/data \
+  ghcr.io/kdlbs/kandev:latest
 ```
 
-### Choosing your image: vanilla vs. universal
-
-Two flavors are published. The default vanilla image is smallest and bundles npm-installable agent CLIs only. The `:universal` image (~1.4 GB) adds language toolchains (Go, Rust, build-essential), linters, and Playwright Chromium system libs - pick this if your agents work on Go/Rust/Python projects or drive headless browsers.
+Open `http://localhost:38429` and follow logs with:
 
 ```bash
-docker pull ghcr.io/kdlbs/kandev:universal
+docker logs -f kandev
 ```
 
-See the [repository image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md) for the full comparison, inclusion policy, and recipes for deriving your own image.
+Kandev currently has no built-in multi-user web login or API authorization boundary. `auth.jwtSecret` does not add one. Docker's unqualified `-p 38429:38429` publishes on every host interface, so do not use that form on an untrusted network. Use loopback, a private network/VPN, or an authenticated reverse proxy with TLS.
 
-## Building from Source
+## Published images
 
-The root `Dockerfile` is a release-image Dockerfile: it copies prebuilt binaries from a `bundle/` directory in the Docker build context. It does not compile the repository inside Docker. On a Linux host matching the target architecture, build the service bundle and prepare the same context layout used by the release workflow:
+The release workflow publishes multi-architecture `linux/amd64` and `linux/arm64` images to `ghcr.io/kdlbs/kandev`.
+
+| Flavor | Moving tag | Version tags | Contents |
+|---|---|---|---|
+| Base | `latest` | `X.Y.Z`, `vX.Y.Z` | Kandev, Node 24/npm, Git, `gh`, Python/pipx, Apprise, Azure CLI, and the Azure DevOps extension |
+| Universal | `universal` | `X.Y.Z-universal`, `vX.Y.Z-universal` | Base plus Go, Rust, pnpm, build tools, common developer CLIs, and Playwright Chromium system libraries |
+
+The universal image does not include Playwright browser downloads, JDKs, .NET, or database servers. Its tool versions are pinned in `Dockerfile.universal` for each release. See the [image guide](https://github.com/kdlbs/kandev/blob/main/docs/images.md) for the inclusion policy and derived-image examples.
+
+Use a version tag or digest in a persistent deployment:
 
 ```bash
-make service-bundle
-rm -rf ctx
-mkdir -p ctx/bundle
-cp -R dist/kandev/. ctx/bundle/
-cp docker-entrypoint.sh ctx/
-docker build -f Dockerfile -t kandev:latest ctx
+docker pull ghcr.io/kdlbs/kandev:X.Y.Z
+docker pull ghcr.io/kdlbs/kandev:X.Y.Z-universal
 ```
 
-For a cross-architecture image, first produce or download the matching `kandev-linux-x64.tar.gz` or `kandev-linux-arm64.tar.gz` release bundle, extract its top-level `kandev/` directory into `ctx/bundle/`, copy `docker-entrypoint.sh` into `ctx/`, and build that context with the matching `--platform`. Setting `--platform` without a matching bundle only labels an image containing the wrong native binaries.
+Replace `X.Y.Z` with a real release. `latest` moves on release. `universal` moves on release and is also rebuilt from the current `latest` base each Monday by the repository's scheduled workflow; dated `universal-weekly-YYYYMMDD` tags identify those rebuilds. Release-versioned universal tags remain unchanged.
 
-## Data Persistence
+The repository root `Dockerfile` is release packaging, not a source-build Dockerfile. The release workflow first builds a native bundle for each architecture, prepares a build context containing `bundle/` plus `docker-entrypoint.sh`, builds the amd64 and arm64 images separately, and joins their digests into the published manifest. A plain `docker build .` from a checkout fails because `bundle/` is intentionally absent.
 
-Kandev stores its SQLite database and git worktrees in `/data`. Mount a volume to persist data across container restarts:
+For extra OS tools, derive from a pinned published image so the release bundle and entrypoint stay intact:
 
-```bash
-# Named volume (recommended)
-docker run -v kandev-data:/data ghcr.io/kdlbs/kandev:latest
-
-# Bind mount to a host directory
-docker run -v /path/on/host:/data ghcr.io/kdlbs/kandev:latest
+```dockerfile
+FROM ghcr.io/kdlbs/kandev:X.Y.Z
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends postgresql-client \
+ && rm -rf /var/lib/apt/lists/*
 ```
 
-Without a volume, data is lost when the container is removed.
+Leaving the final configured user as root is intentional for this base flavor: the inherited entrypoint repairs `/data` and drops to `kandev` before starting the command. If a derivative finishes with `USER kandev`, provision writable volume ownership in advance, as the universal flavor does.
 
-### What lives on the volume
+## Image runtime behavior
 
-| Path | Contents |
+The base image:
+
+- uses Debian Bookworm and exposes only TCP 38429;
+- sets `KANDEV_HOME_DIR=/data`, `HOME=/data/home`, and `NPM_CONFIG_PREFIX=/data/.npm-global`;
+- disables the Docker executor with `KANDEV_DOCKER_ENABLED=false`;
+- starts `kandev start --backend-port 38429 --verbose` under `tini`;
+- starts as root only long enough to create `/data/home` and recursively `chown /data`, then runs Kandev as user `kandev` (UID 1000) through `gosu`.
+
+The universal derivative sets `USER kandev`, so it skips the base entrypoint's root ownership repair. Pre-create a writable bind mount before using that flavor. Recursive ownership repair in the base image makes named volumes convenient, but can be slow on a large bind mount and can fail on root-squashed network storage. To run either image directly as UID 1000, pre-create every required path with suitable ownership and test the storage driver.
+
+## Persistence
+
+Always mount `/data`. Removing a container without a volume removes its database, workspaces, installed agent CLIs, and authentication state.
+
+| Volume path | Data |
 |---|---|
-| `/data/data/` | SQLite database (`kandev.db`, `-wal`, `-shm`) |
-| `/data/worktrees/`, `/data/tasks/`, `/data/repos/`, `/data/sessions/`, `/data/lsp-servers/` | Per-session state |
-| `/data/.npm-global/` | Agent CLIs installed via `npm install -g` (`NPM_CONFIG_PREFIX`) |
-| `/data/home/` | `$HOME` for the in-container `kandev` user — `gh` CLI and agent CLI auth state |
+| `/data/data/` | SQLite `kandev.db`, WAL/SHM files, and SQLite backup snapshots |
+| `/data/tasks/`, `/data/worktrees/`, `/data/repos/`, `/data/sessions/`, `/data/lsp-servers/` | Task and repository runtime state |
+| `/data/agent-sessions/` | Selectively seeded per-execution agent credential/session directories for Docker executors |
+| `/data/.npm-global/` | Agent CLIs installed at runtime |
+| `/data/home/` | Persistent home for `gh`, agent CLI auth, Azure config, caches, and user configuration |
 
-### Persistent agent and `gh` CLI auth
+For a bind mount:
 
-The image sets `HOME=/data/home`, so every CLI that writes its auth under `$HOME` lands on the volume and survives container restarts and image upgrades:
+```bash
+sudo install -d -o 1000 -g 1000 /srv/kandev
+docker run -d \
+  --name kandev \
+  -p 127.0.0.1:38429:38429 \
+  -v /srv/kandev:/data \
+  ghcr.io/kdlbs/kandev:X.Y.Z
+```
 
-- `gh` CLI — `~/.config/gh/hosts.yml`
-- Claude Code — `~/.claude/.credentials.json`, `~/.claude.json`
-- Codex — `~/.codex/auth.json`, `~/.codex/config.toml`
-- Auggie — `~/.augment/session.json`
-- GitHub Copilot — `~/.copilot/...`
-- OpenCode, Amp — `~/.config/<tool>/...`
+Confirm UID/GID policy on your host before copying this example. The image guarantees UID 1000 for the user but does not promise GID 1000 for its primary group; its root entrypoint normally corrects ownership using the image's actual group.
 
-A one-time `docker exec -it kandev gh auth login` (or `claude login`, `codex login`, etc.) is enough; you do not need to redo it after `docker pull` and recreating the container.
+### CLI authentication inside the container
 
-> The GitHub PAT configured in **Settings → Integrations → GitHub** is stored as a secret in the database and has always persisted. The `HOME=/data/home` setup covers the separate `gh auth login` flow that the backend falls back to when no `GITHUB_TOKEN` secret is set.
+The base and universal flavors have different configured users. Always select `kandev` explicitly for interactive login and installs so files under `/data/home` remain usable by the service:
+
+```bash
+docker exec --user kandev -it kandev gh auth login
+docker exec --user kandev -it kandev sh
+```
+
+The same rule applies to `claude login`, `codex login`, and manual `npm install -g` commands. Treat `/data/home` and the database as secret material when backing them up.
 
 ## Configuration
 
-Configuration is done via `KANDEV_`-prefixed environment variables:
+Pass backend settings as environment variables or mount a read-only `/etc/kandev/config.yaml`. See [Configuration](configuration.md) for the canonical field names, environment mapping, validation, and precedence.
+
+Container-specific defaults are:
+
+| Setting | Image value | Notes |
+|---|---|---|
+| `KANDEV_HOME_DIR` | `/data` | Root for database and runtime state |
+| `HOME` | `/data/home` | Persistent CLI credentials and caches |
+| `NPM_CONFIG_PREFIX` | `/data/.npm-global` | Runtime-installed npm CLIs |
+| `KANDEV_DOCKER_ENABLED` | `false` | Overrides the backend's ordinary host default |
+| `KANDEV_NO_BROWSER` | `1` | Prevents browser launch |
+| Internal listener | `38429` | Fixed by the image command unless that command is replaced |
+| Default log level | `info` | The image command passes `--verbose`; an explicit `KANDEV_LOG_LEVEL` wins |
+
+Example:
 
 ```bash
-docker run -p 38429:38429 \
+docker run -d \
+  --name kandev \
+  -p 127.0.0.1:38429:38429 \
   -v kandev-data:/data \
-  -e KANDEV_LOG_LEVEL=debug \
-  ghcr.io/kdlbs/kandev:latest
+  -e KANDEV_LOG_LEVEL=warn \
+  ghcr.io/kdlbs/kandev:X.Y.Z
 ```
 
-### Environment Variables
-
-See [`configuration.md`](./configuration.md) for the full reference (including the YAML form and every knob the backend reads). The table below covers the env vars most often set in a Docker deployment.
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `KANDEV_HOME_DIR` | No | `/data` | Kandev home directory - contains `data/` (DB), `tasks/`, `worktrees/`, `repos/`, `sessions/`, and `lsp-servers/` |
-| `KANDEV_DATABASE_DRIVER` | No | `sqlite` | Database driver (`sqlite` or `postgres`) |
-| `KANDEV_DATABASE_PATH` | No | `$KANDEV_HOME_DIR/data/kandev.db` | SQLite database file path (override) |
-| `KANDEV_LOG_LEVEL` | No | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `KANDEV_LOGGING_FORMAT` | No | environment-selected (`text` in ordinary Docker runs) | Explicit format: `text` or `json`. The default becomes `json` when `KANDEV_ENV` is `production` or `prod`. |
-| `KANDEV_LOGGING_OUTPUTPATH` | No | `stdout` | Log destination: `stdout`, `stderr`, or a file path (rotated when a file) |
-| `KANDEV_LOGGING_MAXSIZEMB` | No | `100` | Rotate the log file when it exceeds this size (MB). File output only. |
-| `KANDEV_LOGGING_MAXBACKUPS` | No | `5` | Max rotated files to retain (`0` = unlimited). File output only. |
-| `KANDEV_LOGGING_MAXAGEDAYS` | No | `30` | Max age of rotated files in days (`0` = unlimited). File output only. |
-| `KANDEV_LOGGING_COMPRESS` | No | `true` | Gzip rotated files. File output only. |
-| `KANDEV_DOCKER_ENABLED` | No | `false` | Enable Docker runtime for agents (see below) |
-
-> **File-mode note:** when `KANDEV_LOGGING_OUTPUTPATH` is a file path, the active log file is created with mode `0600` (owner read/write only). Run any log shipper or sidecar as the same user, or use `stdout`/`stderr` and let the container runtime collect logs.
->
-> **Upgrading from a pre-`KANDEV_HOME_DIR` image?** The SQLite DB path moved from `/data/kandev.db` to `/data/data/kandev.db`. The backend auto-migrates the legacy `kandev.db` (plus any `-wal`/`-shm` files) on first boot — look for `Migrated SQLite database from pre-KANDEV_HOME_DIR location` in the logs. If you prefer to pin the old location instead, set `-e KANDEV_DATABASE_PATH=/data/kandev.db`. If you previously set `KANDEV_DATA_DIR`, replace it with `KANDEV_HOME_DIR`.
-
-### PostgreSQL
-
-To use PostgreSQL instead of SQLite:
+To expose a different host port, leave the internal command alone:
 
 ```bash
-docker run -p 38429:38429 \
-  -e KANDEV_DATABASE_DRIVER=postgres \
-  -e KANDEV_DATABASE_HOST=host.docker.internal \
-  -e KANDEV_DATABASE_PORT=5432 \
-  -e KANDEV_DATABASE_USER=kandev \
-  -e KANDEV_DATABASE_PASSWORD=secret \
-  -e KANDEV_DATABASE_DBNAME=kandev \
-  ghcr.io/kdlbs/kandev:latest
-```
-
-## Port
-
-Kandev exposes a single port. The Go backend serves the API, WebSocket, static SPA assets, and page boot data — all on one port:
-
-| Port | Service |
-|------|---------|
-| `38429` | API + WebSocket + Web UI |
-
-Override the port:
-
-```bash
-docker run -p 9080:9080 \
+docker run -d \
+  --name kandev \
+  -p 127.0.0.1:9080:38429 \
   -v kandev-data:/data \
-  ghcr.io/kdlbs/kandev:latest \
-  kandev start --backend-port 9080
+  ghcr.io/kdlbs/kandev:X.Y.Z
 ```
+
+Open `http://localhost:9080`. If you replace the container command to change its internal port, publish that same port and retain `--verbose` if info logs are desired.
 
 ## Docker Compose
-
-Create a `docker-compose.yml`:
 
 ```yaml
 services:
   kandev:
-    image: ghcr.io/kdlbs/kandev:latest
+    image: ghcr.io/kdlbs/kandev:X.Y.Z
     ports:
-      - "38429:38429"
+      - "127.0.0.1:38429:38429"
     volumes:
       - kandev-data:/data
     restart: unless-stopped
@@ -175,16 +170,19 @@ volumes:
 
 ```bash
 docker compose up -d
+docker compose logs -f kandev
 ```
 
-### With PostgreSQL
+### PostgreSQL example
+
+PostgreSQL moves database rows out of the Kandev volume, but `/data` is still required for workspaces, CLI installs, auth files, and other runtime state.
 
 ```yaml
 services:
   kandev:
-    image: ghcr.io/kdlbs/kandev:latest
+    image: ghcr.io/kdlbs/kandev:X.Y.Z
     ports:
-      - "38429:38429"
+      - "127.0.0.1:38429:38429"
     volumes:
       - kandev-data:/data
     environment:
@@ -192,7 +190,7 @@ services:
       KANDEV_DATABASE_HOST: postgres
       KANDEV_DATABASE_PORT: "5432"
       KANDEV_DATABASE_USER: kandev
-      KANDEV_DATABASE_PASSWORD: secret
+      KANDEV_DATABASE_PASSWORD: "${KANDEV_DB_PASSWORD:?set KANDEV_DB_PASSWORD}"
       KANDEV_DATABASE_DBNAME: kandev
     depends_on:
       postgres:
@@ -200,18 +198,18 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:17
+    image: postgres:16
     environment:
       POSTGRES_USER: kandev
-      POSTGRES_PASSWORD: secret
+      POSTGRES_PASSWORD: "${KANDEV_DB_PASSWORD:?set KANDEV_DB_PASSWORD}"
       POSTGRES_DB: kandev
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U kandev"]
+      test: ["CMD-SHELL", "pg_isready -U kandev -d kandev"]
       interval: 5s
       timeout: 3s
-      retries: 5
+      retries: 10
     restart: unless-stopped
 
 volumes:
@@ -219,36 +217,11 @@ volumes:
   postgres-data:
 ```
 
-## Reverse Proxy
+Put `KANDEV_DB_PASSWORD` in a permission-restricted deployment secret, not shell history or committed YAML. Kandev's built-in System backup/restore covers SQLite only; use `pg_dump` and a tested PostgreSQL restore procedure here.
 
-Since Kandev serves everything on a single port, a reverse proxy only needs to forward all traffic to port 38429. No extra environment variables are needed — the frontend automatically uses `window.location.origin` to reach the API.
+## Reverse proxy and network policy
 
-### Docker Compose with Caddy
-
-```yaml
-services:
-  kandev:
-    image: ghcr.io/kdlbs/kandev:latest
-    volumes:
-      - kandev-data:/data
-    restart: unless-stopped
-
-  caddy:
-    image: caddy:2
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - caddy-data:/data
-      - ./Caddyfile:/etc/caddy/Caddyfile
-    restart: unless-stopped
-
-volumes:
-  kandev-data:
-  caddy-data:
-```
-
-Example `Caddyfile`:
+The backend serves SPA, API, `/ws`, `/mcp`, and `/health` on one origin. Proxy the entire root path and preserve WebSocket upgrades. Caddy does this automatically:
 
 ```text
 kandev.example.com {
@@ -256,44 +229,37 @@ kandev.example.com {
 }
 ```
 
-## Docker-in-Docker (Agent Containers)
+TLS alone is not authentication. Put an identity-aware/authenticated gateway in front, restrict direct access to the Kandev container, and apply CSRF/origin policy appropriate to that gateway. A subpath such as `/kandev/` is not a documented deployment base; prefer a dedicated host at `/`.
 
-By default, `KANDEV_DOCKER_ENABLED=false` inside the container. To enable Docker-based agent execution, mount the Docker socket:
+## Using Docker for agent environments
 
-```bash
-docker run -p 38429:38429 \
-  -v kandev-data:/data \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -e KANDEV_DOCKER_ENABLED=true \
-  ghcr.io/kdlbs/kandev:latest
-```
+Host-installed Kandev can use **Settings > Executors > Docker** against a same-host daemon. The daemon must be reachable through global `docker.host`; the current runtime assumes bind-mount source paths exist on that daemon host. See [Local Docker executor](executors.md#local-docker) for image, credential, port, resume, and cleanup behavior.
 
-> **Note:** Mounting the Docker socket gives the container full access to the host's Docker daemon. Only do this in trusted environments.
+### Containerized control plane limitation
 
-## Upgrading
+Mounting `/var/run/docker.sock` into the Kandev service container is **not by itself a complete configuration**. Agent creation asks the daemon to bind-mount:
 
-```bash
-docker pull ghcr.io/kdlbs/kandev:latest
-docker compose up -d  # or: docker stop kandev && docker rm kandev && docker run ...
-```
+- the Linux `agentctl` helper path resolved inside the control-plane container;
+- per-execution directories under the control plane's Kandev home;
+- a local clone source in the filesystem-URL case.
 
-The volume at `/data` carries over the database, worktrees, npm globals, and `$HOME` for agent CLIs, so there is no manual migration step.
+The Docker daemon resolves those paths on the daemon host, not inside the Kandev container. A named `/data` volume and the image's `/app/...` helper therefore do not automatically exist at matching host paths. The current Docker executor also selects a Linux/amd64 helper unconditionally, so the agent container must be Linux/amd64-compatible (native or correctly emulated).
 
-> **Upgrading across the `HOME=/data/home` change:** if you previously ran `docker exec` to `gh auth login` or log in to agent CLIs on a pre-`HOME=/data/home` image, that state lived in the ephemeral `/home/kandev` inside the container and is not carried over. Log in once on the new container and it will persist for all subsequent upgrades. If you want to preserve the old state, copy it onto the volume before recreating the container:
->
-> ```bash
-> docker exec kandev sh -c 'cp -a /home/kandev/. /data/home/ 2>/dev/null || true'
-> ```
+For reliable Local Docker execution, run the Kandev control plane on the Docker host. Alternatively, build a custom deployment that mirrors every required source at identical absolute host/container paths and test cleanup, architecture, permissions, and upgrades. This advanced layout has no supplied Compose or Kubernetes manifest. Use SSH or Sprites when the control plane itself must remain containerized.
 
-## Health Check
+Giving Kandev a Docker socket or daemon API grants near-root control of that host. Protect the endpoint, never expose an unauthenticated TCP daemon, and do not give untrusted Kandev users profile-build access.
 
-The backend exposes a `/health` endpoint:
+Remote Docker profiles are not a workaround: that executor runtime is currently unimplemented.
+
+## Health and observability
+
+`GET /health` returns 503 during startup and 200 after routes are registered and the listener is accepting connections:
 
 ```bash
-curl http://localhost:38429/health
+curl --fail http://localhost:38429/health
 ```
 
-For Docker health checks in compose:
+It is a startup/readiness signal, not a deep database, Git, Docker, provider, or agent check. A Compose health check can still use it:
 
 ```yaml
 healthcheck:
@@ -304,18 +270,39 @@ healthcheck:
   start_period: 15s
 ```
 
-## Troubleshooting
+Container logs go to stdout/stderr by default. If configuration sends logs to a file, place that path on persistent storage and account for Kandev's file rotation settings.
+
+## Upgrade and remove
+
+Back up first; then pull and recreate with the same `/data` volume and configuration:
 
 ```bash
-# View logs
-docker logs kandev
+docker compose pull kandev
+docker compose up -d kandev
+docker compose logs -f kandev
+```
 
-# Follow logs
-docker logs -f kandev
+SQLite schema migrations run at startup and create a pre-migration SQLite snapshot when needed. PostgreSQL does not receive that built-in snapshot. A container/image rollback does not roll back the database schema, so keep a tested backup from before the upgrade. See [Operations](operations.md) for backup and restore details.
 
-# Shell into the container
-docker exec -it kandev /bin/bash
+Stopping or removing the service container leaves the named volume:
 
-# Check data volume
+```bash
+docker stop kandev
+docker rm kandev
 docker volume inspect kandev-data
 ```
+
+Delete `kandev-data` only after verifying that its database, workspaces, and credentials are no longer needed.
+
+## Troubleshooting
+
+- **UI unreachable:** check `docker ps`, published address/port, host firewall, and `docker logs kandev`; then call `/health`.
+- **Permission denied under `/data`:** inspect mount ownership and root-squash behavior. The runtime user is UID 1000 after entrypoint setup.
+- **CLI login works only as root:** repeat it with `docker exec --user kandev`; repair ownership of the affected files before restarting.
+- **Image pull fails:** authenticate to GHCR if your network policy requires it and verify the tag/platform with `docker buildx imagetools inspect`.
+- **Database connection fails:** test DNS/TCP from the Kandev container, credentials, database name, and `sslMode`.
+- **WebSocket disconnects behind proxy:** forward the whole origin, enable upgrade support, and increase proxy idle timeouts.
+- **Docker agent container fails to mount helper/session paths:** the control plane is probably containerized or using a remote daemon whose filesystem paths do not match; use a same-host control plane or a fully mirrored custom layout.
+- **Disk growth:** inspect `/data`, retained Docker agent containers, image layers/build cache, and Docker volumes before deleting anything.
+
+Related pages: [Configuration](configuration.md), [Executors](executors.md), [Operations](operations.md), and [Run as a Service](run-as-a-service.md).

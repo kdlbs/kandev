@@ -535,6 +535,9 @@ func (m *mockRepository) SetSessionMetadataKey(ctx context.Context, sessionID, k
 	}
 	return nil
 }
+func (m *mockRepository) SetSessionACPSessionID(_ context.Context, _ string, _ string) (bool, error) {
+	return false, nil
+}
 func (m *mockRepository) DismissLastAgentError(_ context.Context, _ string, _ models.LastAgentError, _ time.Time) (bool, error) {
 	return true, nil
 }
