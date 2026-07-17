@@ -55,7 +55,7 @@ while retaining the elevated tools that distinguish them from ordinary quick cha
 - Ordinary and configuration sessions can coexist without sharing setup state, initial prompts,
   repository choices, or workspace state.
 
-Decision: [ADR 0044](../../decisions/0044-typed-quick-chat-sessions.md). Repository-backed ordinary
+Decision: [ADR-2026-07-14-typed-utility-chat-sessions](../../decisions/2026-07-14-typed-utility-chat-sessions.md). Repository-backed ordinary
 chats additionally follow [ADR 0038](../../decisions/0038-quick-chat-repository-isolation.md).
 
 ## Data model
