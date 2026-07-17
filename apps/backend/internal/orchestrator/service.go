@@ -132,6 +132,9 @@ type repoStore interface {
 	// required here because repo (this interface) is what NewService passes
 	// to executor.NewExecutor.
 	UpdateTaskStateIfCurrentIn(ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState) (v1.TaskState, bool, error)
+	// UpdateTaskStateIfNotArchived — see executor.executorStore's doc comment;
+	// required here for the same reason as UpdateTaskStateIfCurrentIn above.
+	UpdateTaskStateIfNotArchived(ctx context.Context, id string, state v1.TaskState) (v1.TaskState, bool, error)
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
@@ -545,9 +548,24 @@ func NewService(
 	// Wire executor state changes through the orchestrator so events are published
 	// (e.g. WebSocket notifications to the frontend). Must be set after service
 	// construction so the session callback can reference s.updateTaskSessionState.
+	// UpdateTaskStateIfNotArchived (not the unconditional UpdateTaskState) so
+	// every runtime-driven task-state write the executor makes through this
+	// single callback — IN_PROGRESS on agent start/resume, FAILED on launch
+	// error — is atomic against archived_at. Each caller's own archived
+	// guard (e.g. writeTaskInProgressForRuntime) reads the task before this
+	// fires; ArchiveTask can commit in that window without an intervening
+	// state write to invalidate the guard, so only this conditional write
+	// closes the race (PR #1706 review).
 	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
-		if err := taskRepo.UpdateTaskState(ctx, taskID, state); err != nil {
+		updated, err := taskRepo.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+		if err != nil {
 			return err
+		}
+		if !updated {
+			s.logger.Debug("skipping runtime task state write for archived task",
+				zap.String("task_id", taskID),
+				zap.String("state", string(state)))
+			return nil
 		}
 		s.processParentChildrenCompletedForTaskState(ctx, taskID, state)
 		return nil

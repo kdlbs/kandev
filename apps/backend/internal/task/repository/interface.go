@@ -64,9 +64,20 @@ type TaskRepository interface {
 	CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	// UpdateTaskStateIfCurrentIn atomically transitions state only when the
-	// task's current state is in allowed. Returns the pre-update state and
+	// task's current state is in allowed AND the task is not archived
+	// (archived_at IS NULL). The archived check is enforced inside the same
+	// UPDATE's WHERE clause, not just by a caller's earlier (non-transactional)
+	// read, so a late write can never race an ArchiveTask commit that lands
+	// between that read and this call. Returns the pre-update state and
 	// whether a row was modified.
 	UpdateTaskStateIfCurrentIn(ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState) (v1.TaskState, bool, error)
+	// UpdateTaskStateIfNotArchived is UpdateTaskStateIfCurrentIn without the
+	// prior-state constraint — for writers (e.g. IN_PROGRESS reconciliation)
+	// that legitimately fire from many prior states and only need the
+	// archived_at IS NULL guarantee. Same TOCTOU-closing semantics: the
+	// archived check is atomic with the write. Returns the pre-update state
+	// and whether a row was modified.
+	UpdateTaskStateIfNotArchived(ctx context.Context, id string, state v1.TaskState) (v1.TaskState, bool, error)
 	CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error)
 	CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error)
 	AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error

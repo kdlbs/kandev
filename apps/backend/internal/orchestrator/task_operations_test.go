@@ -2894,6 +2894,15 @@ func (c *ctxAwareTaskRepo) UpdateTaskStateIfCurrentIn(
 	return c.inner.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
 }
 
+func (c *ctxAwareTaskRepo) UpdateTaskStateIfNotArchived(
+	ctx context.Context, taskID string, state v1.TaskState,
+) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return c.inner.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+}
+
 // TestResumeTaskSession_FailedStateWriteSurvivesCancelledCallerCtx verifies the
 // fix for the WS-disconnect cascade: when the caller's ctx was already
 // cancelled (e.g. the user navigated away mid-resume) and the launch then

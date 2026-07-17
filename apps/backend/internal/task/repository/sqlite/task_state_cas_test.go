@@ -94,3 +94,82 @@ func TestUpdateTaskStateIfCurrentIn_UpdatesWhenNotArchived(t *testing.T) {
 		t.Errorf("persisted state = %q, want %q", task.State, v1.TaskStateReview)
 	}
 }
+
+// TestUpdateTaskStateIfNotArchived_SkipsArchivedTask is the
+// UpdateTaskStateIfNotArchived analog of TestUpdateTaskStateIfCurrentIn_SkipsArchivedTask
+// for the IN_PROGRESS-reconciliation writers (Service/Executor
+// writeTaskInProgressForRuntime, review comment on PR #1706): those callers
+// have no "allowed" prior-state set to check, only an archived guard, so
+// they route through this CAS instead. Same race: ArchiveTask commits
+// between the caller's earlier archived-state read and this call; the
+// archived_at IS NULL clause inside the UPDATE must still make it a no-op.
+func TestUpdateTaskStateIfNotArchived_SkipsArchivedTask(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-archived-race-2")
+
+	if err := repo.UpdateTaskState(ctx, "task-archived-race-2", v1.TaskStateWaitingForInput); err != nil {
+		t.Fatalf("seed WAITING_FOR_INPUT: %v", err)
+	}
+
+	// Simulates the archive committing in the race window between the
+	// caller's taskArchived() guard read and this CAS call.
+	if err := repo.ArchiveTask(ctx, "task-archived-race-2"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+
+	gotState, updated, err := repo.UpdateTaskStateIfNotArchived(ctx, "task-archived-race-2", v1.TaskStateInProgress)
+	if err != nil {
+		t.Fatalf("UpdateTaskStateIfNotArchived: %v", err)
+	}
+	if updated {
+		t.Fatal("expected archived task's state to be left untouched, got updated=true")
+	}
+	if gotState != v1.TaskStateWaitingForInput {
+		t.Errorf("returned currentState = %q, want %q (pre-CAS read)", gotState, v1.TaskStateWaitingForInput)
+	}
+
+	task, err := repo.GetTask(ctx, "task-archived-race-2")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.State != v1.TaskStateWaitingForInput {
+		t.Errorf("persisted state = %q, want %q (archived task must not resurrect to IN_PROGRESS)", task.State, v1.TaskStateWaitingForInput)
+	}
+	if task.ArchivedAt == nil {
+		t.Error("expected task to remain archived")
+	}
+}
+
+// TestUpdateTaskStateIfNotArchived_UpdatesWhenNotArchived is the CAS
+// positive-path sanity check: a non-archived task transitions normally
+// regardless of its prior state, since UpdateTaskStateIfNotArchived has no
+// "allowed" constraint.
+func TestUpdateTaskStateIfNotArchived_UpdatesWhenNotArchived(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-normal-2")
+
+	if err := repo.UpdateTaskState(ctx, "task-normal-2", v1.TaskStateWaitingForInput); err != nil {
+		t.Fatalf("seed WAITING_FOR_INPUT: %v", err)
+	}
+
+	gotState, updated, err := repo.UpdateTaskStateIfNotArchived(ctx, "task-normal-2", v1.TaskStateInProgress)
+	if err != nil {
+		t.Fatalf("UpdateTaskStateIfNotArchived: %v", err)
+	}
+	if !updated {
+		t.Fatal("expected non-archived task to transition, got updated=false")
+	}
+	if gotState != v1.TaskStateWaitingForInput {
+		t.Errorf("returned currentState = %q, want %q", gotState, v1.TaskStateWaitingForInput)
+	}
+
+	task, err := repo.GetTask(ctx, "task-normal-2")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.State != v1.TaskStateInProgress {
+		t.Errorf("persisted state = %q, want %q", task.State, v1.TaskStateInProgress)
+	}
+}

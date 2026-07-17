@@ -267,23 +267,33 @@ type mockRepository struct {
 	preCASHook func(taskID string)
 
 	// Track calls for verification
-	createTaskSessionCalls          []*models.TaskSession
-	updateTaskSessionCalls          []*models.TaskSession
-	setSessionMetadataKeyCalls      []setSessionMetadataKeyCall
-	setSessionPrimaryCalls          []string
-	createTaskEnvironmentCalls      []*models.TaskEnvironment
-	updateTaskEnvironmentCalls      []*models.TaskEnvironment
-	updateTaskStateIfCurrentInCalls []updateTaskStateIfCurrentInCall
+	createTaskSessionCalls            []*models.TaskSession
+	updateTaskSessionCalls            []*models.TaskSession
+	setSessionMetadataKeyCalls        []setSessionMetadataKeyCall
+	setSessionPrimaryCalls            []string
+	createTaskEnvironmentCalls        []*models.TaskEnvironment
+	updateTaskEnvironmentCalls        []*models.TaskEnvironment
+	updateTaskStateIfCurrentInCalls   []updateTaskStateIfCurrentInCall
+	updateTaskStateIfNotArchivedCalls []updateTaskStateIfNotArchivedCall
 }
 
 // updateTaskStateIfCurrentInCall records one UpdateTaskStateIfCurrentIn
-// invocation so tests can assert callers route guarded REVIEW/IN_PROGRESS
-// writes through the archive-aware CAS instead of the unconditional
+// invocation so tests can assert callers route guarded REVIEW writes
+// through the archive-aware CAS instead of the unconditional
 // UpdateTaskState.
 type updateTaskStateIfCurrentInCall struct {
 	TaskID  string
 	State   v1.TaskState
 	Allowed []v1.TaskState
+}
+
+// updateTaskStateIfNotArchivedCall records one UpdateTaskStateIfNotArchived
+// invocation — the IN_PROGRESS/FAILED-writer analog of
+// updateTaskStateIfCurrentInCall, used to assert those callers route
+// through the archive-aware CAS instead of the unconditional UpdateTaskState.
+type updateTaskStateIfNotArchivedCall struct {
+	TaskID string
+	State  v1.TaskState
 }
 
 type setSessionMetadataKeyCall struct {
@@ -436,6 +446,35 @@ func (m *mockRepository) UpdateTaskStateIfCurrentIn(
 		}
 	}
 	return currentState, false, nil
+}
+
+// UpdateTaskStateIfNotArchived mirrors the real repository's archive-aware
+// CAS semantics (task.go's UpdateTaskStateIfNotArchived): unlike
+// UpdateTaskStateIfCurrentIn, there is no "allowed" prior-state set — the
+// write lands whenever the task is not archived. Reuses preCASHook so tests
+// can model the same TOCTOU window (archive commits between an earlier
+// non-transactional guard read and this call) for IN_PROGRESS/FAILED writers.
+func (m *mockRepository) UpdateTaskStateIfNotArchived(
+	ctx context.Context, taskID string, state v1.TaskState,
+) (v1.TaskState, bool, error) {
+	if m.preCASHook != nil {
+		m.preCASHook(taskID)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updateTaskStateIfNotArchivedCalls = append(m.updateTaskStateIfNotArchivedCalls, updateTaskStateIfNotArchivedCall{
+		TaskID: taskID, State: state,
+	})
+	task, ok := m.tasks[taskID]
+	if !ok {
+		return "", false, fmt.Errorf("task not found: %s", taskID)
+	}
+	currentState := task.State
+	if task.ArchivedAt != nil {
+		return currentState, false, nil
+	}
+	task.State = state
+	return currentState, true, nil
 }
 func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {

@@ -1213,6 +1213,56 @@ func (r *Repository) UpdateTaskStateIfCurrentIn(
 	return currentState, true, nil
 }
 
+// UpdateTaskStateIfNotArchived atomically transitions state unless the task
+// is archived — no prior-state constraint, unlike UpdateTaskStateIfCurrentIn.
+// IN_PROGRESS writes (unlike the REVIEW CAS) are legitimately reachable from
+// many prior states, so there is no "allowed" set to check; the only
+// invariant that must hold atomically is archived_at IS NULL. Closes the
+// same TOCTOU window as UpdateTaskStateIfCurrentIn: if ArchiveTask commits
+// between a caller's earlier archived-state guard and this call, the
+// archived_at check inside the transaction (not just the caller's read)
+// makes the no-op atomic. Returns the pre-update state and whether a row
+// was modified.
+func (r *Repository) UpdateTaskStateIfNotArchived(
+	ctx context.Context, id string, state v1.TaskState,
+) (v1.TaskState, bool, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var currentState v1.TaskState
+	var archivedAt sql.NullTime
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state, archived_at FROM tasks WHERE id = ?`), id).
+		Scan(&currentState, &archivedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+		}
+		return "", false, err
+	}
+	if archivedAt.Valid {
+		return currentState, false, nil
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET state = ?, updated_at = ?
+		WHERE id = ? AND archived_at IS NULL
+	`), state, time.Now().UTC(), id)
+	if err != nil {
+		return "", false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return currentState, false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, err
+	}
+	return currentState, true, nil
+}
+
 func taskStateInSet(state v1.TaskState, allowed []v1.TaskState) bool {
 	for _, candidate := range allowed {
 		if state == candidate {

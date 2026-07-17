@@ -167,6 +167,30 @@ func (m *mockTaskRepo) UpdateTaskStateIfCurrentIn(
 	return false, nil
 }
 
+// UpdateTaskStateIfNotArchived has no "allowed" precondition to check, so
+// (unlike UpdateTaskStateIfCurrentIn above) this mock cannot model the
+// archived_at race itself — v1.Task carries no ArchivedAt field for it to
+// consult. It behaves like UpdateTaskState above: unconditional and
+// always tracked, mutating the seeded task's State only when present —
+// existing callers seed via seedMockTaskState only when they need to read
+// the state back, not merely to assert a write happened.
+// Real archived-freeze coverage for this CAS lives at the sqlite layer
+// (task_state_cas_test.go) and the executor-layer mock (models.Task, which
+// does carry ArchivedAt).
+func (m *mockTaskRepo) UpdateTaskStateIfNotArchived(
+	_ context.Context, taskID string, state v1.TaskState,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updatedStates[taskID] = state
+	m.stateWrites[taskID]++
+	m.stateHistory[taskID] = append(m.stateHistory[taskID], state)
+	if t, ok := m.tasks[taskID]; ok {
+		t.State = state
+	}
+	return true, nil
+}
+
 // mockAgentManager is a minimal mock of executor.AgentManagerClient for testing.
 type mockAgentManager struct {
 	isPassthrough  bool

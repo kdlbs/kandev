@@ -249,12 +249,15 @@ func isRuntimeWorkingSessionState(state models.TaskSessionState) bool {
 }
 
 // updateTaskState updates a task's state, using the callback if set for event publishing,
-// or falling back to the raw repository.
+// or falling back to the archive-aware CAS (UpdateTaskStateIfNotArchived) directly. Every
+// call site here is a runtime-driven write (IN_PROGRESS on start/resume, FAILED on launch
+// error) that must never resurrect an archived task's state (PR #1706 review).
 func (e *Executor) updateTaskState(ctx context.Context, taskID string, state v1.TaskState) error {
 	if e.onTaskStateChange != nil {
 		return e.onTaskStateChange(ctx, taskID, state)
 	}
-	return e.repo.UpdateTaskState(ctx, taskID, state)
+	_, _, err := e.repo.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+	return err
 }
 
 // updateSessionState updates a session's state, using the callback if set for event publishing,

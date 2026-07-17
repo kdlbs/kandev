@@ -1204,6 +1204,31 @@ func TestWriteTaskInProgressForRuntimeSkipsArchivedTask(t *testing.T) {
 		"runtime reconciliation must not promote archived tasks to IN_PROGRESS")
 }
 
+// TestWriteTaskInProgressForRuntimeUsesArchiveAwareCAS is the TOCTOU
+// companion to TestWriteTaskInProgressForRuntimeSkipsArchivedTask
+// (carlosflorencio review on PR #1706): the earlier taskArchived() guard is
+// a plain, non-transactional read, so an ArchiveTask commit landing in the
+// window between that read and the write could still resurrect the task's
+// state if the write itself were the unconditional UpdateTaskState. Asserts
+// the write goes through UpdateTaskStateIfNotArchived (tracked separately
+// from the unconditional path via unconditionalWrites) instead.
+func TestWriteTaskInProgressForRuntimeUsesArchiveAwareCAS(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.writeTaskInProgressForRuntime(ctx, "t1", "s1")
+
+	require.Equal(t, 1, taskRepo.stateWrites["t1"],
+		"runtime reconciliation must still promote a non-archived task to IN_PROGRESS")
+	require.Equal(t, v1.TaskStateInProgress, taskRepo.updatedStates["t1"])
+	require.Zero(t, taskRepo.unconditionalWrites["t1"],
+		"IN_PROGRESS write must use UpdateTaskStateIfNotArchived, not the unconditional UpdateTaskState")
+}
+
 func TestWriteTaskReviewStateSkipsArchivedTask(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

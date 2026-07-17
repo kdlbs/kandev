@@ -1084,11 +1084,17 @@ func (s *Service) writeTaskInProgressForRuntime(ctx context.Context, taskID, ses
 		}
 	}
 
-	if err := s.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
+	// UpdateTaskStateIfNotArchived (not the unconditional UpdateTaskState) so
+	// the write is atomic against archived_at: the taskArchived guard above
+	// reads the row before this call, and ArchiveTask can commit in that
+	// window without changing task.State, so only an archive-aware
+	// conditional write closes the race (PR #1706 review).
+	updated, err := s.taskRepo.UpdateTaskStateIfNotArchived(ctx, taskID, v1.TaskStateInProgress)
+	if err != nil {
 		s.logger.Error("failed to update task state to IN_PROGRESS",
 			zap.String("task_id", taskID),
 			zap.Error(err))
-	} else {
+	} else if updated {
 		s.logger.Info("task moved to IN_PROGRESS state",
 			zap.String("task_id", taskID))
 	}
