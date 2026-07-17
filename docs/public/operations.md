@@ -15,7 +15,7 @@ Kandev does not currently provide a user-login boundary for the web application,
 | --- | --- | --- | --- |
 | Desktop | Launch or quit Kandev | `~/.kandev` by default | **Settings > System > Updates** uses the signed desktop updater when supported |
 | Interactive CLI | `kandev`, then `Ctrl-C` | `~/.kandev` by default | Upgrade the Homebrew or npm package, then restart |
-| Managed service | `kandev service start|stop|restart|status` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | Upgrade the package, reinstall the unit with the same flags, and restart; the current native installer does not enable in-app apply |
+| Managed service | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | Upgrade the package, reinstall the unit with the same flags, and restart; the current native installer does not enable in-app apply |
 | Docker or Kubernetes | Container or workload manager | Mounted Kandev home plus any external database/provider state | Replace the image and recreate the container or pod |
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.

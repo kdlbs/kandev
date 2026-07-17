@@ -20,9 +20,11 @@ The suite is split into four projects. Pick one with `--project=<name>`.
 ### `routing`
 
 Runs `office-routing-*.spec.ts` in an isolated desktop worker. Those specs restart
-their backend with provider overrides that persist for the worker lifetime, so
-keeping them separate prevents provider state from leaking into tests that count
-agents or assert the active-agent label. Run it directly with:
+their backend with provider overrides that apply only to the restart/spec that
+supplies them; the next restart rebuilds the environment from its clean baseline.
+Keeping these specs separate also keeps their routing-specific provider and agent
+fixtures away from tests that count agents or assert the active-agent label. Run
+it directly with:
 
 ```sh
 pnpm e2e --project=routing

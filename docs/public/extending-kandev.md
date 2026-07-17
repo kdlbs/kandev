@@ -69,7 +69,7 @@ Inject task/session identity from server context instead of trusting arguments. 
 
 Create backend ownership and validation before a web form. Web settings require the appropriate domain client/hook, `src/settings-routes.tsx`, page/components, and sidebar or general navigation. Add a global state slice only when multiple surfaces or WebSocket hydration require it.
 
-Runtime feature defaults belong in `profiles.yaml`; registered flags use `internal/runtimeflags/registry.go` and the matching frontend feature-flag path. Do not turn an internal package or environment variable into a public setting without defining compatibility and support status.
+Wire runtime feature flags through every enforcement layer in one change. Add the default to `profiles.yaml` and `FeaturesConfig`, register its environment variable and runtime behavior in `internal/runtimeflags/registry.go`, and gate backend construction, handlers, or other call sites. Mirror the field in the frontend feature types, use `useFeature` for client surfaces, and call `notFound()` from the server layout or page when a guessed URL must remain unavailable. Add backend and frontend tests for both states. A flag is incomplete if any layer can expose or execute the feature while it is disabled. Do not turn an internal package or environment variable into a public setting without first defining its compatibility contract and support status.
 
 Workbench changes must preserve task/session/repository selection, dock-layout restoration, reconnect behavior, and the separate mobile layout. Test unavailable dependencies, invalid credentials, save/test failures, keyboard access, and narrow viewports.
 

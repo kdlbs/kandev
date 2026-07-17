@@ -225,42 +225,94 @@ function assertFeatureMediaContract(contract) {
 }
 
 function assertFeatureClipShape(clip) {
-  if (
-    !clip ||
-    typeof clip !== "object" ||
-    typeof clip.slug !== "string" ||
-    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(clip.slug) ||
-    typeof clip.title !== "string" ||
-    !clip.title.trim() ||
-    typeof clip.accessible_caption !== "string" ||
-    !clip.accessible_caption.trim() ||
-    typeof clip.source_scenario !== "string" ||
-    clip.source_scenario.trim().length < 20 ||
-    typeof clip.data_isolation !== "string" ||
-    clip.data_isolation.trim().length < 20 ||
-    typeof clip.duration_seconds !== "number" ||
-    clip.duration_seconds < 6 ||
-    clip.duration_seconds > 15 ||
-    clip.dimensions?.width !== 960 ||
-    clip.dimensions?.height !== 600 ||
-    typeof clip.intended_docs?.page !== "string" ||
-    typeof clip.intended_docs?.section !== "string" ||
-    !clip.intended_docs.section.trim() ||
-    !clip.filenames ||
-    !clip.files
-  ) {
+  if (!clip || typeof clip !== "object" || Array.isArray(clip)) {
     throw new Error("feature media manifest contains an invalid clip entry");
+  }
+
+  const fields = [
+    [
+      "slug",
+      typeof clip.slug === "string" &&
+        /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(clip.slug),
+    ],
+    ["title", typeof clip.title === "string" && clip.title.trim().length > 0],
+    [
+      "accessible_caption",
+      typeof clip.accessible_caption === "string" &&
+        clip.accessible_caption.trim().length > 0,
+    ],
+    [
+      "source_scenario",
+      typeof clip.source_scenario === "string" &&
+        clip.source_scenario.trim().length >= 20,
+    ],
+    [
+      "data_isolation",
+      typeof clip.data_isolation === "string" &&
+        clip.data_isolation.trim().length >= 20,
+    ],
+    [
+      "duration_seconds",
+      typeof clip.duration_seconds === "number" &&
+        clip.duration_seconds >= 6 &&
+        clip.duration_seconds <= 15,
+    ],
+    [
+      "dimensions",
+      clip.dimensions?.width === 960 && clip.dimensions?.height === 600,
+    ],
+    [
+      "intended_docs",
+      typeof clip.intended_docs?.page === "string" &&
+        typeof clip.intended_docs?.section === "string" &&
+        clip.intended_docs.section.trim().length > 0,
+    ],
+    [
+      "filenames",
+      Boolean(
+        clip.filenames &&
+          typeof clip.filenames === "object" &&
+          !Array.isArray(clip.filenames),
+      ),
+    ],
+    [
+      "files",
+      Boolean(
+        clip.files && typeof clip.files === "object" && !Array.isArray(clip.files),
+      ),
+    ],
+  ];
+  const invalidField = fields.find(([, valid]) => !valid)?.[0];
+  if (invalidField) {
+    const owner =
+      typeof clip.slug === "string" && clip.slug.length > 0
+        ? clip.slug
+        : "<unknown>";
+    throw new Error(`feature media clip ${owner} has invalid ${invalidField}`);
   }
 }
 
 function hasCompleteFeatureMediaEmbed(markdown, filenames) {
   return [
     ...stripMarkdownCode(markdown).matchAll(/<DocsVideo\b[\s\S]*?\/>/g),
-  ].some((match) =>
-    Object.values(filenames).every((filename) =>
-      match[0].includes(`media/feature-guides/${filename}`),
-    ),
-  );
+  ].some((match) => {
+    const attributes = Object.fromEntries(
+      [
+        ...match[0].matchAll(
+          /\b(webm|mp4|poster)\s*=\s*(?:"([^"]*)"|'([^']*)')/g,
+        ),
+      ].map((attribute) => [
+        attribute[1],
+        attribute[2] ?? attribute[3],
+      ]),
+    );
+
+    return Object.entries(filenames).every(
+      ([kind, filename]) =>
+        attributes[kind]?.replace(/^\.\//, "") ===
+        `media/feature-guides/${filename}`,
+    );
+  });
 }
 
 function collectHeadingTitles(markdown) {
@@ -268,16 +320,33 @@ function collectHeadingTitles(markdown) {
   for (const match of stripMarkdownCode(markdown, {
     keepInlineCode: true,
   }).matchAll(/^ {0,3}#{1,6}[ \t]+(.+?)\s*#*\s*$/gm)) {
-    titles.add(
-      match[1]
-        .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-        .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-        .replace(/<[^>]+>/g, "")
-        .replace(/[`*_~]/g, "")
-        .trim(),
-    );
+    titles.add(stripHeadingMarkup(match[1]));
   }
   return titles;
+}
+
+function stripHeadingMarkup(value) {
+  const linkedText = value
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1");
+  let text = "";
+  let insideTag = false;
+
+  for (const character of linkedText) {
+    if (character === "<") {
+      insideTag = true;
+    } else if (character === ">" && insideTag) {
+      insideTag = false;
+    } else if (!insideTag) {
+      text += character;
+    }
+  }
+
+  if (insideTag) {
+    throw new Error("heading contains unterminated inline HTML");
+  }
+
+  return text.replace(/[`*_~]/g, "").trim();
 }
 
 function resolveInside(root, relativePath, label) {
@@ -443,10 +512,14 @@ async function assertCoverageEvidence(root, areaId, kind, relativePath) {
       `${areaId} cites ${kind} outside the repository: ${relativePath}`,
     );
   }
+  let stats;
   try {
-    await fs.access(target);
+    stats = await fs.stat(target);
   } catch {
     throw new Error(`${areaId} cites missing ${kind}: ${relativePath}`);
+  }
+  if (!stats.isFile()) {
+    throw new Error(`${areaId} cites non-file ${kind}: ${relativePath}`);
   }
 }
 
@@ -535,6 +608,11 @@ async function collectFilesWithExtension(dir, extension) {
 }
 
 function assertCompleteSurfaceCoverage(shipped, covered, excluded, label) {
+  for (const value of covered) {
+    if (excluded.has(value)) {
+      throw new Error(`coverage.json both covers and excludes ${label}: ${value}`);
+    }
+  }
   for (const value of shipped) {
     if (!covered.has(value) && !excluded.has(value)) {
       throw new Error(`coverage.json does not account for ${label}: ${value}`);
@@ -763,12 +841,7 @@ function collectHeadingAnchors(markdown) {
   const counts = new Map();
 
   for (const match of source.matchAll(/^ {0,3}#{1,6}[ \t]+(.+?)\s*#*\s*$/gm)) {
-    const base = match[1]
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-      .replace(/<[^>]+>/g, "")
-      .replace(/[`*_~]/g, "")
-      .trim()
+    const base = stripHeadingMarkup(match[1])
       .toLowerCase()
       .replace(/[^\p{L}\p{N}\s_-]/gu, "")
       .replace(/\s+/g, "-");

@@ -510,6 +510,37 @@ test("rejects a missing heading fragment in another page", async () => {
   );
 });
 
+test("accepts heading fragments whose labels contain complete inline HTML", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        "## Configure <span>profiles</span>\n\n[Profiles](#configure-profiles)",
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
+test("rejects unterminated inline HTML in a linked heading", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        "Page body.",
+        "## Unsafe <script\n\n[Unsafe](#unsafe-script)",
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.rejects(
+    validatePublicDocs(dir),
+    /heading contains unterminated inline HTML/,
+  );
+});
+
 test("ignores links inside inline code and nested shorter fences", async () => {
   const dir = await createDocs(
     {
@@ -768,6 +799,35 @@ test("rejects coverage entries that cite missing evidence", async () => {
   );
 });
 
+test("rejects coverage evidence that points to a directory", async () => {
+  const fixture = await createCoverageRepo();
+  const coveragePath = path.join(fixture.docsDir, "coverage.json");
+  const coverage = JSON.parse(await fs.readFile(coveragePath, "utf8"));
+  coverage.areas[0].tests[0] = "apps/web/src";
+  await fs.writeFile(coveragePath, JSON.stringify(coverage));
+
+  await assert.rejects(
+    validateCoverageInventory(fixture),
+    /workspace-control cites non-file test: apps\/web\/src/,
+  );
+});
+
+test("rejects shipped surfaces listed as both covered and excluded", async () => {
+  const fixture = await createCoverageRepo();
+  const coveragePath = path.join(fixture.docsDir, "coverage.json");
+  const coverage = JSON.parse(await fs.readFile(coveragePath, "utf8"));
+  coverage.exclusions.settingsRoutes.push({
+    route: "/settings/general",
+    reason: "This deliberately overlaps the covered route.",
+  });
+  await fs.writeFile(coveragePath, JSON.stringify(coverage));
+
+  await assert.rejects(
+    validateCoverageInventory(fixture),
+    /coverage.json both covers and excludes settings route: \/settings\/general/,
+  );
+});
+
 test("rejects duplicate coverage area identifiers", async () => {
   const sharedArea = {
     id: "workspace-control",
@@ -835,7 +895,7 @@ test("rejects focused media without durable capture provenance", async () => {
 
   await assert.rejects(
     validateFeatureMedia({ docsDir }),
-    /feature media manifest contains an invalid clip entry/,
+    /feature media clip review has invalid data_isolation/,
   );
 });
 
@@ -868,6 +928,23 @@ test("rejects focused media that is not embedded on its intended page", async ()
   await fs.writeFile(
     path.join(docsDir, "review.md"),
     `${validPage}\n## Review a diff\n\nNo video is embedded here.\n`,
+  );
+
+  await assert.rejects(
+    validateFeatureMedia({ docsDir }),
+    /review is not embedded with its complete media triplet in review\.md/,
+  );
+});
+
+test("requires each focused-media file in its matching DocsVideo attribute", async () => {
+  const { docsDir } = await createFeatureMedia();
+  await fs.writeFile(
+    path.join(docsDir, "review.md"),
+    `${validPage}\n## Review a diff\n\n<DocsVideo
+  webm="./media/feature-guides/review.webm"
+  poster="./media/feature-guides/review.webp"
+  title="media/feature-guides/review.mp4"
+/>\n`,
   );
 
   await assert.rejects(
