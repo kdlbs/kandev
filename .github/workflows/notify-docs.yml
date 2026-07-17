@@ -124,8 +124,12 @@ jobs:
         with:
           script: |
             const marker = '<!-- kandev-docs-cloudflare-preview -->';
-            const deploymentUrl = process.env.DEPLOYMENT_URL.replace(/\/$/, '');
+            const deploymentUrl = process.env.DEPLOYMENT_URL?.replace(/\/$/, '');
             const aliasUrl = process.env.ALIAS_URL?.replace(/\/$/, '');
+            if (!deploymentUrl) {
+              core.setFailed('Cloudflare Pages did not return a deployment URL; cannot publish the docs preview link.');
+              return;
+            }
             const shortSha = context.payload.pull_request.head.sha.slice(0, 7);
             const bodyLines = [
               marker,
