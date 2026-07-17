@@ -90,7 +90,39 @@ describe("autoSelectBranch", () => {
 });
 
 describe("shouldShowTaskTitleField", () => {
-  it("keeps the title editable after a task has started", () => {
-    expect(shouldShowTaskTitleField(false, true, true)).toBe(true);
-  });
+  it.each([
+    {
+      name: "started edit",
+      isCreateMode: false,
+      isEditMode: true,
+      isTaskStarted: true,
+      expected: true,
+    },
+    {
+      name: "new task",
+      isCreateMode: true,
+      isEditMode: false,
+      isTaskStarted: false,
+      expected: true,
+    },
+    {
+      name: "create from running task",
+      isCreateMode: true,
+      isEditMode: false,
+      isTaskStarted: true,
+      expected: false,
+    },
+    {
+      name: "session",
+      isCreateMode: false,
+      isEditMode: false,
+      isTaskStarted: false,
+      expected: false,
+    },
+  ])(
+    "returns $expected for $name mode",
+    ({ isCreateMode, isEditMode, isTaskStarted, expected }) => {
+      expect(shouldShowTaskTitleField(isCreateMode, isEditMode, isTaskStarted)).toBe(expected);
+    },
+  );
 });
