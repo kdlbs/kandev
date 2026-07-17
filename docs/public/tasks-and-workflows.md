@@ -21,6 +21,8 @@ A task is the unit of work. A workflow is the ordered process that task follows.
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
 
+## Office status
+
 > [!EXPERIMENTAL]
 > Office is in progress and feature-flagged. Its persistent agents, arbitrary-depth task trees, blocker and label properties, named task documents, reviewer/approver quorum, routines, and budgets are not stable features of the regular Kanban task experience.
 

@@ -308,6 +308,20 @@ test("rejects unsupported page status frontmatter", async () => {
   );
 });
 
+test("accepts experimental page status frontmatter", async () => {
+  const dir = await createDocs(
+    {
+      "index.md": validPage.replace(
+        'description: "Start using Kandev."',
+        'description: "Start using Kandev."\nstatus: experimental',
+      ),
+    },
+    { pages: ["index"] },
+  );
+
+  await assert.doesNotReject(validatePublicDocs(dir));
+});
+
 test("rejects published pages without title and description frontmatter", async () => {
   const dir = await createDocs(
     { "index.md": "# Kandev\n" },
