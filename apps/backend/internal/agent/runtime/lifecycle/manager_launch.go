@@ -1344,14 +1344,14 @@ func (m *Manager) initializeAgentSession(ctx context.Context, execution *AgentEx
 
 // initGitRepo initializes a git repository in the given directory.
 // Creates an initial commit so the workspace has a clean git state.
-// This function is idempotent - it skips initialization if .git already exists.
+// Existing repositories are reused and keep Kandev metadata out of git status.
 func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
-	// Check if git repository already exists (idempotent)
 	gitDir := filepath.Join(workspacePath, ".git")
-	if info, err := os.Stat(gitDir); err == nil {
-		if info.IsDir() {
-			return nil // Already initialized
+	if info, err := os.Lstat(gitDir); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("invalid git directory: %s", gitDir)
 		}
+		return excludeWorkspaceOwnershipMarker(gitDir)
 	} else if !os.IsNotExist(err) {
 		// Non-ENOENT error (permissions, I/O, etc.) - fail explicitly
 		return fmt.Errorf("failed to check for .git directory: %w", err)
@@ -1391,5 +1391,5 @@ func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
 		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
 	}
 
-	return nil
+	return excludeWorkspaceOwnershipMarker(gitDir)
 }
