@@ -24,6 +24,18 @@ type FetchArgs = {
   page: number;
 };
 
+type UseGitLabSearchOptions = {
+  kind: SearchKind;
+  presets: PresetOption[];
+  preset: string;
+  customQuery: string;
+  projectFilter?: string;
+  // Gate the network fetch on the integration being connected. When GitLab is
+  // not configured the page renders the connect notice instead of the list, so
+  // firing the search would only produce failing (500) requests in the console.
+  enabled?: boolean;
+};
+
 export function pickFilter(
   presets: PresetOption[],
   preset: string,
@@ -47,13 +59,14 @@ function filterByProject(items: Item[], project: string): Item[] {
   return items.filter((it) => it.project_path === project);
 }
 
-export function useGitLabSearch(
-  kind: SearchKind,
-  presets: PresetOption[],
-  preset: string,
-  customQuery: string,
-  projectFilter: string = "",
-) {
+export function useGitLabSearch({
+  kind,
+  presets,
+  preset,
+  customQuery,
+  projectFilter = "",
+  enabled = true,
+}: UseGitLabSearchOptions) {
   const [state, setState] = useState<SearchState>({
     items: [],
     loading: false,
@@ -70,6 +83,7 @@ export function useGitLabSearch(
 
   const fetchData = useCallback(
     async ({ filter: ef, customQuery: ec, page: epage }: FetchArgs) => {
+      if (!enabled) return;
       const seq = ++requestSeq.current;
       setState((s) => ({ ...s, loading: true, error: null }));
       try {
@@ -99,7 +113,7 @@ export function useGitLabSearch(
         }));
       }
     },
-    [kind],
+    [kind, enabled],
   );
 
   const resolved = useMemo(

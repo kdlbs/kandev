@@ -126,7 +126,9 @@ describe("useGitLabSearch — fetch wiring", () => {
 
   it("forwards preset filter to MR API", async () => {
     searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
-    renderHook(() => useGitLabSearch("mr", PRESETS, PRESET_REVIEW, ""));
+    renderHook(() =>
+      useGitLabSearch({ kind: "mr", presets: PRESETS, preset: PRESET_REVIEW, customQuery: "" }),
+    );
     await waitFor(() => expect(searchUserMRsMock).toHaveBeenCalled());
     const args = searchUserMRsMock.mock.calls[0][0] as Record<string, unknown>;
     expect(args.filter).toBe(PRESET_REVIEW);
@@ -136,11 +138,56 @@ describe("useGitLabSearch — fetch wiring", () => {
 
   it("forwards custom query and drops preset filter", async () => {
     searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
-    renderHook(() => useGitLabSearch("mr", PRESETS, PRESET_REVIEW, CUSTOM_QUERY));
+    renderHook(() =>
+      useGitLabSearch({
+        kind: "mr",
+        presets: PRESETS,
+        preset: PRESET_REVIEW,
+        customQuery: CUSTOM_QUERY,
+      }),
+    );
     await waitFor(() => expect(searchUserMRsMock).toHaveBeenCalled());
     const args = searchUserMRsMock.mock.calls[0][0] as Record<string, unknown>;
     expect(args.filter).toBe("");
     expect(args.customQuery).toBe(CUSTOM_QUERY);
+  });
+
+  it("does not fetch while disabled (integration not connected)", async () => {
+    searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
+    const { result } = renderHook(() =>
+      useGitLabSearch({
+        kind: "mr",
+        presets: PRESETS,
+        preset: PRESET_REVIEW,
+        customQuery: "",
+        enabled: false,
+      }),
+    );
+    // Give any pending effect a chance to run before asserting no call.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(searchUserMRsMock).not.toHaveBeenCalled();
+    expect(searchUserIssuesMock).not.toHaveBeenCalled();
+    expect(result.current.loading).toBe(false);
+    expect(result.current.items).toEqual([]);
+  });
+
+  it("fetches once enabled flips from false to true", async () => {
+    searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
+    const { rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useGitLabSearch({
+          kind: "mr",
+          presets: PRESETS,
+          preset: PRESET_REVIEW,
+          customQuery: "",
+          enabled,
+        }),
+      { initialProps: { enabled: false } },
+    );
+    await new Promise((r) => setTimeout(r, 10));
+    expect(searchUserMRsMock).not.toHaveBeenCalled();
+    rerender({ enabled: true });
+    await waitFor(() => expect(searchUserMRsMock).toHaveBeenCalled());
   });
 
   it("dispatches to issues endpoint when kind is issue", async () => {
@@ -151,7 +198,14 @@ describe("useGitLabSearch — fetch wiring", () => {
       page: 1,
       per_page: 25,
     });
-    const { result } = renderHook(() => useGitLabSearch("issue", PRESETS, PRESET_ASSIGNED, ""));
+    const { result } = renderHook(() =>
+      useGitLabSearch({
+        kind: "issue",
+        presets: PRESETS,
+        preset: PRESET_ASSIGNED,
+        customQuery: "",
+      }),
+    );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items).toEqual([issue]);
     expect(searchUserMRsMock).not.toHaveBeenCalled();
@@ -164,7 +218,9 @@ describe("useGitLabSearch — state", () => {
   it("populates items and total on success", async () => {
     const mr = fakeMR();
     searchUserMRsMock.mockResolvedValue({ mrs: [mr], total_count: 1, page: 1, per_page: 25 });
-    const { result } = renderHook(() => useGitLabSearch("mr", PRESETS, PRESET_ASSIGNED, ""));
+    const { result } = renderHook(() =>
+      useGitLabSearch({ kind: "mr", presets: PRESETS, preset: PRESET_ASSIGNED, customQuery: "" }),
+    );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items).toEqual([mr]);
     expect(result.current.total).toBe(1);
@@ -173,7 +229,9 @@ describe("useGitLabSearch — state", () => {
 
   it("surfaces error message without items", async () => {
     searchUserMRsMock.mockRejectedValue(new Error("boom"));
-    const { result } = renderHook(() => useGitLabSearch("mr", PRESETS, PRESET_ASSIGNED, ""));
+    const { result } = renderHook(() =>
+      useGitLabSearch({ kind: "mr", presets: PRESETS, preset: PRESET_ASSIGNED, customQuery: "" }),
+    );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBe("boom");
     expect(result.current.items).toEqual([]);
@@ -184,7 +242,13 @@ describe("useGitLabSearch — state", () => {
     const b = fakeMR({ project_path: "acme/web" });
     searchUserMRsMock.mockResolvedValue({ mrs: [a, b], total_count: 99, page: 1, per_page: 25 });
     const { result } = renderHook(() =>
-      useGitLabSearch("mr", PRESETS, PRESET_ASSIGNED, "", "acme/web"),
+      useGitLabSearch({
+        kind: "mr",
+        presets: PRESETS,
+        preset: PRESET_ASSIGNED,
+        customQuery: "",
+        projectFilter: "acme/web",
+      }),
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items.map((m) => m.project_path)).toEqual(["acme/web"]);
@@ -202,7 +266,8 @@ describe("useGitLabSearch — pagination & sequencing", () => {
   it("resets page to 1 when preset changes", async () => {
     searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
     const { result, rerender } = renderHook(
-      ({ p }: { p: string }) => useGitLabSearch("mr", PRESETS, p, ""),
+      ({ p }: { p: string }) =>
+        useGitLabSearch({ kind: "mr", presets: PRESETS, preset: p, customQuery: "" }),
       { initialProps: { p: PRESET_ASSIGNED } },
     );
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -228,7 +293,8 @@ describe("useGitLabSearch — pagination & sequencing", () => {
     });
 
     const { result, rerender } = renderHook(
-      ({ p }: { p: string }) => useGitLabSearch("mr", PRESETS, p, ""),
+      ({ p }: { p: string }) =>
+        useGitLabSearch({ kind: "mr", presets: PRESETS, preset: p, customQuery: "" }),
       { initialProps: { p: PRESET_ASSIGNED } },
     );
     rerender({ p: PRESET_REVIEW });
