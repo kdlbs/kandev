@@ -20,8 +20,12 @@ import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { isDebugUI } from "@/lib/config";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
-import type { TaskState, TaskSessionState } from "@/lib/types/http";
-import { shouldUseQuestionTaskIcon, shouldUsePermissionTaskIcon } from "@/lib/ui/state-icons";
+import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
+import {
+  getSessionStateIcon,
+  shouldUseQuestionTaskIcon,
+  shouldUsePermissionTaskIcon,
+} from "@/lib/ui/state-icons";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
@@ -37,6 +41,8 @@ type TaskItemProps = {
   title: string;
   state?: TaskState;
   sessionState?: TaskSessionState;
+  /** Fine-grained busy substate (ADR-0043) of the session `sessionState` reflects. */
+  sessionForegroundActivity?: ForegroundActivity | null;
   isArchived?: boolean;
   isSelected?: boolean;
   /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
@@ -162,12 +168,14 @@ function taskItemRowClick(
 function TaskStateIcon({
   sessionState,
   state,
+  sessionForegroundActivity,
   isInProgress,
   hasPendingClarification,
   hasPendingPermission,
 }: {
   sessionState?: TaskSessionState;
   state?: TaskState;
+  sessionForegroundActivity?: ForegroundActivity | null;
   isInProgress: boolean;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
@@ -195,6 +203,19 @@ function TaskStateIcon({
         data-loading-phase="preparing"
         className="mt-[1px] h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground/40 [animation-duration:2s]"
       />
+    );
+  }
+  // Background-running: the session is live (RUNNING) but its foreground turn is
+  // idle, held open only by spawned background work. Render the shared
+  // background affordance — distinct by shape from this surface's generating
+  // spinner (IconCircleDashed) and never the review/done check. RUNNING always
+  // classifies as in_progress, so this can never fall through to a done icon; an
+  // unknown/generating substate falls through to the generating spinner below.
+  if (sessionState === "RUNNING" && sessionForegroundActivity === "background") {
+    return (
+      <span data-testid="task-state-background-running" className="mt-[1px] flex shrink-0">
+        {getSessionStateIcon("RUNNING", "h-3.5 w-3.5", "background")}
+      </span>
     );
   }
   if (isInProgress) {
@@ -399,6 +420,7 @@ export const TaskItem = memo(function TaskItem({
   title,
   state,
   sessionState,
+  sessionForegroundActivity,
   isArchived,
   isSelected = false,
   isMultiSelected = false,
@@ -449,6 +471,7 @@ export const TaskItem = memo(function TaskItem({
       <TaskStateIcon
         sessionState={sessionState}
         state={state}
+        sessionForegroundActivity={sessionForegroundActivity}
         isInProgress={isInProgress}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}

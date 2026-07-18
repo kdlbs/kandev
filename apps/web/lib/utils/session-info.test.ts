@@ -81,4 +81,55 @@ describe("getSessionInfoForTask", () => {
     );
     expect(info.sessionState).toBe("WAITING_FOR_INPUT");
   });
+
+  // The substate must be read from the SAME session the state came from — the
+  // most-active one — so the sidebar shows background-running for the session it
+  // reports as RUNNING, not a stale substate from the idle primary.
+  it("carries the most-active session's foreground_activity alongside its state", () => {
+    const info = getSessionInfoForTask(
+      "t1",
+      {
+        t1: [
+          session({ id: "p", is_primary: true, state: "WAITING_FOR_INPUT" }),
+          session({ id: "s", state: "RUNNING", foreground_activity: "background" }),
+        ],
+      },
+      {},
+    );
+    expect(info.sessionState).toBe("RUNNING");
+    expect(info.foregroundActivity).toBe("background");
+  });
+
+  it("reports generating substate for a foreground-generating session", () => {
+    const info = getSessionInfoForTask(
+      "t1",
+      {
+        t1: [
+          session({
+            id: "p",
+            is_primary: true,
+            state: "RUNNING",
+            foreground_activity: "generating",
+          }),
+        ],
+      },
+      {},
+    );
+    expect(info.foregroundActivity).toBe("generating");
+  });
+
+  it("defaults foregroundActivity to null when the picked session omits it", () => {
+    // §req safe-defaults: an absent substate must be an explicit null (unknown),
+    // which downstream resolves to generating — never done.
+    const info = getSessionInfoForTask(
+      "t1",
+      { t1: [session({ id: "p", is_primary: true, state: "RUNNING" })] },
+      {},
+    );
+    expect(info.foregroundActivity).toBeNull();
+  });
+
+  it("returns undefined foregroundActivity when the task has no sessions", () => {
+    expect(getSessionInfoForTask("t1", {}, {}).foregroundActivity).toBeUndefined();
+  });
 });

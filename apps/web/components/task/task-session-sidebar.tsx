@@ -134,6 +134,9 @@ function toSidebarItem(
     title: task.title,
     state: task.state as TaskState | undefined,
     sessionState: resolvedSessionState,
+    // Substate of the same session `resolvedSessionState` came from; undefined
+    // when no client session is loaded (safe fallback → generating, never done).
+    sessionForegroundActivity: sessionInfo.foregroundActivity,
     description: task.description,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),

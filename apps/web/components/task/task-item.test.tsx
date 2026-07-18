@@ -7,10 +7,14 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const REVIEW_ICON_TEST_ID = "task-state-review";
 const RUNNING_ICON_TEST_ID = "task-state-running";
+const BACKGROUND_ICON_TEST_ID = "task-state-background-running";
 const WAITING_FOR_INPUT_ICON_TEST_ID = "task-state-waiting-for-input";
 const PENDING_PERMISSION_ICON_TEST_ID = "task-state-pending-permission";
 const AGENT_ERROR_ICON_TEST_ID = "task-agent-error-icon";
 const PREPARING_PHASE = "preparing";
+const DATA_LOADING_PHASE = "data-loading-phase";
+const RUNNING_PHASE = "running";
+const YELLOW_SPINNER_CLASS = "text-yellow-500";
 const PREPARING_SPINNER_CLASS = "text-muted-foreground/40";
 const SPIN_CLASS = "animate-spin";
 const SLOW_SPIN_CLASS = "[animation-duration:2s]";
@@ -29,7 +33,7 @@ function renderTaskItem(props: Partial<ComponentProps<typeof TaskItem>> = {}) {
 
 function expectPreparingSpinner(): void {
   const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
-  expect(icon.getAttribute("data-loading-phase")).toBe(PREPARING_PHASE);
+  expect(icon.getAttribute(DATA_LOADING_PHASE)).toBe(PREPARING_PHASE);
   expect(icon.classList.contains(PREPARING_SPINNER_CLASS)).toBe(true);
   expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
   expect(icon.classList.contains(SLOW_SPIN_CLASS)).toBe(true);
@@ -112,8 +116,8 @@ describe("TaskItem status icon", () => {
     renderTaskItem({ state: "IN_PROGRESS", sessionState: "CREATED" });
 
     const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
-    expect(icon.getAttribute("data-loading-phase")).toBe("running");
-    expect(icon.classList.contains("text-yellow-500")).toBe(true);
+    expect(icon.getAttribute(DATA_LOADING_PHASE)).toBe(RUNNING_PHASE);
+    expect(icon.classList.contains(YELLOW_SPINNER_CLASS)).toBe(true);
     expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
   });
 
@@ -128,8 +132,8 @@ describe("TaskItem status icon", () => {
     renderTaskItem({ state: "IN_PROGRESS", sessionState: "RUNNING" });
 
     const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
-    expect(icon.getAttribute("data-loading-phase")).toBe("running");
-    expect(icon.classList.contains("text-yellow-500")).toBe(true);
+    expect(icon.getAttribute(DATA_LOADING_PHASE)).toBe(RUNNING_PHASE);
+    expect(icon.classList.contains(YELLOW_SPINNER_CLASS)).toBe(true);
     expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
     expect(icon.classList.contains(PREPARING_SPINNER_CLASS)).toBe(false);
   });
@@ -166,5 +170,61 @@ describe("TaskItem actions", () => {
     expect(screen.getByRole("button", { name: "Task actions" }).getAttribute("aria-expanded")).toBe(
       "false",
     );
+  });
+});
+
+describe("TaskItem background-running indicator", () => {
+  it("shows the background-running affordance (spinner, not a check) for a background-running session", () => {
+    // The session's foreground turn is idle but spawned background work is live.
+    // It must read distinctly from generating and never as the review/done check.
+    renderTaskItem({
+      state: "IN_PROGRESS",
+      sessionState: "RUNNING",
+      sessionForegroundActivity: "background",
+    });
+
+    const icon = screen.getByTestId(BACKGROUND_ICON_TEST_ID);
+    expect(icon.querySelector(`.${SPIN_CLASS}`)).not.toBeNull();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("never reads done for a background-running session even in a REVIEW column", () => {
+    // §req: no surface shows done while background work runs. RUNNING classifies
+    // as in_progress, so the background branch wins over the review check.
+    renderTaskItem({
+      state: "REVIEW",
+      sessionState: "RUNNING",
+      sessionForegroundActivity: "background",
+    });
+
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("falls back to the generating spinner when the RUNNING substate is unknown", () => {
+    // Safe default: an unknown/null substate must render generating, never done
+    // and never the background spinner.
+    renderTaskItem({
+      state: "IN_PROGRESS",
+      sessionState: "RUNNING",
+      sessionForegroundActivity: null,
+    });
+
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
+    const icon = screen.getByTestId(RUNNING_ICON_TEST_ID);
+    expect(icon.getAttribute(DATA_LOADING_PHASE)).toBe(RUNNING_PHASE);
+    expect(icon.classList.contains(YELLOW_SPINNER_CLASS)).toBe(true);
+  });
+
+  it("keeps the generating spinner for a foreground-generating session", () => {
+    renderTaskItem({
+      state: "IN_PROGRESS",
+      sessionState: "RUNNING",
+      sessionForegroundActivity: "generating",
+    });
+
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).not.toBeNull();
   });
 });
