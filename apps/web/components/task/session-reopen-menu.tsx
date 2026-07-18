@@ -14,10 +14,28 @@ import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { markSessionTabUserActivationIntent } from "@/components/task/session-tab-activation-intent";
-import type { TaskSession } from "@/lib/types/http";
+import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 
 type AgentInfo = { label: string; agentName: string };
+
+/**
+ * Whether the reopen-menu row should render a state icon for `session`.
+ *
+ * Background-running (RUNNING + `background`) is the one running state this menu
+ * surfaces — it must read distinctly (the shared background spinner), never as
+ * done. The other in-flight states keep the established silent affordance: a
+ * generating RUNNING session, STARTING, and WAITING_FOR_INPUT stay icon-less.
+ * Terminal states (COMPLETED / FAILED / CANCELLED) keep their existing icons.
+ * A RUNNING session whose substate is unknown falls back to silence (not done).
+ */
+export function shouldShowReopenStateIcon(
+  state: TaskSessionState,
+  foregroundActivity?: ForegroundActivity | null,
+): boolean {
+  if (state === "RUNNING") return foregroundActivity === "background";
+  return state !== "STARTING" && state !== "WAITING_FOR_INPUT";
+}
 
 function resolveAgentInfo(
   session: TaskSession,
@@ -125,11 +143,11 @@ export function SessionReopenMenuItems({
             )}
             <span className="flex-1 truncate">{info.label}</span>
             {isPrimary && <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0" />}
-            {session.state !== "RUNNING" &&
-              session.state !== "STARTING" &&
-              session.state !== "WAITING_FOR_INPUT" && (
-                <span className="shrink-0">{getSessionStateIcon(session.state, "h-3 w-3")}</span>
-              )}
+            {shouldShowReopenStateIcon(session.state, session.foreground_activity) && (
+              <span className="shrink-0">
+                {getSessionStateIcon(session.state, "h-3 w-3", session.foreground_activity)}
+              </span>
+            )}
           </DropdownMenuItem>
         );
       })}
