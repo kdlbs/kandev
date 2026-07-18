@@ -9,23 +9,13 @@ import { useOptimisticTaskMutation } from "@/hooks/use-optimistic-task-mutation"
 import { TaskDetachConfirmDialog } from "@/components/task/task-detach-confirm-dialog";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import type { Task } from "@/app/office/tasks/[id]/types";
+import { workspaceModeFromMetadata, type WorkspaceMode } from "@/lib/kanban/map-task";
 
 type ParentPickerProps = {
   task: Task;
 };
 
 const NO_PARENT = "__none__";
-
-type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
-
-function workspaceModeFromMetadata(metadata: Record<string, unknown> | null | undefined) {
-  const workspace = metadata?.workspace;
-  if (!workspace || typeof workspace !== "object") return undefined;
-  const mode = (workspace as Record<string, unknown>).mode;
-  return mode === "inherit_parent" || mode === "new_workspace" || mode === "shared_group"
-    ? mode
-    : undefined;
-}
 
 function useTaskWorkspaceMode(task: Task) {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode | undefined>(task.workspaceMode);

@@ -48,7 +48,7 @@ export type TaskLike = {
   metadata?: Record<string, unknown> | null;
 };
 
-type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
+export type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
 
 export function workspaceModeFromMetadata(
   metadata: TaskLike["metadata"],
