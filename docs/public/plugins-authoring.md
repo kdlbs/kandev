@@ -14,8 +14,7 @@ reference](plugins-manifest.md) for the full `manifest.yaml` schema.
 Two working example plugins accompany this guide:
 
 - `kandev-plugin-hello` — a nav item, native route, sidebar slot component, a
-  WS-driven counter, a Host-state-backed event handler, a declared tool, and a
-  webhook.
+  WS-driven counter, a Host-state-backed event handler, and a webhook.
 - `kandev-plugin-github` — a connector PoC that shells out to the `gh` CLI
   from a webhook handler used as a request relay, reads live kanban data from
   the host store, and opens kandev's real create-task dialog
@@ -92,23 +91,11 @@ type Plugin interface {
 	// kandev to retry (3 retries, 5s/15s/45s backoff).
 	OnEvent(ctx context.Context, e *Event) error
 
-	// InvokeTool handles a call to a tool declared in tools: in
-	// manifest.yaml. The gRPC path is implemented, but see the note below:
-	// nothing invokes plugin tools in the current release yet.
-	InvokeTool(ctx context.Context, req *ToolRequest) (*ToolResponse, error)
-
 	// HandleWebhook handles an inbound request relayed from
 	// POST /api/plugins/{id}/webhooks/{key}.
 	HandleWebhook(ctx context.Context, req *WebhookRequest) (*WebhookResponse, error)
 }
 ```
-
-> **Tools are not agent-invocable yet.** A plugin can declare `tools[]`,
-> and kandev validates and lists them (`GET /api/plugins/tools`), but no
-> caller — no agent, MCP bridge, or HTTP route — invokes `InvokeTool` in
-> the current release. Implement `InvokeTool` if you like, but expect it to
-> stay unused until the agent-tool wiring ships. `OnEvent` and
-> `HandleWebhook` are the two paths that are live end-to-end today.
 
 Embed `pluginsdk.UnimplementedPlugin` and override only the methods you need
 — it's a no-op base that also implements `HostSetter`, so `Serve` injects a

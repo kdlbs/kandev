@@ -30,11 +30,9 @@ flowchart TD
     Verify --> Extract["Extract to ~/.kandev/plugins/&lt;id&gt;/&lt;version&gt;/"]
     Extract --> Spawn["Spawn platform executable as a subprocess (hashicorp/go-plugin)"]
     Spawn -->|"gRPC DeliverEvent"| Deliver["Bus events (at-least-once, buffered while unhealthy)"]
-    Spawn -->|"gRPC InvokeTool"| Invoke["Declared tool calls (not agent-invocable yet)"]
     Ext["External caller"] -->|"HTTP POST/GET /api/plugins/{id}/webhooks/{key}"| Route["kandev webhook route"]
     Route -->|"gRPC HandleWebhook"| Webhook["Plugin webhook handler (plugin serves no HTTP itself)"]
     Deliver --> Host["Plugin calls back on the same connection: Host state / config / secrets, EmitEvent, and capability-gated read-only data accessors"]
-    Invoke --> Host
     Webhook --> Host
     Host -.optional.-> UI["SPA loads ui.bundle at boot: registers native routes / nav / slots / WS handlers"]
 ```
@@ -124,7 +122,7 @@ binary an operator hasn't explicitly approved via install or Sync.
 ## Enable, disable, uninstall
 
 - **Disable** stops the subprocess. Config and state are preserved; no
-  events, tools, or webhooks are delivered while disabled.
+  events or webhooks are delivered while disabled.
 - **Enable** respawns the subprocess and re-completes the handshake.
 - **Uninstall** stops the subprocess and deletes the plugin's package,
   registration record, and all persisted state — there is no grace period.
