@@ -15,9 +15,16 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { IconInfoCircle, IconPower, IconRotateClockwise } from "@tabler/icons-react";
+import {
+  IconExternalLink,
+  IconInfoCircle,
+  IconPower,
+  IconRotateClockwise,
+} from "@tabler/icons-react";
 import { useToast } from "@/components/toast-provider";
 import { useKandevRestart } from "@/hooks/domains/system/use-kandev-restart";
+import { isBrowserDemoDevRouteAvailable } from "@/lib/browser-demo/mode";
+import { isDebugUI } from "@/lib/config";
 import { fetchRuntimeFlags, updateRuntimeFlag } from "@/lib/api/domains/runtime-flags-api";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 import type { RestartCapability } from "@/lib/types/system";
@@ -27,11 +34,16 @@ import { RestartProgressDialog } from "./restart-progress-dialog";
 type Props = {
   initialFlags: RuntimeFlagState[];
   restartCapability: RestartCapability | null;
+  browserDemoAvailable?: boolean;
 };
 
 let bootstrapRuntimeFlagsRequest: ReturnType<typeof fetchRuntimeFlags> | null = null;
 
-export function FeatureTogglesSettings({ initialFlags, restartCapability }: Props) {
+export function FeatureTogglesSettings({
+  initialFlags,
+  restartCapability,
+  browserDemoAvailable = isBrowserDemoDevRouteAvailable() && isDebugUI(),
+}: Props) {
   const [flags, setFlags] = useState(initialFlags);
   const [isLoadingFlags, setIsLoadingFlags] = useState(initialFlags.length === 0);
   const [savingKeys, setSavingKeys] = useState<Set<string>>(() => new Set());
@@ -116,6 +128,9 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
           saving={savingKeys.has(flag.key) || restart.isRestarting}
           onChange={(next) => void setOverride(flag, next)}
           onReset={() => void setOverride(flag, null)}
+          action={
+            browserDemoAvailable && flag.key === "debug.devMode" ? <BrowserDemoAction /> : null
+          }
         />
       ))}
       {flags.length === 0 && (
@@ -127,6 +142,17 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
         onDismiss={restart.dismiss}
       />
     </div>
+  );
+}
+
+function BrowserDemoAction() {
+  return (
+    <Button variant="outline" size="sm" asChild>
+      <a href="/demo" target="_blank" rel="noopener noreferrer">
+        <IconExternalLink className="mr-1 h-3.5 w-3.5" />
+        Open browser demo
+      </a>
+    </Button>
   );
 }
 

@@ -40,6 +40,24 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+describe("browser demo action", () => {
+  it("offers the browser demo in a separate tab during debug development", () => {
+    render(
+      <TooltipProvider>
+        <FeatureTogglesSettings
+          initialFlags={[flagState({ requires_restart_to_apply: false })]}
+          restartCapability={null}
+          browserDemoAvailable
+        />
+      </TooltipProvider>,
+    );
+
+    const link = screen.getByRole("link", { name: "Open browser demo" });
+    expect(link.getAttribute("href")).toBe("/demo");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+});
+
 describe("FeatureTogglesSettings", () => {
   it("shows restart support details without offering restart when unsupported", () => {
     render(
