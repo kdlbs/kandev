@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,21 +20,21 @@ func excludeWorkspaceOwnershipMarker(gitDir string) error {
 		return err
 	}
 
-	existing, err := os.ReadFile(excludePath)
-	if err != nil && !os.IsNotExist(err) {
+	file, err := openGitExcludeNoFollow(gitDir)
+	if err != nil {
+		return fmt.Errorf("open git exclude file: %w", err)
+	}
+	existing, err := io.ReadAll(file)
+	if err != nil {
+		_ = file.Close()
 		return fmt.Errorf("read git exclude file: %w", err)
 	}
 
 	entry := "/" + storageworkspaces.OwnershipMarkerFilename
 	for line := range strings.SplitSeq(string(existing), "\n") {
 		if strings.TrimSpace(line) == entry {
-			return nil
+			return file.Close()
 		}
-	}
-
-	file, err := os.OpenFile(excludePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("open git exclude file: %w", err)
 	}
 
 	prefix := ""
