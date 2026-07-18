@@ -90,7 +90,13 @@ survives a grayscale/desaturated view.
 
 ## Task-level indicator reflects live background work §spec:task-level-indicator
 
-*Status: not started*
+*Status: in progress*
+
+<!-- Backend task-record aggregate (most-active-wins) + live emission on
+generating↔background flips, plus the board/kanban card and task-list-row
+surfaces, are done. The graph/swimlane nodes and the open-task header still read
+primary-session-only and are the remaining work for this section. -->
+
 
 On every at-a-glance task surface — the board / kanban card, the task list rows,
 the graph / swimlane nodes, and the open-task header — a task whose foreground
