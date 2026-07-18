@@ -155,4 +155,16 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(http).isRemoteExecutor).toBe(false);
     expect(toKanbanTask(ws).isRemoteExecutor).toBe(false);
   });
+
+  it("clears the parent and retains shared workspace mode from a detach update", () => {
+    const detached = toKanbanTask(
+      wsPayload({
+        parent_id: null,
+        metadata: { workspace: { mode: "shared_group" } },
+      }),
+    );
+
+    expect(detached.parentTaskId).toBeUndefined();
+    expect(detached.workspaceMode).toBe("shared_group");
+  });
 });

@@ -996,6 +996,9 @@ func wireOfficeSvcsDependencies(
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
 	// Wire the office service as the task canceller for status→cancelled hard-cancels.
 	services.OfficeSvcs.Dashboard.SetTaskCanceller(services.Office)
+	// Route the Office "No parent" mutation through the canonical task detach
+	// operation so inherited workspace sharing remains valid.
+	services.OfficeSvcs.Dashboard.SetTaskDetacher(services.Task)
 	// Wire the reactivity pipeline so property mutations queue downstream runs.
 	services.OfficeSvcs.Dashboard.SetReactivityApplier(
 		officescheduler.NewDashboardReactivityAdapter(services.OfficeSvcs.Scheduler),

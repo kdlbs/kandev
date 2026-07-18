@@ -91,6 +91,8 @@ export type TaskEventPayload = {
   archived_at?: string | null;
   updated_at?: string;
   is_ephemeral: boolean;
+  parent_id?: string | null;
+  metadata?: Record<string, unknown> | null;
   /** Deletion reason on task.deleted (e.g. "pr_approved_by_user"). Absent otherwise. */
   reason?: string;
 };

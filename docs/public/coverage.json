@@ -225,8 +225,18 @@
       "audiences": ["operator"],
       "stability": "stable",
       "docs": ["operations", "configuration", "feature-status"],
-      "sources": ["apps/backend/internal/system/settings/store.go", "apps/web/components/settings/system/feature-toggles-settings.tsx"],
-      "tests": ["apps/backend/internal/system/settings/store_test.go", "apps/web/components/settings/system/feature-toggles-settings.test.tsx"],
+      "sources": [
+        "apps/backend/internal/system/settings/store.go",
+        "apps/backend/internal/system/storage/handler.go",
+        "apps/web/components/settings/system/feature-toggles-settings.tsx",
+        "apps/web/components/settings/system/storage/storage-maintenance-settings.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/system/settings/store_test.go",
+        "apps/backend/internal/system/storage/handler_test.go",
+        "apps/web/components/settings/system/feature-toggles-settings.test.tsx",
+        "apps/web/components/settings/system/storage/storage-maintenance-settings.test.tsx"
+      ],
       "settingsRoutes": [
         "/settings/system/about",
         "/settings/system/backups",

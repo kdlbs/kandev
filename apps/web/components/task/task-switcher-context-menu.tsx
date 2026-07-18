@@ -2,13 +2,11 @@
 
 import { cloneElement, isValidElement, useState } from "react";
 import {
-  IconArchive,
   IconBrandSentry,
   IconCopy,
   IconCircleDot,
   IconGitPullRequest,
   IconLink,
-  IconLoader,
   IconPencil,
   IconPin,
   IconPinFilled,
@@ -31,6 +29,7 @@ import {
 } from "@/components/task/task-move-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { TaskColorMenu } from "./task-switcher-color-menu";
+import { TaskArchiveItem, TaskDeleteItem, TaskDetachItem } from "./task-switcher-action-items";
 import type { TaskSwitcherItem } from "./task-switcher";
 
 export type StepDef = {
@@ -49,6 +48,7 @@ type ContextMenuProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkIssue?: (taskId: string, taskTitle?: string) => void;
   onLinkJiraTicket?: (taskId: string, taskTitle?: string) => void;
@@ -79,6 +79,7 @@ export function TaskItemWithContextMenu({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onDetachTask,
   onLinkPullRequest,
   onLinkIssue,
   onLinkJiraTicket,
@@ -119,6 +120,7 @@ export function TaskItemWithContextMenu({
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
           onDeleteTask={onDeleteTask}
+          onDetachTask={onDetachTask}
           onLinkPullRequest={onLinkPullRequest}
           onLinkIssue={onLinkIssue}
           onLinkJiraTicket={onLinkJiraTicket}
@@ -158,6 +160,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
     onRenameTask,
     onArchiveTask,
     onDeleteTask,
+    onDetachTask,
     onMoveToStep,
     onTogglePin,
     isPinned,
@@ -212,6 +215,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
         }
       : handler;
   const onDelete = withClear(onDeleteTask);
+  const onDetach = withClear(onDetachTask);
   return (
     <>
       <TaskPinItem
@@ -249,6 +253,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
         closeMenu={closeMenu}
         moveTasks={moveTasks}
       />
+      <TaskDetachItem task={task} disabled={isDeleting} onDetachTask={onDetach} />
       <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDelete} />
     </>
   );
@@ -412,41 +417,6 @@ function TaskRenameItem({
   );
 }
 
-function TaskArchiveItem({
-  taskId,
-  actingIds,
-  actingOnSelection,
-  disabled,
-  onArchiveTask,
-  onBulkArchive,
-}: {
-  taskId: string;
-  actingIds: string[];
-  actingOnSelection: boolean;
-  disabled?: boolean;
-  onArchiveTask?: (taskId: string) => void;
-  onBulkArchive?: (taskIds: string[]) => void;
-}) {
-  // Acting on the selection routes through the bulk path (which clears the
-  // selection afterwards) even for a single selected row.
-  if (actingOnSelection && onBulkArchive) {
-    const n = actingIds.length;
-    return (
-      <ContextMenuItem disabled={disabled} onSelect={() => onBulkArchive(actingIds)}>
-        <IconArchive className="mr-2 h-4 w-4" />
-        {n > 1 ? `Archive ${n} tasks` : "Archive"}
-      </ContextMenuItem>
-    );
-  }
-  if (!onArchiveTask) return null;
-  return (
-    <ContextMenuItem disabled={disabled} onSelect={() => onArchiveTask(taskId)}>
-      <IconArchive className="mr-2 h-4 w-4" />
-      Archive
-    </ContextMenuItem>
-  );
-}
-
 function TaskMoveItems({
   task,
   workflows,
@@ -527,35 +497,6 @@ function TaskMoveItems({
         });
       }}
     />
-  );
-}
-
-function TaskDeleteItem({
-  taskId,
-  isDeleting,
-  onDeleteTask,
-}: {
-  taskId: string;
-  isDeleting?: boolean;
-  onDeleteTask?: (taskId: string) => void;
-}) {
-  if (!onDeleteTask) return null;
-  return (
-    <>
-      <ContextMenuSeparator />
-      <ContextMenuItem
-        variant="destructive"
-        disabled={isDeleting}
-        onSelect={() => onDeleteTask(taskId)}
-      >
-        {isDeleting ? (
-          <IconLoader className="mr-2 h-4 w-4 animate-spin" />
-        ) : (
-          <IconTrash className="mr-2 h-4 w-4" />
-        )}
-        Delete
-      </ContextMenuItem>
-    </>
   );
 }
 

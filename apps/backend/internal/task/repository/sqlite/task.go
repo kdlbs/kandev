@@ -287,6 +287,71 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	return tx.Commit()
 }
 
+// DetachTask clears only the hierarchy fields involved in detachment. Keeping
+// this as a targeted update prevents concurrent task edits from being replaced
+// by a stale full-row write.
+func (r *Repository) DetachTask(ctx context.Context, taskID string) (bool, error) {
+	result, err := r.db.ExecContext(
+		ctx,
+		r.db.Rebind(detachTaskQuery(r.db.DriverName())),
+		time.Now().UTC(),
+		taskID,
+	)
+	if err != nil {
+		return false, err
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if rows > 0 {
+		return true, nil
+	}
+
+	var existingID string
+	if err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`SELECT id FROM tasks WHERE id = ?`), taskID).Scan(&existingID); err != nil {
+		if err == sql.ErrNoRows {
+			return false, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
+		}
+		return false, err
+	}
+	return false, nil
+}
+
+func detachTaskQuery(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return `
+			UPDATE tasks
+			SET parent_id = '',
+				metadata = CASE
+					WHEN jsonb_extract_path_text(
+						CASE WHEN metadata IS NULL OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+						'workspace', 'mode'
+					) = 'inherit_parent'
+					THEN jsonb_set(metadata::jsonb, '{workspace,mode}', '"shared_group"'::jsonb, true)::text
+					ELSE metadata
+				END,
+				updated_at = ?
+			WHERE id = ? AND parent_id != ''
+		`
+	}
+	return `
+		UPDATE tasks
+		SET parent_id = '',
+			metadata = CASE
+				WHEN json_valid(metadata) THEN CASE
+					WHEN json_extract(metadata, '$.workspace.mode') = 'inherit_parent'
+					THEN json_set(metadata, '$.workspace.mode', 'shared_group')
+					ELSE metadata
+				END
+				ELSE metadata
+			END,
+			updated_at = ?
+		WHERE id = ? AND parent_id != ''
+	`
+}
+
 // UpdateTaskIfWorkflowStepHasCapacity updates a task inside the same write
 // transaction that checks a WIP-limited target step's current occupancy.
 func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error {

@@ -1051,6 +1051,15 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	c.JSON(http.StatusOK, dto.FromTask(task))
 }
 
+func (h *TaskHandlers) httpDetachTask(c *gin.Context) {
+	task, err := h.service.DetachTask(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		handleNotFound(c, h.logger, err, "task not found")
+		return
+	}
+	c.JSON(http.StatusOK, dto.FromTask(task))
+}
+
 type httpUpdateTaskRepositoryRequest struct {
 	BaseBranch string `json:"base_branch"`
 }
