@@ -82,3 +82,11 @@ elif grep -q "^exit=3 log=$quiet_dir/kandev-run\.ordinary\." <<<"$quiet_dir_fail
 else
   fail "KANDEV_RUN_QUIET_DIR preserves failure extraction"
 fi
+
+if non_writable_output="$(KANDEV_RUN_QUIET_DIR=/proc/1 "$SCRIPT" ordinary -- bash -c 'printf "ok\\n"' 2>&1)"; then
+  fail "non-writable log directory should fail"
+elif grep -q 'cannot create log directory: /proc/1' <<<"$non_writable_output"; then
+  pass "non-writable log directory is rejected"
+else
+  fail "non-writable log directory should produce a clear error"
+fi
