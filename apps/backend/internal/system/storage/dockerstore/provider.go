@@ -10,7 +10,10 @@ import (
 	"github.com/kandev/kandev/internal/system/storage"
 )
 
-var ErrGlobalCleanupDisabled = errors.New("global Docker cleanup is disabled")
+var (
+	ErrDockerUnavailable     = errors.New("docker client is unavailable")
+	ErrGlobalCleanupDisabled = errors.New("global Docker cleanup is disabled")
+)
 
 type DockerClient interface {
 	Ping(context.Context) error
@@ -99,6 +102,9 @@ func (p *Provider) Analyze(ctx context.Context) Analysis {
 }
 
 func (p *Provider) PruneBuildCache(ctx context.Context) (agentdocker.PruneResult, error) {
+	if p.docker == nil {
+		return agentdocker.PruneResult{}, ErrDockerUnavailable
+	}
 	settings, err := p.settings.GetSettings(ctx)
 	if err != nil {
 		return agentdocker.PruneResult{}, fmt.Errorf("read storage settings: %w", err)
@@ -119,6 +125,9 @@ func (p *Provider) PruneBuildCache(ctx context.Context) (agentdocker.PruneResult
 }
 
 func (p *Provider) PruneUnusedImages(ctx context.Context) (agentdocker.PruneResult, error) {
+	if p.docker == nil {
+		return agentdocker.PruneResult{}, ErrDockerUnavailable
+	}
 	settings, err := p.settings.GetSettings(ctx)
 	if err != nil {
 		return agentdocker.PruneResult{}, fmt.Errorf("read storage settings: %w", err)

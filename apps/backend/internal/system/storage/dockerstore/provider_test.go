@@ -130,6 +130,41 @@ func TestGlobalPruneRechecksPersistedAcknowledgementImmediatelyBeforeSDKCall(t *
 	}
 }
 
+func TestGlobalPruneRejectsMissingDockerClient(t *testing.T) {
+	settings := storage.DefaultSettings()
+	settings.Docker.DedicatedDaemonAcknowledged = true
+	settings.Docker.BuildCacheEnabled = true
+	settings.Docker.UnusedImagesEnabled = true
+
+	tests := []struct {
+		name  string
+		prune func(*Provider) error
+	}{
+		{
+			name: "build cache",
+			prune: func(provider *Provider) error {
+				_, err := provider.PruneBuildCache(context.Background())
+				return err
+			},
+		},
+		{
+			name: "unused images",
+			prune: func(provider *Provider) error {
+				_, err := provider.PruneUnusedImages(context.Background())
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := NewProvider(nil, &fakeInventory{}, staticSettings(settings))
+			if err := tt.prune(provider); !errors.Is(err, ErrDockerUnavailable) {
+				t.Fatalf("prune error = %v, want ErrDockerUnavailable", err)
+			}
+		})
+	}
+}
+
 func TestGlobalPruneRejectsOverflowingAgeWithoutSDKCall(t *testing.T) {
 	tests := []struct {
 		name   string
