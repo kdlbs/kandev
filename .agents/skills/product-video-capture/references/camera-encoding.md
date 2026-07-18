@@ -37,7 +37,7 @@ Before using the editorial landing profile, confirm the focused tests recognize 
 
 Design keyframes from semantic story events and the recorded pointer journey:
 
-1. Start centered at 1x for a general-purpose delivery. Start on one matched focused frame for an editorial landing film or short docs clip when it improves readability or removes irrelevant chrome or fixture-only detail while preserving identifying context.
+1. Start centered at 1x for a general-purpose delivery. Start on a single focused frame matched across the loop for an editorial landing film or short docs clip when it improves readability or removes irrelevant chrome or fixture-only detail while preserving identifying context.
 2. Hold context briefly.
 3. Ease toward the first important target while the pointer travels.
 4. Hold or drift gently across related actions. Ignore micro-jitter, but never let intentional pointer travel leave the crop.

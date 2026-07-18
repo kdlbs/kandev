@@ -37,7 +37,7 @@ Launch Chrome with an isolated user-data dir and flags equivalent to:
 ```
 
 Use a fresh Xvfb display sized to the physical frame. Confirm the decoded first frame fills that frame; do not infer this from `ffprobe` width/height alone.
-Inspect the first, middle, and final raw frames for Chrome's automation banner. `--disable-infobars` alone is not sufficient on every Chrome for Testing build; reject the take if any browser-managed banner remains.
+Decode every raw frame and inspect the browser-managed perimeter in frame-indexed contact sheets for Chrome's automation banner; first, middle, and final samples cannot exclude a transient artifact. `--disable-infobars` alone is not sufficient on every Chrome for Testing build; reject the take if any browser-managed banner remains.
 
 ## Recorder Shape
 

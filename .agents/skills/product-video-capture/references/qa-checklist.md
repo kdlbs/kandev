@@ -64,6 +64,8 @@ Search every sampled frame and poster for:
 - clipped title, popover, menu, stage label, diff, composer, checks, or action;
 - accidental notification, browser automation banner, browser status text, or developer tooling.
 
+For browser-managed chrome and banners, inspect the perimeter from every decoded raw frame in frame-indexed contact sheets. Fixed-fraction samples and normal-speed playback are supplementary, not frame-complete evidence.
+
 Confirm visible implementation, diff, test, and review claims are supported by seeded repository/provider state.
 
 ## 5. Landing Integration
