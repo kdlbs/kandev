@@ -1,6 +1,7 @@
 ---
 title: "Plugins"
 description: "Install and manage kandev plugins: Go backends kandev spawns and supervises, with an optional native frontend bundle."
+status: experimental
 ---
 
 # Plugins

@@ -1,6 +1,7 @@
 ---
 title: "Plugin Manifest Reference"
 description: "Complete field-by-field reference for a kandev plugin's manifest.yaml, including the full event-subscription vocabulary."
+status: experimental
 ---
 
 # Plugin Manifest Reference

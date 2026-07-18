@@ -1,6 +1,7 @@
 ---
 title: "Authoring a Plugin"
 description: "Build a kandev plugin backend and optional native UI, package it, and iterate against a local kandev instance."
+status: experimental
 ---
 
 # Authoring a Plugin
