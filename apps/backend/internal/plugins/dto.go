@@ -26,18 +26,6 @@ type UpdateConfigRequest struct {
 	Config map[string]any `json:"config"`
 }
 
-// PluginToolDTO is one entry of GET /api/plugins/tools: a declared tool plus
-// the id of the plugin that owns it. Only tools from StatusActive plugins
-// are listed — per the state machine, disabled/error plugins have their
-// tools hidden from the agent tool set.
-type PluginToolDTO struct {
-	PluginID    string         `json:"plugin_id"`
-	Name        string         `json:"name"`
-	DisplayName string         `json:"display_name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"input_schema,omitempty"`
-}
-
 // SyncResult is the body of a successful POST /api/plugins/sync (and the
 // return value of Service.Sync / Service.bootScan): what the filesystem
 // scan under the plugins directory found and did this run, per

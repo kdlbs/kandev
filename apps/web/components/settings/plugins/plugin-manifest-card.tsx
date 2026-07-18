@@ -8,7 +8,7 @@ import type { PluginRecord } from "@/lib/types/plugins";
 
 /**
  * Read-only view of the plugin's manifest: identity, capabilities, declared
- * tools/webhooks, and a collapsible raw JSON dump for anything the summary
+ * webhooks, and a collapsible raw JSON dump for anything the summary
  * rows don't surface.
  */
 export function PluginManifestCard({ plugin }: { plugin: PluginRecord }) {
@@ -38,10 +38,6 @@ export function PluginManifestCard({ plugin }: { plugin: PluginRecord }) {
         </div>
 
         <CapabilityBadges plugin={plugin} />
-        <DeclarationList
-          label="Tools"
-          items={(plugin.tools ?? []).map((t) => ({ key: t.name, text: t.display_name || t.name }))}
-        />
         <DeclarationList
           label="Webhooks"
           items={(plugin.webhooks ?? []).map((w) => ({ key: w.key, text: w.key }))}

@@ -19,8 +19,6 @@ const (
 	webhooksFileName       = "webhooks.jsonl"
 	configSnapshotFileName = "config.json"
 	secretProbeFileName    = "secret-probe.json"
-
-	toolNameEcho = "echo"
 )
 
 // deliveryRecord is one recorded OnEvent delivery, appended as a JSON line
@@ -114,15 +112,6 @@ func (p *fixturePlugin) recordLastEventBestEffort(ctx context.Context, e *plugin
 		"event_type": e.EventType,
 		"event_id":   e.EventID,
 	})
-}
-
-// InvokeTool implements the fixture's only declared tool ("echo"): it
-// returns the request's input unchanged as the response output.
-func (p *fixturePlugin) InvokeTool(_ context.Context, req *pluginsdk.ToolRequest) (*pluginsdk.ToolResponse, error) {
-	if req.ToolName != toolNameEcho {
-		return &pluginsdk.ToolResponse{Error: fmt.Sprintf("unknown tool %q", req.ToolName)}, nil
-	}
-	return &pluginsdk.ToolResponse{Output: req.Input}, nil
 }
 
 // HandleWebhook appends a webhooks.jsonl line recording the delivery,

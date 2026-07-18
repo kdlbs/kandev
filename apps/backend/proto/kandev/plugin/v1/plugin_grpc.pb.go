@@ -20,7 +20,6 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	Plugin_DeliverEvent_FullMethodName  = "/kandev.plugin.v1.Plugin/DeliverEvent"
-	Plugin_InvokeTool_FullMethodName    = "/kandev.plugin.v1.Plugin/InvokeTool"
 	Plugin_HandleWebhook_FullMethodName = "/kandev.plugin.v1.Plugin/HandleWebhook"
 )
 
@@ -31,7 +30,6 @@ const (
 // Implemented by the PLUGIN. kandev is the client.
 type PluginClient interface {
 	DeliverEvent(ctx context.Context, in *Event, opts ...grpc.CallOption) (*EventAck, error)
-	InvokeTool(ctx context.Context, in *ToolRequest, opts ...grpc.CallOption) (*ToolResponse, error)
 	HandleWebhook(ctx context.Context, in *WebhookRequest, opts ...grpc.CallOption) (*WebhookResponse, error)
 }
 
@@ -47,16 +45,6 @@ func (c *pluginClient) DeliverEvent(ctx context.Context, in *Event, opts ...grpc
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EventAck)
 	err := c.cc.Invoke(ctx, Plugin_DeliverEvent_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *pluginClient) InvokeTool(ctx context.Context, in *ToolRequest, opts ...grpc.CallOption) (*ToolResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ToolResponse)
-	err := c.cc.Invoke(ctx, Plugin_InvokeTool_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +68,6 @@ func (c *pluginClient) HandleWebhook(ctx context.Context, in *WebhookRequest, op
 // Implemented by the PLUGIN. kandev is the client.
 type PluginServer interface {
 	DeliverEvent(context.Context, *Event) (*EventAck, error)
-	InvokeTool(context.Context, *ToolRequest) (*ToolResponse, error)
 	HandleWebhook(context.Context, *WebhookRequest) (*WebhookResponse, error)
 	mustEmbedUnimplementedPluginServer()
 }
@@ -94,9 +81,6 @@ type UnimplementedPluginServer struct{}
 
 func (UnimplementedPluginServer) DeliverEvent(context.Context, *Event) (*EventAck, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeliverEvent not implemented")
-}
-func (UnimplementedPluginServer) InvokeTool(context.Context, *ToolRequest) (*ToolResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method InvokeTool not implemented")
 }
 func (UnimplementedPluginServer) HandleWebhook(context.Context, *WebhookRequest) (*WebhookResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HandleWebhook not implemented")
@@ -140,24 +124,6 @@ func _Plugin_DeliverEvent_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Plugin_InvokeTool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ToolRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(PluginServer).InvokeTool(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Plugin_InvokeTool_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(PluginServer).InvokeTool(ctx, req.(*ToolRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Plugin_HandleWebhook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(WebhookRequest)
 	if err := dec(in); err != nil {
@@ -186,10 +152,6 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DeliverEvent",
 			Handler:    _Plugin_DeliverEvent_Handler,
-		},
-		{
-			MethodName: "InvokeTool",
-			Handler:    _Plugin_InvokeTool_Handler,
 		},
 		{
 			MethodName: "HandleWebhook",

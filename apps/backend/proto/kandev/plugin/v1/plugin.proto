@@ -9,7 +9,6 @@ option go_package = "github.com/kandev/kandev/proto/kandev/plugin/v1;pluginv1";
 // Implemented by the PLUGIN. kandev is the client.
 service Plugin {
   rpc DeliverEvent(Event) returns (EventAck);
-  rpc InvokeTool(ToolRequest) returns (ToolResponse);
   rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
 }
 
@@ -96,22 +95,6 @@ message Event {
   google.protobuf.Struct payload = 5; // marshaled bus event.Data
 }
 message EventAck {}
-
-message ToolRequest {
-  string tool_call_id = 1;
-  string tool_name = 2;
-  google.protobuf.Struct input = 3;
-  ToolContext context = 4;
-}
-message ToolContext {
-  string task_id = 1;
-  string agent_instance_id = 2;
-  string session_id = 3;
-}
-message ToolResponse {
-  google.protobuf.Struct output = 1;
-  string error = 2;
-}
 
 message WebhookRequest {
   string webhook_key = 1;

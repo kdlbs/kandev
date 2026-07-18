@@ -40,34 +40,6 @@ func TestEventProtoRoundTrip_NilPayload(t *testing.T) {
 	require.Nil(t, back.Payload)
 }
 
-func TestToolRequestResponseProtoRoundTrip(t *testing.T) {
-	req := &ToolRequest{
-		ToolCallID: "call-1",
-		ToolName:   "search",
-		Input:      map[string]any{"query": "kandev"},
-		Context: &ToolContext{
-			TaskID:          "task-1",
-			AgentInstanceID: "agent-1",
-			SessionID:       "session-1",
-		},
-	}
-
-	proto, err := req.toProto()
-	require.NoError(t, err)
-
-	back, err := toolRequestFromProto(proto)
-	require.NoError(t, err)
-	require.Equal(t, req, back)
-
-	resp := &ToolResponse{Output: map[string]any{"result": "ok"}}
-	protoResp, err := resp.toProto()
-	require.NoError(t, err)
-
-	backResp, err := toolResponseFromProto(protoResp)
-	require.NoError(t, err)
-	require.Equal(t, resp, backResp)
-}
-
 func TestWebhookRequestResponseProtoRoundTrip(t *testing.T) {
 	req := &WebhookRequest{
 		WebhookKey: "key-1",

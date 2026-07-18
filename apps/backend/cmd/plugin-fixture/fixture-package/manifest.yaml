@@ -26,11 +26,6 @@ capabilities:
   state: true
   secrets: true
 
-tools:
-  - name: "echo"
-    display_name: "Echo"
-    description: "Returns its input unchanged, for e2e tool-invocation coverage"
-
 webhooks:
   - key: "test-hook"
     description: "Records inbound webhooks for e2e polling"

@@ -12,7 +12,6 @@ import {
   installPluginFromUrl,
   installPluginUpload,
   listPlugins,
-  listPluginTools,
   syncPlugins,
   uninstallPlugin,
   updatePluginConfig,
@@ -288,24 +287,6 @@ describe("enablePlugin / disablePlugin / uninstallPlugin", () => {
     const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
     expect(String(url)).toBe(PLUGIN_URL);
     expect(init?.method).toBe("DELETE");
-  });
-});
-
-describe("listPluginTools", () => {
-  it("fetches GET /api/plugins/tools and unwraps the tools array", async () => {
-    const tool = {
-      plugin_id: PLUGIN_ID,
-      name: "search",
-      display_name: "Search",
-      description: "desc",
-    };
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ tools: [tool] }));
-
-    const result = await listPluginTools();
-
-    const [url] = fetchSpy.mock.calls.at(-1) ?? [];
-    expect(String(url)).toBe("http://api.test/api/plugins/tools");
-    expect(result).toEqual([tool]);
   });
 });
 

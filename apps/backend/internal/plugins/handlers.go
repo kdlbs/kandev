@@ -26,10 +26,9 @@ import (
 const maxWebhookBodyBytes = 4 << 20 // 4 MiB
 
 // Controller holds the plugin HTTP handlers: operator-facing management
-// (install/list/get/config/uninstall/enable/disable), the tools listing,
-// the bundle/UI static-file serving (from the extracted package on disk),
-// and the external webhook relay (HTTP -> Host RPC over the live
-// subprocess).
+// (install/list/get/config/uninstall/enable/disable), the bundle/UI
+// static-file serving (from the extracted package on disk), and the
+// external webhook relay (HTTP -> Host RPC over the live subprocess).
 type Controller struct {
 	svc *Service
 	log *logger.Logger
@@ -46,7 +45,6 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	api.POST("/install", ctrl.install)
 	api.POST("/sync", ctrl.sync)
 	api.GET("", ctrl.list)
-	api.GET("/tools", ctrl.listTools)
 	api.GET("/:id", ctrl.get)
 	api.GET("/:id/config", ctrl.getConfig)
 	api.PATCH("/:id", ctrl.updateConfig)
@@ -223,33 +221,6 @@ func (c *Controller) writeLookupError(ctx *gin.Context, err error) {
 	}
 	c.log.Warn("plugin handler error", zap.Error(err))
 	ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-}
-
-// --- Tools listing ---
-
-// listTools aggregates the declared tools of every StatusActive plugin
-// (GET /api/plugins/tools). Listing only — wiring these into the agent's
-// invocable tool set is out of scope for this task.
-func (c *Controller) listTools(ctx *gin.Context) {
-	var tools []PluginToolDTO
-	for _, rec := range c.svc.List() {
-		if rec.Status != StatusActive {
-			continue
-		}
-		for _, tool := range rec.Tools {
-			tools = append(tools, PluginToolDTO{
-				PluginID:    rec.ID,
-				Name:        tool.Name,
-				DisplayName: tool.DisplayName,
-				Description: tool.Description,
-				InputSchema: tool.InputSchema,
-			})
-		}
-	}
-	if tools == nil {
-		tools = []PluginToolDTO{}
-	}
-	ctx.JSON(http.StatusOK, gin.H{"tools": tools})
 }
 
 // --- Bundle / UI static file serving ---

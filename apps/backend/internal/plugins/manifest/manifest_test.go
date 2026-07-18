@@ -19,7 +19,6 @@ base_url: "http://localhost:9100"
 endpoints:
   health: "/health"
   events: "/events"
-  tools: "/tools/{tool_name}"
   webhooks: "/webhooks/{webhook_key}"
 
 capabilities:
@@ -28,17 +27,6 @@ capabilities:
   api_write: ["tasks"]
   state: true
   secrets: true
-
-tools:
-  - name: "slack_send_message"
-    display_name: "Send Slack Message"
-    description: "Posts a message to a Slack channel"
-    input_schema:
-      type: object
-      properties:
-        channel: { type: string }
-        text: { type: string }
-      required: ["channel", "text"]
 
 webhooks:
   - key: "slack-events"
@@ -139,11 +127,6 @@ func TestValidate_RejectsInvalidManifests(t *testing.T) {
 			wantErr: "endpoints.events",
 		},
 		{
-			name:    "missing tools endpoint",
-			mutate:  func(m *Manifest) { m.Endpoints.Tools = "" },
-			wantErr: "endpoints.tools",
-		},
-		{
 			name:    "missing webhooks endpoint",
 			mutate:  func(m *Manifest) { m.Endpoints.Webhooks = "" },
 			wantErr: "endpoints.webhooks",
@@ -159,13 +142,6 @@ func TestValidate_RejectsInvalidManifests(t *testing.T) {
 				m.UI.Pages[0].Surface = "not-a-real-surface"
 			},
 			wantErr: "surface",
-		},
-		{
-			name: "duplicate tool keys",
-			mutate: func(m *Manifest) {
-				m.Tools = append(m.Tools, Tool{Name: "slack_send_message", DisplayName: "Dup"})
-			},
-			wantErr: "duplicate tool",
 		},
 		{
 			name: "duplicate webhook keys",

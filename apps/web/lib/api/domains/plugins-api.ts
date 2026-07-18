@@ -1,6 +1,6 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
-import type { PluginRecord, PluginToolDTO, SyncResult } from "@/lib/types/plugins";
+import type { PluginRecord, SyncResult } from "@/lib/types/plugins";
 
 const BASE = "/api/plugins";
 
@@ -139,13 +139,6 @@ export async function uninstallPlugin(id: string, options?: ApiRequestOptions) {
     ...options,
     init: { ...(options?.init ?? {}), method: "DELETE" },
   });
-}
-
-// listPluginTools aggregates the declared tools of every active plugin
-// (GET /api/plugins/tools).
-export async function listPluginTools(options?: ApiRequestOptions) {
-  const res = await fetchJson<{ tools?: PluginToolDTO[] }>(`${BASE}/tools`, options);
-  return res.tools ?? [];
 }
 
 // syncPlugins reconciles the plugin registry with the plugins directory on

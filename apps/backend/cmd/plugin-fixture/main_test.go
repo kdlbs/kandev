@@ -1,5 +1,5 @@
 // Command plugin-fixture tests. Exercises fixturePlugin's Plugin methods
-// (OnEvent, InvokeTool, HandleWebhook) via direct calls — no go-plugin
+// (OnEvent, HandleWebhook) via direct calls — no go-plugin
 // spawn needed, since fixturePlugin has no dependency on the gRPC
 // transport itself (pluginsdk.Serve owns that wiring and is covered by
 // pkg/pluginsdk's own tests).
@@ -108,18 +108,6 @@ func TestOnEvent_IgnoresHostSetStateError(t *testing.T) {
 
 	err := p.OnEvent(context.Background(), &pluginsdk.Event{EventID: "e1", EventType: "task.created"})
 	require.NoError(t, err, "Host.SetState failures must be best-effort and not fail OnEvent")
-}
-
-func TestInvokeTool_EchoReturnsInput(t *testing.T) {
-	p := &fixturePlugin{dataDir: t.TempDir()}
-
-	input := map[string]any{"channel": "#dev", "text": "hi"}
-	resp, err := p.InvokeTool(context.Background(), &pluginsdk.ToolRequest{
-		ToolName: "echo",
-		Input:    input,
-	})
-	require.NoError(t, err)
-	require.Equal(t, input, resp.Output)
 }
 
 func TestHandleWebhook_AppendsJSONLineAndRespondsOK(t *testing.T) {

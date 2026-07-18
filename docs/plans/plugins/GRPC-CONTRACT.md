@@ -40,7 +40,6 @@ import "google/protobuf/struct.proto";
 // Implemented by the PLUGIN. kandev is the client.
 service Plugin {
   rpc DeliverEvent(Event) returns (EventAck);
-  rpc InvokeTool(ToolRequest) returns (ToolResponse);
   rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
 }
 
@@ -103,15 +102,6 @@ message Event {
   google.protobuf.Struct payload = 5;      // marshaled bus event.Data
 }
 message EventAck {}
-
-message ToolRequest {
-  string tool_call_id = 1;
-  string tool_name = 2;
-  google.protobuf.Struct input = 3;
-  ToolContext context = 4;
-}
-message ToolContext { string task_id = 1; string agent_instance_id = 2; string session_id = 3; }
-message ToolResponse { google.protobuf.Struct output = 1; string error = 2; }
 
 message WebhookRequest {
   string webhook_key = 1;
@@ -248,7 +238,6 @@ Public Go module surface (authors import only this):
 ```go
 type Plugin interface {
     OnEvent(ctx context.Context, e *Event) error            // return err → kandev retries
-    InvokeTool(ctx context.Context, req *ToolRequest) (*ToolResponse, error)
     HandleWebhook(ctx context.Context, req *WebhookRequest) (*WebhookResponse, error)
 }
 type Host interface {                                        // injected before Serve returns
@@ -358,12 +347,11 @@ originally opened `~/.kandev/data/kandev.db` read-only and hand-aggregated
 `Sessions().CodeStats(...)` now returns as a stable, computed DTO — read via
 the API, never the DB.
 
-## 5. Delivery / tools / webhooks semantics (unchanged from HTTP era)
+## 5. Delivery / webhooks semantics (unchanged from HTTP era)
 
 - **DeliverEvent**: unary. Per-plugin sequential queue, 10s timeout, 3 retries
   (5s/15s/45s, injectable), ring buffer 100/5min while plugin unhealthy, flush
   in order on recovery. Non-nil error or timeout counts as failure.
-- **InvokeTool**: 30s timeout.
 - **HandleWebhook**: kandev's HTTP endpoint `POST /api/plugins/{id}/webhooks/{key}`
   converts the HTTP request to WebhookRequest and relays the WebhookResponse.
 - **Health**: go-plugin client `Ping()` every 30s (injectable), 3 consecutive

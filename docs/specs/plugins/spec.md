@@ -53,8 +53,8 @@ surfaces. The core stays small; the ecosystem grows independently.
   runtime"). This is the one in-process surface; the backend stays out-of-process
   (but is now kandev-managed, not operator-managed).
 - A plugin manifest declares identity, runtime executables (per OS/arch), capabilities,
-  declared tools, declared webhooks, config schema, and optional UI bundle.
-- Plugins SHALL receive events, register agent tools, expose proxied external webhook
+  declared webhooks, config schema, and optional UI bundle.
+- Plugins SHALL receive events, expose proxied external webhook
   endpoints, and read/write a plugin-scoped KV state — all over gRPC.
 - Plugins are distributed as a signed-or-unsigned release **tarball** and installed
   either by **URL** (kandev downloads it) or by **manual upload** (multipart file).
@@ -82,7 +82,7 @@ checksums.txt                        # "sha256  path" for every other file
 checksums.txt.sig                    # OPTIONAL ed25519 signature (unsigned → warn, not blocked)
 ```
 
-`manifest.yaml` declares identity, capabilities, tools, webhooks, config schema, and
+`manifest.yaml` declares identity, capabilities, webhooks, config schema, and
 an optional UI bundle, plus a `runtime` block naming the per-platform executables
 (replaces the old `base_url`/`endpoints` block, which is removed entirely):
 
@@ -109,17 +109,6 @@ capabilities:
   api_write: ["tasks", "comments"]            # Host data API writes; deferred, no effect yet
   state: true
   secrets: true
-
-tools:
-  - name: "slack_send_message"
-    display_name: "Send Slack Message"
-    description: "Posts a message to a Slack channel"
-    input_schema:
-      type: object
-      properties:
-        channel: { type: string }
-        text: { type: string }
-      required: ["channel", "text"]
 
 webhooks:
   - key: "slack-events"
@@ -220,7 +209,6 @@ PATCH  /api/plugins/{id}              # Update plugin config (masked secrets kee
 DELETE /api/plugins/{id}              # Uninstall plugin (stops subprocess, removes package + state)
 POST   /api/plugins/{id}/enable
 POST   /api/plugins/{id}/disable
-GET    /api/plugins/tools             # List all declared tools across active plugins
 GET    /api/plugins/{id}/bundle       # Frontend bundle, served from the extracted package dir
 GET    /api/plugins/{id}/ui/*         # Frontend bundle assets, served from the extracted package dir
 ```
@@ -276,24 +264,6 @@ any one of them.
 | Plugin | `plugin.<plugin_id>.<name>` (cross-plugin events) |
 
 Wildcard subscriptions: `task.*`, `agent.*`, `<feature>.*` (any subject prefix).
-
-### Agent tool invocation (kandev -> plugin, gRPC `InvokeTool`)
-
-When an agent calls a plugin tool, kandev calls the plugin's `Plugin.InvokeTool` RPC:
-
-```proto
-message ToolRequest {
-  string tool_call_id = 1;
-  string tool_name = 2;
-  google.protobuf.Struct input = 3;
-  ToolContext context = 4;
-}
-message ToolContext { string task_id = 1; string agent_instance_id = 2; string session_id = 3; }
-message ToolResponse { google.protobuf.Struct output = 1; string error = 2; }
-```
-
-Timeout: 30 seconds. Tools available to all agents by default (`tool_scope` for
-role/instance restrictions is future work).
 
 ### External webhook proxy (external -> kandev -> plugin)
 
@@ -506,9 +476,9 @@ registered -> active -> disabled -> uninstalled
 | State | Meaning |
 |---|---|
 | `registered` | Package extracted and record written; go-plugin spawn/handshake pending or in flight |
-| `active` | Handshake succeeded and health (`Ping`) passes; events delivered, tools available, webhooks proxied |
-| `error` | 3 consecutive `Ping` failures (30s interval, injectable), or the subprocess crashed and restart attempts (backoff, max 5) are exhausted. Events buffered (ring buffer, 100 events, 5-minute TTL). Tools removed from agent tool set. Webhooks return 503 |
-| `disabled` | Operator explicitly disabled. Subprocess stopped. No events, no tools, no webhooks. State and config preserved |
+| `active` | Handshake succeeded and health (`Ping`) passes; events delivered, webhooks proxied |
+| `error` | 3 consecutive `Ping` failures (30s interval, injectable), or the subprocess crashed and restart attempts (backoff, max 5) are exhausted. Events buffered (ring buffer, 100 events, 5-minute TTL). Webhooks return 503 |
+| `disabled` | Operator explicitly disabled. Subprocess stopped. No events, no webhooks. State and config preserved |
 | `uninstalled` | Subprocess stopped, package/record/state deleted (no grace period in v1) |
 
 Health monitoring: kandev's go-plugin client calls `Ping()` on the plugin every 30
@@ -546,13 +516,12 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
 ## Failure modes
 
 - **3 consecutive `Ping` failures (90s), or crash with restart attempts exhausted
-  (max 5, backoff)**: status -> `error`. Events buffered (100, 5min TTL). Tools hidden
-  from agent tool set. Webhooks return 503. Inbox item created.
+  (max 5, backoff)**: status -> `error`. Events buffered (100, 5min TTL). Webhooks
+  return 503. Inbox item created.
 - **Buffer overflows (>100 events or >5min)**: oldest events dropped and logged.
 - **Plugin returns a gRPC error (or times out) on `DeliverEvent`**: retry up to 3 times
   with exponential backoff (5s, 15s, 45s). After exhaustion, event is logged as failed
   and dropped.
-- **Tool call timeout (>30s)**: agent receives a timeout error.
 - **External webhook hits a disabled/error plugin**: kandev returns 503.
 - **Undeclared capability access attempt on a Host RPC**: gRPC `PermissionDenied` with
   a message naming the missing capability.
@@ -596,11 +565,6 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
   moves to `done`, **THEN** kandev calls the plugin's `DeliverEvent` gRPC method with
   the event over the go-plugin unix socket. The plugin formats a Slack message and
   calls the Slack API, then returns `EventAck{}`.
-
-- **GIVEN** a Jira sync plugin that registered the `jira_search` agent tool, **WHEN**
-  an agent calls `jira_search` with query "auth migration", **THEN** kandev calls the
-  plugin's `InvokeTool` gRPC method. The plugin queries Jira, returns results as the
-  `ToolResponse`. The agent receives the search results as the tool output.
 
 - **GIVEN** a Jira sync plugin with a registered `jira-webhooks` webhook, **WHEN**
   Jira POSTs a webhook to
@@ -677,9 +641,12 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
 - **Mandatory package signing.** `checksums.txt.sig` verification is supported when
   present, but signing is optional in v1 — an unsigned package installs with a warning
   rather than being rejected. Requiring signatures is future work.
-- **Agent-session tool wiring.** Declared plugin tools are listed
-  (`GET /api/plugins/tools`) and invocable via the tool client, but are not yet
-  injected into live agent tool sets.
+- **Agent tools.** Plugins do not contribute tools to agents. An earlier
+  `tools[]` manifest section with an `InvokeTool` RPC was built during the
+  initial buildout but never wired into agent tool sets, and has been removed —
+  it duplicated MCP, kandev's established mechanism for exposing tools to
+  agents (`internal/mcp/`). If plugins ever contribute agent tools, they should
+  feed through the MCP surface rather than a parallel invocation path.
 - **Hot reload.** Upgrading a plugin requires a new install (new version directory);
   there is no in-place manifest or binary swap on a running process.
 - **Multi-instance plugins.** Each plugin ID maps to exactly one supervised subprocess.

@@ -12,10 +12,6 @@ func TestUnimplementedPlugin_DefaultsAreNoOps(t *testing.T) {
 
 	require.NoError(t, p.OnEvent(context.Background(), &Event{EventID: "e1"}))
 
-	resp, err := p.InvokeTool(context.Background(), &ToolRequest{ToolName: "noop"})
-	require.NoError(t, err)
-	require.NotNil(t, resp)
-
 	webhookResp, err := p.HandleWebhook(context.Background(), &WebhookRequest{Path: "/x"})
 	require.NoError(t, err)
 	require.NotNil(t, webhookResp)
