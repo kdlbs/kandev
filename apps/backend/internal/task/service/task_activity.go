@@ -29,16 +29,23 @@ func (s *Service) SetForegroundActivityProvider(provider ForegroundActivityProvi
 // aggregate for a task from its currently-active sessions
 // (§spec:task-level-indicator). Only RUNNING sessions carry a busy substate, so a
 // finished primary session never masks a secondary session that is still working.
-// Returns "" when no provider is wired or no session is running.
-func (s *Service) computeTaskForegroundActivity(ctx context.Context, taskID string) v1.ForegroundActivity {
+//
+// The second return value reports whether the aggregate is KNOWN. It is false only
+// when the session set could not be loaded: the substate is then unavailable, and
+// callers must PRESERVE the last-known reading rather than clear it, so a transient
+// DB error never resolves a still-working task to a coarse "done"
+// (§spec:live-propagation-fallback safe fallback). A nil provider (feature not
+// wired) is a known-empty result, not an error, and a running-but-empty aggregate
+// returns ("", true) so it clears as usual.
+func (s *Service) computeTaskForegroundActivity(ctx context.Context, taskID string) (v1.ForegroundActivity, bool) {
 	if s.foregroundActivity == nil {
-		return ""
+		return "", true
 	}
 	sessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to list sessions for task activity aggregate",
 			zap.String("task_id", taskID), zap.Error(err))
-		return ""
+		return "", false
 	}
 	activities := make([]v1.ForegroundActivity, 0, len(sessions))
 	for _, session := range sessions {
@@ -47,7 +54,7 @@ func (s *Service) computeTaskForegroundActivity(ctx context.Context, taskID stri
 		}
 		activities = append(activities, s.foregroundActivity.ForegroundActivity(session.ID))
 	}
-	return v1.AggregateForegroundActivity(activities)
+	return v1.AggregateForegroundActivity(activities), true
 }
 
 // PublishTaskActivityIfChanged recomputes the task-level activity aggregate and
@@ -63,7 +70,13 @@ func (s *Service) PublishTaskActivityIfChanged(ctx context.Context, taskID strin
 	if taskID == "" || s.foregroundActivity == nil {
 		return
 	}
-	current := s.computeTaskForegroundActivity(ctx, taskID)
+	current, known := s.computeTaskForegroundActivity(ctx, taskID)
+	if !known {
+		// The session set could not be loaded: leave the last-known aggregate in
+		// place instead of emitting a spurious clear that could momentarily read
+		// "done" while a turn is still open (§spec:live-propagation-fallback).
+		return
+	}
 
 	s.taskActivityMu.Lock()
 	previous, seen := s.lastTaskActivity[taskID]

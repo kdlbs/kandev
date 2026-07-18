@@ -222,16 +222,20 @@ func (s *Service) logTaskLifecycleEventPublished(eventType string, task *models.
 // publishTaskEvent under the project's function-length limit.
 func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, data map[string]interface{}) {
 	// Task-level MOST-ACTIVE-WINS activity aggregate (§spec:task-level-indicator).
-	// Always present (nil when no session is running) so a coarse state change never
-	// leaves a stale background-running reading on the client. Recording it keeps the
-	// live-propagation dedup baseline in step with every task event, whichever path
-	// emitted it.
-	activity := s.computeTaskForegroundActivity(ctx, taskID)
-	s.recordTaskActivity(taskID, activity)
-	if activity != "" {
-		data["foreground_activity"] = string(activity)
-	} else {
-		data["foreground_activity"] = nil
+	// Present as the value or explicit nil when the aggregate is KNOWN, so a coarse
+	// state change never leaves a stale background-running reading on the client, and
+	// recording it keeps the live-propagation dedup baseline in step with every task
+	// event. When the session set could not be loaded the aggregate is UNKNOWN: omit
+	// the field entirely and leave the dedup baseline untouched, so the WS merge
+	// preserves the client's last-known reading rather than clearing a still-working
+	// task to a coarse "done" (§spec:live-propagation-fallback safe fallback).
+	if activity, known := s.computeTaskForegroundActivity(ctx, taskID); known {
+		s.recordTaskActivity(taskID, activity)
+		if activity != "" {
+			data["foreground_activity"] = string(activity)
+		} else {
+			data["foreground_activity"] = nil
+		}
 	}
 
 	if sessionCountMap, err := s.GetSessionCountsForTasks(ctx, []string{taskID}); err == nil {

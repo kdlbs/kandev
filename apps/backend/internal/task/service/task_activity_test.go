@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -17,6 +19,17 @@ type fakeActivityProvider struct {
 
 func (f *fakeActivityProvider) ForegroundActivity(sessionID string) v1.ForegroundActivity {
 	return f.byID[sessionID]
+}
+
+// failingSessionLister decorates a real SessionRepository but fails the one query
+// the task-level aggregate depends on, so the "session set unavailable" path can be
+// exercised without disturbing any other repository behavior.
+type failingSessionLister struct {
+	repository.SessionRepository
+}
+
+func (failingSessionLister) ListActiveTaskSessionsByTaskID(context.Context, string) ([]*models.TaskSession, error) {
+	return nil, errors.New("boom: sessions unavailable")
 }
 
 func createRunningSession(t *testing.T, ctx context.Context, repo interface {
@@ -127,6 +140,66 @@ func TestPublishTaskActivityIfChanged_EmitsOnlyOnAggregateChange(t *testing.T) {
 	svc.PublishTaskActivityIfChanged(ctx, "task-1")
 	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
 		t.Fatalf("no change must not re-emit, got %d events", len(events))
+	}
+}
+
+func assertForegroundActivityAbsent(t *testing.T, data map[string]interface{}) {
+	t.Helper()
+	if v, ok := data["foreground_activity"]; ok {
+		t.Fatalf("foreground_activity must be omitted when the session set is unavailable, got %#v", v)
+	}
+}
+
+// TestTaskUpdated_OmitsForegroundActivityWhenSessionSetUnavailable locks the safe
+// fallback (§spec:live-propagation-fallback): when the session set can't be loaded
+// the aggregate is UNKNOWN, so the event omits the field entirely rather than
+// stamping an explicit nil that would clear the client to a coarse "done".
+func TestTaskUpdated_OmitsForegroundActivityWhenSessionSetUnavailable(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	createRunningSession(t, ctx, repo, "s1", "task-1", models.TaskSessionStateRunning)
+	svc.SetForegroundActivityProvider(&fakeActivityProvider{byID: map[string]v1.ForegroundActivity{"s1": v1.ForegroundActivityBackground}})
+	svc.sessions = failingSessionLister{svc.sessions}
+
+	eventBus.ClearEvents()
+	svc.PublishTaskUpdated(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1"})
+	assertForegroundActivityAbsent(t, singlePublishedEventData(t, eventBus))
+}
+
+// TestForegroundActivity_UnavailablePreservesLastKnown proves the unknown path does
+// not corrupt the dedup baseline: a failed load neither emits a spurious clear nor
+// overwrites the last-known aggregate, so once the session set is readable again the
+// unchanged reading does not re-emit.
+func TestForegroundActivity_UnavailablePreservesLastKnown(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	createRunningSession(t, ctx, repo, "s1", "task-1", models.TaskSessionStateRunning)
+	svc.SetForegroundActivityProvider(&fakeActivityProvider{byID: map[string]v1.ForegroundActivity{"s1": v1.ForegroundActivityBackground}})
+
+	// Establish a known "background" baseline.
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	if got := foregroundActivityField(t, singlePublishedEventData(t, eventBus)); got != "background" {
+		t.Fatalf("baseline: foreground_activity=%#v, want \"background\"", got)
+	}
+
+	// Session set becomes unavailable: no spurious emit.
+	realSessions := svc.sessions
+	svc.sessions = failingSessionLister{realSessions}
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("unavailable session set must not emit, got %d events", len(events))
+	}
+
+	// Readable again with the same reading: baseline was preserved, so no re-emit.
+	svc.sessions = realSessions
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("preserved baseline must not re-emit unchanged reading, got %d events", len(events))
 	}
 }
 
