@@ -20,8 +20,6 @@ per-user plugin access. They are gated behind the `plugins` feature flag
 builds and on by default in dev/e2e builds. Enabling the flag requires a
 backend restart and surfaces **Settings > Plugins** in the sidebar.
 
-![The Settings > Plugins page listing an installed, active plugin with its category, an unsigned badge, and Disable/Uninstall actions.](../screenshots/plugin-settings-list.png)
-
 ## How it works
 
 ![Plugin lifecycle: install, verify, extract, and spawn a go-plugin gRPC subprocess; then, over one supervised gRPC connection, kandev delivers bus events and relays external webhooks to the plugin, the plugin calls back into the Host API, and the SPA optionally loads the native UI bundle.](../screenshots/plugin-architecture.png)
@@ -80,6 +78,11 @@ Either path runs the same pipeline:
 A successful install that failed to spawn returns HTTP 201 with a
 `warning` field rather than failing outright — the package is installed,
 just not yet running.
+
+Once installed, the plugin appears in the list with its category and an
+`active` (or `unsigned`) badge, plus **Disable** and **Uninstall** actions:
+
+![The Settings > Plugins page listing an installed, active plugin with its category, an unsigned badge, and Disable/Uninstall actions.](../screenshots/plugin-settings-list.png)
 
 ## Filesystem sideload and Sync
 

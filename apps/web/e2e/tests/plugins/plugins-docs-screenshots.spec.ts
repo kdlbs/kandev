@@ -43,22 +43,25 @@ const VIEWPORT = { width: 1280, height: 860 };
 
 // Hand-authored "How it works" flowchart (SVG), rendered to
 // docs/screenshots/plugin-architecture.png (plugins.md embeds it). A clean
-// monochrome top-down flowchart — mermaid's shape without mermaid's rendering.
+// dark top-down flowchart (mermaid's shape, drawn properly) that matches the
+// docs page; the render uses omitBackground so the rounded card is transparent.
 const ARCH_HTML = `<!doctype html><html><head><meta charset="utf-8" /><style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { background:#fff; padding:28px; }
+body { background:transparent; }
 svg { font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Arial, sans-serif; }
-.node { fill:#fff; stroke:#cbd5e1; stroke-width:1.4; }
-.node-dash { fill:#fff; stroke:#cbd5e1; stroke-width:1.4; stroke-dasharray:4 4; }
-.title { font-size:13px; font-weight:650; fill:#1e293b; }
-.sub { font-size:11px; fill:#64748b; }
-.edge { stroke:#94a3b8; stroke-width:1.4; fill:none; }
-.edge-dash { stroke:#94a3b8; stroke-width:1.4; fill:none; stroke-dasharray:4 4; }
-.lbl { font-size:11px; fill:#475569; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; paint-order:stroke; stroke:#fff; stroke-width:5px; stroke-linejoin:round; }
-.opt { font-size:10px; fill:#94a3b8; paint-order:stroke; stroke:#fff; stroke-width:4px; stroke-linejoin:round; }
+.card { fill:#0f172a; stroke:#1e293b; stroke-width:1; }
+.node { fill:#1e293b; stroke:#334155; stroke-width:1.4; }
+.node-dash { fill:#1e293b; stroke:#334155; stroke-width:1.4; stroke-dasharray:4 4; }
+.title { font-size:13px; font-weight:650; fill:#e2e8f0; }
+.sub { font-size:11px; fill:#94a3b8; }
+.edge { stroke:#64748b; stroke-width:1.4; fill:none; }
+.edge-dash { stroke:#64748b; stroke-width:1.4; fill:none; stroke-dasharray:4 4; }
+.lbl { font-size:11px; fill:#cbd5e1; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; paint-order:stroke; stroke:#0f172a; stroke-width:5px; stroke-linejoin:round; }
+.opt { font-size:10px; fill:#64748b; paint-order:stroke; stroke:#0f172a; stroke-width:4px; stroke-linejoin:round; }
 </style></head><body>
 <svg id="diagram" width="760" height="694" viewBox="0 0 760 694">
-<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#94a3b8"/></marker></defs>
+<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#64748b"/></marker></defs>
+<rect x="0.5" y="0.5" width="759" height="693" rx="16" class="card"/>
 <rect x="250" y="20" width="260" height="56" rx="10" class="node"/><text x="380" y="44" text-anchor="middle" class="title">Install</text><text x="380" y="62" text-anchor="middle" class="sub">URL · upload · filesystem sync</text>
 <line x1="380" y1="76" x2="380" y2="114" class="edge" marker-end="url(#ah)"/>
 <rect x="250" y="116" width="260" height="56" rx="10" class="node"/><text x="380" y="140" text-anchor="middle" class="title">Verify</text><text x="380" y="158" text-anchor="middle" class="sub">checksums.txt · validate manifest.yaml</text>
@@ -142,9 +145,10 @@ test.describe("Plugin docs screenshots", () => {
     const page = await ctx.newPage();
     await page.setContent(ARCH_HTML, { waitUntil: "networkidle" });
     fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
-    await page
-      .locator("#diagram")
-      .screenshot({ path: path.join(SCREENSHOTS_DIR, "plugin-architecture.png") });
+    await page.locator("#diagram").screenshot({
+      path: path.join(SCREENSHOTS_DIR, "plugin-architecture.png"),
+      omitBackground: true,
+    });
     await ctx.close();
   });
 });
