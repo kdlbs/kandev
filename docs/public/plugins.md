@@ -24,18 +24,7 @@ backend restart and surfaces **Settings > Plugins** in the sidebar.
 
 ## How it works
 
-```mermaid
-flowchart TD
-    Install["Install: URL / upload / filesystem sync"] --> Verify["Verify checksums.txt, validate manifest.yaml"]
-    Verify --> Extract["Extract to ~/.kandev/plugins/&lt;id&gt;/&lt;version&gt;/"]
-    Extract --> Spawn["Spawn platform executable as a subprocess (hashicorp/go-plugin)"]
-    Spawn -->|"gRPC DeliverEvent"| Deliver["Bus events (at-least-once, buffered while unhealthy)"]
-    Ext["External caller"] -->|"HTTP POST/GET /api/plugins/{id}/webhooks/{key}"| Route["kandev webhook route"]
-    Route -->|"gRPC HandleWebhook"| Webhook["Plugin webhook handler (plugin serves no HTTP itself)"]
-    Deliver --> Host["Plugin calls back on the same connection: Host state / config / secrets, EmitEvent, and capability-gated read-only data accessors"]
-    Webhook --> Host
-    Host -.optional.-> UI["SPA loads ui.bundle at boot: registers native routes / nav / slots / WS handlers"]
-```
+![Plugin lifecycle: install, verify, extract, and spawn a go-plugin gRPC subprocess; then, over one supervised gRPC connection, kandev delivers bus events and relays external webhooks to the plugin, the plugin calls back into the Host API, and the SPA optionally loads the native UI bundle.](../screenshots/plugin-architecture.png)
 
 Kandev owns the whole process lifecycle: it extracts the package, spawns the
 binary, completes the go-plugin handshake, health-checks it (`Ping` every
