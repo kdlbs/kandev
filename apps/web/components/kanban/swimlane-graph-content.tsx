@@ -78,7 +78,12 @@ function DraggableTaskChip({
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
-  const statusIcon = getTaskStateIcon(task.state, "h-3 w-3", hasPendingClarificationRequest);
+  const statusIcon = getTaskStateIcon(
+    task.state,
+    "h-3 w-3",
+    hasPendingClarificationRequest,
+    task.foregroundActivity,
+  );
 
   return (
     <button
@@ -108,7 +113,12 @@ function TaskChipPreview({ task }: { task: Task }) {
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
-  const statusIcon = getTaskStateIcon(task.state, "h-3 w-3", hasPendingClarificationRequest);
+  const statusIcon = getTaskStateIcon(
+    task.state,
+    "h-3 w-3",
+    hasPendingClarificationRequest,
+    task.foregroundActivity,
+  );
   return (
     <div
       className={cn(

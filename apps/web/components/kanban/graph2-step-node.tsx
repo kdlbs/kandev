@@ -144,7 +144,12 @@ export function Graph2StepNode({
       >
         <div className="flex items-center gap-1.5 w-full">
           <div className="shrink-0">
-            {getTaskStateIcon(task.state, "h-3 w-3", hasPendingClarificationRequest)}
+            {getTaskStateIcon(
+              task.state,
+              "h-3 w-3",
+              hasPendingClarificationRequest,
+              task.foregroundActivity,
+            )}
           </div>
           <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>
         </div>
