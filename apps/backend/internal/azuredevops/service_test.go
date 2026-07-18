@@ -301,6 +301,55 @@ func TestSetConfigRestoresPATWhenStoreFails(t *testing.T) {
 	}
 }
 
+func TestSetConfigResetsHealthOnlyWhenCredentialsChange(t *testing.T) {
+	svc, store, _ := newTestService(t, nil)
+	ctx := context.Background()
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme", PAT: "old-pat",
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	setHealthy := func() {
+		t.Helper()
+		if err := store.UpdateAuthHealth(ctx, "ws-a", true, "", time.Now().UTC()); err != nil {
+			t.Fatalf("set auth health: %v", err)
+		}
+	}
+	assertHealth := func(wantChecked, wantOK bool) {
+		t.Helper()
+		config, err := svc.GetConfigForWorkspace(ctx, "ws-a")
+		if err != nil {
+			t.Fatalf("get config: %v", err)
+		}
+		if (config.LastCheckedAt != nil) != wantChecked || config.LastOK != wantOK {
+			t.Fatalf("health = %+v, want checked=%t ok=%t", config, wantChecked, wantOK)
+		}
+	}
+
+	setHealthy()
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme", DefaultProjectID: "project-a",
+	}); err != nil {
+		t.Fatalf("update project: %v", err)
+	}
+	assertHealth(true, true)
+
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/other",
+	}); err != nil {
+		t.Fatalf("update organization: %v", err)
+	}
+	assertHealth(false, false)
+
+	setHealthy()
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/other", PAT: "new-pat",
+	}); err != nil {
+		t.Fatalf("update PAT: %v", err)
+	}
+	assertHealth(false, false)
+}
+
 func TestDeleteConfigLeavesStateWhenSecretDeleteFails(t *testing.T) {
 	svc, store, secrets := newTestService(t, nil)
 	ctx := context.Background()

@@ -114,34 +114,62 @@ func (s *Service) SetConfigForWorkspace(
 	if err != nil {
 		return nil, err
 	}
+	previousConfig, err := s.store.GetConfig(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("read existing azure devops config: %w", err)
+	}
+	organizationChanged := previousConfig != nil && previousConfig.OrganizationURL != cfg.OrganizationURL
 	if req.PAT == "" {
 		if err := s.requireStoredPAT(ctx, workspaceID); err != nil {
 			return nil, err
 		}
-	} else {
-		if s.secrets == nil {
-			return nil, errors.New("azure devops: no secret store configured")
-		}
-		previous, err := s.readStoredPAT(ctx, workspaceID)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID), "Azure DevOps PAT", req.PAT); err != nil {
-			return nil, joinMutationError(
-				fmt.Errorf("store azure devops PAT: %w", err),
-				s.restorePAT(ctx, workspaceID, previous),
-			)
-		}
 		if err := s.store.UpsertConfig(ctx, cfg); err != nil {
-			return nil, joinMutationError(
-				fmt.Errorf("upsert azure devops config: %w", err),
-				s.restorePAT(ctx, workspaceID, previous),
-			)
+			return nil, fmt.Errorf("upsert azure devops config: %w", err)
 		}
-		return s.GetConfigForWorkspace(ctx, workspaceID)
+		return s.finishConfigUpdate(ctx, workspaceID, organizationChanged)
+	}
+	return s.setConfigWithPAT(ctx, workspaceID, cfg, req.PAT, organizationChanged)
+}
+
+func (s *Service) setConfigWithPAT(
+	ctx context.Context,
+	workspaceID string,
+	cfg *Config,
+	pat string,
+	organizationChanged bool,
+) (*Config, error) {
+	if s.secrets == nil {
+		return nil, errors.New("azure devops: no secret store configured")
+	}
+	previous, err := s.readStoredPAT(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID), "Azure DevOps PAT", pat); err != nil {
+		return nil, joinMutationError(
+			fmt.Errorf("store azure devops PAT: %w", err),
+			s.restorePAT(ctx, workspaceID, previous),
+		)
 	}
 	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
-		return nil, fmt.Errorf("upsert azure devops config: %w", err)
+		return nil, joinMutationError(
+			fmt.Errorf("upsert azure devops config: %w", err),
+			s.restorePAT(ctx, workspaceID, previous),
+		)
+	}
+	patChanged := !previous.exists || previous.value != pat
+	return s.finishConfigUpdate(ctx, workspaceID, organizationChanged || patChanged)
+}
+
+func (s *Service) finishConfigUpdate(
+	ctx context.Context,
+	workspaceID string,
+	credentialsChanged bool,
+) (*Config, error) {
+	if credentialsChanged {
+		if err := s.store.ResetAuthHealth(ctx, workspaceID); err != nil {
+			return nil, fmt.Errorf("reset azure devops auth health: %w", err)
+		}
 	}
 	return s.GetConfigForWorkspace(ctx, workspaceID)
 }
