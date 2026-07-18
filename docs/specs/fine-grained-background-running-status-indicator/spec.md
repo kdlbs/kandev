@@ -16,13 +16,16 @@ distinction into Office is a possible follow-up, not part of this work.
 
 ## Three-state status vocabulary §spec:three-state-vocabulary
 
-*Status: in progress*
+*Status: complete*
 
-<!-- The shared vocabulary is established: getSessionStateIcon (apps/web/lib/ui/
-state-icons.tsx) is the single source of the background-running affordance,
-distinct from generating and done by shape+motion (not hue alone), and the
-session-level surfaces now render it. Full cross-surface completion is pending
-the task-level surfaces adopting it (§spec:task-level-indicator). -->
+<!-- The shared vocabulary is established and adopted on every in-scope surface:
+getSessionStateIcon / getTaskStateIcon (apps/web/lib/ui/state-icons.tsx) are the
+single source of the background-running affordance, distinct from generating and
+done by shape+motion (not hue alone). Both the session-level surfaces
+(§spec:session-level-indicator) and every task-level surface
+(§spec:task-level-indicator) now render it, so the three-state reading is
+consistent cross-surface. Live propagation / fresh-load correctness is tracked
+separately in §spec:live-propagation-fallback. -->
 
 
 Every status surface in scope communicates three mutually distinguishable
@@ -90,12 +93,14 @@ survives a grayscale/desaturated view.
 
 ## Task-level indicator reflects live background work §spec:task-level-indicator
 
-*Status: in progress*
+*Status: complete*
 
 <!-- Backend task-record aggregate (most-active-wins) + live emission on
-generating↔background flips, plus the board/kanban card and task-list-row
-surfaces, are done. The graph/swimlane nodes and the open-task header still read
-primary-session-only and are the remaining work for this section. -->
+generating↔background flips drive all four at-a-glance task surfaces: the
+board/kanban card, the task-list rows, the graph/swimlane nodes, and the
+open-task header now read the aggregate-aware getTaskStateIcon (icon) and, for
+the open-task header, a matching text badge — so none can read done while a
+session still has background work outstanding. -->
 
 
 On every at-a-glance task surface — the board / kanban card, the task list rows,
