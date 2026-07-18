@@ -35,6 +35,7 @@ test.describe("Quick Chat repository context on mobile", () => {
     await assertNoDocumentHorizontalOverflow(testPage);
 
     await dialog.getByLabel("Start new chat").click();
+    await testPage.getByRole("menu", { name: "New chat" }).getByText("Quick chat").tap();
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 5_000 });
     const secondAgentSelector = dialog.getByTestId("agent-profile-selector");
     if (await secondAgentSelector.getByText("Select agent", { exact: false }).isVisible()) {

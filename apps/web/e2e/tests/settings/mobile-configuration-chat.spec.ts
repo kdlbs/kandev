@@ -23,6 +23,12 @@ test.describe("Configuration Chat on mobile", () => {
 
     const setup = popover.getByTestId("config-chat-setup");
     const input = setup.getByPlaceholder("Ask anything about your configuration...");
+    await expect(setup.getByRole("heading", { name: "Configuration Chat" })).toHaveCount(0);
+    await expect(setup.getByRole("button", { name: "Cancel" })).toHaveCount(0);
+    await expect(input).toBeInViewport({ ratio: 1 });
+    await expect(setup.getByRole("button", { name: "Start configuration chat" })).toBeInViewport({
+      ratio: 1,
+    });
     await input.fill("/ask-single");
     await setup.getByRole("button", { name: "Start configuration chat" }).tap();
     await popover.getByRole("button", { name: "Open in Quick Chat" }).tap();

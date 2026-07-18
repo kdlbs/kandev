@@ -20,27 +20,6 @@ afterEach(() => {
 });
 
 describe("ConfigChatSetup", () => {
-  it("lets the user switch back to an ordinary quick chat", () => {
-    const onKindChange = vi.fn();
-    render(
-      <ConfigChatSetup
-        defaultProfileId="profile-config"
-        isStarting={false}
-        error={null}
-        onStart={vi.fn()}
-        onCancel={vi.fn()}
-        onKindChange={onKindChange}
-      />,
-    );
-
-    expect(
-      screen.getByRole("radio", { name: "Configuration chat" }).getAttribute("aria-checked"),
-    ).toBe("true");
-    fireEvent.click(screen.getByRole("radio", { name: "Quick chat" }));
-
-    expect(onKindChange).toHaveBeenCalledWith("chat");
-  });
-
   it("shows config-specific guidance and suggestions without repository controls", () => {
     render(
       <ConfigChatSetup

@@ -271,11 +271,11 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
             />
           ) : (
             <ConfigChatSetup
+              presentation="floating"
               defaultProfileId={panel.defaultProfileId}
               isStarting={panel.isStarting}
               error={panel.error}
               onStart={panel.handleStart}
-              onCancel={() => panel.handleOpenChange(false)}
             />
           )}
         </PopoverContent>

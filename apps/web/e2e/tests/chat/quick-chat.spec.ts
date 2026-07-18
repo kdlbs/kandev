@@ -30,6 +30,7 @@ async function openQuickChatSetup(page: Page, navigateHome = true): Promise<Loca
   const setup = dialog.getByTestId("quick-chat-setup");
   if (!(await setup.isVisible({ timeout: 1_000 }).catch(() => false))) {
     await dialog.getByLabel("Start new chat").click();
+    await page.getByRole("menu", { name: "New chat" }).getByText("Quick chat").click();
   }
   await expect(setup).toBeVisible({ timeout: 5_000 });
   return dialog;
@@ -96,22 +97,41 @@ async function waitForQuickChatWidth(dialog: Locator) {
 }
 
 test.describe("Quick Chat", () => {
-  test("offers configuration chat while creating a new chat", async ({ testPage }) => {
+  test("offers configuration chat and restores it as the active tab", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.updateWorkspace(seedData.workspaceId, {
+      default_config_agent_profile_id: seedData.agentProfileId,
+    });
     const dialog = await openQuickChatSetup(testPage);
     const setup = dialog.getByTestId("quick-chat-setup");
 
-    await expect(setup.getByRole("radio", { name: "Quick chat" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-    await setup.getByRole("radio", { name: "Configuration chat" }).click();
+    await expect(setup.getByRole("radiogroup")).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Start new chat" }).click();
+    const menu = testPage.getByRole("menu", { name: "New chat" });
+    await expect(menu.getByRole("menuitem", { name: "Quick chat" })).toBeVisible();
+    await menu.getByRole("menuitem", { name: "Configuration chat" }).click();
 
     const configSetup = dialog.getByTestId("config-chat-setup");
     await expect(configSetup).toBeVisible();
-    await expect(configSetup.getByRole("radio", { name: "Configuration chat" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    await expect(configSetup.getByRole("radiogroup")).toHaveCount(0);
+    await configSetup
+      .getByPlaceholder("Ask anything about your configuration...")
+      .fill("/e2e:simple-message");
+    await configSetup.getByRole("button", { name: "Start configuration chat" }).click();
+    await expect(configSetup).not.toBeVisible({ timeout: 15_000 });
+
+    await testPage.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+Shift+q`);
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    const configTab = dialog
+      .getByTestId("quick-chat-tab")
+      .filter({ has: testPage.getByRole("img", { name: "Configuration chat" }) });
+    await expect(configTab).toHaveClass(/bg-background/);
   });
 
   test("resizes from either edge, restores width, and keeps tab actions adjacent", async ({
@@ -415,6 +435,7 @@ test.describe("Quick Chat", () => {
     // Create a new tab.
     const newChatBtn = dialog.getByLabel("Start new chat");
     await newChatBtn.click();
+    await testPage.getByRole("menu", { name: "New chat" }).getByText("Quick chat").click();
 
     // Setup should appear without the first-use introduction once a chat exists.
     await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 5_000 });

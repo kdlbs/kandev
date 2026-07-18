@@ -19,9 +19,6 @@ async function openConfigChatFromSettings(page: Page): Promise<Locator> {
 async function startConfigChat(dialog: Locator, prompt: string) {
   const setup = dialog.getByTestId("config-chat-setup");
   await expect(setup).toBeVisible({ timeout: 10_000 });
-  await expect(
-    setup.getByText(/manage workflows, agent profiles, and MCP configuration/i),
-  ).toBeVisible();
   await expect(setup.getByText(/repositories/i)).toHaveCount(0);
   const input = setup.getByPlaceholder("Ask anything about your configuration...");
   await input.fill(prompt);
@@ -49,12 +46,25 @@ test.describe("Configuration Chat", () => {
   test("starts floating, expands the same session, restores, continues, and deletes", async ({
     testPage,
   }) => {
+    await testPage.setViewportSize({ width: 900, height: 520 });
     const popover = await openConfigChatFromSettings(testPage);
     const viewport = testPage.viewportSize();
     const box = await popover.boundingBox();
     expect(box).not.toBeNull();
     expect(viewport).not.toBeNull();
     expect(box!.width).toBeLessThan(viewport!.width * 0.7);
+    const setup = popover.getByTestId("config-chat-setup");
+    const input = setup.getByPlaceholder("Ask anything about your configuration...");
+    const scrollRegion = setup.getByTestId("config-chat-guidance");
+    await expect.poll(() => scrollRegion.evaluate((element) => element.scrollTop)).toBe(0);
+    await expect(setup.getByRole("heading", { name: "Configuration Chat" })).toHaveCount(0);
+    await expect(setup.getByRole("button", { name: "Cancel" })).toHaveCount(0);
+    await expect(setup.locator("footer")).toHaveCount(0);
+    const inputBox = await input.boundingBox();
+    expect(inputBox).not.toBeNull();
+    await expect(setup.getByRole("button", { name: "Start configuration chat" })).toBeInViewport({
+      ratio: 1,
+    });
 
     await startConfigChat(popover, "/e2e:simple-message");
     await expect(

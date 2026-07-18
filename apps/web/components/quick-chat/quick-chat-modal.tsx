@@ -3,7 +3,13 @@
 import { memo, type CSSProperties } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
-import { IconPlus, IconX } from "@tabler/icons-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
+import { IconMessageCircle, IconPlus, IconSparkles, IconX } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { QuickChatDeleteDialog } from "./quick-chat-delete-dialog";
 import { QuickChatSessionView } from "./quick-chat-session-view";
@@ -13,7 +19,7 @@ import { useQuickChatModal } from "./use-quick-chat-modal";
 import { useQuickChatWidth } from "@/hooks/use-quick-chat-width";
 import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
-import type { QuickChatSession } from "@/lib/state/slices/ui/types";
+import type { QuickChatSession, QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 
 type QuickChatModalProps = {
@@ -38,7 +44,7 @@ function QuickChatTabs({
   activeSessionId: string;
   onTabChange: (sessionId: string) => void;
   onTabClose: (sessionId: string) => void;
-  onNewChat: () => void;
+  onNewChat: (kind: QuickChatSessionKind) => void;
   onRename: (sessionId: string, name: string) => void;
   onCloseModal: () => void;
 }) {
@@ -62,22 +68,41 @@ function QuickChatTabs({
             />
           );
         })}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-6 w-6 p-0 cursor-pointer shrink-0"
-          onClick={onNewChat}
-          aria-label="Start new chat"
-        >
-          <IconPlus className="h-3.5 w-3.5" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="h-11 w-11 shrink-0 cursor-pointer sm:h-6 sm:w-6"
+              aria-label="Start new chat"
+            >
+              <IconPlus className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent aria-label="New chat" align="start" className="w-52">
+            <DropdownMenuItem
+              onSelect={() => onNewChat("chat")}
+              className="min-h-11 cursor-pointer gap-2"
+            >
+              <IconMessageCircle className="h-4 w-4" aria-hidden />
+              Quick chat
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => onNewChat("config")}
+              className="min-h-11 cursor-pointer gap-2"
+            >
+              <IconSparkles className="h-4 w-4" aria-hidden />
+              Configuration chat
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       {/* Touch devices have no Escape key or visible overlay to dismiss the
           full-screen dialog, so give them an explicit close control. */}
       <Button
         size="sm"
         variant="ghost"
-        className="h-6 w-6 p-0 cursor-pointer shrink-0 sm:hidden"
+        className="h-11 w-11 shrink-0 cursor-pointer p-0 sm:hidden"
         onClick={onCloseModal}
         aria-label="Close quick chat"
         data-testid="quick-chat-close"
@@ -130,7 +155,6 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
     setSessionToClose,
     handleOpenChange,
     handleNewChat,
-    handleSetupKindChange,
     handleSelectAgent,
     handleCloseTab,
     handleConfirmClose,
@@ -176,17 +200,16 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
               pendingAgentId={pendingAgentId}
               onStart={handleSelectAgent}
               onCancel={() => handleOpenChange(false)}
-              onKindChange={handleSetupKindChange}
             />
           )}
           {activeSessionNeedsAgent && setupKind === "config" && (
             <ConfigChatSetup
+              key={`${workspaceId}:config:${setupKey}`}
               defaultProfileId={configChat.defaultProfileId}
               isStarting={configChat.isStarting}
               error={configChat.error}
               onStart={(profileId, prompt) => configChat.startSession(profileId, prompt)}
               onCancel={() => handleOpenChange(false)}
-              onKindChange={handleSetupKindChange}
             />
           )}
         </DialogContent>

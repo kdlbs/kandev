@@ -31,9 +31,10 @@ while retaining the elevated tools that distinguish them from ordinary quick cha
 - Configuration setup never offers repository or branch selectors. Ordinary quick-chat setup
   retains the optional repository context defined by
   [Quick Chat Repository Context](quick-chat-repository-context.md).
-- Creating an ordinary chat remains the default behavior of the existing Quick Chat `+` action.
-  New-chat setup offers an explicit `Quick chat` / `Configuration chat` mode choice and switches to
-  the matching setup without creating a backend task.
+- Creating an ordinary chat remains the default behavior when Quick Chat first opens. The tab-bar
+  `+` action opens a compact menu for `Quick chat` or `Configuration chat`, then opens the matching
+  focused setup without creating a backend task. Setup forms do not present chat kind as an
+  in-form mode selector.
 - Desktop Settings uses the compact floating configuration panel until the user expands it. Mobile
   Settings uses a viewport-bounded floating panel and the existing full-screen Quick Chat layout
   after expansion, with the same creation, tab, clarification, and deletion capabilities.
@@ -199,11 +200,14 @@ deletion.
 - **GIVEN** a configuration agent is selected in Settings, **WHEN** the user starts Configuration
   Chat from the Settings FAB, **THEN** a floating configuration setup/session opens and the created
   task retains config-mode MCP tools.
+- **GIVEN** the floating configuration setup is open, **WHEN** its empty state renders, **THEN** the
+  panel header is the only Configuration Chat title, the composer action remains visible, and no
+  separate cancel footer is rendered.
 - **GIVEN** a floating configuration conversation, **WHEN** the user chooses Open in Quick Chat,
   **THEN** the floating panel closes and the large dialog shows the same session, history, task, and
   pending initial prompt.
-- **GIVEN** an ordinary Quick Chat setup, **WHEN** the user chooses Configuration chat, **THEN** the
-  modal switches to configuration setup without creating an ordinary chat task.
+- **GIVEN** the Quick Chat modal, **WHEN** the user opens the new-chat menu and chooses Configuration
+  chat, **THEN** the modal opens configuration setup without creating an ordinary chat task.
 - **GIVEN** any application route, **WHEN** the user chooses Configuration Chat from the Command
   Palette, **THEN** the same unified configuration setup/session opens in Quick Chat.
 - **GIVEN** a configuration setup tab, **WHEN** it renders, **THEN** it shows configuration copy,
@@ -219,6 +223,8 @@ deletion.
 - **GIVEN** a completed configuration conversation, **WHEN** the browser reloads and Quick Chat is
   reopened, **THEN** the configuration tab and prior messages are restored and the conversation can
   continue.
+- **GIVEN** Quick Chat is closed with a configuration tab active, **WHEN** the generic Quick Chat
+  action reopens the dialog, **THEN** that configuration tab remains active regardless of chat kind.
 - **GIVEN** restored sessions with different activity times, **WHEN** boot state is built, **THEN**
   eligible ordinary and configuration sessions are ordered newest first with the correct kind.
 - **GIVEN** config-mode, automation-run, workflow-bound ephemeral, and ordinary quick-chat tasks,

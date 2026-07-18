@@ -13,8 +13,6 @@ import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import type { QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { Repository } from "@/lib/types/http";
-import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
-import { ChatTypeSelector } from "./chat-type-selector";
 
 type QuickChatSetupProps = {
   workspaceId: string;
@@ -22,7 +20,6 @@ type QuickChatSetupProps = {
   pendingAgentId: string | null;
   onStart: (agentId: string, repositories: QuickChatRepositoryInput[]) => void;
   onCancel: () => void;
-  onKindChange: (kind: QuickChatSessionKind) => void;
 };
 
 function repositoryAddState(isLoading: boolean, repositoryCount: number, rowCount: number) {
@@ -190,7 +187,6 @@ export function QuickChatSetup({
   pendingAgentId,
   onStart,
   onCancel,
-  onKindChange,
 }: QuickChatSetupProps) {
   const agentProfiles = useAppStore((state) => state.agentProfiles.items ?? []);
   const defaultAgentId = useAppStore(
@@ -238,7 +234,6 @@ export function QuickChatSetup({
             <h2 className="text-lg font-semibold">Quick Chat</h2>
             <QuickChatIntroduction show={showIntroduction} />
           </header>
-          <ChatTypeSelector value="chat" disabled={isStarting} onChange={onKindChange} />
           <AgentField
             profiles={agentProfiles}
             value={agentProfileId}

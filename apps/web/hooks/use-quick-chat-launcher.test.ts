@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const openQuickChat = vi.fn();
 const WORKSPACE_ID = "workspace-1";
+const ACTIVE_CONFIG_ID = "config-active";
 let activeSessionId: string | null = null;
 let sessions: Array<{
   sessionId: string;
@@ -24,6 +25,19 @@ beforeEach(() => {
 });
 
 describe("useQuickChatLauncher typed sessions", () => {
+  it("reopens the active configuration session from the generic quick chat launcher", () => {
+    sessions = [
+      { sessionId: "chat-1", workspaceId: WORKSPACE_ID, kind: "chat" },
+      { sessionId: ACTIVE_CONFIG_ID, workspaceId: WORKSPACE_ID, kind: "config" },
+    ];
+    activeSessionId = ACTIVE_CONFIG_ID;
+    const { result } = renderHook(() => useQuickChatLauncher(WORKSPACE_ID));
+
+    act(() => result.current());
+
+    expect(openQuickChat).toHaveBeenCalledWith(ACTIVE_CONFIG_ID, WORKSPACE_ID, undefined, "config");
+  });
+
   it("opens the matching ordinary session when config and chat tabs coexist", () => {
     sessions = [
       { sessionId: "config-1", workspaceId: WORKSPACE_ID, kind: "config" },
@@ -52,13 +66,13 @@ describe("useQuickChatLauncher typed sessions", () => {
   it("prefers the active matching session over the first restored session", () => {
     sessions = [
       { sessionId: "config-newest", workspaceId: WORKSPACE_ID, kind: "config" },
-      { sessionId: "config-active", workspaceId: WORKSPACE_ID, kind: "config" },
+      { sessionId: ACTIVE_CONFIG_ID, workspaceId: WORKSPACE_ID, kind: "config" },
     ];
-    activeSessionId = "config-active";
+    activeSessionId = ACTIVE_CONFIG_ID;
     const { result } = renderHook(() => useQuickChatLauncher(WORKSPACE_ID, "config"));
 
     act(() => result.current());
 
-    expect(openQuickChat).toHaveBeenCalledWith("config-active", WORKSPACE_ID, undefined, "config");
+    expect(openQuickChat).toHaveBeenCalledWith(ACTIVE_CONFIG_ID, WORKSPACE_ID, undefined, "config");
   });
 });

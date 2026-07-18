@@ -70,7 +70,6 @@ const props = {
   pendingAgentId: null,
   onStart: vi.fn(),
   onCancel: vi.fn(),
-  onKindChange: vi.fn(),
 };
 
 beforeEach(() => {
@@ -81,17 +80,6 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("QuickChatSetup default agent", () => {
-  it("offers configuration chat as an explicit creation type", () => {
-    render(<QuickChatSetup {...props} />);
-
-    expect(screen.getByRole("radio", { name: "Quick chat" }).getAttribute("aria-checked")).toBe(
-      "true",
-    );
-    fireEvent.click(screen.getByRole("radio", { name: "Configuration chat" }));
-
-    expect(props.onKindChange).toHaveBeenCalledWith("config");
-  });
-
   it("renders the agent selector with a visible field border", () => {
     render(<QuickChatSetup {...props} />);
 
