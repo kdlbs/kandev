@@ -30,7 +30,7 @@ flowchart TD
     Verify --> Extract["Extract to ~/.kandev/plugins/&lt;id&gt;/&lt;version&gt;/"]
     Extract --> Spawn["Spawn platform executable as a subprocess (hashicorp/go-plugin)"]
     Spawn -->|gRPC| Deliver["DeliverEvent: bus events (at-least-once, buffered while unhealthy)"]
-    Spawn -->|gRPC| Invoke["InvokeTool: agent tool calls"]
+    Spawn -->|gRPC| Invoke["InvokeTool: declared tool calls (not agent-invocable yet)"]
     Spawn -->|gRPC| Webhook["HandleWebhook: external webhook via POST /api/plugins/{id}/webhooks/{key}"]
     Deliver --> Host["Plugin calls back on the same connection: Host state / config / secrets, EmitEvent, and capability-gated read-only data accessors"]
     Invoke --> Host

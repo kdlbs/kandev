@@ -90,9 +90,9 @@ ui:                                           # optional native frontend plugin
 | `capabilities.api_write` | no | string[] | **Reserved for future Host RPCs.** Declared but not enforced by anything today — no Host RPC currently writes kandev's own data. |
 | `capabilities.state` | no | bool | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
-| `tools[].name` | yes | string | Must be unique within the manifest — a duplicate tool name is a validation error. |
-| `tools[].display_name` | no | string | Shown to operators/agents. |
-| `tools[].description` | no | string | Shown to operators/agents. |
+| `tools[].name` | yes | string | Must be unique within the manifest — a duplicate tool name is a validation error. Declared tools are validated and listed (`GET /api/plugins/tools`) but **not yet agent-invocable** — see the note below. |
+| `tools[].display_name` | no | string | Human label shown in the tools listing. |
+| `tools[].description` | no | string | Shown in the tools listing. |
 | `tools[].input_schema` | no | object | Arbitrary JSON Schema describing the tool's input. |
 | `webhooks[].key` | yes | string | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`. |
 | `webhooks[].description` | no | string | Free-form. |
@@ -105,6 +105,12 @@ ui:                                           # optional native frontend plugin
 | `ui.pages[].title` | yes* | string | Display title. |
 | `ui.pages[].path` | yes* | string | Route path for the page. |
 | `ui.pages[].surface` | yes* | string | Where the page mounts. Enum, one of: `settings` · `task-panel` · `main-nav`. Any other value is a validation error. |
+
+Declared `tools[]` are validated at install time and exposed through
+`GET /api/plugins/tools`, but they are **not yet agent-invocable** in the
+current release: no agent, MCP bridge, or HTTP route calls a plugin tool.
+The gRPC `InvokeTool` path exists for when that wiring ships. Treat `tools[]`
+as a forward-looking declaration today.
 
 `ui.pages` is declarative manifest metadata only. A native bundle's runtime
 nav items, icons, and per-route title-bar chrome (`registerNavItem`,
