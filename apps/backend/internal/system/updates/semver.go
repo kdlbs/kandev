@@ -101,6 +101,13 @@ func parseSemver(s string) ([3]int, string, int, bool) {
 	return out, pre, 0, true
 }
 
+// minGitDescribeHashLen is the smallest abbreviated commit hash `git describe`
+// emits by default (core.abbrev = 7). Requiring at least this many hex digits
+// keeps a contrived pre-release such as "1.0.0-3-ga" from being mistaken for a
+// git-describe build; kandev's Makefile runs `git describe` with the default
+// abbreviation, so real builds always meet this floor.
+const minGitDescribeHashLen = 7
+
 // gitDescribeCommits recognises the "<N>-g<hash>[-dirty]" suffix that
 // `git describe --tags` appends when the build is N commits past the nearest
 // tag. It returns the commit count and ok=true for that shape; otherwise
@@ -118,7 +125,11 @@ func gitDescribeCommits(pre string) (int, bool) {
 		return 0, false
 	}
 	hash := parts[1]
-	if len(hash) < 2 || hash[0] != 'g' || !isHexString(hash[1:]) {
+	if len(hash) == 0 || hash[0] != 'g' {
+		return 0, false
+	}
+	digits := hash[1:]
+	if len(digits) < minGitDescribeHashLen || !isHexString(digits) {
 		return 0, false
 	}
 	return n, true

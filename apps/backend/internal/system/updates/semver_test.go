@@ -52,13 +52,17 @@ func TestGitDescribeCommits(t *testing.T) {
 	}{
 		{"standard", "60-g8fae44fb1", 60, true},
 		{"dirty", "60-g8fae44fb1-dirty", 60, true},
-		{"single_commit", "1-gabc1234", 1, true},
+		{"min_length_hash", "1-gabc1234", 1, true},
 		{"empty", "", 0, false},
 		{"real_prerelease", "rc.1", 0, false},
 		{"prerelease_with_dot", "alpha.2", 0, false},
 		{"missing_g_prefix", "60-8fae44fb1", 0, false},
-		{"non_hex_hash", "60-gzzzzzz", 0, false},
+		{"non_hex_hash", "60-gzzzzzzz", 0, false},
 		{"non_numeric_count", "x-gabc1234", 0, false},
+		// Short hashes below git's default abbreviation are treated as ordinary
+		// pre-releases, not git-describe builds.
+		{"single_char_hash", "3-ga", 0, false},
+		{"below_min_hash", "3-gabc12", 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
