@@ -314,6 +314,7 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 	if err := json.Unmarshal([]byte(job.ResourceSnapshot), &snapshot); err != nil {
 		return s.retryTaskResourceCleanupJob(runCtx, job, fmt.Errorf("decode resource snapshot: %w", err))
 	}
+	defer s.signalCleanupDoneForTest()
 	cleanupErr := s.executeTaskResourceCleanupJob(runCtx, job, snapshot)
 	if cleanupErr != nil {
 		return s.retryTaskResourceCleanupJob(runCtx, job, cleanupErr)
@@ -390,7 +391,6 @@ func (s *Service) executeTaskResourceCleanupJob(
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)
 	}
-	s.signalCleanupDoneForTest()
 	if len(errs) == 0 && len(failedStops) == 0 {
 		return nil
 	}
