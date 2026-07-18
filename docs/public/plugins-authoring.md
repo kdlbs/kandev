@@ -147,10 +147,27 @@ type Host interface {
 }
 ```
 
-`scope` is one of `instance`, `workspace`, `task`, `agent` (`scopeID` empty
-for `instance`). `EmitEvent` publishes `plugin.<your-plugin-id>.<name>` on
-kandev's internal event bus for delivery to any subscriber (including other
-plugins).
+**Host state** is a small key/value store kandev keeps for your plugin in
+its own database. Each entry is addressed by a `(scope, scopeID, key)`
+triple and holds a JSON object (`map[string]any`): `SetState` upserts one,
+`GetState` reads it back (`found` is `false` when the key was never set),
+`DeleteState` removes it, and `ListState` returns every entry under a
+`(scope, scopeID)`. Values are JSON objects, not bare scalars — wrap a
+number as `map[string]any{"n": 3}`. State is namespaced per plugin (kandev
+injects your plugin id server-side, so no plugin can read or write
+another's), survives restarts, is captured by kandev's database backups, and
+is deleted when the plugin is uninstalled. Reach for it when you want kandev
+to durably remember something small and structured for you; use the writable
+data directory below for arbitrary files you'd rather manage yourself.
+
+`scope` partitions that store by what a value belongs to: `instance` (the
+whole kandev instance; `scopeID` empty), or `workspace` / `task` / `agent`
+with `scopeID` set to that entity's id. A per-task counter, for example, is
+`SetState(ctx, "task", taskID, "count", map[string]any{"n": 3})` — kept
+separate from every other task's.
+
+`EmitEvent` publishes `plugin.<your-plugin-id>.<name>` on kandev's internal
+event bus for delivery to any subscriber (including other plugins).
 
 The data-reader accessors return typed, paginated readers — e.g.
 `host.Tasks().List(ctx, TaskFilter{...}, Page{Limit: 50})` returns
@@ -180,9 +197,13 @@ func (p *myPlugin) OnEvent(ctx context.Context, e *pluginsdk.Event) error {
 	if host == nil {
 		return nil // broker dial still in progress
 	}
-	value, found, err := host.GetState(ctx, "instance", "", "count")
-	// ...
-	return host.SetState(ctx, "instance", "", "count", map[string]any{"n": 1})
+	// Read the current count (found == false the first time), then write it back + 1.
+	value, _, err := host.GetState(ctx, "instance", "", "count")
+	if err != nil {
+		return err
+	}
+	n, _ := value["n"].(float64) // JSON numbers decode as float64
+	return host.SetState(ctx, "instance", "", "count", map[string]any{"n": n + 1})
 }
 ```
 
