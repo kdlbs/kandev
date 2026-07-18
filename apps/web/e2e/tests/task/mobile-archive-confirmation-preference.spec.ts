@@ -36,27 +36,15 @@ test.describe("Archive confirmation preference on mobile", () => {
     await session.waitForLoad();
     await testPage.getByTestId("mobile-session-menu").click();
 
-    const sheet = testPage.getByRole("dialog");
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
     const taskRow = sheet
       .getByTestId("sidebar-task-item")
       .filter({ hasText: "Mobile Archive Without Confirmation" });
     await expect(taskRow).toBeVisible({ timeout: 15_000 });
 
-    await taskRow.dispatchEvent("pointerdown", {
-      pointerType: "touch",
-      isPrimary: true,
-      button: 0,
-      clientX: 120,
-      clientY: 240,
-    });
-    await testPage.waitForTimeout(1000);
-    await taskRow.dispatchEvent("pointerup", {
-      pointerType: "touch",
-      isPrimary: true,
-      button: 0,
-      clientX: 120,
-      clientY: 240,
-    });
+    const actions = taskRow.getByRole("button", { name: "Task actions" });
+    await expect(actions).toBeVisible();
+    await actions.click();
     await testPage.getByRole("menuitem", { name: "Archive" }).click();
 
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);

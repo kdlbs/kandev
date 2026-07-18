@@ -26,13 +26,14 @@ const modelConfigOptionID = "model"
 
 // SessionManager handles ACP session initialization and management
 type SessionManager struct {
-	logger         *logger.Logger
-	eventPublisher *EventPublisher
-	streamManager  *StreamManager
-	executionStore *ExecutionStore
-	promptStarter  func(executionID string) (uint64, error)
-	historyManager *SessionHistoryManager
-	stopCh         <-chan struct{} // For graceful shutdown coordination
+	logger               *logger.Logger
+	eventPublisher       *EventPublisher
+	streamManager        *StreamManager
+	executionStore       *ExecutionStore
+	promptStarter        func(executionID string) (uint64, error)
+	initialPromptFailure func(executionID string)
+	historyManager       *SessionHistoryManager
+	stopCh               <-chan struct{} // For graceful shutdown coordination
 }
 
 // NewSessionManager creates a new SessionManager
@@ -54,6 +55,10 @@ func (sm *SessionManager) SetDependencies(ep *EventPublisher, strm *StreamManage
 
 func (sm *SessionManager) SetPromptStarter(starter func(executionID string) (uint64, error)) {
 	sm.promptStarter = starter
+}
+
+func (sm *SessionManager) SetInitialPromptFailureHandler(handler func(executionID string)) {
+	sm.initialPromptFailure = handler
 }
 
 // InitializeResult contains the result of session initialization
@@ -496,6 +501,9 @@ func (sm *SessionManager) dispatchInitialPrompt(ctx context.Context, execution *
 				sm.logger.Error("initial prompt failed",
 					zap.String("execution_id", execution.ID),
 					zap.Error(err))
+				if sm.initialPromptFailure != nil {
+					sm.initialPromptFailure(execution.ID)
+				}
 			}
 		}()
 	case sm.shouldInjectResumeContext(agentConfig, execution.SessionID):

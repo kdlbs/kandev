@@ -21,7 +21,6 @@ type Manifest struct {
 	Endpoints    Endpoints    `yaml:"endpoints" json:"endpoints"`
 	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
 
-	Tools    []Tool    `yaml:"tools,omitempty" json:"tools,omitempty"`
 	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
 
 	ConfigSchema map[string]any `yaml:"config_schema,omitempty" json:"config_schema,omitempty"`
@@ -47,7 +46,6 @@ type Runtime struct {
 type Endpoints struct {
 	Health   string `yaml:"health" json:"health"`
 	Events   string `yaml:"events" json:"events"`
-	Tools    string `yaml:"tools" json:"tools"`
 	Webhooks string `yaml:"webhooks" json:"webhooks"`
 }
 
@@ -58,14 +56,6 @@ type Capabilities struct {
 	APIWrite []string `yaml:"api_write,omitempty" json:"api_write,omitempty"`
 	State    bool     `yaml:"state,omitempty" json:"state,omitempty"`
 	Secrets  bool     `yaml:"secrets,omitempty" json:"secrets,omitempty"`
-}
-
-// Tool is an agent-invocable tool the plugin registers.
-type Tool struct {
-	Name        string         `yaml:"name" json:"name"`
-	DisplayName string         `yaml:"display_name" json:"display_name"`
-	Description string         `yaml:"description" json:"description"`
-	InputSchema map[string]any `yaml:"input_schema,omitempty" json:"input_schema,omitempty"`
 }
 
 // Webhook is a proxied external webhook endpoint the plugin declares.

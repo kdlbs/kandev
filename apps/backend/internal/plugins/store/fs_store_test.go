@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -237,6 +238,32 @@ func TestFSStore_SetConfigThenGetConfig_RoundTrips(t *testing.T) {
 	}
 	if got["notify_on_task_created"] != true {
 		t.Fatalf("GetConfig()[\"notify_on_task_created\"] = %v, want true", got["notify_on_task_created"])
+	}
+}
+
+// The config file can carry cleartext secret values (config_schema fields
+// marked secret, e.g. a PAT), so it must be owner-only like the record file
+// — never world-readable.
+func TestFSStore_SetConfig_WritesOwnerOnlyFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits not meaningful on windows")
+	}
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	if err := s.Save(testRecord("kandev-plugin-slack")); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+	if err := s.SetConfig("kandev-plugin-slack", map[string]any{"api_token": "ghp_secret"}); err != nil {
+		t.Fatalf("SetConfig() unexpected error: %v", err)
+	}
+
+	info, err := os.Stat(s.configPath("kandev-plugin-slack"))
+	if err != nil {
+		t.Fatalf("Stat() unexpected error: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("config file mode = %o, want 0600", perm)
 	}
 }
 

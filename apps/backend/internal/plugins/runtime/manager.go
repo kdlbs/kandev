@@ -317,7 +317,7 @@ func (m *Manager) StopAll() {
 }
 
 // Get returns the live RemotePlugin for id, for calling DeliverEvent/
-// InvokeTool/HandleWebhook, and whether one is currently available (false
+// HandleWebhook, and whether one is currently available (false
 // if the plugin was never started, was stopped, or is mid-restart).
 func (m *Manager) Get(id string) (*pluginsdk.RemotePlugin, bool) {
 	m.mu.Lock()

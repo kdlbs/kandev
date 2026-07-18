@@ -240,6 +240,7 @@ function SessionRowItem({
       <div
         role="button"
         tabIndex={0}
+        aria-current={isActive ? "true" : undefined}
         onClick={() => onSelect(row.id)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -313,13 +314,14 @@ function useSessionRows(taskId: string | null) {
 
 const MobileSessionsList = memo(function MobileSessionsList({
   taskId,
+  activeSessionId,
   onClose,
 }: {
   taskId: string | null;
+  activeSessionId: string | null;
   onClose: () => void;
 }) {
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const { rows, isLoading } = useSessionRows(taskId);
   const [launchOpen, setLaunchOpen] = useState(false);
 
@@ -384,36 +386,63 @@ const MobileSessionsList = memo(function MobileSessionsList({
   );
 });
 
-function useActiveSessionPillLabel(taskId: string | null): {
+function useActiveSessionPillLabel(
+  taskId: string | null,
+  sessionId: string | null | undefined,
+): {
   label: string;
   count: string | undefined;
+  agentName: string | null;
+  effectiveSessionId: string | null;
 } {
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const storedActiveSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const { rows } = useSessionRows(taskId);
-  const activeRow = rows.find((r) => r.id === activeSessionId);
+  const effectiveSessionId = sessionId === undefined ? storedActiveSessionId : sessionId;
+  const activeRow = rows.find((r) => r.id === effectiveSessionId);
   const total = rows.length;
   const idx = activeRow?.index;
   let count: string | undefined;
   if (total > 1 && idx) count = `${idx}/${total}`;
   else if (total > 1) count = `${total}`;
-  return { label: activeRow?.agentLabel ?? "Session", count };
+  return {
+    label: activeRow?.agentLabel ?? "Session",
+    count,
+    agentName: activeRow?.agentName ?? null,
+    effectiveSessionId,
+  };
 }
 
 export const MobileSessionsPicker = memo(function MobileSessionsPicker({
   taskId,
+  sessionId,
   compact,
   fullWidth,
 }: {
   taskId: string | null;
+  sessionId?: string | null;
   compact?: boolean;
   fullWidth?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const { label, count } = useActiveSessionPillLabel(taskId);
+  const { label, count, agentName, effectiveSessionId } = useActiveSessionPillLabel(
+    taskId,
+    sessionId,
+  );
   if (!taskId) return null;
   return (
     <>
       <MobilePillButton
+        icon={
+          agentName ? (
+            <span
+              className="flex shrink-0 items-center"
+              data-testid="mobile-session-agent-icon"
+              data-agent-name={agentName}
+            >
+              <AgentLogo agentName={agentName} size={16} className="shrink-0" />
+            </span>
+          ) : undefined
+        }
         label={label}
         count={count}
         compact={compact}
@@ -424,7 +453,11 @@ export const MobileSessionsPicker = memo(function MobileSessionsPicker({
         ariaLabel={`Active session: ${label}. Tap to switch.`}
       />
       <MobilePickerSheet open={open} onOpenChange={setOpen} title="Sessions">
-        <MobileSessionsList taskId={taskId} onClose={() => setOpen(false)} />
+        <MobileSessionsList
+          taskId={taskId}
+          activeSessionId={effectiveSessionId}
+          onClose={() => setOpen(false)}
+        />
       </MobilePickerSheet>
     </>
   );

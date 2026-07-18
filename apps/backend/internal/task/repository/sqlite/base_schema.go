@@ -20,6 +20,7 @@ func (r *Repository) initSchema() error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initTaskResourceCleanupSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
 		r.migrateExecutorProfiles,
@@ -27,6 +28,7 @@ func (r *Repository) initSchema() error {
 		r.ensureDefaultWorkspace,
 		r.ensureDefaultExecutorsAndEnvironments,
 		r.runMigrations,
+		r.hideBuiltinWorkflows,
 		r.backfillTaskEnvironments,
 		r.backfillTaskEnvironmentRepos,
 		r.healTaskEnvironmentWorkspacePaths,
@@ -42,6 +44,33 @@ func (r *Repository) initSchema() error {
 		}
 	}
 	return nil
+}
+
+const taskResourceCleanupSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS task_resource_cleanup_jobs (
+		id TEXT PRIMARY KEY,
+		operation_id TEXT NOT NULL UNIQUE,
+		task_id TEXT NOT NULL,
+		trigger TEXT NOT NULL,
+		state TEXT NOT NULL DEFAULT 'pending',
+		resource_snapshot TEXT NOT NULL DEFAULT '{}',
+		attempts INTEGER NOT NULL DEFAULT 0,
+		next_attempt_at TIMESTAMP,
+		last_error TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		completed_at TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_resource_cleanup_jobs_task_id
+		ON task_resource_cleanup_jobs(task_id);
+	CREATE INDEX IF NOT EXISTS idx_task_resource_cleanup_jobs_due
+		ON task_resource_cleanup_jobs(state, next_attempt_at, created_at);
+`
+
+func (r *Repository) initTaskResourceCleanupSchema() error {
+	_, err := r.db.Exec(taskResourceCleanupSchemaDDL)
+	return err
 }
 
 // ensureWorkspaceIndexes creates workspace-related indexes

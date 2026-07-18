@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,71 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/system/storage"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
+
+func (m *Manager) PruneQuarantinedWorkspace(ctx context.Context, entry storage.QuarantineEntry) error {
+	worktrees, err := m.GetAllByTaskID(ctx, entry.TaskID)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]struct{})
+	var errs []error
+	for _, wt := range worktrees {
+		if wt == nil || wt.RepositoryPath == "" || wt.Path == "" {
+			continue
+		}
+		key := wt.RepositoryPath + "\x00" + filepath.Clean(wt.Path)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		if err := m.pruneQuarantinedWorktree(ctx, wt); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Manager) pruneQuarantinedWorktree(ctx context.Context, wt *Worktree) error {
+	repoLock := m.getRepoLock(wt.RepositoryPath)
+	repoLock.Lock()
+	defer func() {
+		repoLock.Unlock()
+		m.releaseRepoLock(wt.RepositoryPath)
+	}()
+
+	cmd := exec.CommandContext(ctx, "git", "worktree", "remove", "--force", wt.Path)
+	cmd.Dir = wt.RepositoryPath
+	if _, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
+		present, inspectErr := worktreeRegistrationExists(ctx, wt.RepositoryPath, wt.Path)
+		if inspectErr != nil {
+			return fmt.Errorf("verify worktree registration for %s: %w", wt.Path, inspectErr)
+		}
+		if present {
+			return fmt.Errorf("remove worktree registration for %s: %w", wt.Path, err)
+		}
+	}
+	return nil
+}
+
+func worktreeRegistrationExists(ctx context.Context, repoPath, worktreePath string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "worktree", "list", "--porcelain", "-z")
+	cmd.Dir = repoPath
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
+	if err != nil {
+		return false, err
+	}
+	want := filepath.Clean(worktreePath)
+	for _, field := range strings.Split(string(output), "\x00") {
+		if path, ok := strings.CutPrefix(field, "worktree "); ok && filepath.Clean(path) == want {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // RemoveByID removes a specific worktree by its ID and optionally its branch.
 func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranch bool) error {
@@ -128,6 +193,7 @@ func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree) {
 		Script:       repo.SetupScript,
 		WorkingDir:   wt.Path,
 		ScriptType:   "setup",
+		Env:          m.managedScriptEnvironment(ctx),
 	}
 	if err := m.scriptMsgHandler.ExecuteSetupScript(ctx, scriptReq); err != nil {
 		// Non-fatal: keep the worktree and surface a warning. The detailed
@@ -168,6 +234,7 @@ func (m *Manager) runWorktreeCleanupScript(ctx context.Context, wt *Worktree) {
 		Script:       repo.CleanupScript,
 		WorkingDir:   wt.Path,
 		ScriptType:   "cleanup",
+		Env:          m.managedScriptEnvironment(ctx),
 	}
 	if err := m.scriptMsgHandler.ExecuteCleanupScript(ctx, scriptReq); err != nil {
 		m.logger.Warn("cleanup script failed, proceeding with deletion",
@@ -177,6 +244,22 @@ func (m *Manager) runWorktreeCleanupScript(ctx context.Context, wt *Worktree) {
 		m.logger.Info("cleanup script completed successfully",
 			zap.String("worktree_id", wt.ID))
 	}
+}
+
+func (m *Manager) managedScriptEnvironment(ctx context.Context) map[string]string {
+	if m.scriptEnvProvider == nil {
+		return nil
+	}
+	env, err := m.scriptEnvProvider.ExecutionEnvironment(ctx)
+	if err != nil {
+		m.logger.Warn("failed to resolve managed script environment", zap.Error(err))
+		return nil
+	}
+	cachePath := env["GOCACHE"]
+	if cachePath == "" || !filepath.IsAbs(cachePath) {
+		return nil
+	}
+	return map[string]string{"GOCACHE": filepath.Clean(cachePath)}
 }
 
 // CleanupWorktrees removes provided worktrees without re-fetching from the store.
@@ -270,6 +353,13 @@ func (m *Manager) tryRemoveEmptyTaskDir(worktreePath string) {
 	// tasksBase itself or any deeper / unrelated location.
 	if filepath.Dir(parent) != tasksBase {
 		return
+	}
+	entries, readErr := os.ReadDir(parent)
+	if readErr == nil && len(entries) == 1 && entries[0].Name() == storageworkspaces.OwnershipMarkerFilename && entries[0].Type().IsRegular() {
+		if err := os.Remove(filepath.Join(parent, storageworkspaces.OwnershipMarkerFilename)); err != nil && !os.IsNotExist(err) {
+			m.logger.Debug("task ownership marker not removed", zap.String("path", parent), zap.Error(err))
+			return
+		}
 	}
 	if err := os.Remove(parent); err != nil && !os.IsNotExist(err) {
 		m.logger.Debug("task dir not removed (likely non-empty)",

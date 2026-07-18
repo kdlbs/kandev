@@ -272,7 +272,10 @@ func (s *FSStore) GetConfig(id string) (map[string]any, error) {
 // atomic (tmp file + rename within the store dir, via writeFileAtomic), the
 // same guarantee writeRecord gives Save, and is additionally serialized by
 // s.mu so two concurrent SetConfig calls for the same id (e.g. two operator
-// UpdateConfig PATCH requests racing) can never interleave.
+// UpdateConfig PATCH requests racing) can never interleave. Mode 0600, like
+// the record file: secret config fields are normally stored as encrypted-
+// vault references (internal/plugins/config.go), but the no-vault fallback
+// stores cleartext, so the file must not be world-readable either way.
 func (s *FSStore) SetConfig(id string, config map[string]any) error {
 	if err := safePluginID(id); err != nil {
 		return err
@@ -287,7 +290,7 @@ func (s *FSStore) SetConfig(id string, config map[string]any) error {
 	if err != nil {
 		return fmt.Errorf("marshal plugin config: %w", err)
 	}
-	if err := writeFileAtomic(s.dir, s.configPath(id), data, 0o644); err != nil {
+	if err := writeFileAtomic(s.dir, s.configPath(id), data, 0o600); err != nil {
 		return fmt.Errorf("write plugin config: %w", err)
 	}
 	return nil

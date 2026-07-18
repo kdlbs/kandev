@@ -35,7 +35,22 @@ Protocol adapters in `server/adapter/transport/` normalize different agent CLIs:
 - `process.Manager` owns subprocess, wires stdio to adapter
 - Factory pattern in `server/adapter/factory.go` selects adapter by agent type
 
-The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` → normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`.
+The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` -> normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Agent-specific ACP extensions use the package-private `acpDialect` function table in `dialect.go`; keep observed wire translation in `dialect_<agent>.go`. Dialect hooks return normalized data or request descriptions and never receive `*Adapter` or execute RPCs. Shared capability normalization used by both live sessions and utility probes belongs in `internal/agentctl/acpcompat/`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`. See ADR-0043.
+
+### Grok ACP dialect (`dialect_grok.go`)
+
+Grok exposes some model, config, and usage surfaces through implementation-specific ACP metadata. Its dialect normalizes them in the backend so shared ACP paths and the frontend stay provider-agnostic:
+
+| Grok wire | Kandev shape |
+|---|---|
+| Legacy `models` catalog | model `ConfigOption` used by generic frontend selectors |
+| Model `_meta.supportsReasoningEffort` / `reasoningEfforts` / `reasoningEffort` | gated `reasoning_effort` select with category `thought_level` |
+| `SetConfigOption(model, …)` or `(reasoning_effort, …)` | Grok has **no** `session/set_config_option`. Rewrite both to `session/set_model` (effort keeps current modelId + `_meta.reasoningEffort`; model switch may carry prior effort in meta when still supported). Frontend always uses set_config_option when a model ConfigOption exists. |
+| Mid-session `MODEL_SWITCH_INCOMPATIBLE_AGENT` | return Grok's actionable error; user starts a new session explicitly |
+| Notification `_meta.totalTokens` + model `_meta.totalContextTokens` | `EventTypeContextWindow` (used/size/remaining). Compaction may decrease used; clear used on model switch. |
+| Prompt `_meta.usage` | input/output/cache/total plus `reasoningTokens` as `PromptUsage.ThoughtTokens`; sibling flat fields are not whole-turn totals |
+
+Grok ACP currently exposes neither per-turn cost nor subscription quota/reset values. Do not estimate them or treat the optional subscription tier label as usage data.
 
 ## ACP Protocol
 

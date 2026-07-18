@@ -21,7 +21,12 @@ export interface NavItem {
   path: string;
   /** Curated icon name (see `lib/plugins/icons.ts`); unknown names render the puzzle glyph. */
   icon?: string;
-  section?: "main" | "settings";
+  /**
+   * Where the item renders: "main" (default) as a top-level sidebar entry,
+   * "integrations" inside the sidebar's Integrations section alongside the
+   * first-party integration links.
+   */
+  section?: "main" | "settings" | "integrations";
 }
 
 /**

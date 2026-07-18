@@ -95,7 +95,10 @@ export type SystemJobKind =
   | "backup-create"
   | "restore"
   | "disk-walk"
-  | "self-update";
+  | "self-update"
+  | "storage-analysis"
+  | "storage-cleanup"
+  | "storage-quarantine-delete";
 
 export type SystemJobState = "queued" | "running" | "succeeded" | "failed";
 
@@ -156,6 +159,143 @@ export interface SystemMetricsSnapshot {
 
 export interface JobAcceptResponse {
   job_id: string;
+}
+
+export interface StorageResourceSettings {
+  enabled: boolean;
+}
+
+export interface StorageGoCacheSettings {
+  enabled: boolean;
+  max_bytes: number;
+  adopted_path: string;
+}
+
+export interface StorageDockerSettings {
+  dedicated_daemon_acknowledged: boolean;
+  build_cache_enabled: boolean;
+  build_cache_keep_bytes: number;
+  build_cache_unused_hours: number;
+  unused_images_enabled: boolean;
+  unused_images_hours: number;
+}
+
+export interface StorageMaintenanceSettings {
+  enabled: boolean;
+  check_interval_hours: number;
+  idle_for_minutes: number;
+  orphan_grace_hours: number;
+  quarantine_retention_hours: number;
+  workspaces: StorageResourceSettings;
+  kandev_containers: StorageResourceSettings;
+  go_cache: StorageGoCacheSettings;
+  docker: StorageDockerSettings;
+}
+
+export interface StorageCapabilities {
+  managed_go_cache_path: string;
+  go_cache_adoption_available: boolean;
+  docker_available: boolean;
+  docker_host: string;
+  host_global_docker_cleanup_allowed: boolean;
+}
+
+export interface StorageWorkspaceSummary {
+  active_bytes?: number;
+  candidate_bytes?: number;
+  warnings?: string[];
+  available?: boolean;
+  warning?: string;
+}
+
+export interface StorageGoCacheSummary {
+  path?: string;
+  size_bytes?: number;
+  owned?: boolean;
+  enabled?: boolean;
+  available?: boolean;
+  warning?: string;
+}
+
+export interface StorageDockerSummary {
+  available: boolean;
+  build_cache_bytes: number;
+  unused_image_bytes: number;
+  managed_container_count: number;
+  managed_container_bytes: number;
+  warnings?: string[];
+}
+
+export type StorageQuarantineSummary =
+  | {
+      available?: true;
+      count: number;
+      size_bytes: number;
+      warning?: never;
+    }
+  | {
+      available: false;
+      warning: string;
+      count?: never;
+      size_bytes?: never;
+    };
+
+export interface StorageSummary {
+  workspaces: StorageWorkspaceSummary;
+  go_cache: StorageGoCacheSummary;
+  quarantine: StorageQuarantineSummary;
+  docker: StorageDockerSummary;
+}
+
+export type StorageRunState =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "skipped_busy";
+
+export interface StorageMaintenanceRun {
+  id: string;
+  trigger: "scheduled" | "manual" | "analysis";
+  state: StorageRunState;
+  settings_snapshot: StorageMaintenanceSettings;
+  result: Record<string, unknown>;
+  message: string;
+  started_at: string;
+  completed_at?: string;
+}
+
+export interface StorageQuarantineEntry {
+  id: string;
+  resource_type: "task_workspace" | "go_cache";
+  task_id?: string;
+  workspace_id?: string;
+  original_path: string;
+  quarantine_path: string;
+  size_bytes: number;
+  state: "quarantined" | "restored" | "deleted" | "failed";
+  quarantined_at: string;
+  delete_after: string;
+  restored_at?: string;
+  deleted_at?: string;
+  last_error: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface StorageOverviewResponse {
+  settings: StorageMaintenanceSettings;
+  capabilities: StorageCapabilities;
+  summary: StorageSummary;
+  last_run: StorageMaintenanceRun | null;
+}
+
+export interface StorageSettingsResponse {
+  settings: StorageMaintenanceSettings;
+}
+
+export interface StorageAdoptionResponse extends StorageSettingsResponse {
+  capabilities: StorageCapabilities;
 }
 
 export interface RestartCapability {

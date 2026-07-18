@@ -55,4 +55,24 @@ test.describe("Quick Chat entry points on mobile", () => {
     await expect(sheet).not.toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
   });
+
+  test("returns to the selected workspace home from the Tasks header", async ({
+    testPage,
+    seedData,
+  }) => {
+    await testPage.goto(`/tasks?workspace=${seedData.workspaceId}`);
+    await testPage.waitForLoadState("networkidle");
+
+    const homeLink = testPage.getByRole("link", { name: "Kandev home" });
+    await expect(homeLink).toHaveAttribute("href", `/?workspaceId=${seedData.workspaceId}`);
+
+    await homeLink.click();
+
+    await expect(testPage).toHaveURL((url) => {
+      return url.pathname === "/" && url.searchParams.get("workspaceId") === seedData.workspaceId;
+    });
+    const homeHeader = testPage.getByRole("link", { name: "Kandev home" }).locator("..");
+    await expect(homeHeader.getByText("Home", { exact: true })).toHaveCount(0);
+    await assertNoDocumentHorizontalOverflow(testPage);
+  });
 });

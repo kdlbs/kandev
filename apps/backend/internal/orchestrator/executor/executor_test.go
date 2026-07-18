@@ -256,6 +256,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalled = true
+			if !req.StartAgent {
+				t.Error("expected lifecycle launch to retain initial-agent activity")
+			}
 			if req.SessionID != "session-123" {
 				t.Errorf("Expected session ID session-123, got %s", req.SessionID)
 			}
@@ -579,6 +582,9 @@ func TestLaunchPreparedSession_WorkspaceOnly(t *testing.T) {
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalled = true
+			if req.StartAgent {
+				t.Error("workspace-only launch retained initial-agent activity")
+			}
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-123",
 				ContainerID:      "container-123",
@@ -1358,6 +1364,215 @@ func TestRunAgentProcessAsync_ResumeDoesNotEscalateTaskState(t *testing.T) {
 	}
 }
 
+// TestRunAgentProcessAsync_ResumeFailureUsesRawCASWithoutCallbacks covers the
+// true raw-fallback branch: neither onTaskReviewStateReconcile nor
+// onTaskStateChange is configured (a standalone Executor with no orchestrator
+// wiring at all — never the case in production, see service.go's
+// exec.SetOnTaskStateChange/SetOnTaskReviewStateReconcile). The REVIEW write
+// must go straight through the archive-aware UpdateTaskStateIfCurrentIn CAS
+// on the repository rather than the unconditional UpdateTaskState, so a late
+// write here still can't race an archive.
+func TestRunAgentProcessAsync_ResumeFailureUsesRawCASWithoutCallbacks(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateInProgress}
+	stopCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
+		},
+		stopAgentFunc: func(ctx context.Context, agentExecutionID string, force bool) error {
+			close(stopCh)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	// Deliberately no SetOnTaskStateChange / SetOnTaskReviewStateReconcile.
+
+	exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		false, true) // resume path: no escalation, fromResume=true
+
+	select {
+	case <-stopCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for StopAgent to be called")
+	}
+
+	if got := repo.tasks["task-123"].State; got != v1.TaskStateReview {
+		t.Errorf("expected resume failure to reconcile task state to REVIEW via the raw CAS, got %q", got)
+	}
+	if len(repo.updateTaskStateIfCurrentInCalls) != 1 {
+		t.Fatalf("expected exactly 1 UpdateTaskStateIfCurrentIn call, got %d: %+v", len(repo.updateTaskStateIfCurrentInCalls), repo.updateTaskStateIfCurrentInCalls)
+	}
+	call := repo.updateTaskStateIfCurrentInCalls[0]
+	if call.TaskID != "task-123" || call.State != v1.TaskStateReview {
+		t.Errorf("unexpected CAS call: %+v", call)
+	}
+	if len(call.Allowed) != 2 || call.Allowed[0] != v1.TaskStateInProgress || call.Allowed[1] != v1.TaskStateScheduling {
+		t.Errorf("expected CAS allowed=[IN_PROGRESS, SCHEDULING], got %v", call.Allowed)
+	}
+}
+
+// TestRunAgentProcessAsync_ResumeFailureSkipsArchivedTaskRacingCAS is the
+// TOCTOU companion to TestRunAgentProcessAsync_ResumeFailureUsesRawCASWithoutCallbacks
+// (cubic review finding on PR #1706): the task is NOT archived when
+// shouldSkipFailedStartReviewForTask's earlier (non-transactional) guard
+// runs — that guard passes — and only archives via preCASHook right as
+// UpdateTaskStateIfCurrentIn is invoked, modeling ArchiveTask committing in
+// the exact gap between the guard read and the atomic write. Without the
+// archived_at check inside the CAS itself (not just the earlier guard),
+// this write would still land and resurrect the task to REVIEW.
+func TestRunAgentProcessAsync_ResumeFailureSkipsArchivedTaskRacingCAS(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateInProgress}
+	repo.preCASHook = func(taskID string) {
+		if task, ok := repo.tasks[taskID]; ok {
+			archivedAt := time.Now().UTC()
+			task.ArchivedAt = &archivedAt
+		}
+	}
+	stopCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			return fmt.Errorf("ACP initialize handshake failed: context deadline exceeded")
+		},
+		stopAgentFunc: func(ctx context.Context, agentExecutionID string, force bool) error {
+			close(stopCh)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	// Deliberately no SetOnTaskStateChange / SetOnTaskReviewStateReconcile.
+
+	exec.runAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456",
+		func(ctx context.Context) { t.Error("onSuccess should not run on failure") },
+		false, true) // resume path: no escalation, fromResume=true
+
+	select {
+	case <-stopCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for StopAgent to be called")
+	}
+
+	if got := repo.tasks["task-123"].State; got != v1.TaskStateInProgress {
+		t.Errorf("expected archive racing the CAS to leave state untouched, got %q", got)
+	}
+	if len(repo.updateTaskStateIfCurrentInCalls) != 1 {
+		t.Fatalf("expected the CAS to still be called (guard passed pre-archive), got %+v", repo.updateTaskStateIfCurrentInCalls)
+	}
+}
+
+// waitForUpdateTaskStateIfNotArchivedCall blocks (via a channel signal, not
+// polling) until startAgentProcessAsync's background goroutine has recorded
+// its UpdateTaskStateIfNotArchived call. Needed because — unlike the
+// resume-failure tests above, where StopAgent (closing the sync channel)
+// runs strictly after the state write — startAgentProcessAsync's onSuccess
+// callback has nothing observable after the write itself.
+func waitForUpdateTaskStateIfNotArchivedCall(t *testing.T, repo *mockRepository) {
+	t.Helper()
+	select {
+	case <-repo.updateTaskStateIfNotArchivedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for UpdateTaskStateIfNotArchived call")
+	}
+}
+
+// TestStartAgentProcessAsync_UsesRawCASWithoutCallbacks is the IN_PROGRESS
+// analog of TestRunAgentProcessAsync_ResumeFailureUsesRawCASWithoutCallbacks:
+// with no SetOnTaskStateChange callback wired, startAgentProcessAsync's
+// post-launch IN_PROGRESS write must go through the archive-aware
+// UpdateTaskStateIfNotArchived CAS on the repository rather than the
+// unconditional UpdateTaskState (carlosflorencio review on PR #1706:
+// writeTaskInProgressForRuntime's ArchivedAt guard was followed by an
+// unconditional write, leaving the same TOCTOU window open as the REVIEW
+// writers had before the CAS fix).
+func TestStartAgentProcessAsync_UsesRawCASWithoutCallbacks(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateWaitingForInput}
+	startedCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			close(startedCh)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	// Deliberately no SetOnTaskStateChange.
+
+	exec.startAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456")
+
+	select {
+	case <-startedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for StartAgentProcess to be called")
+	}
+
+	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
+
+	if got := repo.tasks["task-123"].State; got != v1.TaskStateInProgress {
+		t.Errorf("expected agent start success to promote task state to IN_PROGRESS via the raw CAS, got %q", got)
+	}
+	call := repo.updateTaskStateIfNotArchivedCalls[0]
+	if call.TaskID != "task-123" || call.State != v1.TaskStateInProgress {
+		t.Errorf("unexpected CAS call: %+v", call)
+	}
+}
+
+// TestStartAgentProcessAsync_SkipsArchivedTaskRacingCAS is the TOCTOU
+// companion to TestStartAgentProcessAsync_UsesRawCASWithoutCallbacks: the
+// task is NOT archived when startAgentProcessAsync's earlier archived guard
+// (inside its onSuccess callback, via updateTaskState → the repo fallback)
+// would have run, and only archives via preCASHook right as
+// UpdateTaskStateIfNotArchived is invoked, modeling ArchiveTask committing
+// in the exact gap between an earlier archived-state read and the atomic
+// write. Without the archived_at check inside the CAS itself, this write
+// would still land and resurrect the task to IN_PROGRESS.
+func TestStartAgentProcessAsync_SkipsArchivedTaskRacingCAS(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateWaitingForInput}
+	repo.preCASHook = func(taskID string) {
+		if task, ok := repo.tasks[taskID]; ok {
+			archivedAt := time.Now().UTC()
+			task.ArchivedAt = &archivedAt
+		}
+	}
+	startedCh := make(chan struct{})
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(ctx context.Context, agentExecutionID string) error {
+			close(startedCh)
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	// Deliberately no SetOnTaskStateChange.
+
+	exec.startAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456")
+
+	select {
+	case <-startedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for StartAgentProcess to be called")
+	}
+
+	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
+
+	if got := repo.tasks["task-123"].State; got != v1.TaskStateWaitingForInput {
+		t.Errorf("expected archive racing the CAS to leave state untouched, got %q", got)
+	}
+}
+
 func TestRunAgentProcessAsync_ResumeFailureDoesNotReviewWhileSiblingWorks(t *testing.T) {
 	f := newRunAgentProcessAsyncFailureFixture(t)
 	f.repo.sessions["session-456"] = &models.TaskSession{
@@ -1456,6 +1671,30 @@ func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsOfficeTask(t *testing.T) {
 
 	if len(taskStateUpdates) != 0 {
 		t.Errorf("expected office task to keep workflow state, got %v", taskStateUpdates)
+	}
+}
+
+func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsArchivedTask(t *testing.T) {
+	repo := newMockRepository()
+	archivedAt := time.Now().UTC()
+	repo.tasks["task-123"] = &models.Task{
+		ID:         "task-123",
+		ArchivedAt: &archivedAt,
+	}
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateFailed,
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	var taskStateUpdates []v1.TaskState
+	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
+		taskStateUpdates = append(taskStateUpdates, state)
+		return nil
+	})
+
+	exec.writeTaskReviewStateIfNoWorkingSessions(context.Background(), "task-123", "session-123")
+
+	if len(taskStateUpdates) != 0 {
+		t.Errorf("expected archived task to keep its frozen state, got %v", taskStateUpdates)
 	}
 }
 

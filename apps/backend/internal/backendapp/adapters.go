@@ -59,6 +59,14 @@ func (a *taskRepositoryAdapter) UpdateTaskStateIfCurrentIn(
 	return a.svc.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
 }
 
+// UpdateTaskStateIfNotArchived is UpdateTaskStateIfCurrentIn without the
+// prior-state constraint (see scheduler.TaskRepository doc).
+func (a *taskRepositoryAdapter) UpdateTaskStateIfNotArchived(
+	ctx context.Context, taskID string, state v1.TaskState,
+) (bool, error) {
+	return a.svc.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+}
+
 // lifecycleAdapter adapts the lifecycle manager as an AgentManagerClient
 type lifecycleAdapter struct {
 	mgr      *lifecycle.Manager
@@ -102,6 +110,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		TaskTitle:           req.TaskTitle,
 		AgentProfileID:      officeProfileID,
 		ExecutionProfileID:  req.AgentProfileID,
+		StartAgent:          req.StartAgent,
 		WorkspacePath:       workspacePath,
 		TaskDescription:     req.TaskDescription,
 		Attachments:         convertToLifecycleAttachments(req.Attachments),

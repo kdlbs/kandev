@@ -182,19 +182,6 @@ func (r *RemotePlugin) DeliverEvent(ctx context.Context, e *Event) error {
 	return err
 }
 
-// InvokeTool calls the plugin's InvokeTool RPC.
-func (r *RemotePlugin) InvokeTool(ctx context.Context, req *ToolRequest) (*ToolResponse, error) {
-	proto, err := req.toProto()
-	if err != nil {
-		return nil, err
-	}
-	resp, err := r.client.InvokeTool(ctx, proto)
-	if err != nil {
-		return nil, err
-	}
-	return toolResponseFromProto(resp)
-}
-
 // HandleWebhook calls the plugin's HandleWebhook RPC.
 func (r *RemotePlugin) HandleWebhook(ctx context.Context, req *WebhookRequest) (*WebhookResponse, error) {
 	resp, err := r.client.HandleWebhook(ctx, req.toProto())
@@ -221,18 +208,6 @@ func (s *grpcPluginServer) DeliverEvent(ctx context.Context, req *pluginv1.Event
 		return nil, err
 	}
 	return &pluginv1.EventAck{}, nil
-}
-
-func (s *grpcPluginServer) InvokeTool(ctx context.Context, req *pluginv1.ToolRequest) (*pluginv1.ToolResponse, error) {
-	toolReq, err := toolRequestFromProto(req)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := s.impl.InvokeTool(ctx, toolReq)
-	if err != nil {
-		return nil, err
-	}
-	return resp.toProto()
 }
 
 func (s *grpcPluginServer) HandleWebhook(ctx context.Context, req *pluginv1.WebhookRequest) (*pluginv1.WebhookResponse, error) {

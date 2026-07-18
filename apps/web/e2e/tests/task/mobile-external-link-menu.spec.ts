@@ -35,34 +35,45 @@ test.describe("Mobile sidebar — external link menu", () => {
     await session.waitForLoad();
 
     await testPage.getByTestId("mobile-session-menu").click();
-    const sheet = testPage.getByRole("dialog");
-    const taskRow = sheet.locator('[role="button"]').filter({
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+    const taskRow = sheet.getByTestId("sidebar-task-item").filter({
       hasText: "Mobile external link task",
     });
     await expect(taskRow).toBeVisible({ timeout: 10_000 });
-    await taskRow.dispatchEvent("pointerdown", {
-      pointerType: "touch",
-      isPrimary: true,
-      button: 0,
-      clientX: 120,
-      clientY: 240,
-    });
-    await testPage.waitForTimeout(1000);
-    await taskRow.dispatchEvent("pointerup", {
-      pointerType: "touch",
-      isPrimary: true,
-      button: 0,
-      clientX: 120,
-      clientY: 240,
-    });
+    const actions = taskRow.getByRole("button", { name: "Task actions" });
+    await expect(actions).toBeVisible();
+    await actions.click();
 
     const linkTrigger = testPage.getByRole("menuitem", { name: /^Link$/ });
     await expect(linkTrigger).toBeVisible();
-    await linkTrigger.focus();
-    await testPage.keyboard.press("ArrowRight");
+    await linkTrigger.click();
 
-    await expect(testPage.getByRole("menuitem", { name: "Jira Ticket" })).toBeVisible();
+    const jiraItem = testPage.getByRole("menuitem", { name: "Jira Ticket" });
+    await expect(jiraItem).toBeVisible();
     await expect(testPage.getByRole("menuitem", { name: "Linear Issue" })).toBeVisible();
     await expect(testPage.getByRole("menuitem", { name: "Sentry Issue" })).toBeVisible();
+
+    const nestedMenu = jiraItem.locator("xpath=ancestor::*[@role='menu'][1]");
+    await nestedMenu.evaluate((element) =>
+      Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => undefined)),
+      ),
+    );
+    const [menuBox, itemBox] = await Promise.all([
+      nestedMenu.boundingBox(),
+      jiraItem.boundingBox(),
+    ]);
+    const viewport = testPage.viewportSize();
+    if (!menuBox || !itemBox || !viewport) throw new Error("mobile nested menu has no layout box");
+    expect(menuBox.x).toBeGreaterThanOrEqual(8);
+    expect(menuBox.x).toBeLessThanOrEqual(18);
+    expect(menuBox.width).toBeGreaterThanOrEqual(viewport.width - 36);
+    expect(viewport.width - (menuBox.x + menuBox.width)).toBeGreaterThanOrEqual(8);
+    expect(viewport.width - (menuBox.x + menuBox.width)).toBeLessThanOrEqual(18);
+    expect(viewport.height - (menuBox.y + menuBox.height)).toBeGreaterThanOrEqual(7);
+    expect(viewport.height - (menuBox.y + menuBox.height)).toBeLessThanOrEqual(18);
+    expect(itemBox.height).toBeGreaterThanOrEqual(44);
   });
 });

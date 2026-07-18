@@ -108,7 +108,9 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
 | [acp-model-configuration-summary](ui/acp-model-configuration-summary.md) | shipped |
 | [review-file-status](ui/review-file-status.md) | building |
+| [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
+| [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -118,6 +120,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 |---|---|
 | [system-page](system-page/spec.md) | draft |
 | [feature-toggles](feature-toggles/spec.md) | draft |
+| [storage-maintenance](system-page/storage-maintenance.md) | building |
 
 ---
 
@@ -133,6 +136,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [public-share-links](public-share-links/spec.md) | draft |
 | [ssh-executor](ssh-executor/spec.md) | draft |
 | [cli-mode-parity](cli-mode-parity/spec.md) | draft |
+| [mobile-quick-chat-topbar](mobile-quick-chat-topbar/spec.md) | building |
 
 ---
 

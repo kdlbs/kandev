@@ -233,6 +233,19 @@ func (r *testTaskRepository) UpdateTaskStateIfCurrentIn(
 	return false, nil
 }
 
+func (r *testTaskRepository) UpdateTaskStateIfNotArchived(
+	_ context.Context, taskID string, state v1.TaskState,
+) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	task, exists := r.tasks[taskID]
+	if !exists {
+		return false, fmt.Errorf("%w: %s", taskrepo.ErrTaskNotFound, taskID)
+	}
+	task.State = state
+	return true, nil
+}
+
 func createTestLogger() *logger.Logger {
 	log, _ := logger.NewLogger(logger.LoggingConfig{
 		Level:  "error", // Suppress logs during tests

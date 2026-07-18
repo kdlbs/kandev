@@ -23,7 +23,7 @@ function isEditableTarget(e: KeyboardEvent): boolean {
  * task list, Office, Settings, etc. Mount this once near the app root (it has
  * no dockview dependency) so the binding works everywhere.
  *
- * The AppSidebar is desktop-only (`hidden md:flex`); on mobile the toggle still
+ * The AppSidebar is hidden below the `md` breakpoint; on mobile the toggle still
  * flips store state but has no visible effect, which is fine.
  */
 export function useAppShortcuts() {

@@ -180,6 +180,10 @@ type CreateRequest struct {
 	// ~/.kandev/tasks/{TaskDirName}/{RepoName}/ instead of ~/.kandev/worktrees/.
 	TaskDirName string
 
+	// WorkspaceID is persisted in the task-root ownership marker used by
+	// install-wide workspace maintenance.
+	WorkspaceID string
+
 	// RepoName is the repository name used as subdirectory inside the task directory.
 	// Only used when TaskDirName is also set.
 	RepoName string

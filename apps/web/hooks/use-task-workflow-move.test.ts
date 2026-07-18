@@ -50,17 +50,19 @@ describe("useTaskWorkflowMove", () => {
     expect(mockToast).not.toHaveBeenCalled();
   });
 
-  it("shows singular, plural, and zero-count success messages", async () => {
+  it("shows workflow and same-workflow step success messages", async () => {
     mockBulkMoveSelectedTasks
       .mockResolvedValueOnce({ moved_count: 1 })
       .mockResolvedValueOnce({ moved_count: 2 })
-      .mockResolvedValueOnce({ moved_count: 0 });
+      .mockResolvedValueOnce({ moved_count: 0 })
+      .mockResolvedValueOnce({ moved_count: 1 });
     const { result } = renderHook(() => useTaskWorkflowMove());
 
     await act(async () => {
       await result.current([TASK_1], TARGET_WORKFLOW_ID, TARGET_STEP_ID);
       await result.current([TASK_1, TASK_2], TARGET_WORKFLOW_ID, TARGET_STEP_ID);
       await result.current([TASK_1], TARGET_WORKFLOW_ID, TARGET_STEP_ID);
+      await result.current([TASK_1], TARGET_WORKFLOW_ID, TARGET_STEP_ID, "step");
     });
 
     expect(mockToast).toHaveBeenNthCalledWith(1, {
@@ -76,6 +78,11 @@ describe("useTaskWorkflowMove", () => {
     expect(mockToast).toHaveBeenNthCalledWith(3, {
       title: "Moved 0 tasks to workflow",
       description: "Switch to the destination workflow to see them.",
+      variant: "success",
+    });
+    expect(mockToast).toHaveBeenNthCalledWith(4, {
+      title: "Moved task to step",
+      description: "The task is now in the selected step.",
       variant: "success",
     });
   });

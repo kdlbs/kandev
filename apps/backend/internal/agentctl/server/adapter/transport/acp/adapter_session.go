@@ -55,6 +55,8 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	a.sessionID = string(resp.SessionId)
 	sessionID := a.sessionID
+	a.configGeneration++
+	clear(a.contextSamples)
 	// Reset session-scoped model caches before computing the new session's
 	// state so a session without a model surface can't reuse the previous
 	// session's models / configOptions for validation in SetModel.
@@ -132,14 +134,6 @@ func hasModelConfigOption(options []streams.ConfigOption) bool {
 		}
 	}
 	return false
-}
-
-func sessionConfigOptions(meta map[string]any, acpConfigOptions []acp.SessionConfigOption) []streams.ConfigOption {
-	configOptions := convertACPConfigOptions(acpConfigOptions)
-	if len(configOptions) > 0 {
-		return configOptions
-	}
-	return extractConfigOptions(meta)
 }
 
 // effectiveMcpCapabilities applies the adapter's AssumeMcpSse/AssumeMcpHttp
@@ -320,6 +314,8 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	a.mu.Lock()
 	a.sessionID = sessionID
+	a.configGeneration++
+	clear(a.contextSamples)
 	// Reset session-scoped model caches so a load that lands on a session
 	// without a model surface can't reuse the previous session's data.
 	a.availableModels = nil
@@ -426,9 +422,9 @@ func (a *Adapter) emitInitialModeState(modes *acp.SessionModeState) {
 // emitSessionModels emits a session_models event from the session response.
 func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState, meta map[string]any, acpConfigOptions []acp.SessionConfigOption) {
 	currentModelID := models.CurrentModelId
-	// Prefer typed config options from the response; fall back to _meta
-	// extraction for older agents.
-	configOptions := sessionConfigOptions(meta, acpConfigOptions)
+	configOptions := a.dialect.sessionConfigOptions(
+		meta, acpConfigOptions, models.AvailableModels, currentModelID,
+	)
 
 	// Fallback: if the SDK didn't parse currentModelId (some agents omit it),
 	// take the model-shaped configOption's CurrentValue verbatim. We
@@ -473,7 +469,13 @@ func (a *Adapter) emitSessionModels(sessionID string, models *sessionModelState,
 // — this prevents a downstream consumer that reads ConfigOptions[model]
 // .CurrentValue (codex-style agents surface the current model there) from
 // disagreeing with the CurrentModelID emitted on the same event.
-func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []modelInfo, cachedConfig []streams.ConfigOption) {
+func (a *Adapter) emitSetModelEvent(
+	sessionID string,
+	modelID string,
+	cachedModels []modelInfo,
+	cachedConfig []streams.ConfigOption,
+	expectedGeneration ...uint64,
+) {
 	outConfig := cachedConfig
 	if len(cachedConfig) > 0 {
 		// Shallow copy: only CurrentValue (a string) is rewritten below, so
@@ -488,7 +490,24 @@ func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []mo
 			}
 		}
 	}
-
+	outConfig = a.dialect.modelConfigAfterChange(outConfig, cachedModels, modelID)
+	a.mu.Lock()
+	if a.sessionID != sessionID ||
+		(len(expectedGeneration) > 0 && a.configGeneration != expectedGeneration[0]) {
+		a.mu.Unlock()
+		return
+	}
+	if len(outConfig) > 0 {
+		// Refresh the cached config options so a subsequent SetConfigOption
+		// (e.g. user toggles reasoning effort after switching model) doesn't
+		// reuse the stale model CurrentValue from session/new and clobber the
+		// just-applied model in the convergence event.
+		a.availableConfigOptions = outConfig
+	}
+	if tracker := a.usageBySession[sessionID]; tracker != nil {
+		tracker.maxSize = 0
+	}
+	delete(a.contextSamples, sessionID)
 	event := AgentEvent{
 		Type:           streams.EventTypeSessionModels,
 		SessionID:      sessionID,
@@ -496,13 +515,17 @@ func (a *Adapter) emitSetModelEvent(sessionID, modelID string, cachedModels []mo
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
 	}
-	if !a.emitConfigUpdateForSession(sessionID, outConfig, event) {
-		return
-	}
+	sent := a.sendUpdateLocked(event)
+	closed := a.closed
+	a.mu.Unlock()
+
 	a.logger.Info("emitting session_models convergence event after SetModel",
 		zap.String("session_id", sessionID),
 		zap.String("model_id", modelID),
 	)
+	if !sent && !closed {
+		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+	}
 }
 
 // currentModelFromConfig returns the CurrentValue of the model-shaped
@@ -567,6 +590,53 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	if conn == nil {
 		return fmt.Errorf("adapter not initialized")
 	}
+	return a.setModelWithConn(ctx, conn, sessionID, modelID, available, cachedConfig)
+}
+
+func (a *Adapter) setModelWithConn(
+	ctx context.Context,
+	conn sessionmodel.SDKConn,
+	sessionID string,
+	modelID string,
+	available []modelInfo,
+	cachedConfig []streams.ConfigOption,
+) error {
+	generation := a.beginConfigChange()
+	a.configChangeMu.Lock()
+	defer a.configChangeMu.Unlock()
+	if !a.isCurrentConfigChange(sessionID, generation) {
+		return nil
+	}
+
+	rpc, err := a.dialect.modelRequest(dialectConfigChange{
+		sessionID: sessionID,
+		value:     modelID,
+		models:    available,
+		config:    cachedConfig,
+	})
+	if err != nil {
+		return err
+	}
+	if rpc != nil {
+		_, err = conn.UnstableSetSessionModel(ctx, rpc.request)
+		if !a.isCurrentConfigChange(sessionID, generation) {
+			return nil
+		}
+		if err != nil {
+			return rpc.formatError(err)
+		}
+		a.finalizeSetModel(
+			sessionmodel.MethodSetModel,
+			sessionID,
+			modelID,
+			available,
+			cachedConfig,
+			configOptionIDModel,
+			nil,
+			generation,
+		)
+		return nil
+	}
 
 	// Validate model exists in the agent's available models (if known).
 	if len(available) > 0 {
@@ -576,10 +646,13 @@ func (a *Adapter) SetModel(ctx context.Context, modelID string) error {
 	}
 
 	method, responseConfig, configID, err := applySessionModelWithConfigOptions(ctx, conn, sessionID, modelID, cachedConfig)
+	if !a.isCurrentConfigChange(sessionID, generation) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("set session model failed via %s: %w", method, err)
 	}
-	a.finalizeSetModel(method, sessionID, modelID, available, cachedConfig, configID, responseConfig)
+	a.finalizeSetModel(method, sessionID, modelID, available, cachedConfig, configID, responseConfig, generation)
 	return nil
 }
 
@@ -604,16 +677,33 @@ func (a *Adapter) finalizeSetModel(
 	cachedConfig []streams.ConfigOption,
 	configID string,
 	responseConfig []acp.SessionConfigOption,
+	expectedGeneration ...uint64,
 ) {
 	if method == sessionmodel.MethodNone {
 		return
 	}
-	a.resetContextWindowMaxSize(sessionID)
 	if len(responseConfig) > 0 {
-		a.emitAuthoritativeConfigOptions(sessionID, configID, responseConfig, available)
+		a.emitAuthoritativeConfigOptions(sessionID, configID, responseConfig, available, expectedGeneration...)
 		return
 	}
-	a.emitSetModelEvent(sessionID, modelID, available, cachedConfig)
+	a.emitSetModelEvent(sessionID, modelID, available, cachedConfig, expectedGeneration...)
+}
+
+func (a *Adapter) beginConfigChange() uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.configGeneration++
+	return a.configGeneration
+}
+
+func (a *Adapter) isCurrentConfigChange(sessionID string, generation uint64) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.configChangeIsCurrentLocked(sessionID, generation)
+}
+
+func (a *Adapter) configChangeIsCurrentLocked(sessionID string, generation uint64) bool {
+	return a.sessionID == sessionID && a.configGeneration == generation
 }
 
 func applySessionModel(
@@ -713,6 +803,48 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 		return fmt.Errorf("no active session: call NewSession before SetConfigOption")
 	}
 
+	generation := a.beginConfigChange()
+	a.configChangeMu.Lock()
+	defer a.configChangeMu.Unlock()
+	if !a.isCurrentConfigChange(sessionID, generation) {
+		return nil
+	}
+
+	rpc, err := a.dialect.configRequest(dialectConfigChange{
+		sessionID: sessionID,
+		configID:  configID,
+		value:     value,
+		models:    cachedModels,
+		config:    cachedConfig,
+	})
+	if err != nil {
+		return err
+	}
+	if rpc != nil {
+		_, err = conn.UnstableSetSessionModel(ctx, rpc.request)
+		if !a.isCurrentConfigChange(sessionID, generation) {
+			return nil
+		}
+		if err != nil {
+			return rpc.formatError(err)
+		}
+		if isModelConfigID(configID, cachedConfig) {
+			a.finalizeSetModel(
+				sessionmodel.MethodSetModel,
+				sessionID,
+				value,
+				cachedModels,
+				cachedConfig,
+				configID,
+				nil,
+				generation,
+			)
+		} else {
+			a.emitSetConfigOptionEvent(sessionID, configID, value, cachedModels, cachedConfig, generation)
+		}
+		return nil
+	}
+
 	resp, err := conn.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
 		ValueId: &acp.SetSessionConfigOptionValueId{
 			SessionId: acp.SessionId(sessionID),
@@ -720,6 +852,9 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 			Value:     acp.SessionConfigValueId(value),
 		},
 	})
+	if !a.isCurrentConfigChange(sessionID, generation) {
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("set session config option failed: %w", err)
 	}
@@ -730,13 +865,13 @@ func (a *Adapter) SetConfigOption(ctx context.Context, configID, value string) e
 		return nil
 	}
 	if len(resp.ConfigOptions) > 0 {
-		a.emitAuthoritativeConfigOptions(sessionID, configID, resp.ConfigOptions, cachedModels)
+		a.emitAuthoritativeConfigOptions(sessionID, configID, resp.ConfigOptions, cachedModels, generation)
 		return nil
 	}
 	if isModelConfigID(configID, cachedConfig) {
-		a.emitSetModelEvent(sessionID, value, cachedModels, cachedConfig)
+		a.emitSetModelEvent(sessionID, value, cachedModels, cachedConfig, generation)
 	} else {
-		a.emitSetConfigOptionEvent(sessionID, configID, value, cachedModels, cachedConfig)
+		a.emitSetConfigOptionEvent(sessionID, configID, value, cachedModels, cachedConfig, generation)
 	}
 	return nil
 }
@@ -746,9 +881,10 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 	configID string,
 	options []acp.SessionConfigOption,
 	cachedModels []modelInfo,
+	expectedGeneration ...uint64,
 ) {
 	configOptions := convertACPConfigOptions(options)
-	a.emitConfigUpdateForSession(sessionID, configOptions, AgentEvent{
+	event := AgentEvent{
 		Type:           streams.EventTypeSessionModels,
 		SessionID:      sessionID,
 		CurrentModelID: currentModelFromConfig(configOptions),
@@ -758,29 +894,43 @@ func (a *Adapter) emitAuthoritativeConfigOptions(
 			"config_options_source":    "provider_response",
 			"config_options_config_id": configID,
 		},
-	})
-}
-
-func (a *Adapter) emitConfigUpdateForSession(
-	sessionID string,
-	configOptions []streams.ConfigOption,
-	event AgentEvent,
-) bool {
+	}
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	if len(expectedGeneration) > 0 && !a.configChangeIsCurrentLocked(sessionID, expectedGeneration[0]) {
+		a.mu.Unlock()
+		return
+	}
 	if a.sessionID != sessionID || a.closed {
-		return false
+		a.mu.Unlock()
+		return
 	}
 	a.availableConfigOptions = configOptions
-	a.sendUpdateLocked(event)
-	return true
+	if isModelConfigID(configID, configOptions) {
+		if tracker := a.usageBySession[sessionID]; tracker != nil {
+			tracker.maxSize = 0
+		}
+		delete(a.contextSamples, sessionID)
+	}
+	sent := a.sendUpdateLocked(event)
+	closed := a.closed
+	a.mu.Unlock()
+	if !sent && !closed {
+		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+	}
 }
 
 // emitSetConfigOptionEvent emits a session_models convergence event after a
 // non-model SetConfigOption RPC succeeds. The frontend uses this to keep the
 // option dropdowns in sync with the agent without waiting for an agent-driven
 // ConfigOptionUpdate.
-func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, cachedModels []modelInfo, cachedConfig []streams.ConfigOption) {
+func (a *Adapter) emitSetConfigOptionEvent(
+	sessionID string,
+	configID string,
+	value string,
+	cachedModels []modelInfo,
+	cachedConfig []streams.ConfigOption,
+	expectedGeneration ...uint64,
+) {
 	if len(cachedConfig) == 0 {
 		// In normal operation session/new populates availableConfigOptions
 		// before the frontend can fire a SetConfigOption. Hitting this branch
@@ -815,6 +965,16 @@ func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, ca
 			zap.String("config_id", configID),
 		)
 	}
+	// Refresh the cached config options so consecutive SetConfigOption
+	// calls (or a follow-up SetModel) read the latest CurrentValues
+	// instead of the stale session/new snapshot.
+	a.mu.Lock()
+	if a.sessionID != sessionID ||
+		(len(expectedGeneration) > 0 && a.configGeneration != expectedGeneration[0]) {
+		a.mu.Unlock()
+		return
+	}
+	a.availableConfigOptions = outConfig
 	event := AgentEvent{
 		Type:           streams.EventTypeSessionModels,
 		SessionID:      sessionID,
@@ -822,14 +982,18 @@ func (a *Adapter) emitSetConfigOptionEvent(sessionID, configID, value string, ca
 		SessionModels:  convertSessionModels(cachedModels),
 		ConfigOptions:  outConfig,
 	}
-	if !a.emitConfigUpdateForSession(sessionID, outConfig, event) {
-		return
-	}
+	sent := a.sendUpdateLocked(event)
+	closed := a.closed
+	a.mu.Unlock()
+
 	a.logger.Info("emitting session_models convergence event after SetConfigOption",
 		zap.String("session_id", sessionID),
 		zap.String("config_id", configID),
 		zap.String("value", value),
 	)
+	if !sent && !closed {
+		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+	}
 }
 
 // isModelConfigID reports whether configID identifies the model-shaped

@@ -46,7 +46,6 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateCategories()...)
 	errs = append(errs, m.validateUIPages()...)
 	errs = append(errs, m.validateUIBundle()...)
-	errs = append(errs, m.validateTools()...)
 	errs = append(errs, m.validateWebhooks()...)
 	return errors.Join(errs...)
 }
@@ -158,9 +157,6 @@ func (m *Manifest) validateEndpoints() []error {
 	if m.Endpoints.Events == "" {
 		errs = append(errs, errors.New("endpoints.events is required"))
 	}
-	if m.Endpoints.Tools == "" {
-		errs = append(errs, errors.New("endpoints.tools is required"))
-	}
 	if m.Endpoints.Webhooks == "" {
 		errs = append(errs, errors.New("endpoints.webhooks is required"))
 	}
@@ -202,20 +198,6 @@ func (m *Manifest) validateUIBundle() []error {
 		if !strings.HasPrefix(style, "/") {
 			errs = append(errs, fmt.Errorf("ui.styles entry %q must be a root-relative path (start with \"/\")", style))
 		}
-	}
-	return errs
-}
-
-// validateTools checks for duplicate tool names.
-func (m *Manifest) validateTools() []error {
-	seen := make(map[string]bool, len(m.Tools))
-	var errs []error
-	for _, tool := range m.Tools {
-		if seen[tool.Name] {
-			errs = append(errs, fmt.Errorf("duplicate tool name %q", tool.Name))
-			continue
-		}
-		seen[tool.Name] = true
 	}
 	return errs
 }

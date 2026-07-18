@@ -3,12 +3,14 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
@@ -72,11 +74,23 @@ func (m *Manager) routePassthrough(ctx context.Context, execution *AgentExecutio
 // StartAgentProcess configures and starts the agent subprocess for an execution.
 // This must be called after Launch() to actually start the agent (e.g., auggie, codex).
 // The command is built internally based on the execution's agent profile.
-func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) error {
+func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (retErr error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	activityClaim, err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing)
+	if err != nil {
+		return err
+	}
+	operationCtx := activityClaim.Context(ctx)
+	defer func() {
+		if retErr != nil {
+			activityClaim.Release()
+			return
+		}
+		activityClaim.Commit()
+	}()
 
 	// Decide passthrough vs ACP. The session-creation snapshot
 	// (execution.IsPassthrough, sourced from TaskSession.IsPassthrough) is
@@ -92,8 +106,12 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	// transient resolve error must not silently route a passthrough session
 	// to ACP — the resume branch routes on the snapshot alone, and the fresh
 	// branch surfaces the resolve error explicitly.
-	if isPassthrough, profileInfo := m.routePassthrough(ctx, execution); isPassthrough {
-		return m.startPassthroughExecution(ctx, execution, profileInfo)
+	isPassthrough, profileInfo := m.routePassthrough(operationCtx, execution)
+	if err := context.Cause(operationCtx); err != nil {
+		return err
+	}
+	if isPassthrough {
+		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
 
 	if execution.agentctl == nil {
@@ -110,13 +128,13 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 	}
 
 	// Wait for agentctl to be ready
-	if err := execution.agentctl.WaitForReady(ctx, 60*time.Second); err != nil {
+	if err := execution.agentctl.WaitForReady(operationCtx, 60*time.Second); err != nil {
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
 
 	taskDescription := getTaskDescriptionFromMetadata(execution)
-	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(ctx, execution)
+	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
 
 	var bootCommand string
 	if reuseExisting {
@@ -135,7 +153,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 			zap.String("acp_session_id", execution.ACPSessionID))
 
 		var err error
-		bootCommand, err = m.configureAndStartAgent(ctx, execution, approvalPolicy)
+		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
 		if err != nil {
 			return err
 		}
@@ -146,7 +164,7 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) err
 			zap.String("command", bootCommand))
 	}
 
-	return m.initializeAgentSession(ctx, execution, bootCommand, agentDisplayName, taskDescription)
+	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription)
 }
 
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.
@@ -264,12 +282,52 @@ func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, 
 			}
 		}
 	}
+	if req.managedGoCachePath != "" {
+		env["GOCACHE"] = req.managedGoCachePath
+	}
 
 	if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
 		return nil, err
 	}
 
 	return env, nil
+}
+
+func (m *Manager) prepareManagedGoCacheEnvironment(ctx context.Context, req *LaunchRequest) error {
+	if req == nil || m.managedGoCache == nil || !isHostLocalExecutor(req.ExecutorType) {
+		return nil
+	}
+	env, err := m.managedGoCache.ExecutionEnvironment(ctx)
+	if err != nil {
+		return fmt.Errorf("prepare managed Go cache: %w", err)
+	}
+	path := env["GOCACHE"]
+	if path == "" {
+		return nil
+	}
+	if !filepath.IsAbs(path) {
+		return fmt.Errorf("managed GOCACHE must be absolute: %q", path)
+	}
+	path = filepath.Clean(path)
+	if req.Env == nil {
+		req.Env = make(map[string]string)
+	}
+	req.Env["GOCACHE"] = path
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]interface{})
+	}
+	req.Metadata[managedGoCacheMetadataKey] = path
+	req.managedGoCachePath = path
+	return nil
+}
+
+func isHostLocalExecutor(executorType string) bool {
+	switch models.ExecutorType(executorType) {
+	case "", models.ExecutorTypeLocal, "local_pc", models.ExecutorTypeWorktree:
+		return true
+	default:
+		return false
+	}
 }
 
 // waitForAgentctlReady waits for the agentctl HTTP server to be ready.

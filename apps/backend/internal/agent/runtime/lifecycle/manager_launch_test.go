@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -14,10 +15,12 @@ import (
 	"testing"
 	"time"
 
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -554,6 +557,118 @@ func (p *progressPreparer) Prepare(_ context.Context, _ *EnvPrepareRequest, onPr
 	return &EnvPrepareResult{Success: true, Steps: []PrepareStep{step}, WorkspacePath: "/tmp/ws"}, nil
 }
 
+type staticManagedGoCacheEnvironment struct {
+	path string
+}
+
+func (p staticManagedGoCacheEnvironment) ExecutionEnvironment(context.Context) (map[string]string, error) {
+	return map[string]string{"GOCACHE": p.path}, nil
+}
+
+func TestPrepareManagedGoCacheEnvironmentOverridesLocalRequest(t *testing.T) {
+	mgr := newTestManager(t)
+	managedPath := filepath.Join(t.TempDir(), "cache", "go-build")
+	mgr.SetManagedGoCacheEnvironmentProvider(staticManagedGoCacheEnvironment{path: managedPath})
+	req := &LaunchRequest{
+		ExecutorType: "local_pc",
+		Env:          map[string]string{"GOCACHE": "/home/user/.cache/go-build"},
+	}
+
+	err := mgr.prepareManagedGoCacheEnvironment(context.Background(), req)
+	if err != nil {
+		t.Fatalf("prepareManagedGoCacheEnvironment() error = %v", err)
+	}
+	if got := req.Env["GOCACHE"]; got != managedPath {
+		t.Fatalf("request GOCACHE = %q, want %q", got, managedPath)
+	}
+	if req.managedGoCachePath != managedPath {
+		t.Fatalf("managedGoCachePath = %q, want %q", req.managedGoCachePath, managedPath)
+	}
+	if got, _ := req.Metadata[managedGoCacheMetadataKey].(string); got != managedPath {
+		t.Fatalf("managed cache metadata = %q, want %q", got, managedPath)
+	}
+}
+
+func TestManagedGoCacheEnvironmentPropagatesToPrepareAndRuntime(t *testing.T) {
+	mgr := newTestManager(t)
+	managedPath := filepath.Join(t.TempDir(), "cache", "go-build")
+	mgr.SetManagedGoCacheEnvironmentProvider(staticManagedGoCacheEnvironment{path: managedPath})
+	req := &LaunchRequest{
+		ExecutorType:   "worktree",
+		AgentProfileID: "profile-1",
+		Env:            map[string]string{"GOCACHE": "/tmp/user-cache"},
+	}
+	if err := mgr.prepareManagedGoCacheEnvironment(context.Background(), req); err != nil {
+		t.Fatalf("prepareManagedGoCacheEnvironment() error = %v", err)
+	}
+
+	prepareEnv := buildEnvPrepareRequest(req, "/tmp/workspace", executor.NameStandalone).Env
+	runtimeEnv, err := mgr.buildEnvForExecution(context.Background(), "exec-1", req, nil, nil)
+	if err != nil {
+		t.Fatalf("buildEnvForExecution() error = %v", err)
+	}
+	if prepareEnv["GOCACHE"] != managedPath || runtimeEnv["GOCACHE"] != managedPath {
+		t.Fatalf("GOCACHE diverged: prepare=%q runtime=%q want=%q",
+			prepareEnv["GOCACHE"], runtimeEnv["GOCACHE"], managedPath)
+	}
+}
+
+func TestManagedGoCacheEnvironmentSkipsRemoteExecution(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.SetManagedGoCacheEnvironmentProvider(staticManagedGoCacheEnvironment{path: "/tmp/managed-cache"})
+	req := &LaunchRequest{
+		ExecutorType: "local_docker",
+		Env:          map[string]string{"GOCACHE": "/container/cache"},
+	}
+
+	if err := mgr.prepareManagedGoCacheEnvironment(context.Background(), req); err != nil {
+		t.Fatalf("prepareManagedGoCacheEnvironment() error = %v", err)
+	}
+	if got := req.Env["GOCACHE"]; got != "/container/cache" {
+		t.Fatalf("remote GOCACHE = %q, want existing container value", got)
+	}
+}
+
+func TestLaunchKeepsInitialExecutionActivityAfterReturning(t *testing.T) {
+	log := newTestLogger()
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(&createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameDocker},
+		client:       newReadyAgentctlClient(t, log),
+	})
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+
+	execution, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID: "task-activity", SessionID: "session-activity", AgentProfileID: "profile-1",
+		ExecutorType: "local_docker", IsEphemeral: true, StartAgent: true,
+		TaskDescription: "initial prompt",
+	})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if maintenance != nil {
+		maintenance.Release()
+	}
+	if !errors.Is(err, activity.ErrBusy) {
+		t.Fatalf("maintenance after Launch error = %v, want activity.ErrBusy", err)
+	}
+
+	mgr.RemoveExecution(execution.ID)
+	maintenance, _, err = coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("maintenance after RemoveExecution: %v", err)
+	}
+	maintenance.Release()
+}
+
 func TestLaunch_PublishesPrepareCompletedAfterRuntimeProgress(t *testing.T) {
 	log := newTestLogger()
 	execRegistry := NewExecutorRegistry(log)
@@ -705,6 +820,12 @@ func TestLaunchResolveWorkspacePath_NonEphemeralRepoLessGetsScratchDir(t *testin
 	// New layout: <homeDir>/tasks/<workspaceID>/<taskID> (sibling to worktree task dirs).
 	require.Contains(t, workspacePath, filepath.Join("tasks", "ws-xyz", "task-xyz"))
 	require.NotContains(t, workspacePath, "quick-chat")
+	marker, found, err := storageworkspaces.ReadOwnershipMarker(workspacePath)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "task-xyz", marker.TaskID)
+	require.Equal(t, "ws-xyz", marker.WorkspaceID)
+	require.Equal(t, storageworkspaces.LayoutVersionScratch, marker.LayoutVersion)
 }
 
 func TestLaunchResolveWorkspacePath_NonEphemeralWithoutWorkspaceIDReturnsEmpty(t *testing.T) {
@@ -721,6 +842,19 @@ func TestLaunchResolveWorkspacePath_NonEphemeralWithoutWorkspaceIDReturnsEmpty(t
 
 	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
 	require.Empty(t, workspacePath)
+}
+
+func TestLaunchResolveWorkspacePathRejectsDotTaskID(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.dataDir = t.TempDir()
+	req := &LaunchRequest{
+		SessionID: "session-dot-task", TaskID: ".", WorkspaceID: "ws-1",
+	}
+
+	workspacePath, _, _, _ := mgr.launchResolveWorkspacePath(context.Background(), req)
+	if workspacePath != "" {
+		t.Fatalf("workspace path = %q, want empty for dot task ID", workspacePath)
+	}
 }
 
 func TestLaunchResolveWorkspacePath_PickedFolderUsedDirectly(t *testing.T) {
@@ -817,6 +951,133 @@ func TestLaunch_RejectsWhenAgentAlreadyRunning(t *testing.T) {
 	_, err := mgr.Launch(context.Background(), req)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "already has an agent running")
+}
+
+func TestLaunchDeadlineDoesNotAbortLiveEnsureFollower(t *testing.T) {
+	provider := &notifyingWorkspaceInfoProvider{
+		mockWorkspaceInfoProvider: &mockWorkspaceInfoProvider{
+			infos: map[string]*WorkspaceInfo{
+				"session-mixed": {
+					TaskID: "task-1", SessionID: "session-mixed", TaskEnvironmentID: "env-1",
+					WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+				},
+			},
+		},
+		environmentReached: make(chan struct{}),
+	}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	backend.entered = make(chan struct{}, 1)
+	backend.barrier = make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(backend.barrier)
+		}
+	}()
+
+	launchCtx, cancelLaunch := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer cancelLaunch()
+	launchResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(launchCtx, &LaunchRequest{
+			TaskID: "task-1", SessionID: "session-mixed", TaskEnvironmentID: "env-1",
+			AgentProfileID: "profile-1", WorkspacePath: "/workspace/task-1",
+		})
+		launchResult <- err
+	}()
+	select {
+	case <-backend.entered:
+	case <-time.After(time.Second):
+		t.Fatal("Launch did not reach CreateInstance")
+	}
+
+	ensureResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetOrEnsureExecutionForEnvironment(context.Background(), "env-1")
+		ensureResult <- err
+	}()
+	<-provider.environmentReached
+	select {
+	case err := <-ensureResult:
+		t.Fatalf("ensure follower returned before shared launch completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if err := <-launchResult; !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Launch error = %v, want caller deadline", err)
+	}
+	if _, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0); !errors.Is(err, activity.ErrBusy) {
+		t.Fatalf("maintenance error = %v, want shared launch activity after leader deadline", err)
+	}
+	close(backend.barrier)
+	released = true
+	if err := <-ensureResult; err != nil {
+		t.Fatalf("live ensure follower failed after Launch deadline: %v", err)
+	}
+}
+
+func TestEnsureLeaderDoesNotHideLaunchWaiterDeadline(t *testing.T) {
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-mixed": {
+				TaskID: "task-1", SessionID: "session-mixed", TaskEnvironmentID: "env-1",
+				WorkspacePath: "/workspace/task-1", AgentID: "auggie",
+			},
+		},
+	})
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	backend.entered = make(chan struct{}, 1)
+	backend.barrier = make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(backend.barrier)
+		}
+	}()
+
+	ensureResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.GetOrEnsureExecution(context.Background(), "session-mixed")
+		ensureResult <- err
+	}()
+	select {
+	case <-backend.entered:
+	case <-time.After(time.Second):
+		t.Fatal("ensure did not reach CreateInstance")
+	}
+
+	launchCtx, cancelLaunch := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelLaunch()
+	launchResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(launchCtx, &LaunchRequest{
+			TaskID: "task-1", SessionID: "session-mixed", TaskEnvironmentID: "env-1",
+			AgentProfileID: "profile-1", WorkspacePath: "/workspace/task-1",
+		})
+		launchResult <- err
+	}()
+	select {
+	case err := <-launchResult:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Launch error = %v, want caller deadline", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		close(backend.barrier)
+		released = true
+		<-ensureResult
+		<-launchResult
+		t.Fatal("Launch waiter did not observe its own deadline")
+	}
+	if _, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0); !errors.Is(err, activity.ErrBusy) {
+		t.Fatalf("maintenance error = %v, want shared ensure activity", err)
+	}
+	close(backend.barrier)
+	released = true
+	if err := <-ensureResult; err != nil {
+		t.Fatalf("ensure leader failed after Launch waiter deadline: %v", err)
+	}
 }
 
 // TestLaunch_RaceRollback exercises the race window between the step-3 duplicate

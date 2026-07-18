@@ -98,6 +98,9 @@ func (m *mockRepository) UpdateTaskState(ctx context.Context, id string, state v
 func (m *mockRepository) UpdateTaskStateIfCurrentIn(_ context.Context, _ string, _ v1.TaskState, _ []v1.TaskState) (v1.TaskState, bool, error) {
 	return "", false, nil
 }
+func (m *mockRepository) UpdateTaskStateIfNotArchived(_ context.Context, _ string, _ v1.TaskState) (v1.TaskState, bool, error) {
+	return "", false, nil
+}
 func (m *mockRepository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, columnID string, position int) error {
 	return nil
 }

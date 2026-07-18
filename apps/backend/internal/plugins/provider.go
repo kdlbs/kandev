@@ -43,7 +43,7 @@ const pluginsSubdir = "plugins"
 // "Extension points" doc comment on Service for how backendapp attaches
 // them after calling Provide. cleanup stops the runtime manager (kills any
 // spawned processes); callers should register it with addCleanup.
-func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretRevealer, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error) {
+func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus bus.EventBus, log *logger.Logger) (*Service, func() error, error) {
 	dir := filepath.Join(cfg.ResolvedHomeDir(), pluginsSubdir)
 	pluginStore := store.NewFSStore(dir)
 	pluginStore.SetLogger(log)

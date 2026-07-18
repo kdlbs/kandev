@@ -2,12 +2,9 @@
  * Mobile parity for the sidebar view system (filters / sort / group + saved
  * views).
  *
- * The desktop sidebar exposes a `SidebarFilterBar` (saved-view chip row + a
- * filter gear that opens the shared `SidebarFilterPopover`). That same bar is
- * now folded into the mobile task-switcher sheet so mobile users can switch and
- * edit views instead of being stuck on whatever view was last picked on
- * desktop. The sheet already applied the active view via `applyView`; these
- * tests guard the newly-added switching/editing UI.
+ * The mobile task-switcher sheet exposes a saved-view chip row, fixed direct
+ * creation action, and filter gear backed by the shared `SidebarFilterPopover`.
+ * The desktop AppSidebar uses a separate dropdown picker for the same state.
  *
  * Lives in `mobile-*.spec.ts` so the `mobile-chrome` Playwright project applies
  * the mobile device automatically.
@@ -59,6 +56,73 @@ async function addTitleFilter(testPage: Page, sheet: Locator, value: string): Pr
 }
 
 test.describe("Mobile sidebar — view system", () => {
+  test("direct creation stays touch-reachable, viewport-safe, and persists", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, ["Mobile New View Task"]);
+    const newView = sheet.getByTestId("sidebar-new-view");
+    const gear = sheet.getByTestId("sidebar-filter-gear");
+    await expect(newView).toBeVisible();
+    await expect(newView).toContainText("New view");
+    const newViewBox = await newView.boundingBox();
+    const gearBox = await gear.boundingBox();
+    const chipRowBox = await sheet.getByTestId("sidebar-view-chip-row").boundingBox();
+    expect(newViewBox?.height).toBeGreaterThanOrEqual(40);
+    expect(gearBox?.height).toBeGreaterThanOrEqual(40);
+    expect(chipRowBox!.x + chipRowBox!.width).toBeLessThanOrEqual(newViewBox!.x);
+    expect(newViewBox!.x + newViewBox!.width).toBeLessThanOrEqual(gearBox!.x);
+    await expect(
+      sheet.getByTestId("sidebar-view-chip-row").getByTestId("sidebar-new-view"),
+    ).toHaveCount(0);
+
+    await newView.click();
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    const renameInput = popover.getByTestId("view-rename-input");
+    await expect(popover).toBeVisible();
+    await expect(renameInput).toBeFocused();
+    await expect(renameInput).toHaveValue("New view");
+    const popoverBox = await popover.boundingBox();
+    const viewport = testPage.viewportSize();
+    expect(popoverBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    expect(popoverBox!.x).toBeGreaterThanOrEqual(0);
+    expect(popoverBox!.x + popoverBox!.width).toBeLessThanOrEqual(viewport!.width);
+
+    await popover.getByRole("button", { name: "Cancel" }).click();
+    await testPage.keyboard.press("Escape");
+    await expect(
+      sheet.getByTestId("sidebar-view-chip-row").getByTestId("sidebar-view-chip").filter({
+        hasText: "New view",
+      }),
+    ).toHaveAttribute("data-active", "true");
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await expect
+      .poll(async () => {
+        const { settings } = await apiClient.getUserSettings();
+        return (settings.sidebar_views as Array<{ name?: string }> | undefined)?.some(
+          (view) => view.name === "New view",
+        );
+      })
+      .toBe(true);
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").click();
+    const reloadedSheet = testPage.getByRole("dialog");
+    await expect(
+      reloadedSheet
+        .getByTestId("sidebar-view-chip-row")
+        .getByTestId("sidebar-view-chip")
+        .filter({ hasText: "New view" }),
+    ).toHaveAttribute("data-active", "true");
+  });
+
   test("editing filters in the mobile sheet narrows the task list live", async ({
     testPage,
     apiClient,
@@ -79,6 +143,15 @@ test.describe("Mobile sidebar — view system", () => {
     // the globally-mounted (hidden on mobile) AppSidebar TasksViewPicker renders
     // the same testid, so a page-level query is a strict-mode collision.
     await expect(sheet.getByTestId("sidebar-filter-gear-indicator")).toBeVisible();
+    const blockedNewView = sheet.getByTestId("sidebar-new-view");
+    await expect(blockedNewView).toHaveAttribute("aria-disabled", "true");
+    await expect(blockedNewView).toHaveAttribute("aria-label", /save or discard changes/i);
+    // aria-disabled communicates the blocked state, but this action remains
+    // clickable so touch/keyboard users can get the concrete reason toast.
+    await blockedNewView.click({ force: true });
+    await expect(
+      testPage.getByText("Save or discard changes before creating a new view."),
+    ).toBeVisible();
     await testPage.keyboard.press("Escape");
 
     // The list inside the sheet re-filters live via applyView.
@@ -116,6 +189,44 @@ test.describe("Mobile sidebar — view system", () => {
     await chipRow.getByTestId("sidebar-view-chip").filter({ hasText: "All tasks" }).click();
     await expect(sheet.getByText("Update deps")).toBeVisible();
     await expect(sheet.getByText("Fix auth bug")).toBeVisible();
+  });
+
+  test("many saved views scroll without covering fixed actions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedAndOpenSheet(testPage, apiClient, seedData, ["Scrollable Views Task"]);
+    const views = Array.from({ length: 8 }, (_, index) => ({
+      id: `mobile-scroll-${index}`,
+      name: `Long mobile view ${index + 1}`,
+      filters: [],
+      sort: { key: "state", direction: "asc" },
+      group: "repository",
+      collapsed_groups: [],
+    }));
+    const response = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      sidebar_views: views,
+      sidebar_active_view_id: views[0].id,
+      sidebar_draft: null,
+    });
+    expect(response.ok).toBe(true);
+
+    await testPage.reload();
+    await new SessionPage(testPage).waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").click();
+    const sheet = testPage.getByRole("dialog");
+    const chipRow = sheet.getByTestId("sidebar-view-chip-row");
+    await expect(chipRow).toBeVisible();
+    expect(await chipRow.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
+      true,
+    );
+    await chipRow.evaluate((element) => {
+      element.scrollLeft = element.scrollWidth;
+    });
+    expect(await chipRow.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+    await expect(sheet.getByTestId("sidebar-new-view")).toBeVisible();
+    await expect(sheet.getByTestId("sidebar-filter-gear")).toBeVisible();
   });
 
   test("tapping a group header collapses and expands the group in the sheet", async ({

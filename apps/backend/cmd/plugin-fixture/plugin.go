@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	deliveriesFileName = "deliveries.jsonl"
-	webhooksFileName   = "webhooks.jsonl"
-
-	toolNameEcho = "echo"
+	deliveriesFileName     = "deliveries.jsonl"
+	webhooksFileName       = "webhooks.jsonl"
+	configSnapshotFileName = "config.json"
+	secretProbeFileName    = "secret-probe.json"
 )
 
 // deliveryRecord is one recorded OnEvent delivery, appended as a JSON line
@@ -114,23 +114,62 @@ func (p *fixturePlugin) recordLastEventBestEffort(ctx context.Context, e *plugin
 	})
 }
 
-// InvokeTool implements the fixture's only declared tool ("echo"): it
-// returns the request's input unchanged as the response output.
-func (p *fixturePlugin) InvokeTool(_ context.Context, req *pluginsdk.ToolRequest) (*pluginsdk.ToolResponse, error) {
-	if req.ToolName != toolNameEcho {
-		return &pluginsdk.ToolResponse{Error: fmt.Sprintf("unknown tool %q", req.ToolName)}, nil
-	}
-	return &pluginsdk.ToolResponse{Output: req.Input}, nil
-}
-
-// HandleWebhook appends a webhooks.jsonl line recording the delivery, and
-// responds 200 "ok".
-func (p *fixturePlugin) HandleWebhook(_ context.Context, req *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error) {
+// HandleWebhook appends a webhooks.jsonl line recording the delivery,
+// best-effort snapshots the plugin's current operator config to
+// config.json (evidence for e2e that the Host GetConfig RPC delivers the
+// values set in Settings > Plugins, secrets in cleartext), and responds
+// 200 "ok".
+func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error) {
 	rec := webhookRecord{WebhookKey: req.WebhookKey, Method: req.Method}
 	if err := appendJSONLine(filepath.Join(p.dataDir, webhooksFileName), rec); err != nil {
 		return nil, err
 	}
+	p.snapshotConfigBestEffort(ctx)
+	p.snapshotSecretProbeBestEffort(ctx)
 	return &pluginsdk.WebhookResponse{Status: 200, Body: []byte("ok")}, nil
+}
+
+// snapshotSecretProbeBestEffort exercises the plugin-scoped secret
+// primitives end to end: SetSecret then GetSecret through the Host, writing
+// the read-back value to secret-probe.json as evidence for e2e that a
+// plugin-owned secret survives a vault round trip over the real transport.
+func (p *fixturePlugin) snapshotSecretProbeBestEffort(ctx context.Context) {
+	host := p.Host()
+	if host == nil {
+		return
+	}
+	if err := host.SetSecret(ctx, "probe", "s3cret-roundtrip"); err != nil {
+		return
+	}
+	value, found, err := host.GetSecret(ctx, "probe")
+	if err != nil || !found {
+		return
+	}
+	data, err := json.Marshal(map[string]string{"probe": value})
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(p.dataDir, secretProbeFileName), data, 0o600)
+}
+
+// snapshotConfigBestEffort writes the current Host.GetConfig result to
+// config.json (overwriting any previous snapshot). Errors — including "no
+// Host injected yet" — are silently ignored: like recordLastEventBestEffort,
+// this exists purely as e2e coverage of the Host round trip.
+func (p *fixturePlugin) snapshotConfigBestEffort(ctx context.Context) {
+	host := p.Host()
+	if host == nil {
+		return
+	}
+	config, err := host.GetConfig(ctx)
+	if err != nil {
+		return
+	}
+	data, err := json.Marshal(config)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(p.dataDir, configSnapshotFileName), data, 0o600)
 }
 
 // appendJSONLine marshals v to a single JSON line and appends it to path,

@@ -16,13 +16,6 @@ export interface PluginCapabilities {
   secrets?: boolean;
 }
 
-export interface PluginTool {
-  name: string;
-  display_name: string;
-  description: string;
-  input_schema?: Record<string, unknown>;
-}
-
 export interface PluginWebhook {
   key: string;
   description?: string;
@@ -60,7 +53,6 @@ export interface PluginRecord {
   author: string;
   categories: string[];
   capabilities: PluginCapabilities;
-  tools?: PluginTool[];
   webhooks?: PluginWebhook[];
   config_schema?: Record<string, unknown>;
   ui?: PluginUISection;
@@ -73,15 +65,6 @@ export interface PluginRecord {
   /** Crash-restart attempts since install (health-check backoff counter). */
   restart_count: number;
   last_health_check?: string | null;
-}
-
-/** One entry of GET /api/plugins/tools. */
-export interface PluginToolDTO {
-  plugin_id: string;
-  name: string;
-  display_name: string;
-  description: string;
-  input_schema?: Record<string, unknown>;
 }
 
 /**

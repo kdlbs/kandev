@@ -275,7 +275,7 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
     <div
       data-testid="sidebar-task-diff-stats"
       className={cn(
-        "shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
+        "mobile-task-diff-stats shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
         menuOpen
           ? "opacity-0"
           : "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within:opacity-0",
@@ -469,14 +469,14 @@ export const TaskItem = memo(function TaskItem({
         agentErrorMessage={agentErrorMessage}
       />
       {hasDiffStats ? (
-        <div className="relative shrink-0 self-center flex items-center">
+        <div className="mobile-task-actions-with-stats relative shrink-0 self-center flex items-center">
           <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
-          <div className="absolute inset-0 flex items-center justify-end">
-            <TaskMenuButton visible={effectiveMenuOpen} />
+          <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
+            <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
           </div>
         </div>
       ) : (
-        <TaskMenuButton visible={effectiveMenuOpen} />
+        <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
       )}
       {showSubtaskToggle && (
         <SubtaskToggle
@@ -556,11 +556,11 @@ function SubtaskToggle({
   );
 }
 
-function TaskMenuButton({ visible }: { visible: boolean }) {
+function TaskMenuButton({ visible, expanded }: { visible: boolean; expanded: boolean }) {
   return (
     <div
       className={cn(
-        "self-center shrink-0 flex items-center transition-opacity duration-100",
+        "mobile-task-actions self-center shrink-0 flex items-center transition-opacity duration-100",
         !visible && "[@media(hover:none)]:hidden",
         visible
           ? "opacity-100"
@@ -570,7 +570,7 @@ function TaskMenuButton({ visible }: { visible: boolean }) {
       <button
         type="button"
         className={cn(
-          "flex size-6 items-center justify-center rounded-md cursor-pointer",
+          "mobile-task-actions-button flex size-6 items-center justify-center rounded-md cursor-pointer touch-manipulation",
           "text-muted-foreground hover:text-foreground hover:bg-foreground/10",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring transition-colors",
         )}
@@ -586,6 +586,8 @@ function TaskMenuButton({ visible }: { visible: boolean }) {
           );
         }}
         aria-label="Task actions"
+        aria-haspopup="menu"
+        aria-expanded={expanded}
       >
         <IconDots className="h-4 w-4" />
       </button>

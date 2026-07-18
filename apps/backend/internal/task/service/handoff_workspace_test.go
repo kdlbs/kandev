@@ -399,6 +399,10 @@ func (r *phase4TaskRepo) UpdateTaskStateIfCurrentIn(context.Context, string, v1.
 	r.panicNotUsed("UpdateTaskStateIfCurrentIn")
 	return "", false, nil
 }
+func (r *phase4TaskRepo) UpdateTaskStateIfNotArchived(context.Context, string, v1.TaskState) (v1.TaskState, bool, error) {
+	r.panicNotUsed("UpdateTaskStateIfNotArchived")
+	return "", false, nil
+}
 func (r *phase4TaskRepo) CountTasksByWorkflow(context.Context, string) (int, error) {
 	r.panicNotUsed("CountTasksByWorkflow")
 	return 0, nil

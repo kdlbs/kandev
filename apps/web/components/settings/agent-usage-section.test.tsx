@@ -2,10 +2,9 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { AgentUsageSection } from "@/components/settings/agent-usage-section";
-import type { AgentSubscriptionUsageResponse } from "@/lib/types/http";
 
 const listAgentSubscriptionUsage = vi.hoisted(() =>
-  vi.fn<() => Promise<AgentSubscriptionUsageResponse>>(),
+  vi.fn<typeof import("@/lib/api").listAgentSubscriptionUsage>(),
 );
 
 vi.mock("@/lib/api", () => ({

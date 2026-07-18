@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, memo } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, memo } from "react";
 import {
   DockviewReact,
   DockviewDefaultTab,
@@ -17,6 +17,7 @@ import {
   setupLayoutPersistence,
   setupPortalCleanup,
   setupSashDragCapToggle,
+  syncDockviewContainerSize,
 } from "./dockview-layout-setup";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useLspFileOpener } from "@/hooks/use-lsp-file-opener";
@@ -347,7 +348,9 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   compact = false,
 }: DockviewDesktopLayoutProps) {
   const setApi = useDockviewStore((s) => s.setApi);
+  const api = useDockviewStore((s) => s.api);
   const buildDefaultLayout = useDockviewStore((s) => s.buildDefaultLayout);
+  const layoutRootRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const readyDisposersRef = useRef<Array<() => void>>([]);
   const appStore = useAppStoreApi();
@@ -355,6 +358,8 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   const effectiveSessionId =
     useAppStore((state) => state.tasks.activeSessionId) ?? sessionId ?? null;
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const appSidebarCollapsed = useAppStore((state) => state.appSidebar.collapsed);
+  const appSidebarWidth = useAppStore((state) => state.appSidebar.width);
   const effectiveEnvId = useAppStore((state) =>
     effectiveSessionId ? (state.environmentIdBySessionId[effectiveSessionId] ?? null) : null,
   );
@@ -373,6 +378,13 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   useEffect(() => {
     envIdRef.current = effectiveEnvId;
   }, [effectiveEnvId]);
+
+  useLayoutEffect(() => {
+    if (!api) return;
+    const dockview = layoutRootRef.current?.querySelector<HTMLElement>(".dv-dockview");
+    const container = dockview?.parentElement;
+    if (container) syncDockviewContainerSize(api, container);
+  }, [api, appSidebarCollapsed, appSidebarWidth]);
 
   const onReady = useCallback(
     (event: DockviewReadyEvent) => {
@@ -404,6 +416,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
 
   return (
     <div
+      ref={layoutRootRef}
       data-testid="dockview-task-layout"
       className="flex-1 min-h-0 grid grid-rows-[1fr_auto]"
       aria-busy={isRestoringLayout}

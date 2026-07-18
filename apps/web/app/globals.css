@@ -224,6 +224,85 @@
   }
 }
 
+/* Radix menus are poppers: their inline transform lives on a generated wrapper,
+   not the menu surface. On mobile viewports, pin that wrapper to the
+   viewport and let the menu scroll internally like a compact bottom sheet. */
+@media (max-width: 639px) {
+  .mobile-task-actions {
+    display: flex !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  .mobile-task-actions-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .mobile-task-actions-with-stats {
+    gap: 0.125rem;
+  }
+
+  .mobile-task-actions-slot {
+    position: static;
+  }
+
+  .mobile-task-diff-stats {
+    opacity: 1 !important;
+  }
+
+  [data-radix-popper-content-wrapper]:has(
+    > :is(
+      [data-slot="context-menu-content"],
+      [data-slot="context-menu-sub-content"],
+      [data-slot="dropdown-menu-content"],
+      [data-slot="dropdown-menu-sub-content"]
+    )
+  ) {
+    position: fixed !important;
+    inset: auto 8px max(8px, env(safe-area-inset-bottom, 0px)) 8px !important;
+    width: auto !important;
+    min-width: 0 !important;
+    transform: none !important;
+  }
+
+  :is(
+    [data-slot="context-menu-content"],
+    [data-slot="context-menu-sub-content"],
+    [data-slot="dropdown-menu-content"],
+    [data-slot="dropdown-menu-sub-content"]
+  ) {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    max-height: min(70dvh, calc(100dvh - 16px - env(safe-area-inset-bottom, 0px))) !important;
+    padding: 0.5rem !important;
+    border-radius: 1rem !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    transform-origin: bottom center !important;
+  }
+
+  :is(
+    [data-slot="context-menu-item"],
+    [data-slot="context-menu-checkbox-item"],
+    [data-slot="context-menu-radio-item"],
+    [data-slot="context-menu-sub-trigger"],
+    [data-slot="dropdown-menu-item"],
+    [data-slot="dropdown-menu-checkbox-item"],
+    [data-slot="dropdown-menu-radio-item"],
+    [data-slot="dropdown-menu-sub-trigger"]
+  ) {
+    min-height: 44px;
+    padding-block: 0.625rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    cursor: pointer;
+  }
+}
+
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;

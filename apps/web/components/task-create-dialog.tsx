@@ -46,6 +46,7 @@ import {
 import { resetTaskCreateLastUsedSync } from "@/components/task-create-dialog-handlers";
 import { useAppStore } from "@/components/state-provider";
 import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
+import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
 
 export interface TaskCreateDialogProps {
   open: boolean;
@@ -132,7 +133,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
     freshBranchAvailable,
     isLocalExecutor,
   } = props;
-  const showTaskName = (isCreateMode || isEditMode) && !isTaskStarted;
+  const showTaskName = shouldShowTaskTitleField(isCreateMode, isEditMode, isTaskStarted);
   const taskNameAutoFocus = !isEditMode && !fs.useRemote;
   return (
     <>

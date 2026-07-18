@@ -14,7 +14,7 @@ Radarr and Sonarr solve this with a dedicated **System** area: a group of read-o
 
 ## What (v1)
 
-A new **System** group is added to the existing settings sidebar (`apps/web/components/settings/settings-app-sidebar.tsx`), alongside General/Workspaces/Agents/Executors/Integrations/etc. The group contains seven child pages, each on its own route under `/settings/system/*`. The existing `/settings/changelog` route is removed and its UI is absorbed into the new **Updates** page.
+A new **System** group is added to the existing settings sidebar (`apps/web/components/settings/settings-app-sidebar.tsx`), alongside General/Workspaces/Agents/Executors/Integrations/etc. The group contains nine child pages, each on its own route under `/settings/system/*`. The existing `/settings/changelog` route is removed and its UI is absorbed into the new **Updates** page.
 
 ### Pages
 
@@ -22,27 +22,36 @@ A new **System** group is added to the existing settings sidebar (`apps/web/comp
    - **Health issues** card: renders the existing `GET /api/v1/system/health` payload (warning/error/info issues with messages and links).
    - **Disk usage** card: shows total kandev data footprint with a per-subdirectory breakdown (`data dir / worktrees / repos / sessions / tasks / quick-chat / backups`), an "as of HH:MM" timestamp, and a **Refresh** button. The disk walk is lazy and asynchronous: the first visit after a cold start (or after the 2h cache expires) returns `null` immediately and the page shows a loading spinner while the walk runs in the background; subsequent visits within 2h return the cached value instantly.
    - **Version + update** card: short summary of current version and "update available" badge, with a CTA to the Updates page.
-2. **Database** — `/settings/system/database`
+2. **Feature Toggles** — `/settings/system/feature-toggles`
+   - Install-wide runtime flags, risk metadata, environment locks, and restart handling.
+   - The full contract lives in [Feature Toggles](../feature-toggles/spec.md).
+3. **Database** — `/settings/system/database`
    - Read-only: database driver, database size, and schema version. SQLite additionally shows file path, WAL size, and last-backup timestamp (from `<data-dir>/backups/`). Postgres shows database-level size and does not render SQLite file/WAL/backup rows.
    - SQLite-only **VACUUM** button — safe, reclaims space; shows progress and final size delta.
    - SQLite-only **Optimize** button — runs `PRAGMA optimize`; shows progress.
    - SQLite-only **Factory Reset** button — destructive. Wipes the full kandev install (database + worktrees + repo clones + session dirs + tasks dir + quick-chat dir), equivalent to deleting `~/.kandev/` and starting over. Opens a modal that requires (a) typing the literal string `RESET` to enable the confirm button, (b) acknowledging that the backend will create a pre-reset snapshot first and then restart. Server-side: stop orchestrator and running executions → snapshot DB to `<data-dir>/backups/pre-reset-<ts>.db` → drop DB tables and re-run migrations → `rm -rf` the worktrees/repos/sessions/tasks/quick-chat subdirs → restart backend process. The frontend disables the UI and waits for the backend to come back, then routes to the empty onboarding state.
-3. **Backups** — `/settings/system/backups`
+4. **Backups** — `/settings/system/backups`
    - Lists existing snapshots in `<data-dir>/backups/` with name, size, and mtime.
    - Per-row actions: **Download**, **Restore** (gated like Factory Reset), **Delete** (confirm-only).
    - **Create snapshot** button at the top of the list; uses the existing `VACUUM INTO` path.
-4. **Logs** — `/settings/system/logs`
+5. **Logs** — `/settings/system/logs`
    - Static log viewer: last 1000 lines of the current lumberjack log file, with a **Refresh** button. No live tail in v1.
    - List of rotated log files with name/size/mtime and a per-row **Download** button.
    - **Download current** button at the top.
-5. **Updates** — `/settings/system/updates`
+6. **Updates** — `/settings/system/updates`
    - Shows running version, latest available version, and a "new version available" badge if newer.
    - **Check now** button — forces a re-poll (rate-limited 30s per process).
    - Below: the embedded changelog list (the content currently rendered at `/settings/changelog` via `@/generated/changelog.json`).
-6. **Licenses** — `/settings/system/licenses`
+7. **Licenses** — `/settings/system/licenses`
    - Renders a JSON manifest of all third-party OSS dependencies (npm + Go), each with its license name, version, repository URL, and license text. The manifest is generated at build time and committed to the repo.
    - Searchable list (filter by package name or license type), one-line per row, expand to see full license text.
-7. **About** — `/settings/system/about`
+8. **Storage** — `/settings/system/storage`
+   - Analyzes Kandev task workspaces, quarantine, managed Go cache, and Docker storage.
+   - Configures opt-in idle-time maintenance and exposes manual analyze/run actions.
+   - Lists cleanup history and restorable quarantined task workspaces.
+   - The full ownership, API, persistence, and safety contract lives in
+     [Storage Maintenance](storage-maintenance.md).
+9. **About** — `/settings/system/about`
    - Version, build commit, build timestamp, Go runtime version, Node runtime version, OS/arch.
    - Links: GitHub repo, documentation, license, "Report an issue".
 
@@ -75,6 +84,8 @@ GET    /api/v1/system/updates                     - { current, latest, latestChe
 POST   /api/v1/system/updates/check               - force GitHub re-poll; rate-limited 30s
 POST   /api/v1/system/updates/apply               - queue service-only self-update; body { confirm: "UPDATE" }
 ```
+
+Storage endpoints are defined separately in [Storage Maintenance](storage-maintenance.md).
 
 Long-running operations (vacuum, optimize, reset, restore, snapshot create, disk walk) return `202 Accepted` with a `jobId` and publish progress on the existing event bus. The frontend subscribes via WS (`system.job.update` event) to render progress and final result. On success/failure the operation flips a corresponding entry in the existing health surface (e.g., a "VACUUM completed: reclaimed X MB" info issue that auto-expires).
 

@@ -96,15 +96,23 @@ type mockTaskRepo struct {
 	// dispatch's IN_PROGRESS write) — tests asserting a state was NEVER
 	// written at any point must check stateHistory, not updatedStates.
 	stateHistory map[string][]v1.TaskState
-	getTaskErr   error // if set, GetTask returns this error
+	// unconditionalWrites counts UpdateTaskState (the non-CAS write) calls per
+	// task, tracked separately from stateWrites (which both UpdateTaskState
+	// and UpdateTaskStateIfCurrentIn increment). Startup/crash reconciliation
+	// callers must route guarded REVIEW writes through the CAS method so an
+	// archive can't race a late write; tests assert this stays 0 for those
+	// paths instead of just checking the resulting state.
+	unconditionalWrites map[string]int
+	getTaskErr          error // if set, GetTask returns this error
 }
 
 func newMockTaskRepo() *mockTaskRepo {
 	return &mockTaskRepo{
-		tasks:         make(map[string]*v1.Task),
-		updatedStates: make(map[string]v1.TaskState),
-		stateWrites:   make(map[string]int),
-		stateHistory:  make(map[string][]v1.TaskState),
+		tasks:               make(map[string]*v1.Task),
+		updatedStates:       make(map[string]v1.TaskState),
+		stateWrites:         make(map[string]int),
+		stateHistory:        make(map[string][]v1.TaskState),
+		unconditionalWrites: make(map[string]int),
 	}
 }
 
@@ -130,6 +138,7 @@ func (m *mockTaskRepo) UpdateTaskState(_ context.Context, taskID string, state v
 	m.updatedStates[taskID] = state
 	m.stateWrites[taskID]++
 	m.stateHistory[taskID] = append(m.stateHistory[taskID], state)
+	m.unconditionalWrites[taskID]++
 	if t, ok := m.tasks[taskID]; ok {
 		t.State = state
 	}
@@ -156,6 +165,30 @@ func (m *mockTaskRepo) UpdateTaskStateIfCurrentIn(
 		return true, nil
 	}
 	return false, nil
+}
+
+// UpdateTaskStateIfNotArchived has no "allowed" precondition to check, so
+// (unlike UpdateTaskStateIfCurrentIn above) this mock cannot model the
+// archived_at race itself — v1.Task carries no ArchivedAt field for it to
+// consult. It behaves like UpdateTaskState above: unconditional and
+// always tracked, mutating the seeded task's State only when present —
+// existing callers seed via seedMockTaskState only when they need to read
+// the state back, not merely to assert a write happened.
+// Real archived-freeze coverage for this CAS lives at the sqlite layer
+// (task_state_cas_test.go) and the executor-layer mock (models.Task, which
+// does carry ArchivedAt).
+func (m *mockTaskRepo) UpdateTaskStateIfNotArchived(
+	_ context.Context, taskID string, state v1.TaskState,
+) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.updatedStates[taskID] = state
+	m.stateWrites[taskID]++
+	m.stateHistory[taskID] = append(m.stateHistory[taskID], state)
+	if t, ok := m.tasks[taskID]; ok {
+		t.State = state
+	}
+	return true, nil
 }
 
 // mockAgentManager is a minimal mock of executor.AgentManagerClient for testing.

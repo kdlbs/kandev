@@ -1,6 +1,6 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
-import type { PluginRecord, PluginToolDTO, SyncResult } from "@/lib/types/plugins";
+import type { PluginRecord, SyncResult } from "@/lib/types/plugins";
 
 const BASE = "/api/plugins";
 
@@ -87,8 +87,21 @@ async function throwInstallError(response: Response): Promise<never> {
   throw new ApiError(message, response.status, body);
 }
 
+// getPluginConfig fetches a plugin's stored operator config
+// (GET /api/plugins/:id/config). Secret values (per the manifest's
+// config_schema) arrive masked — the backend never returns them in
+// cleartext on this surface.
+export async function getPluginConfig(id: string, options?: ApiRequestOptions) {
+  const res = await fetchJson<{ config?: Record<string, unknown> }>(
+    `${BASE}/${encodeURIComponent(id)}/config`,
+    options,
+  );
+  return res.config ?? {};
+}
+
 // updatePluginConfig replaces a plugin's operator-editable config
-// (PATCH /api/plugins/:id).
+// (PATCH /api/plugins/:id). Secret fields submitted as the mask placeholder
+// keep their stored value server-side.
 export async function updatePluginConfig(
   id: string,
   config: Record<string, unknown>,
@@ -126,13 +139,6 @@ export async function uninstallPlugin(id: string, options?: ApiRequestOptions) {
     ...options,
     init: { ...(options?.init ?? {}), method: "DELETE" },
   });
-}
-
-// listPluginTools aggregates the declared tools of every active plugin
-// (GET /api/plugins/tools).
-export async function listPluginTools(options?: ApiRequestOptions) {
-  const res = await fetchJson<{ tools?: PluginToolDTO[] }>(`${BASE}/tools`, options);
-  return res.tools ?? [];
 }
 
 // syncPlugins reconciles the plugin registry with the plugins directory on

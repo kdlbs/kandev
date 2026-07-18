@@ -53,6 +53,7 @@ type RepoPrepareSpec struct {
 // EnvPrepareRequest contains the parameters for environment preparation.
 type EnvPrepareRequest struct {
 	TaskID          string
+	WorkspaceID     string
 	SessionID       string
 	TaskTitle       string
 	ExecutionID     string

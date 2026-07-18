@@ -8,12 +8,17 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Failed to move task";
 }
 
-function movedTitle(movedCount: number) {
-  if (movedCount === 1) return "Moved task to workflow";
-  return `Moved ${movedCount} tasks to workflow`;
+function movedTitle(movedCount: number, destination: "step" | "workflow") {
+  if (movedCount === 1) return `Moved task to ${destination}`;
+  return `Moved ${movedCount} tasks to ${destination}`;
 }
 
-function movedDescription(movedCount: number) {
+function movedDescription(movedCount: number, destination: "step" | "workflow") {
+  if (destination === "step") {
+    return movedCount === 1
+      ? "The task is now in the selected step."
+      : "The tasks are now in the selected step.";
+  }
   return movedCount === 1
     ? "Switch to the destination workflow to see it."
     : "Switch to the destination workflow to see them.";
@@ -23,7 +28,12 @@ export function useTaskWorkflowMove() {
   const { toast } = useToast();
 
   return useCallback(
-    async (taskIds: string[], targetWorkflowId: string, targetStepId: string) => {
+    async (
+      taskIds: string[],
+      targetWorkflowId: string,
+      targetStepId: string,
+      destination: "step" | "workflow" = "workflow",
+    ) => {
       const ids = [...new Set(taskIds.filter(Boolean))];
       if (ids.length === 0) return;
       try {
@@ -33,8 +43,8 @@ export function useTaskWorkflowMove() {
           target_step_id: targetStepId,
         });
         toast({
-          title: movedTitle(result.moved_count),
-          description: movedDescription(result.moved_count),
+          title: movedTitle(result.moved_count, destination),
+          description: movedDescription(result.moved_count, destination),
           variant: "success",
         });
       } catch (error) {

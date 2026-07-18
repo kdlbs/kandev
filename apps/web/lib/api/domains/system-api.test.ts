@@ -27,6 +27,15 @@ import {
   fetchSystemJob,
   fetchRestartCapability,
   requestRestart,
+  adoptStorageGoCache,
+  analyzeStorage,
+  deleteStorageQuarantine,
+  fetchStorageOverview,
+  fetchStorageQuarantine,
+  fetchStorageRuns,
+  restoreStorageQuarantine,
+  runStorageMaintenance,
+  saveStorageSettings,
 } from "./system-api";
 
 const BASE = "http://api.test/api/v1/system";
@@ -299,5 +308,80 @@ describe("restart", () => {
     expect(lastCall().url).toBe(`${BASE}/restart`);
     expect(method()).toBe("POST");
     expect(res.accepted).toBe(true);
+  });
+});
+
+describe("storage maintenance", () => {
+  const settings = {
+    enabled: false,
+    check_interval_hours: 24,
+    idle_for_minutes: 10,
+    orphan_grace_hours: 168,
+    quarantine_retention_hours: 168,
+    workspaces: { enabled: true },
+    kandev_containers: { enabled: true },
+    go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
+    docker: {
+      dedicated_daemon_acknowledged: false,
+      build_cache_enabled: false,
+      build_cache_keep_bytes: 10737418240,
+      build_cache_unused_hours: 168,
+      unused_images_enabled: false,
+      unused_images_hours: 168,
+    },
+  };
+
+  it("loads overview and list resources without caching", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse({ settings, summary: {}, capabilities: {}, last_run: null }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ runs: [{ id: "run-1" }] }))
+      .mockResolvedValueOnce(jsonResponse({ entries: [{ id: "entry-1" }] }));
+
+    await fetchStorageOverview();
+    expect(lastCall().url).toBe(`${BASE}/storage`);
+    expect(lastCall().init?.cache).toBe("no-store");
+    expect((await fetchStorageRuns())[0]?.id).toBe("run-1");
+    expect(lastCall().url).toBe(`${BASE}/storage/runs?limit=20`);
+    expect((await fetchStorageQuarantine())[0]?.id).toBe("entry-1");
+  });
+
+  it("saves dedicated Docker acknowledgement with its confirmation", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ settings }));
+    await saveStorageSettings(settings, "DEDICATED");
+    expect(lastCall().url).toBe(`${BASE}/storage/settings`);
+    expect(method()).toBe("PATCH");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      settings,
+      confirmations: { dedicated_docker: "DEDICATED" },
+    });
+  });
+
+  it("uses fixed confirmations for Go-cache adoption and permanent deletion", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ settings, capabilities: {} }))
+      .mockResolvedValueOnce(jsonResponse({ job_id: "delete-job" }));
+    await adoptStorageGoCache("/root/.cache/go-build");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      path: "/root/.cache/go-build",
+      confirm: "ADOPT",
+    });
+    const response = await deleteStorageQuarantine("entry/1");
+    expect(lastCall().url).toBe(`${BASE}/storage/quarantine/entry%2F1`);
+    expect(method()).toBe("DELETE");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ confirm: "DELETE" });
+    expect(response.job_id).toBe("delete-job");
+  });
+
+  it("starts analysis, selected cleanup, and restore operations", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ job_id: "analysis" }))
+      .mockResolvedValueOnce(jsonResponse({ job_id: "cleanup" }))
+      .mockResolvedValueOnce(jsonResponse({ entry: { id: "restored" } }));
+    expect((await analyzeStorage()).job_id).toBe("analysis");
+    expect((await runStorageMaintenance(["workspaces"])).job_id).toBe("cleanup");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ resources: ["workspaces"] });
+    expect((await restoreStorageQuarantine("entry-1")).id).toBe("restored");
   });
 });

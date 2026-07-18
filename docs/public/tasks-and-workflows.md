@@ -21,11 +21,6 @@ A task is the unit of work. A workflow is the ordered process that task follows.
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
 
-## Office status
-
-> [!EXPERIMENTAL]
-> Office is in progress and feature-flagged. Its persistent agents, arbitrary-depth task trees, blocker and label properties, named task documents, reviewer/approver quorum, routines, and budgets are not stable features of the regular Kanban task experience.
-
 ## Prepare a workspace
 
 A new workspace created by a user does not automatically receive a workflow.
@@ -101,7 +96,7 @@ If the selected profile is unhealthy or incompatible with the executor, fix that
 
 ## Find and organize tasks
 
-The header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts.
+On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
 
 - Search matches tasks without changing their state.
 - The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**.
@@ -110,6 +105,8 @@ The header switches between **Kanban**, **Pipeline**, and **List**. Kanban and P
 - **Show archived** reveals archived tasks in List.
 - List page sizes are 10, 25, or 50; the default is 25.
 - Parent tasks and direct subtasks are indented as a tree.
+
+On phones, Kanban focuses one workflow and one step at a time. The board navigator always names both; open it to choose either level, or use the previous/next controls and horizontal swipe to move between steps. Choosing a workflow makes it the active workflow for board actions and task creation. Tap a card to open that task directly. Its **More options** menu opens as a touch-sized bottom surface; **Move to** changes the task's workflow or step. **Edit** can still rename a task after work starts, while its original prompt remains locked.
 
 Regular Kanban does not currently expose label editing or label filters. Do not design a supported Kanban process around labels.
 
@@ -196,7 +193,10 @@ Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_
 
 Revision history is not an immutable record of every autosave. Consecutive writes from the same author name and author kind coalesce into the latest revision for five minutes by default. Operators can set `KANDEV_PLAN_COALESCE_WINDOW_MS`; `0` disables coalescing, while an invalid or negative value falls back to five minutes.
 
-### Current availability of documents, labels, and blockers
+## Office documents, labels, and blockers
+
+> [!EXPERIMENTAL]
+> Office is feature-flagged, disabled in the production profile by default, and still in progress. Its named documents, labels, and blocker controls are not stable regular-Kanban features.
 
 | Capability | Regular Kanban | Office |
 |---|---|---|

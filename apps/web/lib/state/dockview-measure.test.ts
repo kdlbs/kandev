@@ -23,16 +23,16 @@ describe("measureDockviewContainer", () => {
     expect(measureDockviewContainer(fakeApi(0, 0))).toEqual({ width: 1500, height: 700 });
   });
 
-  it("ignores an implausibly-narrow live width (sidebar mid-transition) but keeps the live height", () => {
-    // Regression (post unified-sidebar #1165): the AppSidebar is a root-layout
-    // flex sibling with `transition-all duration-300`, so the dockview content
-    // container can be measured mid-animation at a tiny positive width. Building
-    // the default layout at that width collapses the horizontal columns into a
+  it("ignores an implausibly-narrow live width during root layout but keeps the live height", () => {
+    // Regression (post unified-sidebar #1165): while the AppSidebar root-flex
+    // width was animated, the dockview content container could be measured at a
+    // tiny positive width. Keep rejecting that transient during initial layout:
+    // building the default at it collapses the horizontal columns into a
     // vertical stack (chat / files+changes / terminal). On desktop the sidebar
     // maxes at 30vw, so content is always >= ~70vw — a sub-half-viewport read is
     // definitionally a transient: fall back the width to the viewport so the
     // build stays horizontal (the resize observer then snaps to the exact size).
-    // The animation is horizontal, so the live height is reliable and is kept.
+    // Root flex layout changes are horizontal, so the live height is reliable.
     const parent = document.createElement("div");
     Object.defineProperty(parent, "clientWidth", { value: 80, configurable: true });
     Object.defineProperty(parent, "clientHeight", { value: 700, configurable: true });

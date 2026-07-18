@@ -119,6 +119,14 @@ surface.
   </Tooltip>
   ```
   Keep the wrapper focusable only while disabled; when enabled, the button itself owns focus.
+- **Interactive help inside Radix tooltips:** do not nest a `Tooltip` root inside
+  another `TooltipContent` when the inner trigger must remain interactive.
+  Tooltip roots under one provider coordinate open state, so the inner tooltip
+  can close and unmount its parent before the pointer reaches it. Render the
+  secondary help inline in the existing content or use a disclosure primitive
+  with independent open state. Touch-pinned help must close on a second trigger
+  tap, outside interaction, and Escape; verify desktop pointer and mobile-sized
+  touch flows.
 - **Renaming a `data-testid`:** set the new id as `data-testid="<new>"` and keep
   the old id as `data-legacy-testid="<old>"`, then migrate e2e specs to the new
   id in the same PR. JSX rejects two `data-testid` attributes on one element,
@@ -173,5 +181,10 @@ When you hit a limit, extract a helper function, custom hook, or sub-component. 
 ## Testing notes
 
 - jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after.
+- jsdom synthetic mouse events do not reliably open Radix Tooltip. In component
+  tests, render under `TooltipProvider` and assert the keyboard-focus path with
+  `fireEvent.focus`. Cover pointer hover in Playwright with `locator.hover()` and
+  assert the visible portaled `role="tooltip"`; do not remove a hover regression
+  solely because `mouseenter` or `pointerMove` failed in jsdom.
 - In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper.
 - Shared E2E helpers that inspect mounted React/DOM internals must be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.

@@ -28,7 +28,7 @@ function useSidebarBulkActions(
   const { archiveTaskById, deleteTaskById } = useTaskActions();
   const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
   const { removeTaskFromBoard } = useTaskRemoval({ store, useLayoutSwitch: true });
-  const { removeTasksFromStore } = useTaskMultiSelectStore();
+  const { getWorkflowIdForTask, removeTasksFromStore } = useTaskMultiSelectStore();
   const moveTasks = useTaskWorkflowMove();
   const { toast } = useToast();
   const [isArchiving, setIsArchiving] = useState(false);
@@ -111,7 +111,10 @@ function useSidebarBulkActions(
     async (ids: string[], targetWorkflowId: string, targetStepId: string) => {
       if (ids.length === 0) return;
       try {
-        await moveTasks(ids, targetWorkflowId, targetStepId);
+        const destination = ids.every((taskId) => getWorkflowIdForTask(taskId) === targetWorkflowId)
+          ? "step"
+          : "workflow";
+        await moveTasks(ids, targetWorkflowId, targetStepId, destination);
         clearSelection();
       } catch {
         // useTaskWorkflowMove already toasts the failure; keep the rows selected
@@ -119,7 +122,7 @@ function useSidebarBulkActions(
         // fire-and-forget call site.
       }
     },
-    [moveTasks, clearSelection],
+    [moveTasks, clearSelection, getWorkflowIdForTask],
   );
 
   return { bulkArchive, bulkDelete, bulkMove, isArchiving, isDeleting };

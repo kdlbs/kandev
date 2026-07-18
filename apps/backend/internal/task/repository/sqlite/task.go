@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db/dialect"
@@ -42,6 +43,9 @@ var taskScanColumns = []taskScanColumn{
 	{name: "is_ephemeral"},
 	{name: "parent_id"},
 	{name: "archived_at"},
+	{name: "archived_by_cascade_id", selectExpr: func(alias string) string {
+		return `COALESCE(` + alias + `.archived_by_cascade_id, '') AS archived_by_cascade_id`
+	}},
 	{name: "created_at"},
 	{name: "updated_at"},
 	{name: "assignee_agent_profile_id", selectExpr: func(alias string) string {
@@ -831,7 +835,7 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	err := row.Scan(
 		&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
 		&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
-		&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt,
+		&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
 		&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
 		&task.Labels, &identifier, &task.IsFromOffice,
@@ -860,7 +864,7 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		err := rows.Scan(
 			&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
 			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
-			&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt,
+			&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
 			&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
 			&task.Labels, &identifier, &task.IsFromOffice,
@@ -1166,7 +1170,11 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 
 // UpdateTaskStateIfCurrentIn transitions state inside a transaction, re-checking
 // the current state on write so concurrent handlers cannot clobber a task that
-// moved out of allowed between read and update.
+// moved out of allowed between read and update. The write is also scoped to
+// archived_at IS NULL: if ArchiveTask commits between the caller's earlier
+// archived-state guard and this call, the archived_at check in the UPDATE's
+// WHERE clause (not just the state check) makes the no-op atomic, so a late
+// runtime write can never resurrect an archived task's state.
 func (r *Repository) UpdateTaskStateIfCurrentIn(
 	ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState,
 ) (v1.TaskState, bool, error) {
@@ -1194,7 +1202,7 @@ func (r *Repository) UpdateTaskStateIfCurrentIn(
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET state = ?, updated_at = ?
-		WHERE id = ? AND state = ?
+		WHERE id = ? AND state = ? AND archived_at IS NULL
 	`), state, time.Now().UTC(), id, currentState)
 	if err != nil {
 		return "", false, err
@@ -1207,6 +1215,146 @@ func (r *Repository) UpdateTaskStateIfCurrentIn(
 		return "", false, err
 	}
 	return currentState, true, nil
+}
+
+// updateTaskStateIfNotArchivedMaxAttempts bounds the optimistic-retry loop in
+// UpdateTaskStateIfNotArchived. A retry only fires when another writer
+// changed tasks.state (not archived_at) in the gap between this method's
+// read and its write; real contention on a single task's state column is
+// rare enough that a handful of attempts is generous headroom, not a
+// meaningful latency risk. updateTaskStateIfNotArchivedBackoff is a fixed
+// delay between attempts, giving the concurrent writer time to finish
+// (commit or roll back) before the next attempt re-reads — without it, a
+// tight spin-retry can exhaust every attempt in well under a millisecond,
+// faster than any real concurrent write completes.
+const (
+	updateTaskStateIfNotArchivedMaxAttempts = 8
+	updateTaskStateIfNotArchivedBackoff     = 15 * time.Millisecond
+)
+
+// UpdateTaskStateIfNotArchived atomically transitions state unless the task
+// is archived — no prior-state constraint, unlike UpdateTaskStateIfCurrentIn.
+// IN_PROGRESS writes (unlike the REVIEW CAS) are legitimately reachable from
+// many prior states, so there is no "allowed" set to check; the only
+// invariant that must hold atomically is archived_at IS NULL. Closes the
+// same TOCTOU window as UpdateTaskStateIfCurrentIn: if ArchiveTask commits
+// between a caller's earlier archived-state guard and this call, the
+// archived_at check inside the transaction (not just the caller's read)
+// makes the no-op atomic. Returns the pre-update state and whether a row
+// was modified.
+//
+// The UPDATE's WHERE clause also pins state = currentState (the value read
+// moments earlier in the same transaction), so the returned "pre-update
+// state" is never stale: without that pin, a concurrent state write landing
+// between the SELECT and the UPDATE would still match archived_at IS NULL
+// alone, silently clobbering the newer state while this method kept
+// reporting the old (now wrong) value as the pre-update state — which the
+// service layer publishes as the task.state_changed event's old_state
+// (CodeRabbit review on PR #1706). Losing the race on state (rows==0 while
+// the row is still unarchived) means state moved, not that the row is gone
+// or archived, so this is optimistic-concurrency-retried rather than
+// treated as a no-op — an IN_PROGRESS write has no prior-state restriction
+// to honor, so it always still applies once the retry re-reads a fresh
+// state.
+func (r *Repository) UpdateTaskStateIfNotArchived(
+	ctx context.Context, id string, state v1.TaskState,
+) (v1.TaskState, bool, error) {
+	for attempt := range updateTaskStateIfNotArchivedMaxAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", false, ctx.Err()
+			case <-time.After(updateTaskStateIfNotArchivedBackoff):
+			}
+		}
+		currentState, updated, retry, err := r.tryUpdateTaskStateIfNotArchived(ctx, id, state)
+		if err != nil || !retry {
+			return currentState, updated, err
+		}
+	}
+	return "", false, fmt.Errorf("update task state if not archived: exceeded %d attempts for task %s",
+		updateTaskStateIfNotArchivedMaxAttempts, id)
+}
+
+// tryUpdateTaskStateIfNotArchived is one attempt of the optimistic-retry loop
+// above. retry=true means the state changed concurrently while the row
+// stayed unarchived — the caller should re-read and try again.
+func (r *Repository) tryUpdateTaskStateIfNotArchived(
+	ctx context.Context, id string, state v1.TaskState,
+) (currentState v1.TaskState, updated, retry bool, err error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var archivedAt sql.NullTime
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT state, archived_at FROM tasks WHERE id = ?`), id).
+		Scan(&currentState, &archivedAt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false, false, fmt.Errorf("%w: %s", ErrTaskNotFound, id)
+		}
+		return "", false, false, err
+	}
+	if archivedAt.Valid {
+		return currentState, false, false, nil
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET state = ?, updated_at = ?
+		WHERE id = ? AND state = ? AND archived_at IS NULL
+	`), state, time.Now().UTC(), id, currentState)
+	if err != nil {
+		if isRetryableStateRaceError(err) {
+			// SQLite (under WAL) can refuse to upgrade this transaction's
+			// already-established read snapshot to a writer once another
+			// connection committed a conflicting write in between — it
+			// returns SQLITE_BUSY ("database is locked") on the UPDATE
+			// itself rather than a clean 0-rows-affected. Same underlying
+			// condition as the rows==0 branch below: retry with a fresh
+			// transaction/snapshot instead of surfacing a transient error.
+			return currentState, false, true, nil
+		}
+		return "", false, false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		// archived_at IS NULL was true moments ago (checked above, inside
+		// this same transaction) — a concurrent writer changed state, not
+		// archived_at. Retry with a fresh read rather than reporting a
+		// stale old-state/no-op.
+		return currentState, false, true, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, false, err
+	}
+	return currentState, true, false, nil
+}
+
+// isRetryableStateRaceError reports whether err is a database-level
+// contention error rather than a genuine failure: SQLite's WAL snapshot
+// conflict (a write following a read in the same transaction, after
+// another connection committed a conflicting write — surfaces as
+// SQLITE_BUSY/"database is locked" on the write itself, not a clean
+// 0-rows-affected), or a Postgres serialization/deadlock/lock-timeout
+// error. UpdateTaskStateIfNotArchived's retry loop treats this the same as
+// rows==0: the underlying condition (another writer changed the row) is
+// exactly the one it already retries for.
+func isRetryableStateRaceError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "40001", "40P01", "55P03": // serialization_failure, deadlock_detected, lock_not_available
+			return true
+		}
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "database is locked") || strings.Contains(s, "database table is locked")
 }
 
 func taskStateInSet(state v1.TaskState, allowed []v1.TaskState) bool {

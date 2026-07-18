@@ -55,6 +55,10 @@ func (h *fakeHost) DeleteState(context.Context, string, string, string) error { 
 func (h *fakeHost) ListState(context.Context, string, string) ([]pluginsdk.StateEntry, error) {
 	return nil, nil
 }
+func (h *fakeHost) GetConfig(context.Context) (map[string]any, error)       { return nil, nil }
+func (h *fakeHost) GetSecret(context.Context, string) (string, bool, error) { return "", false, nil }
+func (h *fakeHost) SetSecret(context.Context, string, string) error         { return nil }
+func (h *fakeHost) DeleteSecret(context.Context, string) error              { return nil }
 func (h *fakeHost) RevealSecret(context.Context, string) (string, error)    { return "", nil }
 func (h *fakeHost) EmitEvent(context.Context, string, map[string]any) error { return nil }
 
@@ -109,7 +113,7 @@ func copyFile(t *testing.T, src, dst string, mode os.FileMode) {
 	}
 }
 
-func TestManager_StartDeliverEventInvokeToolStop(t *testing.T) {
+func TestManager_StartDeliverEventWebhookStop(t *testing.T) {
 	rec := buildFixtureRecord(t, "kandev-fixture-plugin")
 	pluginsDir := t.TempDir()
 	host := newFakeHost()
@@ -130,13 +134,13 @@ func TestManager_StartDeliverEventInvokeToolStop(t *testing.T) {
 		t.Fatal("Get() ok = false right after a successful Start()")
 	}
 
-	t.Run("InvokeTool echoes input over the real subprocess", func(t *testing.T) {
-		resp, err := remote.InvokeTool(ctx, &pluginsdk.ToolRequest{ToolName: "echo", Input: map[string]any{"x": float64(1)}})
+	t.Run("HandleWebhook echoes the body over the real subprocess", func(t *testing.T) {
+		resp, err := remote.HandleWebhook(ctx, &pluginsdk.WebhookRequest{WebhookKey: "echo", Body: []byte("hi")})
 		if err != nil {
-			t.Fatalf("InvokeTool() unexpected error: %v", err)
+			t.Fatalf("HandleWebhook() unexpected error: %v", err)
 		}
-		if resp.Output["x"] != float64(1) {
-			t.Fatalf("InvokeTool().Output = %v, want echoed input", resp.Output)
+		if string(resp.Body) != "hi" {
+			t.Fatalf("HandleWebhook().Body = %q, want echoed body", resp.Body)
 		}
 	})
 
@@ -203,10 +207,10 @@ func TestManager_CrashTriggersAutomaticRestart(t *testing.T) {
 	if !ok {
 		t.Fatal("Get() ok = false right after Start()")
 	}
-	// Invoking the "crash" tool exits the subprocess immediately; the RPC
+	// Invoking the "crash" webhook exits the subprocess immediately; the RPC
 	// call itself is expected to error (connection dropped mid-call) or
 	// hang up cleanly - either way we only assert on the recovery below.
-	_, _ = remote.InvokeTool(ctx, &pluginsdk.ToolRequest{ToolName: "crash"})
+	_, _ = remote.HandleWebhook(ctx, &pluginsdk.WebhookRequest{WebhookKey: "crash"})
 
 	require.Eventually(t, func() bool {
 		mu.Lock()

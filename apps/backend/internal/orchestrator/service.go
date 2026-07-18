@@ -128,6 +128,13 @@ type repoStore interface {
 	sessionExecutorStore
 	// Additional methods needed by executor
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
+	// UpdateTaskStateIfCurrentIn — see executor.executorStore's doc comment;
+	// required here because repo (this interface) is what NewService passes
+	// to executor.NewExecutor.
+	UpdateTaskStateIfCurrentIn(ctx context.Context, id string, state v1.TaskState, allowed []v1.TaskState) (v1.TaskState, bool, error)
+	// UpdateTaskStateIfNotArchived — see executor.executorStore's doc comment;
+	// required here for the same reason as UpdateTaskStateIfCurrentIn above.
+	UpdateTaskStateIfNotArchived(ctx context.Context, id string, state v1.TaskState) (v1.TaskState, bool, error)
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
@@ -541,9 +548,24 @@ func NewService(
 	// Wire executor state changes through the orchestrator so events are published
 	// (e.g. WebSocket notifications to the frontend). Must be set after service
 	// construction so the session callback can reference s.updateTaskSessionState.
+	// UpdateTaskStateIfNotArchived (not the unconditional UpdateTaskState) so
+	// every runtime-driven task-state write the executor makes through this
+	// single callback — IN_PROGRESS on agent start/resume, FAILED on launch
+	// error — is atomic against archived_at. Each caller's own archived
+	// guard (e.g. writeTaskInProgressForRuntime) reads the task before this
+	// fires; ArchiveTask can commit in that window without an intervening
+	// state write to invalidate the guard, so only this conditional write
+	// closes the race (PR #1706 review).
 	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
-		if err := taskRepo.UpdateTaskState(ctx, taskID, state); err != nil {
+		updated, err := taskRepo.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+		if err != nil {
 			return err
+		}
+		if !updated {
+			s.logger.Debug("skipping runtime task state write for archived task",
+				zap.String("task_id", taskID),
+				zap.String("state", string(state)))
+			return nil
 		}
 		s.processParentChildrenCompletedForTaskState(ctx, taskID, state)
 		return nil
@@ -1311,9 +1333,14 @@ func (s *Service) reconcileOneSessionOnStartup(ctx context.Context, running *mod
 
 	// Ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if running.TaskID != "" {
-		task, taskErr := s.taskRepo.GetTask(ctx, running.TaskID)
-		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress {
-			if updateErr := s.taskRepo.UpdateTaskState(ctx, running.TaskID, v1.TaskStateReview); updateErr != nil {
+		task, taskErr := s.repo.GetTask(ctx, running.TaskID)
+		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
+			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
+			// so the write is atomic against archived_at: the taskArchived guard
+			// above reads the row before this call, and ArchiveTask can commit in
+			// that window without changing task.State, so only an archive-aware
+			// conditional write closes the race.
+			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, running.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
 				s.logger.Warn("failed to update task to REVIEW on startup",
 					zap.String("task_id", running.TaskID),
 					zap.Error(updateErr))
@@ -1422,12 +1449,15 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 	s.abandonOpenTurnsOnStartup(ctx, sessionID, "failed session cleanup")
 	// If session failed, ensure task is in REVIEW state (not stuck IN_PROGRESS)
 	if session.TaskID != "" {
-		task, taskErr := s.taskRepo.GetTask(ctx, session.TaskID)
-		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress {
+		task, taskErr := s.repo.GetTask(ctx, session.TaskID)
+		if taskErr == nil && task != nil && task.State == v1.TaskStateInProgress && !taskArchived(task) {
 			s.logger.Info("fixing task state: session failed but task still IN_PROGRESS",
 				zap.String("task_id", session.TaskID),
 				zap.String("session_id", sessionID))
-			if updateErr := s.taskRepo.UpdateTaskState(ctx, session.TaskID, v1.TaskStateReview); updateErr != nil {
+			// UpdateTaskStateIfCurrentIn (not the unconditional UpdateTaskState)
+			// so the write is atomic against archived_at — see the matching
+			// comment in reconcileOneSessionOnStartup above.
+			if _, updateErr := s.taskRepo.UpdateTaskStateIfCurrentIn(ctx, session.TaskID, v1.TaskStateReview, []v1.TaskState{v1.TaskStateInProgress}); updateErr != nil {
 				s.logger.Warn("failed to update task state to REVIEW",
 					zap.String("task_id", session.TaskID),
 					zap.Error(updateErr))

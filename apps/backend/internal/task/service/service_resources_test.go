@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -46,6 +47,62 @@ func (c *blockingWorktreeCleanup) CleanupWorktrees(ctx context.Context, _ []*wor
 		return ctx.Err()
 	case <-c.release:
 		return nil
+	}
+}
+
+func TestWorkspaceDeleteDurableCleanupSignalsOwnedWorker(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	ctx := context.Background()
+	snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+		Worktrees: []*worktree.Worktree{{ID: "workspace-delete-worktree", TaskID: "workspace-delete-task"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID: "workspace-delete-job", OperationID: "workspace_delete:workspace-delete-task",
+		TaskID: "workspace-delete-task", Trigger: models.TaskResourceCleanupTriggerWorkspaceDelete,
+		State: models.TaskResourceCleanupStatePrepared, ResourceSnapshot: string(snapshot),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	barrier := newCancellableCleanupBarrier()
+	taskSvc.SetWorktreeCleanup(barrier)
+	wake := make(chan struct{}, 1)
+	taskSvc.cleanupWorkerMu.Lock()
+	taskSvc.cleanupWorkerWake = wake
+	taskSvc.cleanupWorkerMu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		taskSvc.runWorkspaceDeleteTaskCleanup(workspaceDeleteTaskCleanup{cleanupJob: job})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-barrier.started:
+		close(barrier.release)
+		select {
+		case <-barrier.stopped:
+		case <-time.After(time.Second):
+			t.Fatal("synchronous workspace cleanup did not stop after release")
+		}
+		t.Fatal("workspace deletion processed durable cleanup synchronously")
+	case <-time.After(time.Second):
+		close(barrier.release)
+		t.Fatal("workspace deletion did not return")
+	}
+	select {
+	case <-wake:
+	default:
+		t.Fatal("workspace deletion did not wake owned cleanup worker")
+	}
+	got, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob: %v", err)
+	}
+	if got.State != models.TaskResourceCleanupStatePending {
+		t.Fatalf("cleanup state = %q, want pending", got.State)
 	}
 }
 

@@ -126,6 +126,14 @@ export function computeIsTaskStarted(
   return editingTask.state !== "TODO" && editingTask.state !== "CREATED";
 }
 
+export function shouldShowTaskTitleField(
+  isCreateMode: boolean,
+  isEditMode: boolean,
+  isTaskStarted: boolean,
+): boolean {
+  return isEditMode || (isCreateMode && !isTaskStarted);
+}
+
 export type ActivatePlanModeArgs = {
   sessionId: string;
   taskId: string;

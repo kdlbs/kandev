@@ -53,18 +53,22 @@ func (s *stubEnvRepo) DeleteTaskEnvironment(context.Context, string) error {
 func (s *stubEnvRepo) DeleteTaskEnvironmentsByTask(context.Context, string) error { return nil }
 
 type stubDestroyer struct {
-	containerCalls []string
-	sandboxCalls   []string
-	worktreeCalls  []string
-	pushCalls      int
-	containerErr   error
-	sandboxErr     error
-	worktreeErr    error
-	pushErr        error
+	containerCalls       []string
+	sandboxCalls         []string
+	worktreeCalls        []string
+	cancelAfterContainer context.CancelFunc
+	pushCalls            int
+	containerErr         error
+	sandboxErr           error
+	worktreeErr          error
+	pushErr              error
 }
 
 func (s *stubDestroyer) DestroyContainer(_ context.Context, id string) error {
 	s.containerCalls = append(s.containerCalls, id)
+	if s.cancelAfterContainer != nil {
+		s.cancelAfterContainer()
+	}
 	return s.containerErr
 }
 func (s *stubDestroyer) DestroySandbox(_ context.Context, id, _ string) error {
@@ -175,6 +179,43 @@ func TestResetTaskEnvironment_DestroysEachResourceTypeAndDeletesRow(t *testing.T
 	}
 	if len(destroyer.worktreeCalls) != 1 || destroyer.worktreeCalls[0] != "wt-1" {
 		t.Errorf("expected 1 worktree destroy call, got %v", destroyer.worktreeCalls)
+	}
+}
+
+func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *testing.T) {
+	svc := newResetTestService(t, &stubEnvRepo{})
+	ctx, cancel := context.WithCancel(context.Background())
+	destroyer := &stubDestroyer{cancelAfterContainer: cancel}
+	svc.SetEnvironmentDestroyer(destroyer)
+
+	err := svc.teardownEnvironmentResources(ctx, &models.TaskEnvironment{
+		ContainerID: "container-1", SandboxID: "sandbox-1", WorktreeID: "worktree-1",
+	})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("teardown error = %v, want context cancellation", err)
+	}
+	if len(destroyer.sandboxCalls) != 0 || len(destroyer.worktreeCalls) != 0 {
+		t.Fatalf("resources destroyed after cancellation: sandboxes=%v worktrees=%v",
+			destroyer.sandboxCalls, destroyer.worktreeCalls)
+	}
+}
+
+func TestCleanupTaskEnvironment_CancellationPreservesEnvironmentRow(t *testing.T) {
+	repo := &stubEnvRepo{}
+	svc := newResetTestService(t, repo)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	errs := svc.cleanupTaskEnvironment(ctx, "task-1", taskEnvironmentCleanup{
+		env: &models.TaskEnvironment{ID: "environment-1", TaskID: "task-1"}, deleteRow: true,
+	})
+
+	if !errors.Is(errors.Join(errs...), context.Canceled) {
+		t.Fatalf("cleanup errors = %v, want context cancellation", errs)
+	}
+	if repo.deleted {
+		t.Fatal("environment row deleted after cancellation")
 	}
 }
 

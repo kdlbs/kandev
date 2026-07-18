@@ -23,6 +23,10 @@ import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availabili
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
 import { useAppStore } from "@/components/state-provider";
+import type { Icon as TablerIcon } from "@tabler/icons-react";
+import { useFeature } from "@/hooks/domains/features/use-feature";
+import { resolvePluginIcon } from "@/lib/plugins/icons";
+import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { GitHubStatus } from "@/lib/types/github";
 
 type MobileIntegrationsSectionProps = {
@@ -210,30 +214,68 @@ export function IntegrationsTopbarLinks() {
   );
 }
 
+function MobileIntegrationRow({
+  href,
+  label,
+  icon: Icon,
+  testId,
+  onNavigate,
+}: {
+  href: string;
+  label: string;
+  icon: TablerIcon;
+  testId?: string;
+  onNavigate: () => void;
+}) {
+  return (
+    <Button asChild variant="outline" className="w-full cursor-pointer justify-start gap-2">
+      <Link href={href} onClick={onNavigate} data-testid={testId}>
+        <Icon className="h-4 w-4" />
+        <span className="flex-1 truncate text-left">{label}</span>
+      </Link>
+    </Button>
+  );
+}
+
+/**
+ * Mobile counterpart to the desktop sidebar Integrations section: the
+ * hamburger-sheet surface that exposes the first-party integration links plus
+ * any plugin-registered nav items targeting this section
+ * (`registerNavItem({ section: "integrations" })`). Plugin items are gated on
+ * the "plugins" feature flag, matching the desktop `IntegrationsSection`.
+ */
 export function MobileIntegrationsSection({ onNavigate }: MobileIntegrationsSectionProps) {
   const links = useConfiguredIntegrationLinks();
+  const pluginsEnabled = useFeature("plugins");
+  const registry = usePluginRegistry();
+  const pluginItems = pluginsEnabled
+    ? registry.getNavItems().filter((item) => item.section === "integrations")
+    : [];
 
-  if (links.length === 0) return null;
+  if (links.length === 0 && pluginItems.length === 0) return null;
 
   return (
     <div className="space-y-3">
       <div className="text-sm font-medium">Integrations</div>
-      {links.map((link) => {
-        const Icon = INTEGRATION_ICONS[link.id];
-        return (
-          <Button
-            key={link.id}
-            asChild
-            variant="outline"
-            className="w-full cursor-pointer justify-start gap-2"
-          >
-            <Link href={link.href} onClick={onNavigate}>
-              <Icon className="h-4 w-4" />
-              <span className="flex-1 text-left">{link.label}</span>
-            </Link>
-          </Button>
-        );
-      })}
+      {links.map((link) => (
+        <MobileIntegrationRow
+          key={link.id}
+          href={link.href}
+          label={link.label}
+          icon={INTEGRATION_ICONS[link.id]}
+          onNavigate={onNavigate}
+        />
+      ))}
+      {pluginItems.map((item) => (
+        <MobileIntegrationRow
+          key={`plugin-${item.id}`}
+          href={item.path}
+          label={item.label}
+          icon={resolvePluginIcon(item.icon)}
+          testId={`plugin-nav-item-${item.id}`}
+          onNavigate={onNavigate}
+        />
+      ))}
     </div>
   );
 }

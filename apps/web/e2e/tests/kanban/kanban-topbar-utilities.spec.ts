@@ -7,7 +7,7 @@ test.describe("Kanban topbar utilities", () => {
   // the AppSidebar footer gear, which toggles a full-height settings takeover
   // (the settings tree). From there each leaf navigates to a /settings/... page.
   test("settings is reachable from the AppSidebar footer gear", async ({ testPage }) => {
-    // Lock to desktop width — the AppSidebar is desktop-only (`hidden md:flex`).
+    // Lock to desktop width — the AppSidebar is hidden below the `md` breakpoint.
     await testPage.setViewportSize({ width: 1280, height: 800 });
     const kanban = new KanbanPage(testPage);
     await kanban.goto();

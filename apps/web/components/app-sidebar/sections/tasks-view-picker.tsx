@@ -1,15 +1,17 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { IconChevronDown, IconAdjustments, IconCheck } from "@tabler/icons-react";
+import { useMemo, useRef } from "react";
+import { IconChevronDown, IconAdjustments, IconCheck, IconPlus } from "@tabler/icons-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
 import { SidebarFilterPopover } from "@/components/task/sidebar-filter/sidebar-filter-popover";
+import { useSidebarViewPopover } from "@/components/task/sidebar-filter/use-sidebar-view-popover";
 import { cn } from "@/lib/utils";
 
 const TRIGGER_BUTTON_CLASS = cn(
@@ -22,7 +24,15 @@ export function TasksViewPicker() {
   const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
   const draft = useAppStore((s) => s.sidebarViews.draft);
   const setActiveView = useAppStore((s) => s.setSidebarActiveView);
-  const [filterOpen, setFilterOpen] = useState(false);
+  const openPopoverAfterPickerCloseRef = useRef(false);
+  const {
+    open,
+    onOpenChange,
+    startNewView,
+    renameRequestedViewId,
+    consumeRenameRequest,
+    newViewDisabledReason,
+  } = useSidebarViewPopover();
 
   const activeView = useMemo(
     () => views.find((v) => v.id === activeViewId) ?? views[0],
@@ -45,7 +55,16 @@ export function TasksViewPicker() {
             <IconChevronDown className="h-3 w-3 shrink-0 opacity-70" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuContent
+          align="end"
+          className="w-52"
+          onCloseAutoFocus={(event) => {
+            if (!openPopoverAfterPickerCloseRef.current) return;
+            event.preventDefault();
+            openPopoverAfterPickerCloseRef.current = false;
+            onOpenChange(true);
+          }}
+        >
           {views.map((view) => {
             const isActive = view.id === activeViewId;
             return (
@@ -63,11 +82,21 @@ export function TasksViewPicker() {
               </DropdownMenuItem>
             );
           })}
+          <DropdownMenuSeparator />
+          <NewViewMenuItem
+            disabledReason={newViewDisabledReason}
+            hasDraft={draft !== null}
+            onSelect={() => {
+              openPopoverAfterPickerCloseRef.current = startNewView({ openPopover: false });
+            }}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
       <SidebarFilterPopover
-        open={filterOpen}
-        onOpenChange={setFilterOpen}
+        open={open}
+        onOpenChange={onOpenChange}
+        renameRequestedViewId={renameRequestedViewId}
+        onRenameRequestHandled={consumeRenameRequest}
         trigger={
           <button
             type="button"
@@ -87,5 +116,34 @@ export function TasksViewPicker() {
         }
       />
     </div>
+  );
+}
+
+function NewViewMenuItem({
+  disabledReason,
+  hasDraft,
+  onSelect,
+}: {
+  disabledReason: string | null;
+  hasDraft: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <DropdownMenuItem
+      disabled={!!disabledReason}
+      onSelect={onSelect}
+      data-testid="sidebar-new-view"
+      aria-label={disabledReason ? `New view unavailable. ${disabledReason}` : "New view"}
+      title={disabledReason ?? undefined}
+      className="cursor-pointer gap-2"
+    >
+      <IconPlus className="h-3.5 w-3.5" />
+      <span>New view</span>
+      {disabledReason && (
+        <span className="ml-auto text-[10px] text-muted-foreground" aria-hidden="true">
+          {hasDraft ? "Save/discard first" : "50 max"}
+        </span>
+      )}
+    </DropdownMenuItem>
   );
 }

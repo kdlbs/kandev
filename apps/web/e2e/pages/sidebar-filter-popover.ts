@@ -35,6 +35,11 @@ export class SidebarFilterPopoverPage {
     return this.page.getByTestId("sidebar-filter-popover");
   }
 
+  /** Direct-create action inside the currently open desktop view menu. */
+  get newViewAction(): Locator {
+    return this.chipMenu.getByTestId("sidebar-new-view");
+  }
+
   /** Open radix dropdown menu hosting the view chips. Scoped to the menu that
    *  actually contains the view chips so it can't match another sidebar menu. */
   get chipMenu(): Locator {
@@ -76,6 +81,19 @@ export class SidebarFilterPopoverPage {
     await this.chipByName(name).click();
     // Selecting closes the menu.
     await expect(this.chipMenu).toBeHidden();
+  }
+
+  /** Create immediately, then wait for the optional rename handoff. */
+  async beginNewView(): Promise<Locator> {
+    await this.openViewPicker();
+    await this.newViewAction.scrollIntoViewIfNeeded();
+    await this.newViewAction.click();
+    await expect(this.chipMenu).toBeHidden();
+    await expect(this.popover).toBeVisible();
+    const input = this.popover.getByTestId("view-rename-input");
+    await expect(input).toBeVisible();
+    await expect(input).toBeFocused();
+    return input;
   }
 
   /**

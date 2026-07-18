@@ -101,12 +101,18 @@ type PluginRuntime interface {
 	StopAll()
 }
 
-// SecretRevealer is the minimal surface Service needs to resolve a secret
-// reference to its cleartext value, for the Host.RevealSecret RPC.
-// Satisfied by *internal/integrations/secretadapter.Adapter in production;
-// tests use a fake.
-type SecretRevealer interface {
+// SecretVault is the surface Service needs on kandev's encrypted secret
+// vault: Reveal for the Host.RevealSecret RPC and for resolving
+// vault-backed config secrets, Set/Delete for the plugin-scoped
+// GetSecret/SetSecret/DeleteSecret RPCs and for storing secret config
+// fields, and ListIDs for uninstall cleanup of a plugin's vault namespace.
+// Satisfied structurally by *internal/integrations/secretadapter.Adapter in
+// production; tests use a fake.
+type SecretVault interface {
 	Reveal(ctx context.Context, ref string) (string, error)
+	Set(ctx context.Context, id, name, value string) error
+	Delete(ctx context.Context, id string) error
+	ListIDs(ctx context.Context) ([]string, error)
 }
 
 // Deliverer is the minimal surface the event-delivery subsystem

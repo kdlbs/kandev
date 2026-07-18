@@ -135,13 +135,15 @@ describe("AppSidebar", () => {
     cleanup();
   });
 
-  it("renders the nav sections when expanded (no Settings section — that's the footer gear)", () => {
+  it("renders the expanded nav inside a clipped animation layer", () => {
     render(<AppSidebar />);
     expect(screen.getByTestId("app-sidebar").getAttribute("data-collapsed")).toBe("false");
     expect(screen.getByTestId("tasks-section")).toBeTruthy();
     expect(screen.getByTestId("projects-section")).toBeTruthy();
     expect(screen.getByTestId("agents-section")).toBeTruthy();
     expect(screen.queryByTestId("settings-section")).toBeNull();
+    expect(screen.getByTestId("app-sidebar-content").classList).toContain("overflow-hidden");
+    expect(screen.getByTestId("app-sidebar").classList).not.toContain("overflow-hidden");
   });
 
   it("renders office navigation without kanban-only sections in office mode", () => {

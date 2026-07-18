@@ -100,7 +100,6 @@ export function TaskItemWithContextMenu({
   const [contextOpen, setContextOpen] = useState(false);
   const [menuKey, setMenuKey] = useState(0);
   const moveTasks = useTaskWorkflowMove();
-  const menuOpen = contextOpen || isDeleting === true;
   const closeMenu = () => {
     setContextOpen(false);
     setMenuKey((k) => k + 1);
@@ -109,7 +108,7 @@ export function TaskItemWithContextMenu({
   return (
     <ContextMenu key={menuKey} onOpenChange={setContextOpen}>
       <ContextMenuTrigger asChild>
-        <div>{cloneWithMenuOpen(children, menuOpen)}</div>
+        <div>{cloneWithMenuOpen(children, contextOpen)}</div>
       </ContextMenuTrigger>
       <ContextMenuContent className="w-48">
         <TaskContextMenuItems
@@ -470,13 +469,17 @@ function TaskMoveItems({
   // Moving a selection routes through the sidebar hook's bulkMove, which clears
   // the selection afterwards. Fall back to a raw move when no bulk handler is
   // wired (e.g. the kanban-less callers that don't manage a selection).
-  const runSelectionMove = (targetWorkflowId: string, stepId: string) => {
+  const runSelectionMove = (
+    targetWorkflowId: string,
+    stepId: string,
+    destination: "step" | "workflow",
+  ) => {
     closeMenu();
     if (onBulkMove) {
       onBulkMove(actingIds, targetWorkflowId, stepId);
       return;
     }
-    void moveTasks(actingIds, targetWorkflowId, stepId).catch(() => {
+    void moveTasks(actingIds, targetWorkflowId, stepId, destination).catch(() => {
       // useTaskWorkflowMove already shows the failure toast.
     });
   };
@@ -488,9 +491,18 @@ function TaskMoveItems({
   if (actingOnSelection) {
     moveToStep = isMixedWorkflowSelection
       ? undefined
-      : (stepId) => runSelectionMove(workflowId, stepId);
+      : (stepId) => runSelectionMove(workflowId, stepId, "step");
   } else {
-    moveToStep = selectMoveAction(task.id, workflowId, onMoveToStep, closeMenu);
+    moveToStep = (stepId) => {
+      closeMenu();
+      if (onMoveToStep) {
+        onMoveToStep(task.id, workflowId, stepId);
+        return;
+      }
+      void moveTasks([task.id], workflowId, stepId, "step").catch(() => {
+        // useTaskWorkflowMove already shows the failure toast.
+      });
+    };
   }
 
   return (
@@ -506,29 +518,16 @@ function TaskMoveItems({
       onMoveToStep={moveToStep}
       onSendToWorkflow={(targetWorkflowId, stepId) => {
         if (actingOnSelection) {
-          runSelectionMove(targetWorkflowId, stepId);
+          runSelectionMove(targetWorkflowId, stepId, "workflow");
           return;
         }
         closeMenu();
-        void moveTasks([task.id], targetWorkflowId, stepId).catch(() => {
+        void moveTasks([task.id], targetWorkflowId, stepId, "workflow").catch(() => {
           // useTaskWorkflowMove already shows the failure toast.
         });
       }}
     />
   );
-}
-
-function selectMoveAction(
-  taskId: string,
-  workflowId: string,
-  handler: ((taskId: string, workflowId: string, targetStepId: string) => void) | undefined,
-  closeMenu: () => void,
-) {
-  if (!handler) return undefined;
-  return (stepId: string) => {
-    closeMenu();
-    handler(taskId, workflowId, stepId);
-  };
 }
 
 function TaskDeleteItem({

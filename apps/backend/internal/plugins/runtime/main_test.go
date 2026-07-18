@@ -14,7 +14,7 @@ import (
 
 // fixtureBinPath is the path to the real SDK-based plugin binary built by
 // TestMain, used by the end-to-end tests in manager_test.go that exercise a
-// real subprocess spawn/handshake/DeliverEvent/InvokeTool/crash-restart
+// real subprocess spawn/handshake/DeliverEvent/crash-restart
 // cycle. Empty when tests run with -short (no real subprocess tests run in
 // that mode).
 var fixtureBinPath string
