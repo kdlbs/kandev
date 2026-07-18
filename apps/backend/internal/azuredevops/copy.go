@@ -38,7 +38,7 @@ func (s *Service) CopyConfigToWorkspace(
 	if err != nil {
 		return nil, fmt.Errorf("read source azure devops credential: %w", err)
 	}
-	target, err := s.SetConfigForWorkspace(ctx, targetWorkspaceID, &SetConfigRequest{
+	_, err = s.SetConfigForWorkspace(ctx, targetWorkspaceID, &SetConfigRequest{
 		OrganizationURL:    source.OrganizationURL,
 		DefaultProjectID:   source.DefaultProjectID,
 		DefaultProjectName: source.DefaultProjectName,
@@ -48,5 +48,8 @@ func (s *Service) CopyConfigToWorkspace(
 	if err != nil {
 		return nil, err
 	}
-	return target, nil
+	if err := s.store.ResetAuthHealth(ctx, targetWorkspaceID); err != nil {
+		return nil, fmt.Errorf("reset target azure devops health: %w", err)
+	}
+	return s.GetConfigForWorkspace(ctx, targetWorkspaceID)
 }

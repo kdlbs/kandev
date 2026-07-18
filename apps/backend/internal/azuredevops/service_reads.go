@@ -141,15 +141,19 @@ func (s *Service) GetPullRequestFeedbackForWorkspace(
 
 func summarizeReviewState(reviewers []Reviewer) string {
 	hasApproval := false
+	hasWaiting := false
 	for _, reviewer := range reviewers {
 		switch reviewer.Vote {
 		case -10:
 			return "rejected"
 		case -5:
-			return "waiting"
+			hasWaiting = true
 		case 5, 10:
 			hasApproval = true
 		}
+	}
+	if hasWaiting {
+		return "waiting"
 	}
 	if hasApproval {
 		return reviewStateApproved

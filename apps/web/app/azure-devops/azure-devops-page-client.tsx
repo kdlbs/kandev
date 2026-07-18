@@ -303,7 +303,7 @@ function MobileFilters({
   );
 }
 
-export function AzureDevOpsPageClient({ workspaceId, workflows, steps, repositories }: PageProps) {
+function AzureDevOpsPageContent({ workspaceId, workflows, steps, repositories }: PageProps) {
   const state = useAzureDevOpsPageState(workspaceId);
 
   if (state.connection.loading) return null;
@@ -382,4 +382,8 @@ export function AzureDevOpsPageClient({ workspaceId, workflows, steps, repositor
       />
     </main>
   );
+}
+
+export function AzureDevOpsPageClient(props: PageProps) {
+  return <AzureDevOpsPageContent key={props.workspaceId ?? ""} {...props} />;
 }

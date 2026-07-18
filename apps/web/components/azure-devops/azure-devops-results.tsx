@@ -27,7 +27,8 @@ export function AzureDevOpsWorkItemResults({
   error: string | null;
   onStartTask: (item: AzureDevOpsWorkItem) => void;
 }) {
-  if (items.length === 0) return <EmptyResult loading={loading} error={error} />;
+  if (loading || error || items.length === 0)
+    return <EmptyResult loading={loading} error={error} />;
   return (
     <div className="divide-y" data-testid="azure-devops-work-item-results">
       {items.map((item) => (
@@ -91,7 +92,8 @@ export function AzureDevOpsPullRequestResults({
   onFeedback: (pullRequest: AzureDevOpsPullRequest) => void;
   onStartTask: (pullRequest: AzureDevOpsPullRequest) => void;
 }) {
-  if (items.length === 0) return <EmptyResult loading={loading} error={error} />;
+  if (loading || error || items.length === 0)
+    return <EmptyResult loading={loading} error={error} />;
   return (
     <div className="divide-y" data-testid="azure-devops-pull-request-results">
       {items.map((pullRequest) => (

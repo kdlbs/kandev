@@ -50,6 +50,16 @@ function taskPullRequest(
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((next, fail) => {
+    resolve = next;
+    reject = fail;
+  });
+  return { promise, reject, resolve };
+}
+
 beforeEach(() => {
   apiMocks.list.mockReset();
   apiMocks.sync.mockReset();
@@ -100,5 +110,56 @@ describe("useAzureDevOpsTaskPullRequests", () => {
       repositoryId: "repo-1",
       pullRequestId: 42,
     });
+  });
+
+  it("deduplicates concurrent workspace loads", async () => {
+    const pending = deferred<{ taskPrs: Record<string, AzureDevOpsTaskPullRequest[]> }>();
+    apiMocks.list.mockReturnValue(pending.promise);
+    const first = taskPullRequest({ id: "link-one", taskId: "task-1" });
+    const second = taskPullRequest({ id: "link-two", taskId: "task-2" });
+    const { result } = renderHook(
+      () => ({
+        first: useAzureDevOpsTaskPullRequests("workspace-concurrent", "task-1"),
+        second: useAzureDevOpsTaskPullRequests("workspace-concurrent", "task-2"),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(apiMocks.list).toHaveBeenCalledTimes(1));
+    await act(async () => pending.resolve({ taskPrs: { "task-1": [first], "task-2": [second] } }));
+    await waitFor(() => expect(result.current).toEqual({ first: [first], second: [second] }));
+  });
+
+  it("retries a failed workspace load after remount", async () => {
+    apiMocks.list.mockRejectedValueOnce(new Error("offline"));
+    const first = renderHook(() => useAzureDevOpsTaskPullRequests("workspace-retry", "task-1"), {
+      wrapper,
+    });
+    await waitFor(() => expect(apiMocks.list).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    const linked = taskPullRequest({ id: "link-retry" });
+    apiMocks.list.mockResolvedValueOnce({ taskPrs: { "task-1": [linked] } });
+    const second = renderHook(() => useAzureDevOpsTaskPullRequests("workspace-retry", "task-1"), {
+      wrapper,
+    });
+    await waitFor(() => expect(second.result.current).toEqual([linked]));
+    expect(apiMocks.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("replaces task associations when the workspace changes", async () => {
+    const first = taskPullRequest({ id: "link-workspace-a", title: "Workspace A" });
+    const second = taskPullRequest({ id: "link-workspace-b", title: "Workspace B" });
+    apiMocks.list.mockImplementation((workspaceId: string) =>
+      Promise.resolve({
+        taskPrs: { "task-1": [workspaceId === "workspace-switch-a" ? first : second] },
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ workspaceId }) => useAzureDevOpsTaskPullRequests(workspaceId, "task-1"),
+      { initialProps: { workspaceId: "workspace-switch-a" }, wrapper },
+    );
+    await waitFor(() => expect(result.current).toEqual([first]));
+    rerender({ workspaceId: "workspace-switch-b" });
+    await waitFor(() => expect(result.current).toEqual([second]));
   });
 });

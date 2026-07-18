@@ -5,13 +5,16 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
 type fakeSecretStore struct {
-	mu     sync.Mutex
-	values map[string]string
+	mu             sync.Mutex
+	values         map[string]string
+	setFailures    int
+	deleteFailures int
 }
 
 func newFakeSecretStore() *fakeSecretStore {
@@ -31,6 +34,10 @@ func (f *fakeSecretStore) Reveal(_ context.Context, id string) (string, error) {
 func (f *fakeSecretStore) Set(_ context.Context, id, _ string, value string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.setFailures > 0 {
+		f.setFailures--
+		return errors.New("injected secret set failure")
+	}
 	f.values[id] = value
 	return nil
 }
@@ -38,6 +45,10 @@ func (f *fakeSecretStore) Set(_ context.Context, id, _ string, value string) err
 func (f *fakeSecretStore) Delete(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.deleteFailures > 0 {
+		f.deleteFailures--
+		return errors.New("injected secret delete failure")
+	}
 	delete(f.values, id)
 	return nil
 }
@@ -160,13 +171,21 @@ func TestConfigTestUsesSubmittedAndStoredCredentialsWithoutPersistence(t *testin
 }
 
 func TestCopyConfigCopiesCredentialAndDeleteIsScoped(t *testing.T) {
-	svc, _, secrets := newTestService(t, nil)
+	svc, store, secrets := newTestService(t, nil)
 	ctx := context.Background()
 	if _, err := svc.SetConfigForWorkspace(ctx, "source", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", DefaultProjectID: "p1",
 		DefaultProjectName: "Platform", PAT: "source-pat",
 	}); err != nil {
 		t.Fatalf("set source: %v", err)
+	}
+	if _, err := svc.SetConfigForWorkspace(ctx, "target", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/old", PAT: "old-pat",
+	}); err != nil {
+		t.Fatalf("set target: %v", err)
+	}
+	if err := store.UpdateAuthHealth(ctx, "target", true, "", time.Now().UTC()); err != nil {
+		t.Fatalf("set target health: %v", err)
 	}
 	if _, err := svc.CopyConfigToWorkspace(ctx, "source", "target"); err != nil {
 		t.Fatalf("copy: %v", err)
@@ -217,5 +236,125 @@ func TestConfigRecordAuthHealthPersistsPerWorkspace(t *testing.T) {
 	b, _ := svc.GetConfigForWorkspace(ctx, "ws-b")
 	if !a.LastOK || a.LastCheckedAt == nil || b.LastOK || b.LastError != "401 unauthorized" {
 		t.Fatalf("health rows: a=%+v b=%+v", a, b)
+	}
+}
+
+func TestSetConfigCompensatesSecretFailure(t *testing.T) {
+	svc, store, secrets := newTestService(t, nil)
+	ctx := context.Background()
+	secrets.setFailures = 1
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme", PAT: "new-pat",
+	}); err == nil {
+		t.Fatal("set config unexpectedly succeeded")
+	}
+	config, err := store.GetConfig(ctx, "ws-a")
+	if err != nil || config != nil {
+		t.Fatalf("config after secret failure = %+v, err = %v", config, err)
+	}
+	if exists, _ := secrets.Exists(ctx, SecretKeyForWorkspace("ws-a")); exists {
+		t.Fatal("secret remains after failed config creation")
+	}
+}
+
+func TestSetConfigKeepsPreviousConfigWhenSecretReplacementFails(t *testing.T) {
+	svc, store, secrets := newTestService(t, nil)
+	ctx := context.Background()
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/old", PAT: "old-pat",
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	secrets.setFailures = 1
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/new", PAT: "new-pat",
+	}); err == nil {
+		t.Fatal("replace config unexpectedly succeeded")
+	}
+	config, err := store.GetConfig(ctx, "ws-a")
+	if err != nil || config.OrganizationURL != "https://dev.azure.com/old" {
+		t.Fatalf("config after secret replacement failure = %+v, err = %v", config, err)
+	}
+	if pat, _ := secrets.Reveal(ctx, SecretKeyForWorkspace("ws-a")); pat != "old-pat" {
+		t.Fatalf("PAT after replacement failure = %q", pat)
+	}
+}
+
+func TestSetConfigRestoresPATWhenStoreFails(t *testing.T) {
+	svc, store, secrets := newTestService(t, nil)
+	ctx := context.Background()
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme", PAT: "old-pat",
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := store.db.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme", PAT: "new-pat",
+	}); err == nil {
+		t.Fatal("set config unexpectedly succeeded")
+	}
+	if pat, _ := secrets.Reveal(ctx, SecretKeyForWorkspace("ws-a")); pat != "old-pat" {
+		t.Fatalf("PAT after store failure = %q", pat)
+	}
+}
+
+func TestDeleteConfigLeavesStateWhenSecretDeleteFails(t *testing.T) {
+	svc, store, secrets := newTestService(t, nil)
+	ctx := context.Background()
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme", PAT: "pat",
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	secrets.deleteFailures = 1
+	if err := svc.DeleteConfigForWorkspace(ctx, "ws-a"); err == nil {
+		t.Fatal("delete config unexpectedly succeeded")
+	}
+	config, err := store.GetConfig(ctx, "ws-a")
+	if err != nil || config == nil {
+		t.Fatalf("config after secret delete failure = %+v, err = %v", config, err)
+	}
+	if pat, _ := secrets.Reveal(ctx, SecretKeyForWorkspace("ws-a")); pat != "pat" {
+		t.Fatalf("PAT after failed deletion = %q", pat)
+	}
+}
+
+func TestDeleteConfigRestoresPATWhenStoreFails(t *testing.T) {
+	svc, store, secrets := newTestService(t, nil)
+	ctx := context.Background()
+	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme", PAT: "pat",
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	if err := store.db.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	if err := svc.DeleteConfigForWorkspace(ctx, "ws-a"); err == nil {
+		t.Fatal("delete config unexpectedly succeeded")
+	}
+	if pat, _ := secrets.Reveal(ctx, SecretKeyForWorkspace("ws-a")); pat != "pat" {
+		t.Fatalf("PAT after store deletion failure = %q", pat)
+	}
+}
+
+func TestRecordAuthHealthIgnoresParentCancellation(t *testing.T) {
+	svc, _, _ := newTestService(t, func(*Config, string) Client {
+		return &fakeClient{err: context.Canceled}
+	})
+	if _, err := svc.SetConfigForWorkspace(t.Context(), "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme", PAT: "pat",
+	}); err != nil {
+		t.Fatalf("seed config: %v", err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	svc.RecordAuthHealthForWorkspace(ctx, "ws-a")
+	config, err := svc.GetConfigForWorkspace(t.Context(), "ws-a")
+	if err != nil || config.LastCheckedAt != nil {
+		t.Fatalf("health after cancellation = %+v, err = %v", config, err)
 	}
 }

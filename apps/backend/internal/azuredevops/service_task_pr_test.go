@@ -156,6 +156,31 @@ func TestServiceAssociateAndSyncTaskPRRefreshesPersistedSummary(t *testing.T) {
 	}
 }
 
+func TestSummarizeReviewStateUsesDeterministicPrecedence(t *testing.T) {
+	tests := []struct {
+		name     string
+		votes    []int
+		expected string
+	}{
+		{name: "rejection after waiting", votes: []int{-5, -10}, expected: "rejected"},
+		{name: "rejection before waiting", votes: []int{-10, -5}, expected: "rejected"},
+		{name: "waiting beats approval", votes: []int{10, -5}, expected: "waiting"},
+		{name: "approval", votes: []int{5, 10}, expected: "approved"},
+		{name: "no vote", votes: []int{0}, expected: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reviewers := make([]Reviewer, 0, len(tt.votes))
+			for _, vote := range tt.votes {
+				reviewers = append(reviewers, Reviewer{Vote: vote})
+			}
+			if got := summarizeReviewState(reviewers); got != tt.expected {
+				t.Fatalf("summarizeReviewState(%v) = %q, want %q", tt.votes, got, tt.expected)
+			}
+		})
+	}
+}
+
 func newTaskPRServiceFixture(t *testing.T) (*Service, *taskPRClient) {
 	t.Helper()
 	db := newTestDB(t)

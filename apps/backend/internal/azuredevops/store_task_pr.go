@@ -2,11 +2,11 @@ package azuredevops
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 )
 
 const taskPRSelectColumns = `id, task_id, repository_id, organization_url,
@@ -29,22 +29,13 @@ func (s *Store) UpsertTaskPR(ctx context.Context, taskPR *TaskPR) error {
 	}
 	now := time.Now().UTC()
 	taskPR.UpdatedAt = now
-	existing, err := s.findTaskPR(ctx, taskPR)
-	if err != nil {
-		return err
-	}
-	if existing != nil {
-		taskPR.ID = existing.ID
-		taskPR.CreatedAt = existing.CreatedAt
-		return s.updateTaskPR(ctx, taskPR)
-	}
 	if taskPR.ID == "" {
 		taskPR.ID = uuid.NewString()
 	}
 	if taskPR.CreatedAt.IsZero() {
 		taskPR.CreatedAt = now
 	}
-	_, err = s.db.NamedExecContext(ctx, `
+	query, args, err := sqlx.Named(`
 		INSERT INTO azure_devops_task_prs (
 			id, task_id, repository_id, organization_url, project_id,
 			azure_repository_id, pull_request_id, pull_request_url, title,
@@ -55,38 +46,29 @@ func (s *Store) UpsertTaskPR(ctx context.Context, taskPR *TaskPR) error {
 			:azure_repository_id, :pull_request_id, :pull_request_url, :title,
 			:source_branch, :target_branch, :author_id, :author_name, :status,
 			:review_state, :policy_state, :is_draft, :last_synced_at, :created_at, :updated_at
-		)`, taskPR)
-	return err
-}
-
-func (s *Store) findTaskPR(ctx context.Context, taskPR *TaskPR) (*TaskPR, error) {
-	var existing TaskPR
-	err := s.ro.GetContext(ctx, &existing,
-		`SELECT `+taskPRSelectColumns+` FROM azure_devops_task_prs
-		 WHERE task_id = ? AND repository_id = ? AND azure_repository_id = ?
-		 AND pull_request_id = ? LIMIT 1`,
-		taskPR.TaskID, taskPR.RepositoryID, taskPR.AzureRepositoryID, taskPR.PullRequestID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
+		)
+		ON CONFLICT(task_id, repository_id, azure_repository_id, pull_request_id)
+		DO UPDATE SET
+			organization_url = excluded.organization_url,
+			project_id = excluded.project_id,
+			pull_request_url = excluded.pull_request_url,
+			title = excluded.title,
+			source_branch = excluded.source_branch,
+			target_branch = excluded.target_branch,
+			author_id = excluded.author_id,
+			author_name = excluded.author_name,
+			status = excluded.status,
+			review_state = excluded.review_state,
+			policy_state = excluded.policy_state,
+			is_draft = excluded.is_draft,
+			last_synced_at = excluded.last_synced_at,
+			updated_at = excluded.updated_at
+		RETURNING id, created_at`, taskPR)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return &existing, nil
-}
-
-func (s *Store) updateTaskPR(ctx context.Context, taskPR *TaskPR) error {
-	_, err := s.db.NamedExecContext(ctx, `
-		UPDATE azure_devops_task_prs SET
-			organization_url = :organization_url, project_id = :project_id,
-			pull_request_url = :pull_request_url, title = :title,
-			source_branch = :source_branch, target_branch = :target_branch,
-			author_id = :author_id, author_name = :author_name, status = :status,
-			review_state = :review_state, policy_state = :policy_state,
-			is_draft = :is_draft, last_synced_at = :last_synced_at,
-			updated_at = :updated_at
-		WHERE id = :id`, taskPR)
-	return err
+	query = s.db.Rebind(query)
+	return s.db.QueryRowxContext(ctx, query, args...).Scan(&taskPR.ID, &taskPR.CreatedAt)
 }
 
 // ListTaskPRsByTask returns all associations for one task in creation order.

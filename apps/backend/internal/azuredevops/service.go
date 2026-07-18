@@ -118,17 +118,30 @@ func (s *Service) SetConfigForWorkspace(
 		if err := s.requireStoredPAT(ctx, workspaceID); err != nil {
 			return nil, err
 		}
-	}
-	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
-		return nil, fmt.Errorf("upsert azure devops config: %w", err)
-	}
-	if req.PAT != "" {
+	} else {
 		if s.secrets == nil {
 			return nil, errors.New("azure devops: no secret store configured")
 		}
-		if err := s.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID), "Azure DevOps PAT", req.PAT); err != nil {
-			return nil, fmt.Errorf("store azure devops PAT: %w", err)
+		previous, err := s.readStoredPAT(ctx, workspaceID)
+		if err != nil {
+			return nil, err
 		}
+		if err := s.secrets.Set(ctx, SecretKeyForWorkspace(workspaceID), "Azure DevOps PAT", req.PAT); err != nil {
+			return nil, joinMutationError(
+				fmt.Errorf("store azure devops PAT: %w", err),
+				s.restorePAT(ctx, workspaceID, previous),
+			)
+		}
+		if err := s.store.UpsertConfig(ctx, cfg); err != nil {
+			return nil, joinMutationError(
+				fmt.Errorf("upsert azure devops config: %w", err),
+				s.restorePAT(ctx, workspaceID, previous),
+			)
+		}
+		return s.GetConfigForWorkspace(ctx, workspaceID)
+	}
+	if err := s.store.UpsertConfig(ctx, cfg); err != nil {
+		return nil, fmt.Errorf("upsert azure devops config: %w", err)
 	}
 	return s.GetConfigForWorkspace(ctx, workspaceID)
 }
@@ -138,15 +151,64 @@ func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID stri
 	if err := validateWorkspaceID(workspaceID); err != nil {
 		return err
 	}
-	if err := s.store.DeleteConfig(ctx, workspaceID); err != nil {
+	previous, err := s.readStoredPAT(ctx, workspaceID)
+	if err != nil {
 		return err
 	}
-	if s.secrets != nil {
+	if previous.exists {
 		if err := s.secrets.Delete(ctx, SecretKeyForWorkspace(workspaceID)); err != nil {
-			s.log.Warn("azure devops: secret delete failed", zap.Error(err))
+			return joinMutationError(
+				fmt.Errorf("delete azure devops PAT: %w", err),
+				s.restorePAT(ctx, workspaceID, previous),
+			)
 		}
 	}
+	if err := s.store.DeleteConfig(ctx, workspaceID); err != nil {
+		return joinMutationError(err, s.restorePAT(ctx, workspaceID, previous))
+	}
 	return nil
+}
+
+type storedPAT struct {
+	value  string
+	exists bool
+}
+
+func (s *Service) readStoredPAT(ctx context.Context, workspaceID string) (storedPAT, error) {
+	if s.secrets == nil {
+		return storedPAT{}, nil
+	}
+	key := SecretKeyForWorkspace(workspaceID)
+	exists, err := s.secrets.Exists(ctx, key)
+	if err != nil {
+		return storedPAT{}, fmt.Errorf("check azure devops PAT: %w", err)
+	}
+	if !exists {
+		return storedPAT{}, nil
+	}
+	value, err := s.secrets.Reveal(ctx, key)
+	if err != nil {
+		return storedPAT{}, fmt.Errorf("read azure devops PAT: %w", err)
+	}
+	return storedPAT{value: value, exists: true}, nil
+}
+
+func (s *Service) restorePAT(ctx context.Context, workspaceID string, previous storedPAT) error {
+	if s.secrets == nil {
+		return nil
+	}
+	key := SecretKeyForWorkspace(workspaceID)
+	if previous.exists {
+		return s.secrets.Set(ctx, key, "Azure DevOps PAT", previous.value)
+	}
+	return s.secrets.Delete(ctx, key)
+}
+
+func joinMutationError(actionErr, rollbackErr error) error {
+	if rollbackErr == nil {
+		return actionErr
+	}
+	return errors.Join(actionErr, fmt.Errorf("restore prior Azure DevOps state: %w", rollbackErr))
 }
 
 // TestConnectionForWorkspace probes submitted credentials without persisting
@@ -185,8 +247,11 @@ func (s *Service) RecordAuthHealthForWorkspace(ctx context.Context, workspaceID 
 	probeCtx, cancel := context.WithTimeout(ctx, authProbeTimeout)
 	result, err := s.ProbeAuthForWorkspace(probeCtx, workspaceID)
 	cancel()
+	if ctx.Err() != nil {
+		return
+	}
 	ok, errMsg := authHealthResult(result, err)
-	writeCtx, writeCancel := context.WithTimeout(context.Background(), authHealthWriteTimeout)
+	writeCtx, writeCancel := context.WithTimeout(ctx, authHealthWriteTimeout)
 	defer writeCancel()
 	if err := s.store.UpdateAuthHealth(writeCtx, workspaceID, ok, errMsg, time.Now().UTC()); err != nil {
 		s.log.Warn("azure devops: update auth health failed", zap.Error(err))

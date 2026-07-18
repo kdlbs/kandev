@@ -3,6 +3,8 @@ package azuredevops
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -180,6 +182,49 @@ func TestStoreTaskPRUpsertAndRestartPersistence(t *testing.T) {
 	}
 	if rows[0].Title != "Updated title" || rows[0].ReviewState != "approved" {
 		t.Fatalf("mutable fields were not refreshed: %+v", rows[0])
+	}
+}
+
+func TestStoreTaskPRConcurrentUpsertPreservesStableIdentity(t *testing.T) {
+	store, err := NewStore(newTestDB(t), nil)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	const writers = 12
+	ids := make(chan string, writers)
+	errs := make(chan error, writers)
+	var wait sync.WaitGroup
+	for index := 0; index < writers; index++ {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			row := testTaskPR("task-a", "repo-a", 42)
+			row.Title = fmt.Sprintf("Title %d", index)
+			if err := store.UpsertTaskPR(context.Background(), row); err != nil {
+				errs <- err
+				return
+			}
+			ids <- row.ID
+		}(index)
+	}
+	wait.Wait()
+	close(errs)
+	close(ids)
+	for err := range errs {
+		t.Fatalf("concurrent upsert: %v", err)
+	}
+	stableID := ""
+	for id := range ids {
+		if stableID == "" {
+			stableID = id
+		}
+		if id != stableID {
+			t.Fatalf("concurrent upsert IDs differ: %q and %q", stableID, id)
+		}
+	}
+	rows, err := store.ListTaskPRsByTask(context.Background(), "task-a")
+	if err != nil || len(rows) != 1 || rows[0].ID != stableID {
+		t.Fatalf("rows after concurrent upsert = %+v, err = %v", rows, err)
 	}
 }
 

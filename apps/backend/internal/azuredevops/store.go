@@ -163,3 +163,15 @@ func (s *Store) UpdateAuthHealth(
 		WHERE workspace_id = ?`, checkedAt, ok, errMsg, workspaceID)
 	return err
 }
+
+// ResetAuthHealth marks a workspace configuration as not yet checked.
+func (s *Store) ResetAuthHealth(ctx context.Context, workspaceID string) error {
+	if err := validateWorkspaceID(workspaceID); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE azure_devops_configs
+		SET last_checked_at = NULL, last_ok = 0, last_error = ''
+		WHERE workspace_id = ?`, workspaceID)
+	return err
+}

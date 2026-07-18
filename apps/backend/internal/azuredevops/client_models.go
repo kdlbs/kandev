@@ -1,6 +1,9 @@
 package azuredevops
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Project is an Azure DevOps project visible to the authenticated user.
 type Project struct {
@@ -103,6 +106,24 @@ type Comment struct {
 	CommentType string    `json:"commentType"`
 	PublishedAt time.Time `json:"publishedAt,omitempty"`
 	UpdatedAt   time.Time `json:"updatedAt,omitempty"`
+}
+
+// UnmarshalJSON translates Azure's wire timestamp names while preserving
+// Kandev's public publishedAt/updatedAt response contract.
+func (c *Comment) UnmarshalJSON(data []byte) error {
+	type commentAlias Comment
+	var wire struct {
+		commentAlias
+		PublishedDate   time.Time `json:"publishedDate"`
+		LastUpdatedDate time.Time `json:"lastUpdatedDate"`
+	}
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return err
+	}
+	*c = Comment(wire.commentAlias)
+	c.PublishedAt = wire.PublishedDate
+	c.UpdatedAt = wire.LastUpdatedDate
+	return nil
 }
 
 type Thread struct {

@@ -18,6 +18,7 @@ function useAzureDevOpsList<T>(load: () => Promise<T>, empty: T, active: boolean
   useEffect(() => {
     if (!active) {
       setData(empty);
+      setLoading(false);
       setError(null);
       return;
     }

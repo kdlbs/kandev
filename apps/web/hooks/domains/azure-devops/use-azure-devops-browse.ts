@@ -21,6 +21,14 @@ type AsyncResult<T> = {
   error: string | null;
 };
 
+function useOperationGeneration(scope?: string) {
+  const generation = useRef({ scope, value: 0 });
+  if (generation.current.scope !== scope) {
+    generation.current = { scope, value: generation.current.value + 1 };
+  }
+  return generation;
+}
+
 export function useAzureDevOpsConnection(workspaceId?: string) {
   const [state, setState] = useState<AsyncResult<AzureDevOpsConfig | null>>({
     data: null,
@@ -33,6 +41,7 @@ export function useAzureDevOpsConnection(workspaceId?: string) {
       return;
     }
     let cancelled = false;
+    setState({ data: null, loading: true, error: null });
     getAzureDevOpsConfig(workspaceId, { cache: "no-store" })
       .then((data) => {
         if (!cancelled) setState({ data, loading: false, error: null });
@@ -53,26 +62,29 @@ export function useAzureDevOpsWorkItemSearch(workspaceId?: string) {
     loading: false,
     error: null,
   });
-  const requestId = useRef(0);
+  const generation = useOperationGeneration(workspaceId);
+  useEffect(() => {
+    setState({ data: [], loading: false, error: null });
+  }, [workspaceId]);
   const search = useCallback(
     async (request: { project: string; wiql: string; top?: number }) => {
       if (!workspaceId) return;
-      const current = ++requestId.current;
+      const current = ++generation.current.value;
       setState((previous) => ({ ...previous, loading: true, error: null }));
       try {
         const result = await searchAzureDevOpsWorkItems(workspaceId, request, {
           cache: "no-store",
         });
-        if (current === requestId.current) {
+        if (current === generation.current.value) {
           setState({ data: result.items ?? [], loading: false, error: null });
         }
       } catch (err) {
-        if (current === requestId.current) {
+        if (current === generation.current.value) {
           setState((previous) => ({ ...previous, loading: false, error: String(err) }));
         }
       }
     },
-    [workspaceId],
+    [generation, workspaceId],
   );
   return { ...state, search };
 }
@@ -84,17 +96,20 @@ export function useAzureDevOpsPullRequestSearch(workspaceId?: string) {
     loading: false,
     error: null,
   });
-  const requestId = useRef(0);
+  const generation = useOperationGeneration(workspaceId);
+  useEffect(() => {
+    setState({ data: [], count: 0, loading: false, error: null });
+  }, [workspaceId]);
   const search = useCallback(
     async (filters: AzureDevOpsPullRequestFilters) => {
       if (!workspaceId) return;
-      const current = ++requestId.current;
+      const current = ++generation.current.value;
       setState((previous) => ({ ...previous, loading: true, error: null }));
       try {
         const result = await listAzureDevOpsPullRequests(workspaceId, filters, {
           cache: "no-store",
         });
-        if (current === requestId.current) {
+        if (current === generation.current.value) {
           setState({
             data: result.items ?? [],
             count: result.count ?? 0,
@@ -103,12 +118,12 @@ export function useAzureDevOpsPullRequestSearch(workspaceId?: string) {
           });
         }
       } catch (err) {
-        if (current === requestId.current) {
+        if (current === generation.current.value) {
           setState((previous) => ({ ...previous, loading: false, error: String(err) }));
         }
       }
     },
-    [workspaceId],
+    [generation, workspaceId],
   );
   return { ...state, search };
 }
@@ -119,9 +134,14 @@ export function useAzureDevOpsPullRequestFeedback(workspaceId?: string) {
     loading: false,
     error: null,
   });
+  const generation = useOperationGeneration(workspaceId);
+  useEffect(() => {
+    setState({ data: null, loading: false, error: null });
+  }, [workspaceId]);
   const load = useCallback(
     async (pullRequest: AzureDevOpsPullRequest) => {
       if (!workspaceId) return;
+      const current = ++generation.current.value;
       setState({ data: null, loading: true, error: null });
       try {
         const data = await getAzureDevOpsPullRequestFeedback(
@@ -131,15 +151,20 @@ export function useAzureDevOpsPullRequestFeedback(workspaceId?: string) {
           pullRequest.id,
           { cache: "no-store" },
         );
-        setState({ data, loading: false, error: null });
+        if (current === generation.current.value) {
+          setState({ data, loading: false, error: null });
+        }
       } catch (err) {
-        setState({ data: null, loading: false, error: String(err) });
+        if (current === generation.current.value) {
+          setState({ data: null, loading: false, error: String(err) });
+        }
       }
     },
-    [workspaceId],
+    [generation, workspaceId],
   );
   const clear = useCallback(() => {
+    generation.current.value += 1;
     setState({ data: null, loading: false, error: null });
-  }, []);
+  }, [generation]);
   return { ...state, load, clear };
 }

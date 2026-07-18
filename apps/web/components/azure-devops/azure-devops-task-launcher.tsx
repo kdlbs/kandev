@@ -94,21 +94,20 @@ export function AzureDevOpsTaskLauncher({
     };
   }, [payload, repositories, steps, workflows]);
 
-  const onSuccess = (task: Task) => {
+  const onSuccess = async (task: Task) => {
     if (payload?.kind === "pull-request" && workspaceId && launch?.repository) {
-      void associateAzureDevOpsPullRequest(workspaceId, task.id, {
-        repositoryId: launch.repository.id,
-        pullRequestId: payload.pullRequest.id,
-      })
-        .then((linked) => {
-          cacheAzureDevOpsTaskPullRequest(workspaceId, task.id, linked);
-          setTaskPullRequest(task.id, linked);
-        })
-        .catch((error: unknown) => {
-          toast.error(
-            error instanceof Error ? error.message : "Failed to link Azure DevOps pull request.",
-          );
+      try {
+        const linked = await associateAzureDevOpsPullRequest(workspaceId, task.id, {
+          repositoryId: launch.repository.id,
+          pullRequestId: payload.pullRequest.id,
         });
+        cacheAzureDevOpsTaskPullRequest(workspaceId, task.id, linked);
+        setTaskPullRequest(task.id, linked);
+      } catch (error: unknown) {
+        toast.error(
+          error instanceof Error ? error.message : "Failed to link Azure DevOps pull request.",
+        );
+      }
     }
     onClose();
     router.push(`/tasks/${task.id}`);

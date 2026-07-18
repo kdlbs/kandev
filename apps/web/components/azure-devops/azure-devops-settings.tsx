@@ -79,11 +79,17 @@ function savedPATMatches(config: AzureDevOpsConfig | null, form: FormState): boo
   );
 }
 
-function requestFromForm(form: FormState): SetAzureDevOpsConfigRequest {
+function requestFromForm(
+  form: FormState,
+  savedConfig: AzureDevOpsConfig | null,
+): SetAzureDevOpsConfigRequest {
+  const organizationMatches =
+    normalizedOrganization(form.organizationUrl) ===
+    normalizedOrganization(savedConfig?.organizationUrl ?? "");
   return {
     organizationUrl: form.organizationUrl.trim(),
-    defaultProjectId: form.defaultProjectId,
-    defaultProjectName: form.defaultProjectName,
+    defaultProjectId: organizationMatches ? form.defaultProjectId : undefined,
+    defaultProjectName: organizationMatches ? form.defaultProjectName : undefined,
     authMethod: "pat",
     pat: form.pat || undefined,
   };
@@ -133,7 +139,14 @@ function useAzureDevOpsSettings(workspaceId: string) {
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
-      setForm((current) => ({ ...current, [key]: value })),
+      setForm((current) => ({
+        ...current,
+        [key]: value,
+        ...(key === "organizationUrl" &&
+        normalizedOrganization(String(value)) !== normalizedOrganization(current.organizationUrl)
+          ? { defaultProjectId: "", defaultProjectName: "" }
+          : {}),
+      })),
     [],
   );
 
@@ -141,18 +154,18 @@ function useAzureDevOpsSettings(workspaceId: string) {
     setTesting(true);
     setTestResult(null);
     try {
-      setTestResult(await testAzureDevOpsConnection(workspaceId, requestFromForm(form)));
+      setTestResult(await testAzureDevOpsConnection(workspaceId, requestFromForm(form, config)));
     } catch (err) {
       setTestResult({ ok: false, error: String(err) });
     } finally {
       setTesting(false);
     }
-  }, [form, workspaceId]);
+  }, [config, form, workspaceId]);
 
   const save = useCallback(async () => {
     setSaving(true);
     try {
-      const next = await setAzureDevOpsConfig(workspaceId, requestFromForm(form));
+      const next = await setAzureDevOpsConfig(workspaceId, requestFromForm(form, config));
       setConfig(next);
       setForm(configToForm(next));
       setTestResult(null);
@@ -162,7 +175,7 @@ function useAzureDevOpsSettings(workspaceId: string) {
     } finally {
       setSaving(false);
     }
-  }, [form, toast, workspaceId]);
+  }, [config, form, toast, workspaceId]);
 
   const remove = useCallback(async () => {
     if (!confirm("Remove Azure DevOps configuration?")) return;
@@ -212,10 +225,12 @@ function ConnectionFields({
   state,
   projects,
   canReusePAT,
+  projectSelectionEnabled,
 }: {
   state: SettingsState;
   projects: ProjectsState;
   canReusePAT: boolean;
+  projectSelectionEnabled: boolean;
 }) {
   const projectPlaceholder = projects.loading ? "Loading projects..." : "Optional";
   return (
@@ -242,7 +257,12 @@ function ConnectionFields({
               state.update("defaultProjectId", projectId);
               state.update("defaultProjectName", project?.name ?? "");
             }}
-            disabled={state.loading || projects.loading || projects.data.length === 0}
+            disabled={
+              state.loading ||
+              projects.loading ||
+              projects.data.length === 0 ||
+              !projectSelectionEnabled
+            }
           >
             <SelectTrigger id="azure-devops-project" className="w-full">
               <SelectValue placeholder={projectPlaceholder} />
@@ -328,6 +348,10 @@ export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: str
   const state = useAzureDevOpsSettings(workspaceId);
   const projects = useAzureDevOpsProjects(workspaceId, !!state.config?.hasSecret);
   const canReusePAT = savedPATMatches(state.config, state.form);
+  const projectSelectionEnabled =
+    !!state.config?.hasSecret &&
+    normalizedOrganization(state.config.organizationUrl) ===
+      normalizedOrganization(state.form.organizationUrl);
   const missingPAT = !canReusePAT && !state.form.pat;
   const disabled = state.loading || !state.form.organizationUrl || missingPAT;
 
@@ -340,7 +364,12 @@ export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: str
       <Card>
         <CardContent className="space-y-4 pt-6">
           <IntegrationAuthStatusBanner health={state.health} />
-          <ConnectionFields state={state} projects={projects} canReusePAT={canReusePAT} />
+          <ConnectionFields
+            state={state}
+            projects={projects}
+            canReusePAT={canReusePAT}
+            projectSelectionEnabled={projectSelectionEnabled}
+          />
           <TestResult result={state.testResult} />
           <Separator />
           <ConnectionActions state={state} disabled={disabled} />

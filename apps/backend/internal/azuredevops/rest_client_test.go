@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestRESTClientAuthAndDiscovery(t *testing.T) {
@@ -116,7 +117,7 @@ func TestRESTClientPullRequestReads(t *testing.T) {
 		case "/acme/project-1/_apis/git/repositories/repo-1/pullrequests/42/reviewers":
 			_, _ = w.Write([]byte(`{"count":1,"value":[{"id":"u2","displayName":"Grace","vote":10,"isRequired":true}]}`))
 		case "/acme/project-1/_apis/git/repositories/repo-1/pullrequests/42/threads":
-			_, _ = w.Write([]byte(`{"count":1,"value":[{"id":7,"status":"active","comments":[{"id":8,"content":"Please add a test","author":{"id":"u2","displayName":"Grace"},"commentType":"text"}]}]}`))
+			_, _ = w.Write([]byte(`{"count":1,"value":[{"id":7,"status":"active","comments":[{"id":8,"content":"Please add a test","author":{"id":"u2","displayName":"Grace"},"commentType":"text","publishedDate":"2026-07-17T10:00:00Z","lastUpdatedDate":"2026-07-17T11:30:00Z"}]}]}`))
 		case "/acme/project-1/_apis/git/repositories/repo-1/pullrequests/42/workitems":
 			_, _ = w.Write([]byte(`{"count":1,"value":[{"id":"101","url":"https://api/workitems/101"}]}`))
 		case "/acme/project-1/_apis/policy/evaluations":
@@ -143,6 +144,11 @@ func TestRESTClientPullRequestReads(t *testing.T) {
 	threads, err := client.ListThreads(context.Background(), "project-1", "repo-1", 42)
 	if err != nil || len(threads) != 1 || threads[0].Comments[0].Content != "Please add a test" {
 		t.Fatalf("ListThreads = %+v, %v", threads, err)
+	}
+	comment := threads[0].Comments[0]
+	if !comment.PublishedAt.Equal(time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)) ||
+		!comment.UpdatedAt.Equal(time.Date(2026, 7, 17, 11, 30, 0, 0, time.UTC)) {
+		t.Fatalf("comment timestamps = published %v, updated %v", comment.PublishedAt, comment.UpdatedAt)
 	}
 	refs, err := client.ListLinkedWorkItems(context.Background(), "project-1", "repo-1", 42)
 	if err != nil || len(refs) != 1 || refs[0].ID != 101 {
