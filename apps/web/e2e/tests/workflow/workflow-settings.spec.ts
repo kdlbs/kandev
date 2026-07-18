@@ -1,5 +1,14 @@
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
+
+async function maxRingSpread(locator: Locator): Promise<number> {
+  const boxShadow = await locator.evaluate((element) => getComputedStyle(element).boxShadow);
+  const spreads = Array.from(boxShadow.matchAll(/0px 0px 0px ([\d.]+)px/g), (match) =>
+    Number(match[1]),
+  );
+  return Math.max(0, ...spreads);
+}
 
 test.describe("Workflow settings", () => {
   test("hides system-only templates from the add workflow dialog", async ({
@@ -225,14 +234,19 @@ test.describe("Workflow settings", () => {
 
     await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
     await expect(card).toHaveAttribute("data-settings-dirty", "true");
-    await expect(card.getByTestId(`workflow-step-panel-${seedData.steps[0].id}`)).toHaveAttribute(
-      "data-settings-dirty",
-      "true",
-    );
-    await expect(card.getByTestId(`workflow-step-node-${seedData.steps[0].id}`)).toHaveAttribute(
-      "data-settings-dirty",
-      "true",
-    );
+    const stepPanel = card.getByTestId(`workflow-step-panel-${seedData.steps[0].id}`);
+    const dirtyStepNode = card.getByTestId(`workflow-step-node-${seedData.steps[0].id}`);
+
+    await expect(stepPanel).toHaveAttribute("data-settings-dirty", "true");
+    await expect(card).toHaveAttribute("data-settings-dirty-level", "card");
+    await expect(stepPanel).toHaveAttribute("data-settings-dirty-level", "container");
+    await expect(dirtyStepNode).toHaveAttribute("data-settings-dirty", "true");
+    await expect(dirtyStepNode).toHaveAttribute("data-settings-dirty-level", "container");
+    await nameInput.blur();
+    expect(await maxRingSpread(nameInput)).toBeGreaterThan(0);
+    expect(await maxRingSpread(card)).toBe(0);
+    expect(await maxRingSpread(stepPanel)).toBe(0);
+    expect(await maxRingSpread(dirtyStepNode)).toBe(0);
 
     expect((await apiClient.listWorkflowSteps(seedData.workflowId)).steps[0]?.name).toBe(
       firstStepName,

@@ -6,5 +6,5 @@ type SettingsCardProps = ComponentProps<typeof Card> & {
 };
 
 export function SettingsCard({ isDirty = false, ...props }: SettingsCardProps) {
-  return <Card {...props} data-settings-dirty={isDirty} />;
+  return <Card {...props} data-settings-dirty={isDirty} data-settings-dirty-level="card" />;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { createContext, useContext, useState, useSyncExternalStore } from "react";
 import { usePathname } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
@@ -10,9 +10,14 @@ import { ConfigChatPanel } from "./config-chat-panel";
 const emptySubscribe = () => () => {};
 const getClientSnapshot = () => true;
 const getServerSnapshot = () => false;
+const ConfigChatFloatingActionsContext = createContext<HTMLElement | null>(null);
 
 function useIsMounted() {
   return useSyncExternalStore(emptySubscribe, getClientSnapshot, getServerSnapshot);
+}
+
+export function useConfigChatFloatingActionsHost(): HTMLElement | null {
+  return useContext(ConfigChatFloatingActionsContext);
 }
 
 /**
@@ -25,16 +30,20 @@ export function ConfigChatProvider({ children }: { children: React.ReactNode }) 
   const mounted = useIsMounted();
   const pathname = usePathname();
   const isSettingsPage = pathname.startsWith("/settings");
+  const [floatingActionsHost, setFloatingActionsHost] = useState<HTMLElement | null>(null);
 
   // Preload agent profiles so they're available when config chat is opened
   useSettingsData(true);
 
   return (
-    <>
+    <ConfigChatFloatingActionsContext.Provider value={floatingActionsHost}>
       {children}
       {mounted && activeWorkspace && isSettingsPage && (
-        <ConfigChatPanel workspaceId={activeWorkspace} />
+        <ConfigChatPanel
+          workspaceId={activeWorkspace}
+          setFloatingActionsHost={setFloatingActionsHost}
+        />
       )}
-    </>
+    </ConfigChatFloatingActionsContext.Provider>
   );
 }

@@ -69,7 +69,7 @@ test.describe("Configuration Chat", () => {
         has: testPage.getByRole("button", { name: "Close config chat" }),
       });
       await expect(configChatPopover).toBeVisible();
-      await expectElementsNotToIntersect(saveButton, configChatPopover);
+      await expectElementAbove(saveButton, configChatPopover);
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         changes_panel_layout: initialLayout,
@@ -212,4 +212,14 @@ async function expectElementsNotToIntersect(
     firstBox!.y < secondBox!.y + secondBox!.height &&
     firstBox!.y + firstBox!.height > secondBox!.y;
   expect(intersects).toBe(false);
+}
+
+async function expectElementAbove(
+  upper: import("@playwright/test").Locator,
+  lower: import("@playwright/test").Locator,
+) {
+  const [upperBox, lowerBox] = await Promise.all([upper.boundingBox(), lower.boundingBox()]);
+  expect(upperBox).not.toBeNull();
+  expect(lowerBox).not.toBeNull();
+  expect(upperBox!.y + upperBox!.height).toBeLessThanOrEqual(lowerBox!.y);
 }

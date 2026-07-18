@@ -15,10 +15,10 @@ import {
   ScriptEditor,
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
-import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import {
   HelpTip,
   STEP_COLORS,
+  STEP_PROMPT_PLACEHOLDERS,
   PROMPT_TEMPLATES,
   hasOnEnterAction,
   hasOnExitAction,
@@ -31,15 +31,6 @@ import {
 } from "./workflow-pipeline-editor-step-actions";
 import { StepWipControls } from "./workflow-pipeline-editor-wip-controls";
 import { isWorkflowStepDirty, isWorkflowStepValueDirty } from "./workflow-dirty-state";
-
-const STEP_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
-  {
-    key: "task_prompt",
-    description: "The original task description provided by the user",
-    example: "Implement user authentication with OAuth2",
-    executor_types: [],
-  },
-];
 
 // --- StepAgentProfileSelect ---
 
@@ -555,8 +546,6 @@ function StepPromptSection({
   );
 }
 
-// --- StepConfigPanel ---
-
 type StepConfigPanelProps = {
   step: WorkflowStep;
   savedStep?: WorkflowStep;
@@ -591,6 +580,7 @@ export function StepConfigPanel({
       key={step.id}
       className="rounded-lg border bg-card animate-in fade-in-0 slide-in-from-top-2 duration-200"
       data-settings-dirty={isWorkflowStepDirty(step, savedStep)}
+      data-settings-dirty-level="container"
       data-testid={`workflow-step-panel-${step.id}`}
     >
       <StepConfigHeader

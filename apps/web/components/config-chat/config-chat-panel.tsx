@@ -109,11 +109,29 @@ function useConfigChatPanelController(workspaceId: string) {
   };
 }
 
+type ConfigChatPanelProps = {
+  workspaceId: string;
+  setFloatingActionsHost?: (host: HTMLElement | null) => void;
+};
+
+function ConfigChatFloatingActionsHost({
+  setHost,
+}: {
+  setHost?: ConfigChatPanelProps["setFloatingActionsHost"];
+}) {
+  return (
+    <div
+      ref={setHost}
+      className="pointer-events-none absolute right-0 bottom-[calc(100%+0.75rem)] z-10 max-w-[calc(100vw_-_2rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))]"
+      data-testid="config-chat-floating-actions"
+    />
+  );
+}
+
 export const ConfigChatPanel = memo(function ConfigChatPanel({
   workspaceId,
-}: {
-  workspaceId: string;
-}) {
+  setFloatingActionsHost,
+}: ConfigChatPanelProps) {
   const panel = useConfigChatPanelController(workspaceId);
 
   return (
@@ -146,8 +164,9 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
         sideOffset={8}
         onInteractOutside={(event) => event.preventDefault()}
         data-testid="config-chat-popover"
-        className="flex h-[min(550px,calc(100dvh-7rem))] max-h-[550px] w-[min(420px,calc(100vw-2rem))] flex-col gap-0 overflow-hidden p-0 shadow-2xl"
+        className="relative flex h-[min(550px,calc(100dvh_-_11rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)))] max-h-[550px] w-[min(420px,calc(100vw_-_2rem))] flex-col gap-0 overflow-hidden p-0 shadow-2xl"
       >
+        <ConfigChatFloatingActionsHost setHost={setFloatingActionsHost} />
         <PanelHeader onExpand={panel.handleExpand} onClose={() => panel.handleOpenChange(false)} />
         {panel.session ? (
           <QuickChatSessionView
