@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { workflowId as toWorkflowId, type Workflow } from "@/lib/types/http";
-import { alignSavedWorkflowsToDraftOrder } from "./workspace-workflows-client";
+import {
+  alignSavedWorkflowsToDraftOrder,
+  getWorkflowOrderDirtyIds,
+} from "./workspace-workflows-client";
 
 function workflow(id: string, name = id): Workflow {
   return {
@@ -43,5 +46,25 @@ describe("alignSavedWorkflowsToDraftOrder", () => {
         ]),
       ).map(({ id }) => id),
     ).toEqual([firstSaved.id, secondSaved.id]);
+  });
+});
+
+describe("getWorkflowOrderDirtyIds", () => {
+  it("marks only workflows whose visible position changed", () => {
+    const first = workflow("first");
+    const second = workflow("second");
+    const third = workflow("third");
+
+    expect([...getWorkflowOrderDirtyIds([first, third, second], [first, second, third])]).toEqual([
+      third.id,
+      second.id,
+    ]);
+  });
+
+  it("marks a newly inserted workflow as order-dirty", () => {
+    const first = workflow("first");
+    const draft = workflow("temp-workflow-1");
+
+    expect([...getWorkflowOrderDirtyIds([first, draft], [first])]).toEqual([draft.id]);
   });
 });

@@ -4,6 +4,7 @@ import { CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsCard } from "@/components/settings/settings-card";
 import {
+  useSettingsRouteIsDirty,
   useSettingsSaveContributor,
   type SettingsSaveRevision,
 } from "@/components/settings/settings-save-provider";
@@ -40,6 +41,7 @@ export function SettingsPageTemplate({
   children,
   deleteSection,
 }: SettingsPageTemplateProps) {
+  const routeIsDirty = useSettingsRouteIsDirty();
   useSettingsSaveContributor({
     id: saveId ?? `settings-page:${title}`,
     revision: saveRevision,
@@ -63,7 +65,7 @@ export function SettingsPageTemplate({
 
       <Separator />
 
-      <SettingsCard isDirty={cardIsDirty}>
+      <SettingsCard isDirty={cardIsDirty || routeIsDirty}>
         <CardContent className="">{children}</CardContent>
       </SettingsCard>
 

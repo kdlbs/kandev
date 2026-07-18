@@ -29,6 +29,7 @@ export function useWatcherEnabledDrafts<T extends EnabledItem>({
     () => items.map((item) => ({ ...item, enabled: drafts[item.id] ?? item.enabled })),
     [drafts, items],
   );
+  const dirtyIds = useMemo(() => new Set(changes.map(({ item }) => item.id)), [changes]);
 
   const toggleEnabled = useCallback((item: T) => {
     setDrafts((current) => ({
@@ -62,5 +63,5 @@ export function useWatcherEnabledDrafts<T extends EnabledItem>({
     discard,
   });
 
-  return { items: draftItems, toggleEnabled };
+  return { items: draftItems, dirtyIds, toggleEnabled };
 }

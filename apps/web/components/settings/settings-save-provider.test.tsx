@@ -92,6 +92,20 @@ function BooleanDraftContributor({ pending }: { pending: Deferred }) {
   );
 }
 
+function ResettingDraftContributor() {
+  const [mode, setMode] = useState<"create" | "idle">("create");
+
+  useSettingsSaveContributor({
+    id: "resetting-draft",
+    revision: mode,
+    isDirty: mode === "create",
+    save: () => setMode("idle"),
+    discard: () => setMode("idle"),
+  });
+
+  return null;
+}
+
 afterEach(() => {
   cleanup();
   clearNavigationBlockerForTests();
@@ -307,6 +321,22 @@ describe("SettingsSaveProvider navigation", () => {
 
     shouldFail = false;
     fireEvent.click(screen.getByRole("button", { name: "Save and leave" }));
+    await waitFor(() => expect(window.location.pathname).toBe(TERMINAL_PATH));
+  });
+
+  it("continues navigation when a successful save resets the draft revision", async () => {
+    window.history.replaceState({}, "", APPEARANCE_PATH);
+
+    render(
+      <SettingsSaveProvider>
+        <ResettingDraftContributor />
+        <Link href={TERMINAL_PATH}>Terminal</Link>
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Terminal" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save and leave" }));
+
     await waitFor(() => expect(window.location.pathname).toBe(TERMINAL_PATH));
   });
 

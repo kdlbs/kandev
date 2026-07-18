@@ -9,6 +9,7 @@ vi.mock("@/lib/api/domains/settings-api", () => ({
 }));
 
 const codexFileMethodId = "agent:codex-acp:files:0";
+const copyAuthFilesLabel = "Copy auth files";
 
 function renderRemoteCredentialsCard(onChange = vi.fn()) {
   render(<RemoteCredentialsHarness onChange={onChange} />);
@@ -48,7 +49,7 @@ beforeEach(() => {
           {
             method_id: codexFileMethodId,
             type: "files",
-            label: "Copy auth files",
+            label: copyAuthFilesLabel,
             source_files: [".codex/auth.json", ".codex/config.toml"],
             has_local_files: false,
           },
@@ -90,15 +91,33 @@ describe("RemoteCredentialsCard", () => {
     renderRemoteCredentialsCard(onChange);
 
     fireEvent.click(await screen.findByText("Codex"));
-    const fileOption = screen.getByRole("radio", { name: "Copy auth files" });
+    const fileOption = screen.getByRole("radio", { name: copyAuthFilesLabel });
     expect(fileOption.getAttribute("aria-checked")).toBe("false");
 
     fireEvent.click(fileOption);
 
     expect(onChange).toHaveBeenCalledWith([codexFileMethodId]);
     await waitFor(() => {
-      const selectedOption = screen.getByRole("radio", { name: "Copy auth files" });
+      const selectedOption = screen.getByRole("radio", { name: copyAuthFilesLabel });
       expect(selectedOption.getAttribute("aria-checked")).toBe("true");
+    });
+  });
+
+  it("marks the selected credential and owning card dirty", async () => {
+    renderRemoteCredentialsCard();
+
+    fireEvent.click(await screen.findByText("Codex"));
+    const fileOption = screen.getByRole("radio", { name: copyAuthFilesLabel });
+    fireEvent.click(fileOption);
+
+    await waitFor(() => {
+      expect(fileOption.getAttribute("data-settings-dirty")).toBe("true");
+      expect(
+        screen
+          .getByText("Remote Credentials")
+          .closest("[data-settings-dirty]")
+          ?.getAttribute("data-settings-dirty"),
+      ).toBe("true");
     });
   });
 });

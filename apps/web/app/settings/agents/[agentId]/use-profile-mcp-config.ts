@@ -19,6 +19,8 @@ type UseProfileMcpConfigParams = {
 type UseProfileMcpConfigResult = {
   mcpEnabled: boolean;
   mcpServers: string;
+  mcpBaselineEnabled: boolean;
+  mcpBaselineServers: string;
   mcpError: string | null;
   mcpDirty: boolean;
   mcpStatus: McpStatus;
@@ -136,6 +138,13 @@ function resetMcpDraftState(config: AgentProfileMcpConfig | null, setters: McpSt
   setters.setMcpStatus("idle");
 }
 
+function mcpBaseline(config: AgentProfileMcpConfig | null) {
+  return {
+    mcpBaselineEnabled: config?.enabled ?? false,
+    mcpBaselineServers: serializeServers(config),
+  };
+}
+
 export function useProfileMcpConfig({
   profileId,
   supportsMcp,
@@ -235,6 +244,7 @@ export function useProfileMcpConfig({
   return {
     mcpEnabled,
     mcpServers,
+    ...mcpBaseline(mcpConfig),
     mcpError,
     mcpDirty,
     mcpStatus,

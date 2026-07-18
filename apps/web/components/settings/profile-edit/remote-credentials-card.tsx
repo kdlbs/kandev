@@ -4,13 +4,16 @@ import { useEffect, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
-import { Input } from "@kandev/ui/input";
-import { Label } from "@kandev/ui/label";
-import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
+import { CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@kandev/ui/accordion";
 import { AgentLogo } from "@/components/agent-logo";
 import { InlineSecretSelect } from "@/components/settings/profile-edit/inline-secret-select";
+import { SettingsCard } from "@/components/settings/settings-card";
+import {
+  GitIdentityAccordionItem,
+  type GitIdentityMode,
+  type GitIdentityState,
+} from "./git-identity-fields";
 import {
   listRemoteCredentials,
   type RemoteAuthSpec,
@@ -19,33 +22,31 @@ import {
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
 type AuthChoice = "files" | "env" | "gh_cli_token" | "none";
-export type GitIdentityMode = "local" | "override";
-export type GitIdentityState = {
-  userName: string;
-  userEmail: string;
-  detected: boolean;
-};
+export type { GitIdentityMode, GitIdentityState } from "./git-identity-fields";
 
 const RADIO_LABEL_BASE =
   "flex w-full items-start gap-3 rounded-md border p-3 text-left cursor-pointer transition-colors";
 const SELECTED_BORDER = "border-primary bg-primary/5";
 const DEFAULT_BORDER = "border-border";
-const RADIO_ITEM_CLASS =
-  "mt-0.5 border border-muted-foreground/80 data-[state=checked]:border-primary";
 const OPTION_DOT_BASE =
   "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border";
 
 type RemoteCredentialsCardProps = {
   isRemote: boolean;
   selectedIds: string[];
+  baselineSelectedIds?: string[];
   onChange: (ids: string[]) => void;
   agentEnvVars: Record<string, string | null>;
+  baselineAgentEnvVars?: Record<string, string | null>;
   onAgentEnvVarChange: (methodId: string, secretId: string | null) => void;
   secrets: SecretListItem[];
   gitIdentityMode: GitIdentityMode;
+  baselineGitIdentityMode?: GitIdentityMode;
   onGitIdentityModeChange: (mode: GitIdentityMode) => void;
   gitUserName: string;
   gitUserEmail: string;
+  baselineGitUserName?: string;
+  baselineGitUserEmail?: string;
   onGitUserNameChange: (value: string) => void;
   onGitUserEmailChange: (value: string) => void;
   localGitIdentity: GitIdentityState;
@@ -54,14 +55,19 @@ type RemoteCredentialsCardProps = {
 export function RemoteCredentialsCard({
   isRemote,
   selectedIds,
+  baselineSelectedIds = [],
   onChange,
   agentEnvVars,
+  baselineAgentEnvVars = {},
   onAgentEnvVarChange,
   secrets,
   gitIdentityMode,
+  baselineGitIdentityMode = "override",
   onGitIdentityModeChange,
   gitUserName,
   gitUserEmail,
+  baselineGitUserName = "",
+  baselineGitUserEmail = "",
   onGitUserNameChange,
   onGitUserEmailChange,
   localGitIdentity,
@@ -77,25 +83,21 @@ export function RemoteCredentialsCard({
   }, []);
 
   const selectedSet = new Set(selectedIds);
+  const baselineSelectedSet = new Set(baselineSelectedIds);
+  const credentialsDirty = !sameStringSet(selectedSet, baselineSelectedSet);
+  const agentEnvVarsDirty = JSON.stringify(agentEnvVars) !== JSON.stringify(baselineAgentEnvVars);
+  const gitIdentityDirty =
+    gitIdentityMode !== baselineGitIdentityMode ||
+    (gitIdentityMode === "override" &&
+      (gitUserName !== baselineGitUserName || gitUserEmail !== baselineGitUserEmail));
+  const isDirty = credentialsDirty || agentEnvVarsDirty || gitIdentityDirty;
 
   if (loading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Remote Credentials</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <IconLoader2 className="h-4 w-4 animate-spin" />
-            Loading...
-          </div>
-        </CardContent>
-      </Card>
-    );
+    return <RemoteCredentialsLoading isDirty={isDirty} />;
   }
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle>Remote Credentials</CardTitle>
         <CardDescription>
@@ -108,9 +110,12 @@ export function RemoteCredentialsCard({
             {isRemote && (
               <GitIdentityAccordionItem
                 mode={gitIdentityMode}
+                baselineMode={baselineGitIdentityMode}
                 onModeChange={onGitIdentityModeChange}
                 gitUserName={gitUserName}
                 gitUserEmail={gitUserEmail}
+                baselineGitUserName={baselineGitUserName}
+                baselineGitUserEmail={baselineGitUserEmail}
                 onGitUserNameChange={onGitUserNameChange}
                 onGitUserEmailChange={onGitUserEmailChange}
                 localGitIdentity={localGitIdentity}
@@ -124,8 +129,12 @@ export function RemoteCredentialsCard({
                   key={spec.id}
                   spec={spec}
                   selectedIds={selectedSet}
+                  baselineSelectedIds={baselineSelectedSet}
                   onCredentialsChange={onChange}
                   envSecretId={envMethod ? (agentEnvVars[envMethod.method_id] ?? null) : null}
+                  baselineEnvSecretId={
+                    envMethod ? (baselineAgentEnvVars[envMethod.method_id] ?? null) : null
+                  }
                   onMethodSecretChange={onAgentEnvVarChange}
                   secrets={secrets}
                 />
@@ -136,138 +145,32 @@ export function RemoteCredentialsCard({
           <p className="text-sm text-muted-foreground">No transferable credentials found.</p>
         )}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
+}
+
+function RemoteCredentialsLoading({ isDirty }: { isDirty: boolean }) {
+  return (
+    <SettingsCard isDirty={isDirty}>
+      <CardHeader>
+        <CardTitle>Remote Credentials</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <IconLoader2 className="h-4 w-4 animate-spin" />
+          Loading...
+        </div>
+      </CardContent>
+    </SettingsCard>
+  );
+}
+
+function sameStringSet(left: Set<string>, right: Set<string>): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
 function getSpecMethods(spec: RemoteAuthSpec): RemoteAuthMethod[] {
   return Array.isArray(spec.methods) ? spec.methods : [];
-}
-
-function GitIdentityAccordionItem({
-  mode,
-  onModeChange,
-  gitUserName,
-  gitUserEmail,
-  onGitUserNameChange,
-  onGitUserEmailChange,
-  localGitIdentity,
-}: {
-  mode: GitIdentityMode;
-  onModeChange: (mode: GitIdentityMode) => void;
-  gitUserName: string;
-  gitUserEmail: string;
-  onGitUserNameChange: (value: string) => void;
-  onGitUserEmailChange: (value: string) => void;
-  localGitIdentity: GitIdentityState;
-}) {
-  const isLocalAutoDetected = mode === "local" && localGitIdentity.detected;
-  let badgeLabel = "Custom";
-  if (isLocalAutoDetected) {
-    badgeLabel = "Auto-detect";
-  } else if (mode === "local") {
-    badgeLabel = "Not Configured";
-  }
-  const localIdentityDescription = localGitIdentity.detected
-    ? `${localGitIdentity.userName} <${localGitIdentity.userEmail}>`
-    : "Local git user.name/user.email not detected on this machine";
-  const badgeClassName = isLocalAutoDetected
-    ? "bg-green-600 text-[10px] px-1.5 py-0"
-    : "text-[10px] px-1.5 py-0";
-  const badgeVariant = isLocalAutoDetected ? "default" : "secondary";
-
-  return (
-    <AccordionItem value="git_identity">
-      <AccordionTrigger>
-        <div className="flex items-center gap-2 flex-1">
-          <span className="font-medium text-sm">Git Identity</span>
-          <Badge variant={badgeVariant} className={badgeClassName}>
-            {badgeLabel}
-          </Badge>
-        </div>
-      </AccordionTrigger>
-      <AccordionContent className="h-auto">
-        <div className="space-y-3 text-sm">
-          <p className="text-xs text-muted-foreground">
-            Used by remote executors for commit author configuration.
-          </p>
-          <RadioGroup
-            value={mode}
-            onValueChange={(value) => onModeChange(value as GitIdentityMode)}
-            className="gap-2"
-          >
-            <label
-              className={`${RADIO_LABEL_BASE} ${mode === "local" ? SELECTED_BORDER : DEFAULT_BORDER}`}
-            >
-              <RadioGroupItem
-                value="local"
-                disabled={!localGitIdentity.detected}
-                className={RADIO_ITEM_CLASS}
-              />
-              <div className="flex flex-col gap-0.5">
-                <span className="text-sm font-medium">Use local git config</span>
-                <span className="text-xs text-muted-foreground">{localIdentityDescription}</span>
-              </div>
-            </label>
-            <label
-              className={`${RADIO_LABEL_BASE} ${mode === "override" ? SELECTED_BORDER : DEFAULT_BORDER}`}
-            >
-              <RadioGroupItem value="override" className={RADIO_ITEM_CLASS} />
-              <div className="flex flex-col gap-0.5">
-                <span className="text-sm font-medium">Override identity</span>
-                <span className="text-xs text-muted-foreground">
-                  Set a custom name and email for remote git commits.
-                </span>
-              </div>
-            </label>
-          </RadioGroup>
-          {mode === "override" && (
-            <OverrideIdentityFields
-              gitUserName={gitUserName}
-              gitUserEmail={gitUserEmail}
-              onGitUserNameChange={onGitUserNameChange}
-              onGitUserEmailChange={onGitUserEmailChange}
-            />
-          )}
-        </div>
-      </AccordionContent>
-    </AccordionItem>
-  );
-}
-
-function OverrideIdentityFields({
-  gitUserName,
-  gitUserEmail,
-  onGitUserNameChange,
-  onGitUserEmailChange,
-}: {
-  gitUserName: string;
-  gitUserEmail: string;
-  onGitUserNameChange: (value: string) => void;
-  onGitUserEmailChange: (value: string) => void;
-}) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      <div className="space-y-1.5">
-        <Label htmlFor="remote-git-user-name">Git User Name</Label>
-        <Input
-          id="remote-git-user-name"
-          value={gitUserName}
-          onChange={(e) => onGitUserNameChange(e.target.value)}
-          placeholder="Jane Developer"
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="remote-git-user-email">Git User Email</Label>
-        <Input
-          id="remote-git-user-email"
-          value={gitUserEmail}
-          onChange={(e) => onGitUserEmailChange(e.target.value)}
-          placeholder="jane@example.com"
-        />
-      </div>
-    </div>
-  );
 }
 
 type InitialChoiceOpts = {
@@ -299,15 +202,19 @@ const AGENT_LOGO_IDS = new Set(["claude_code", "auggie", "codex", "gemini", "cop
 function AuthSection({
   spec,
   selectedIds,
+  baselineSelectedIds,
   onCredentialsChange,
   envSecretId,
+  baselineEnvSecretId,
   onMethodSecretChange,
   secrets,
 }: {
   spec: RemoteAuthSpec;
   selectedIds: Set<string>;
+  baselineSelectedIds: Set<string>;
   onCredentialsChange: (ids: string[]) => void;
   envSecretId: string | null;
+  baselineEnvSecretId: string | null;
   onMethodSecretChange: (methodId: string, secretId: string | null) => void;
   secrets: SecretListItem[];
 }) {
@@ -328,6 +235,14 @@ function AuthSection({
     selectedIds,
     envSecretId,
   });
+  const baselineChoice = initialChoice({
+    fileMethod,
+    envMethod,
+    ghTokenMethod,
+    selectedIds: baselineSelectedIds,
+    envSecretId: baselineEnvSecretId,
+  });
+  const isDirty = choice !== baselineChoice || envSecretId !== baselineEnvSecretId;
 
   const handleChoice = (value: AuthChoice) => {
     const nextSelectedIds = new Set(selectedIds);
@@ -352,7 +267,7 @@ function AuthSection({
   const showLogo = AGENT_LOGO_IDS.has(spec.id);
 
   return (
-    <AccordionItem value={spec.id}>
+    <AccordionItem value={spec.id} data-settings-dirty={isDirty}>
       <AccordionTrigger>
         <div className="flex items-center gap-2 flex-1">
           {showLogo && <AgentLogo agentName={spec.id} size={18} />}
@@ -366,17 +281,20 @@ function AuthSection({
             <EnvOnlySection
               envMethod={envMethod}
               secretId={envSecretId}
+              baselineSecretId={baselineEnvSecretId}
               onSecretIdChange={(sid) => onMethodSecretChange(envMethod.method_id, sid)}
               secrets={secrets}
             />
           ) : (
             <AuthChoiceRadio
               choice={choice}
+              baselineChoice={baselineChoice}
               onChoiceChange={handleChoice}
               fileMethod={fileMethod}
               envMethod={envMethod}
               ghTokenMethod={ghTokenMethod}
               secretId={envSecretId}
+              baselineSecretId={baselineEnvSecretId}
               onSecretIdChange={(sid) => {
                 if (envMethod) onMethodSecretChange(envMethod.method_id, sid);
               }}
@@ -392,11 +310,13 @@ function AuthSection({
 function EnvOnlySection({
   envMethod,
   secretId,
+  baselineSecretId,
   onSecretIdChange,
   secrets,
 }: {
   envMethod: RemoteAuthMethod;
   secretId: string | null;
+  baselineSecretId: string | null;
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
 }) {
@@ -413,6 +333,7 @@ function EnvOnlySection({
         secrets={secrets}
         label={envMethod.env_var}
         placeholder="Select or create a secret..."
+        isDirty={secretId !== baselineSecretId}
       />
     </>
   );
@@ -421,15 +342,18 @@ function EnvOnlySection({
 function GhTokenOption({
   method,
   isSelected,
+  isDirty,
   onSelect,
 }: {
   method: RemoteAuthMethod;
   isSelected: boolean;
+  isDirty: boolean;
   onSelect: () => void;
 }) {
   return (
     <AuthOptionButton
       selected={isSelected}
+      isDirty={isDirty}
       onSelect={onSelect}
       label={method.label ?? "Copy token from local CLI"}
     >
@@ -448,11 +372,13 @@ function GhTokenOption({
 function FileOption({
   method,
   isSelected,
+  isDirty,
   filesAvailable,
   onSelect,
 }: {
   method: RemoteAuthMethod;
   isSelected: boolean;
+  isDirty: boolean;
   filesAvailable: boolean;
   onSelect: () => void;
 }) {
@@ -460,6 +386,7 @@ function FileOption({
   return (
     <AuthOptionButton
       selected={isSelected}
+      isDirty={isDirty}
       onSelect={onSelect}
       label={method.label ?? "Copy auth files"}
     >
@@ -477,21 +404,30 @@ function FileOption({
 function EnvOption({
   method,
   isSelected,
+  isDirty,
   secretId,
+  baselineSecretId,
   onSecretIdChange,
   secrets,
   onSelect,
 }: {
   method: RemoteAuthMethod;
   isSelected: boolean;
+  isDirty: boolean;
   secretId: string | null;
+  baselineSecretId: string | null;
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
   onSelect: () => void;
 }) {
   return (
     <div>
-      <AuthOptionButton selected={isSelected} onSelect={onSelect} label="Provide secret">
+      <AuthOptionButton
+        selected={isSelected}
+        isDirty={isDirty}
+        onSelect={onSelect}
+        label="Provide secret"
+      >
         <div className="flex flex-col gap-0.5">
           <span className="text-sm font-medium">Provide secret</span>
           <span className="text-xs text-muted-foreground">
@@ -512,6 +448,7 @@ function EnvOption({
             onSecretIdChange={onSecretIdChange}
             secrets={secrets}
             placeholder="Select or create a secret..."
+            isDirty={secretId !== baselineSecretId}
           />
         </div>
       )}
@@ -521,20 +458,24 @@ function EnvOption({
 
 function AuthChoiceRadio({
   choice,
+  baselineChoice,
   onChoiceChange,
   fileMethod,
   envMethod,
   ghTokenMethod,
   secretId,
+  baselineSecretId,
   onSecretIdChange,
   secrets,
 }: {
   choice: AuthChoice;
+  baselineChoice: AuthChoice;
   onChoiceChange: (v: AuthChoice) => void;
   fileMethod?: RemoteAuthMethod;
   envMethod?: RemoteAuthMethod;
   ghTokenMethod?: RemoteAuthMethod;
   secretId: string | null;
+  baselineSecretId: string | null;
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
 }) {
@@ -544,6 +485,7 @@ function AuthChoiceRadio({
         <GhTokenOption
           method={ghTokenMethod}
           isSelected={choice === "gh_cli_token"}
+          isDirty={(choice === "gh_cli_token") !== (baselineChoice === "gh_cli_token")}
           onSelect={() => onChoiceChange("gh_cli_token")}
         />
       )}
@@ -551,6 +493,7 @@ function AuthChoiceRadio({
         <FileOption
           method={fileMethod}
           isSelected={choice === "files"}
+          isDirty={(choice === "files") !== (baselineChoice === "files")}
           filesAvailable={fileMethod.has_local_files ?? false}
           onSelect={() => onChoiceChange("files")}
         />
@@ -559,7 +502,9 @@ function AuthChoiceRadio({
         <EnvOption
           method={envMethod}
           isSelected={choice === "env"}
+          isDirty={(choice === "env") !== (baselineChoice === "env")}
           secretId={secretId}
+          baselineSecretId={baselineSecretId}
           onSecretIdChange={onSecretIdChange}
           secrets={secrets}
           onSelect={() => onChoiceChange("env")}
@@ -571,11 +516,13 @@ function AuthChoiceRadio({
 
 function AuthOptionButton({
   selected,
+  isDirty,
   onSelect,
   label,
   children,
 }: {
   selected: boolean;
+  isDirty: boolean;
   onSelect: () => void;
   label: string;
   children: ReactNode;
@@ -587,6 +534,7 @@ function AuthOptionButton({
       aria-checked={selected}
       aria-label={label}
       onClick={onSelect}
+      data-settings-dirty={isDirty}
       className={`${RADIO_LABEL_BASE} ${selected ? SELECTED_BORDER : DEFAULT_BORDER}`}
     >
       <span

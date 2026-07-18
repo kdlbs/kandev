@@ -14,7 +14,10 @@ function Harness({ save }: { save: (enabled: boolean) => Promise<void> }) {
     saveEnabled: (_watch, enabled) => save(enabled),
   });
   return (
-    <button onClick={() => drafts.toggleEnabled(drafts.items[0])}>
+    <button
+      data-dirty={drafts.dirtyIds.has(watch.id)}
+      onClick={() => drafts.toggleEnabled(drafts.items[0])}
+    >
       {drafts.items[0].enabled ? "Disable" : "Enable"}
     </button>
   );
@@ -34,6 +37,19 @@ describe("useWatcherEnabledDrafts", () => {
 
     expect(screen.queryByRole("button", { name: "Save changes" })).toBeNull();
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it("exposes the changed watcher id for row and control highlighting", () => {
+    render(
+      <SettingsSaveProvider>
+        <Harness save={vi.fn().mockResolvedValue(undefined)} />
+      </SettingsSaveProvider>,
+    );
+
+    const toggle = screen.getByRole("button", { name: "Disable" });
+    expect(toggle.getAttribute("data-dirty")).toBe("false");
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Enable" }).getAttribute("data-dirty")).toBe("true");
   });
 
   it("keeps failed changes dirty and retries them", async () => {

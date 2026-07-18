@@ -16,7 +16,6 @@ import { createPortal } from "react-dom";
 
 import { useConfigChatFloatingActionsHost } from "@/components/config-chat/config-chat-provider";
 import type { NavigationIntent } from "@/lib/routing/navigation-guard";
-import { useOptionalAppStore } from "@/components/state-provider";
 import { cn } from "@/lib/utils";
 
 export type SettingsSaveStatus = "dirty" | "saving" | "saved" | "error";
@@ -48,9 +47,8 @@ export function SettingsFloatingSave({
   const isBusy = isSaving || isDiscarding;
   const buttonLabel = status === "error" ? "Retry save" : "Save changes";
   const accessibleLabel = getAccessibleLabel(status, buttonLabel);
-  const isConfigChatOpen = useOptionalAppStore((state) => state.configChat.isOpen, false);
   const configChatFloatingActionsHost = useConfigChatFloatingActionsHost();
-  const isHostedByConfigChat = isConfigChatOpen && configChatFloatingActionsHost !== null;
+  const isHostedByConfigChat = configChatFloatingActionsHost !== null;
   const saveAction = (
     <div
       className={cn(

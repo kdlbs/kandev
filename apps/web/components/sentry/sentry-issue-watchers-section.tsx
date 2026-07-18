@@ -3,8 +3,8 @@
 import { useCallback, useState } from "react";
 import { IconBellRinging, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { WatcherSettingsCard } from "@/components/integrations/watcher-settings-card";
 import { useToast } from "@/components/toast-provider";
 import { useSentryIssueWatches } from "@/hooks/domains/sentry/use-sentry-issue-watches";
 import { useSentryInstances } from "@/hooks/domains/sentry/use-sentry-availability";
@@ -172,23 +172,23 @@ export function SentryIssueWatchersSection({ workspaceId }: { workspaceId: strin
         </Button>
       }
     >
-      <Card>
-        <CardContent className="pt-6">
-          {loading && items.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
-          ) : (
-            <SentryIssueWatchTable
-              watches={enabledDrafts.items}
-              instanceName={instanceName}
-              onEdit={openEdit}
-              onDelete={actions.remove}
-              onTrigger={actions.trigger}
-              onReset={handleReset}
-              onToggleEnabled={enabledDrafts.toggleEnabled}
-            />
-          )}
-        </CardContent>
-      </Card>
+      <WatcherSettingsCard
+        isDirty={enabledDrafts.dirtyIds.size > 0}
+        isLoading={loading}
+        isEmpty={items.length === 0}
+        testId="sentry-watchers-card"
+      >
+        <SentryIssueWatchTable
+          watches={enabledDrafts.items}
+          dirtyIds={enabledDrafts.dirtyIds}
+          instanceName={instanceName}
+          onEdit={openEdit}
+          onDelete={actions.remove}
+          onTrigger={actions.trigger}
+          onReset={handleReset}
+          onToggleEnabled={enabledDrafts.toggleEnabled}
+        />
+      </WatcherSettingsCard>
       <SentryIssueWatchDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}

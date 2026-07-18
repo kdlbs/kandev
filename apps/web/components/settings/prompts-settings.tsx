@@ -31,29 +31,36 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Request failed";
 }
 
+async function runPromptSave(
+  action: () => Promise<unknown>,
+  reportError: (error: unknown) => void,
+) {
+  try {
+    await action();
+  } catch (error) {
+    reportError(error);
+    throw error;
+  }
+}
+
 type PromptFormState = typeof defaultFormState;
 
 type PromptCreateFormProps = {
   formState: PromptFormState;
   onFormChange: (patch: Partial<PromptFormState>) => void;
-  onSubmit: () => void;
   onCancel: () => void;
-  isValid: boolean;
   isBusy: boolean;
 };
 
-function PromptCreateForm({
-  formState,
-  onFormChange,
-  onSubmit,
-  onCancel,
-  isValid,
-  isBusy,
-}: PromptCreateFormProps) {
+function PromptCreateForm({ formState, onFormChange, onCancel, isBusy }: PromptCreateFormProps) {
+  const nameIsDirty = formState.name !== defaultFormState.name;
+  const contentIsDirty = formState.content !== defaultFormState.content;
   return (
     <div
       className="rounded-lg border border-border/70 bg-background p-4 space-y-3"
       data-testid="prompt-create-form"
+      data-settings-dirty="true"
+      data-settings-dirty-level="container"
     >
       <div className="text-sm font-medium text-foreground">Add prompt</div>
       <Input
@@ -62,6 +69,7 @@ function PromptCreateForm({
         placeholder="Prompt name"
         data-testid="prompt-name-input"
         disabled={isBusy}
+        data-settings-dirty={nameIsDirty}
       />
       <Textarea
         value={formState.content}
@@ -71,11 +79,9 @@ function PromptCreateForm({
         className="resize-y max-h-60 overflow-auto"
         data-testid="prompt-content-input"
         disabled={isBusy}
+        data-settings-dirty={contentIsDirty}
       />
       <div className="flex items-center gap-2">
-        <Button onClick={onSubmit} disabled={!isValid || isBusy} data-testid="prompt-submit">
-          Add prompt
-        </Button>
         <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
           Cancel
         </Button>
@@ -380,16 +386,14 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     toast({ title, description: errorMessage(err), variant: "error" });
   const handleCreate = () => {
     if (!isValid || isBusy) return;
-    createRequest.run(formState).catch(toastError("Couldn't create prompt"));
+    return runPromptSave(() => createRequest.run(formState), toastError("Couldn't create prompt"));
   };
-  const handleUpdate = async () => {
+  const handleUpdate = () => {
     if (!isValid || isBusy || !editingId) return;
-    try {
-      await updateRequest.run(editingId, formState);
-    } catch (error) {
-      toastError("Couldn't save prompt")(error);
-      throw error;
-    }
+    return runPromptSave(
+      () => updateRequest.run(editingId, formState),
+      toastError("Couldn't save prompt"),
+    );
   };
   const startEditing = (prompt: CustomPrompt) => {
     setEditingId(prompt.id);
@@ -427,6 +431,24 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   };
 }
 
+export function getPromptDraftMeta(
+  prompts: CustomPrompt[],
+  editingId: string | null,
+  showCreate: boolean,
+  formState: PromptFormState,
+) {
+  const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
+  const revision = JSON.stringify(formState);
+  const savedRevision = JSON.stringify({
+    name: editingPrompt?.name ?? "",
+    content: editingPrompt?.content ?? "",
+  });
+  return {
+    isDirty: showCreate || (Boolean(editingId) && revision !== savedRevision),
+    revision: `${showCreate ? "new" : (editingId ?? "none")}:${revision}`,
+  };
+}
+
 export function PromptsSettings() {
   const state = usePromptsState();
   const {
@@ -452,13 +474,7 @@ export function PromptsSettings() {
     resetForm,
   } = usePromptsActions(state);
   const isEditing = Boolean(editingId);
-  const editingPrompt = prompts.find((prompt) => prompt.id === editingId);
-  const editRevision = JSON.stringify(formState);
-  const savedEditRevision = JSON.stringify({
-    name: editingPrompt?.name ?? "",
-    content: editingPrompt?.content ?? "",
-  });
-  const editIsDirty = Boolean(editingId) && editRevision !== savedEditRevision;
+  const draft = getPromptDraftMeta(prompts, editingId, showCreate, formState);
 
   useEffect(() => {
     if (!editingId) return;
@@ -469,13 +485,15 @@ export function PromptsSettings() {
     <SettingsPageTemplate
       title="Prompts"
       description="Create reusable prompt snippets for the chat input."
-      isDirty={editIsDirty}
+      isDirty={draft.isDirty}
       saveStatus="idle"
-      saveId="prompts-existing-item"
-      saveRevision={`${editingId ?? "none"}:${editRevision}`}
-      canSave={!editingId || isValid}
-      invalidReason={editingId && !isValid ? "Prompt name and content are required." : undefined}
-      onSave={handleUpdate}
+      saveId="prompts-item-draft"
+      saveRevision={draft.revision}
+      canSave={!draft.isDirty || isValid}
+      invalidReason={
+        draft.isDirty && !isValid ? "Prompt name and content are required." : undefined
+      }
+      onSave={showCreate ? handleCreate : handleUpdate}
       onDiscard={resetForm}
     >
       <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
@@ -498,9 +516,7 @@ export function PromptsSettings() {
           <PromptCreateForm
             formState={formState}
             onFormChange={(patch) => setFormState((prev) => ({ ...prev, ...patch }))}
-            onSubmit={handleCreate}
             onCancel={resetForm}
-            isValid={isValid}
             isBusy={isBusy}
           />
         )}

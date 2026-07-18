@@ -284,6 +284,7 @@ export function alignSavedWorkflowsToDraftOrder(
 type WorkflowListProps = {
   workflowItems: Workflow[];
   savedWorkflowItems: Workflow[];
+  orderDirtyIds: ReadonlySet<string>;
   initialStepsByWorkflowId: Map<string, WorkflowStep[]>;
   isWorkflowDirty: (wf: Workflow) => boolean;
   onUpdate: (
@@ -298,9 +299,11 @@ type WorkflowListProps = {
 
 function SortableWorkflowItem({
   workflow,
+  isDirty,
   children,
 }: {
   workflow: Workflow;
+  isDirty: boolean;
   children: React.ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -312,7 +315,14 @@ function SortableWorkflowItem({
     opacity: isDragging ? 0.5 : 1,
   };
   return (
-    <div ref={setNodeRef} style={style} className="relative min-w-0">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className="relative min-w-0"
+      data-settings-dirty={isDirty}
+      data-settings-dirty-level="container"
+      data-testid={`workflow-order-item-${workflow.id}`}
+    >
       <div
         className="absolute left-0 top-6 -ml-6 flex items-center cursor-grab active:cursor-grabbing z-10 sm:-ml-8"
         data-testid={`workflow-drag-handle-${workflow.id}`}
@@ -329,6 +339,7 @@ function SortableWorkflowItem({
 function WorkflowList({
   workflowItems,
   savedWorkflowItems,
+  orderDirtyIds,
   initialStepsByWorkflowId,
   isWorkflowDirty,
   onUpdate,
@@ -359,13 +370,23 @@ function WorkflowList({
         items={workflowItems.map((wf) => wf.id)}
         strategy={verticalListSortingStrategy}
       >
-        <div className="grid min-w-0 gap-3 pl-6 sm:pl-8">
+        <div
+          className="grid min-w-0 gap-3 pl-6 sm:pl-8"
+          data-settings-dirty={orderDirtyIds.size > 0}
+          data-settings-dirty-level="container"
+          data-testid="workflow-order-list"
+        >
           {workflowItems.map((workflow) => (
-            <SortableWorkflowItem key={workflow.id} workflow={workflow}>
+            <SortableWorkflowItem
+              key={workflow.id}
+              workflow={workflow}
+              isDirty={orderDirtyIds.has(workflow.id)}
+            >
               <WorkflowCard
                 workflow={workflow}
                 savedWorkflow={savedWorkflowsById.get(workflow.id)}
                 isWorkflowDirty={isWorkflowDirty(workflow)}
+                isOrderDirty={orderDirtyIds.has(workflow.id)}
                 initialWorkflowSteps={initialStepsByWorkflowId.get(workflow.id)}
                 otherWorkflows={workflowItems.filter((w) => w.id !== workflow.id)}
                 onUpdateWorkflow={(updates) => onUpdate(workflow.id, updates)}
@@ -461,6 +482,7 @@ export function WorkspaceWorkflowsClient({
         <WorkflowList
           workflowItems={page.workflowItems}
           savedWorkflowItems={page.savedWorkflowItems}
+          orderDirtyIds={page.workflowOrderDirtyIds}
           initialStepsByWorkflowId={page.initialStepsByWorkflowId}
           isWorkflowDirty={page.isWorkflowDirty}
           onUpdate={page.handleUpdateWorkflow}
@@ -484,6 +506,20 @@ type WorkflowOrderDraftArgs = {
   idMappings: React.RefObject<Map<string, string>>;
 };
 
+export function getWorkflowOrderDirtyIds(
+  workflows: Workflow[],
+  savedWorkflows: Workflow[],
+): ReadonlySet<string> {
+  const savedPositions = new Map(
+    savedWorkflows.map((workflow, position) => [workflow.id, position]),
+  );
+  return new Set(
+    workflows.flatMap((workflow, position) =>
+      savedPositions.get(workflow.id) === position ? [] : [workflow.id],
+    ),
+  );
+}
+
 function useWorkflowOrderDraft({
   workspace,
   workflowItems,
@@ -494,6 +530,7 @@ function useWorkflowOrderDraft({
 }: WorkflowOrderDraftArgs) {
   const currentOrder = workflowItems.map((workflow) => workflow.id);
   const savedOrder = savedWorkflowItems.map((workflow) => workflow.id);
+  const dirtyIds = getWorkflowOrderDirtyIds(workflowItems, savedWorkflowItems);
   useSettingsSaveContributor({
     id: `workflow-order:${workspace?.id ?? "missing"}`,
     order: 1000,
@@ -512,6 +549,7 @@ function useWorkflowOrderDraft({
     },
     discard: () => setWorkflowItems(savedWorkflowItems),
   });
+  return dirtyIds;
 }
 
 function sortWorkflows(workflows: Workflow[], order: string[]): Workflow[] {
@@ -567,7 +605,7 @@ function useWorkspaceWorkflowsPage(
     actions.handleWorkflowSaved(params);
   };
 
-  useWorkflowOrderDraft({
+  const workflowOrderDirtyIds = useWorkflowOrderDraft({
     workspace,
     workflowItems,
     savedWorkflowItems,
@@ -580,6 +618,7 @@ function useWorkspaceWorkflowsPage(
     router,
     workflowItems,
     savedWorkflowItems,
+    workflowOrderDirtyIds,
     isWorkflowDirty,
     ...importExport,
     ...actions,

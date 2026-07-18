@@ -34,6 +34,7 @@ type WorkflowCardProps = {
   workflow: Workflow;
   savedWorkflow?: Workflow;
   isWorkflowDirty: boolean;
+  isOrderDirty?: boolean;
   initialWorkflowSteps?: WorkflowStep[];
   otherWorkflows?: Workflow[];
   onUpdateWorkflow: (updates: {
@@ -479,7 +480,10 @@ export function WorkflowCard(props: WorkflowCardProps) {
   const visibleSavedSteps = savedWorkflow ? s.savedWorkflowSteps : [];
 
   return (
-    <SettingsCard isDirty={s.hasUnsavedChanges} data-testid={`workflow-card-${workflow.id}`}>
+    <SettingsCard
+      isDirty={s.hasUnsavedChanges || props.isOrderDirty}
+      data-testid={`workflow-card-${workflow.id}`}
+    >
       <CardContent className="pt-6">
         <div className="space-y-4">
           <WorkflowCardBody

@@ -51,6 +51,7 @@ type SaveResult = {
 };
 
 const SettingsSaveRegistryContext = createContext<Registry | null>(null);
+const SettingsRouteDirtyContext = createContext(false);
 
 export function SettingsSaveProvider({ children }: { children: ReactNode }) {
   const { contributors, registry, dirtyContributors, refreshRegistry } = useContributorRegistry();
@@ -133,21 +134,29 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
 
   return (
     <SettingsSaveRegistryContext.Provider value={registry}>
-      {children}
-      {(hasDirty || status === "saved") && (
-        <SettingsFloatingSave
-          status={displayStatus}
-          dirtyContributorIds={dirtyContributors.map(({ contributor }) => contributor.id).join(",")}
-          invalidReason={invalidReason}
-          navigationIntent={pendingNavigation}
-          isDiscarding={isDiscarding}
-          onSave={handleSave}
-          onDiscardAndLeave={discardAndLeave}
-          onContinueEditing={continueEditing}
-        />
-      )}
+      <SettingsRouteDirtyContext.Provider value={hasDirty}>
+        {children}
+        {(hasDirty || status === "saved") && (
+          <SettingsFloatingSave
+            status={displayStatus}
+            dirtyContributorIds={dirtyContributors
+              .map(({ contributor }) => contributor.id)
+              .join(",")}
+            invalidReason={invalidReason}
+            navigationIntent={pendingNavigation}
+            isDiscarding={isDiscarding}
+            onSave={handleSave}
+            onDiscardAndLeave={discardAndLeave}
+            onContinueEditing={continueEditing}
+          />
+        )}
+      </SettingsRouteDirtyContext.Provider>
     </SettingsSaveRegistryContext.Provider>
   );
+}
+
+export function useSettingsRouteIsDirty(): boolean {
+  return useContext(SettingsRouteDirtyContext);
 }
 
 function useContributorRegistry() {
@@ -271,7 +280,7 @@ function hasNewerRevision(
   submitted: SettingsSaveContributor,
 ): boolean {
   const current = contributors.get(submitted.id)?.contributor;
-  return Boolean(current && !Object.is(current.revision, submitted.revision));
+  return Boolean(current && current.isDirty && !Object.is(current.revision, submitted.revision));
 }
 
 function compareContributors(left: RegisteredContributor, right: RegisteredContributor): number {

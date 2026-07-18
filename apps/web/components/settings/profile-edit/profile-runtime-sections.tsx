@@ -53,13 +53,18 @@ type SpritesSectionsProps = {
   baselineNetworkRules?: NetworkPolicyRule[];
   onNetworkRulesChange: (rules: NetworkPolicyRule[]) => void;
   remoteCredentials: string[];
+  baselineRemoteCredentials?: string[];
   onRemoteCredentialsChange: (ids: string[]) => void;
   agentEnvVars: Record<string, string | null>;
+  baselineAgentEnvVars?: Record<string, string | null>;
   onAgentEnvVarChange: (agentId: string, secretId: string | null) => void;
   gitIdentityMode: GitIdentityMode;
+  baselineGitIdentityMode?: GitIdentityMode;
   onGitIdentityModeChange: (mode: GitIdentityMode) => void;
   gitUserName: string;
   gitUserEmail: string;
+  baselineGitUserName?: string;
+  baselineGitUserEmail?: string;
   onGitUserNameChange: (value: string) => void;
   onGitUserEmailChange: (value: string) => void;
   localGitIdentity: GitIdentityState;
@@ -74,13 +79,18 @@ export function SpritesSections({
   baselineNetworkRules,
   onNetworkRulesChange,
   remoteCredentials,
+  baselineRemoteCredentials,
   onRemoteCredentialsChange,
   agentEnvVars,
+  baselineAgentEnvVars,
   onAgentEnvVarChange,
   gitIdentityMode,
+  baselineGitIdentityMode,
   onGitIdentityModeChange,
   gitUserName,
   gitUserEmail,
+  baselineGitUserName,
+  baselineGitUserEmail,
   onGitUserNameChange,
   onGitUserEmailChange,
   localGitIdentity,
@@ -92,14 +102,19 @@ export function SpritesSections({
       <RemoteCredentialsCard
         isRemote={isRemote}
         selectedIds={remoteCredentials}
+        baselineSelectedIds={baselineRemoteCredentials}
         onChange={onRemoteCredentialsChange}
         agentEnvVars={agentEnvVars}
+        baselineAgentEnvVars={baselineAgentEnvVars}
         onAgentEnvVarChange={onAgentEnvVarChange}
         secrets={secrets}
         gitIdentityMode={gitIdentityMode}
+        baselineGitIdentityMode={baselineGitIdentityMode}
         onGitIdentityModeChange={onGitIdentityModeChange}
         gitUserName={gitUserName}
         gitUserEmail={gitUserEmail}
+        baselineGitUserName={baselineGitUserName}
+        baselineGitUserEmail={baselineGitUserEmail}
         onGitUserNameChange={onGitUserNameChange}
         onGitUserEmailChange={onGitUserEmailChange}
         localGitIdentity={localGitIdentity}

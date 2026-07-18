@@ -35,10 +35,13 @@ test.describe("Docker executor profile persistence", () => {
       });
 
       await testPage.getByRole("button", { name: "Use defaults" }).click();
-      const createButton = testPage.getByRole("button", { name: "Create Profile" });
-      await expect(createButton).toBeDisabled();
+      await expect(testPage.getByRole("button", { name: "Create Profile" })).toHaveCount(0);
+      const saveButton = testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: "Save changes" });
+      await expect(saveButton).toBeDisabled();
 
-      await testPage.getByTestId("create-profile-disabled-tooltip").hover();
+      await saveButton.hover();
       await expect(
         testPage.getByText("Build this Docker image before creating the profile."),
       ).toBeVisible();
@@ -48,8 +51,8 @@ test.describe("Docker executor profile persistence", () => {
         timeout: 10_000,
       });
 
-      await expect(createButton).toBeEnabled();
-      await createButton.click();
+      await expect(saveButton).toBeEnabled();
+      await saveButton.click();
 
       await expect(testPage).toHaveURL(/\/settings\/executors\/[^/]+$/);
       createdProfileId = testPage.url().split("/").pop() ?? null;

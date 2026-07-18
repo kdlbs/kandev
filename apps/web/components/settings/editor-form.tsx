@@ -108,6 +108,11 @@ function resolveEditorName(state: EditorFormState) {
   }
 }
 
+function normalizeEditorState(state: EditorFormState) {
+  const name = resolveEditorName(state);
+  return name === state.name ? state : { ...state, name };
+}
+
 export function formStateFromEditor(editor: EditorOption): EditorFormState {
   return {
     name: editor.name,
@@ -149,6 +154,7 @@ type EditorFormProps = {
   submitLabel: string;
   isSaving: boolean;
   coordinatedSaveId?: string;
+  dirtyWhenMounted?: boolean;
 };
 
 function EditorKindFields({
@@ -223,6 +229,7 @@ export function EditorForm({
   submitLabel,
   isSaving,
   coordinatedSaveId,
+  dirtyWhenMounted = false,
 }: EditorFormProps) {
   const [state, setState] = useState<EditorFormState>(initialState);
   const [baseline, setBaseline] = useState<EditorFormState>(initialState);
@@ -249,17 +256,16 @@ export function EditorForm({
   }, [state]);
 
   const handleSave = async () => {
-    const resolvedName = resolveEditorName(state);
-    const submitted = resolvedName === state.name ? state : { ...state, name: resolvedName };
+    const submitted = normalizeEditorState(state);
     await onSave(submitted);
     setBaseline(submitted);
     setState(submitted);
     onSaved?.();
   };
   const revision = JSON.stringify(state);
-  const isCoordinatedDirty = Boolean(coordinatedSaveId) && revision !== JSON.stringify(baseline);
-  const normalizedState =
-    resolveEditorName(state) === state.name ? state : { ...state, name: resolveEditorName(state) };
+  const isCoordinatedDirty =
+    Boolean(coordinatedSaveId) && (dirtyWhenMounted || revision !== JSON.stringify(baseline));
+  const normalizedState = normalizeEditorState(state);
   useSettingsSaveContributor({
     id: coordinatedSaveId ?? `editor-form-local:${title}`,
     revision,

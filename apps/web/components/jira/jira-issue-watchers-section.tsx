@@ -3,8 +3,8 @@
 import { useCallback, useState } from "react";
 import { IconBellRinging, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent } from "@kandev/ui/card";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { WatcherSettingsCard } from "@/components/integrations/watcher-settings-card";
 import { useToast } from "@/components/toast-provider";
 import { useJiraIssueWatches } from "@/hooks/domains/jira/use-jira-issue-watches";
 import { useWatcherEnabledDrafts } from "@/components/integrations/use-watcher-enabled-drafts";
@@ -191,23 +191,23 @@ export function JiraIssueWatchersSection() {
         </Button>
       }
     >
-      <Card>
-        <CardContent className="pt-6">
-          {loading && items.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
-          ) : (
-            <JiraIssueWatchTable
-              watches={enabledDrafts.items}
-              showWorkspace
-              onEdit={openEdit}
-              onDelete={handleDelete}
-              onTrigger={handleTrigger}
-              onReset={handleReset}
-              onToggleEnabled={enabledDrafts.toggleEnabled}
-            />
-          )}
-        </CardContent>
-      </Card>
+      <WatcherSettingsCard
+        isDirty={enabledDrafts.dirtyIds.size > 0}
+        isLoading={loading}
+        isEmpty={items.length === 0}
+        testId="jira-watchers-card"
+      >
+        <JiraIssueWatchTable
+          watches={enabledDrafts.items}
+          dirtyIds={enabledDrafts.dirtyIds}
+          showWorkspace
+          onEdit={openEdit}
+          onDelete={handleDelete}
+          onTrigger={handleTrigger}
+          onReset={handleReset}
+          onToggleEnabled={enabledDrafts.toggleEnabled}
+        />
+      </WatcherSettingsCard>
       <JiraIssueWatchDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}

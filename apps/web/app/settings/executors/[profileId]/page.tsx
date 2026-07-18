@@ -50,6 +50,13 @@ import {
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
+import {
+  deriveSpritesSecretId,
+  getGitIdentityBaseline,
+  parseNetworkPolicyRules,
+  parseRemoteAuthSecrets,
+  parseRemoteCredentials,
+} from "@/components/settings/profile-edit/executor-profile-baselines";
 import type { Executor, ExecutorProfile, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 
@@ -63,31 +70,6 @@ function useProfileFromStore(profileId: string) {
   );
   const profile = executor?.profiles?.find((p: ExecutorProfile) => p.id === profileId) ?? null;
   return executor && profile ? { executor, profile } : null;
-}
-
-function deriveSpritesSecretId(envVars?: ProfileEnvVar[]): string | null {
-  const row = envVars?.find((ev) => ev.key === SPRITES_TOKEN_KEY && ev.secret_id);
-  return row?.secret_id ?? null;
-}
-
-function parseNetworkPolicyRules(config?: Record<string, string>): NetworkPolicyRule[] {
-  const raw = config?.sprites_network_policy_rules;
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as NetworkPolicyRule[];
-  } catch {
-    return [];
-  }
-}
-
-function parseRemoteCredentials(config?: Record<string, string>): string[] {
-  const raw = config?.remote_credentials;
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as string[];
-  } catch {
-    return [];
-  }
 }
 
 function useRemoteExecutorFlags(executorType: ExecutorType) {
@@ -114,15 +96,9 @@ function useRemoteAuthState(profile: ExecutorProfile) {
   const [remoteCredentials, setRemoteCredentials] = useState<string[]>(() =>
     parseRemoteCredentials(profile.config),
   );
-  const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>(() => {
-    const raw = profile.config?.remote_auth_secrets;
-    if (!raw) return {};
-    try {
-      return JSON.parse(raw) as Record<string, string | null>;
-    } catch {
-      return {};
-    }
-  });
+  const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>(() =>
+    parseRemoteAuthSecrets(profile.config),
+  );
 
   const handleAgentEnvVarChange = useCallback((agentId: string, secretId: string | null) => {
     setAgentEnvVars((prev) => ({ ...prev, [agentId]: secretId }));
@@ -435,7 +411,7 @@ type ProfileEditSectionsProps = {
 };
 
 function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSectionsProps) {
-  const isSSH = executor.type === "ssh";
+  const gitIdentityBaseline = getGitIdentityBaseline(profile, form.localGitIdentity);
   return (
     <>
       <ProfileDetailsCard
@@ -443,7 +419,7 @@ function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSe
         baselineName={profile.name}
         onNameChange={form.setName}
       />
-      {isSSH && (
+      {executor.type === "ssh" && (
         <SSHAgentReadinessCard
           executorId={executor.id}
           shell={form.sshShell}
@@ -477,13 +453,18 @@ function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSe
           baselineNetworkRules={parseNetworkPolicyRules(profile.config)}
           onNetworkRulesChange={form.setNetworkPolicyRules}
           remoteCredentials={form.remoteCredentials}
+          baselineRemoteCredentials={parseRemoteCredentials(profile.config)}
           onRemoteCredentialsChange={form.setRemoteCredentials}
           agentEnvVars={form.agentEnvVars}
+          baselineAgentEnvVars={parseRemoteAuthSecrets(profile.config)}
           onAgentEnvVarChange={form.handleAgentEnvVarChange}
           gitIdentityMode={form.gitIdentityMode}
+          baselineGitIdentityMode={gitIdentityBaseline.mode}
           onGitIdentityModeChange={form.setGitIdentityMode}
           gitUserName={form.gitUserName}
           gitUserEmail={form.gitUserEmail}
+          baselineGitUserName={gitIdentityBaseline.userName}
+          baselineGitUserEmail={gitIdentityBaseline.userEmail}
           onGitUserNameChange={form.setGitUserName}
           onGitUserEmailChange={form.setGitUserEmail}
           localGitIdentity={form.localGitIdentity}

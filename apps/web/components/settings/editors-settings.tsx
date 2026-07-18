@@ -373,11 +373,12 @@ function CustomEditorsList({
           title="New custom editor"
           initialState={defaultFormState()}
           onCancel={() => setIsAdding(false)}
-          onSave={(state) => {
-            void createRequest.run(state);
-          }}
+          onSave={(state) => createRequest.run(state)}
+          onSaved={() => setIsAdding(false)}
           submitLabel="Add editor"
           isSaving={createRequest.isLoading}
+          coordinatedSaveId="custom-editor:new"
+          dirtyWhenMounted
         />
       )}
       <div className="space-y-3">
