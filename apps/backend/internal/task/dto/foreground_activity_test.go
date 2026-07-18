@@ -72,6 +72,101 @@ func TestEnrichForegroundActivity(t *testing.T) {
 	}
 }
 
+// mapForegroundActivityProvider resolves a per-session activity so multi-session
+// aggregation can be exercised with distinct values per session.
+type mapForegroundActivityProvider struct {
+	byID   map[string]v1.ForegroundActivity
+	called []string
+}
+
+func (m *mapForegroundActivityProvider) ForegroundActivity(sessionID string) v1.ForegroundActivity {
+	m.called = append(m.called, sessionID)
+	return m.byID[sessionID]
+}
+
+func TestEnrichTaskForegroundActivity(t *testing.T) {
+	running := models.TaskSessionStateRunning
+	done := models.TaskSessionStateCompleted
+	waiting := models.TaskSessionStateWaitingForInput
+
+	sess := func(id string, state models.TaskSessionState) *models.TaskSession {
+		return &models.TaskSession{ID: id, State: state}
+	}
+
+	tests := []struct {
+		name     string
+		sessions []*models.TaskSession
+		byID     map[string]v1.ForegroundActivity
+		want     v1.ForegroundActivity
+		// wantQueried lists the session IDs the provider must be consulted for —
+		// only RUNNING sessions, never a terminal/waiting one.
+		wantQueried []string
+	}{
+		{
+			name:        "any generating wins",
+			sessions:    []*models.TaskSession{sess("a", running), sess("b", running)},
+			byID:        map[string]v1.ForegroundActivity{"a": v1.ForegroundActivityBackground, "b": v1.ForegroundActivityGenerating},
+			want:        v1.ForegroundActivityGenerating,
+			wantQueried: []string{"a", "b"},
+		},
+		{
+			name:        "none generating but one background",
+			sessions:    []*models.TaskSession{sess("a", running), sess("b", running)},
+			byID:        map[string]v1.ForegroundActivity{"a": v1.ForegroundActivityBackground, "b": v1.ForegroundActivityBackground},
+			want:        v1.ForegroundActivityBackground,
+			wantQueried: []string{"a", "b"},
+		},
+		{
+			name:        "finished primary does not mask a still-working secondary",
+			sessions:    []*models.TaskSession{sess("primary", done), sess("secondary", running)},
+			byID:        map[string]v1.ForegroundActivity{"secondary": v1.ForegroundActivityBackground},
+			want:        v1.ForegroundActivityBackground,
+			wantQueried: []string{"secondary"},
+		},
+		{
+			name:        "no running session falls through to empty",
+			sessions:    []*models.TaskSession{sess("a", done), sess("b", waiting)},
+			byID:        map[string]v1.ForegroundActivity{},
+			want:        "",
+			wantQueried: nil,
+		},
+		{
+			name:        "nil sessions are skipped",
+			sessions:    []*models.TaskSession{nil, sess("a", running)},
+			byID:        map[string]v1.ForegroundActivity{"a": v1.ForegroundActivityGenerating},
+			want:        v1.ForegroundActivityGenerating,
+			wantQueried: []string{"a"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			provider := &mapForegroundActivityProvider{byID: tc.byID}
+			dto := &TaskDTO{ID: "t1"}
+			EnrichTaskForegroundActivity(dto, tc.sessions, provider)
+			if dto.ForegroundActivity != tc.want {
+				t.Fatalf("aggregate: got %q, want %q", dto.ForegroundActivity, tc.want)
+			}
+			if len(provider.called) != len(tc.wantQueried) {
+				t.Fatalf("queried %v, want %v", provider.called, tc.wantQueried)
+			}
+			for i, id := range tc.wantQueried {
+				if provider.called[i] != id {
+					t.Fatalf("queried[%d]=%q, want %q (all: %v)", i, provider.called[i], id, provider.called)
+				}
+			}
+		})
+	}
+}
+
+func TestEnrichTaskForegroundActivity_NilProviderIsNoOp(t *testing.T) {
+	dto := &TaskDTO{ID: "t1"}
+	EnrichTaskForegroundActivity(dto, []*models.TaskSession{{ID: "a", State: models.TaskSessionStateRunning}}, nil)
+	if dto.ForegroundActivity != "" {
+		t.Fatalf("nil provider must not set an aggregate, got %q", dto.ForegroundActivity)
+	}
+}
+
 func TestEnrichForegroundActivity_NilProviderIsNoOp(t *testing.T) {
 	dto := &TaskSessionDTO{ID: "s1", State: models.TaskSessionStateRunning}
 	EnrichForegroundActivity(dto, nil)
