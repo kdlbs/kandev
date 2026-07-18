@@ -81,8 +81,9 @@ while task resources are active or another maintenance run owns the cleanup gate
 
 Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
 period. Orphaned task workspaces move into Kandev's quarantine before permanent deletion; review
-the quarantine list to restore an entry or delete it immediately. Host-wide Docker build-cache and
-unused-image cleanup remain disabled until you confirm that Kandev owns a dedicated Docker daemon.
+the quarantine list to restore an entry or request deletion as a background job. Host-wide Docker
+build-cache and unused-image cleanup remain disabled until you confirm that Kandev owns a dedicated
+Docker daemon.
 Do not enable those rules on a daemon shared with unrelated workloads.
 
 ## Database operation
