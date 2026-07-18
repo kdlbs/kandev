@@ -69,6 +69,7 @@ export type KanbanState = {
     primaryExecutorName?: string | null;
     isRemoteExecutor?: boolean;
     parentTaskId?: string | null;
+    workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
     updatedAt?: string;
     createdAt?: string;
     isPRReview?: boolean;

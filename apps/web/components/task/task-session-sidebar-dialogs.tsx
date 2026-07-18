@@ -3,6 +3,7 @@
 import { TaskRenameDialog } from "./task-rename-dialog";
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
+import { TaskDetachTargetConfirmDialog } from "./task-detach-confirm-dialog";
 import { TaskExternalLinkDialog } from "./task-external-link-dialog";
 import { TaskGitHubIssueDialog } from "./task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "./task-github-pr-dialog";
@@ -13,6 +14,11 @@ import type {
 } from "./task-session-sidebar-link-actions";
 
 type Target = { id: string; title: string; executorType?: string | null } | null;
+type DetachTarget = {
+  id: string;
+  title: string;
+  workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
+} | null;
 type LinkTarget = SidebarLinkTarget | null;
 
 export type SidebarDialogsActions = {
@@ -28,6 +34,10 @@ export type SidebarDialogsActions = {
   setDeletingTask: (next: Target) => void;
   isDeleting: boolean;
   handleDeleteConfirm: (opts: { cascade: boolean }) => Promise<void> | void;
+  detachingTask: DetachTarget;
+  setDetachingTask: (next: DetachTarget) => void;
+  detachingTaskId: string | null;
+  handleDetachConfirm: () => Promise<void> | void;
   linkingPullRequestTask: LinkTarget;
   setLinkingPullRequestTask: (next: LinkTarget) => void;
   linkingIssueTask: LinkTarget;
@@ -58,6 +68,10 @@ export function SidebarDialogs({
     setDeletingTask,
     isDeleting,
     handleDeleteConfirm,
+    detachingTask,
+    setDetachingTask,
+    detachingTaskId,
+    handleDetachConfirm,
   } = actions;
   return (
     <>
@@ -90,6 +104,12 @@ export function SidebarDialogs({
         executorType={deletingTask?.executorType}
         isDeleting={isDeleting}
         onConfirm={handleDeleteConfirm}
+      />
+      <TaskDetachTargetConfirmDialog
+        target={detachingTask}
+        detachingTaskId={detachingTaskId}
+        onDismiss={() => setDetachingTask(null)}
+        onConfirm={handleDetachConfirm}
       />
       <SidebarLinkDialogs actions={actions} repositories={repositories} workspaceId={workspaceId} />
     </>

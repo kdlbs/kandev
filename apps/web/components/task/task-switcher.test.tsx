@@ -165,6 +165,60 @@ describe("TaskSwitcher — bulk pin menu", () => {
   });
 });
 
+describe("TaskSwitcher — detach menu", () => {
+  it("offers detach for a single subtask and invokes the action", () => {
+    const onDetachTask = vi.fn();
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={grouped()}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onDetachTask={onDetachTask}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(CHILD.title));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Detach from parent" }));
+
+    expect(onDetachTask).toHaveBeenCalledWith(CHILD.id);
+  });
+
+  it("omits detach for root and multi-selection menus", () => {
+    const { rerender } = render(
+      <Providers>
+        <TaskSwitcher
+          grouped={grouped()}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onDetachTask={vi.fn()}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(ROOT.title));
+    expect(screen.queryByRole("menuitem", { name: "Detach from parent" })).toBeNull();
+
+    rerender(
+      <Providers>
+        <TaskSwitcher
+          grouped={grouped()}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onDetachTask={vi.fn()}
+          selectedTaskIds={new Set([CHILD.id, GRANDCHILD.id])}
+        />
+      </Providers>,
+    );
+    fireEvent.contextMenu(screen.getByText(CHILD.title));
+    expect(screen.queryByRole("menuitem", { name: "Detach from parent" })).toBeNull();
+  });
+});
+
 describe("TaskSwitcher — external issue link menu", () => {
   it("offers configured external issue providers from the task context menu", async () => {
     render(

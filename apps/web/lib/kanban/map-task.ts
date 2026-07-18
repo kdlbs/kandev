@@ -48,6 +48,20 @@ export type TaskLike = {
   metadata?: Record<string, unknown> | null;
 };
 
+type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
+
+export function workspaceModeFromMetadata(
+  metadata: TaskLike["metadata"],
+): WorkspaceMode | undefined {
+  const workspace = metadata?.workspace;
+  if (!workspace || typeof workspace !== "object") return undefined;
+  const mode = (workspace as Record<string, unknown>).mode;
+  if (mode === "inherit_parent" || mode === "new_workspace" || mode === "shared_group") {
+    return mode;
+  }
+  return undefined;
+}
+
 function pickRepositoryId(source: TaskLike): string | undefined {
   return source.repository_id ?? source.repositories?.[0]?.repository_id ?? undefined;
 }
@@ -102,6 +116,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primaryExecutorName: source.primary_executor_name ?? undefined,
     isRemoteExecutor: source.is_remote_executor ?? false,
     parentTaskId: source.parent_id ?? undefined,
+    workspaceMode: workspaceModeFromMetadata(source.metadata),
     updatedAt: source.updated_at,
     createdAt: source.created_at,
     isPRReview: isPRReviewFromMetadata(source.metadata),

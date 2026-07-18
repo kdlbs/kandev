@@ -105,6 +105,7 @@ On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and
 - **Show archived** reveals archived tasks in List.
 - List page sizes are 10, 25, or 50; the default is 25.
 - Parent tasks and direct subtasks are indented as a tree.
+- A subtask's action menu can detach it into a top-level task. Detaching preserves its workflow position and descendants; an inherited workspace remains shared with the former parent.
 
 On phones, Kanban focuses one workflow and one step at a time. The board navigator always names both; open it to choose either level, or use the previous/next controls and horizontal swipe to move between steps. Choosing a workflow makes it the active workflow for board actions and task creation. Tap a card to open that task directly. Its **More options** menu opens as a touch-sized bottom surface; **Move to** changes the task's workflow or step. **Edit** can still rename a task after work starts, while its original prompt remains locked.
 
