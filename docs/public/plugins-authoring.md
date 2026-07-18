@@ -191,9 +191,7 @@ plain-JS ES module. There is no bundler step — kandev serves the file
 verbatim from the extracted package directory, so you edit the bundle and
 repackage.
 
-![A native plugin route rendered inside kandev: a sidebar nav item the
-plugin registered, the host's page title bar, and page content reading live
-task data from the shared app store.](media/plugins/plugin-page.png)
+![A native plugin route rendered inside kandev: a sidebar nav item the plugin registered, the host's page title bar, and page content reading live task data from the shared app store.](../screenshots/plugin-native-page.png)
 
 The single entry point: the bundle, once evaluated, calls
 `window.registerKandevPlugin(id, { initialize(registry, host), destroy?() })`.

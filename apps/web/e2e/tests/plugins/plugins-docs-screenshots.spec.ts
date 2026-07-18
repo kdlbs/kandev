@@ -4,8 +4,10 @@
  *
  * When enabled, it installs a real gRPC plugin into the worker's isolated
  * backend (same harness as tests/plugins/plugins.spec.ts) and screenshots
- * the operator-facing surfaces straight into docs/public/media/plugins/*.png,
- * which the public plugin docs embed.
+ * the operator-facing surfaces straight into docs/screenshots/plugin-*.png,
+ * which the public plugin docs embed as ../screenshots/plugin-*.png (the
+ * landing publisher only rewrites/copies images under screenshots/; media/
+ * is reserved for <DocsVideo> assets).
  *
  * Regenerate (from apps/web), pointing at the polished kandev-plugin-hello
  * example so the captures match the docs prose (display name "Hello Plugin",
@@ -36,7 +38,7 @@ const PLUGIN_ID = process.env.DOCS_PLUGIN_ID ?? "kandev-plugin-e2e";
 const NAV_ITEM_ID = process.env.DOCS_PLUGIN_NAV_ID ?? "e2e-hello";
 const PLUGIN_ROUTE = process.env.DOCS_PLUGIN_ROUTE ?? "/plugins/e2e-hello";
 
-const MEDIA_DIR = path.resolve(__dirname, "../../../../../docs/public/media/plugins");
+const SCREENSHOTS_DIR = path.resolve(__dirname, "../../../../../docs/screenshots");
 const VIEWPORT = { width: 1280, height: 860 };
 
 /** Let transient success toasts auto-dismiss so they don't sit in captures. */
@@ -49,9 +51,9 @@ async function waitForToastsGone(page: Page): Promise<void> {
 }
 
 async function shot(page: Page, name: string): Promise<void> {
-  fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
   await waitForToastsGone(page);
-  await page.screenshot({ path: path.join(MEDIA_DIR, `${name}.png`) });
+  await page.screenshot({ path: path.join(SCREENSHOTS_DIR, `plugin-${name}.png`) });
 }
 
 test.describe("Plugin docs screenshots", () => {
@@ -94,7 +96,7 @@ test.describe("Plugin docs screenshots", () => {
     await expect(navItem).toBeVisible({ timeout: 15_000 });
     await navItem.click();
     await expect(testPage).toHaveURL(new RegExp(`${PLUGIN_ROUTE}$`));
-    await shot(testPage, "plugin-page");
+    await shot(testPage, "native-page");
 
     // Clean up so a repeat run reinstalls from a clean slate.
     await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
