@@ -86,6 +86,8 @@ type ChangesTreeProps = {
   /** Shared with the parent FileListSection so the BulkActionBar reflects
    *  selections made in tree mode. */
   multiSelect: ReturnType<typeof useMultiSelect>;
+  /** Add one tree depth when the repository header is this tree's parent. */
+  nested?: boolean;
 };
 
 export function ChangesTree({
@@ -98,7 +100,9 @@ export function ChangesTree({
   onDiscard,
   variant,
   multiSelect,
+  nested = false,
 }: ChangesTreeProps) {
+  const baseIndentPx = nested ? 12 : 0;
   const tree = useMemo(() => buildChangesTree(files), [files]);
   const { visibleRows, toggle, setExpanded } = useTree<TreeNode>({
     nodes: tree,
@@ -132,7 +136,12 @@ export function ChangesTree({
     <ul data-testid={`${variant}-file-tree`} className="space-y-0.5">
       {visibleRows.map((row) =>
         row.isDir ? (
-          <TreeDirRow key={row.path} row={row} onToggle={() => toggle(row.path)} />
+          <TreeDirRow
+            key={row.path}
+            row={row}
+            baseIndentPx={baseIndentPx}
+            onToggle={() => toggle(row.path)}
+          />
         ) : (
           <FileRow
             key={`${row.node.file?.repositoryName ?? ""}:${row.path}`}
@@ -147,7 +156,7 @@ export function ChangesTree({
             onDiscard={onDiscard}
             onEditFile={onEditFile}
             treeMode
-            indentPx={row.depth * 12}
+            indentPx={baseIndentPx + row.depth * 12}
           />
         ),
       )}
@@ -249,19 +258,28 @@ export function RepoTreeGroup(props: RepoTreeGroupProps) {
           onDiscard={props.onDiscard}
           variant={variant}
           multiSelect={props.multiSelect}
+          nested
         />
       )}
     </div>
   );
 }
 
-function TreeDirRow({ row, onToggle }: { row: VisibleRow<TreeNode>; onToggle: () => void }) {
+function TreeDirRow({
+  row,
+  baseIndentPx,
+  onToggle,
+}: {
+  row: VisibleRow<TreeNode>;
+  baseIndentPx: number;
+  onToggle: () => void;
+}) {
   return (
     <li>
       <button
         type="button"
         className="flex items-center w-full gap-1 px-1 py-0.5 -mx-1 rounded-md hover:bg-muted/60 cursor-pointer text-xs text-foreground/70"
-        style={{ paddingLeft: row.depth * 12 + 4 }}
+        style={{ paddingLeft: baseIndentPx + row.depth * 12 + 4 }}
         onClick={onToggle}
         data-testid={`tree-dir-${row.path.replace(/[/\\]/g, "-")}`}
       >
