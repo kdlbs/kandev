@@ -114,10 +114,18 @@ describe("buildHostApi", () => {
     const replaceSpy = vi.spyOn(window.history, "replaceState");
 
     host.navigate("/somewhere");
-    expect(pushSpy).toHaveBeenCalledWith({}, "", "/somewhere");
+    expect(pushSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ __kandevNavigationPosition: expect.any(Number) }),
+      "",
+      "/somewhere",
+    );
 
     host.navigate("/elsewhere", { replace: true });
-    expect(replaceSpy).toHaveBeenCalledWith({}, "", "/elsewhere");
+    expect(replaceSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ __kandevNavigationPosition: expect.any(Number) }),
+      "",
+      "/elsewhere",
+    );
 
     pushSpy.mockRestore();
     replaceSpy.mockRestore();
