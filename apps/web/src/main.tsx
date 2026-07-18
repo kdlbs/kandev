@@ -8,6 +8,7 @@ import { useAppStoreApi, StateProvider } from "@/components/state-provider";
 import { PluginBootBridge } from "@/lib/plugins/plugin-boot-bridge";
 import { preloadLocale } from "@/lib/i18n";
 import { resolveInitialLocale } from "@/lib/i18n/boot";
+import { shouldInstallBrowserDemo } from "@/lib/browser-demo/mode";
 import { AppShell } from "./app-shell";
 import { AuthGatedScreen, useAuthGateDecision } from "./auth-gate";
 import { loadBootPayload } from "./boot-payload";
@@ -75,7 +76,21 @@ if (!root) {
   throw new Error("Missing #root element");
 }
 
-void loadBootPayload().then(async (payload) => {
+const buildEnv =
+  (
+    import.meta as ImportMeta & {
+      env?: { DEV?: boolean; VITE_KANDEV_BROWSER_DEMO?: string };
+    }
+  ).env ?? {};
+const demoReady = shouldInstallBrowserDemo({
+  env: buildEnv,
+  pathname: window.location.pathname,
+  storage: window.sessionStorage,
+})
+  ? import("@/lib/browser-demo/install").then(({ installBrowserDemo }) => installBrowserDemo())
+  : Promise.resolve();
+
+void demoReady.then(() => loadBootPayload()).then(async (payload) => {
   // The Go shell already rewrote <title>; this is the /api/v1/app-state boot
   // path, which never renders through it.
   applyTitlePrefix(payload.runtime?.titlePrefix, document);
