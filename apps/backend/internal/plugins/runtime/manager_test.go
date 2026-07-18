@@ -145,16 +145,20 @@ func TestManager_StartDeliverEventWebhookStop(t *testing.T) {
 	})
 
 	t.Run("DeliverEvent reaches the plugin, which calls back into Host.SetState", func(t *testing.T) {
-		err := remote.DeliverEvent(ctx, &pluginsdk.Event{EventID: "e1", EventType: "task.created"})
-		if err != nil {
-			t.Fatalf("DeliverEvent() unexpected error: %v", err)
-		}
-
-		select {
-		case <-host.setCh:
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for the plugin's Host.SetState callback")
-		}
+		require.Eventually(t, func() bool {
+			if err := remote.DeliverEvent(ctx, &pluginsdk.Event{
+				EventID: "e1", EventType: "task.created",
+			}); err != nil {
+				return false
+			}
+			select {
+			case <-host.setCh:
+				return true
+			default:
+				return false
+			}
+		}, 5*time.Second, 20*time.Millisecond,
+			"plugin should call Host.SetState after asynchronous Host injection completes")
 
 		value, found := host.get("instance", "", "last_event")
 		if !found {
