@@ -431,7 +431,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	default:
 		return
 	}
-	terminal := isTerminalToolUpdateStatus(status)
+	terminal := isTerminalToolStatus(status)
 	turnID := ""
 	if terminal {
 		var err error
@@ -495,7 +495,7 @@ func (s *Service) trackBackgroundToolUpdate(ctx context.Context, payload *lifecy
 	if payload.Data.ParentToolCallID != "" {
 		return
 	}
-	if isTerminalToolUpdateStatus(payload.Data.ToolStatus) {
+	if isTerminalToolStatus(payload.Data.ToolStatus) {
 		// A finished top-level background task no longer holds the turn open.
 		// Once none remain, the foreground is no longer "waiting on background".
 		// Cleared by tool-call ID membership rather than by re-classifying the
@@ -530,9 +530,9 @@ func (s *Service) trackBackgroundToolUpdate(ctx context.Context, payload *lifecy
 	}
 }
 
-// isTerminalToolUpdateStatus reports whether a tool_update status marks the tool call
+// isTerminalToolStatus reports whether a tool_update status marks the tool call
 // as finished (successfully, in error, or cancelled).
-func isTerminalToolUpdateStatus(status string) bool {
+func isTerminalToolStatus(status string) bool {
 	switch status {
 	case agentEventComplete, agentEventCompleted, "success", agentEventError, agentEventFailed, "cancelled":
 		return true

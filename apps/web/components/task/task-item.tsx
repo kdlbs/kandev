@@ -41,7 +41,7 @@ type TaskItemProps = {
   title: string;
   state?: TaskState;
   sessionState?: TaskSessionState;
-  /** Fine-grained busy substate (ADR-0043) of the session `sessionState` reflects. */
+  /** Fine-grained busy substate (ADR-0046) of the session `sessionState` reflects. */
   sessionForegroundActivity?: ForegroundActivity | null;
   isArchived?: boolean;
   isSelected?: boolean;

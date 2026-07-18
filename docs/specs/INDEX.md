@@ -40,6 +40,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — marketplace](plugins/marketplace.md) | building |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
+| [fine-grained background-running status indicator](fine-grained-background-running-status-indicator/spec.md) | shipped |
 
 ## tasks/ — task & workflow model
 

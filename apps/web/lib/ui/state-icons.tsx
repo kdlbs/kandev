@@ -57,7 +57,7 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
 };
 
 // (b) background-running: the foreground turn has yielded to spawned background
-// work (ADR-0043). A spinner — the operator can see the
+// work (ADR-0046). A spinner — the operator can see the
 // agent is not done — visually separate from the static "generating" dot (a) by
 // its motion AND shape, and from the done checkmark (c) by its motion AND shape,
 // so the three read apart even in a grayscale/desaturated scan (not hue alone,
@@ -202,7 +202,7 @@ function getSessionStateIconConfig(
 ): IconConfig {
   // (b) background-running wins over the default RUNNING (generating) icon:
   // while the foreground turn waits on spawned background work the session must
-  // read as "working in background", never as done (ADR-0043).
+  // read as "working in background", never as done (ADR-0046).
   if (state === "RUNNING" && foregroundActivity === "background") {
     return SESSION_BACKGROUND_ICON;
   }

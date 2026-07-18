@@ -10,7 +10,7 @@ import (
 )
 
 // ForegroundActivityProvider surfaces the live fine-grained busy substate of a
-// RUNNING session (ADR-0043), satisfied by the orchestrator. The task service
+// RUNNING session (ADR-0046), satisfied by the orchestrator. The task service
 // depends only on this narrow seam so it takes no hard orchestrator dependency
 // and can be faked in tests.
 type ForegroundActivityProvider interface {
