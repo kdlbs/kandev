@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -42,17 +42,41 @@ export function InstallPluginDialog({
 }: InstallPluginDialogProps) {
   const [tab, setTab] = useState<InstallTab>("url");
   const [url, setUrl] = useState("");
+  const [file, setFile] = useState<File | null>(null);
 
-  const handleOpenChange = (next: boolean) => {
-    if (!next) {
+  // Reset the lifted input state whenever the dialog closes. This keys off the
+  // `open` prop rather than `onOpenChange` because a successful install closes
+  // the dialog by flipping the controlled `open` prop directly
+  // (usePluginActions.afterInstall), which never routes through onOpenChange —
+  // so resetting only in an onOpenChange handler would leave a stale file/url
+  // selected the next time the dialog opens.
+  useEffect(() => {
+    if (!open) {
       setUrl("");
+      setFile(null);
       setTab("url");
     }
-    onOpenChange(next);
-  };
+  }, [open]);
+
+  const trimmedUrl = url.trim();
+  // The single Install button submits whichever tab is active; its testid,
+  // handler, and disabled state all derive from `tab` so the e2e/unit selectors
+  // (install-plugin-url-submit / install-plugin-upload-submit) keep working.
+  const install =
+    tab === "url"
+      ? {
+          testId: "install-plugin-url-submit",
+          onClick: () => onSubmitUrl(trimmedUrl),
+          disabled: busy || trimmedUrl.length === 0,
+        }
+      : {
+          testId: "install-plugin-upload-submit",
+          onClick: () => file && onSubmitFile(file),
+          disabled: busy || !file,
+        };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg" data-testid="install-plugin-dialog">
         <DialogHeader>
           <DialogTitle>Install plugin</DialogTitle>
@@ -79,10 +103,10 @@ export function InstallPluginDialog({
             </TabsTrigger>
           </TabsList>
           <TabsContent value="url" className="pt-3">
-            <UrlTab url={url} setUrl={setUrl} busy={busy} onSubmit={onSubmitUrl} />
+            <UrlTab url={url} setUrl={setUrl} />
           </TabsContent>
           <TabsContent value="upload" className="pt-3">
-            <UploadTab busy={busy} onSubmit={onSubmitFile} />
+            <UploadTab file={file} setFile={setFile} />
           </TabsContent>
         </Tabs>
 
@@ -96,10 +120,19 @@ export function InstallPluginDialog({
           <Button
             type="button"
             variant="outline"
-            onClick={() => handleOpenChange(false)}
+            onClick={() => onOpenChange(false)}
             className="cursor-pointer"
           >
             Cancel
+          </Button>
+          <Button
+            type="button"
+            data-testid={install.testId}
+            onClick={install.onClick}
+            disabled={install.disabled}
+            className="cursor-pointer"
+          >
+            Install
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -107,46 +140,24 @@ export function InstallPluginDialog({
   );
 }
 
-function UrlTab({
-  url,
-  setUrl,
-  busy,
-  onSubmit,
-}: {
-  url: string;
-  setUrl: (v: string) => void;
-  busy: boolean;
-  onSubmit: (url: string) => void;
-}) {
+function UrlTab({ url, setUrl }: { url: string; setUrl: (v: string) => void }) {
   return (
-    <div className="space-y-3">
-      <div className="space-y-1.5">
-        <Label htmlFor="install-plugin-url">Package URL</Label>
-        <Input
-          id="install-plugin-url"
-          data-testid="install-plugin-url-input"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://example.com/acme-tools-1.0.0.tar.gz"
-          className="font-mono text-sm"
-        />
-      </div>
-      <Button
-        type="button"
-        data-testid="install-plugin-url-submit"
-        onClick={() => onSubmit(url.trim())}
-        disabled={busy || url.trim().length === 0}
-        className="cursor-pointer"
-      >
-        Install
-      </Button>
+    <div className="space-y-1.5">
+      <Label htmlFor="install-plugin-url">Package URL</Label>
+      <Input
+        id="install-plugin-url"
+        data-testid="install-plugin-url-input"
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder="https://example.com/acme-tools-1.0.0.tar.gz"
+        className="font-mono text-sm"
+      />
     </div>
   );
 }
 
-function UploadTab({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) => void }) {
+function UploadTab({ file, setFile }: { file: File | null; setFile: (file: File | null) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -175,44 +186,33 @@ function UploadTab({ busy, onSubmit }: { busy: boolean; onSubmit: (file: File) =
   };
 
   return (
-    <div className="space-y-3">
-      <div
-        data-testid="install-plugin-dropzone"
-        onDragOver={handleDragOver}
-        onDragEnter={handleDragEnter}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
-        className={cn(
-          "flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground cursor-pointer",
-          isDragging && "border-primary bg-primary/5 ring-1 ring-primary/30",
+    <div
+      data-testid="install-plugin-dropzone"
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      onClick={() => inputRef.current?.click()}
+      className={cn(
+        "flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground cursor-pointer",
+        isDragging && "border-primary bg-primary/5 ring-1 ring-primary/30",
+      )}
+    >
+      <span>
+        {file ? (
+          <span className="font-mono text-foreground">{file.name}</span>
+        ) : (
+          "Drag and drop a .tar.gz package here, or click to browse"
         )}
-      >
-        <span>
-          {file ? (
-            <span className="font-mono text-foreground">{file.name}</span>
-          ) : (
-            "Drag and drop a .tar.gz package here, or click to browse"
-          )}
-        </span>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".tar.gz,.tgz,application/gzip"
-          data-testid="install-plugin-file-input"
-          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          className="hidden"
-        />
-      </div>
-      <Button
-        type="button"
-        data-testid="install-plugin-upload-submit"
-        onClick={() => file && onSubmit(file)}
-        disabled={busy || !file}
-        className="cursor-pointer"
-      >
-        Install
-      </Button>
+      </span>
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".tar.gz,.tgz,application/gzip"
+        data-testid="install-plugin-file-input"
+        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+        className="hidden"
+      />
     </div>
   );
 }
