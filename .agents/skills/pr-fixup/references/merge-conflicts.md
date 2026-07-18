@@ -12,6 +12,8 @@ gh pr view <PR> --json number,url,baseRefName,headRefName,mergeable,mergeStateSt
 
 Treat `mergeable:"CONFLICTING"` or `mergeStateStatus:"DIRTY"` as an actionable merge-conflict blocker. Treat `mergeable:"UNKNOWN"` as inconclusive: wait one short cadence and query again before deciding. States such as `BEHIND`, `BLOCKED`, `UNSTABLE`, or `HAS_HOOKS` may require an update or more CI/review work, but they are not by themselves proof of file-level conflicts.
 
+Always use the freshly queried `baseRefName`. GitHub can retarget a stacked child PR after its parent merges, so neither the Git upstream nor a base branch remembered from an earlier fixup round is authoritative.
+
 Inspect the local worktree:
 
 ```bash
@@ -42,7 +44,10 @@ If `git ls-files -u` prints entries, or conflict markers are present in tracked 
    git grep -n -E '^(<<<<<<<|>>>>>>>)'
    git diff --check
    git diff --cached --check
+   git diff --stat origin/<baseRefName>
    ```
+
+   Confirm that the final diff against the current GitHub base contains only the PR's intended delta. A clean index is insufficient if a retargeted stacked PR accidentally retains its merged parent's changes.
 
 ### When the local index is already unmerged
 
@@ -72,3 +77,15 @@ If `git ls-files -u` shows entries, a previous merge or rebase was left incomple
    ```
 
 Do not discard unrelated user changes to make a merge/rebase easier. If unrelated dirty files block the conflict-resolution attempt, stop and ask before stashing, committing, or reverting them.
+
+## Push after rebasing
+
+Capture the remote branch SHA before rebasing when possible. After a successful rebase, prefer an exact force lease:
+
+```bash
+git push \
+  --force-with-lease=refs/heads/<branch>:<expected-remote-sha> \
+  origin HEAD:refs/heads/<branch>
+```
+
+An intervening fetch can update the remote-tracking ref consulted by generic `--force-with-lease`. Use the generic form only when the prior remote SHA was not captured, and never use an unconditional force push.

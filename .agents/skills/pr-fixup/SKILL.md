@@ -124,7 +124,7 @@ scripts/pr-resolve list <PR>
 
 If `unresolved_review_thread_count` is nonzero but `unresolved_threads` is empty, or if `hidden_unresolved_threads` is non-empty, run `scripts/pr-resolve list <PR>` before acting. Fetch each full body with `scripts/pr-state --comment <comment_id>` or `scripts/pr-resolve show <PR> <THREAD_ID_OR_COMMENT_ID>`; hidden threads can contain valid current blockers even when the current-head filtered view is empty. `pr-state` can briefly report total unresolved count from historical state while current-head unresolved threads are empty; `pr-resolve list` is the authoritative actionable thread set for fixup work. If `scripts/pr-state --summary` reports a nonzero unresolved count but `scripts/pr-resolve show <PR> <THREAD_ID>` says the listed thread is `resolved: true`, treat the summary as stale state. Wait briefly, rerun `scripts/pr-state --summary <PR>`, and do not reply again to an already-resolved thread.
 
-Poll at a 30s cadence with a **20 min cap**. Prefer one-shot `scripts/pr-state --summary <PR>` checks, or a bounded command that can finish naturally, over long inline shell loops. In this environment, a running non-TTY loop may not receive Ctrl-C through `write_stdin`, so avoid `while sleep ...; do ...; done` polling in the main session. Run `sleep 30` and then a fresh `scripts/pr-state --summary <PR>` as separate commands; a combined command can capture blank output. Rerun a blank summary before interpreting it.
+Poll at a 30s cadence with a **20 min cap**. Prefer one-shot `scripts/pr-state --summary <PR>` checks, or a bounded command that can finish naturally, over long inline shell loops. In this environment, a running non-TTY loop may not receive Ctrl-C through `write_stdin`, so avoid `while sleep ...; do ...; done` polling in the main session. Run `sleep 30` and then a fresh `scripts/pr-state --summary <PR>` as separate commands; a combined command can capture blank output. Record wall-clock time around requested sleeps: if less elapsed than requested, treat the wait as interrupted, re-poll, and report the shorter time. Rerun a blank summary before interpreting it.
 
 Stop early if any required check fails. A `queued` or `in_progress` job caused by GitHub runner capacity is pending CI, not a failure: when the requested watch window or cap ends with no failures or unresolved comments, do not make speculative code changes. Report each pending job's exact name and status, plus its `details_url` or Actions run URL. If the user explicitly asks to poll until CI is green, continue past the normal pending-E2E stopping point with bounded one-shot `sleep N; scripts/pr-state --summary <PR>` checks; stop immediately on any `failed_checks`, and continue until `failed_checks: []`, `pending_checks: []`, and `unresolved_review_thread_count: 0`. Do not run `gh pr checks --watch` in the main session unless the runtime can keep the watcher isolated and automatically clean it up. If you do use `gh pr checks --watch`, keep watching until the command exits; GitHub can expand matrix jobs after an initial aggregate "Build" check passes, so the first green build/lint/test rows are not necessarily terminal.
 
@@ -450,12 +450,12 @@ Mark task 5 as in_progress.
    git push
    ```
 
-   If verification or conflict resolution rebased the branch onto `origin/main`, local commit SHAs changed and a plain push may fail non-fast-forward. In that case, push with:
+   If verification or conflict resolution rebased the branch, local commit SHAs changed and a plain push may fail non-fast-forward. When the pre-rebase remote SHA is known, use an exact lease:
    ```bash
-   git push --force-with-lease
+   git push --force-with-lease=refs/heads/<branch>:<expected-remote-sha> origin HEAD:refs/heads/<branch>
    ```
-
-Mark task 5 as completed.
+   Otherwise use generic `git push --force-with-lease`; never force push unconditionally.
+   Mark task 5 as completed.
 
 ### 6. Re-check PR state
 
@@ -473,6 +473,8 @@ After the push, CI restarts and bots may re-review. Use `pr-poller` again when a
 - If new CI failures appeared from the latest commit → loop back to task 2 and reset task 2-5 to `in_progress` as needed.
 - If new review comments appeared after the push → loop back to task 3.
 - If the poller hit its cap (`recommendation:` mentions "timed out") → surface the remaining pending items to the user and stop.
+
+Before declaring the PR complete, run `gh pr view <PR> --json headRefOid,baseRefName,mergeable,mergeStateStatus` and `git ls-files -u`. If GitHub reports `CONFLICTING` / `DIRTY` or the index is unmerged, load `references/merge-conflicts.md` and repeat conflict resolution, verification, push, and post-push checks. Long CI waits can make the initial result stale.
 
 Cap re-check loops at **3 iterations** to prevent runaway sessions. After 3, surface the remaining state to the user and stop.
 

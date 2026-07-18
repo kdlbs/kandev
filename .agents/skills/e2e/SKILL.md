@@ -63,6 +63,14 @@ pnpm e2e:clean                                 # remove build/test artifacts, in
 
 The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 
+`--no-build` reuses every production E2E artifact, not only Vite assets and the
+backend executable. On a fresh worktree or after rebasing, confirm packaged
+fixtures also exist; global setup currently requires
+`apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz`. If it is absent, run
+without `--no-build` or first run `make -C apps/backend e2e-plugin-package`.
+Prefer a normal managed build after source or base-branch changes and reserve
+`--no-build` for repeated runs against unchanged artifacts.
+
 ### Raw commands (when you need fine control)
 
 ```bash
@@ -365,6 +373,12 @@ A test that flakes under parallel/sharded load is one of two things — decide w
 ## Selector guidelines
 
 - **Prefer `data-testid` selectors** over text-based locators. Text content can change when UI is updated (e.g., hiding a badge), breaking tests that match by text. Use `getByTestId()` or `locator("[data-testid='...']")` for stable targeting.
+- **Scope Radix tooltip locators to the visible portal.** Radix can render an
+  accessibility copy as well as the visible tooltip, so global test-id, text,
+  or role locators may match multiple elements in strict mode. Start from a
+  visible `[data-slot="tooltip-content"][data-state]`, then locate its visible
+  descendant. Do not assume the trigger's `aria-describedby` target is the
+  visual portal. Use bounding-box assertions when relative placement matters.
 - **Use page object methods** like `clickSessionChatTab()` (stable `data-testid`) instead of `sessionTabByText("1")` (fragile text match) for session tabs.
 - **Dropdown menus can detach** from the DOM when React re-renders the parent (e.g., WS events updating the sidebar). The `openSidebarMenuAndClick()` helper in `session-page.ts` retries the full open-click sequence on detachment — use this pattern for similar interactions.
 

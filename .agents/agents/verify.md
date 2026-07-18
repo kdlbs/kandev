@@ -12,50 +12,44 @@ Run the full verification pipeline for the monorepo, then fix any issues found.
 
 ## Steps
 
-1. **Rebase on main** (ensures CI parity — CI merges main into the PR branch):
-   ```bash
-   git fetch origin main --quiet
-   ```
-   - If the current branch is `main`, skip this step.
-   - If the branch is stacked on another feature branch (not main), skip this step.
-     Detect: `git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null` — if the upstream is NOT `origin/main` (e.g., another feature branch), skip rebase.
-   - Otherwise, rebase:
+1. **Prepare and rebase against the current PR base:**
+   - Fresh worktrees share `.git/` but not dependencies. If `apps/node_modules` is missing, run `pnpm install --frozen-lockfile` from `apps/`.
+   - Resolve the PR base from GitHub because stacked PRs may not target `main` and can be retargeted after a parent merges:
      ```bash
-     git rebase origin/main
+     PR_BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || printf 'main')"
+     git fetch origin "$PR_BASE" --quiet
      ```
-   - If the rebase has conflicts, resolve them:
-     1. For each conflicted file, read the file and understand both sides of the conflict
-     2. Resolve by keeping the correct combination of both changes (don't just pick one side)
-     3. `git add <resolved-file>` then `git rebase --continue`
-     4. Repeat for each conflicting commit until the rebase completes
-     5. If a conflict is too ambiguous to resolve confidently, abort (`git rebase --abort`) and report the issue
+   - If the current branch is the base branch, skip the rebase. Otherwise rebase onto `origin/$PR_BASE`.
+   - Resolve conflicts by preserving the intended behavior from both sides. Stage each resolved file and continue. If a conflict is ambiguous, abort and report it rather than guessing.
 
-2. **Format** (prevents formatter-induced lint failures):
-   - `make -C apps/backend fmt`
-   - `cd apps && pnpm format`
-
-3. **Verify** — always wrap heavy commands with `scripts/run-quiet <tag> -- <cmd>`. The wrapper redirects all output to a unique `/tmp/kandev-run.<tag>.<random>.log`, prints `exit=0 log=...` on success or an auto-grepped failure summary on error, and exits with the underlying command's exit code. Random suffix ⇒ safe under parallel invocations.
+2. **Format and generate metadata:**
    ```bash
-   scripts/run-quiet backend-test -- make -C apps/backend test lint
-   scripts/run-quiet web-lint -- bash -c 'cd apps && pnpm --filter @kandev/web lint'
+   scripts/run-quiet format -- make fmt
+   git status --short
+   node apps/web/scripts/generate-release-notes.mjs
+   node apps/web/scripts/generate-changelog.mjs
    ```
-   - If both print `exit=0`: done, nothing more to read.
-   - If non-zero: the failure summary is already in your context. `Read` only specific line ranges of the printed log path if you need more context — never `cat` the whole log.
+   Review formatter changes before continuing.
 
-4. **Fix issues** — do NOT just report them:
-   - Read each failing file at the reported line number (use the `Read` tool with `offset`/`limit`, not `cat` of the whole file)
-   - Fix the root cause (don't suppress warnings or add ignores)
-   - Common fixes:
-     - **Type errors**: fix the type, add a missing import, or correct the function signature
-     - **Lint — function too long**: extract a helper function or sub-component
-     - **Lint — file too long**: split the file into smaller, cohesive files grouped by responsibility
-     - **Lint — cyclomatic/cognitive complexity**: simplify conditionals, extract early returns, break into smaller functions
-     - **Lint — unused imports**: remove them
-     - **Lint — duplicate strings**: extract to a constant
-     - **Test failures**: read the test, understand the assertion, fix the code (not the test) unless the test is outdated
-     - **Test failures — goleak (package passes, TestMain fails):** loop the failing package with race to match CI: `go test -race -count=10 ./internal/<pkg>/...`. If stack traces mention `sleepOrStop` / `connectWorkspaceStream`, fix test cleanup (see backend AGENTS.md leak-testing section).
-   - After fixing, re-run **only** the failed command via `scripts/run-quiet` to confirm the fix. Do not re-run the whole pipeline on every iteration.
+3. **Run the complete pipeline** through `scripts/run-quiet`:
+   ```bash
+   scripts/run-quiet typecheck -- make typecheck
+   scripts/run-quiet test -- make test
+   scripts/run-quiet lint -- make lint
+   ```
+   - `make test` covers backend, web, CLI, `test-scripts`, and desktop smoke checks. Do not skip a failed subtarget while reporting full verification as green.
+   - If a command fails, inspect only targeted ranges of the returned log path; never stream or `cat` the entire log.
+
+4. **Fix issues** - do not just report them:
+   - Read each failing file at the reported line number.
+   - Fix the root cause; do not suppress warnings or add ignores.
+   - For type, lint, or test failures, fix implementation behavior unless the test is demonstrably outdated.
+   - For goleak failures after otherwise passing Go tests, loop the affected package with `go test -race -count=10 ./internal/<pkg>/...` and inspect cleanup ownership.
+   - If Go tests fail because `httptest.NewServer` cannot bind loopback in a restricted sandbox, rerun the exact command with normal network/loopback escalation before diagnosing code.
+   - For `ENOSPC`, read-only cache, or cache-initialization failures, create invocation-specific writable `TMPDIR`, `GOCACHE`, and `GOLANGCI_LINT_CACHE` directories and rerun the exact command. Clean only those directories.
+   - For Rust/Tauri changes, compare `rustc --version` with `apps/desktop/src-tauri/Cargo.toml`'s `rust-version`. Activate a matching installed toolchain without replacing `PATH`; report or request installation if unavailable.
+   - After fixing, rerun only the failed command through `scripts/run-quiet`.
 
 5. **Repeat** steps 3-4 until all commands pass. If a fix introduces new issues, address those too.
 
-6. **Done** when all pass cleanly: rebase, fmt, typecheck, test, lint.
+6. **Done** only when rebase, format, metadata generation, typecheck, the complete test target, lint, and any scoped Rust tests all pass.
