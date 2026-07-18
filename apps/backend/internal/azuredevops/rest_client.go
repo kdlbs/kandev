@@ -39,19 +39,28 @@ func AsAPIError(err error, target **APIError) bool { return errors.As(err, targe
 
 // RESTClient reads Azure DevOps Services directly over HTTP.
 type RESTClient struct {
-	organizationURL string
-	pat             string
-	httpClient      *http.Client
+	organization string
+	pat          string
+	httpClient   *http.Client
+	initErr      error
 }
 
 func NewRESTClient(organizationURL, pat string, httpClient *http.Client) *RESTClient {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
+	validatedURL, err := ValidateOrganizationURL(organizationURL)
+	if err != nil {
+		return &RESTClient{
+			pat: pat, httpClient: httpClient,
+			initErr: fmt.Errorf("invalid azure devops organization URL: %w", err),
+		}
+	}
+	organization := strings.TrimPrefix(validatedURL, "https://dev.azure.com/")
 	return &RESTClient{
-		organizationURL: strings.TrimRight(organizationURL, "/"),
-		pat:             pat,
-		httpClient:      httpClient,
+		organization: organization,
+		pat:          pat,
+		httpClient:   httpClient,
 	}
 }
 
@@ -281,6 +290,9 @@ func (c *RESTClient) getWorkItemBatch(ctx context.Context, projectID string, ids
 }
 
 func (c *RESTClient) doJSON(ctx context.Context, method, endpoint string, requestBody, responseBody any) error {
+	if c.initErr != nil {
+		return c.initErr
+	}
 	var body io.Reader
 	if requestBody != nil {
 		encoded, err := json.Marshal(requestBody)
@@ -289,7 +301,8 @@ func (c *RESTClient) doJSON(ctx context.Context, method, endpoint string, reques
 		}
 		body = bytes.NewReader(encoded)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.organizationURL+endpoint, body)
+	requestURL := "https://dev.azure.com/" + url.PathEscape(c.organization) + endpoint
+	req, err := http.NewRequestWithContext(ctx, method, requestURL, body)
 	if err != nil {
 		return fmt.Errorf("create azure devops request: %w", err)
 	}
@@ -322,7 +335,6 @@ func (c *RESTClient) doJSON(ctx context.Context, method, endpoint string, reques
 	}
 	return nil
 }
-
 func (c *RESTClient) decodeAPIError(resp *http.Response, endpoint string) error {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	body := strings.ReplaceAll(string(data), c.pat, "[REDACTED]")
