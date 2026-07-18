@@ -20,6 +20,10 @@ per-user plugin access. They are gated behind the `plugins` feature flag
 builds and on by default in dev/e2e builds. Enabling the flag requires a
 backend restart and surfaces **Settings > Plugins** in the sidebar.
 
+![The Settings > Plugins page listing an installed, active plugin with its
+category, an unsigned badge, and Disable/Uninstall
+actions.](media/plugins/settings-list.png)
+
 ## How it works
 
 ```
@@ -74,6 +78,9 @@ Open **Settings > Plugins** and click **Install plugin**. You can install
 from a URL (kandev downloads the tarball) or by uploading a `.tar.gz` file
 directly. No credentials are ever shown or copied — installing a plugin has
 nothing to reveal, unlike a webhook-secret/API-key registration flow.
+
+![The Install plugin dialog with From URL and Upload file tabs and a
+drag-and-drop area for a .tar.gz package.](media/plugins/install-dialog.png)
 
 The same operations are available over HTTP:
 
@@ -156,6 +163,11 @@ process itself receives the real values via the `GetConfig` Host RPC.
 Saving config **restarts the running plugin** so it re-reads its config.
 `<id>.config.yml` on disk is written with mode `0600` and may hold vault
 references rather than cleartext for secret fields.
+
+![A plugin's settings page: a schema-driven form with a masked API-token
+field, a toggle, and a text field, above a Manifest card showing the
+plugin's id, version, signing status, and
+capabilities.](media/plugins/settings-page.png)
 
 ## Signed vs. unsigned packages
 
