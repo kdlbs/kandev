@@ -135,6 +135,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [public-share-links](public-share-links/spec.md) | draft |
 | [ssh-executor](ssh-executor/spec.md) | draft |
 | [cli-mode-parity](cli-mode-parity/spec.md) | draft |
+| [mobile-quick-chat-topbar](mobile-quick-chat-topbar/spec.md) | building |
 
 ---
 

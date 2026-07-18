@@ -216,20 +216,42 @@ code, pre { font-family: var(--mono); }
 .text > * { margin: 0; }
 .text > * + * { margin-top: 8px; }
 .text p { line-height: 1.6; }
+.text h1, .text h2, .text h3, .text h4, .text h5, .text h6 {
+  margin: 14px 0 6px;
+  line-height: 1.3;
+}
+.text h1 { font-size: 1.5rem; }
+.text h2 { font-size: 1.3rem; }
+.text h3 { font-size: 1.12rem; }
+.text h4, .text h5, .text h6 { font-size: 1rem; }
+.text ul, .text ol { margin: 8px 0; padding-left: 24px; }
+.text li + li { margin-top: 3px; }
+.text blockquote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent);
+  color: var(--text-dim);
+}
+.text blockquote > :first-child { margin-top: 0; }
+.text blockquote > :last-child { margin-bottom: 0; }
+.text hr { margin: 16px 0; border: 0; border-top: 1px solid var(--border-strong); }
+.text table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.text th, .text td { padding: 6px 8px; border: 1px solid var(--border-strong); text-align: left; }
+.text th { background: var(--surface-2); }
 .group-user .text { font-size: 15px; }
 
-code.inline {
+.text :not(pre) > code {
   background: color-mix(in oklab, var(--foreground) 8%, transparent);
   padding: 1px 5px;
   border-radius: 4px;
   font-size: 0.9em;
 }
-.group-user code.inline {
+.group-user .text :not(pre) > code {
   background: color-mix(in oklab, white 22%, transparent);
   color: var(--primary-foreground);
 }
 
-pre.code {
+.text pre {
   margin: 4px 0;
   padding: 12px 14px;
   border-radius: var(--radius-lg);
@@ -240,7 +262,7 @@ pre.code {
   line-height: 1.5;
   color: var(--text);
 }
-.group-user pre.code {
+.group-user .text pre {
   background: color-mix(in oklab, black 25%, transparent);
   border-color: color-mix(in oklab, white 14%, transparent);
   color: var(--primary-foreground);

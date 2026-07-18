@@ -53,6 +53,34 @@ describe("ShareDialog", () => {
     expect(screen.getByText(/Redacted: abs-path/)).toBeTruthy();
   });
 
+  it("renders text blocks as markdown in the preview", async () => {
+    previewShareMock.mockResolvedValueOnce({
+      ...SAMPLE_SNAPSHOT,
+      messages: [
+        {
+          role: "assistant" as const,
+          ts: "now",
+          blocks: [
+            {
+              kind: "text" as const,
+              text: "## Summary\n\n**Pushed** successfully.\n\n- tests passed\n- lint passed\n\n[docs](https://example.com)\n\n![tracker](https://attacker.example/pixel)",
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<ShareDialog open={true} onOpenChange={() => {}} taskId="t-1" sessionId="sess-1" />);
+
+    expect(await screen.findByRole("heading", { level: 2, name: "Summary" })).toBeTruthy();
+    expect(screen.getByText("Pushed").tagName).toBe("STRONG");
+    expect(screen.getByRole("list").children).toHaveLength(2);
+    expect(screen.queryByRole("img", { name: "tracker" })).toBeNull();
+    const docsLink = screen.getByRole("link", { name: "docs" });
+    expect(docsLink.getAttribute("target")).toBe("_blank");
+    expect(docsLink.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
   it("publishes on click and shows the URL with a copy button", async () => {
     previewShareMock.mockResolvedValueOnce(SAMPLE_SNAPSHOT);
     createShareMock.mockResolvedValueOnce({

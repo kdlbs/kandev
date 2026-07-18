@@ -27,6 +27,7 @@ func (r *Repository) initSchema() error {
 		r.ensureDefaultWorkspace,
 		r.ensureDefaultExecutorsAndEnvironments,
 		r.runMigrations,
+		r.hideBuiltinWorkflows,
 		r.backfillTaskEnvironments,
 		r.backfillTaskEnvironmentRepos,
 		r.healTaskEnvironmentWorkspacePaths,

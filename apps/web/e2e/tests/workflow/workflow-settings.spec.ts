@@ -2,6 +2,19 @@ import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow settings", () => {
+  test("hides system-only templates from the add workflow dialog", async ({
+    testPage,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    await page.addWorkflowButton.click();
+    await expect(page.createDialog).toBeVisible();
+    await expect(page.createDialog.getByText("Office Default", { exact: true })).toHaveCount(0);
+    await expect(page.createDialog.getByText("Routine", { exact: true })).toHaveCount(0);
+  });
+
   test("displays existing workflows on the settings page", async ({ testPage, seedData }) => {
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
