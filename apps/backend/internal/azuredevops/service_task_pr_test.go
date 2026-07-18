@@ -181,6 +181,33 @@ func TestSummarizeReviewStateUsesDeterministicPrecedence(t *testing.T) {
 	}
 }
 
+func TestSummarizePolicyStateIgnoresOptionalFailures(t *testing.T) {
+	tests := []struct {
+		name     string
+		policies []PolicyEvaluation
+		expected string
+	}{
+		{name: "no policies", expected: ""},
+		{name: "blocking failure", policies: []PolicyEvaluation{{Status: "rejected", IsBlocking: true}}, expected: "failure"},
+		{name: "optional failure", policies: []PolicyEvaluation{{Status: "broken"}}, expected: "success"},
+		{
+			name: "optional failure with blocking pending",
+			policies: []PolicyEvaluation{
+				{Status: "rejected"},
+				{Status: "running", IsBlocking: true},
+			},
+			expected: "pending",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := summarizePolicyState(tt.policies); got != tt.expected {
+				t.Fatalf("summarizePolicyState(%+v) = %q, want %q", tt.policies, got, tt.expected)
+			}
+		})
+	}
+}
+
 func newTaskPRServiceFixture(t *testing.T) (*Service, *taskPRClient) {
 	t.Helper()
 	db := newTestDB(t)

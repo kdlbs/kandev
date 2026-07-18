@@ -169,7 +169,9 @@ func summarizePolicyState(policies []PolicyEvaluation) string {
 	for _, policy := range policies {
 		switch strings.ToLower(policy.Status) {
 		case "rejected", "broken":
-			return "failure"
+			if policy.IsBlocking {
+				return "failure"
+			}
 		case "queued", "running":
 			pending = true
 		}
