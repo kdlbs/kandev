@@ -96,7 +96,7 @@ ui:                                           # optional native frontend plugin
 | `webhooks[].key` | yes | string | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`. |
 | `webhooks[].description` | no | string | Free-form. |
 | `webhooks[].method` | no | string | **Informational only** — kandev does not validate or enforce the inbound HTTP method against this value. |
-| `config_schema` | no | object | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** and `GET`/`PATCH /api/plugins/{id}/config`. See "Config schema validation and secret fields" below. |
+| `config_schema` | no | object | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** (`GET /api/plugins/{id}/config` and `PATCH /api/plugins/{id}`). See "Config schema validation and secret fields" below. |
 | `ui.bundle` | no | string | Root-relative path (must start with `/`, e.g. `/ui/bundle.js`) to the plugin's native UI ES module, served at `GET /api/plugins/{id}/bundle`. |
 | `ui.styles` | no | string[] | Root-relative CSS paths (each must start with `/`), served at `GET /api/plugins/{id}/ui/*` and injected as `<link>` tags on load. |
 | `ui.pages` | no | object[] | Optional declarative page metadata. Secondary to `ui.bundle` — a native bundle registers its own routes/nav at runtime, so most plugins omit `ui.pages`. |

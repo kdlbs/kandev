@@ -91,8 +91,9 @@ Either path runs the same pipeline:
 
 1. Verify `checksums.txt` covers every other file in the tarball and every
    hash matches (always enforced).
-2. If `checksums.txt.sig` is present, verify the signature; if absent,
-   install proceeds with a surfaced "unsigned plugin" warning.
+2. Check for `checksums.txt.sig`. Signature verification is not currently
+   wired up, so every package — signed or not — installs and is reported
+   as unsigned today (see "Signed vs. unsigned packages" below).
 3. Parse and validate `manifest.yaml` **before any code runs**: schema, `id`
    pattern, capability vocabulary, and that `runtime.executables` contains
    an entry for the host's OS/arch.
@@ -158,10 +159,12 @@ references rather than cleartext for secret fields.
 ## Signed vs. unsigned packages
 
 Every package's `checksums.txt` is verified at install time — this integrity
-gate is always enforced. Signing is a separate, optional layer: if a package
-includes a `checksums.txt.sig` (an ed25519 signature over `checksums.txt`),
-kandev verifies it and marks the plugin signed. An unsigned package still
-installs, with a surfaced warning — signing is not required in v1.
+gate is always enforced. Signing (`checksums.txt.sig`, an ed25519 signature
+over `checksums.txt`) is a separate, optional layer, and its verification
+hook is not currently wired up in the shipped product: no signature is
+cryptographically checked today, so every install — signed tarball or not —
+is currently treated and reported as unsigned. A signed package installs
+identically to an unsigned one; signing is not required in v1.
 
 ## On-disk layout
 
@@ -170,11 +173,11 @@ installs, with a surfaced warning — signing is not required in v1.
 ├── <id>.yml                    # registration record (status, install_path, signed, ...)
 ├── <id>.config.yml             # operator-editable config (PATCH /api/plugins/{id})
 └── <id>/
-    └── <version>/              # extracted package (InstallPath)
-        ├── manifest.yaml
-        ├── server/plugin-<goos>-<goarch>[.exe]
-        ├── ui/bundle.js         # optional
-        └── data/                # KANDEV_PLUGIN_DATA_DIR for this plugin
+    ├── <version>/              # extracted package (InstallPath)
+    │   ├── manifest.yaml
+    │   ├── server/plugin-<goos>-<goarch>[.exe]
+    │   └── ui/bundle.js         # optional
+    └── data/                    # KANDEV_PLUGIN_DATA_DIR — shared across versions
 ```
 
 ## Security posture

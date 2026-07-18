@@ -250,8 +250,8 @@ interface PluginHostApi {
   pluginId: string;
   React: typeof import("react");       // shared host React instance — MUST use this, never bundle your own React
   jsx: typeof React.createElement;     // convenience alias
-  store: {                              // kandev's live app store (read-only surface)
-    getState(): AppState;
+  store: {                              // kandev's live app store — read access is the common
+    getState(): AppState;               // case; setState is exposed but writes affect the whole SPA
     setState(partial): void;
     subscribe(listener): () => void;
   };
