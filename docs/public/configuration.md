@@ -107,7 +107,7 @@ The Docker socket is effectively root-equivalent on many hosts. Do not publish i
 
 The launcher starts `agentctl`, performs a one-time nonce handshake, and supplies the resulting per-launch token internally. Do not persist or proxy its bootstrap/auth state. Agent command, model, environment, permission, and MCP configuration belongs in agent profiles rather than this section.
 
-### Authentication, Office, voice, and feature flags
+### Authentication, Office, Plugins, voice, and feature flags
 
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
@@ -116,6 +116,7 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 | `office.jwtSigningKey` | `KANDEV_OFFICE_JWTSIGNINGKEY` | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts. |
 | `voice.openAIApiKey` | `KANDEV_VOICE_OPENAI_API_KEY` | empty | Server-side transcription fallback when browser speech recognition is unavailable. Empty disables the fallback and its endpoint returns unavailable. |
 | `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
+| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | `false` in production | Extensible plugin system: install/manage plugins, spawn plugin backends, and load native UI bundles. Loaded plugin code runs with backend privileges. |
 
 Do not infer security from `auth.jwtSecret`: setting it currently does not turn the local server into an authenticated public service. Office's JWT key has a narrower, active purpose. Store both active secrets and third-party API keys in your deployment secret manager; never commit them in `config.yaml`.
 
@@ -273,17 +274,19 @@ voice:
 
 features:
   office: false
+  plugins: false
 ```
 
 Copying this entire file is unnecessary and can freeze old defaults in a deployment. Keep only deliberate overrides. On Windows, do not copy the Unix Docker host/path literals from this example.
 
 ## Runtime feature toggles
 
-**Settings → System → Feature Toggles** manages two startup-time flags:
+**Settings → System → Feature Toggles** manages three startup-time flags:
 
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
 | `features.office` | `KANDEV_FEATURES_OFFICE` | off | Experimental autonomous-agent Office surfaces and automation. |
+| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | off | Extensible plugin system: install/manage plugins and load their backends and native UI bundles. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` (also locked by explicit legacy/debug-message vars) | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.

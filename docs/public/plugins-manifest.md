@@ -36,8 +36,8 @@ min_kandev_version: "0.78.0"                 # optional
 
 capabilities:
   events: ["task.created", "task.state_changed", "agent.completed"]
-  api_read: ["tasks", "agents"]              # reserved, no Host RPC enforces this yet
-  api_write: ["tasks", "comments"]           # reserved, no Host RPC enforces this yet
+  api_read: ["tasks", "agent_profiles"]      # gates the Host data-reader RPCs
+  api_write: ["tasks"]                       # reserved, no Host RPC enforces this yet
   state: true
   secrets: true
 
@@ -60,10 +60,10 @@ webhooks:
 config_schema:
   type: object
   properties:
-    bot_token_secret: { type: string, description: "Secret reference for Slack bot token" }
+    bot_token:  { type: string, secret: true, title: "Bot Token", description: "Slack bot OAuth token" }
     default_channel:  { type: string, description: "Default channel for notifications" }
     notify_on_task_created: { type: boolean, default: true }
-  required: ["bot_token_secret", "default_channel"]
+  required: ["bot_token", "default_channel"]
 
 ui:                                           # optional native frontend plugin
   bundle: "/ui/bundle.js"                    # root-relative
@@ -85,10 +85,10 @@ ui:                                           # optional native frontend plugin
 | `runtime.executables` | required when `runtime.type: binary` | map\<string,string\> | Key is `<goos>-<goarch>` (e.g. `linux-amd64`, `darwin-arm64`, `windows-amd64`); value is a clean, package-relative path under `server/` (no leading `/`, no `..` segments). At least one entry required; the running host's key must be present at install time. Windows values end in `.exe`. |
 | `min_kandev_version` | no | string | Optional advisory; not currently enforced by the installer. |
 | `capabilities.events` | no | string[] | Bus subjects (or wildcard patterns) this plugin subscribes to. See "Event subscription vocabulary" below. |
-| `capabilities.api_read` | no | string[] | **Reserved for future Host RPCs.** Declaring values today has no effect — no Host RPC reads kandev's own data (tasks, agents, comments) yet. |
-| `capabilities.api_write` | no | string[] | **Reserved for future Host RPCs.** Same status as `api_read` — not enforced by anything today. |
+| `capabilities.api_read` | no | string[] | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `workspaces`, `workflows`, `agent_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
+| `capabilities.api_write` | no | string[] | **Reserved for future Host RPCs.** Declared but not enforced by anything today — no Host RPC currently writes kandev's own data. |
 | `capabilities.state` | no | bool | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
-| `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`. Calling it without this set to `true` returns gRPC `PermissionDenied`. |
+| `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `tools[].name` | yes | string | Must be unique within the manifest — a duplicate tool name is a validation error. |
 | `tools[].display_name` | no | string | Shown to operators/agents. |
 | `tools[].description` | no | string | Shown to operators/agents. |
@@ -96,7 +96,7 @@ ui:                                           # optional native frontend plugin
 | `webhooks[].key` | yes | string | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`. |
 | `webhooks[].description` | no | string | Free-form. |
 | `webhooks[].method` | no | string | **Informational only** — kandev does not validate or enforce the inbound HTTP method against this value. |
-| `config_schema` | no | object | Arbitrary JSON Schema for the operator-editable config exposed via `PATCH /api/plugins/{id}`. |
+| `config_schema` | no | object | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** and `GET`/`PATCH /api/plugins/{id}/config`. See "Config schema validation and secret fields" below. |
 | `ui.bundle` | no | string | Root-relative path (must start with `/`, e.g. `/ui/bundle.js`) to the plugin's native UI ES module, served at `GET /api/plugins/{id}/bundle`. |
 | `ui.styles` | no | string[] | Root-relative CSS paths (each must start with `/`), served at `GET /api/plugins/{id}/ui/*` and injected as `<link>` tags on load. |
 | `ui.pages` | no | object[] | Optional declarative page metadata. Secondary to `ui.bundle` — a native bundle registers its own routes/nav at runtime, so most plugins omit `ui.pages`. |
@@ -104,6 +104,11 @@ ui:                                           # optional native frontend plugin
 | `ui.pages[].title` | yes* | string | Display title. |
 | `ui.pages[].path` | yes* | string | Route path for the page. |
 | `ui.pages[].surface` | yes* | string | Where the page mounts. Enum, one of: `settings` · `task-panel` · `main-nav`. Any other value is a validation error. |
+
+`ui.pages` is declarative manifest metadata only. A native bundle's runtime
+nav items, icons, and per-route title-bar chrome (`registerNavItem`,
+`registerRoute`'s `options.topbar`) are a separate JS SDK surface with no
+`manifest.yaml` field — see [Authoring a plugin](plugins-authoring.md).
 
 ## Managed vs. legacy manifests
 
@@ -122,6 +127,43 @@ binary`), so a legacy manifest can never actually be installed via `POST
 /api/plugins/install` or a filesystem sideload. The remote tier is
 effectively removed in practice, even though the manifest schema still
 recognizes its shape.
+
+## Host data API resource vocabulary
+
+`capabilities.api_read` gates the read-only Host data accessors (ADR 0043):
+each entry must be one of `tasks`, `sessions`, `workspaces`, `workflows`,
+`agent_profiles`, `repositories`. Declaring a resource grants the matching
+`Host` accessor (`Tasks()`, `Sessions()`, `Workspaces()`, `Workflows()`,
+`AgentProfiles()`, `Repositories()` — see [Authoring a
+plugin](plugins-authoring.md)); calling an accessor for an undeclared
+resource returns gRPC `PermissionDenied`. `capabilities.api_write` reserves
+the same resource names for a future write path — no write RPC exists yet,
+so declaring it currently has no effect.
+
+## Config schema validation and secret fields
+
+`config_schema` is not an arbitrary, purely descriptive JSON Schema — kandev
+validates submitted config against a specific subset of it before
+persisting:
+
+- `required` (an array of property names) is enforced — a `PATCH` missing a
+  required property is rejected.
+- `type` (`string`, `boolean`, `number`, or `integer`) is checked against
+  the submitted value.
+- `enum` membership is checked when present.
+- A property with `secret: true`, or `format: "password"`, is treated as a
+  **secret field** and must be `type: string` (or untyped) — a non-string
+  secret is rejected. Secret values are moved into kandev's encrypted vault;
+  `GET /api/plugins/{id}/config` returns the literal mask `"********"` in
+  their place, and resubmitting that mask unchanged is treated as "keep the
+  stored value" rather than overwriting it with the literal string.
+- `title` is read by the settings-page renderer as a display label
+  override for the property (falling back to the property name); it has no
+  backend validation effect.
+
+The plugin process itself always sees real, unmasked values (secrets
+included) via the `GetConfig` Host RPC — masking only applies to the
+operator-facing API/UI.
 
 ## Event subscription vocabulary
 

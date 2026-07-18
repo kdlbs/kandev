@@ -43,10 +43,12 @@ backend restart and surfaces **Settings > Plugins** in the sidebar.
               │               │                         │
               └───────────────┴────────────┬────────────┘
                                             ▼
-                              plugin calls back over the
-                              same connection: Host.GetState /
-                              SetState / DeleteState / ListState /
-                              RevealSecret / EmitEvent
+                        plugin calls back over the same connection:
+                        Host state/config/secrets (GetState/SetState/...,
+                        GetConfig, GetSecret/SetSecret/DeleteSecret,
+                        RevealSecret), EmitEvent, and capability-gated
+                        read-only data accessors (Tasks, Sessions,
+                        Workspaces, Workflows, AgentProfiles, Repositories)
                                             │
                                             ▼
                        (optional) SPA loads ui.bundle at boot,
@@ -58,6 +60,12 @@ binary, completes the go-plugin handshake, health-checks it (`Ping` every
 30s), and restarts it on crash or repeated health-check failure (backoff,
 max 5 attempts). There is no separate operator-managed plugin process to run
 or babysit — install a package and kandev does the rest.
+
+A native UI bundle can register a nav item that renders as a top-level
+sidebar entry or, when it declares itself part of the Integrations section,
+alongside kandev's first-party integration links in the main sidebar's
+**Integrations** section — expect new entries to appear there once such a
+plugin is installed and active.
 
 ## Installing a plugin
 
@@ -134,6 +142,19 @@ binary an operator hasn't explicitly approved via install or Sync.
 - **Uninstall** stops the subprocess and deletes the plugin's package,
   registration record, and all persisted state — there is no grace period.
 
+## Per-plugin settings
+
+A plugin can declare `config_schema` in its manifest, generating a settings
+form at **Settings > Plugins > `<plugin>`** (also `GET /api/plugins/{id}/config`
+and `PATCH /api/plugins/{id}`). Fields marked `secret: true` or
+`format: "password"` (for example a GitHub PAT) are never returned in
+cleartext to the operator UI — reads show a masked placeholder, and
+resubmitting the form unchanged leaves the stored secret alone. The plugin
+process itself receives the real values via the `GetConfig` Host RPC.
+Saving config **restarts the running plugin** so it re-reads its config.
+`<id>.config.yml` on disk is written with mode `0600` and may hold vault
+references rather than cleartext for secret fields.
+
 ## Signed vs. unsigned packages
 
 Every package's `checksums.txt` is verified at install time — this integrity
@@ -164,9 +185,15 @@ installs, with a surfaced warning — signing is not required in v1.
   `api_key`, `webhook_secret`, or HMAC signing anywhere in the contract; the
   go-plugin handshake plus AutoMTLS authenticate the channel.
 - **Capability-based access control.** A plugin can only call the Host RPCs
-  it declared in its manifest (`state`, `secrets`); an undeclared capability
-  returns gRPC `PermissionDenied` with a message naming the missing
-  capability, checked by a server interceptor before the handler runs.
+  it declared in its manifest: `state` gates the state RPCs, `secrets` gates
+  the plugin-owned secret RPCs, and each read-only data accessor (tasks,
+  sessions, workspaces, workflows, agent profiles, repositories) is gated
+  individually via `api_read:<resource>` (write access, `api_write:<resource>`,
+  is reserved but not yet implemented). An undeclared capability returns gRPC
+  `PermissionDenied` with a message naming the missing capability, checked by
+  a server interceptor before the handler runs. `GetConfig` and `EmitEvent`
+  are the only ungated RPCs — a plugin can always read its own config
+  (secrets included) and emit events.
 - **Native UI plugins run in-origin with full app-store access.** This is an
   accepted tradeoff, not an oversight: a plugin bundle shares the kandev
   React instance and Zustand store so it can build UI indistinguishable from

@@ -98,8 +98,9 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | Statistics and host resource metrics | Supported | Workspace stats and on-demand CPU/memory/disk display are shipped. Execution-environment metrics depend on executor/runtime support. |
 | SQLite backups, database maintenance, status, and logs | Supported | Backups use SQLite `VACUUM INTO` snapshots under the data root. Retention, free space, file permissions, and off-host copies remain operator responsibilities. |
 | Update checking and applying updates | Dependency-bound | Checking is shipped. Package-manager installs update through their package manager; backend self-update is service-install-specific; desktop updater support varies by artifact/platform. |
-| Feature Toggle settings | Supported | The page exposes Office and Debug overrides, environment locks, and restart-required state. Debug is high risk because logs/endpoints can expose prompt, file, and tool data. A toggle being present does not promote its target feature to supported. |
+| Feature Toggle settings | Supported | The page exposes Office, Plugins, and Debug overrides, environment locks, and restart-required state. Debug is high risk because logs/endpoints can expose prompt, file, and tool data. A toggle being present does not promote its target feature to supported. |
 | Office mode | In progress | Production defaults `KANDEV_FEATURES_OFFICE=false`; development and E2E enable it for implementation/testing. Its routes, agents, labels, documents, dependencies, routines, skills, routing, costs, and approvals may change between releases. |
+| Plugin system | In progress | Production defaults `KANDEV_FEATURES_PLUGINS=false`; development and E2E enable it for implementation/testing. Loaded plugin code runs with backend privileges; manifest schema, capabilities, and host API may change between releases. |
 | Mock providers and E2E-only routes | Internal | They are selected only by development/test runtime profiles and must not be exposed as product integrations. |
 
 ## Publication boundary

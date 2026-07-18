@@ -109,8 +109,38 @@ type Host interface {
 	SetState(ctx context.Context, scope, scopeID, key string, value map[string]any) error
 	DeleteState(ctx context.Context, scope, scopeID, key string) error
 	ListState(ctx context.Context, scope, scopeID string) ([]StateEntry, error)
+
+	// GetConfig returns the plugin's own operator-editable config (set via
+	// Settings > Plugins > <plugin>, generated from manifest config_schema).
+	// Ungated — always readable, secret values included. Kandev restarts a
+	// running plugin when its config changes, so re-read at startup.
+	GetConfig(ctx context.Context) (map[string]any, error)
+
+	// GetSecret/SetSecret/DeleteSecret manage a plugin-owned secret in
+	// kandev's encrypted vault, namespaced to this plugin. Require the
+	// `secrets` capability.
+	GetSecret(ctx context.Context, key string) (value string, found bool, err error)
+	SetSecret(ctx context.Context, key, value string) error
+	DeleteSecret(ctx context.Context, key string) error
+
+	// RevealSecret resolves an operator-provided secret reference (e.g. a
+	// config value pointing at a shared kandev secret) to its cleartext
+	// value. For secrets the plugin itself owns, use GetSecret/SetSecret.
 	RevealSecret(ctx context.Context, ref string) (string, error)
+
 	EmitEvent(ctx context.Context, name string, payload map[string]any) error
+
+	// Tasks/Sessions/Workspaces/Workflows/AgentProfiles/Repositories return
+	// read-only accessors for the Host data API (ADR 0043), each gated on
+	// its own capabilities.api_read entry (e.g. "tasks", "sessions").
+	// Write RPCs (capabilities.api_write) are reserved and not yet
+	// implemented.
+	Tasks() TaskReader
+	Sessions() SessionReader
+	Workspaces() WorkspaceReader
+	Workflows() WorkflowReader
+	AgentProfiles() AgentProfileReader
+	Repositories() RepositoryReader
 }
 ```
 
@@ -119,12 +149,22 @@ for `instance`). `EmitEvent` publishes `plugin.<your-plugin-id>.<name>` on
 kandev's internal event bus for delivery to any subscriber (including other
 plugins).
 
-**Capability gating.** Every Host RPC is checked against your manifest's
-`capabilities` before the handler runs: `GetState`/`SetState`/`DeleteState`/
-`ListState` require `capabilities.state: true`, `RevealSecret` requires
-`capabilities.secrets: true`. Calling one without the declared capability
-returns gRPC `PermissionDenied` with message `capability '<name>' not
-declared` — declare what you use.
+The data-reader accessors return typed, paginated readers — e.g.
+`host.Tasks().List(ctx, TaskFilter{...}, Page{Limit: 50})` returns
+`([]Task, *PageInfo, error)` with an opaque `PageInfo.NextCursor` for the
+next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
+`Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
+`Session`, and filter/page types.
+
+**Capability gating.** Every Host RPC except `GetConfig` and `EmitEvent` is
+checked against your manifest's `capabilities` before the handler runs:
+`GetState`/`SetState`/`DeleteState`/`ListState` require
+`capabilities.state: true`; `GetSecret`/`SetSecret`/`DeleteSecret`/
+`RevealSecret` require `capabilities.secrets: true`; each data-reader
+accessor requires its resource in `capabilities.api_read` (e.g. `tasks`,
+`sessions`, `workspaces`, `workflows`, `agent_profiles`, `repositories`).
+Calling one without the declared capability returns gRPC `PermissionDenied`
+with a message naming the missing capability — declare what you use.
 
 **Writable data directory.** Kandev injects `KANDEV_PLUGIN_DATA_DIR` into
 every spawned plugin subprocess — a per-plugin writable directory
@@ -160,16 +200,46 @@ then calls `initialize(registry, host)`. On disable/uninstall it calls
 
 ```ts
 interface PluginRegistry {
-  // Top-level SPA route, exact-match against window.location path.
-  registerRoute(path: string, Component: React.ComponentType): void;
+  // Top-level SPA route, exact-match against window.location path. The host
+  // wraps the page in kandev's title bar by default; configure or opt out
+  // via options.topbar.
+  registerRoute(path: string, Component: React.ComponentType, options?: PluginRouteOptions): void;
   // Sidebar/main nav entry, rendered by <PluginNavItems/>.
-  registerNavItem(item: { id: string; label: string; path: string; icon?: string; section?: "main" | "settings" }): void;
+  registerNavItem(item: NavItem): void;
   // Route under /settings/plugins/{id}/..., rendered inside the settings shell.
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
   // Named slot injection. Initial slots: "task-sidebar", "settings-nav", "main-nav-footer".
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
   // WS action handler, bridged into the existing lib/ws dispatch.
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
+}
+
+interface NavItem {
+  id: string;
+  label: string;
+  path: string;
+  // Curated icon name (see lib/plugins/icons.ts); unknown names render the puzzle glyph.
+  icon?: string;
+  // "main" (default): top-level sidebar entry. "integrations": renders inside
+  // the sidebar's Integrations section alongside first-party integration links.
+  section?: "main" | "settings" | "integrations";
+}
+
+interface PluginRouteOptions {
+  // Kandev-style title bar above the page. Default: enabled with a derived
+  // title (from the matching nav item, else the plugin's display name).
+  // Pass a PluginPageChrome to configure it, or `false` for a full-bleed
+  // page that owns its own chrome (e.g. with host.ui.PageTopbar).
+  topbar?: boolean | PluginPageChrome;
+}
+
+interface PluginPageChrome {
+  title?: string;
+  subtitle?: string;
+  icon?: string;               // same curated set as NavItem.icon
+  backHref?: string;           // default "/"
+  backLabel?: string;          // default "Kandev"
+  actions?: React.ComponentType; // rendered on the right side of the topbar
 }
 ```
 
@@ -188,18 +258,30 @@ interface PluginHostApi {
   api: {
     // fetch scoped to /api/plugins/{id}/...; relayed to your webhook handler.
     fetch(path: string, init?: RequestInit): Promise<Response>;
+    // Backend API origin ("" when the SPA and API share an origin) — lets a
+    // plugin reach first-party kandev REST endpoints directly.
+    baseUrl: string;
   };
-  ui: Record<string, unknown>;          // curated @kandev/ui subset (Button, Card, Badge, ... TaskCreateDialog)
+  ui: Record<string, unknown>;          // curated @kandev/ui subset — see below
   theme: "light" | "dark";
+  // Soft SPA navigation (history push/replace), same as the app's own router.
+  navigate(href: string, options?: { replace?: boolean }): void;
 }
 ```
 
 A plugin bundle must render with `host.React` / `host.jsx` — bundling your
-own React copy breaks hook identity against the host tree. `host.ui` is a
-curated `@kandev/ui` subset plus one piece of first-party app UI,
+own React copy breaks hook identity against the host tree.
+
+`host.ui` is a curated `@kandev/ui` subset — Alert, Badge, Button, Card,
+Checkbox, Dialog, DropdownMenu, Input, Label, Pagination, ScrollArea, Select,
+Separator, Sheet, Skeleton, Spinner, Switch, Table, Tabs, Textarea, Tooltip
+(each with their compound sub-parts, e.g. `DialogContent`, `TableRow`) — plus
+first-party app UI: `Combobox` (the app's picker), `PageTopbar` (the title
+bar a route gets by default via `registerRoute`'s `options.topbar`, exposed
+here for routes that opt out and render their own chrome), and
 `TaskCreateDialog`, so a plugin can hand off task creation to kandev's real
 create-task flow (repo/branch/agent pickers, validation) instead of POSTing
-directly.
+directly. See `apps/web/lib/plugins/host-api.ts` for the exact current list.
 
 ## Three integration patterns
 

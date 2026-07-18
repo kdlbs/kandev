@@ -255,6 +255,14 @@
       "tests": ["apps/backend/internal/office/onboarding/service_test.go", "apps/web/src/office-routes.test.ts"]
     },
     {
+      "id": "plugin-system",
+      "audiences": ["operator", "contributor"],
+      "stability": "experimental",
+      "docs": ["plugins", "plugins-authoring", "plugins-manifest"],
+      "sources": ["apps/backend/internal/plugins/handlers.go", "apps/backend/pkg/pluginsdk/host.go", "apps/web/lib/plugins/host-api.ts"],
+      "tests": ["apps/backend/internal/plugins/service_test.go", "apps/backend/internal/plugins/manifest/manifest_test.go", "apps/web/lib/plugins/host-api.test.ts"]
+    },
+    {
       "id": "websocket-protocol",
       "audiences": ["contributor", "integrator"],
       "stability": "stable",
