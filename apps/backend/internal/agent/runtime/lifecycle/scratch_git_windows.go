@@ -16,6 +16,8 @@ func openGitExcludeNoFollow(gitDir string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
+	// OPEN_REPARSE_POINT protects the final component. Intermediate junctions
+	// rely on the earlier Lstat checks; atomic traversal would require NtCreateFile.
 	handle, err := windows.CreateFile(
 		pathUTF16,
 		windows.GENERIC_READ|windows.FILE_APPEND_DATA,
