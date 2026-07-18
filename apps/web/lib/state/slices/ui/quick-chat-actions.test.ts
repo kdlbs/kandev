@@ -128,3 +128,18 @@ describe("typed quick chat sessions", () => {
     });
   });
 });
+
+describe("configuration quick chat uniqueness", () => {
+  it("opens the existing configuration session instead of creating another setup", () => {
+    const store = makeStore();
+    store.getState().addQuickChatSession(SESSION_A, WORKSPACE_A, "agent-a", "config");
+
+    store.getState().openQuickChat("", WORKSPACE_A, undefined, "config");
+
+    expect(store.getState().quickChat).toMatchObject({
+      isOpen: true,
+      activeSessionId: SESSION_A,
+      sessions: [expect.objectContaining({ sessionId: SESSION_A, kind: "config" })],
+    });
+  });
+});

@@ -30,6 +30,19 @@ test.describe("Quick Chat entry points on mobile", () => {
     await expect(dialog).not.toBeVisible();
   });
 
+  test("chooses configuration mode from the setup panel", async ({ testPage }) => {
+    await testPage.goto("/");
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
+
+    const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    const setup = dialog.getByTestId("quick-chat-setup");
+    await expect(setup.getByText(/create a task for planned work/i)).toBeVisible();
+    await setup.getByRole("switch", { name: "Configuration chat" }).tap();
+
+    await expect(dialog.getByTestId("config-chat-setup")).toBeVisible();
+    await assertNoDocumentHorizontalOverflow(testPage);
+  });
+
   test("opens from the task switcher sheet on a session page", async ({
     testPage,
     apiClient,

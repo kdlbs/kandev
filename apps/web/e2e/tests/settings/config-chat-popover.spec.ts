@@ -23,9 +23,8 @@ async function startConfigChat(dialog: Locator, prompt: string) {
   const input = setup.getByPlaceholder("Ask anything about your configuration...");
   await input.fill(prompt);
   await setup.getByRole("button", { name: "Start configuration chat" }).click();
-  await expect(dialog.getByRole("img", { name: "Configuration chat" })).toBeVisible({
-    timeout: 15_000,
-  });
+  await expect(setup).not.toBeVisible({ timeout: 15_000 });
+  await expect(dialog.getByTestId("chat-input-editor")).toBeVisible({ timeout: 15_000 });
 }
 
 async function sendMessage(dialog: Locator, text: string) {
@@ -67,6 +66,10 @@ test.describe("Configuration Chat", () => {
     });
 
     await startConfigChat(popover, "/e2e:simple-message");
+    await expect(popover.getByTestId("quick-chat-tab")).toHaveCount(0);
+    await expect(popover.getByRole("button", { name: "Start new configuration chat" })).toHaveCount(
+      0,
+    );
     await expect(
       popover.getByText("simple mock response for e2e testing", { exact: false }),
     ).toBeVisible({ timeout: 30_000 });
@@ -82,9 +85,7 @@ test.describe("Configuration Chat", () => {
     await expect(testPage.getByRole("dialog", { name: "Quick Chat" })).not.toBeVisible();
     await testPage.getByRole("button", { name: "Configuration Chat" }).click();
     const restored = testPage.getByTestId("config-chat-popover");
-    await expect(restored.getByRole("img", { name: "Configuration chat" })).toBeVisible({
-      timeout: 10_000,
-    });
+    await expect(restored.getByTestId("chat-input-editor")).toBeVisible({ timeout: 10_000 });
     await expect(
       restored.getByText("simple mock response for e2e testing", { exact: false }),
     ).toBeVisible({ timeout: 20_000 });
@@ -94,7 +95,9 @@ test.describe("Configuration Chat", () => {
       timeout: 30_000,
     });
 
-    await restored
+    await restored.getByRole("button", { name: "Open in Quick Chat" }).click();
+    const restoredDialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await restoredDialog
       .getByTestId("quick-chat-tab")
       .getByRole("button", { name: /^Close / })
       .click();
@@ -105,7 +108,7 @@ test.describe("Configuration Chat", () => {
     );
     await deleteDialog.getByRole("button", { name: "Delete" }).click();
     await deleteResponse;
-    await expect(restored.getByTestId("config-chat-setup")).toBeVisible();
+    await expect(restoredDialog).not.toBeVisible();
 
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");

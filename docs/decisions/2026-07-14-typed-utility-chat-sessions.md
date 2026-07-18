@@ -20,7 +20,10 @@ All user-facing utility conversations use one typed Quick Chat session model wit
 message/composer/clarification renderer. The responsive Quick Chat modal is the primary large
 surface; Settings also provides a compact floating configuration presentation over the same typed
 sessions. Expanding the floating presentation activates the same setup or persisted session in the
-modal rather than creating or copying a conversation. Blank setup tabs are
+modal rather than creating or copying a conversation. The floating presentation has no tab model:
+it displays the workspace's single current configuration setup or session. Configuration entry
+points reuse that session while it exists, and ordinary Quick Chat setup is the only place that
+offers configuration creation. Blank setup tabs are
 typed client-only placeholders with workspace-and-kind-scoped IDs; persisted tabs map to existing
 task sessions. Setup IDs never enter backend hydration and prevent blank ordinary/config tabs from
 aliasing each other while retaining client-side cleanup for abandoned setup.
@@ -52,7 +55,9 @@ chat implementation. Ordinary and configuration sessions can coexist while prese
 setup and backend capability contracts. The floating Settings panel owns only presentation state;
 shared session state, pending initial prompts, messages, and task identity must remain transferable.
 Tab and hydration code must carry an explicit kind, and workspace transitions must filter rather
-than assume all hydrated sessions share the current workspace.
+than assume all hydrated sessions share the current workspace. Supporting multiple configuration
+sessions later requires a deliberate product change because the current creation surfaces and
+floating presentation enforce one per workspace.
 
 Config sessions have no automatic idle cleanup. Any creation, delete, or workspace-removal path
 must continue to use task lifecycle services so config-mode tasks cannot become hidden orphans.

@@ -20,6 +20,24 @@ afterEach(() => {
 });
 
 describe("ConfigChatSetup", () => {
+  it("can switch a modal setup back to an ordinary quick chat", () => {
+    const onKindChange = vi.fn();
+    render(
+      <ConfigChatSetup
+        defaultProfileId="profile-config"
+        isStarting={false}
+        error={null}
+        onStart={vi.fn()}
+        onCancel={vi.fn()}
+        onKindChange={onKindChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("switch", { name: "Configuration chat" }));
+
+    expect(onKindChange).toHaveBeenCalledWith("chat");
+  });
+
   it("shows config-specific guidance and suggestions without repository controls", () => {
     render(
       <ConfigChatSetup

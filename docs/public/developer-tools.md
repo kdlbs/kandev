@@ -15,14 +15,15 @@ Select **Quick Chat** beside **New Task** in the expanded sidebar, or select its
 
 ### Start a chat
 
-1. Choose an agent profile. Quick Chat requires one and defaults to the workspace's default agent profile when configured.
-2. Optionally add one or more workspace repositories.
-3. For each repository, choose a branch. The same repository cannot be added twice.
-4. Select **Start chat**.
+1. Turn on **Configuration chat** when the conversation should inspect or change Kandev configuration. This option is hidden when the workspace already has a configuration conversation.
+2. Choose an agent profile. Quick Chat requires one and defaults to the workspace's default agent profile when configured.
+3. For an ordinary Quick Chat, optionally add one or more workspace repositories.
+4. For each repository, choose a branch. The same repository cannot be added twice.
+5. Select **Start chat**.
 
 Each selected repository gets an isolated worktree from the chosen branch. Uncommitted changes in your original checkout are not copied. Without a repository, Kandev creates an ephemeral working directory under `<KANDEV_HOME_DIR>/quick-chat/` (by default `~/.kandev/quick-chat/`).
 
-Quick Chat supports multiple tabs, tab renaming, and **+** to create another chat. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
+Quick Chat supports multiple tabs, tab renaming, and **+** to open another ordinary-chat setup. Structured profiles show ACP chat; CLI-passthrough profiles show their PTY interface. The desktop window is resizable, while mobile uses a full-screen view.
 
 Closing a real chat tab permanently deletes its conversation, hidden backing task data, and associated worktree. There is no undo. Kandev also deletes abandoned chats after seven days; cleanup runs when the backend starts and then once per day. Only chats whose session is `RUNNING` or `IDLE` are protected from age-based cleanup. Old `CREATED`, `STARTING`, or `WAITING_FOR_INPUT` chats can expire, so do not use Quick Chat for durable work.
 
@@ -52,9 +53,11 @@ Utility calls run as ephemeral processes on the Kandev backend host. Kandev reco
 
 The same settings page configures the **Configuration Chat Agent** for each workspace. Choose a profile, choose **No default**, or rely on the workspace default profile. Kandev remembers the first explicit selection as that workspace's configuration-chat default.
 
-Open Configuration Chat from the floating chat button on Settings pages or run **Configuration Chat** from the `Cmd/Ctrl+K` command menu. It supports multiple tabs and uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
+Open Configuration Chat from the floating chat button on Settings pages, turn on **Configuration chat** while creating a Quick Chat, or run **Configuration Chat** from the `Cmd/Ctrl+K` command menu. A workspace currently has one configuration conversation. The Settings panel shows that conversation without tabs; **Open in Quick Chat** moves the same setup or session into the larger tabbed dialog without copying it.
 
-Closing a Configuration Chat tab removes only the browser tab state; it does not delete the backing `config_mode` task. Those tasks are excluded from the seven-day Quick Chat sweeper and can accumulate. Profile deletion attempts to clean matching ephemeral tasks, but otherwise there is no equivalent close-to-delete lifecycle in this UI.
+Configuration Chat uses a repository-less ephemeral task. Its configuration-mode MCP can inspect and change workflows, agent profiles, and MCP configuration. The selected profile's model, credentials, permissions, and external MCP settings apply. Review requested configuration mutations before approving them.
+
+Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
 
 ## Saved prompts
 

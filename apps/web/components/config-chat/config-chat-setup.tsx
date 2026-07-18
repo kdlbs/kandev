@@ -5,6 +5,8 @@ import { IconLoader2, IconMessageCircle, IconSend2, IconSparkles } from "@tabler
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { useAppStore } from "@/components/state-provider";
+import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
+import { ConfigurationChatToggle } from "@/components/quick-chat/configuration-chat-toggle";
 
 const SUGGESTION_PROMPTS = [
   "Add a 'Code Review' step to my workflow",
@@ -18,6 +20,7 @@ type ConfigChatSetupBaseProps = {
   isStarting: boolean;
   error: string | null;
   onStart: (profileId: string, prompt: string) => void;
+  onKindChange?: (kind: QuickChatSessionKind) => void;
 };
 
 type ConfigChatSetupProps = ConfigChatSetupBaseProps &
@@ -198,14 +201,18 @@ function ConfigGuidance({
   presentation,
   hasProfiles,
   needsProfileSelection,
+  isStarting,
   onSelectProfile,
   onSelectSuggestion,
+  onKindChange,
 }: {
   presentation: "dialog" | "floating";
   hasProfiles: boolean;
   needsProfileSelection: boolean;
+  isStarting: boolean;
   onSelectProfile: (profileId: string) => void;
   onSelectSuggestion: (prompt: string) => void;
+  onKindChange?: (kind: QuickChatSessionKind) => void;
 }) {
   return (
     <div
@@ -214,15 +221,24 @@ function ConfigGuidance({
     >
       <div className="mx-auto w-full max-w-2xl space-y-7">
         {presentation === "dialog" && (
-          <header className="space-y-2">
-            <div className="flex items-center gap-2">
-              <IconSparkles className="h-5 w-5 text-primary" aria-hidden />
-              <h2 className="text-lg font-semibold">Configuration Chat</h2>
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Ask an agent to manage workflows, agent profiles, and MCP configuration.
-            </p>
-          </header>
+          <>
+            <header className="space-y-2">
+              <div className="flex items-center gap-2">
+                <IconSparkles className="h-5 w-5 text-primary" aria-hidden />
+                <h2 className="text-lg font-semibold">Configuration Chat</h2>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Ask an agent to manage workflows, agent profiles, and MCP configuration.
+              </p>
+            </header>
+            {onKindChange && (
+              <ConfigurationChatToggle
+                checked
+                disabled={isStarting}
+                onCheckedChange={(checked) => !checked && onKindChange("chat")}
+              />
+            )}
+          </>
         )}
 
         {!hasProfiles && (
@@ -299,6 +315,7 @@ export function ConfigChatSetup({
   error,
   onStart,
   onCancel,
+  onKindChange,
 }: ConfigChatSetupProps) {
   const profiles = useAppStore((state) => state.agentProfiles.items ?? []);
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId ?? "");
@@ -330,8 +347,10 @@ export function ConfigChatSetup({
         presentation={presentation}
         hasProfiles={profiles.length > 0}
         needsProfileSelection={needsProfileSelection}
+        isStarting={isStarting}
         onSelectProfile={setSelectedProfileId}
         onSelectSuggestion={setInputValue}
+        onKindChange={onKindChange}
       />
       <ConfigSetupActions
         showPrompt={profiles.length > 0 && !needsProfileSelection}

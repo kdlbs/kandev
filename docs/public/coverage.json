@@ -235,6 +235,7 @@
         "/settings/system/licenses",
         "/settings/system/logs",
         "/settings/system/status",
+        "/settings/system/storage",
         "/settings/system/updates"
       ]
     },

@@ -203,13 +203,22 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
   // Any picker-bypassing user action while a pick is pending should supersede
   // the in-flight start, so the resolved request cleans up its orphan task
   // instead of yanking the user back to that session.
-  const handleNewChat = useCallback(
-    (kind: QuickChatSessionKind = "chat") => {
+  const handleNewChat = useCallback(() => {
+    resetPendingStarts();
+    setSetupKey((key) => key + 1);
+    store.openQuickChat("", workspaceId, undefined, "chat");
+  }, [resetPendingStarts, store, workspaceId]);
+
+  const handleSetupKindChange = useCallback(
+    (kind: QuickChatSessionKind) => {
       resetPendingStarts();
+      if (activeSession && isQuickChatSetupSessionId(activeSession.sessionId)) {
+        store.closeQuickChatSession(activeSession.sessionId);
+      }
       setSetupKey((key) => key + 1);
       store.openQuickChat("", workspaceId, undefined, kind);
     },
-    [resetPendingStarts, store, workspaceId],
+    [activeSession, resetPendingStarts, store, workspaceId],
   );
 
   const handleSelectAgent = useCallback(
@@ -249,6 +258,7 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     setSessionToClose,
     handleOpenChange,
     handleNewChat,
+    handleSetupKindChange,
     handleSelectAgent,
     handleCloseTab,
     handleConfirmClose,

@@ -21,7 +21,7 @@ while retaining the elevated tools that distinguish them from ordinary quick cha
   accessible label wherever their tab kind is presented.
 - Settings Configuration Chat opens a floating configuration panel. The Command Palette
   Configuration Chat command opens the same typed setup/session in the Quick Chat modal.
-- The Settings panel can transfer its current setup or real session into the Quick Chat modal
+- The Settings panel can transfer its current setup or session into the Quick Chat modal
   without creating a second task, losing messages, or replaying the initial prompt.
 - Blank setup tabs use client-local workspace-and-kind-scoped identities, so ordinary and
   configuration setup can coexist without crossing workspace boundaries.
@@ -32,9 +32,13 @@ while retaining the elevated tools that distinguish them from ordinary quick cha
   retains the optional repository context defined by
   [Quick Chat Repository Context](quick-chat-repository-context.md).
 - Creating an ordinary chat remains the default behavior when Quick Chat first opens. The tab-bar
-  `+` action opens a compact menu for `Quick chat` or `Configuration chat`, then opens the matching
-  focused setup without creating a backend task. Setup forms do not present chat kind as an
-  in-form mode selector.
+  `+` action opens that setup directly. The setup always explains when to use Quick Chat instead of
+  a tracked task and offers configuration mode in the form while the workspace has no existing or
+  pending configuration session.
+- A workspace currently presents one configuration session. Configuration entry points reopen that
+  session when it exists, and the Settings floating panel shows it without a tab strip or new-session
+  action. The larger Quick Chat dialog retains tabs so the configuration session can coexist with
+  ordinary chats and be deleted through the established tab lifecycle.
 - Desktop Settings uses the compact floating configuration panel until the user expands it. Mobile
   Settings uses a viewport-bounded floating panel and the existing full-screen Quick Chat layout
   after expansion, with the same creation, tab, clarification, and deletion capabilities.
@@ -146,6 +150,7 @@ Sessions are sorted by last activity, newest first. Boot classification always d
 | Closed, restored sessions available       | Quick Chat or command action                | Modal opens on an eligible session or typed setup tab in the active workspace.                                                                                                                                                     |
 | Settings configuration panel closed       | Settings FAB                                | Floating panel opens on an eligible configuration session or configuration setup.                                                                                                                                                  |
 | Floating setup/session                    | Open in Quick Chat                          | Floating panel closes and the same setup/session becomes active in the large dialog without creating a task.                                                                                                                       |
+| Existing configuration session            | Configuration entry point                   | Existing session opens; no second configuration setup is created.                                                                                                                                                                  |
 | Blank `chat` setup                        | Start succeeds                              | Placeholder is replaced by a persisted `chat` session.                                                                                                                                                                             |
 | Blank `config` setup                      | Prompt/profile submit succeeds              | The task session is seeded and the typed persisted tab opens. ACP prompts are delivered once after the chat subscription is ready; passthrough prompts are delivered once by the backend launch path before the terminal attaches. |
 | Persisted session open                    | Switch tab or close modal                   | Session remains persisted and restorable.                                                                                                                                                                                          |
@@ -206,8 +211,14 @@ deletion.
 - **GIVEN** a floating configuration conversation, **WHEN** the user chooses Open in Quick Chat,
   **THEN** the floating panel closes and the large dialog shows the same session, history, task, and
   pending initial prompt.
-- **GIVEN** the Quick Chat modal, **WHEN** the user opens the new-chat menu and chooses Configuration
-  chat, **THEN** the modal opens configuration setup without creating an ordinary chat task.
+- **GIVEN** the Quick Chat modal has no configuration session, **WHEN** the user starts a new chat,
+  **THEN** its setup explains Quick Chat versus a tracked task and offers configuration mode inside
+  the panel.
+- **GIVEN** a workspace already has a configuration session, **WHEN** the user starts a new Quick
+  Chat, **THEN** configuration mode is not offered and configuration entry points reopen the
+  existing session.
+- **GIVEN** Settings Configuration Chat is open, **WHEN** setup or the existing conversation is
+  shown, **THEN** the floating panel has no session tabs or new-configuration-session action.
 - **GIVEN** any application route, **WHEN** the user chooses Configuration Chat from the Command
   Palette, **THEN** the same unified configuration setup/session opens in Quick Chat.
 - **GIVEN** a configuration setup tab, **WHEN** it renders, **THEN** it shows configuration copy,
@@ -259,5 +270,6 @@ deletion.
 - A new persistence table for UI tabs or duplicating task/session history in frontend storage.
 - A separate configuration session store, message renderer, or backend conversation.
 - A general task/chat navigation redesign.
+- Multiple configuration sessions per workspace.
 - Repository context for configuration sessions.
 - A user-configurable ordinary-chat retention window or automatic expiration for config sessions.
