@@ -34,7 +34,7 @@ describe("getTaskStateIcon", () => {
 });
 
 describe("getSessionStateIcon — fine-grained busy tri-state", () => {
-  // ADR-0038. Three distinguishable conditions:
+  // ADR-0043. Three distinguishable conditions:
   //  (a) RUNNING + generating  → the established static "running" dot (unchanged)
   //  (b) RUNNING + background   → working-in-background spinner, NOT the done check
   //  (c) COMPLETED              → done checkmark
@@ -75,6 +75,20 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     expect(iconType(getSessionStateIcon("COMPLETED", undefined, "background"))).toBe(
       IconCircleCheck,
     );
+  });
+
+  it("distinguishes background-running from BOTH generating and done by icon SHAPE, not hue alone", () => {
+    // §req:not-color-alone: the three affordances must be separable in a
+    // grayscale/desaturated scan. Asserting the icon *component* (shape) differs
+    // — independent of className/hue — guarantees the distinction survives for
+    // color-vision-deficient operators. This locks getSessionStateIcon as the
+    // single source every session surface calls for all three states.
+    const generating = iconType(getSessionStateIcon("RUNNING", undefined, "generating"));
+    const background = iconType(getSessionStateIcon("RUNNING", undefined, "background"));
+    const done = iconType(getSessionStateIcon("COMPLETED"));
+    expect(background).not.toBe(generating);
+    expect(background).not.toBe(done);
+    expect(generating).not.toBe(done);
   });
 });
 

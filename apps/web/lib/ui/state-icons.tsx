@@ -55,12 +55,19 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
   CANCELLED: { Icon: IconPlayerPause, className: STYLE_MUTED },
 };
 
-// (b) background-idle: the foreground turn has yielded to spawned background
-// work (ADR-0038). A spinner — the operator can see the
+// (b) background-running: the foreground turn has yielded to spawned background
+// work (ADR-0043). A spinner — the operator can see the
 // agent is not done — visually separate from the static "generating" dot (a) by
-// its motion, and never the done checkmark. The spinner (work in motion) reads
-// as "something is still running in the background" while the foreground is
-// idle; the solid dot stays reserved for the foreground actively generating.
+// its motion AND shape, and from the done checkmark (c) by its motion AND shape,
+// so the three read apart even in a grayscale/desaturated scan (not hue alone,
+// per §req:not-color-alone). The spinner (work in motion) reads as "something is
+// still running in the background" while the foreground is idle; the solid dot
+// stays reserved for the foreground actively generating.
+//
+// This is the single source for the background-running affordance: every
+// session-level surface (session switcher, session-reopen menu, sidebar running
+// indicator) renders it by calling getSessionStateIcon with the session's
+// foreground_activity rather than re-deriving its own icon.
 const SESSION_BACKGROUND_ICON: IconConfig = {
   Icon: IconLoader2,
   className: "text-emerald-500 animate-spin",
@@ -154,9 +161,9 @@ function getSessionStateIconConfig(
   state?: TaskSessionState,
   foregroundActivity?: ForegroundActivity | null,
 ): IconConfig {
-  // (b) background-idle wins over the default RUNNING (generating) icon: while
-  // the foreground turn waits on spawned background work the session must read
-  // as "working in background", never as done (ADR-0038).
+  // (b) background-running wins over the default RUNNING (generating) icon:
+  // while the foreground turn waits on spawned background work the session must
+  // read as "working in background", never as done (ADR-0043).
   if (state === "RUNNING" && foregroundActivity === "background") {
     return SESSION_BACKGROUND_ICON;
   }
