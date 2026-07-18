@@ -41,63 +41,49 @@ const PLUGIN_ROUTE = process.env.DOCS_PLUGIN_ROUTE ?? "/plugins/e2e-hello";
 const SCREENSHOTS_DIR = path.resolve(__dirname, "../../../../../docs/screenshots");
 const VIEWPORT = { width: 1280, height: 860 };
 
-// Hand-authored "How it works" architecture diagram, rendered to
-// docs/screenshots/plugin-architecture.png (plugins.md embeds it). Kept as
-// HTML/CSS rather than mermaid so it reads as a designed figure.
+// Hand-authored "How it works" architecture diagram (SVG), rendered to
+// docs/screenshots/plugin-architecture.png (plugins.md embeds it). A designed
+// figure rather than mermaid so the boxes/arrows read as a real diagram.
 const ARCH_HTML = `<!doctype html><html><head><meta charset="utf-8" /><style>
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #fff; padding: 30px; }
-#diagram { width: 940px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif; color: #0f172a; background: #fff; }
-.phase { margin-bottom: 26px; } .phase:last-child { margin-bottom: 0; }
-.phase-label { font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #6366f1; margin-bottom: 4px; }
-.phase-sub { font-size: 12.5px; color: #64748b; margin-bottom: 14px; }
-.pipeline { display: flex; align-items: stretch; gap: 6px; }
-.step { flex: 1; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; display: flex; gap: 10px; align-items: flex-start; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
-.step .ico { width: 26px; height: 26px; flex: none; border-radius: 8px; display: grid; place-items: center; background: #eef2ff; color: #6366f1; font-size: 14px; font-weight: 700; }
-.step-title { font-size: 13.5px; font-weight: 650; line-height: 1.25; }
-.step-sub { font-size: 11.5px; color: #64748b; margin-top: 2px; line-height: 1.3; }
-.chev { align-self: center; color: #cbd5e1; font-size: 18px; font-weight: 700; }
-.supervise-note { margin-top: 12px; font-size: 12.5px; color: #475569; line-height: 1.45; padding: 10px 14px; background: #fafafa; border: 1px dashed #e2e8f0; border-radius: 10px; }
-.supervise-note b { color: #0f172a; font-weight: 650; }
-.flows { display: flex; flex-direction: column; gap: 10px; }
-.flow { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 16px; background: #fff; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
-.flow.optional { border-style: dashed; background: #fcfcfd; }
-.actors { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.chip { font-size: 12px; font-weight: 650; padding: 3px 10px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
-.chip.k { background: #eef2ff; color: #4338ca; border-color: #c7d2fe; }
-.chip.p { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
-.chip.e { background: #fffbeb; color: #b45309; border-color: #fde68a; }
-.chip.b { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
-.arrow { display: inline-flex; align-items: center; }
-.arrow .line { width: 22px; height: 0; border-top: 2px solid #cbd5e1; position: relative; }
-.arrow .line::after { content: ""; position: absolute; right: -1px; top: -4px; border-left: 6px solid #cbd5e1; border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
-.method { font-size: 12.5px; font-weight: 700; color: #6366f1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.method.plain { color: #475569; }
-.desc { font-size: 12.5px; color: #475569; margin-top: 7px; line-height: 1.45; }
-.desc code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px; background: #f1f5f9; padding: 1px 5px; border-radius: 5px; color: #334155; }
-.opt-tag { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: #94a3b8; margin-left: 6px; }
-</style></head><body><div id="diagram">
-<section class="phase"><div class="phase-label">1 · Install &amp; supervise</div>
-<div class="pipeline">
-<div class="step"><div class="ico">↓</div><div><div class="step-title">Install</div><div class="step-sub">URL · upload · filesystem sync</div></div></div>
-<div class="chev">›</div>
-<div class="step"><div class="ico">✓</div><div><div class="step-title">Verify</div><div class="step-sub">checksums.txt · validate manifest.yaml</div></div></div>
-<div class="chev">›</div>
-<div class="step"><div class="ico">◲</div><div><div class="step-title">Extract</div><div class="step-sub">~/.kandev/plugins/&lt;id&gt;/&lt;version&gt;/</div></div></div>
-<div class="chev">›</div>
-<div class="step"><div class="ico">⚙</div><div><div class="step-title">Spawn</div><div class="step-sub">go-plugin gRPC subprocess</div></div></div>
-</div>
-<div class="supervise-note">kandev owns the lifecycle: completes the handshake, health-checks with <b>Ping</b> every 30s, and restarts on crash or repeated failure (backoff, max 5 attempts).</div>
-</section>
-<section class="phase"><div class="phase-label">2 · While the plugin runs</div>
-<div class="phase-sub">One supervised gRPC connection — unix socket (loopback + AutoMTLS on Windows). The plugin serves no HTTP itself.</div>
-<div class="flows">
-<div class="flow"><div class="actors"><span class="chip k">kandev</span><span class="arrow"><span class="line"></span></span><span class="method">DeliverEvent</span><span class="arrow"><span class="line"></span></span><span class="chip p">plugin</span></div><div class="desc">Bus events delivered at-least-once, buffered while the plugin is unhealthy.</div></div>
-<div class="flow"><div class="actors"><span class="chip e">external caller</span><span class="arrow"><span class="line"></span></span><span class="method plain">HTTP POST/GET</span><span class="arrow"><span class="line"></span></span><span class="chip k">kandev</span><span class="arrow"><span class="line"></span></span><span class="method">HandleWebhook</span><span class="arrow"><span class="line"></span></span><span class="chip p">plugin</span></div><div class="desc">kandev's <code>/api/plugins/{id}/webhooks/{key}</code> route relays the request to the plugin over gRPC.</div></div>
-<div class="flow"><div class="actors"><span class="chip p">plugin</span><span class="arrow"><span class="line"></span></span><span class="method">Host API</span><span class="arrow"><span class="line"></span></span><span class="chip k">kandev</span></div><div class="desc">Calls back on the same connection: state / config / secrets, <code>EmitEvent</code>, and capability-gated read-only data (tasks, sessions, workspaces, …).</div></div>
-<div class="flow optional"><div class="actors"><span class="chip p">plugin</span><span class="arrow"><span class="line"></span></span><span class="method plain">ui.bundle</span><span class="arrow"><span class="line"></span></span><span class="chip b">browser SPA</span><span class="opt-tag">optional</span></div><div class="desc">The SPA loads the native bundle at boot to register real routes, nav items, slot components, and WS handlers.</div></div>
-</div></section>
-</div></body></html>`;
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#fff; padding:28px; }
+svg { font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, Arial, sans-serif; }
+.box { fill:#fff; stroke:#e2e8f0; stroke-width:1.5; }
+.box-soft { fill:#f8fafc; stroke:#e2e8f0; stroke-width:1.5; }
+.lane { fill:#f8fafc; stroke:#e2e8f0; stroke-width:1.5; }
+.t-title { font-size:14px; font-weight:700; }
+.t-step { font-size:13px; font-weight:650; fill:#0f172a; }
+.t-sub { font-size:11px; fill:#64748b; }
+.t-body { font-size:11.5px; fill:#475569; }
+.badge { fill:#6366f1; } .badge-t { fill:#fff; font-size:11px; font-weight:700; }
+.edge { stroke:#94a3b8; stroke-width:1.6; fill:none; }
+.edge-dotted { stroke:#94a3b8; stroke-width:1.6; fill:none; stroke-dasharray:4 4; }
+.lbl { font-size:11.5px; font-weight:700; fill:#4f46e5; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; paint-order:stroke; stroke:#fff; stroke-width:5px; stroke-linejoin:round; }
+.lbl-p { font-size:11px; fill:#475569; paint-order:stroke; stroke:#fff; stroke-width:5px; stroke-linejoin:round; }
+.lbl-mut { font-size:10.5px; fill:#94a3b8; paint-order:stroke; stroke:#fff; stroke-width:4px; stroke-linejoin:round; }
+.chip-p { fill:#ecfdf5; stroke:#a7f3d0; } .chip-p-t { font-size:11px; font-weight:650; fill:#047857; }
+</style></head><body>
+<svg id="diagram" width="960" height="500" viewBox="0 0 960 500">
+<defs><marker id="ah" markerWidth="9" markerHeight="9" refX="6.5" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 z" fill="#94a3b8"/></marker></defs>
+<text x="20" y="14" class="t-sub" style="font-weight:700;fill:#6366f1;letter-spacing:.06em">INSTALL &amp; LOAD</text>
+<rect x="20" y="24" width="204" height="60" rx="12" class="box-soft"/><circle cx="44" cy="54" r="11" class="badge"/><text x="44" y="58" text-anchor="middle" class="badge-t">1</text><text x="64" y="49" class="t-step">Install</text><text x="64" y="66" class="t-sub">URL · upload · sync</text>
+<rect x="256" y="24" width="204" height="60" rx="12" class="box-soft"/><circle cx="280" cy="54" r="11" class="badge"/><text x="280" y="58" text-anchor="middle" class="badge-t">2</text><text x="300" y="49" class="t-step">Verify</text><text x="300" y="66" class="t-sub">checksums · manifest.yaml</text>
+<rect x="492" y="24" width="204" height="60" rx="12" class="box-soft"/><circle cx="516" cy="54" r="11" class="badge"/><text x="516" y="58" text-anchor="middle" class="badge-t">3</text><text x="536" y="49" class="t-step">Extract</text><text x="536" y="66" class="t-sub">~/.kandev/plugins/&lt;id&gt;/</text>
+<rect x="728" y="24" width="204" height="60" rx="12" class="box-soft"/><circle cx="752" cy="54" r="11" class="badge"/><text x="752" y="58" text-anchor="middle" class="badge-t">4</text><text x="772" y="49" class="t-step">Spawn</text><text x="772" y="66" class="t-sub">go-plugin subprocess</text>
+<line x1="226" y1="54" x2="252" y2="54" class="edge" marker-end="url(#ah)"/><line x1="462" y1="54" x2="488" y2="54" class="edge" marker-end="url(#ah)"/><line x1="698" y1="54" x2="724" y2="54" class="edge" marker-end="url(#ah)"/>
+<path d="M830,84 C830,150 726,150 726,208" class="edge-dotted" marker-end="url(#ah)"/><text x="812" y="150" class="lbl-mut">spawned &amp; supervised</text>
+<rect x="70" y="130" width="250" height="42" rx="10" class="box" fill="#fffbeb" stroke="#fde68a"/><text x="195" y="156" text-anchor="middle" style="font-size:12px;font-weight:650;fill:#b45309">External caller</text>
+<path d="M195,172 L195,208" class="edge" marker-end="url(#ah)"/><text x="212" y="196" class="lbl-p">HTTP POST/GET&#8195;/api/plugins/{id}/webhooks/{key}</text>
+<rect x="70" y="210" width="330" height="182" rx="14" class="lane"/><text x="90" y="240" class="t-title" fill="#4338ca">kandev backend</text><text x="90" y="264" class="t-body">event bus · webhook route</text><text x="90" y="284" class="t-body">Host API · secrets · supervisor</text>
+<rect x="560" y="210" width="330" height="182" rx="14" class="lane"/><text x="580" y="240" class="t-title" fill="#047857">plugin subprocess</text><text x="580" y="264" class="t-body">OnEvent · HandleWebhook</text><text x="580" y="284" class="t-body">Host calls back over gRPC</text>
+<rect x="580" y="344" width="228" height="28" rx="8" class="chip-p"/><text x="594" y="362" class="chip-p-t">native UI bundle · optional</text>
+<text x="480" y="228" text-anchor="middle" class="lbl-mut">gRPC · AutoMTLS</text>
+<line x1="404" y1="256" x2="556" y2="256" class="edge" marker-end="url(#ah)"/><text x="480" y="249" text-anchor="middle" class="lbl">DeliverEvent</text>
+<line x1="404" y1="300" x2="556" y2="300" class="edge" marker-end="url(#ah)"/><text x="480" y="293" text-anchor="middle" class="lbl">HandleWebhook</text>
+<line x1="556" y1="348" x2="404" y2="348" class="edge" marker-end="url(#ah)"/><text x="480" y="341" text-anchor="middle" class="lbl">Host API</text>
+<rect x="560" y="432" width="250" height="42" rx="10" class="box"/><text x="685" y="458" text-anchor="middle" style="font-size:12px;font-weight:650;fill:#334155">Browser SPA</text>
+<path d="M690,392 L690,430" class="edge" marker-end="url(#ah)"/><text x="704" y="416" class="lbl-p">loads ui.bundle at boot</text>
+</svg></body></html>`;
 
 /** Let transient success toasts auto-dismiss so they don't sit in captures. */
 async function waitForToastsGone(page: Page): Promise<void> {
