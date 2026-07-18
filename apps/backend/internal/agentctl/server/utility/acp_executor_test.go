@@ -50,6 +50,32 @@ func TestProbeConfigOptions_PreservesDescriptions(t *testing.T) {
 	}
 }
 
+func TestApplySessionCompatibility_PreservesDescriptions(t *testing.T) {
+	t.Parallel()
+
+	out := &ProbeResponse{ConfigOptions: []ProbeConfigOption{{
+		Type:         "select",
+		ID:           "reasoning_effort",
+		Name:         "Reasoning effort",
+		Description:  "Controls reasoning depth.",
+		CurrentValue: "high",
+		Options: []ProbeConfigOptionChoice{{
+			Value:       "high",
+			Name:        "High",
+			Description: "More thorough reasoning.",
+		}},
+	}}}
+
+	applySessionCompatibility(out, "mock-agent")
+
+	if got := out.ConfigOptions[0].Description; got != "Controls reasoning depth." {
+		t.Errorf("option description = %q, want provider description", got)
+	}
+	if got := out.ConfigOptions[0].Options[0].Description; got != "More thorough reasoning." {
+		t.Errorf("value description = %q, want provider description", got)
+	}
+}
+
 func TestResolveProbeCommand_AllowsEveryListedBinary(t *testing.T) {
 	t.Parallel()
 

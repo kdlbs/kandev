@@ -602,13 +602,15 @@ func applySessionCompatibility(out *ProbeResponse, agentID string) {
 			Type:         option.Type,
 			ID:           option.ID,
 			Name:         option.Name,
+			Description:  option.Description,
 			CurrentValue: option.CurrentValue,
 			Category:     option.Category,
 		}
 		for _, choice := range option.Options {
 			converted.Options = append(converted.Options, streams.ConfigOptionValue{
-				Value: choice.Value,
-				Name:  choice.Name,
+				Value:       choice.Value,
+				Name:        choice.Name,
+				Description: choice.Description,
 			})
 		}
 		base = append(base, converted)
@@ -620,13 +622,15 @@ func applySessionCompatibility(out *ProbeResponse, agentID string) {
 			Type:         option.Type,
 			ID:           option.ID,
 			Name:         option.Name,
+			Description:  option.Description,
 			CurrentValue: option.CurrentValue,
 			Category:     option.Category,
 		}
 		for _, choice := range option.Options {
 			converted.Options = append(converted.Options, ProbeConfigOptionChoice{
-				Value: choice.Value,
-				Name:  choice.Name,
+				Value:       choice.Value,
+				Name:        choice.Name,
+				Description: choice.Description,
 			})
 		}
 		out.ConfigOptions = append(out.ConfigOptions, converted)
