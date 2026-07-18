@@ -111,6 +111,34 @@ type taskPRStoreContract interface {
 	UpsertTaskPR(context.Context, *TaskPR) error
 	ListTaskPRsByTask(context.Context, string) ([]*TaskPR, error)
 	ListTaskPRsByWorkspace(context.Context, string) (map[string][]*TaskPR, error)
+	DeleteTaskPRsByTask(context.Context, string) error
+}
+
+func TestStoreDeleteTaskPRsByTaskIsScoped(t *testing.T) {
+	store, err := NewStore(newTestDB(t), nil)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	ctx := context.Background()
+	for _, row := range []*TaskPR{
+		testTaskPR("task-a", "repo-a", 1),
+		testTaskPR("task-b", "repo-b", 2),
+	} {
+		if err := store.UpsertTaskPR(ctx, row); err != nil {
+			t.Fatalf("upsert task PR: %v", err)
+		}
+	}
+	if err := store.DeleteTaskPRsByTask(ctx, "task-a"); err != nil {
+		t.Fatalf("delete task PRs: %v", err)
+	}
+	deleted, err := store.ListTaskPRsByTask(ctx, "task-a")
+	if err != nil || len(deleted) != 0 {
+		t.Fatalf("deleted task rows = %+v, err = %v", deleted, err)
+	}
+	remaining, err := store.ListTaskPRsByTask(ctx, "task-b")
+	if err != nil || len(remaining) != 1 {
+		t.Fatalf("remaining task rows = %+v, err = %v", remaining, err)
+	}
 }
 
 func TestStoreTaskPRUpsertAndRestartPersistence(t *testing.T) {

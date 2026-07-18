@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
+import { toast } from "sonner";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore } from "@/components/state-provider";
+import { cacheAzureDevOpsTaskPullRequest } from "@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests";
 import { useRouter } from "@/lib/routing/client-router";
 import { associateAzureDevOpsPullRequest } from "@/lib/api/domains/azure-devops-api";
 import type { AzureDevOpsPullRequest, AzureDevOpsWorkItem } from "@/lib/types/azure-devops";
@@ -98,8 +100,15 @@ export function AzureDevOpsTaskLauncher({
         repositoryId: launch.repository.id,
         pullRequestId: payload.pullRequest.id,
       })
-        .then((linked) => setTaskPullRequest(task.id, linked))
-        .catch(() => undefined);
+        .then((linked) => {
+          cacheAzureDevOpsTaskPullRequest(workspaceId, task.id, linked);
+          setTaskPullRequest(task.id, linked);
+        })
+        .catch((error: unknown) => {
+          toast.error(
+            error instanceof Error ? error.message : "Failed to link Azure DevOps pull request.",
+          );
+        });
     }
     onClose();
     router.push(`/tasks/${task.id}`);

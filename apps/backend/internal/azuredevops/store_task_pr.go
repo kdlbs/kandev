@@ -100,6 +100,15 @@ func (s *Store) ListTaskPRsByTask(ctx context.Context, taskID string) ([]*TaskPR
 	return taskPRPointers(rows), nil
 }
 
+// DeleteTaskPRsByTask removes every Azure pull request association owned by a task.
+func (s *Store) DeleteTaskPRsByTask(ctx context.Context, taskID string) error {
+	if taskID == "" {
+		return errors.New("azure devops store: task id is required")
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM azure_devops_task_prs WHERE task_id = ?`, taskID)
+	return err
+}
+
 // ListTaskPRsByWorkspace groups associations for tasks owned by one workspace.
 func (s *Store) ListTaskPRsByWorkspace(ctx context.Context, workspaceID string) (map[string][]*TaskPR, error) {
 	var rows []TaskPR

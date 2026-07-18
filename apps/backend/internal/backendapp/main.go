@@ -527,6 +527,12 @@ func startAgentInfrastructure(
 	// Azure DevOps v1 owns only connection-health polling. PR summaries are
 	// refreshed explicitly through their task association routes.
 	if services.AzureDevOps != nil {
+		azureLifecycle, lifecycleErr := azuredevopspkg.RegisterLifecycleCleanup(eventBus, services.AzureDevOps)
+		if lifecycleErr != nil {
+			log.Warn("Azure DevOps lifecycle cleanup unavailable", zap.Error(lifecycleErr))
+		} else {
+			addCleanup(azureLifecycle.Close)
+		}
 		azurePoller := azuredevopspkg.NewPoller(services.AzureDevOps, log)
 		azurePoller.Start(ctx)
 		addCleanup(func() error { azurePoller.Stop(); return nil })

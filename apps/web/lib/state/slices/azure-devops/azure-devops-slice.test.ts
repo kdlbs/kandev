@@ -31,7 +31,7 @@ function taskPullRequest(
 }
 
 function makeStore() {
-  return create<AzureDevOpsSlice>()(immer((...args) => createAzureDevOpsSlice(...args)));
+  return create<AzureDevOpsSlice>()(immer((set) => createAzureDevOpsSlice(set)));
 }
 
 describe("Azure DevOps task PR slice", () => {

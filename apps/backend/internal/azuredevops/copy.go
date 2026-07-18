@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 )
 
 var (
@@ -48,9 +47,6 @@ func (s *Service) CopyConfigToWorkspace(
 	})
 	if err != nil {
 		return nil, err
-	}
-	if err := s.store.UpdateAuthHealth(ctx, targetWorkspaceID, false, "", time.Now().UTC()); err != nil {
-		return nil, fmt.Errorf("reset target azure devops health: %w", err)
 	}
 	return target, nil
 }

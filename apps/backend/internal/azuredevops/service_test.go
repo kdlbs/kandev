@@ -175,6 +175,9 @@ func TestCopyConfigCopiesCredentialAndDeleteIsScoped(t *testing.T) {
 	if err != nil || target == nil || target.DefaultProjectID != "p1" || !target.HasSecret {
 		t.Fatalf("target config: %+v err=%v", target, err)
 	}
+	if target.LastCheckedAt != nil || target.LastOK || target.LastError != "" {
+		t.Fatalf("copied config inherited health state: %+v", target)
+	}
 	if pat, _ := secrets.Reveal(ctx, SecretKeyForWorkspace("target")); pat != "source-pat" {
 		t.Fatalf("target PAT = %q", pat)
 	}

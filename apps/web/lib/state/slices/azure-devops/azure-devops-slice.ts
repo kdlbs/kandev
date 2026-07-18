@@ -5,12 +5,13 @@ export const defaultAzureDevOpsState: AzureDevOpsSliceState = {
   azureDevOpsTaskPullRequests: { byTaskId: {} },
 };
 
-type AzureDevOpsSliceCreator = StateCreator<
+type AzureDevOpsStateCreator = StateCreator<
   AzureDevOpsSlice,
   [["zustand/immer", never]],
   [],
   AzureDevOpsSlice
 >;
+type AzureDevOpsSliceCreator = (set: Parameters<AzureDevOpsStateCreator>[0]) => AzureDevOpsSlice;
 
 export const createAzureDevOpsSlice: AzureDevOpsSliceCreator = (set) => ({
   ...defaultAzureDevOpsState,
