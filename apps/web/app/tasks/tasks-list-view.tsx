@@ -400,7 +400,7 @@ function TaskListRow({
         data-testid="tasks-list-row-content"
         style={{ paddingLeft: `${level * 28}px` }}
       >
-        {getTaskStateIcon(task.state, "h-4 w-4 shrink-0")}
+        {getTaskStateIcon(task.state, "h-4 w-4 shrink-0", false, task.foreground_activity)}
         <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
           {task.title}
         </span>
