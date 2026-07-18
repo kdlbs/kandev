@@ -1462,26 +1462,19 @@ func TestRunAgentProcessAsync_ResumeFailureSkipsArchivedTaskRacingCAS(t *testing
 	}
 }
 
-// waitForUpdateTaskStateIfNotArchivedCall polls (mutex-guarded, so a
-// non-empty read is ordered-after the matching write inside the mock's
-// locked section) until startAgentProcessAsync's background goroutine has
-// recorded its UpdateTaskStateIfNotArchived call. Needed because — unlike
-// the resume-failure tests above, where StopAgent (closing the sync
-// channel) runs strictly after the state write — startAgentProcessAsync's
-// onSuccess callback has nothing observable after the write itself.
+// waitForUpdateTaskStateIfNotArchivedCall blocks (via a channel signal, not
+// polling) until startAgentProcessAsync's background goroutine has recorded
+// its UpdateTaskStateIfNotArchived call. Needed because — unlike the
+// resume-failure tests above, where StopAgent (closing the sync channel)
+// runs strictly after the state write — startAgentProcessAsync's onSuccess
+// callback has nothing observable after the write itself.
 func waitForUpdateTaskStateIfNotArchivedCall(t *testing.T, repo *mockRepository) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		repo.mu.Lock()
-		n := len(repo.updateTaskStateIfNotArchivedCalls)
-		repo.mu.Unlock()
-		if n > 0 {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-repo.updateTaskStateIfNotArchivedCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for UpdateTaskStateIfNotArchived call")
 	}
-	t.Fatal("timed out waiting for UpdateTaskStateIfNotArchived call")
 }
 
 // TestStartAgentProcessAsync_UsesRawCASWithoutCallbacks is the IN_PROGRESS

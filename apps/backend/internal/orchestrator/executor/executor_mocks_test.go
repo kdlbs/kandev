@@ -265,6 +265,12 @@ type mockRepository struct {
 	// call — the hook mutates the task here to model that gap. If nil, the
 	// CAS runs immediately against the task as currently seeded.
 	preCASHook func(taskID string)
+	// updateTaskStateIfNotArchivedCh, when non-nil, receives a non-blocking
+	// signal every time UpdateTaskStateIfNotArchived records a call — lets
+	// tests wait via select instead of polling with time.Sleep for a
+	// background goroutine's call to land. Buffered so a signal is never
+	// lost even if the test hasn't started waiting yet.
+	updateTaskStateIfNotArchivedCh chan struct{}
 
 	// Track calls for verification
 	createTaskSessionCalls            []*models.TaskSession
@@ -304,15 +310,16 @@ type setSessionMetadataKeyCall struct {
 
 func newMockRepository() *mockRepository {
 	return &mockRepository{
-		sessions:             make(map[string]*models.TaskSession),
-		tasks:                make(map[string]*models.Task),
-		taskRepositories:     make(map[string]*models.TaskRepository),
-		repositories:         make(map[string]*models.Repository),
-		executors:            make(map[string]*models.Executor),
-		executorProfiles:     make(map[string]*models.ExecutorProfile),
-		executorsRunning:     make(map[string]*models.ExecutorRunning),
-		taskEnvironments:     make(map[string]*models.TaskEnvironment),
-		taskEnvironmentRepos: make(map[string][]*models.TaskEnvironmentRepo),
+		sessions:                       make(map[string]*models.TaskSession),
+		tasks:                          make(map[string]*models.Task),
+		taskRepositories:               make(map[string]*models.TaskRepository),
+		repositories:                   make(map[string]*models.Repository),
+		executors:                      make(map[string]*models.Executor),
+		executorProfiles:               make(map[string]*models.ExecutorProfile),
+		executorsRunning:               make(map[string]*models.ExecutorRunning),
+		taskEnvironments:               make(map[string]*models.TaskEnvironment),
+		taskEnvironmentRepos:           make(map[string][]*models.TaskEnvironmentRepo),
+		updateTaskStateIfNotArchivedCh: make(chan struct{}, 8),
 	}
 }
 
@@ -460,6 +467,7 @@ func (m *mockRepository) UpdateTaskStateIfNotArchived(
 	if m.preCASHook != nil {
 		m.preCASHook(taskID)
 	}
+	defer m.notifyUpdateTaskStateIfNotArchived()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.updateTaskStateIfNotArchivedCalls = append(m.updateTaskStateIfNotArchivedCalls, updateTaskStateIfNotArchivedCall{
@@ -475,6 +483,19 @@ func (m *mockRepository) UpdateTaskStateIfNotArchived(
 	}
 	task.State = state
 	return currentState, true, nil
+}
+
+// notifyUpdateTaskStateIfNotArchived signals updateTaskStateIfNotArchivedCh
+// (if the test wired one) that a call just landed. Non-blocking so it never
+// stalls the caller when nothing is listening.
+func (m *mockRepository) notifyUpdateTaskStateIfNotArchived() {
+	if m.updateTaskStateIfNotArchivedCh == nil {
+		return
+	}
+	select {
+	case m.updateTaskStateIfNotArchivedCh <- struct{}{}:
+	default:
+	}
 }
 func (m *mockRepository) ArchiveTask(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) ListTasksForAutoArchive(ctx context.Context) ([]*models.Task, error) {
