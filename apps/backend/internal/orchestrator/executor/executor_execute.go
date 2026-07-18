@@ -630,6 +630,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
 		req.OfficeAgentProfileID = session.AgentProfileID
 	}
+	req.StartAgent = startAgent
 	mergeEnv(req, opts.Env)
 	if opts.RouteOverride != nil {
 		req.RouteOverride = opts.RouteOverride

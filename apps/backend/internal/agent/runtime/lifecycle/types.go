@@ -489,6 +489,7 @@ type LaunchRequest struct {
 	// ExecutionProfileID selects the complete CLI runtime profile. Empty keeps
 	// backward-compatible behavior by using AgentProfileID.
 	ExecutionProfileID string
+	StartAgent         bool                // Transfer launch activity through initial startup/prompt
 	WorkspacePath      string              // Host path to workspace (original repository path)
 	TaskDescription    string              // Task description to send via ACP prompt
 	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
@@ -554,6 +555,10 @@ type LaunchRequest struct {
 	// fields above are populated from Repositories[0] for callers that have not
 	// yet been updated.
 	Repositories []RepoLaunchSpec
+
+	// managedGoCachePath is resolved once before local preparation so setup
+	// scripts and the runtime instance cannot observe different settings.
+	managedGoCachePath string
 }
 
 // RepoSpecs returns the per-repo launch specs for this request. When

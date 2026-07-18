@@ -463,6 +463,7 @@ type routeParams struct {
 	eventBus                bus.EventBus
 	services                *Services
 	systemSvc               *systemsvc.Service
+	workspaceRestorer       taskhandlers.WorkspaceQuarantineRestorer
 	runtimeFlagsSvc         *runtimeflags.Service
 	agentSettingsController *agentsettingscontroller.Controller
 	agentSettingsRepo       settingsstore.Repository
@@ -838,6 +839,9 @@ func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, han
 	if handoffSvc != nil {
 		taskH.SetHandoffService(handoffSvc)
 	}
+	if p.workspaceRestorer != nil {
+		taskH.SetWorkspaceQuarantineRestorer(p.workspaceRestorer)
+	}
 	if p.services.GitHub != nil {
 		ghSvc := p.services.GitHub
 		taskH.SetOnTaskCreatedWithPR(func(ctx context.Context, taskID, sessionID, prURL, branch string) {
@@ -1094,12 +1098,16 @@ func registerHealthRoutes(p routeParams) {
 		oslimits.NewOSLimitsChecker(oslimits.NewInotifyProbe()),
 		5*time.Minute,
 	)
-	healthSvc := health.NewService(p.log,
+	checkers := []health.Checker{
 		health.NewGitExecutableChecker(),
 		githubChecker,
 		health.NewAgentChecker(p.agentSettingsController),
 		osLimitsChecker,
-	)
+	}
+	if p.systemSvc != nil && p.systemSvc.StorageRuntime != nil {
+		checkers = append(checkers, p.systemSvc.StorageRuntime)
+	}
+	healthSvc := health.NewService(p.log, checkers...)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
 }
 

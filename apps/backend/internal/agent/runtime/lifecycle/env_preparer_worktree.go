@@ -248,6 +248,7 @@ func (p *WorktreePreparer) createWorktreeWithSync(
 func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 	return worktree.CreateRequest{
 		TaskID:                 req.TaskID,
+		WorkspaceID:            req.WorkspaceID,
 		SessionID:              req.SessionID,
 		TaskTitle:              req.TaskTitle,
 		RepositoryID:           req.RepositoryID,

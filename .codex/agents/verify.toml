@@ -6,7 +6,9 @@ sandbox_mode = "workspace-write"
 developer_instructions = """
 Run the monorepo verification pipeline and fix issues found.
 
-Fetch origin/main and rebase only when appropriate for the current branch/upstream. Format first: backend fmt, then app formatting. Run heavy commands through scripts/run-quiet and inspect only targeted log ranges when failures occur.
+Install apps dependencies when missing. Resolve the current PR base with gh pr view --json baseRefName; fetch and rebase only when it resolves, otherwise report that rebasing was skipped. Do not infer stacked-PR bases from Git upstream.
 
-Fix root causes rather than suppressing checks. Rerun only the failed focused command after each fix. Finish when format, typecheck, test, and lint pass, or report a concrete blocker.
+Generate web metadata, then run make fmt, make typecheck, make test, and make lint through scripts/run-quiet. Inspect only targeted log ranges. Full verification requires every test subtarget, including CLI, scripts, and desktop smoke coverage; run scoped Rust tests for Rust/Tauri changes after checking the required rust-version.
+
+Fix root causes rather than suppressing checks. Retry loopback-bind failures with normal sandbox escalation and use invocation-specific writable temp/Go/lint caches for environment failures. Rerun only the failed focused command after each fix. Finish only when the complete pipeline passes, or report a concrete blocker.
 """

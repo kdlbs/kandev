@@ -43,6 +43,9 @@ var taskScanColumns = []taskScanColumn{
 	{name: "is_ephemeral"},
 	{name: "parent_id"},
 	{name: "archived_at"},
+	{name: "archived_by_cascade_id", selectExpr: func(alias string) string {
+		return `COALESCE(` + alias + `.archived_by_cascade_id, '') AS archived_by_cascade_id`
+	}},
 	{name: "created_at"},
 	{name: "updated_at"},
 	{name: "assignee_agent_profile_id", selectExpr: func(alias string) string {
@@ -832,7 +835,7 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	err := row.Scan(
 		&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
 		&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
-		&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt,
+		&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
 		&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
 		&task.Labels, &identifier, &task.IsFromOffice,
@@ -861,7 +864,7 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		err := rows.Scan(
 			&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
 			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
-			&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt,
+			&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
 			&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
 			&task.Labels, &identifier, &task.IsFromOffice,

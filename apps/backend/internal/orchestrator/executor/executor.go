@@ -287,6 +287,7 @@ type LaunchAgentRequest struct {
 	// OfficeAgentProfileID is the stable Office identity. AgentProfileID stays
 	// the concrete execution profile inside the executor for compatibility.
 	OfficeAgentProfileID string
+	StartAgent           bool // Keep lifecycle activity through initial startup/prompt
 	RepositoryURL        string
 	Branch               string
 	TaskDescription      string                 // Task description to send via ACP prompt

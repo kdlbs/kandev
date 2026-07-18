@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
 
 // Settings has no nav "Settings" section; direct settings routes keep the
 // gear-gated tree open so a hard refresh preserves settings navigation context.
@@ -70,6 +71,34 @@ test.describe("Settings sidebar takeover", () => {
     // a collapsed rail can't host the settings tree.
     await testPage.getByTestId("sidebar-settings-gear").click();
     await expect(sidebar).toHaveAttribute("data-collapsed", "false");
+    await expect(takeover).toBeVisible();
+  });
+
+  test("the gear navigates to Settings in one click from a task session view", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Regression: from a session view the gear used to only swap the
+    // sidebar's own tree — the main panel kept showing the task, so the
+    // click looked like a no-op. A second click (on a tree leaf) was
+    // needed to actually reach Settings. The gear must now behave like
+    // the sibling Stats/Office footer buttons and navigate in one click.
+    const task = await apiClient.createTask(seedData.workspaceId, "Gear Nav Task", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const takeover = testPage.getByTestId("app-sidebar-settings-mode");
+    await expect(takeover).toHaveCount(0);
+
+    await testPage.getByTestId("sidebar-settings-gear").click();
+
+    await expect(testPage).toHaveURL(/\/settings$/);
     await expect(takeover).toBeVisible();
   });
 

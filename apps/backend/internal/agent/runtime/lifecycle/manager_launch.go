@@ -16,8 +16,10 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/events"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -336,6 +338,16 @@ func (m *Manager) resolveScratchWorkspace(ctx context.Context, req *LaunchReques
 			zap.Error(err))
 		return ""
 	}
+	if !req.IsEphemeral {
+		if err := storageworkspaces.WriteOwnershipMarker(scratchPath, storageworkspaces.OwnershipMarker{
+			TaskID: req.TaskID, WorkspaceID: req.WorkspaceID, TaskDirName: req.TaskID,
+			LayoutVersion: storageworkspaces.LayoutVersionScratch,
+		}); err != nil {
+			m.logger.Warn("failed to mark scratch workspace ownership",
+				zap.String("workspace_path", scratchPath), zap.Error(err))
+			return ""
+		}
+	}
 	if err := m.initGitRepo(ctx, scratchPath); err != nil {
 		m.logger.Warn("failed to initialize git repository in scratch workspace",
 			zap.String("session_id", req.SessionID),
@@ -372,7 +384,7 @@ func (m *Manager) scratchWorkspacePath(req *LaunchRequest) string {
 			zap.String("workspace_id", req.WorkspaceID))
 		return ""
 	}
-	if strings.ContainsAny(req.TaskID, `/\`) || strings.ContainsAny(req.WorkspaceID, `/\`) {
+	if invalidScratchPathID(req.TaskID) || invalidScratchPathID(req.WorkspaceID) {
 		m.logger.Warn("task or workspace ID contains path separator, rejecting",
 			zap.String("task_id", req.TaskID),
 			zap.String("workspace_id", req.WorkspaceID))
@@ -383,6 +395,10 @@ func (m *Manager) scratchWorkspacePath(req *LaunchRequest) string {
 	// workspaces live alongside the existing repo-bound worktree task dirs
 	// at <kandevHome>/tasks/<workspaceID>/<taskID>/.
 	return filepath.Join(m.dataDir, "tasks", req.WorkspaceID, req.TaskID)
+}
+
+func invalidScratchPathID(id string) bool {
+	return id == "." || id == ".." || strings.ContainsAny(id, `/\`)
 }
 
 // launchPrepareRequest copies the launch request, sets the resolved workspace path,
@@ -660,6 +676,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 	repoSetupScript, _ := req.Metadata[MetadataKeyRepoSetupScript].(string)
 	prepReq := &EnvPrepareRequest{
 		TaskID:                 req.TaskID,
+		WorkspaceID:            req.WorkspaceID,
 		SessionID:              req.SessionID,
 		TaskTitle:              req.TaskTitle,
 		ExecutorType:           execName,
@@ -792,15 +809,37 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 // deduplication key exists and we fall through to direct execution.
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
 	if req.SessionID == "" {
-		return m.launchInternal(ctx, req)
+		activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
+		if err != nil {
+			return nil, err
+		}
+		transferredActivity := false
+		defer func() {
+			if !transferredActivity {
+				activityLease.Release()
+			}
+		}()
+		activityLease.SetKind(activity.KindExecutionPreparing)
+		execution, launchErr := m.launchInternal(ctx, req)
+		if launchErr == nil && req.StartAgent {
+			m.trackActivity(executionActivityKey(execution.ID), activityLease)
+			transferredActivity = true
+		}
+		return execution, launchErr
 	}
-	v, err, _ := m.ensureExecutionGroup.Do(req.SessionID, func() (interface{}, error) {
-		return m.launchInternal(ctx, req)
+	value, err := m.doCoalescedExecution(ctx, req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionStarting)
+		if acquireErr != nil {
+			return nil, acquireErr
+		}
+		defer activityLease.Release()
+		activityLease.SetKind(activity.KindExecutionPreparing)
+		return m.launchInternal(sharedCtx, req)
 	})
 	if err != nil {
 		return nil, err
 	}
-	execution := v.(*AgentExecution)
+	execution := value.(*AgentExecution)
 	// If this Launch call joined a workspace-only ensure peer's singleflight
 	// slot (EnsureWorkspaceExecutionForSession / GetOrEnsureExecution), the
 	// returned execution has no AgentCommand and the orchestrator's subsequent
@@ -812,6 +851,13 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 			return nil, err
 		}
 	}
+	if req.StartAgent {
+		activityLease, err := m.acquireActivity(ctx, activity.KindExecutionPreparing)
+		if err != nil {
+			return nil, err
+		}
+		m.trackActivity(executionActivityKey(execution.ID), activityLease)
+	}
 	return execution, nil
 }
 
@@ -821,13 +867,18 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 // dedicated singleflight key so they don't race on the shared AgentExecution
 // pointer.
 func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *AgentExecution, req *LaunchRequest) error {
-	_, err, _ := m.ensureExecutionGroup.Do("promote:"+req.SessionID, func() (interface{}, error) {
+	_, err := m.doCoalescedExecution(ctx, "promote:"+req.SessionID, func(sharedCtx context.Context) (interface{}, error) {
+		activityLease, acquireErr := m.acquireActivity(sharedCtx, activity.KindExecutionPreparing)
+		if acquireErr != nil {
+			return nil, acquireErr
+		}
+		defer activityLease.Release()
 		// Re-check after acquiring the slot — a peer Launch may have already
 		// promoted while we were waiting.
 		if execution.AgentCommand != "" {
 			return nil, nil
 		}
-		agentTypeName, profileInfo, err := m.resolveAgentProfile(ctx, req)
+		agentTypeName, profileInfo, err := m.resolveAgentProfile(sharedCtx, req)
 		if err != nil {
 			return nil, err
 		}
@@ -850,7 +901,7 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		}
 		execution.IsPassthrough = req.IsPassthrough
 		if !req.IsPassthrough {
-			if err := m.materializeRuntimeProjectMCP(ctx, execution, agentConfig); err != nil {
+			if err := m.materializeRuntimeProjectMCP(sharedCtx, execution, agentConfig); err != nil {
 				execution.AgentCommand = ""
 				execution.ContinueCommand = ""
 				execution.isResumedSession = false
@@ -889,6 +940,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	if !agentConfig.Enabled() {
 		return nil, fmt.Errorf("agent type %q is disabled", agentTypeName)
+	}
+	if err := m.prepareManagedGoCacheEnvironment(ctx, req); err != nil {
+		return nil, err
 	}
 
 	// 3. Check if session already has an agent running. A workspace-only

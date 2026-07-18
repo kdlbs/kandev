@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
 func TestCreateInTaskDir_CheckoutBranchUsesRemoteStartPointAndUpstream(t *testing.T) {
@@ -22,6 +24,7 @@ func TestCreateInTaskDir_CheckoutBranchUsesRemoteStartPointAndUpstream(t *testin
 
 	wt1, err := mgr.Create(context.Background(), CreateRequest{
 		TaskID:         "task-1",
+		WorkspaceID:    "workspace-1",
 		SessionID:      "session-1",
 		TaskTitle:      "PR Review 1",
 		RepositoryID:   "repo-1",
@@ -36,6 +39,10 @@ func TestCreateInTaskDir_CheckoutBranchUsesRemoteStartPointAndUpstream(t *testin
 	}
 	if wt1.Branch != "feature/pr-branch" {
 		t.Fatalf("first worktree branch = %q, want %q", wt1.Branch, "feature/pr-branch")
+	}
+	marker, found, err := storageworkspaces.ReadOwnershipMarker(filepath.Dir(wt1.Path))
+	if err != nil || !found || marker.TaskID != "task-1" || marker.WorkspaceID != "workspace-1" || marker.LayoutVersion != storageworkspaces.LayoutVersionSemantic {
+		t.Fatalf("task root ownership marker = %#v found=%v err=%v", marker, found, err)
 	}
 
 	wt2, err := mgr.Create(context.Background(), CreateRequest{

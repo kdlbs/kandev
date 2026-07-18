@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -1227,10 +1228,20 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 	// list just means nothing was recoverable. Detached from the request
 	// context: the tasks are already unarchived, so a client disconnect
 	// must not skip the checkout_branch restore.
-	recoveryCtx := context.WithoutCancel(c.Request.Context())
+	recoveryCtx, cancelRecovery := context.WithTimeout(
+		context.WithoutCancel(c.Request.Context()),
+		h.detachedRecoveryTimeout(),
+	)
+	defer cancelRecovery()
 	recovery := make([]service.BranchRecovery, 0)
 	for _, id := range outcome.ArchivedTaskIDs {
 		recovery = append(recovery, h.service.RecoverTaskBranches(recoveryCtx, id)...)
+	}
+	workspaceRecovery := make([]storageworkspaces.WorkspaceRecovery, 0, len(outcome.ArchivedTaskIDs))
+	if h.workspaceRestorer != nil {
+		for _, id := range outcome.ArchivedTaskIDs {
+			workspaceRecovery = append(workspaceRecovery, h.workspaceRestorer.RestoreTask(recoveryCtx, id))
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":            true,
@@ -1238,6 +1249,7 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 		"unarchived_ids":     outcome.ArchivedTaskIDs,
 		"skipped_ids":        outcome.SkippedTaskIDs,
 		"affected_group_ids": outcome.ReleasedGroupIDs,
+		"workspace_recovery": workspaceRecovery,
 		"recovery":           recovery,
 	})
 }

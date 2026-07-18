@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = resolve(__dirname, "../../..");
+const externalPnpmWorkflowFiles = new Set([".github/workflows/notify-docs.yml"]);
 
 function readRepoFile(path: string): string {
   return readFileSync(resolve(repoRoot, path), "utf8");
@@ -147,7 +148,7 @@ function extractWorkflowPnpmVersions(workflow: string): Array<string | undefined
   return versions;
 }
 
-function assertWorkflowPnpmVersions(file: string, expectedVersion: string): number {
+function assertWorkflowPnpmVersions(file: string, expectedVersion?: string): number {
   const versions = extractWorkflowPnpmVersions(readRepoFile(file));
   for (const version of versions) {
     if (version === undefined) {
@@ -155,9 +156,11 @@ function assertWorkflowPnpmVersions(file: string, expectedVersion: string): numb
       continue;
     }
 
-    expect(version, `${file}: pnpm/action-setup version must match apps/package.json`).toBe(
-      expectedVersion,
-    );
+    if (expectedVersion !== undefined) {
+      expect(version, `${file}: pnpm/action-setup version must match apps/package.json`).toBe(
+        expectedVersion,
+      );
+    }
   }
 
   return versions.length;
@@ -214,10 +217,10 @@ describe("release runtime tooling configuration", () => {
       'npm install -g --prefix /usr/local "pnpm@${PNPM_VERSION}"',
     );
 
-    const workflowSetupCount = workflowFiles().reduce(
-      (count, file) => count + assertWorkflowPnpmVersions(file, packagePnpmVersion),
-      0,
-    );
+    const workflowSetupCount = workflowFiles().reduce((count, file) => {
+      const expectedVersion = externalPnpmWorkflowFiles.has(file) ? undefined : packagePnpmVersion;
+      return count + assertWorkflowPnpmVersions(file, expectedVersion);
+    }, 0);
     expect(workflowSetupCount).toBeGreaterThan(0);
   });
 });

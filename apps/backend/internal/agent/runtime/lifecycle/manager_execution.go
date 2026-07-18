@@ -8,7 +8,9 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
@@ -18,6 +20,11 @@ import (
 // ErrSessionWorkspaceNotReady indicates the task session exists but does not yet
 // have a resolved workspace path (typically while worktree preparation is in progress).
 var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
+
+// coalescedExecutionCreationTimeout matches the runtime's 60-second agentctl
+// startup window while preventing blocked instance I/O from owning the shared
+// session slot and its activity lease for the lifetime of the manager.
+const coalescedExecutionCreationTimeout = time.Minute
 
 // GetOrEnsureExecution returns an existing execution or creates one on-demand.
 // Use this for workspace-oriented operations (files, shell, inference, ports, vscode, LSP)
@@ -38,13 +45,13 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 	// Slow path: create on-demand, deduplicated by sessionID-keyed singleflight.
 	// Use ensureWorkspaceExecutionLocked (not EnsureWorkspaceExecutionForSession)
 	// to avoid recursing into the same singleflight slot we already hold.
-	v, err, _ := m.ensureExecutionGroup.Do(sessionID, func() (interface{}, error) {
-		return m.ensureWorkspaceExecutionLocked(ctx, "", sessionID)
+	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+		return m.ensureWorkspaceExecutionLocked(sharedCtx, "", sessionID)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return v.(*AgentExecution), nil
+	return value.(*AgentExecution), nil
 }
 
 // GetOrEnsureExecutionForEnvironment returns an execution for a task environment,
@@ -92,7 +99,7 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	// Share the sessionID-keyed bucket so we deduplicate against any concurrent
 	// GetOrEnsureExecution(sessionID) / EnsureWorkspaceExecutionForSession for
 	// the same session.
-	v, err, _ := m.ensureExecutionGroup.Do(info.SessionID, func() (interface{}, error) {
+	value, err := m.doCoalescedExecution(ctx, info.SessionID, func(sharedCtx context.Context) (interface{}, error) {
 		if execution, exists := m.executionStore.GetBySessionID(info.SessionID); exists {
 			return execution, nil
 		}
@@ -102,7 +109,7 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 		// createExecution publishes AgentctlStarting before spawning the
 		// waitForAgentctlReady goroutine, so frontend gates flip out of
 		// `undefined` even on this lazy-create path.
-		execution, err := m.createExecution(ctx, info.TaskID, info)
+		execution, err := m.createExecution(sharedCtx, info.TaskID, info)
 		if err != nil {
 			return nil, err
 		}
@@ -111,7 +118,7 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	if err != nil {
 		return nil, err
 	}
-	return v.(*AgentExecution), nil
+	return value.(*AgentExecution), nil
 }
 
 // EnsureWorkspaceExecutionForSession ensures an agentctl execution exists for a specific task session.
@@ -133,13 +140,56 @@ func (m *Manager) EnsureWorkspaceExecutionForSession(ctx context.Context, taskID
 		return execution, nil
 	}
 
-	v, err, _ := m.ensureExecutionGroup.Do(sessionID, func() (interface{}, error) {
-		return m.ensureWorkspaceExecutionLocked(ctx, taskID, sessionID)
+	value, err := m.doCoalescedExecution(ctx, sessionID, func(sharedCtx context.Context) (interface{}, error) {
+		return m.ensureWorkspaceExecutionLocked(sharedCtx, taskID, sessionID)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return v.(*AgentExecution), nil
+	return value.(*AgentExecution), nil
+}
+
+func (m *Manager) doCoalescedExecution(
+	ctx context.Context,
+	key string,
+	operation func(context.Context) (interface{}, error),
+) (interface{}, error) {
+	result := m.ensureExecutionGroup.DoChan(key, func() (interface{}, error) {
+		sharedCtx, cancel := m.coalescedExecutionContext(ctx)
+		defer cancel()
+		return operation(sharedCtx)
+	})
+	return awaitCoalescedResult(ctx, result)
+}
+
+func (m *Manager) coalescedExecutionContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	sharedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), coalescedExecutionCreationTimeout)
+	if m.stopCh == nil {
+		return sharedCtx, cancel
+	}
+	go func() {
+		select {
+		case <-m.stopCh:
+			cancel()
+		case <-sharedCtx.Done():
+		}
+	}()
+	return sharedCtx, cancel
+}
+
+func awaitCoalescedResult(
+	ctx context.Context,
+	result <-chan singleflight.Result,
+) (interface{}, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case completed := <-result:
+		if completed.Err != nil {
+			return nil, completed.Err
+		}
+		return completed.Val, nil
+	}
 }
 
 // ensureWorkspaceExecutionLocked is the body of EnsureWorkspaceExecutionForSession
@@ -385,6 +435,13 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 // createExecution creates an agentctl execution.
 // The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
+	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
+	if err != nil {
+		return nil, err
+	}
+	defer activityLease.Release()
+	activityLease.SetKind(activity.KindExecutionPreparing)
+
 	// Select runtime based on executor type; falls back to standalone if empty/unavailable
 	rt, err := m.getExecutorBackend(info.ExecutorType)
 	if err != nil {
@@ -425,6 +482,11 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		}
 	}
 	m.mergeAgentProfileEnvFromInfo(ctx, profileInfo, env)
+	managedReq := &LaunchRequest{ExecutorType: info.ExecutorType, Env: env}
+	if err := m.prepareManagedGoCacheEnvironment(ctx, managedReq); err != nil {
+		return nil, err
+	}
+	env = managedReq.Env
 	autoApprove := false
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -433,6 +495,13 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 	if len(env) == 0 {
 		env = nil
+	}
+	metadata := make(map[string]interface{}, len(info.Metadata)+1)
+	for key, value := range info.Metadata {
+		metadata[key] = value
+	}
+	if managedReq.managedGoCachePath != "" {
+		metadata[managedGoCacheMetadataKey] = managedReq.managedGoCachePath
 	}
 
 	req := &ExecutorCreateRequest{
@@ -448,7 +517,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AutoApprovePermissions:         autoApprove,
 		AutoApprovePermissionsOverride: autoApproveOverride,
 		AgentConfig:                    agentConfig,
-		Metadata:                       info.Metadata,
+		Metadata:                       metadata,
 		PreviousExecutionID:            info.AgentExecutionID,
 		AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),

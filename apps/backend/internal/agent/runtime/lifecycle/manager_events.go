@@ -260,6 +260,7 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 	if !claimed {
 		return false
 	}
+	m.releaseActivity(executionActivityKey(execution.ID))
 
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
@@ -662,6 +663,7 @@ func (m *Manager) handleProcessStatus(execution *AgentExecution, status *agentct
 		zap.String("status", string(status.Status)),
 	)
 	m.eventPublisher.PublishProcessStatus(execution, status)
+	m.releaseTerminalProcessActivity(status)
 }
 
 // handleShellExit processes shell exit events from the workspace stream

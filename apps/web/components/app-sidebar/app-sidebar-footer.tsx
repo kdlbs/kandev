@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "@/lib/routing/client-router";
+import { useRouter, usePathname } from "@/lib/routing/client-router";
 import {
   IconBuildings,
   IconChartBar,
@@ -29,6 +29,7 @@ import {
   resolveLastKanbanWorkspace,
   workspaceHomeHref,
 } from "./app-sidebar-workspace-navigation";
+import { isSettingsRoute } from "./app-sidebar-route";
 
 type AppSidebarFooterProps = {
   collapsed: boolean;
@@ -98,6 +99,7 @@ function FooterIconButton({
 
 export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebarFooterProps) {
   const router = useRouter();
+  const pathname = usePathname();
   const workspaces = useAppStore((s) => s.workspaces);
   const workspaceId = workspaces.activeId;
   const activeWorkspace = workspaces.items.find((workspace) => workspace.id === workspaceId);
@@ -106,6 +108,17 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
     ? resolveLastKanbanWorkspace(workspaces.items)
     : resolveLastOfficeWorkspace(workspaces.items);
   const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
+  const enterSettings = () => {
+    // The gear only swaps the sidebar's own content; without also
+    // navigating, the main panel keeps showing whatever the user was on
+    // (e.g. a task session), so the first click looks like a no-op and a
+    // second click (on a tree leaf) is what actually reaches Settings.
+    // Match the Stats/Office buttons: one click gets you there.
+    if (!settingsMode && !isSettingsRoute(pathname)) {
+      router.push("/settings");
+    }
+    onToggleSettingsMode();
+  };
   const officeEnabled = useFeature("office");
   const releaseNotes = useReleaseNotes();
   const [improveOpen, setImproveOpen] = useState(false);
@@ -121,7 +134,7 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
         icon={IconSettings}
         label={settingsMode ? "Close settings" : "Settings"}
         collapsed={collapsed}
-        onClick={onToggleSettingsMode}
+        onClick={enterSettings}
         active={settingsMode}
         testId="sidebar-settings-gear"
       />

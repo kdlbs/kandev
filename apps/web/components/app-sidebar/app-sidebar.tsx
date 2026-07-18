@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "@/lib/routing/client-router";
+import { isSettingsRoute } from "./app-sidebar-route";
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureWorkspaceWorkflows } from "@/hooks/use-workflows";
 import { useInOffice } from "@/hooks/use-in-office";
@@ -39,10 +40,6 @@ const SECTION_ROUTE_MAP: Array<{ id: string; matches: (path: string) => boolean 
   { id: APP_SIDEBAR_SECTION_IDS.projects, matches: (p) => p.startsWith("/office/projects") },
   { id: APP_SIDEBAR_SECTION_IDS.agents, matches: (p) => p.startsWith("/office/agents") },
 ];
-
-function isSettingsRoute(pathname: string | null): boolean {
-  return pathname === "/settings" || Boolean(pathname?.startsWith("/settings/"));
-}
 
 type AppSidebarNavigationProps = {
   collapsed: boolean;

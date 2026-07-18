@@ -11,6 +11,12 @@ import type {
   JobAcceptResponse,
   RestartCapability,
   RestartResponse,
+  StorageAdoptionResponse,
+  StorageMaintenanceRun,
+  StorageMaintenanceSettings,
+  StorageOverviewResponse,
+  StorageQuarantineEntry,
+  StorageSettingsResponse,
 } from "@/lib/types/system";
 
 const SYSTEM_BASE = "/api/v1/system";
@@ -185,4 +191,119 @@ export function requestRestart(options?: ApiRequestOptions): Promise<RestartResp
     ...options,
     init: { ...(options?.init ?? {}), method: "POST" },
   });
+}
+
+// --- Storage maintenance ------------------------------------------------
+
+export function fetchStorageOverview(
+  options?: ApiRequestOptions,
+): Promise<StorageOverviewResponse> {
+  return fetchJson<StorageOverviewResponse>(`${SYSTEM_BASE}/storage`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function saveStorageSettings(
+  settings: StorageMaintenanceSettings,
+  dedicatedDockerConfirmation?: "DEDICATED",
+  options?: ApiRequestOptions,
+): Promise<StorageSettingsResponse> {
+  return fetchJson<StorageSettingsResponse>(`${SYSTEM_BASE}/storage/settings`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PATCH",
+      body: JSON.stringify({
+        settings,
+        confirmations: dedicatedDockerConfirmation
+          ? { dedicated_docker: dedicatedDockerConfirmation }
+          : {},
+      }),
+    },
+  });
+}
+
+export function adoptStorageGoCache(
+  path: string,
+  options?: ApiRequestOptions,
+): Promise<StorageAdoptionResponse> {
+  return fetchJson<StorageAdoptionResponse>(`${SYSTEM_BASE}/storage/go-cache/adopt`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify({ path, confirm: "ADOPT" }),
+    },
+  });
+}
+
+export function analyzeStorage(options?: ApiRequestOptions): Promise<JobAcceptResponse> {
+  return fetchJson<JobAcceptResponse>(`${SYSTEM_BASE}/storage/analyze`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST" },
+  });
+}
+
+export function runStorageMaintenance(
+  resources?: string[],
+  options?: ApiRequestOptions,
+): Promise<JobAcceptResponse> {
+  return fetchJson<JobAcceptResponse>(`${SYSTEM_BASE}/storage/run`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify(resources?.length ? { resources } : {}),
+    },
+  });
+}
+
+export async function fetchStorageRuns(
+  limit = 20,
+  options?: ApiRequestOptions,
+): Promise<StorageMaintenanceRun[]> {
+  const response = await fetchJson<{ runs: StorageMaintenanceRun[] }>(
+    `${SYSTEM_BASE}/storage/runs?limit=${encodeURIComponent(String(limit))}`,
+    { ...options, cache: "no-store" },
+  );
+  return response.runs ?? [];
+}
+
+export async function fetchStorageQuarantine(
+  options?: ApiRequestOptions,
+): Promise<StorageQuarantineEntry[]> {
+  const response = await fetchJson<{ entries: StorageQuarantineEntry[] }>(
+    `${SYSTEM_BASE}/storage/quarantine`,
+    { ...options, cache: "no-store" },
+  );
+  return response.entries ?? [];
+}
+
+export async function restoreStorageQuarantine(
+  id: string,
+  options?: ApiRequestOptions,
+): Promise<StorageQuarantineEntry> {
+  const response = await fetchJson<{ entry: StorageQuarantineEntry }>(
+    `${SYSTEM_BASE}/storage/quarantine/${encodeURIComponent(id)}/restore`,
+    { ...options, init: { ...(options?.init ?? {}), method: "POST" } },
+  );
+  return response.entry;
+}
+
+export function deleteStorageQuarantine(
+  id: string,
+  options?: ApiRequestOptions,
+): Promise<JobAcceptResponse> {
+  return fetchJson<JobAcceptResponse>(
+    `${SYSTEM_BASE}/storage/quarantine/${encodeURIComponent(id)}`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "DELETE",
+        body: JSON.stringify({ confirm: "DELETE" }),
+      },
+    },
+  );
 }

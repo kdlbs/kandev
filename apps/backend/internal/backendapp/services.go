@@ -73,6 +73,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			Environments:     repos.Task,
 			TaskEnvironments: repos.Task,
 			Reviews:          repos.Task,
+			ResourceCleanups: repos.Task,
 		},
 		eventBus,
 		log,

@@ -3,6 +3,7 @@
 package lifecycle
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/registry"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -130,6 +132,55 @@ type Manager struct {
 	// 0 when unset (tests, or before the launcher wires it). Never used for
 	// SSH/remote rows — their process lives on another host.
 	standaloneHostPID atomic.Int64
+
+	// managedGoCache provides the opt-in GOCACHE for host-local executions.
+	// System storage wiring installs it after settings persistence is ready.
+	managedGoCache ManagedGoCacheEnvironmentProvider
+
+	activityCoordinator *activity.Coordinator
+	activityMu          sync.Mutex
+	activityLeases      map[string]*activity.TaskLease
+	activityLeaseOwners map[string]uint64
+	activityPending     map[string]map[uint64]*executionActivityClaim
+	activityGeneration  uint64
+}
+
+// ManagedGoCacheEnvironmentProvider supplies the environment for one new
+// local execution. Implementations must return an absolute GOCACHE path.
+type ManagedGoCacheEnvironmentProvider interface {
+	ExecutionEnvironment(ctx context.Context) (map[string]string, error)
+}
+
+// SetManagedGoCacheEnvironmentProvider wires install-wide managed cache settings.
+func (m *Manager) SetManagedGoCacheEnvironmentProvider(provider ManagedGoCacheEnvironmentProvider) {
+	m.managedGoCache = provider
+}
+
+// SetActivityCoordinator wires the install-wide host-resource activity gate.
+// It is optional so embedded and test configurations retain legacy behavior.
+func (m *Manager) SetActivityCoordinator(coordinator *activity.Coordinator) {
+	m.activityMu.Lock()
+	m.activityCoordinator = coordinator
+	if m.activityLeases == nil {
+		m.activityLeases = make(map[string]*activity.TaskLease)
+	}
+	if m.activityLeaseOwners == nil {
+		m.activityLeaseOwners = make(map[string]uint64)
+	}
+	if m.activityPending == nil {
+		m.activityPending = make(map[string]map[uint64]*executionActivityClaim)
+	}
+	m.activityMu.Unlock()
+	if m.executorRegistry == nil {
+		return
+	}
+	backend, err := m.executorRegistry.GetBackend(executor.NameDocker)
+	if err != nil {
+		return
+	}
+	if dockerExecutor, ok := backend.(*DockerExecutor); ok {
+		dockerExecutor.SetActivityCoordinator(coordinator)
+	}
 }
 
 // SetStandaloneHostPID records the local agentctl control-server PID so
@@ -198,7 +249,6 @@ func NewManager(
 		skillDeployer:            NoopSkillDeployer(),
 		remediateNpxCache:        routingerr.RemediateNpxCache,
 	}
-
 	// Initialize stream manager with callbacks that delegate to manager methods
 	// mcpHandler will be set later via SetMCPHandler.
 	// stopCh is shared with the manager so workspace-stream backoff drains on Stop.

@@ -256,6 +256,9 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalled = true
+			if !req.StartAgent {
+				t.Error("expected lifecycle launch to retain initial-agent activity")
+			}
 			if req.SessionID != "session-123" {
 				t.Errorf("Expected session ID session-123, got %s", req.SessionID)
 			}
@@ -579,6 +582,9 @@ func TestLaunchPreparedSession_WorkspaceOnly(t *testing.T) {
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			launchCalled = true
+			if req.StartAgent {
+				t.Error("workspace-only launch retained initial-agent activity")
+			}
 			return &LaunchAgentResponse{
 				AgentExecutionID: "exec-123",
 				ContainerID:      "container-123",

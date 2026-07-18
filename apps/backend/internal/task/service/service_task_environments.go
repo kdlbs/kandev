@@ -331,6 +331,9 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 // single error so a stuck container can't permanently orphan the worktree.
 // On any error, the caller should preserve the row so the user can retry.
 func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.TaskEnvironment) error {
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
 	if env.ContainerID == "" && env.SandboxID == "" && env.WorktreeID == "" {
 		return nil
 	}
@@ -339,20 +342,38 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 	}
 
 	var errs []error
+	contextError := func() error {
+		if cause := context.Cause(ctx); cause != nil {
+			return errors.Join(errors.Join(errs...), cause)
+		}
+		return nil
+	}
 	if env.ContainerID != "" {
+		if err := contextError(); err != nil {
+			return err
+		}
 		if err := s.envDestroyer.DestroyContainer(ctx, env.ContainerID); err != nil {
 			errs = append(errs, fmt.Errorf("destroy container %s: %w", env.ContainerID, err))
 		}
 	}
 	if env.SandboxID != "" {
+		if err := contextError(); err != nil {
+			return err
+		}
 		if err := s.envDestroyer.DestroySandbox(ctx, env.SandboxID, ""); err != nil {
 			errs = append(errs, fmt.Errorf("destroy sandbox %s: %w", env.SandboxID, err))
 		}
 	}
 	if env.WorktreeID != "" {
+		if err := contextError(); err != nil {
+			return err
+		}
 		if err := s.envDestroyer.DestroyWorktree(ctx, env.WorktreeID); err != nil {
 			errs = append(errs, fmt.Errorf("destroy worktree %s: %w", env.WorktreeID, err))
 		}
+	}
+	if err := contextError(); err != nil {
+		return err
 	}
 	return errors.Join(errs...)
 }

@@ -110,6 +110,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		TaskTitle:           req.TaskTitle,
 		AgentProfileID:      officeProfileID,
 		ExecutionProfileID:  req.AgentProfileID,
+		StartAgent:          req.StartAgent,
 		WorkspacePath:       workspacePath,
 		TaskDescription:     req.TaskDescription,
 		Attachments:         convertToLifecycleAttachments(req.Attachments),

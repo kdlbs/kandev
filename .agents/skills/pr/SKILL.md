@@ -78,22 +78,23 @@ explicitly requests task tracking.
 
    A ready PR may still end with "CI pending" after fixup when no checks have failed and no review threads remain unresolved, especially after a late fixup push restarts CodeQL, E2E, or preview jobs. Continue fixing failed checks and unresolved review threads, but it is acceptable to report the PR as ready locally once full local verification is green, `failed_checks: []`, `unresolved_review_thread_count: 0`, and only queued/in-progress long-running checks remain. This includes CodeQL and preview deploy as well as E2E shards; do not wait indefinitely. Include the exact pending checks from the final re-check in the response, and stop immediately if a pending check fails or a new unresolved thread appears.
 
-6. **PR screenshots:** After creating the PR, check if `apps/web/.pr-assets/manifest.json` exists. If it does:
+6. **PR image preparation:** After creating the PR, check if `apps/web/.pr-assets/manifest.json` exists. If it does:
    - Read the manifest to list available screenshots/GIFs
-   - Run `npx tsx apps/web/e2e/scripts/upload-pr-assets.ts <PR_NUMBER>` to generate embed markdown
-   - If `apps/web/.pr-assets/embed.md` exists and is non-empty, append its contents to the PR body using a body file and `gh pr edit <PR_NUMBER> --body-file <file>`
+   - Run `pnpm exec tsx apps/web/e2e/scripts/upload-pr-assets.ts <PR_NUMBER>` to validate local media and generate `apps/web/.pr-assets/embed.md`; despite its historical name, the helper does not upload files to GitHub
+   - Inspect `embed.md` before changing the PR body. Append it only when it contains an actual hosted image URL. If it contains only drag-and-drop placeholders, leave the PR body unchanged and report that manual GitHub attachment is required
+   - When hosted embed markdown is available, append it to the PR body using a body file and `gh pr edit <PR_NUMBER> --body-file <file>`
    - If `gh pr edit --body-file` fails after PR creation, especially with the GitHub Projects classic deprecation GraphQL error, fall back to REST. Build the payload with `jq --rawfile`, never by hand-escaping shell strings:
      ```bash
      jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
      gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input /tmp/pr-body-payload.json
      ```
-   - Tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
+   - When placeholders remain, tell the user to drag and drop the image files from `.pr-assets/` into the PR description on GitHub for the images to render
 
 7. **Return the PR URL** when done.
 
 ## Azure Repos flow
 
-When `git remote get-url origin` points at Azure Repos, the steps are the same up through **Push** (1–3). For step 4, create an Azure Repos pull request instead of a GitHub PR. **Skip steps 5 and 6** — `/pr-fixup` and the PR asset upload flow are GitHub-specific.
+When `git remote get-url origin` points at Azure Repos, the steps are the same up through **Push** (1–3). For step 4, create an Azure Repos pull request instead of a GitHub PR. **Skip steps 5 and 6** — `/pr-fixup` and PR image preparation are GitHub-specific.
 
 Prefer the Azure CLI when it is on `PATH`:
 

@@ -20,6 +20,9 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
+	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	storagepkg "github.com/kandev/kandev/internal/system/storage"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
@@ -35,6 +38,69 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+func TestRegisterTaskRoutesWiresProductionWorkspaceRestorer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil || len(workspaces) == 0 {
+		t.Fatalf("ListWorkspaces: workspaces=%d err=%v", len(workspaces), err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: workflows=%d err=%v", len(workflows), err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil || len(steps) == 0 {
+		t.Fatalf("ListStepsByWorkflow: steps=%d err=%v", len(steps), err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
+		WorkflowStepID: steps[0].ID, Title: "Production unarchive wiring",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := harness.taskRepo.ArchiveTask(ctx, task.ID); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	router := gin.New()
+	gateway := gateways.NewGateway(log)
+	settings, store := newStorageMaintenanceStores(t)
+	composition := storageComposition{workspaceRestorer: &workspaceQuarantineController{
+		settings: settings,
+		factory: func(storagepkg.StorageMaintenanceSettings) *storageworkspaces.Provider {
+			return storageworkspaces.New(storageworkspaces.Config{Store: store})
+		},
+	}}
+	handoff := taskservice.NewHandoffService(
+		harness.taskRepo, harness.taskRepo,
+		taskservice.NewDocumentService(harness.taskRepo, log), nil, nil, log,
+	)
+	registerTaskRoutes(routeParams{
+		router: router, gateway: gateway, taskSvc: harness.taskSvc, taskRepo: harness.taskRepo,
+		services: &Services{Workflow: harness.workflowSvc}, workspaceRestorer: composition.workspaceRestorer, log: log,
+	}, taskservice.NewPlanService(harness.taskRepo, nil, log), handoff)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+task.ID+"/unarchive", nil)
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unarchive status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		WorkspaceRecovery []storageworkspaces.WorkspaceRecovery `json:"workspace_recovery"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response.WorkspaceRecovery) != 1 || response.WorkspaceRecovery[0].Status != "not_found" {
+		t.Fatalf("workspace recovery = %#v", response.WorkspaceRecovery)
+	}
+}
 
 func decodePayload(t *testing.T, raw json.RawMessage) map[string]interface{} {
 	t.Helper()
