@@ -49,6 +49,13 @@ which owns the entire go-plugin/gRPC transport — handshake, plugin map, and
 Host injection. There is no HTTP server, no listen address, and no
 credentials to configure.
 
+> **Language.** The backend is any native executable that speaks the
+> hashicorp/go-plugin gRPC protocol (magic-cookie handshake, AutoMTLS, the
+> `kandev.plugin.v1` services) — kandev just spawns the platform binary and
+> talks to it over that wire. Go is the only SDK kandev ships today, so this
+> guide is Go; another language means implementing the handshake, mTLS, and
+> proto yourself.
+
 ```go
 // main.go
 package main
