@@ -36,7 +36,7 @@ test.describe("Quick Chat entry points on mobile", () => {
 
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     const setup = dialog.getByTestId("quick-chat-setup");
-    await expect(setup.getByText(/create a task for planned work/i)).toBeVisible();
+    await expect(setup.getByText(/quick chats stay outside your task board/i)).toBeVisible();
     await setup.getByRole("switch", { name: "Configuration chat" }).tap();
 
     await expect(dialog.getByTestId("config-chat-setup")).toBeVisible();
