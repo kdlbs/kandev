@@ -84,8 +84,8 @@ describe("QuickChatSetup default agent", () => {
   it("explains when to use Quick Chat instead of a task", () => {
     render(<QuickChatSetup {...props} />);
 
-    expect(screen.getByText(/questions, exploration, and small requests/i)).toBeTruthy();
-    expect(screen.getByText(/create a task for planned work/i)).toBeTruthy();
+    expect(screen.getByText(/idea, question, or codebase/i)).toBeTruthy();
+    expect(screen.getByText(/outside your task board/i)).toBeTruthy();
   });
 
   it("offers configuration mode in the setup panel", () => {

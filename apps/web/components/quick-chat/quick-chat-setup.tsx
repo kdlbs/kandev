@@ -40,11 +40,9 @@ function QuickChatIntroduction() {
   return (
     <div className="space-y-1" data-testid="quick-chat-introduction">
       <p className="text-sm text-foreground">
-        Use Quick Chat for questions, exploration, and small requests that do not need tracking.
+        Chat with an agent about an idea, question, or codebase.
       </p>
-      <p className="text-sm text-muted-foreground">
-        Create a task for planned work you want to track on your task board and through a workflow.
-      </p>
+      <p className="text-sm text-muted-foreground">Quick chats stay outside your task board.</p>
     </div>
   );
 }

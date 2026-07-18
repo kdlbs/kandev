@@ -246,10 +246,10 @@ test.describe("Quick Chat", () => {
     try {
       const dialog = await openQuickChatSetup(testPage);
       await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
-        "Use Quick Chat for questions, exploration, and small requests",
+        "Chat with an agent about an idea, question, or codebase.",
       );
       await expect(dialog.getByTestId("quick-chat-introduction")).toContainText(
-        "Create a task for planned work",
+        "Quick chats stay outside your task board.",
       );
       await expect(
         dialog.getByText("Add repository context to focus on specific code and branches."),
