@@ -15,7 +15,11 @@ import { MobileSearchBar } from "./kanban/mobile-search-bar";
 import { TaskMultiSelectToolbar } from "./kanban/task-multi-select-toolbar";
 import { useKanbanData, useKanbanActions, useKanbanNavigation } from "@/hooks/domains/kanban";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
-import { resolveBoardWorkflowId, resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
+import {
+  resolveBoardWorkflowId,
+  resolveBoardWorkflowSteps,
+  resolveDesiredWorkflowId,
+} from "@/lib/kanban/resolve-workflow";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { useWorkspaceMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -241,6 +245,47 @@ function useMultiSelectDerived(
   return { isMixedWorkflowSelection, multiSelectSteps };
 }
 
+function useEffectiveWorkflowContext({
+  isMobile,
+  selectedWorkflowId,
+  hydratedWorkflowId,
+  activeSteps,
+}: {
+  isMobile: boolean;
+  selectedWorkflowId: string | null;
+  hydratedWorkflowId: string | null;
+  activeSteps: ReturnType<typeof useKanbanBoardHooks>["activeSteps"];
+}) {
+  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const [mobileWorkflowFocusId, setMobileWorkflowFocusId] = useState<string | null>(null);
+  const effectiveWorkflowId = resolveBoardWorkflowId({
+    isMobile,
+    selectedWorkflowId,
+    focusedWorkflowId: mobileWorkflowFocusId,
+    hydratedWorkflowId,
+  });
+  const effectiveSteps = useMemo(
+    () =>
+      resolveBoardWorkflowSteps({
+        effectiveWorkflowId,
+        hydratedWorkflowId,
+        snapshots,
+        activeSteps,
+      }),
+    [activeSteps, effectiveWorkflowId, hydratedWorkflowId, snapshots],
+  );
+  const multiSelect = useTaskMultiSelect(effectiveWorkflowId);
+  const selection = useMultiSelectDerived(multiSelect.selectedIds, snapshots, effectiveSteps);
+
+  return {
+    effectiveWorkflowId,
+    effectiveSteps,
+    multiSelect,
+    ...selection,
+    setMobileWorkflowFocusId,
+  };
+}
+
 function useKanbanBoardSetup(
   onPreviewTask: KanbanBoardProps["onPreviewTask"],
   onOpenTask: KanbanBoardProps["onOpenTask"],
@@ -280,27 +325,20 @@ function useKanbanBoardSetup(
     [onBeforeEdit, handleEdit],
   );
 
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-  const [mobileWorkflowFocusId, setMobileWorkflowFocusId] = useState<string | null>(null);
-  const effectiveWorkflowId = resolveBoardWorkflowId({
+  const {
+    effectiveWorkflowId,
+    effectiveSteps,
+    multiSelect,
+    isMixedWorkflowSelection,
+    multiSelectSteps,
+    setMobileWorkflowFocusId,
+  } = useEffectiveWorkflowContext({
     isMobile,
     selectedWorkflowId: workflowsState.activeId,
-    focusedWorkflowId: mobileWorkflowFocusId,
     hydratedWorkflowId: kanban.workflowId,
+    activeSteps: hooks.activeSteps,
   });
-  const effectiveSteps = useMemo(() => {
-    const focusedSnapshot = effectiveWorkflowId ? snapshots[effectiveWorkflowId] : undefined;
-    if (!focusedSnapshot) return hooks.activeSteps;
-    return [...focusedSnapshot.steps].sort((a, b) => a.position - b.position);
-  }, [effectiveWorkflowId, hooks.activeSteps, snapshots]);
-
-  const multiSelect = useTaskMultiSelect(effectiveWorkflowId);
   const { isMultiSelectMode, toggleSelect } = multiSelect;
-  const { isMixedWorkflowSelection, multiSelectSteps } = useMultiSelectDerived(
-    multiSelect.selectedIds,
-    snapshots,
-    effectiveSteps,
-  );
 
   const handleCardClickOrSelect = useCallback(
     (task: Task) => {

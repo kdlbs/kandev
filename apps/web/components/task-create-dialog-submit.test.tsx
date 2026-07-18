@@ -62,10 +62,13 @@ const buildCreateTaskPayloadMock = vi.fn((args: BuildCreateTaskPayloadCall) => (
   executor_profile_id: args.executorProfileId || undefined,
 }));
 const validateCreateInputsMock = vi.fn((..._args: unknown[]) => true);
+const buildRepositoriesPayloadMock = vi.fn(
+  (_args: unknown) => [] as Array<{ repository_id: string; base_branch?: string }>,
+);
 vi.mock("@/components/task-create-dialog-helpers", () => ({
   activatePlanMode: vi.fn(),
   buildCreateTaskPayload: (args: BuildCreateTaskPayloadCall) => buildCreateTaskPayloadMock(args),
-  buildRepositoriesPayload: () => [],
+  buildRepositoriesPayload: (args: unknown) => buildRepositoriesPayloadMock(args),
   computeIsTaskStarted: (isEditMode: boolean, editingTask?: { state?: string } | null) =>
     Boolean(
       isEditMode &&
@@ -164,6 +167,8 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
 beforeEach(() => {
   resetTaskCreateLastUsedSync({ clearQueued: true });
   buildCreateTaskPayloadMock.mockClear();
+  buildRepositoriesPayloadMock.mockReset();
+  buildRepositoriesPayloadMock.mockReturnValue([]);
   validateCreateInputsMock.mockClear();
   createTaskRetryMock.mockClear();
   updateTaskMock.mockReset();
@@ -175,6 +180,9 @@ beforeEach(() => {
 
 describe("useTaskSubmitHandlers — started task edits", () => {
   it("updates only the title so a locked prompt cannot be cleared", async () => {
+    buildRepositoriesPayloadMock.mockReturnValue([
+      { repository_id: "repo-1", base_branch: "main" },
+    ]);
     const deps = makeDeps({
       isEditMode: true,
       taskName: RENAMED_TITLE,
@@ -186,6 +194,7 @@ describe("useTaskSubmitHandlers — started task edits", () => {
         state: "IN_PROGRESS",
       },
       descriptionInputRef: makeRef(""),
+      noRepository: false,
     });
     const { result } = renderHook(() => useTaskSubmitHandlers(deps));
 
@@ -194,6 +203,36 @@ describe("useTaskSubmitHandlers — started task edits", () => {
     });
 
     expect(updateTaskMock).toHaveBeenCalledWith(TASK_ID, { title: RENAMED_TITLE });
+    expect(buildRepositoriesPayloadMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps repository updates for tasks that have not started", async () => {
+    const repositories = [{ repository_id: "repo-1", base_branch: "main" }];
+    buildRepositoriesPayloadMock.mockReturnValue(repositories);
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: RENAMED_TITLE,
+      editingTask: {
+        id: TASK_ID,
+        title: "Original title",
+        description: ORIGINAL_PROMPT,
+        workflowStepId: "step-1",
+        state: "TODO",
+      },
+      descriptionInputRef: makeRef("Updated prompt"),
+      noRepository: false,
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(updateTaskMock).toHaveBeenCalledWith(TASK_ID, {
+      title: RENAMED_TITLE,
+      description: "Updated prompt",
+      repositories,
+    });
   });
 
   it("uses the update-only path when the started edit form is submitted", async () => {

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { resolveBoardWorkflowId, resolveDesiredWorkflowId } from "./resolve-workflow";
+import {
+  resolveBoardWorkflowId,
+  resolveBoardWorkflowSteps,
+  resolveDesiredWorkflowId,
+} from "./resolve-workflow";
 import type { WorkflowsState } from "@/lib/state/slices";
 
 type Workflow = WorkflowsState["items"][number];
@@ -126,5 +130,49 @@ describe("resolveBoardWorkflowId", () => {
         hydratedWorkflowId: "wf-hydrated",
       }),
     ).toBe("wf-hydrated");
+  });
+});
+
+describe("resolveBoardWorkflowSteps", () => {
+  const oldSteps = [{ id: "old-step", position: 0 }];
+
+  it("does not reuse steps from a previously hydrated workflow", () => {
+    expect(
+      resolveBoardWorkflowSteps({
+        effectiveWorkflowId: "wf-new",
+        hydratedWorkflowId: "wf-old",
+        snapshots: {},
+        activeSteps: oldSteps,
+      }),
+    ).toEqual([]);
+  });
+
+  it("uses active steps when they belong to the effective workflow", () => {
+    expect(
+      resolveBoardWorkflowSteps({
+        effectiveWorkflowId: "wf-old",
+        hydratedWorkflowId: "wf-old",
+        snapshots: {},
+        activeSteps: oldSteps,
+      }),
+    ).toBe(oldSteps);
+  });
+
+  it("sorts steps from the effective workflow snapshot", () => {
+    expect(
+      resolveBoardWorkflowSteps({
+        effectiveWorkflowId: "wf-new",
+        hydratedWorkflowId: "wf-old",
+        snapshots: {
+          "wf-new": {
+            steps: [
+              { id: "later", position: 2 },
+              { id: "first", position: 0 },
+            ],
+          },
+        },
+        activeSteps: oldSteps,
+      }).map((step) => step.id),
+    ).toEqual(["first", "later"]);
   });
 });

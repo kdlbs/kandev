@@ -22,6 +22,29 @@ export function resolveBoardWorkflowId({
 }
 
 /**
+ * Resolve steps for board actions without pairing a newly selected workflow
+ * with steps left over from the previously hydrated workflow.
+ */
+export function resolveBoardWorkflowSteps<TStep>({
+  effectiveWorkflowId,
+  hydratedWorkflowId,
+  snapshots,
+  activeSteps,
+}: {
+  effectiveWorkflowId: string | null;
+  hydratedWorkflowId: string | null;
+  snapshots: Record<string, { steps: Array<TStep & { position: number }> } | undefined>;
+  activeSteps: TStep[];
+}): TStep[] {
+  const effectiveSnapshot = effectiveWorkflowId ? snapshots[effectiveWorkflowId] : undefined;
+  if (effectiveSnapshot) {
+    return [...effectiveSnapshot.steps].sort((a, b) => a.position - b.position);
+  }
+  if (effectiveWorkflowId === hydratedWorkflowId) return activeSteps;
+  return [];
+}
+
+/**
  * Resolve the workflow id that should be active given the current store state
  * and persisted user settings.
  *
