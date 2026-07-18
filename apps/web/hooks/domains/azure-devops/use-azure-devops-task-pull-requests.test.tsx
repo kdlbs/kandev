@@ -163,3 +163,59 @@ describe("useAzureDevOpsTaskPullRequests", () => {
     await waitFor(() => expect(result.current).toEqual([second]));
   });
 });
+
+describe("useAzureDevOpsTaskPullRequests workspace switch guards", () => {
+  it("ignores a workspace load that completes after the workspace changes", async () => {
+    const firstLoad = deferred<{ taskPrs: Record<string, AzureDevOpsTaskPullRequest[]> }>();
+    const first = taskPullRequest({ id: "link-stale-load-a", title: "Workspace A" });
+    const second = taskPullRequest({ id: "link-stale-load-b", title: "Workspace B" });
+    apiMocks.list.mockImplementation((workspaceId: string) =>
+      workspaceId === "workspace-stale-load-a"
+        ? firstLoad.promise
+        : Promise.resolve({ taskPrs: { "task-1": [second] } }),
+    );
+    const { result, rerender } = renderHook(
+      ({ workspaceId }) => useAzureDevOpsTaskPullRequests(workspaceId, "task-1"),
+      { initialProps: { workspaceId: "workspace-stale-load-a" }, wrapper },
+    );
+    await waitFor(() => expect(apiMocks.list).toHaveBeenCalledTimes(1));
+
+    rerender({ workspaceId: "workspace-stale-load-b" });
+    await waitFor(() => expect(result.current).toEqual([second]));
+    await act(async () => firstLoad.resolve({ taskPrs: { "task-1": [first] } }));
+
+    expect(result.current).toEqual([second]);
+  });
+
+  it("ignores a task PR refresh that completes after the workspace changes", async () => {
+    const refresh = deferred<AzureDevOpsTaskPullRequest>();
+    const first = taskPullRequest({
+      id: "link-stale-refresh",
+      title: "Workspace A",
+      lastSyncedAt: "2020-01-01T00:00:00Z",
+    });
+    const second = taskPullRequest({ id: "link-stale-refresh", title: "Workspace B" });
+    const refreshed = taskPullRequest({
+      id: "link-stale-refresh",
+      title: "Refreshed workspace A",
+    });
+    apiMocks.list.mockImplementation((workspaceId: string) =>
+      Promise.resolve({
+        taskPrs: { "task-1": [workspaceId === "workspace-stale-refresh-a" ? first : second] },
+      }),
+    );
+    apiMocks.sync.mockReturnValue(refresh.promise);
+    const { result, rerender } = renderHook(
+      ({ workspaceId }) => useAzureDevOpsTaskPullRequests(workspaceId, "task-1"),
+      { initialProps: { workspaceId: "workspace-stale-refresh-a" }, wrapper },
+    );
+    await waitFor(() => expect(apiMocks.sync).toHaveBeenCalledTimes(1));
+
+    rerender({ workspaceId: "workspace-stale-refresh-b" });
+    await waitFor(() => expect(result.current).toEqual([second]));
+    expect(apiMocks.sync).toHaveBeenCalledTimes(1);
+    await act(async () => refresh.resolve(refreshed));
+
+    expect(result.current).toEqual([second]);
+  });
+});

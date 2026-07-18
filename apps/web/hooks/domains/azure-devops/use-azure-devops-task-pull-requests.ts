@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import {
   listWorkspaceAzureDevOpsTaskPullRequests,
@@ -12,7 +12,7 @@ type WorkspaceSnapshot = Record<string, AzureDevOpsTaskPullRequest[]>;
 
 const TASK_PR_REFRESH_INTERVAL_MS = 90_000;
 const EMPTY_TASK_PULL_REQUESTS: AzureDevOpsTaskPullRequest[] = [];
-const pendingWorkspaces = new Map<string, Promise<void>>();
+const pendingWorkspaces = new Map<string, Promise<WorkspaceSnapshot>>();
 const pendingTaskPullRequests = new Map<string, Promise<AzureDevOpsTaskPullRequest>>();
 const workspaceSnapshots = new Map<string, WorkspaceSnapshot>();
 const workspaceUpdates = new Map<string, WorkspaceSnapshot>();
@@ -59,17 +59,14 @@ export function cacheAzureDevOpsTaskPullRequest(
   workspaceUpdates.set(workspaceId, withTaskPullRequest(updates, taskId, pullRequest));
 }
 
-function loadWorkspace(
-  workspaceId: string,
-  setAll: (items: Record<string, AzureDevOpsTaskPullRequest[]>) => void,
-) {
+function loadWorkspace(workspaceId: string) {
   const pending = pendingWorkspaces.get(workspaceId);
   if (pending) return pending;
   const request = listWorkspaceAzureDevOpsTaskPullRequests(workspaceId, { cache: "no-store" })
     .then((result) => {
       const snapshot = mergeWorkspaceUpdates(workspaceId, result.taskPrs ?? {});
       workspaceSnapshots.set(workspaceId, snapshot);
-      setAll(snapshot);
+      return snapshot;
     })
     .finally(() => pendingWorkspaces.delete(workspaceId));
   pendingWorkspaces.set(workspaceId, request);
@@ -98,6 +95,12 @@ function refreshTaskPullRequest(
 }
 
 export function useAzureDevOpsTaskPullRequests(workspaceId: string | null, taskId: string | null) {
+  const generation = useRef({ scope: workspaceId, value: 0 });
+  const loadedWorkspace = useRef<string | null>(null);
+  if (generation.current.scope !== workspaceId) {
+    generation.current = { scope: workspaceId, value: generation.current.value + 1 };
+    loadedWorkspace.current = null;
+  }
   const pullRequests = useAppStore((state) =>
     taskId
       ? (state.azureDevOpsTaskPullRequests.byTaskId[taskId] ?? EMPTY_TASK_PULL_REQUESTS)
@@ -108,26 +111,35 @@ export function useAzureDevOpsTaskPullRequests(workspaceId: string | null, taskI
 
   useEffect(() => {
     if (!workspaceId) return;
+    const current = generation.current.value;
+    const applySnapshot = (snapshot: WorkspaceSnapshot) => {
+      if (current !== generation.current.value) return;
+      loadedWorkspace.current = workspaceId;
+      setAll(snapshot);
+    };
     const snapshot = workspaceSnapshots.get(workspaceId);
     if (snapshot) {
-      setAll(snapshot);
+      applySnapshot(snapshot);
       return;
     }
-    void loadWorkspace(workspaceId, setAll).catch(() => undefined);
-  }, [setAll, workspaceId]);
+    void loadWorkspace(workspaceId)
+      .then(applySnapshot)
+      .catch(() => undefined);
+  }, [generation, setAll, workspaceId]);
 
   useEffect(() => {
-    if (!workspaceId || !taskId) return;
+    if (!workspaceId || !taskId || loadedWorkspace.current !== workspaceId) return;
+    const current = generation.current.value;
     for (const pullRequest of pullRequests) {
       if (!shouldRefresh(pullRequest)) continue;
       void refreshTaskPullRequest(workspaceId, taskId, pullRequest)
         .then((refreshed) => {
           cacheAzureDevOpsTaskPullRequest(workspaceId, taskId, refreshed);
-          setOne(taskId, refreshed);
+          if (current === generation.current.value) setOne(taskId, refreshed);
         })
         .catch(() => undefined);
     }
-  }, [pullRequests, setOne, taskId, workspaceId]);
+  }, [generation, pullRequests, setOne, taskId, workspaceId]);
 
   return pullRequests;
 }
