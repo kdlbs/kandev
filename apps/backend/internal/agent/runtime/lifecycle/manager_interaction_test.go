@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -285,6 +287,58 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	if !slices.Contains(eventTypes, events.AgentContextReset) {
 		t.Fatalf("expected %q event, got %v", events.AgentContextReset, eventTypes)
 	}
+}
+
+func TestPromptAgentWithDispatchCallbackTracksExecutionActivityUntilCompletion(t *testing.T) {
+	mgr := newTestManager(t)
+	coordinator := activity.NewCoordinator(activity.Options{})
+	mgr.SetActivityCoordinator(coordinator)
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	if err := client.StreamUpdates(context.Background(), func(agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("connect update stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID: "exec-callback-activity", TaskID: "task-1", SessionID: "session-1",
+		Status: v1.AgentStatusRunning, WorkspacePath: "/workspace", agentctl: client,
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	dispatched := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := mgr.PromptAgentWithDispatchCallback(
+			context.Background(), execution.ID, "hello", nil, false, func() { close(dispatched) },
+		)
+		done <- err
+	}()
+	<-dispatched
+
+	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if maintenance != nil {
+		maintenance.Release()
+	}
+	if !errors.Is(err, activity.ErrBusy) {
+		t.Fatalf("maintenance while callback prompt is running: %v, want activity.ErrBusy", err)
+	}
+
+	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "end_turn"}
+	if err := <-done; err != nil {
+		t.Fatalf("PromptAgentWithDispatchCallback: %v", err)
+	}
+	maintenance, _, err = coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("maintenance after callback prompt completed: %v", err)
+	}
+	maintenance.Release()
 }
 
 func TestManager_RestartAgentProcess_StopErrorIsNonFatal(t *testing.T) {
