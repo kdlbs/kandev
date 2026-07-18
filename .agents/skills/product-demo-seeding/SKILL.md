@@ -40,6 +40,7 @@ Read [isolation-and-seeding.md](references/isolation-and-seeding.md) before star
 - Use current product capabilities. Inspect selectors and API helpers again instead of copying an old capture spec blindly.
 - If a responsive surface is broken, report the product bug and choose another truthful native route only when it demonstrates the same capability.
 - Keep local paths, test directives, generic mock responses, fixture names, and host identity out of visible frames.
+- Give capture-only mock executors a logical command label such as `mock-agent`; never expose the temporary executable's absolute host path in a visible command, profile, or session label.
 
 ## Story Selection
 

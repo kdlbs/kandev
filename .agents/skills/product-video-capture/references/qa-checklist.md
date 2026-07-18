@@ -62,7 +62,7 @@ Search every sampled frame and poster for:
 - fake provider/executor/integration controls;
 - inconsistent organization, repository, task, branch, PR, or file names;
 - clipped title, popover, menu, stage label, diff, composer, checks, or action;
-- accidental notification, browser status text, or developer tooling.
+- accidental notification, browser automation banner, browser status text, or developer tooling.
 
 Confirm visible implementation, diff, test, and review claims are supported by seeded repository/provider state.
 

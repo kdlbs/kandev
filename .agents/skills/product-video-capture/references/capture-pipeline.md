@@ -27,6 +27,7 @@ Launch Chrome with an isolated user-data dir and flags equivalent to:
 
 ```text
 --disable-infobars
+--test-type
 --hide-scrollbars
 --force-device-scale-factor=<dpr>
 --window-position=0,0
@@ -36,6 +37,7 @@ Launch Chrome with an isolated user-data dir and flags equivalent to:
 ```
 
 Use a fresh Xvfb display sized to the physical frame. Confirm the decoded first frame fills that frame; do not infer this from `ffprobe` width/height alone.
+Inspect the first, middle, and final raw frames for Chrome's automation banner. `--disable-infobars` alone is not sufficient on every Chrome for Testing build; reject the take if any browser-managed banner remains.
 
 ## Recorder Shape
 
@@ -100,7 +102,7 @@ When desktop uses a split diff but mobile exposes `MobileDiffSheet`, write diffe
 Reject and recapture if any sampled or playback frame shows:
 
 - CSS-size content padded inside a larger gray/black canvas;
-- browser chrome, host desktop, notification, or URL tooltip;
+- browser chrome, automation banner, host desktop, notification, or URL tooltip;
 - double cursor or OS cursor;
 - loader/blank/error state held as a story beat;
 - generic fixture/mock text, slash directives, local paths, localhost status, or host identity;
