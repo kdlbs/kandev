@@ -19,7 +19,7 @@ Run focused tests from `$LANDING_REPO` before encoding. Current contract:
 
 - 25 fps constant cadence;
 - general desktop delivery 2560x1600 from at least 3840x2400 source;
-- editorial landing delivery 1920x1200 from at least 3840x2400 source, with a 2x focused camera, VP9 CRF 26, and H.264 CRF 18;
+- when the checked-out landing tests recognize `formFactor: "landing"`, editorial delivery 1920x1200 from at least 3840x2400 source, with a 2x focused camera, VP9 CRF 26, and H.264 CRF 18;
 - mobile delivery 1290x2796 from native 1290x2796 source;
 - general desktop and focused documentation clips reach 1.50x; editorial landing clips reach 2x; native mobile reaches 1.18x;
 - centered 1x opening and ending by default;
