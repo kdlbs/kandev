@@ -502,6 +502,20 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 	svc.turnService = &repoTurnService{repo: repo}
 	turn, err := svc.turnService.StartTurn(ctx, "s1")
 	require.NoError(t, err)
+	configSnapshot := map[string]interface{}{
+		"model": "gpt-5.4",
+		"config_options": []interface{}{
+			map[string]interface{}{
+				"id": "reasoning_effort", "name": "Reasoning effort",
+				"value": "high", "value_name": "High",
+			},
+		},
+		"config_baseline": map[string]interface{}{"reasoning_effort": "medium"},
+	}
+	turn.Metadata = map[string]interface{}{
+		models.TurnMetaKeyRuntimeConfigSnapshot: configSnapshot,
+	}
+	require.NoError(t, svc.turnService.UpdateTurn(ctx, turn))
 
 	svc.persistTurnPromptMetadata(ctx, &lifecycle.AgentStreamEventPayload{
 		TaskID:    "t1",
@@ -529,6 +543,7 @@ func TestPersistTurnPromptMetadata(t *testing.T) {
 	updated, err := repo.GetTurn(ctx, turn.ID)
 	require.NoError(t, err)
 	require.Equal(t, "gpt-5.5", updated.Metadata["model"])
+	require.Equal(t, configSnapshot, updated.Metadata[models.TurnMetaKeyRuntimeConfigSnapshot])
 	require.Equal(t, "codex-acp", updated.Metadata["agent_type"])
 	require.Equal(t, "exec-1", updated.Metadata["agent_id"])
 	usage, ok := updated.Metadata["prompt_usage"].(map[string]interface{})
