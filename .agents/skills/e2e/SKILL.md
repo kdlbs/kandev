@@ -376,7 +376,7 @@ A test that flakes under parallel/sharded load is one of two things — decide w
 - **Scope Radix tooltip locators to the visible portal.** Radix can render an
   accessibility copy as well as the visible tooltip, so global test-id, text,
   or role locators may match multiple elements in strict mode. Start from a
-  open `[data-slot="tooltip-content"][data-state="open"]`, then locate its visible
+  open portal `[data-slot="tooltip-content"][data-state="open"]`, then locate its visible
   descendant. Do not assume the trigger's `aria-describedby` target is the
   visual portal. Use bounding-box assertions when relative placement matters.
 - **Use page object methods** like `clickSessionChatTab()` (stable `data-testid`) instead of `sessionTabByText("1")` (fragile text match) for session tabs.
