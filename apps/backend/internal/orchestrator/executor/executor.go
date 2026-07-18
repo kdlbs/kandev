@@ -269,6 +269,8 @@ type AgentProfileInfo struct {
 	AgentID                    string
 	AgentName                  string
 	Model                      string
+	Mode                       string
+	ConfigOptions              map[string]string
 	AutoApprove                bool
 	DangerouslySkipPermissions bool
 	CLIPassthrough             bool

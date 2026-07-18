@@ -12,6 +12,7 @@ type TurnConfigSnapshot = {
 };
 
 const TURN_CONFIG_SNAPSHOT_KEY = "runtime_config_snapshot";
+const RUNTIME_MODEL_CONFIG_ID = "model";
 
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value : null;
@@ -70,7 +71,7 @@ function humanizeConfigKey(key: string): string {
 function changedConfigOptions(snapshot: TurnConfigSnapshot): TurnConfigOption[] {
   const baseline = snapshot.config_baseline;
   return (snapshot.config_options ?? []).filter((option) => {
-    if (option.id === "model") return false;
+    if (option.id === RUNTIME_MODEL_CONFIG_ID) return false;
     return (
       baseline === undefined ||
       !Object.hasOwn(baseline, option.id) ||
@@ -85,8 +86,8 @@ export function formatMessageSessionConfig(
 ): string | null {
   const snapshot = parseTurnConfigSnapshot(turnMetadata);
   const model =
-    stringValue(messageMetadata?.model) ??
     stringValue(turnMetadata?.model) ??
+    stringValue(messageMetadata?.model) ??
     snapshot?.model ??
     null;
   if (!model) return null;

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"os/exec"
 	"sort"
 	"strings"
@@ -503,6 +504,8 @@ func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfile
 		"agent_id":                     profileInfo.AgentID,
 		"agent_name":                   profileInfo.AgentName,
 		"model":                        profileInfo.Model,
+		"mode":                         profileInfo.Mode,
+		"config_options":               maps.Clone(profileInfo.ConfigOptions),
 		"auto_approve":                 profileInfo.AutoApprove,
 		"dangerously_skip_permissions": profileInfo.DangerouslySkipPermissions,
 		"cli_passthrough":              profileInfo.CLIPassthrough,

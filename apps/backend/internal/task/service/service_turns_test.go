@@ -126,6 +126,20 @@ func TestStartTurnPersistsImmutableEffectiveRuntimeConfigSnapshot(t *testing.T) 
 	}
 }
 
+func TestBuildTurnRuntimeConfigSnapshotFallsBackToSelectorModel(t *testing.T) {
+	snapshot := buildTurnRuntimeConfigSnapshot(&models.TaskSession{
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyACPModelState: lifecycle.SessionModelsSnapshot{
+				CurrentModelID: "selector-model",
+			},
+		},
+	})
+
+	if snapshot.Model != "selector-model" {
+		t.Fatalf("snapshot model = %q, want selector-model", snapshot.Model)
+	}
+}
+
 func (nilTaskSessionRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
 	return nil, nil
 }

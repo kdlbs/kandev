@@ -111,6 +111,37 @@ func TestPrepareSession_Success(t *testing.T) {
 	}
 }
 
+func TestPrepareSessionSnapshotsProfileRuntimeConfig(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		resolveAgentProfileFunc: func(context.Context, string) (*AgentProfileInfo, error) {
+			return &AgentProfileInfo{
+				ProfileID:     "profile-123",
+				Model:         "gpt-5.6-sol",
+				Mode:          "agent",
+				ConfigOptions: map[string]string{"reasoning_effort": "high"},
+			}, nil
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+	task := &v1.Task{ID: "task-123", WorkspaceID: "workspace-123", Title: "Test Task"}
+
+	if _, err := executor.PrepareSession(
+		context.Background(), task, "profile-123", "executor-123", "", "step-123",
+	); err != nil {
+		t.Fatalf("PrepareSession failed: %v", err)
+	}
+
+	snapshot := repo.createTaskSessionCalls[0].AgentProfileSnapshot
+	if snapshot["mode"] != "agent" {
+		t.Fatalf("profile snapshot mode = %#v", snapshot["mode"])
+	}
+	options, ok := snapshot["config_options"].(map[string]string)
+	if !ok || options["reasoning_effort"] != "high" {
+		t.Fatalf("profile snapshot config options = %#v", snapshot["config_options"])
+	}
+}
+
 func TestPersistRuntimeModelMetadataStoresRuntimeConfigAndClearsContextWindow(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)

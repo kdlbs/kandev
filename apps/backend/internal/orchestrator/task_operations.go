@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -327,11 +328,13 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 				zap.Error(err))
 		} else if profileInfo != nil {
 			session.AgentProfileSnapshot = map[string]interface{}{
-				"id":         profileInfo.ProfileID,
-				"name":       profileInfo.ProfileName,
-				"agent_id":   profileInfo.AgentID,
-				"agent_name": profileInfo.AgentName,
-				"model":      profileInfo.Model,
+				"id":             profileInfo.ProfileID,
+				"name":           profileInfo.ProfileName,
+				"agent_id":       profileInfo.AgentID,
+				"agent_name":     profileInfo.AgentName,
+				"model":          profileInfo.Model,
+				"mode":           profileInfo.Mode,
+				"config_options": maps.Clone(profileInfo.ConfigOptions),
 			}
 		}
 		s.promoteSessionIfTaskHasNoPrimary(ctx, taskID, session)

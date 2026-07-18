@@ -75,12 +75,12 @@ describe("formatMessageSessionConfig", () => {
     );
   });
 
-  it("prefers actual message and turn models over the captured model", () => {
-    expect(formatMessageSessionConfig({ model: "message-model" }, turnMetadata())).toContain(
-      "message-model ·",
-    );
+  it("prefers provider-refined turn model over cached message and captured models", () => {
     expect(
-      formatMessageSessionConfig(undefined, { ...turnMetadata(), model: "turn-model" }),
+      formatMessageSessionConfig(
+        { model: "message-model" },
+        { ...turnMetadata(), model: "turn-model" },
+      ),
     ).toContain("turn-model ·");
   });
 
