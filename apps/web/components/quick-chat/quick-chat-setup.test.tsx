@@ -16,6 +16,16 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
+  useSettingsData: () => ({ agentProfiles: [{ id: "agent-a" }, { id: "agent-b" }] }),
+}));
+
+vi.mock("@/hooks/domains/workspace/use-workspaces", () => ({
+  useWorkspaces: () => ({
+    items: [{ id: "workspace-1", default_agent_profile_id: defaultAgentId }],
+  }),
+}));
+
 vi.mock("@/components/task-create-dialog-options", () => ({
   useAgentProfileOptions: () => [],
 }));

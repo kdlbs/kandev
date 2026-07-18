@@ -1,4 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const startConfigChat = vi.fn();
@@ -51,8 +53,23 @@ vi.mock("@/lib/api/domains/workspace-api", () => ({
 
 vi.mock("@/app/actions/workspaces", () => ({ updateWorkspaceAction: vi.fn() }));
 
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
+  useSettingsData: () => ({ agentProfiles: appState.agentProfiles.items }),
+}));
+
+vi.mock("@/hooks/domains/workspace/use-workspaces", () => ({
+  useWorkspaces: () => ({ items: appState.workspaces.items }),
+}));
+
 import { useConfigChat } from "./use-config-chat";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
+
+function renderConfigChatHook() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+  return renderHook(() => useConfigChat(WORKSPACE_ID), { wrapper });
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -69,7 +86,7 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
 
 describe("useConfigChat unified launch", () => {
   it("seeds and opens a typed Quick Chat session with one pending initial prompt", async () => {
-    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+    const { result } = renderConfigChatHook();
 
     await act(async () => {
       await result.current.startSession(CONFIG_PROFILE_ID, PROMPT);
@@ -95,7 +112,7 @@ describe("useConfigChat unified launch", () => {
   });
 
   it("registers a floating configuration session without opening the large dialog", async () => {
-    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+    const { result } = renderConfigChatHook();
 
     await act(async () => {
       await result.current.startSession(CONFIG_PROFILE_ID, PROMPT, { openInQuickChat: false });
@@ -112,7 +129,7 @@ describe("useConfigChat unified launch", () => {
   });
 
   it("starts a passthrough profile with its prompt instead of stranding it outside the terminal", async () => {
-    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+    const { result } = renderConfigChatHook();
 
     await act(async () => {
       await result.current.startSession(PASSTHROUGH_PROFILE_ID, PROMPT);
@@ -127,7 +144,7 @@ describe("useConfigChat unified launch", () => {
 
   it("waits for the selected profile before deciding how to deliver the prompt", async () => {
     appState.agentProfiles.items = [];
-    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+    const { result } = renderConfigChatHook();
 
     await act(async () => {
       await result.current.startSession(PASSTHROUGH_PROFILE_ID, PROMPT);
@@ -146,7 +163,7 @@ describe("useConfigChat unified launch", () => {
         }),
     );
     deleteTask.mockResolvedValue(undefined);
-    const { result } = renderHook(() => useConfigChat(WORKSPACE_ID));
+    const { result } = renderConfigChatHook();
 
     act(() => {
       void result.current.startSession(CONFIG_PROFILE_ID, PROMPT);
@@ -172,8 +189,8 @@ describe("useConfigChat launch serialization", () => {
           resolveStart = resolve;
         }),
     );
-    const first = renderHook(() => useConfigChat(WORKSPACE_ID));
-    const second = renderHook(() => useConfigChat(WORKSPACE_ID));
+    const first = renderConfigChatHook();
+    const second = renderConfigChatHook();
     let firstStart!: Promise<string | undefined>;
 
     act(() => {

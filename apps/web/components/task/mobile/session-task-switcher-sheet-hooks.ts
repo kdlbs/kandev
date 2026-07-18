@@ -17,7 +17,7 @@ import {
   hasPendingClarification,
   hasPendingPermissionRequest,
 } from "@/lib/utils/pending-clarification";
-import { toKanbanTask, workspaceModeFromMetadata } from "@/lib/kanban/map-task";
+import { toKanbanTask } from "@/lib/kanban/map-task";
 import {
   repositoryId as toRepositoryId,
   type TaskState,
@@ -540,7 +540,7 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
   const deleteActions = useSheetDeleteActions(store, queryClient, removeTaskFromBoard);
-  const detachActions = useTaskDetachDialog(store);
+  const detachActions = useTaskDetachDialog();
 
   const handleSelectTask = useCallback(
     (taskId: string) => {

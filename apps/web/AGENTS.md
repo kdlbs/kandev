@@ -79,7 +79,9 @@ lib/api/domains/                    # API clients
   streams, environment-scoped cleanup, and terminal/session UI.
 - Workspace repositories, repository branches/scripts, workflow lists, workflow
   snapshots, task details, session worktrees, feature flags, settings catalogs,
-  integrations, office data, and system data are TanStack Query data.
+  integrations, office data, system data (including storage maintenance), plugin
+  registry/configuration, agent subscription usage, and discovered repositories
+  are TanStack Query data.
 - `userSettings` is the retained server-backed persisted preference object;
   settings reads also seed `qk.settings.user()` so server-state consumers use
   Query where migrated.

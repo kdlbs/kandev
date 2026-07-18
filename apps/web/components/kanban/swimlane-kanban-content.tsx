@@ -22,7 +22,6 @@ import { MobileColumnTabs } from "./mobile-column-tabs";
 import { SwipeableColumns } from "./swipeable-columns";
 import { MobileDropTargets } from "./mobile-drop-targets";
 import { getKanbanColumnGridTemplate } from "./kanban-grid-template";
-import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
 import type { MoveTaskError } from "@/lib/kanban/move-task-error";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";

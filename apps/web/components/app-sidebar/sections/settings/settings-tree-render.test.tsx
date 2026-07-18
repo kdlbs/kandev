@@ -54,6 +54,10 @@ vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
   }),
 }));
 
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: () => false,
+}));
+
 vi.mock("@kandev/ui/collapsible", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   const CollapsibleContext = React.createContext(false);

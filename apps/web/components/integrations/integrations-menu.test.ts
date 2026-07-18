@@ -47,6 +47,15 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: useFeatureMock,
 }));
 
+vi.mock("@/hooks/domains/workspace/use-workspaces", () => ({
+  useWorkspaces: () => ({
+    items: activeWorkspaceRef.items,
+    activeId: activeWorkspaceRef.id,
+    activeWorkspace:
+      activeWorkspaceRef.items.find((workspace) => workspace.id === activeWorkspaceRef.id) ?? null,
+  }),
+}));
+
 function status(overrides: Partial<GitHubStatus>): GitHubStatus {
   return {
     authenticated: false,
@@ -271,7 +280,7 @@ describe("MobileIntegrationsSection", () => {
   function renderMobileSection(onNavigate = vi.fn()) {
     return {
       onNavigate,
-      ...render(createElement(MobileIntegrationsSection, { onNavigate })),
+      ...renderWithQuery(createElement(MobileIntegrationsSection, { onNavigate })),
     };
   }
 

@@ -76,6 +76,8 @@ export const qk = {
         "repositories",
         { includeScripts: params?.includeScripts ?? false },
       ] as const,
+    discoveredRepositories: (workspaceId: string) =>
+      ["workspaces", workspaceId, "discoveredRepositories"] as const,
     branches: (workspaceId: string, source: { repositoryId?: string; path?: string }) =>
       [
         "workspaces",
@@ -198,6 +200,7 @@ export const qk = {
     installJobs: () => ["settings", "agentInstallJobs"] as const,
     installJob: (jobId: string) => ["settings", "agentInstallJobs", jobId] as const,
     dynamicModels: (agentName: string) => ["settings", "agentModels", agentName] as const,
+    agentSubscriptionUsage: () => ["settings", "agentSubscriptionUsage"] as const,
     editors: () => ["settings", "editors"] as const,
     prompts: () => ["settings", "prompts"] as const,
     notificationProviders: () => ["settings", "notificationProviders"] as const,
@@ -208,6 +211,10 @@ export const qk = {
       ["settings", "sprites", "instances", id(secretId)] as const,
     systemHealth: () => ["settings", "systemHealth"] as const,
     runtimeFlags: () => ["settings", "runtimeFlags"] as const,
+  },
+  plugins: {
+    all: () => ["plugins"] as const,
+    config: (pluginId: string) => ["plugins", pluginId, "config"] as const,
   },
   office: {
     meta: () => ["office", "meta"] as const,
@@ -321,6 +328,9 @@ export const qk = {
     metrics: () => ["system", "metrics"] as const,
     updates: () => ["system", "updates"] as const,
     restartCapability: () => ["system", "restartCapability"] as const,
+    storageOverview: () => ["system", "storage", "overview"] as const,
+    storageRuns: (limit = 20) => ["system", "storage", "runs", { limit }] as const,
+    storageQuarantine: () => ["system", "storage", "quarantine"] as const,
   },
   automations: {
     list: (workspaceId: OptionalString) => ["automations", id(workspaceId)] as const,

@@ -8,7 +8,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/components/toast-provider";
 import {
   adoptStorageGoCache,
@@ -22,6 +22,12 @@ import {
   saveStorageSettings,
 } from "@/lib/api/domains/system-api";
 import type { StorageMaintenanceSettings, SystemJob } from "@/lib/types/system";
+import { qk } from "@/lib/query/keys";
+import {
+  storageOverviewQueryOptions,
+  storageQuarantineQueryOptions,
+  storageRunsQueryOptions,
+} from "@/lib/query/query-options";
 import { useSystemJob } from "./use-system-jobs";
 
 export type StoragePendingAction =
@@ -65,9 +71,8 @@ const MAX_TERMINAL_REFRESH_ATTEMPTS = 6;
 
 function useStorageActionRunner() {
   const { toast } = useToast();
-  const [pendingAction, setPendingAction] = useState<StoragePendingAction>("load");
+  const [pendingAction, setPendingAction] = useState<StoragePendingAction>(null);
   const [error, setError] = useState<string | null>(null);
-  const finishLoading = useCallback(() => setPendingAction(null), []);
   const perform = useCallback(
     async (
       action: Exclude<StoragePendingAction, "load" | null>,
@@ -89,12 +94,12 @@ function useStorageActionRunner() {
     },
     [toast],
   );
-  return { pendingAction, error, setError, finishLoading, perform };
+  return { pendingAction, error, setError, perform };
 }
 
-function useStorageActions(reload: Reload) {
+function useStorageActions(reload: Reload, initiallyLoading: boolean) {
   const { toast } = useToast();
-  const { pendingAction, error, setError, finishLoading, perform } = useStorageActionRunner();
+  const { pendingAction, error, setError, perform } = useStorageActionRunner();
   const [analysisJobId, setAnalysisJobId] = useState<string | null>(null);
   const [cleanupJobId, setCleanupJobId] = useState<string | null>(null);
   const [deleteJobId, setDeleteJobId] = useState<string | null>(null);
@@ -171,7 +176,7 @@ function useStorageActions(reload: Reload) {
   return {
     pendingAction,
     error,
-    finishLoading,
+    initialLoadPending: initiallyLoading,
     setError,
     save,
     analyze,
@@ -233,10 +238,10 @@ function useReloadCompletedJobs(
 }
 
 export function useStorageMaintenance() {
-  const storage = useAppStore((state) => state.system.storage);
-  const setOverview = useAppStore((state) => state.setSystemStorageOverview);
-  const setRuns = useAppStore((state) => state.setSystemStorageRuns);
-  const setQuarantine = useAppStore((state) => state.setSystemStorageQuarantine);
+  const queryClient = useQueryClient();
+  const overviewQuery = useQuery(storageOverviewQueryOptions());
+  const runsQuery = useQuery(storageRunsQueryOptions(20));
+  const quarantineQuery = useQuery(storageQuarantineQueryOptions());
   const reloadGeneration = useRef(0);
   const reload = useCallback(async () => {
     const generation = ++reloadGeneration.current;
@@ -246,17 +251,14 @@ export function useStorageMaintenance() {
       fetchStorageQuarantine(),
     ]);
     if (generation !== reloadGeneration.current) return;
-    setOverview(overview);
-    setRuns(runs);
-    setQuarantine(quarantine);
-  }, [setOverview, setQuarantine, setRuns]);
-  const { finishLoading, setError, ...actions } = useStorageActions(reload);
-
-  useEffect(() => {
-    void reload()
-      .catch((requestError) => setError(messageFromError(requestError)))
-      .finally(finishLoading);
-  }, [finishLoading, reload, setError]);
+    queryClient.setQueryData(qk.system.storageOverview(), overview);
+    queryClient.setQueryData(qk.system.storageRuns(20), runs);
+    queryClient.setQueryData(qk.system.storageQuarantine(), quarantine);
+  }, [queryClient]);
+  const initiallyLoading =
+    overviewQuery.isLoading || runsQuery.isLoading || quarantineQuery.isLoading;
+  const { initialLoadPending, setError, ...actions } = useStorageActions(reload, initiallyLoading);
+  const queryError = overviewQuery.error ?? runsQuery.error ?? quarantineQuery.error;
   useReloadCompletedJobs(
     reload,
     setError,
@@ -264,5 +266,13 @@ export function useStorageMaintenance() {
     actions.cleanupJob,
     actions.deleteJob,
   );
-  return { ...storage, ...actions, reload };
+  return {
+    overview: overviewQuery.data ?? null,
+    runs: runsQuery.data ?? [],
+    quarantine: quarantineQuery.data ?? [],
+    ...actions,
+    pendingAction: actions.pendingAction ?? (initialLoadPending ? "load" : null),
+    error: actions.error ?? (queryError ? messageFromError(queryError) : null),
+    reload,
+  };
 }

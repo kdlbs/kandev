@@ -99,3 +99,16 @@ describe("query keys", () => {
     expect(() => JSON.stringify(qk.office.taskSearch("workspace-1", "needle", 10))).not.toThrow();
   });
 });
+
+describe("post-rebase query keys", () => {
+  it("scopes post-rebase server-state domains", () => {
+    expect(qk.plugins.config("plugin-1")).toEqual(["plugins", "plugin-1", "config"]);
+    expect(qk.system.storageRuns(20)).toEqual(["system", "storage", "runs", { limit: 20 }]);
+    expect(qk.settings.agentSubscriptionUsage()).toEqual(["settings", "agentSubscriptionUsage"]);
+    expect(qk.workspaces.discoveredRepositories("workspace-1")).toEqual([
+      "workspaces",
+      "workspace-1",
+      "discoveredRepositories",
+    ]);
+  });
+});

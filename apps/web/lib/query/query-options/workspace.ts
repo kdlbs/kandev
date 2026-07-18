@@ -7,6 +7,7 @@ import {
   listRepositoryScripts,
   listWorkspaces,
 } from "@/lib/api/domains/workspace-api";
+import { discoverRepositoriesAction } from "@/app/actions/workspaces";
 import { qk } from "../keys";
 import { withSignal } from "./utils";
 
@@ -17,6 +18,15 @@ export function workspacesQueryOptions() {
       const response = await listWorkspaces(withSignal(signal));
       return response.workspaces;
     },
+  });
+}
+
+export function discoveredRepositoriesQueryOptions(workspaceId: string) {
+  return queryOptions({
+    queryKey: qk.workspaces.discoveredRepositories(workspaceId),
+    queryFn: async () => (await discoverRepositoriesAction(workspaceId)).repositories ?? [],
+    enabled: Boolean(workspaceId),
+    staleTime: 0,
   });
 }
 

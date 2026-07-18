@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getPluginConfig, updatePluginConfig } from "@/lib/api/domains/plugins-api";
+import { updatePluginConfig } from "@/lib/api/domains/plugins-api";
+import { pluginConfigQueryOptions } from "@/lib/query/query-options";
 import {
   SECRET_MASK,
   buildInitialValues,
@@ -29,6 +31,11 @@ function maskSecretsIn(
   return masked;
 }
 
+function configErrorMessage(error: unknown): string | null {
+  if (!error) return null;
+  return error instanceof Error ? error.message : "Failed to load plugin settings";
+}
+
 /**
  * Load/edit/save state for one plugin's schema-driven settings form.
  * Mirrors use-plugin-actions' local-hook pattern: fetch + toast wiring lives
@@ -40,40 +47,22 @@ export function usePluginConfigForm(plugin: PluginRecord | null) {
   const fields = useMemo(() => parseConfigSchema(plugin?.config_schema), [plugin?.config_schema]);
   const [values, setValues] = useState<FormValues>({});
   const [initialValues, setInitialValues] = useState<FormValues>({});
-  const [configLoading, setConfigLoading] = useState(false);
-  const [configError, setConfigError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
   const pluginId = plugin?.id ?? null;
   const hasFields = fields.length > 0;
+  const queryClient = useQueryClient();
+  const configQuery = useQuery({
+    ...pluginConfigQueryOptions(pluginId ?? ""),
+    enabled: Boolean(pluginId && hasFields),
+  });
 
   useEffect(() => {
-    if (!pluginId || !hasFields) return;
-    let cancelled = false;
-    setConfigLoading(true);
-    setConfigError(null);
-    getPluginConfig(pluginId, { cache: "no-store" })
-      .then((config) => {
-        if (cancelled) return;
-        const initial = buildInitialValues(fields, config);
-        setValues(initial);
-        setInitialValues(initial);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setConfigError(err instanceof Error ? err.message : "Failed to load plugin settings");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setConfigLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // fields is derived solely from plugin.config_schema; pluginId is the
-    // real reload trigger.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pluginId, hasFields]);
+    if (!pluginId || !hasFields || configQuery.data === undefined) return;
+    const initial = buildInitialValues(fields, configQuery.data);
+    setValues(initial);
+    setInitialValues(initial);
+  }, [configQuery.data, fields, hasFields, pluginId]);
 
   const isDirty = useMemo(
     () => fields.some((field) => values[field.name] !== initialValues[field.name]),
@@ -104,7 +93,10 @@ export function usePluginConfigForm(plugin: PluginRecord | null) {
     // transient hiccup while the plugin restarts) must not be reported as a
     // save failure, and the typed cleartext secret must not stay on screen.
     try {
-      const refreshed = await getPluginConfig(pluginId, { cache: "no-store" });
+      const refreshed = await queryClient.fetchQuery({
+        ...pluginConfigQueryOptions(pluginId),
+        staleTime: 0,
+      });
       const initial = buildInitialValues(fields, refreshed);
       setValues(initial);
       setInitialValues(initial);
@@ -122,8 +114,8 @@ export function usePluginConfigForm(plugin: PluginRecord | null) {
     fields,
     values,
     initialValues,
-    configLoading,
-    configError,
+    configLoading: configQuery.isLoading,
+    configError: configErrorMessage(configQuery.error),
     saveStatus,
     isDirty,
     canSave: missing.length === 0,

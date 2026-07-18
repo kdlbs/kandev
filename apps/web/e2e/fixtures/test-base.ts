@@ -274,16 +274,16 @@ test.beforeEach(async ({ apiClient, seedData }) => {
 
 export { expect } from "@playwright/test";
 
-async function setupPage(page: Page, backend: BackendContext): Promise<void> {
-  function defaultTaskCreateLastUsed(seedData: SeedData) {
-    return {
-      repository_id: seedData.repositoryId,
-      branch: "main",
-      agent_profile_id: seedData.agentProfileId,
-      executor_profile_id: seedData.worktreeExecutorProfileId,
-    };
-  }
+function defaultTaskCreateLastUsed(seedData: SeedData) {
+  return {
+    repository_id: seedData.repositoryId,
+    branch: "main",
+    agent_profile_id: seedData.agentProfileId,
+    executor_profile_id: seedData.worktreeExecutorProfileId,
+  };
+}
 
+async function setupPage(page: Page, backend: BackendContext): Promise<void> {
   await page.addInitScript(
     ({ backendPort }: { backendPort: string }) => {
       localStorage.setItem("kandev.onboarding.completed", "true");

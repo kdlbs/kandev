@@ -85,6 +85,10 @@ vi.mock("@/hooks/use-workflows", () => ({
   useEnsureWorkspaceWorkflows: () => {},
 }));
 
+vi.mock("@/hooks/domains/features/use-feature", () => ({
+  useFeature: (name: keyof typeof storeState.features) => storeState.features[name],
+}));
+
 const storeState = {
   features: {
     office: false,

@@ -12,6 +12,7 @@ type MockState = {
   tasks: { activeSessionId: string | null };
   taskSessions: { items: Record<string, { agent_profile_id?: string; repository_id?: string }> };
   messages: { bySession: Record<string, Array<{ author_type?: string; content?: string }>> };
+  userSettings: { taskCreateLastUsed: null };
 };
 
 const capturedSubmitWorkflowIds: Array<string | null> = [];
@@ -156,6 +157,7 @@ describe("NewSubtaskDialog", () => {
       tasks: { activeSessionId: null },
       taskSessions: { items: {} },
       messages: { bySession: {} },
+      userSettings: { taskCreateLastUsed: null },
     };
   });
 

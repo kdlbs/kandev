@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { StateProvider } from "@/components/state-provider";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { makeQueryClient } from "@/lib/query/client";
 import type { StorageMaintenanceSettings, StorageOverviewResponse } from "@/lib/types/system";
 
 const mocks = vi.hoisted(() => ({
@@ -91,7 +92,7 @@ const cleanupJob = {
 };
 
 function wrapper({ children }: { children: ReactNode }) {
-  return <StateProvider>{children}</StateProvider>;
+  return <QueryClientProvider client={makeQueryClient()}>{children}</QueryClientProvider>;
 }
 
 beforeEach(() => {
@@ -109,7 +110,7 @@ describe("useStorageMaintenance", () => {
   it("loads overview, run history, and quarantine through the domain controller", async () => {
     const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
     await waitFor(() => expect(result.current.overview).toEqual(overview));
-    expect(mocks.fetchRuns).toHaveBeenCalledWith(20);
+    expect(mocks.fetchRuns).toHaveBeenCalledWith(20, expect.any(Object));
     expect(mocks.fetchQuarantine).toHaveBeenCalledTimes(1);
     expect(result.current.pendingAction).toBeNull();
   });
@@ -203,15 +204,22 @@ describe("useStorageMaintenance terminal refresh", () => {
       });
       const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
       await act(async () => {
-        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(0);
       });
-      expect(result.current.overview).toEqual(overview);
+      await vi.waitFor(() => expect(result.current.overview).toEqual(overview));
 
       mocks.fetchOverview.mockRejectedValue(new Error("refresh unavailable"));
       await act(async () => {
         await result.current.runNow();
         await vi.advanceTimersByTimeAsync(0);
       });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.cleanupJob?.state).toBe("succeeded");
       expect(mocks.fetchOverview).toHaveBeenCalledTimes(2);
 
       await act(async () => {

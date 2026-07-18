@@ -127,6 +127,7 @@ func TestMapUserSettingsStateKeys(t *testing.T) {
 	want := []string{
 		"changesPanelLayout",
 		"chatSubmitKey",
+		"confirmTaskArchive",
 		"defaultEditorId",
 		"defaultUtilityAgentId",
 		"enablePreviewOnClick",
@@ -143,6 +144,9 @@ func TestMapUserSettingsStateKeys(t *testing.T) {
 		"savedLayouts",
 		"shellOptions",
 		"showReleaseNotification",
+		"sidebarActiveViewId",
+		"sidebarDraft",
+		"sidebarTaskPrefs",
 		"sidebarViews",
 		"systemMetricsDisplay",
 		"taskCreateLastUsed",

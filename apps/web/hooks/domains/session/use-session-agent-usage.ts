@@ -1,44 +1,18 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAppStore } from "@/components/state-provider";
-import { listAgentSubscriptionUsage } from "@/lib/api";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { agentSubscriptionUsageQueryOptions } from "@/lib/query/query-options/settings";
 import type { AgentSubscriptionUsage } from "@/lib/types/http";
 
-// Module-level memo: the last usage listing, served instantly on the next
-// tooltip open while a fresh fetch is in flight. One in-flight request is
-// shared between concurrent consumers.
-let lastAgents: AgentSubscriptionUsage[] | null = null;
-let inflight: Promise<AgentSubscriptionUsage[]> | null = null;
-
-function fetchFreshAgentUsage(): Promise<AgentSubscriptionUsage[]> {
-  if (!inflight) {
-    inflight = listAgentSubscriptionUsage({ cache: "no-store", fresh: true })
-      .then((response) => {
-        lastAgents = response.agents ?? [];
-        return lastAgents;
-      })
-      .finally(() => {
-        inflight = null;
-      });
-  }
-  return inflight;
-}
-
-/** Test-only: clear the module-level memo between tests. */
-export function resetSessionAgentUsageCacheForTest() {
-  lastAgents = null;
-  inflight = null;
-}
-
-/** Resolves the session's agent name (e.g. "claude-acp") from the store. */
+/** Resolves the session's agent name (e.g. "claude-acp") from live session and settings data. */
 export function useSessionAgentName(sessionId: string | null): string | null {
   const profileId = useAppStore((state) =>
     sessionId ? state.taskSessions.items[sessionId]?.agent_profile_id : undefined,
   );
-  const agentName = useAppStore((state) =>
-    profileId
-      ? state.agentProfiles.items.find((profile) => profile.id === profileId)?.agent_name
-      : undefined,
-  );
+  const { agentProfiles } = useSettingsData(Boolean(profileId));
+  const agentName = profileId
+    ? agentProfiles.find((profile) => profile.id === profileId)?.agent_name
+    : undefined;
   return agentName ?? null;
 }
 
@@ -51,26 +25,11 @@ export function useSessionAgentName(sessionId: string | null): string | null {
  */
 export function useSessionAgentUsage(sessionId: string | null): AgentSubscriptionUsage | null {
   const agentName = useSessionAgentName(sessionId);
-  const [agents, setAgents] = useState<AgentSubscriptionUsage[]>(lastAgents ?? []);
-
-  useEffect(() => {
-    if (!agentName) return;
-    let active = true;
-    fetchFreshAgentUsage()
-      .then((list) => {
-        if (active) setAgents(list);
-      })
-      .catch(() => {
-        // Don't keep presenting stale usage as live: drop the memo so the
-        // next open refetches, and hide the rows for this open.
-        lastAgents = null;
-        if (active) setAgents([]);
-      });
-    return () => {
-      active = false;
-    };
-  }, [agentName]);
-
+  const query = useQuery({
+    ...agentSubscriptionUsageQueryOptions(true),
+    enabled: Boolean(agentName),
+    staleTime: 15_000,
+  });
   if (!agentName) return null;
-  return agents.find((agent) => agent.agent_id === agentName) ?? null;
+  return query.data?.agents.find((agent) => agent.agent_id === agentName) ?? null;
 }

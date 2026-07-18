@@ -20,6 +20,7 @@ import {
   listExecutors,
   listInstallJobs,
   listNotificationProviders,
+  listAgentSubscriptionUsage,
   listPrompts,
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
@@ -103,6 +104,14 @@ export function availableAgentsQueryOptions() {
   return queryOptions({
     queryKey: qk.settings.availableAgents(),
     queryFn: ({ signal }) => listAvailableAgents(withSignal(signal)),
+  });
+}
+
+export function agentSubscriptionUsageQueryOptions(fresh = false) {
+  return queryOptions({
+    queryKey: qk.settings.agentSubscriptionUsage(),
+    queryFn: ({ signal }) =>
+      listAgentSubscriptionUsage({ ...withSignal(signal), cache: "no-store", fresh }),
   });
 }
 

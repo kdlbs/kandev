@@ -8,6 +8,9 @@ import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
+import { makeQueryClient } from "@/lib/query/client";
+import { qk } from "@/lib/query/keys";
 import type { PluginRecord, SyncResult } from "@/lib/types/plugins";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } }));
@@ -80,7 +83,6 @@ vi.mock("@/hooks/domains/features/use-feature", () => ({
 
 let storeState: Record<string, unknown> = {};
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: Record<string, unknown>) => unknown) => selector(storeState),
   useAppStoreApi: () => ({
     getState: () => storeState,
     setState: vi.fn(),
@@ -130,15 +132,24 @@ function installedPlugin(overrides: Partial<PluginRecord> = {}): PluginRecord {
   });
 }
 
+let queryClient: QueryClient;
+
 function setStoreState(plugins: PluginRecord[]) {
-  storeState = {
-    plugins: { items: plugins, loading: false, loaded: true, error: null },
-    setPlugins: vi.fn(),
-    setPluginsLoading: vi.fn(),
-    setPluginsError: vi.fn(),
-    upsertPlugin: vi.fn(),
-    removePlugin: vi.fn(),
-  };
+  storeState = {};
+  queryClient = makeQueryClient();
+  queryClient.setQueryData(qk.plugins.all(), plugins);
+}
+
+function renderPage() {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <PluginsSettingsPage />
+    </QueryClientProvider>,
+  );
+}
+
+function cachedPlugins(): PluginRecord[] {
+  return queryClient.getQueryData<PluginRecord[]>(qk.plugins.all()) ?? [];
 }
 
 function emptySyncResult(overrides: Partial<SyncResult> = {}): SyncResult {
@@ -163,7 +174,7 @@ describe("PluginsSettingsPage", () => {
     featureEnabled = false;
     setStoreState([]);
 
-    const { container } = render(<PluginsSettingsPage />);
+    const { container } = renderPage();
 
     expect(container.firstChild).toBeNull();
   });
@@ -171,7 +182,7 @@ describe("PluginsSettingsPage", () => {
   it("shows an empty state when there are no plugins", () => {
     setStoreState([]);
 
-    render(<PluginsSettingsPage />);
+    renderPage();
 
     expect(screen.getByText(/no plugins/i)).toBeTruthy();
   });
@@ -182,7 +193,7 @@ describe("PluginsSettingsPage", () => {
       activePlugin({ id: "unsigned-one", display_name: "Unsigned Plugin", signed: false }),
     ]);
 
-    render(<PluginsSettingsPage />);
+    renderPage();
 
     expect(screen.getByText("Acme Tools")).toBeTruthy();
     expect(screen.getByText(/acme-tools.*v1\.0\.0/)).toBeTruthy();
@@ -193,13 +204,12 @@ describe("PluginsSettingsPage", () => {
   it("disables an active plugin: calls the API, unloads the bundle, and updates the store", async () => {
     setStoreState([activePlugin()]);
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByRole("button", { name: /disable/i }));
 
     await vi.waitFor(() => expect(disablePluginSpy).toHaveBeenCalledWith(PLUGIN_ID));
     expect(unloadPluginSpy).toHaveBeenCalledWith(PLUGIN_ID);
-    const upsertPlugin = storeState.upsertPlugin as ReturnType<typeof vi.fn>;
-    expect(upsertPlugin).toHaveBeenCalledWith(
+    expect(cachedPlugins()).toContainEqual(
       expect.objectContaining({ id: PLUGIN_ID, status: "disabled" }),
     );
   });
@@ -207,12 +217,11 @@ describe("PluginsSettingsPage", () => {
   it("enables a disabled plugin: calls the API, updates the store, and reloads the bundle", async () => {
     setStoreState([activePlugin({ status: "disabled" })]);
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByRole("button", { name: /enable/i }));
 
     await vi.waitFor(() => expect(enablePluginSpy).toHaveBeenCalledWith(PLUGIN_ID));
-    const upsertPlugin = storeState.upsertPlugin as ReturnType<typeof vi.fn>;
-    expect(upsertPlugin).toHaveBeenCalledWith(
+    expect(cachedPlugins()).toContainEqual(
       expect.objectContaining({ id: PLUGIN_ID, status: "active" }),
     );
     await vi.waitFor(() =>
@@ -226,20 +235,19 @@ describe("PluginsSettingsPage", () => {
   it("uninstalls a plugin after confirmation: calls the API, unloads the bundle, and removes it from the store", async () => {
     setStoreState([activePlugin()]);
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByRole("button", { name: /uninstall/i }));
     fireEvent.click(screen.getByRole("button", { name: /confirm uninstall/i }));
 
     await vi.waitFor(() => expect(uninstallPluginSpy).toHaveBeenCalledWith(PLUGIN_ID));
     expect(unloadPluginSpy).toHaveBeenCalledWith(PLUGIN_ID);
-    const removePlugin = storeState.removePlugin as ReturnType<typeof vi.fn>;
-    expect(removePlugin).toHaveBeenCalledWith(PLUGIN_ID);
+    expect(cachedPlugins()).toEqual([]);
   });
 
   it("does not uninstall when the confirmation dialog is cancelled", () => {
     setStoreState([activePlugin()]);
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByRole("button", { name: /uninstall/i }));
     fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
 
@@ -251,7 +259,7 @@ describe("PluginsSettingsPage install dialog", () => {
   it("installs a plugin from a URL: calls the API, loads the bundle, and updates the store", async () => {
     setStoreState([]);
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
     fireEvent.change(screen.getByTestId("install-plugin-url-input"), {
       target: { value: NEW_PLUGIN_URL },
@@ -259,8 +267,7 @@ describe("PluginsSettingsPage install dialog", () => {
     fireEvent.click(screen.getByTestId("install-plugin-url-submit"));
 
     await vi.waitFor(() => expect(installPluginFromUrlSpy).toHaveBeenCalledWith(NEW_PLUGIN_URL));
-    const upsertPlugin = storeState.upsertPlugin as ReturnType<typeof vi.fn>;
-    expect(upsertPlugin).toHaveBeenCalledWith(expect.objectContaining({ id: NEW_PLUGIN_ID }));
+    expect(cachedPlugins()).toContainEqual(expect.objectContaining({ id: NEW_PLUGIN_ID }));
     await vi.waitFor(() =>
       expect(loadPluginsSpy).toHaveBeenCalledWith(
         [
@@ -280,7 +287,7 @@ describe("PluginsSettingsPage install dialog", () => {
       type: "application/gzip",
     });
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
     // Radix TabsTrigger switches tabs on mousedown, not click (see
     // @radix-ui/react-tabs) — fireEvent.click alone never fires it.
@@ -291,8 +298,7 @@ describe("PluginsSettingsPage install dialog", () => {
     fireEvent.click(screen.getByTestId("install-plugin-upload-submit"));
 
     await vi.waitFor(() => expect(installPluginUploadSpy).toHaveBeenCalledWith(file));
-    const upsertPlugin = storeState.upsertPlugin as ReturnType<typeof vi.fn>;
-    expect(upsertPlugin).toHaveBeenCalledWith(expect.objectContaining({ id: NEW_PLUGIN_ID }));
+    expect(cachedPlugins()).toContainEqual(expect.objectContaining({ id: NEW_PLUGIN_ID }));
   });
 });
 
@@ -303,7 +309,7 @@ describe("PluginsSettingsPage install dialog state reset", () => {
       type: "application/gzip",
     });
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
     fireEvent.mouseDown(screen.getByTestId("install-plugin-tab-upload"));
     fireEvent.change(screen.getByTestId("install-plugin-file-input"), {
@@ -334,7 +340,7 @@ describe("PluginsSettingsPage install dialog state reset", () => {
     });
     setStoreState([]);
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
     fireEvent.change(screen.getByTestId("install-plugin-url-input"), {
       target: { value: NEW_PLUGIN_URL },
@@ -347,8 +353,7 @@ describe("PluginsSettingsPage install dialog state reset", () => {
       ),
     );
     expect(toast.success).not.toHaveBeenCalled();
-    const upsertPlugin = storeState.upsertPlugin as ReturnType<typeof vi.fn>;
-    expect(upsertPlugin).toHaveBeenCalledWith(
+    expect(cachedPlugins()).toContainEqual(
       expect.objectContaining({ id: NEW_PLUGIN_ID, status: "error" }),
     );
   });
@@ -359,7 +364,7 @@ describe("PluginsSettingsPage install dialog state reset", () => {
     );
     setStoreState([]);
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByTestId(INSTALL_TRIGGER_TESTID));
     fireEvent.change(screen.getByTestId("install-plugin-url-input"), {
       target: { value: "https://example.test/bad.tar.gz" },
@@ -378,15 +383,14 @@ describe("PluginsSettingsPage sync button", () => {
     syncPluginsSpy.mockResolvedValueOnce(emptySyncResult({ added: ["sideloaded-plugin"] }));
     const callsBeforeClick = listPluginsSpy.mock.calls.length;
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByTestId(SYNC_BUTTON_TESTID));
 
     await vi.waitFor(() => expect(syncPluginsSpy).toHaveBeenCalled());
     await vi.waitFor(() =>
       expect(listPluginsSpy.mock.calls.length).toBeGreaterThan(callsBeforeClick),
     );
-    const setPlugins = storeState.setPlugins as ReturnType<typeof vi.fn>;
-    await vi.waitFor(() => expect(setPlugins).toHaveBeenCalledWith([]));
+    await vi.waitFor(() => expect(cachedPlugins()).toEqual([]));
     await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Sync: 1 sideloaded"));
   });
 
@@ -394,7 +398,7 @@ describe("PluginsSettingsPage sync button", () => {
     setStoreState([]);
     syncPluginsSpy.mockResolvedValueOnce(emptySyncResult());
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     fireEvent.click(screen.getByTestId(SYNC_BUTTON_TESTID));
 
     await vi.waitFor(() => expect(toast.success).toHaveBeenCalledWith("Everything up to date"));
@@ -408,7 +412,7 @@ describe("PluginsSettingsPage sync button", () => {
       }),
     );
 
-    render(<PluginsSettingsPage />);
+    renderPage();
     expect(screen.queryByTestId("plugins-sync-errors")).toBeNull();
     fireEvent.click(screen.getByTestId(SYNC_BUTTON_TESTID));
 
@@ -421,10 +425,7 @@ describe("PluginsSettingsPage sync button", () => {
     setStoreState([]);
     syncPluginsSpy.mockRejectedValueOnce(new Error("backend unreachable"));
 
-    render(<PluginsSettingsPage />);
-    // Let the mount-triggered usePlugins() load settle before capturing the
-    // baseline call count, so it only reflects the click below.
-    await vi.waitFor(() => expect(listPluginsSpy).toHaveBeenCalled());
+    renderPage();
     const callsBeforeClick = listPluginsSpy.mock.calls.length;
 
     fireEvent.click(screen.getByTestId(SYNC_BUTTON_TESTID));

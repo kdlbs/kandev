@@ -22,7 +22,6 @@ import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialo
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { useCachedRepositories } from "@/hooks/domains/workspace/use-repository-cache";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
-import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import { useDetachTask } from "@/hooks/use-detach-task";
 import { sortIdsByCreatedDesc } from "@/lib/kanban/task-order";
 import { workflowSnapshotQueryData } from "@/lib/query/workflow-snapshot-cache";

@@ -510,7 +510,7 @@ export function useSidebarActions(
 
   const archiveActions = useArchiveActions(taskById);
   const deleteActions = useDeleteActions(store, removeTaskFromBoard, taskById);
-  const detachActions = useTaskDetachDialog(store);
+  const detachActions = useTaskDetachDialog();
   const linkActions = useSidebarLinkActions(linkTaskById);
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);

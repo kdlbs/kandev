@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { makeQueryClient } from "@/lib/query/client";
 import { useDiscoveredRepositories } from "./use-discovered-repositories";
 import { discoverRepositoriesAction } from "@/app/actions/workspaces";
 import type { LocalRepository } from "@/lib/types/http";
@@ -22,10 +25,13 @@ function deferred() {
 }
 
 function renderDiscovery(open: boolean, ws: string | null) {
+  const queryClient = makeQueryClient();
   return renderHook(
     ({ o, w }: { o: boolean; w: string | null }) => useDiscoveredRepositories(o, w),
     {
       initialProps: { o: open, w: ws },
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(QueryClientProvider, { client: queryClient }, children),
     },
   );
 }

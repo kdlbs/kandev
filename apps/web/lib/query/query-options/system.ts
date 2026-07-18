@@ -6,6 +6,9 @@ import {
   fetchLogFiles,
   fetchLogTail,
   fetchRestartCapability,
+  fetchStorageOverview,
+  fetchStorageQuarantine,
+  fetchStorageRuns,
   fetchSystemInfo,
   fetchSystemJob,
   fetchUpdates,
@@ -91,5 +94,26 @@ export function restartCapabilityQueryOptions() {
   return queryOptions({
     queryKey: qk.system.restartCapability(),
     queryFn: ({ signal }) => fetchRestartCapability(withSignal(signal)),
+  });
+}
+
+export function storageOverviewQueryOptions() {
+  return queryOptions({
+    queryKey: qk.system.storageOverview(),
+    queryFn: ({ signal }) => fetchStorageOverview(withSignal(signal)),
+  });
+}
+
+export function storageRunsQueryOptions(limit = 20) {
+  return queryOptions({
+    queryKey: qk.system.storageRuns(limit),
+    queryFn: ({ signal }) => fetchStorageRuns(limit, withSignal(signal)),
+  });
+}
+
+export function storageQuarantineQueryOptions() {
+  return queryOptions({
+    queryKey: qk.system.storageQuarantine(),
+    queryFn: ({ signal }) => fetchStorageQuarantine(withSignal(signal)),
   });
 }

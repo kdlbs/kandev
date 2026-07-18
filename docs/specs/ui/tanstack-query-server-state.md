@@ -366,3 +366,16 @@ Post-rebase audit completed locally on 2026-07-15 after rebasing onto
   preference/layout state, so no additional server-state migration was needed.
 - Full local format, typecheck, test, and lint passed, including 635 web test
   files (4,781 passed, 4 skipped) plus backend, CLI, script, and harness checks.
+
+Post-rebase audit completed locally on 2026-07-18 after rebasing onto
+`origin/main` at `8fae44fb`:
+
+- Preserved upstream configuration chat, mobile task navigation, task detach,
+  multi-branch review, execution-profile routing, and plugin UI behavior while
+  resolving the migration conflicts.
+- Migrated the upstream plugin registry and plugin configuration, storage
+  maintenance overview/history/quarantine, agent subscription usage, and
+  repository discovery caches to typed TanStack Query keys and options.
+- Removed the newly introduced plugin and storage Zustand server-state slices;
+  plugin bundle registration remains a runtime host concern and task/session
+  indexes remain in the documented live-state exceptions.

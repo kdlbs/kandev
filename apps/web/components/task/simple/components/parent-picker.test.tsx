@@ -1,7 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useEffect, type ReactNode } from "react";
-import { StateProvider, useAppStore } from "@/components/state-provider";
+import type { ReactNode } from "react";
+import { StateProvider } from "@/components/state-provider";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { makeQueryClient } from "@/lib/query/client";
+import { officeTasksInfiniteQueryOptions } from "@/lib/query/query-options";
 import { TaskOptimisticContextProvider } from "@/hooks/use-optimistic-task-mutation";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
 import type { Task } from "@/app/office/tasks/[id]/types";
@@ -75,20 +78,25 @@ const candidates = [
   },
 ] as OfficeTask[];
 
-function SeedTasks() {
-  const setTasks = useAppStore((state) => state.setTasks);
-  useEffect(() => setTasks(candidates), [setTasks]);
-  return null;
-}
-
 function Wrapper({ children }: { children: ReactNode }) {
+  const queryClient = makeQueryClient();
+  const options = officeTasksInfiniteQueryOptions("ws-1", {
+    limit: 50,
+    sort: "updated_at",
+    order: "desc",
+  });
+  queryClient.setQueryData(options.queryKey, {
+    pages: [{ tasks: candidates }],
+    pageParams: [undefined],
+  });
   return (
-    <StateProvider>
-      <SeedTasks />
-      <TaskOptimisticContextProvider value={{ task, applyPatch: vi.fn(), restore: vi.fn() }}>
-        {children}
-      </TaskOptimisticContextProvider>
-    </StateProvider>
+    <QueryClientProvider client={queryClient}>
+      <StateProvider initialState={{ workspaces: { activeId: "ws-1" } }}>
+        <TaskOptimisticContextProvider value={{ task, applyPatch: vi.fn(), restore: vi.fn() }}>
+          {children}
+        </TaskOptimisticContextProvider>
+      </StateProvider>
+    </QueryClientProvider>
   );
 }
 

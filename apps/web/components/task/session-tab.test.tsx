@@ -25,7 +25,11 @@ type MockState = {
 let mockState: MockState;
 
 vi.mock("@tabler/icons-react", () => ({
+  IconCheck: () => null,
+  IconInfoCircle: () => null,
+  IconLoader2: () => null,
   IconStar: () => <span data-testid="primary-star" />,
+  IconX: () => null,
 }));
 
 vi.mock("dockview-react", () => ({
@@ -53,6 +57,11 @@ vi.mock("@kandev/ui/alert-dialog", () => ({
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: MockState) => unknown) => selector(mockState),
+  useAppStoreApi: () => ({ getState: () => mockState }),
+}));
+
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: vi.fn() }),
 }));
 
 vi.mock("@/hooks/domains/session/use-session-actions", () => ({

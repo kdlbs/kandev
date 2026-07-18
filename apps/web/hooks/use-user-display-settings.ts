@@ -8,8 +8,6 @@ import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { userSettingsQueryOptions } from "@/lib/query/query-options/settings";
 import { mapUserSettingsQueryData } from "@/hooks/domains/settings/user-settings-query-data";
-import { getLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { repositoryId, type Repository } from "@/lib/types/http";
 import { DEFAULT_TASKS_LIST_GROUP, DEFAULT_TASKS_LIST_SORT } from "@/lib/tasks/tasks-list-options";
 import {
@@ -91,39 +89,9 @@ function carryForwardSidebarSettings(current: DisplaySettings) {
   };
 }
 
-function emptyTaskCreateLastUsed(): DisplaySettings["taskCreateLastUsed"] {
-  return {
-    repositoryId: null,
-    branch: null,
-    agentProfileId: null,
-    executorProfileId: null,
-  };
-}
-
-function hasTaskCreateLastUsed(value: DisplaySettings["taskCreateLastUsed"] | undefined) {
-  return Boolean(
-    value?.repositoryId || value?.branch || value?.agentProfileId || value?.executorProfileId,
-  );
-}
-
-function readCachedTaskCreateLastUsed(): DisplaySettings["taskCreateLastUsed"] {
-  const cached = {
-    repositoryId: getLocalStorage<string | null>(STORAGE_KEYS.LAST_REPOSITORY_ID, null),
-    branch: getLocalStorage<string | null>(STORAGE_KEYS.LAST_BRANCH, null),
-    agentProfileId: getLocalStorage<string | null>(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, null),
-    executorProfileId: getLocalStorage<string | null>(STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID, null),
-  };
-  return hasTaskCreateLastUsed(cached) ? cached : emptyTaskCreateLastUsed();
-}
-
-function resolveTaskCreateLastUsed(current: DisplaySettings) {
-  const currentLastUsed = current.taskCreateLastUsed;
-  return hasTaskCreateLastUsed(currentLastUsed) ? currentLastUsed : readCachedTaskCreateLastUsed();
-}
-
 function carryForwardSyncedLocalSettings(current: DisplaySettings) {
   return {
-    taskCreateLastUsed: resolveTaskCreateLastUsed(current),
+    taskCreateLastUsed: current.taskCreateLastUsed,
     jiraSavedViews: current.jiraSavedViews,
     jiraTaskPresets: current.jiraTaskPresets,
     githubSavedPresets: current.githubSavedPresets,

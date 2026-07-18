@@ -36,14 +36,14 @@ describe("seedQueryClientFromBootPayload", () => {
     const client = makeQueryClient();
     const payload = {
       initialState: {
-        features: { office: true },
+        features: { office: true, plugins: false },
       },
     } satisfies BootPayload;
 
     seedQueryClientFromBootPayload(client, payload);
 
     expect(client.getQueryData(qk.boot.initialState())).toEqual(payload.initialState);
-    expect(client.getQueryData(qk.features())).toEqual({ office: true });
+    expect(client.getQueryData(qk.features())).toEqual({ office: true, plugins: false });
   });
 
   it("seeds task detail route data into task, session, messages, and turns keys", () => {

@@ -25,6 +25,14 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
+  useSettingsData: () => ({ agentProfiles: mocks.agentProfiles }),
+}));
+
+vi.mock("@/hooks/domains/kanban/use-task-by-id", () => ({
+  useTaskById: () => ({ primarySessionId: "session-a" }),
+}));
+
 vi.mock("@/components/agent-logo", () => ({
   AgentLogo: ({ agentName }: { agentName: string }) => (
     <span data-testid={`agent-logo-${agentName}`} />

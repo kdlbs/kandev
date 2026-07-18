@@ -1,4 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -52,24 +53,27 @@ vi.mock("@/app/actions/workspaces", () => ({
 import { ConfigSection } from "./config-section";
 
 function renderConfigSection(overrides: Partial<ComponentProps<typeof ConfigSection>> = {}) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <ConfigSection
-      workspaceId="workspace-1"
-      workflowId=""
-      workflowStepId=""
-      agentProfileId=""
-      executorProfileId=""
-      repositorySelection={{ kind: "none" }}
-      executionMode="task"
-      conditionType={null}
-      onWorkflowChange={() => {}}
-      onStepChange={() => {}}
-      onAgentProfileChange={() => {}}
-      onExecutorProfileChange={() => {}}
-      onRepositoryChange={() => {}}
-      onExecutionModeChange={() => {}}
-      {...overrides}
-    />,
+    <QueryClientProvider client={queryClient}>
+      <ConfigSection
+        workspaceId="workspace-1"
+        workflowId=""
+        workflowStepId=""
+        agentProfileId=""
+        executorProfileId=""
+        repositorySelection={{ kind: "none" }}
+        executionMode="task"
+        conditionType={null}
+        onWorkflowChange={() => {}}
+        onStepChange={() => {}}
+        onAgentProfileChange={() => {}}
+        onExecutorProfileChange={() => {}}
+        onRepositoryChange={() => {}}
+        onExecutionModeChange={() => {}}
+        {...overrides}
+      />
+    </QueryClientProvider>,
   );
 }
 

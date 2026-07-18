@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { discoverRepositoriesAction } from "@/app/actions/workspaces";
+import { useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { discoveredRepositoriesQueryOptions } from "@/lib/query/query-options";
 import type { LocalRepository } from "@/lib/types/http";
-
-type DiscoveryResult = { ws: string; repos: LocalRepository[] };
 
 /**
  * Lazily discovers on-disk repositories while the picker popover is
@@ -22,23 +21,18 @@ export function useDiscoveredRepositories(
   open: boolean,
   workspaceId: string | null,
 ): LocalRepository[] | null {
-  const [result, setResult] = useState<DiscoveryResult | null>(null);
-
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    ...discoveredRepositoriesQueryOptions(workspaceId ?? ""),
+    enabled: open && Boolean(workspaceId),
+  });
   useEffect(() => {
-    if (!open || !workspaceId) return;
-    if (result?.ws === workspaceId) return;
-    let cancelled = false;
-    discoverRepositoriesAction(workspaceId)
-      .then((res) => {
-        if (!cancelled) setResult({ ws: workspaceId, repos: res.repositories ?? [] });
-      })
-      .catch(() => {
-        if (!cancelled) setResult({ ws: workspaceId, repos: [] });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, workspaceId, result]);
-
-  return result?.ws === workspaceId ? result.repos : null;
+    if (open || !workspaceId) return;
+    void queryClient.cancelQueries({
+      exact: true,
+      queryKey: discoveredRepositoriesQueryOptions(workspaceId).queryKey,
+    });
+  }, [open, queryClient, workspaceId]);
+  if (!open || !workspaceId || !query.isFetched) return null;
+  return query.data ?? [];
 }

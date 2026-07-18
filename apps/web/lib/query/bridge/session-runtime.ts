@@ -404,6 +404,7 @@ function patchSessionModels(
       category: option.category,
       options: option.options,
     })),
+    configBaseline: payload.config_baseline,
   };
   queryClient.setQueryData(qk.sessionRuntime.models(payload.session_id), (current: unknown) => {
     previousModelId = isRecord(current) ? String(current.currentModelId ?? "") : "";

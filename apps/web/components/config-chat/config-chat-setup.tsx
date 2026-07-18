@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { IconLoader2, IconMessageCircle, IconSend2, IconSparkles } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
-import { useAppStore } from "@/components/state-provider";
+import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 import { ConfigurationChatToggle } from "@/components/quick-chat/configuration-chat-toggle";
 
@@ -30,7 +30,7 @@ type ConfigChatSetupProps = ConfigChatSetupBaseProps &
   );
 
 function ProfileSelector({ onSelect }: { onSelect: (id: string) => void }) {
-  const profiles = useAppStore((state) => state.agentProfiles.items ?? []);
+  const { agentProfiles: profiles } = useSettingsData(true);
   return (
     <section className="space-y-3" aria-labelledby="config-chat-agent-label">
       <div>
@@ -317,7 +317,7 @@ export function ConfigChatSetup({
   onCancel,
   onKindChange,
 }: ConfigChatSetupProps) {
-  const profiles = useAppStore((state) => state.agentProfiles.items ?? []);
+  const { agentProfiles: profiles } = useSettingsData(true);
   const [selectedProfileId, setSelectedProfileId] = useState(defaultProfileId ?? "");
   const [inputValue, setInputValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);

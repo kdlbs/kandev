@@ -22,8 +22,6 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useSummarizeSession, type SummarizeSessionResult } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
-import { getLocalStorage } from "@/lib/local-storage";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { taskQueryOptions } from "@/lib/query/query-options";
 import type { ExecutorProfile, ExecutorType, Repository } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";

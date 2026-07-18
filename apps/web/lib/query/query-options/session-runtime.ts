@@ -28,6 +28,7 @@ export type SessionModelsQueryData = {
   currentModelId: string;
   models: SessionModelEntry[];
   configOptions: ConfigOptionEntry[];
+  configBaseline?: Record<string, string>;
 };
 
 export type SessionModeQueryData = {

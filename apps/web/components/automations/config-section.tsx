@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { useWorkflowSteps, type WorkflowStepOption } from "@/hooks/use-workflow-steps";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
-import { discoverRepositoriesAction } from "@/app/actions/workspaces";
 import type { LocalRepository, Repository } from "@/lib/types/http";
+import { discoveredRepositoriesQueryOptions } from "@/lib/query/query-options";
 import type { ExecutionMode, TriggerType } from "@/lib/types/automation";
 import { RequiredFieldLabel } from "./required-field-label";
 
@@ -116,23 +117,8 @@ const EXECUTION_MODE_ITEMS = [
 ];
 
 function useDiscoveredRepositories(workspaceId: string) {
-  const [items, setItems] = useState<LocalRepository[]>([]);
-  useEffect(() => {
-    if (!workspaceId) return;
-    let cancelled = false;
-    discoverRepositoriesAction(workspaceId)
-      .then((res) => {
-        if (cancelled) return;
-        setItems(res.repositories ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setItems([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId]);
-  return items;
+  const query = useQuery(discoveredRepositoriesQueryOptions(workspaceId));
+  return query.data ?? [];
 }
 
 function getWorkflowStepHelpText(workflowId: string, workflowStepId: string): string | undefined {

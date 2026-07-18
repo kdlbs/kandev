@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { mergeInitialState } from "@/lib/state/default-state";
-import type { AppState } from "@/lib/state/store";
 import type { Task } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
@@ -80,9 +79,7 @@ describe("fetchSessionDataForTask hydration", () => {
 
   it("preserves the Office workflow ID in task-route state", async () => {
     const result = await fetchSessionDataForTask("task-1");
-    const initialState = result.initialState as unknown as Partial<AppState>;
-
-    expect(initialState.workspaces?.items[0]?.office_workflow_id).toBe("workflow-office");
+    expect(result.initialState.workspaces?.items?.[0]?.office_workflow_id).toBe("workflow-office");
   });
 
   it("hydrates persisted per-turn runtime configuration after a page reload", async () => {

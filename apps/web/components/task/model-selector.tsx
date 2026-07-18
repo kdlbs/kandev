@@ -18,7 +18,7 @@ import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
 import { qk } from "@/lib/query/keys";
 import { sessionModelsQueryOptions } from "@/lib/query/query-options";
-import type { Agent, AgentProfile, AvailableAgent, TaskSession } from "@/lib/types/http";
+import type { Agent, AgentProfile, AvailableAgent } from "@/lib/types/http";
 import type {
   ConfigOptionEntry,
   SessionModelEntry,
@@ -35,22 +35,6 @@ type ModelSelectorProps = {
   sessionId: string | null;
   triggerClassName?: string;
 };
-
-function resolveSessionState(
-  sessionId: string | null,
-  taskSessions: Record<string, TaskSession>,
-  activeModels: Record<string, string>,
-  sessionModelsData: SessionModelsEntry | undefined,
-) {
-  if (!sessionId) {
-    return { session: null, activeModel: null, sessionModelsData: undefined };
-  }
-  return {
-    session: taskSessions[sessionId] ?? null,
-    activeModel: activeModels[sessionId] || null,
-    sessionModelsData,
-  };
-}
 
 function resolveSnapshotModel(snapshot: unknown): string | null {
   if (!snapshot || typeof snapshot !== "object") return null;

@@ -6,7 +6,7 @@ import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { Task as BackendTask } from "@/lib/types/http";
-import type { WorkflowItem, WorkflowsState } from "@/lib/state/slices";
+import type { WorkflowItem, WorkflowSnapshotData, WorkflowsState } from "@/lib/state/slices";
 import { type MoveTaskError } from "@/lib/kanban/move-task-error";
 import { SwimlaneContainer } from "./kanban/swimlane-container";
 import { KanbanHeader } from "./kanban/kanban-header";
@@ -203,10 +203,7 @@ function useKanbanBoardHooks(
   };
 }
 
-type SnapEntry = {
-  tasks: { id: string }[];
-  steps: { id: string; title: string; color?: string | null }[];
-};
+type SnapEntry = WorkflowSnapshotData;
 
 function useMultiSelectDerived(
   selectedIds: Set<string>,

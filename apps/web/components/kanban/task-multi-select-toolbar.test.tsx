@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { TaskMultiSelectToolbar } from "./task-multi-select-toolbar";
 
+vi.mock("@/components/task/task-archive-confirm-dialog", () => ({
+  TaskArchiveConfirmDialog: () => null,
+}));
+
 function snapshots(): Record<string, WorkflowSnapshotData> {
   return {
     "workflow-1": {

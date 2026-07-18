@@ -18,8 +18,6 @@ import { integrationFromPathname } from "@/components/integrations/integration-c
 import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 
-const WORKSPACE_SYNC_FAILED_KEY = "kandev:settings:integration-workspace:sync-failed:v1";
-
 // Brand/initialism overrides so the derived label matches how the rest of the
 // app spells these (e.g. "github" -> "GitHub", not "Github"). Anything not
 // listed here falls back to dash-aware title-casing of the path segment.
@@ -171,7 +169,7 @@ function IntegrationActions() {
   const showSwitcher = pathname.startsWith("/settings/integrations");
   const persistWorkspace = useMemo(
     () =>
-      createQueuedUserSettingsSync<string>(WORKSPACE_SYNC_FAILED_KEY, (workspaceId) => ({
+      createQueuedUserSettingsSync<string>((workspaceId) => ({
         workspace_id: workspaceId,
       })),
     [],

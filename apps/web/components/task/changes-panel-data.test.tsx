@@ -63,6 +63,7 @@ vi.mock("@/hooks/domains/session/use-session-git", () => ({
     allFiles: [],
     cumulativeDiff: null,
     commits: [],
+    repoNames: new Set<string>(),
     pendingStageFiles: new Set<string>(),
     ahead: 0,
     isLoading: false,

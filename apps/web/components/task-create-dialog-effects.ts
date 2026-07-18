@@ -9,9 +9,7 @@ import {
   discoverRepositoriesAction,
   getLocalRepositoryStatusAction,
 } from "@/app/actions/workspaces";
-import { getLocalStorage } from "@/lib/local-storage";
 import { workflowStepsQueryOptions } from "@/lib/query/query-options";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import type {
   DialogFormState,

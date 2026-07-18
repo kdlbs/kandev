@@ -14,6 +14,10 @@ vi.mock("@/components/state-provider", () => ({
     selector({ agentProfiles: { items: profiles } }),
 }));
 
+vi.mock("@/hooks/domains/settings/use-settings-data", () => ({
+  useSettingsData: () => ({ agentProfiles: profiles }),
+}));
+
 afterEach(() => {
   cleanup();
   profiles.splice(0, profiles.length, ...defaultProfiles);

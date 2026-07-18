@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { qk } from "@/lib/query/keys";
-import { STORAGE_KEYS } from "@/lib/settings/constants";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import { useAgentDiscovery } from "./use-agent-discovery";
 import { useAvailableAgents } from "./use-available-agents";
@@ -107,6 +106,7 @@ const createBaseState = vi.hoisted(
       terminalFontFamily: null,
       terminalFontSize: null,
       changesPanelLayout: "tree",
+      confirmTaskArchive: true,
       systemMetricsDisplay: { showInTopbar: false },
       lspAutoStartLanguages: [],
       lspAutoInstallLanguages: [],
@@ -365,40 +365,6 @@ describe("settings query hooks", () => {
     });
     expect(queryClient.getQueryData(qk.settings.user())).toEqual(userSettingsResponse);
     expect(display.current.settings.workspaceId).toBe(WORKSPACE_ID);
-  });
-
-  it("preserves cached task-create selections when committing the initial workspace", async () => {
-    localStorage.setItem(STORAGE_KEYS.LAST_REPOSITORY_ID, JSON.stringify("repo-1"));
-    localStorage.setItem(STORAGE_KEYS.LAST_BRANCH, JSON.stringify("main"));
-    localStorage.setItem(STORAGE_KEYS.LAST_AGENT_PROFILE_ID, JSON.stringify("agent-profile-1"));
-    localStorage.setItem(
-      STORAGE_KEYS.LAST_EXECUTOR_PROFILE_ID,
-      JSON.stringify("executor-profile-1"),
-    );
-    storeHarness.getState().userSettings = {
-      ...storeHarness.getState().userSettings,
-      loaded: true,
-      workspaceId: null,
-      workflowId: "workflow-1",
-    };
-
-    const queryClient = createQueryClient();
-    renderHook(
-      () => useUserDisplaySettings({ workspaceId: WORKSPACE_ID, workflowId: "workflow-1" }),
-      {
-        wrapper: wrapperFor(queryClient),
-      },
-    );
-
-    await waitFor(() =>
-      expect(storeHarness.getState().userSettings.workspaceId).toBe(WORKSPACE_ID),
-    );
-    expect(storeHarness.getState().userSettings.taskCreateLastUsed).toEqual({
-      repositoryId: "repo-1",
-      branch: "main",
-      agentProfileId: "agent-profile-1",
-      executorProfileId: "executor-profile-1",
-    });
   });
 
   it("loads dynamic model capabilities through the agent model query key", async () => {

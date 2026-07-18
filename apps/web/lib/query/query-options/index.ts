@@ -6,6 +6,7 @@ export * from "./jira";
 export * from "./kanban";
 export * from "./linear";
 export * from "./office";
+export * from "./plugins";
 export * from "./sentry";
 export * from "./session";
 export * from "./session-runtime";
