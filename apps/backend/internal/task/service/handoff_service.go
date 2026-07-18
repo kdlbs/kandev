@@ -420,6 +420,36 @@ func (s *HandoffService) attachSequentialBlocker(ctx context.Context, taskID, pa
 	})
 }
 
+// ListRelatedForCaller is the access-checked entry point behind the
+// list_related_tasks_kandev MCP tool. When the caller inspects a task other
+// than itself, the target must be readable under the same relation/workspace
+// guard the document tools use (self / ancestor / descendant / sibling /
+// blocker, same workspace). Without this gate a caller that learns an
+// unrelated or cross-workspace task ID could read that task's description and
+// its relatives' descriptions. Returns ErrAccessDenied for inaccessible
+// targets.
+//
+// The un-gated ListRelated remains for trusted internal callers (e.g.
+// GetTaskContext renders the context panel for a task the user already owns).
+func (s *HandoffService) ListRelatedForCaller(ctx context.Context, callerTaskID, targetTaskID string) (*RelatedTasks, error) {
+	if targetTaskID == "" {
+		return nil, ErrDocumentTaskRequired
+	}
+	if callerTaskID != "" && callerTaskID != targetTaskID {
+		ok, err := canReadDocuments(ctx,
+			repoTaskLookupAdapter{r: s.tasks},
+			blockerLookupAdapter{repo: s.blockers},
+			callerTaskID, targetTaskID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, ErrAccessDenied
+		}
+	}
+	return s.ListRelated(ctx, targetTaskID)
+}
+
 // ListRelated returns the parent, children, siblings, blockers, and
 // blocked-by tasks for taskID. Document keys are populated for the task
 // itself plus every related task so an agent can shop for documents in

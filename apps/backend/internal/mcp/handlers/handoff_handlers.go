@@ -35,8 +35,15 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
-	related, err := svc.ListRelated(ctx, req.TaskID)
+	caller := req.CallerTaskID
+	if caller == "" {
+		caller = req.TaskID
+	}
+	related, err := svc.ListRelatedForCaller(ctx, caller, req.TaskID)
 	if err != nil {
+		if errors.Is(err, service.ErrAccessDenied) {
+			return mapHandoffError(msg, err)
+		}
 		h.logger.Error("list related tasks", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
