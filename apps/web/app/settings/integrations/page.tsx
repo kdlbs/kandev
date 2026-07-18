@@ -2,6 +2,7 @@ import Link from "@/components/routing/app-link";
 import {
   IconBrandGithub,
   IconBrandGitlab,
+  IconBrandAzure,
   IconBrandSentry,
   IconBrandSlack,
   IconHexagon,
@@ -10,6 +11,12 @@ import {
 import { Card, CardContent } from "@kandev/ui/card";
 
 const INTEGRATIONS = [
+  {
+    slug: "azure-devops",
+    label: "Azure DevOps",
+    description: "Azure Boards work items and Azure Repos pull requests.",
+    Icon: IconBrandAzure,
+  },
   {
     slug: "github",
     label: "GitHub",
@@ -62,8 +69,8 @@ export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndex
       <div>
         <h2 className="text-2xl font-bold">Integrations</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect Kandev to third-party services. Credentials are install-wide; per-workspace
-          watchers and presets live inside each integration page.
+          Connect Kandev to third-party services. Connection scope and available settings are shown
+          on each integration page.
         </p>
       </div>
       <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">

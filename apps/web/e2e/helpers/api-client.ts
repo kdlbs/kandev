@@ -1549,6 +1549,27 @@ export class ApiClient {
     return Boolean(cfg.hasSecret) && Boolean(cfg.lastOk);
   }
 
+  // --- Azure DevOps Mock Control ---
+
+  async mockAzureDevOpsSeed(state: unknown): Promise<void> {
+    await this.request("POST", "/api/v1/azure-devops/mock/state", state);
+  }
+
+  async mockAzureDevOpsReset(): Promise<void> {
+    await this.request("DELETE", "/api/v1/azure-devops/mock/state");
+  }
+
+  async setAzureDevOpsConfig(
+    workspaceId: string,
+    payload: { organizationUrl: string; pat: string },
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      `/api/v1/azure-devops/config?workspace_id=${encodeURIComponent(workspaceId)}`,
+      { ...payload, authMethod: "pat" },
+    );
+  }
+
   // --- Jira Mock Control ---
 
   async mockJiraReset(): Promise<void> {

@@ -6,6 +6,7 @@ import {
   IconBolt,
   IconBrandGithub,
   IconBrandGitlab,
+  IconBrandAzure,
   IconBrandSentry,
   IconBrandSlack,
   IconFolder,
@@ -21,6 +22,7 @@ import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 const ROOT_HREF = "/settings/workspace";
 
 const INTEGRATIONS: Array<{ slug: string; label: string; icon: TablerIcon }> = [
+  { slug: "azure-devops", label: "Azure DevOps", icon: IconBrandAzure },
   { slug: "github", label: "GitHub", icon: IconBrandGithub },
   { slug: "gitlab", label: "GitLab", icon: IconBrandGitlab },
   { slug: "jira", label: "Jira", icon: IconTicket },

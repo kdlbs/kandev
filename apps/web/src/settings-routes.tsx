@@ -13,6 +13,7 @@ import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
 import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
 import ExternalMcpPage from "@/app/settings/external-mcp/page";
 import IntegrationsIndexPage from "@/app/settings/integrations/page";
+import IntegrationsAzureDevOpsPage from "@/app/settings/integrations/azure-devops/page";
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import IntegrationsJiraPage from "@/app/settings/integrations/jira/page";
 import IntegrationsLinearPage from "@/app/settings/integrations/linear/page";
@@ -147,6 +148,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/voice-mode": () => <VoiceModeSettings />,
   "/settings/plugins": () => <PluginsSettingsPage />,
   "/settings/integrations": () => renderIntegrationSettingsRoute(null),
+  "/settings/integrations/azure-devops": () => renderIntegrationSettingsRoute("azure-devops"),
   "/settings/integrations/github": () => renderIntegrationSettingsRoute("github"),
   "/settings/integrations/gitlab": () => renderIntegrationSettingsRoute("gitlab"),
   "/settings/integrations/jira": () => renderIntegrationSettingsRoute("jira"),
@@ -368,6 +370,8 @@ function renderIntegrationSettingsRoute(section: string | null, workspaceId?: st
   switch (section) {
     case null:
       return <IntegrationsIndexPage workspaceId={workspaceId} />;
+    case "azure-devops":
+      return <IntegrationsAzureDevOpsPage workspaceId={workspaceId} />;
     case "github":
       return <GitHubIntegrationPage workspaceId={workspaceId} />;
     case "gitlab":

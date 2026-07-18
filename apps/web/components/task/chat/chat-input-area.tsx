@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TodoIndicator } from "./todo-indicator";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
+import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
 import { ShareButton, shareableSessionStateClient } from "@/components/task/share/share-button";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
@@ -311,6 +312,7 @@ function ChatStatusBar({
     >
       {showTodos && <TodoIndicator todos={todoItems} />}
       <PRStatusChip taskId={taskId} />
+      <AzureDevOpsTaskPullRequestChip taskId={taskId} />
       {queueChip}
       {/* Distinct per-banner keys: the key remounts the banner on task switch
           so its dismissed state re-initialises, and keeping the two suffixes

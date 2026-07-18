@@ -24,6 +24,7 @@ import {
   createUISlice,
   createGitHubSlice,
   createGitLabSlice,
+  createAzureDevOpsSlice,
   createJiraSlice,
   createLinearSlice,
   createOfficeSlice,
@@ -39,6 +40,7 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultGitLabState,
+  defaultAzureDevOpsState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
@@ -73,6 +75,7 @@ import {
   type AutomationsSliceActions,
   type FeaturesSliceActions,
   type GitHubSliceActions,
+  type AzureDevOpsSliceActions,
   type PluginsSliceActions,
 } from "./slices";
 import type {
@@ -201,6 +204,9 @@ export type AppState = {
   gitlabActionPresets: (typeof defaultGitLabState)["gitlabActionPresets"];
   gitlabStats: (typeof defaultGitLabState)["gitlabStats"];
   gitlabStatus: (typeof defaultGitLabState)["gitlabStatus"];
+
+  // Azure DevOps slice
+  azureDevOpsTaskPullRequests: (typeof defaultAzureDevOpsState)["azureDevOpsTaskPullRequests"];
 
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
@@ -597,6 +603,7 @@ export type AppState = {
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
 } & GitHubSliceActions &
+  AzureDevOpsSliceActions &
   SystemSliceActions &
   FeaturesSliceActions &
   AutomationsSliceActions &
@@ -622,6 +629,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createGitHubSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createGitLabSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createAzureDevOpsSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createJiraSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

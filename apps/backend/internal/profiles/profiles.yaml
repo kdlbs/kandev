@@ -71,7 +71,7 @@ mocks:
     dev:  ""
     e2e:  "true"
 
-  # Replace the GitHub / Jira / Linear clients with in-memory fakes
+  # Replace third-party clients with in-memory fakes
   # so e2e specs don't hit live APIs (and dev doesn't need tokens).
   KANDEV_MOCK_GITHUB:
     prod: ""
@@ -86,6 +86,10 @@ mocks:
     dev:  ""
     e2e:  "true"
   KANDEV_MOCK_SENTRY:
+    prod: ""
+    dev:  ""
+    e2e:  "true"
+  KANDEV_MOCK_AZURE_DEVOPS:
     prod: ""
     dev:  ""
     e2e:  "true"

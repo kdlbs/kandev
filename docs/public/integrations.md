@@ -1,6 +1,6 @@
 ---
 title: "Integrations"
-description: "Connect GitHub, GitLab, Jira, Linear, Sentry, and Slack, then browse external work or create watched tasks."
+description: "Connect Azure DevOps, GitHub, GitLab, Jira, Linear, Sentry, and Slack, then browse external work or create watched tasks."
 ---
 
 # Integrations
@@ -23,6 +23,7 @@ Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a pro
 
 - `/settings/workspace/{workspaceId}/integrations/github`
 - `/settings/workspace/{workspaceId}/integrations/gitlab`
+- `/settings/workspace/{workspaceId}/integrations/azure-devops`
 - `/settings/workspace/{workspaceId}/integrations/jira`
 - `/settings/workspace/{workspaceId}/integrations/linear`
 - `/settings/workspace/{workspaceId}/integrations/sentry`
@@ -30,7 +31,7 @@ Select **Settings > Workspaces > _Workspace_ > Integrations**, then choose a pro
 
 Compatibility routes under **Settings > Integrations** use the active workspace where the provider has workspace settings.
 
-GitHub authentication is installation-wide and the current integration targets `github.com`. GitLab authentication and its selected host are also installation-wide. Jira, Linear, and Slack configuration is workspace-specific. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
+GitHub authentication is installation-wide and the current integration targets `github.com`. GitLab authentication and its selected host are also installation-wide. Azure DevOps, Jira, Linear, and Slack configuration is workspace-specific. Sentry supports multiple named instances per workspace. Do not assume that configuring one workspace gives another the same provider scope.
 
 Provider secrets saved by these forms use Kandev's encrypted secret store. The backend must still decrypt them to make API requests. Limit access to settings and the Kandev data directory, and use the narrowest provider scope that works.
 
@@ -90,6 +91,18 @@ At `/gitlab`, use built-in searches or per-user saved searches. The project pick
 Current public GitLab settings expose the connection only. Although internal services contain watcher and preset data types, there is no current end-user settings workflow for GitLab watches or prompt presets. Do not rely on those features until they appear in the UI.
 
 Unlike GitHub, Kandev does not automatically inject the stored GitLab integration token into task executors. Configure the executor's Git credentials separately when a task must fetch from or push to GitLab.
+
+## Azure DevOps
+
+Azure DevOps configuration is workspace-specific. The current integration supports Azure DevOps Services organizations at a canonical `https://dev.azure.com/<organization>` URL. It does not support Azure DevOps Server/TFS or alternate organization URL forms.
+
+Create a personal access token with **Work Items (Read)** and **Code (Read)** access, then enter it on the Azure DevOps settings page. Kandev stores the PAT in its encrypted secret store and calls Azure DevOps REST API 7.1 directly. The connection, work-item, and pull-request paths do not require GitHub, `gh`, `az`, or Azure CLI authentication. When editing a saved connection, a blank PAT preserves that workspace's existing credential. Copy configuration transfers the encrypted credential to the target workspace.
+
+Use `/azure-devops` to run WIQL work-item queries or browse pull requests by project, repository, status, creator, and reviewer. Pull-request feedback includes reviewers and votes, comment threads, linked work items, and branch-policy results. Provider content is read-only in this release: Kandev does not edit work items, vote, comment, complete pull requests, or change policies.
+
+You can launch a task from a work item or pull request. When the selected Kandev repository is configured with matching Azure project and repository identifiers, launching from a pull request also stores a durable task association. Task surfaces show its normalized status, review, and policy summary while Azure-native feedback remains in the Azure DevOps browser. Synchronization uses the backend REST client and does not depend on tools installed in the task environment.
+
+This release has no Entra OAuth flow, webhook, or watch poller. Configure executor Git credentials independently when a launched task must fetch from or push to an Azure Repos repository; the integration PAT is not injected into task environments.
 
 ## Jira
 
@@ -174,7 +187,7 @@ Slack does not trigger on reactions, expose a slash command/shortcut, mirror tas
 Supported integration pages offer **Copy configuration** with provider-specific behavior:
 
 - GitHub copies repository scope, saved/default searches, and quick-action presets. It does not copy authentication or watches.
-- Jira, Linear, and Slack copy the workspace configuration and encrypted credential, replacing the target's provider configuration and re-running health checks. They do not copy watches.
+- Azure DevOps, Jira, Linear, and Slack copy the workspace configuration and encrypted credential, replacing the target's provider configuration and re-running health checks. They do not copy watches.
 - Sentry adds copies of the source instances with new IDs and copied secrets, preserves target instances, and deduplicates conflicting names. It does not copy watches.
 - GitLab host and authentication are already global, so there is no workspace copy action.
 
@@ -188,7 +201,7 @@ Issue bodies, pull-request comments, commit messages, Slack threads, and inciden
 - **Cleared token but connection remains:** a higher-priority CLI or environment credential is still active for GitHub or GitLab.
 - **Repository, project, or team is missing:** confirm the connected identity can see it and check workspace filters/defaults.
 - **Kandev can read but cannot write:** add only the specific provider write scope needed, then repeat the test.
-- **Task cannot fetch or push:** fix Git/SSH credentials in the executor. GitLab, Jira, Linear, Sentry, and Slack integration credentials are not task Git credentials. GitHub remote launches are the exception: inspect the profile's `GITHUB_TOKEN`/`GH_TOKEN`, then the globally stored GitHub token or local `gh` fallback that Kandev may have injected.
+- **Task cannot fetch or push:** fix Git/SSH credentials in the executor. Azure DevOps, GitLab, Jira, Linear, Sentry, and Slack integration credentials are not task Git credentials. GitHub remote launches are the exception: inspect the profile's `GITHUB_TOKEN`/`GH_TOKEN`, then the globally stored GitHub token or local `gh` fallback that Kandev may have injected.
 - **A watch still runs after disabling the provider:** the Enabled switch is browser-local. Pause/delete the watch, or remove the backend configuration.
 - **Unexpected work is created:** pause the watch or automation, inspect its query, last-polled/status fields, and created-task list, then narrow provider filters before resetting or polling again. Watch tables do not provide a separate run/import history.
 

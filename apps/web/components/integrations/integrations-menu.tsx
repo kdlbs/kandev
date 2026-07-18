@@ -14,12 +14,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   IconBrandGithub,
   IconBrandGitlab,
+  IconBrandAzure,
   IconHexagon,
   IconPlugConnected,
   IconTicket,
 } from "@tabler/icons-react";
 import { useJiraAvailable } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
+import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-devops-availability";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
 import { useAppStore } from "@/components/state-provider";
@@ -33,7 +35,7 @@ type MobileIntegrationsSectionProps = {
   onNavigate: () => void;
 };
 
-type IntegrationId = "github" | "gitlab" | "jira" | "linear";
+type IntegrationId = "azure-devops" | "github" | "gitlab" | "jira" | "linear";
 
 type IntegrationLink = {
   id: IntegrationId;
@@ -42,6 +44,7 @@ type IntegrationLink = {
 };
 
 type IntegrationAvailability = {
+  azureDevOpsAvailable?: boolean;
   githubReady: boolean;
   gitlabReady: boolean;
   jiraAvailable: boolean;
@@ -49,6 +52,7 @@ type IntegrationAvailability = {
 };
 
 const INTEGRATION_LINKS: IntegrationLink[] = [
+  { id: "azure-devops", label: "Azure DevOps", href: "/azure-devops" },
   { id: "github", label: "GitHub", href: "/github" },
   { id: "gitlab", label: "GitLab", href: "/gitlab" },
   { id: "jira", label: "Jira", href: "/jira" },
@@ -56,6 +60,7 @@ const INTEGRATION_LINKS: IntegrationLink[] = [
 ];
 
 const INTEGRATION_ICONS = {
+  "azure-devops": IconBrandAzure,
   github: IconBrandGithub,
   gitlab: IconBrandGitlab,
   jira: IconTicket,
@@ -65,12 +70,14 @@ const INTEGRATION_ICONS = {
 const HOVER_CLOSE_DELAY_MS = 180;
 
 export function getAvailableIntegrationLinks({
+  azureDevOpsAvailable,
   githubReady,
   gitlabReady,
   jiraAvailable,
   linearAvailable,
 }: IntegrationAvailability): IntegrationLink[] {
   return INTEGRATION_LINKS.filter((link) => {
+    if (link.id === "azure-devops") return !!azureDevOpsAvailable;
     if (link.id === "github") return githubReady;
     if (link.id === "gitlab") return gitlabReady;
     if (link.id === "jira") return jiraAvailable;
@@ -108,9 +115,11 @@ export function useConfiguredIntegrationLinks(): IntegrationLink[] {
   const gitlabAvailable = useGitLabAvailable();
   const jiraAvailable = useJiraAvailable(scopedWorkspaceId);
   const linearAvailable = useLinearAvailable(scopedWorkspaceId);
+  const azureDevOpsAvailable = useAzureDevOpsAvailable(scopedWorkspaceId);
   const githubStatus = getGitHubIntegrationStatus(status, loading);
 
   return getAvailableIntegrationLinks({
+    azureDevOpsAvailable,
     githubReady: githubStatus.ready,
     gitlabReady: gitlabAvailable,
     jiraAvailable,

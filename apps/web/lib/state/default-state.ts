@@ -7,6 +7,7 @@ import {
   defaultUIState,
   defaultGitHubState,
   defaultGitLabState,
+  defaultAzureDevOpsState,
   defaultJiraState,
   defaultLinearState,
   defaultOfficeState,
@@ -77,6 +78,7 @@ export const defaultState = {
   prFeedbackCache: defaultGitHubState.prFeedbackCache,
   taskCIAutomation: defaultGitHubState.taskCIAutomation,
   taskMRs: defaultGitLabState.taskMRs,
+  azureDevOpsTaskPullRequests: defaultAzureDevOpsState.azureDevOpsTaskPullRequests,
   gitlabReviewWatches: defaultGitLabState.gitlabReviewWatches,
   gitlabIssueWatches: defaultGitLabState.gitlabIssueWatches,
   gitlabMRWatches: defaultGitLabState.gitlabMRWatches,
@@ -110,7 +112,7 @@ export const defaultState = {
 
 export type DefaultState = typeof defaultState;
 
-function mergeGitLabFields(
+function mergeCodeHostFields(
   d: DefaultState,
   s: Partial<DefaultState>,
 ): Pick<
@@ -122,6 +124,7 @@ function mergeGitLabFields(
   | "gitlabActionPresets"
   | "gitlabStats"
   | "gitlabStatus"
+  | "azureDevOpsTaskPullRequests"
 > {
   return {
     taskMRs: { ...d.taskMRs, ...s.taskMRs },
@@ -131,6 +134,10 @@ function mergeGitLabFields(
     gitlabActionPresets: { ...d.gitlabActionPresets, ...s.gitlabActionPresets },
     gitlabStats: { ...d.gitlabStats, ...s.gitlabStats },
     gitlabStatus: { ...d.gitlabStatus, ...s.gitlabStatus },
+    azureDevOpsTaskPullRequests: {
+      ...d.azureDevOpsTaskPullRequests,
+      ...s.azureDevOpsTaskPullRequests,
+    },
   };
 }
 
@@ -259,7 +266,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
     actionPresets: { ...defaultState.actionPresets, ...initialState.actionPresets },
     prFeedbackCache: { ...defaultState.prFeedbackCache, ...initialState.prFeedbackCache },
     taskCIAutomation: { ...defaultState.taskCIAutomation, ...initialState.taskCIAutomation },
-    ...mergeGitLabFields(defaultState, initialState),
+    ...mergeCodeHostFields(defaultState, initialState),
     jiraIssueWatches: { ...defaultState.jiraIssueWatches, ...initialState.jiraIssueWatches },
     linearIssueWatches: {
       ...defaultState.linearIssueWatches,
