@@ -19,6 +19,7 @@ import Link from "@/components/routing/app-link";
 import { TaskPageContent } from "@/components/task/task-page-content";
 import { TaskBody, resolveTaskBodyMode } from "@/components/task/TaskBody";
 import { TaskHeader } from "@/components/task/TaskHeader";
+import { TaskStateActions } from "@/components/task/task-state-actions";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isFromOffice } from "@/lib/types/http";
 import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
@@ -76,11 +77,7 @@ export function KanbanTaskShell({
     <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-background p-6">
       {showOfficeLink && <CrossLinkRow taskId={taskId} target="office" />}
       <div className="mt-4 max-w-3xl">
-        <TaskHeader
-          identifier={task?.id?.slice(0, 8)}
-          title={task?.title ?? "Loading..."}
-          state={task?.state ?? null}
-        />
+        <SimpleTaskHeaderRow task={task} />
         <p className="mt-4 text-sm text-muted-foreground">
           {showOfficeLink
             ? "Simple view for kanban tasks shows the chat that's already in the panels. For the full Linear-style experience (comments, properties, activity timeline), open this task in the office view."
@@ -95,6 +92,27 @@ export function KanbanTaskShell({
   }
 
   return <TaskBody mode={mode} simpleSlot={simpleSlot} advancedSlot={advancedSlot} />;
+}
+
+// Open-task header row for the kanban simple view: a task-level status icon plus
+// the shared TaskHeader. Both reflect the MOST-ACTIVE-WINS activity aggregate so a
+// background-running task reads distinctly and never as done (§spec:task-level-indicator).
+function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
+  return (
+    <div className="flex items-center gap-2">
+      <TaskStateActions
+        state={task?.state ?? undefined}
+        className="shrink-0"
+        foregroundActivity={task?.foreground_activity}
+      />
+      <TaskHeader
+        identifier={task?.id?.slice(0, 8)}
+        title={task?.title ?? "Loading..."}
+        state={task?.state ?? null}
+        foregroundActivity={task?.foreground_activity}
+      />
+    </div>
+  );
 }
 
 function CrossLinkRow({ taskId, target }: { taskId: string; target: "office" | "kanban" }) {

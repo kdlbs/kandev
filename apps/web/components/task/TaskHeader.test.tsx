@@ -29,4 +29,24 @@ describe("TaskHeader", () => {
     render(<TaskHeader title="t" assigneeName="Alice" />);
     expect(screen.getByText("Alice")).toBeTruthy();
   });
+
+  // §spec:task-level-indicator: the open-task header text badge reflects the
+  // task-level activity aggregate — background-running reads distinctly and never
+  // as a done state, even when the coarse workflow state is COMPLETED.
+  it("reflects background-running in the badge instead of a done coarse state", () => {
+    render(<TaskHeader title="t" state="COMPLETED" foregroundActivity="background" />);
+    expect(screen.getByText("Background running")).toBeTruthy();
+    expect(screen.queryByText("COMPLETED")).toBeNull();
+  });
+
+  it("reflects generating in the badge over a done coarse state", () => {
+    render(<TaskHeader title="t" state="COMPLETED" foregroundActivity="generating" />);
+    expect(screen.getByText("Generating")).toBeTruthy();
+    expect(screen.queryByText("COMPLETED")).toBeNull();
+  });
+
+  it("keeps the coarse state in the badge when no session is active", () => {
+    render(<TaskHeader title="t" state="COMPLETED" foregroundActivity={null} />);
+    expect(screen.getByText("COMPLETED")).toBeTruthy();
+  });
 });
