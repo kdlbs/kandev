@@ -24,11 +24,17 @@ export function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boole
 
 type ProfileEnvVarsEditorProps = {
   envVars?: ProfileEnvVar[];
+  baselineEnvVars?: ProfileEnvVar[];
   secrets: { id: string; name: string }[];
   onChange: (envVars: ProfileEnvVar[]) => void;
 };
 
-export function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvVarsEditorProps) {
+export function ProfileEnvVarsEditor({
+  envVars,
+  baselineEnvVars,
+  secrets,
+  onChange,
+}: ProfileEnvVarsEditorProps) {
   // `synced` is what we've acknowledged from the parent (either via the prop
   // or our own last emission). When the prop diverges from it we re-seed
   // local row state; that's how external prop resets propagate without
@@ -77,6 +83,7 @@ export function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvV
   return (
     <EnvVarsCard
       rows={rows}
+      baselineRows={baselineEnvVars ? envVarsToRows(baselineEnvVars) : undefined}
       secrets={secrets}
       onAdd={handleAdd}
       onUpdate={handleUpdate}
@@ -87,15 +94,27 @@ export function ProfileEnvVarsEditor({ envVars, secrets, onChange }: ProfileEnvV
 
 type ProfileEnvVarsSectionProps = {
   envVars?: ProfileEnvVar[];
+  baselineEnvVars?: ProfileEnvVar[];
   onChange: (patch: Partial<AgentProfile>) => void;
 };
 
-export function ProfileEnvVarsSection({ envVars, onChange }: ProfileEnvVarsSectionProps) {
+export function ProfileEnvVarsSection({
+  envVars,
+  baselineEnvVars,
+  onChange,
+}: ProfileEnvVarsSectionProps) {
   const { items: secrets } = useSecrets();
   const handleChange = useCallback(
     (next: ProfileEnvVar[]) => onChange({ envVars: next }),
     [onChange],
   );
 
-  return <ProfileEnvVarsEditor envVars={envVars} secrets={secrets} onChange={handleChange} />;
+  return (
+    <ProfileEnvVarsEditor
+      envVars={envVars}
+      baselineEnvVars={baselineEnvVars}
+      secrets={secrets}
+      onChange={handleChange}
+    />
+  );
 }

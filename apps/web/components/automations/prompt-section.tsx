@@ -8,23 +8,30 @@ import { toScriptPlaceholders } from "./automation-placeholders";
 
 type PromptSectionProps = {
   value: string;
+  isDirty: boolean;
   onChange: (value: string) => void;
   placeholders: PlaceholderInfo[];
 };
 
-export function PromptSection({ value, onChange, placeholders }: PromptSectionProps) {
+export function PromptSection({ value, isDirty, onChange, placeholders }: PromptSectionProps) {
   const scriptPlaceholders = useMemo(() => toScriptPlaceholders(placeholders), [placeholders]);
 
   return (
     <div className="space-y-3">
       <Label className="text-xs uppercase tracking-wider text-muted-foreground">Instructions</Label>
-      <ScriptEditor
-        value={value}
-        onChange={onChange}
-        language="plaintext"
-        height="160px"
-        placeholders={scriptPlaceholders}
-      />
+      <div
+        className="rounded-md border border-transparent"
+        data-settings-dirty={isDirty}
+        data-settings-dirty-level="container"
+      >
+        <ScriptEditor
+          value={value}
+          onChange={onChange}
+          language="plaintext"
+          height="160px"
+          placeholders={scriptPlaceholders}
+        />
+      </div>
       {placeholders.length > 0 && (
         <div className="text-xs text-muted-foreground space-y-1">
           <p className="font-medium">Available placeholders:</p>

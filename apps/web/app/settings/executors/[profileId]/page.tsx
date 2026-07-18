@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
+import { getExecutorDescription } from "@/components/settings/executor-description";
 import {
   McpPolicyCard,
   validateMcpPolicy,
@@ -25,6 +26,7 @@ import {
   EnvVarsCard,
   useEnvVarRows,
   rowsToEnvVars,
+  envVarsToRows,
 } from "@/components/settings/profile-edit/env-vars-card";
 import { ScriptCard } from "@/components/settings/profile-edit/script-card";
 import { SSHAgentReadinessCard } from "@/components/settings/ssh-agent-readiness-card";
@@ -425,35 +427,34 @@ function applyDockerConfig(
   }
 }
 
-function ProfileEditSections({
-  executor,
-  profile,
-  form,
-  secrets,
-}: {
+type ProfileEditSectionsProps = {
   executor: Executor;
   profile: ExecutorProfile;
   form: ReturnType<typeof useProfileFormState>;
   secrets: ReturnType<typeof useSecrets>["items"];
-}) {
+};
+
+function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSectionsProps) {
   const isSSH = executor.type === "ssh";
   return (
     <>
-      <ProfileDetailsCard name={form.name} onNameChange={form.setName} />
+      <ProfileDetailsCard
+        name={form.name}
+        baselineName={profile.name}
+        onNameChange={form.setName}
+      />
       {isSSH && (
-        // SSH-specific: lives right after profile details (top of the page)
-        // because the very next question after "name this profile" on an
-        // SSH host is "which agents are installed here". Drives the shell
-        // selector that governs every subsequent SSH command run by kandev.
         <SSHAgentReadinessCard
           executorId={executor.id}
           shell={form.sshShell}
+          baselineShell={profile.config?.ssh_shell ?? ""}
           onShellChange={form.setSshShell}
         />
       )}
       {form.isSprites && (
         <SpritesApiKeyCard
           secretId={form.spritesSecretId}
+          baselineSecretId={deriveSpritesSecretId(profile.env_vars)}
           onSecretIdChange={form.setSpritesSecretId}
           secrets={secrets}
         />
@@ -473,6 +474,7 @@ function ProfileEditSections({
           isSprites={form.isSprites}
           secretId={form.spritesSecretId}
           networkRules={form.networkPolicyRules}
+          baselineNetworkRules={parseNetworkPolicyRules(profile.config)}
           onNetworkRulesChange={form.setNetworkPolicyRules}
           remoteCredentials={form.remoteCredentials}
           onRemoteCredentialsChange={form.setRemoteCredentials}
@@ -490,6 +492,7 @@ function ProfileEditSections({
       )}
       <EnvVarsCard
         rows={form.envVarRows}
+        baselineRows={envVarsToRows(profile.env_vars)}
         secrets={secrets}
         onAdd={form.addEnvVar}
         onUpdate={form.updateEnvVar}
@@ -499,6 +502,7 @@ function ProfileEditSections({
         title="Prepare Script"
         description={form.prepareDesc}
         value={form.prepareScript}
+        baselineValue={profile.prepare_script ?? ""}
         onChange={form.setPrepareScript}
         height="300px"
         placeholders={form.placeholders}
@@ -509,6 +513,7 @@ function ProfileEditSections({
           title="Cleanup Script"
           description="Runs after the agent session ends for cleanup tasks."
           value={form.cleanupScript}
+          baselineValue={profile.cleanup_script ?? ""}
           onChange={form.setCleanupScript}
           height="200px"
           placeholders={form.placeholders}
@@ -517,6 +522,7 @@ function ProfileEditSections({
       )}
       <McpPolicyCard
         mcpPolicy={form.mcpPolicy}
+        baselinePolicy={profile.mcp_policy ?? ""}
         mcpPolicyError={form.mcpPolicyError}
         onPolicyChange={form.setMcpPolicy}
       />
@@ -623,14 +629,4 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       />
     </div>
   );
-}
-
-function getExecutorDescription(type: ExecutorType): string {
-  if (type === "local_pc") return "Runs agents directly in the repository folder.";
-  if (type === "worktree") return "Creates git worktrees for isolated agent sessions.";
-  if (type === "local_docker") return "Runs Docker containers on this machine.";
-  if (type === "remote_docker") return "Connects to a remote Docker host.";
-  if (type === "sprites") return "Runs agents in Sprites.dev cloud sandboxes.";
-  if (type === "ssh") return "Runs agents on a trusted Linux amd64 or macOS host over SSH.";
-  return "Custom executor.";
 }

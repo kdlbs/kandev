@@ -14,15 +14,36 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
-import { UnsavedSaveButton } from "@/components/settings/unsaved-indicator";
 import { SettingsCard } from "@/components/settings/settings-card";
-import { ProfileFormFields } from "@/components/settings/profile-form-fields";
+import { ProfileFormFields, type ProfileFormData } from "@/components/settings/profile-form-fields";
 import { ProfileEnvVarsSection } from "@/components/settings/agent-profile-page";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import type { Agent, ModelConfig, PermissionSetting, PassthroughConfig } from "@/lib/types/http";
 import { ProfileMcpConfigCard } from "./profile-mcp-config-card";
 import { profilePermissionValues } from "@/lib/agent-permissions";
-import { toAgentProfilePatch, type DraftProfile, type DraftAgent } from "./agent-save-helpers";
+import {
+  isProfileDirty,
+  toAgentProfilePatch,
+  type DraftProfile,
+  type DraftAgent,
+} from "./agent-save-helpers";
+
+function profileFormData(
+  profile: DraftProfile,
+  permissionSettings: Record<string, PermissionSetting>,
+): ProfileFormData {
+  const permissions = profilePermissionValues(profile, permissionSettings);
+  return {
+    name: profile.name,
+    model: profile.model,
+    mode: profile.mode ?? "",
+    config_options: profile.configOptions ?? {},
+    auto_approve: permissions.auto_approve,
+    allow_indexing: permissions.allow_indexing,
+    cli_passthrough: profile.cliPassthrough ?? false,
+    cli_flags: profile.cliFlags ?? [],
+  };
+}
 
 export type AgentHeaderProps = {
   displayName: string;
@@ -85,6 +106,7 @@ export function AgentHeader({
 
 export type ProfileCardItemProps = {
   profile: DraftProfile;
+  savedProfile?: DraftProfile;
   isNew: boolean;
   draftAgent: DraftAgent;
   currentAgentModelConfig: ModelConfig;
@@ -101,6 +123,7 @@ export type ProfileCardItemProps = {
 
 export function ProfileCardItem({
   profile,
+  savedProfile,
   isNew,
   draftAgent,
   currentAgentModelConfig,
@@ -111,21 +134,21 @@ export function ProfileCardItem({
   onRemoveProfile,
   onToastError,
 }: ProfileCardItemProps) {
-  const permissionValues = profilePermissionValues(profile, permissionSettings);
+  const formProfile = profileFormData(profile, permissionSettings);
+  const baselineProfile = savedProfile
+    ? profileFormData(savedProfile, permissionSettings)
+    : undefined;
+  const dirty =
+    isNew ||
+    !savedProfile ||
+    Boolean(profile.mcp_config?.dirty) ||
+    isProfileDirty(profile, savedProfile);
   return (
-    <SettingsCard id={`profile-card-${profile.id}`} isDirty={isNew}>
+    <SettingsCard id={`profile-card-${profile.id}`} isDirty={dirty}>
       <CardContent className="pt-6 space-y-4">
         <ProfileFormFields
-          profile={{
-            name: profile.name,
-            model: profile.model,
-            mode: profile.mode ?? "",
-            config_options: profile.configOptions ?? {},
-            auto_approve: permissionValues.auto_approve,
-            allow_indexing: permissionValues.allow_indexing,
-            cli_passthrough: profile.cliPassthrough ?? false,
-            cli_flags: profile.cliFlags ?? [],
-          }}
+          profile={formProfile}
+          baselineProfile={baselineProfile}
           onChange={(patch) => onProfileChange(profile.id, toAgentProfilePatch(patch))}
           modelConfig={currentAgentModelConfig}
           permissionSettings={permissionSettings}
@@ -138,11 +161,13 @@ export function ProfileCardItem({
         />
         <CustomCLIFlagsCard
           flags={profile.cliFlags ?? []}
+          baselineFlags={savedProfile?.cliFlags}
           onChange={(next) => onProfileChange(profile.id, { cliFlags: next })}
           permissionSettings={permissionSettings}
         />
         <ProfileEnvVarsSection
           envVars={profile.envVars}
+          baselineEnvVars={savedProfile?.envVars}
           onChange={(patch) => onProfileChange(profile.id, patch)}
         />
         <ProfileMcpConfigCard
@@ -164,12 +189,11 @@ export type ProfilesCardProps = {
   isCreateMode: boolean;
   isAgentDirty: boolean;
   draftAgent: DraftAgent;
+  savedAgent: Agent | null;
   newProfileId: string | null;
   currentAgentModelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
-  saveStatus: "idle" | "loading" | "success" | "error";
-  hasInvalidMcpConfig: boolean;
   onAddProfile: () => void;
   onProfileChange: (profileId: string, patch: Partial<DraftProfile>) => void;
   onProfileMcpChange: (
@@ -178,7 +202,6 @@ export type ProfilesCardProps = {
   ) => void;
   onRemoveProfile: (profileId: string) => void;
   onToastError: (error: unknown) => void;
-  onSave: () => void;
 };
 
 export function ProfilesCard({
@@ -186,18 +209,16 @@ export function ProfilesCard({
   isCreateMode,
   isAgentDirty,
   draftAgent,
+  savedAgent,
   newProfileId,
   currentAgentModelConfig,
   permissionSettings,
   passthroughConfig,
-  saveStatus,
-  hasInvalidMcpConfig,
   onAddProfile,
   onProfileChange,
   onProfileMcpChange,
   onRemoveProfile,
   onToastError,
-  onSave,
 }: ProfilesCardProps) {
   return (
     <SettingsCard isDirty={isAgentDirty}>
@@ -215,6 +236,7 @@ export function ProfilesCard({
           <ProfileCardItem
             key={profile.id}
             profile={profile}
+            savedProfile={savedAgent?.profiles.find((saved) => saved.id === profile.id)}
             isNew={profile.id === newProfileId}
             draftAgent={draftAgent}
             currentAgentModelConfig={currentAgentModelConfig}
@@ -227,18 +249,6 @@ export function ProfilesCard({
           />
         ))}
       </CardContent>
-      {isCreateMode && (
-        <div className="flex justify-end px-6 pb-6">
-          <UnsavedSaveButton
-            isDirty={isAgentDirty}
-            isLoading={saveStatus === "loading"}
-            status={saveStatus}
-            onClick={onSave}
-            disabled={hasInvalidMcpConfig}
-            cleanLabel="Create agent"
-          />
-        </div>
-      )}
     </SettingsCard>
   );
 }

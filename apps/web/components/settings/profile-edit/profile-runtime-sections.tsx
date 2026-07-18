@@ -34,8 +34,10 @@ export function DockerSections({
     <>
       <DockerfileBuildCard
         dockerfile={dockerfile}
+        baselineDockerfile={profile.config?.dockerfile ?? ""}
         onDockerfileChange={onDockerfileChange}
         imageTag={imageTag}
+        baselineImageTag={profile.config?.image_tag ?? ""}
         onImageTagChange={onImageTagChange}
       />
       <DockerContainersCard profileId={profile.id} />
@@ -48,6 +50,7 @@ type SpritesSectionsProps = {
   isSprites: boolean;
   secretId: string | null;
   networkRules: NetworkPolicyRule[];
+  baselineNetworkRules?: NetworkPolicyRule[];
   onNetworkRulesChange: (rules: NetworkPolicyRule[]) => void;
   remoteCredentials: string[];
   onRemoteCredentialsChange: (ids: string[]) => void;
@@ -68,6 +71,7 @@ export function SpritesSections({
   isSprites,
   secretId,
   networkRules,
+  baselineNetworkRules,
   onNetworkRulesChange,
   remoteCredentials,
   onRemoteCredentialsChange,
@@ -101,7 +105,11 @@ export function SpritesSections({
         localGitIdentity={localGitIdentity}
       />
       {isSprites && (
-        <NetworkPoliciesCard rules={networkRules} onRulesChange={onNetworkRulesChange} />
+        <NetworkPoliciesCard
+          rules={networkRules}
+          baselineRules={baselineNetworkRules}
+          onRulesChange={onNetworkRulesChange}
+        />
       )}
     </>
   );

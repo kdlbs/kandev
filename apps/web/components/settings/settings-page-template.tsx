@@ -12,6 +12,7 @@ type SettingsPageTemplateProps = {
   title: string;
   description?: string;
   isDirty: boolean;
+  cardIsDirty?: boolean;
   saveStatus: "idle" | "loading" | "success" | "error";
   onSave: () => Promise<unknown> | void;
   saveId?: string;
@@ -28,6 +29,7 @@ export function SettingsPageTemplate({
   title,
   description,
   isDirty,
+  cardIsDirty = isDirty,
   onSave,
   saveId,
   saveRevision = 0,
@@ -61,7 +63,7 @@ export function SettingsPageTemplate({
 
       <Separator />
 
-      <SettingsCard isDirty={isDirty}>
+      <SettingsCard isDirty={cardIsDirty}>
         <CardContent className="">{children}</CardContent>
       </SettingsCard>
 

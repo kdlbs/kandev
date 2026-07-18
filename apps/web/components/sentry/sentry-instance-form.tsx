@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -36,12 +36,13 @@ function instanceToForm(instance: SentryConfig | null): FormState {
 
 type FieldProps = {
   form: FormState;
+  baseline: FormState;
   idPrefix: string;
   loading: boolean;
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 };
 
-function NameField({ form, idPrefix, loading, update }: FieldProps) {
+function NameField({ form, baseline, idPrefix, loading, update }: FieldProps) {
   return (
     <div className={FIELD}>
       <Label htmlFor={`${idPrefix}-name`}>Name</Label>
@@ -50,6 +51,7 @@ function NameField({ form, idPrefix, loading, update }: FieldProps) {
         data-testid={`${idPrefix}-name-input`}
         placeholder="Production, Self-hosted, …"
         value={form.name}
+        data-settings-dirty={form.name !== baseline.name}
         onChange={(e) => update("name", e.target.value)}
         disabled={loading}
       />
@@ -58,7 +60,7 @@ function NameField({ form, idPrefix, loading, update }: FieldProps) {
   );
 }
 
-function UrlField({ form, idPrefix, loading, update }: FieldProps) {
+function UrlField({ form, baseline, idPrefix, loading, update }: FieldProps) {
   return (
     <div className={FIELD}>
       <Label htmlFor={`${idPrefix}-url`}>Instance URL</Label>
@@ -68,6 +70,7 @@ function UrlField({ form, idPrefix, loading, update }: FieldProps) {
         type="url"
         placeholder={SENTRY_DEFAULT_URL}
         value={form.url}
+        data-settings-dirty={form.url !== baseline.url}
         onChange={(e) => update("url", e.target.value)}
         disabled={loading}
       />
@@ -81,6 +84,7 @@ function UrlField({ form, idPrefix, loading, update }: FieldProps) {
 
 function SecretField({
   form,
+  baseline,
   idPrefix,
   loading,
   update,
@@ -131,6 +135,7 @@ function SecretField({
         type="password"
         placeholder={hasSavedSecret ? "••••••••" : "sntrys_..."}
         value={form.secret}
+        data-settings-dirty={form.secret !== baseline.secret}
         onChange={(e) => update("secret", e.target.value)}
         disabled={loading}
       />
@@ -228,6 +233,7 @@ type SentryInstanceFormProps = {
   idPrefix: string;
   onSaved: (cfg: SentryConfig) => void;
   onCancel: () => void;
+  onDirtyChange?: (isDirty: boolean) => void;
 };
 
 type CoordinatedSaveOptions = {
@@ -251,54 +257,41 @@ function useCoordinatedInstanceSave({
   const revision = JSON.stringify(form);
   const latestRevision = useRef(revision);
   latestRevision.current = revision;
+  const isDirty = instance === null || revision !== JSON.stringify(baseline);
 
   useSettingsSaveContributor({
     id: `sentry-instance:${instance?.id ?? "new"}`,
     revision,
-    isDirty: instance !== null && revision !== JSON.stringify(baseline),
+    isDirty,
     canSave,
     invalidReason: canSave ? undefined : "Enter an instance name and auth token before saving.",
     save: async (submittedRevision) => {
       const submitted = form;
       const saved = await handleSave();
       setBaseline(submitted);
-      if (latestRevision.current === submittedRevision) onSaved(saved);
+      if (instance === null || latestRevision.current === submittedRevision) onSaved(saved);
     },
     discard: () => setForm(baseline),
   });
 
-  return async () => {
-    try {
-      onSaved(await handleSave());
-    } catch {
-      // The form already reports the API error and remains open for correction.
-    }
-  };
+  return { baseline, isDirty };
 }
 
 type FormActionsProps = {
   idPrefix: string;
-  isExisting: boolean;
-  saving: boolean;
   testing: boolean;
-  disableSave: boolean;
   disableTest: boolean;
   requiresTestSecret: boolean;
   onTest: () => void;
-  onCreate: () => Promise<void>;
   onCancel: () => void;
 };
 
 function FormActions({
   idPrefix,
-  isExisting,
-  saving,
   testing,
-  disableSave,
   disableTest,
   requiresTestSecret,
   onTest,
-  onCreate,
   onCancel,
 }: FormActionsProps) {
   return (
@@ -314,17 +307,6 @@ function FormActions({
       >
         {testing ? "Testing..." : "Test connection"}
       </Button>
-      {!isExisting && (
-        <Button
-          type="button"
-          onClick={() => void onCreate()}
-          disabled={disableSave}
-          className="cursor-pointer"
-          data-testid={`${idPrefix}-save-button`}
-        >
-          {saving ? "Saving..." : "Save"}
-        </Button>
-      )}
       <Button
         type="button"
         variant="ghost"
@@ -344,6 +326,7 @@ export function SentryInstanceForm({
   idPrefix,
   onSaved,
   onCancel,
+  onDirtyChange,
 }: SentryInstanceFormProps) {
   const [form, setForm] = useState<FormState>(() => instanceToForm(instance));
   const update = useCallback(
@@ -360,11 +343,9 @@ export function SentryInstanceForm({
   const hasSavedSecret = !!instance?.hasSecret;
   const missingSecret = !hasSavedSecret && !form.secret;
   const requiresTestSecret = !form.secret && (candidateTest || missingSecret);
-  const disableSave = saving || !form.name.trim() || missingSecret;
   const disableTest = testing || requiresTestSecret;
-  const isExisting = instance !== null;
   const canSave = Boolean(form.name.trim()) && !missingSecret;
-  const handleCreate = useCoordinatedInstanceSave({
+  const coordinated = useCoordinatedInstanceSave({
     instance,
     form,
     setForm,
@@ -372,18 +353,38 @@ export function SentryInstanceForm({
     onSaved,
     canSave,
   });
+  useEffect(() => onDirtyChange?.(coordinated.isDirty), [coordinated.isDirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 
   return (
-    <div className="space-y-4 rounded-md border p-4" data-testid={`${idPrefix}-form`}>
+    <div
+      className="space-y-4 rounded-md border p-4"
+      data-testid={`${idPrefix}-form`}
+      data-settings-dirty={coordinated.isDirty}
+      data-settings-dirty-level="container"
+    >
       {instance === null && (
         <h4 data-testid={`${idPrefix}-form-heading`} className="text-sm font-semibold">
           New Instance
         </h4>
       )}
-      <NameField form={form} idPrefix={idPrefix} loading={saving} update={update} />
-      <UrlField form={form} idPrefix={idPrefix} loading={saving} update={update} />
+      <NameField
+        form={form}
+        baseline={coordinated.baseline}
+        idPrefix={idPrefix}
+        loading={saving}
+        update={update}
+      />
+      <UrlField
+        form={form}
+        baseline={coordinated.baseline}
+        idPrefix={idPrefix}
+        loading={saving}
+        update={update}
+      />
       <SecretField
         form={form}
+        baseline={coordinated.baseline}
         idPrefix={idPrefix}
         loading={saving}
         update={update}
@@ -393,14 +394,10 @@ export function SentryInstanceForm({
       <Separator />
       <FormActions
         idPrefix={idPrefix}
-        isExisting={isExisting}
-        saving={saving}
         testing={testing}
-        disableSave={disableSave}
         disableTest={disableTest}
         requiresTestSecret={requiresTestSecret}
         onTest={handleTest}
-        onCreate={handleCreate}
         onCancel={onCancel}
       />
     </div>

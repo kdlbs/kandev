@@ -21,6 +21,7 @@ import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import {
@@ -101,23 +102,31 @@ export default function ProfileDetailPage({
 
 function ProfileDetailsCard({
   name,
+  baselineName,
   onNameChange,
 }: {
   name: string;
+  baselineName: string;
   onNameChange: (v: string) => void;
 }) {
+  const isDirty = name.trim() !== baselineName.trim();
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle>Profile Details</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="profile-name">Name</Label>
-          <Input id="profile-name" value={name} onChange={(e) => onNameChange(e.target.value)} />
+          <Input
+            id="profile-name"
+            value={name}
+            onChange={(e) => onNameChange(e.target.value)}
+            data-settings-dirty={isDirty}
+          />
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -127,23 +136,34 @@ function EnvVarRow({
   secrets,
   onUpdate,
   onRemove,
+  baselineRow,
 }: {
   row: EnvVarRow;
   index: number;
   secrets: { id: string; name: string }[];
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
+  baselineRow?: EnvVarRow;
 }) {
+  const isDirty = !baselineRow || JSON.stringify(row) !== JSON.stringify(baselineRow);
   return (
-    <div className="flex items-start gap-2">
+    <div
+      className="flex items-start gap-2"
+      data-settings-dirty={isDirty}
+      data-settings-dirty-level="container"
+    >
       <Input
         value={row.key}
         onChange={(e) => onUpdate(index, "key", e.target.value)}
         placeholder="KEY"
         className="font-mono text-xs flex-[2]"
+        data-settings-dirty={!baselineRow || row.key !== baselineRow.key}
       />
       <Select value={row.mode} onValueChange={(v) => onUpdate(index, "mode", v)}>
-        <SelectTrigger className="w-[100px] text-xs">
+        <SelectTrigger
+          className="w-[100px] text-xs"
+          data-settings-dirty={!baselineRow || row.mode !== baselineRow.mode}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -157,10 +177,14 @@ function EnvVarRow({
           onChange={(e) => onUpdate(index, "value", e.target.value)}
           placeholder="value"
           className="font-mono text-xs flex-[3]"
+          data-settings-dirty={!baselineRow || row.value !== baselineRow.value}
         />
       ) : (
         <Select value={row.secretId} onValueChange={(v) => onUpdate(index, "secretId", v)}>
-          <SelectTrigger className="flex-[3] text-xs">
+          <SelectTrigger
+            className="flex-[3] text-xs"
+            data-settings-dirty={!baselineRow || row.secretId !== baselineRow.secretId}
+          >
             <SelectValue placeholder="Select secret..." />
           </SelectTrigger>
           <SelectContent>
@@ -187,19 +211,23 @@ function EnvVarRow({
 
 function EnvVarsCard({
   rows,
+  baselineRows,
   secrets,
   onAdd,
   onUpdate,
   onRemove,
 }: {
   rows: EnvVarRow[];
+  baselineRows: EnvVarRow[];
   secrets: { id: string; name: string }[];
   onAdd: () => void;
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
 }) {
+  const isDirty =
+    JSON.stringify(rowsToEnvVars(rows)) !== JSON.stringify(rowsToEnvVars(baselineRows));
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -229,6 +257,7 @@ function EnvVarsCard({
           <EnvVarRow
             key={idx}
             row={row}
+            baselineRow={baselineRows[idx]}
             index={idx}
             secrets={secrets}
             onUpdate={onUpdate}
@@ -236,7 +265,7 @@ function EnvVarsCard({
           />
         ))}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -457,7 +486,11 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         </Button>
       </div>
       <Separator />
-      <ProfileDetailsCard name={form.name} onNameChange={form.setName} />
+      <ProfileDetailsCard
+        name={form.name}
+        baselineName={profile.name}
+        onNameChange={form.setName}
+      />
       {form.isSprites && form.spritesSecretId && (
         <>
           <SpritesConnectionCard secretId={form.spritesSecretId} />
@@ -466,6 +499,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       )}
       <EnvVarsCard
         rows={form.envVarRows}
+        baselineRows={envVarsToRows(profile.env_vars)}
         secrets={secrets}
         onAdd={form.addEnvVar}
         onUpdate={form.updateEnvVar}
@@ -475,6 +509,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         title="Prepare Script"
         description={form.prepareDesc}
         value={form.prepareScript}
+        baselineValue={profile.prepare_script ?? ""}
         onChange={form.setPrepareScript}
         height="300px"
         placeholders={form.placeholders}
@@ -485,6 +520,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
           title="Cleanup Script"
           description="Runs after the agent session ends for cleanup tasks."
           value={form.cleanupScript}
+          baselineValue={profile.cleanup_script ?? ""}
           onChange={form.setCleanupScript}
           height="200px"
           placeholders={form.placeholders}

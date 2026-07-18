@@ -25,10 +25,8 @@ export class AutomationsPage {
     this.editor = page.getByTestId("automation-editor");
     this.nameInput = page.getByTestId("automation-name-input");
     this.saveButton = page
-      .getByTestId("automation-save-button")
-      .or(
-        page.getByTestId("settings-floating-save").getByRole("button", { name: /save changes/i }),
-      );
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: /save changes/i });
     this.deleteButton = page.getByTestId("automation-delete-button");
     this.customScheduleInput = page.getByTestId("schedule-custom-input");
     this.addConditionButton = page.getByTestId("add-condition-button");

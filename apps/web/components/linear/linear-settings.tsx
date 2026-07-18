@@ -9,7 +9,6 @@ import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
@@ -20,7 +19,7 @@ import {
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
-import { useDraftedIntegrationEnabled } from "@/components/integrations/use-drafted-integration-enabled";
+import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getLinearConfig,
@@ -46,6 +45,7 @@ function configToForm(cfg: LinearConfig | null): FormState {
 
 type FieldsRowProps = {
   form: FormState;
+  baseline: FormState;
   loading: boolean;
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   hasSavedSecret: boolean;
@@ -55,6 +55,7 @@ type FieldsRowProps = {
 
 function SecretField({
   form,
+  baseline,
   loading,
   update,
   hasSavedSecret,
@@ -75,6 +76,7 @@ function SecretField({
         type="password"
         placeholder={hasSavedSecret ? "••••••••" : "lin_api_..."}
         value={form.secret}
+        data-settings-dirty={form.secret !== baseline.secret}
         onChange={(e) => update("secret", e.target.value)}
         disabled={loading}
       />
@@ -93,7 +95,7 @@ function SecretField({
   );
 }
 
-function TeamSelector({ form, loading, update, teams, loadingTeams }: FieldsRowProps) {
+function TeamSelector({ form, baseline, loading, update, teams, loadingTeams }: FieldsRowProps) {
   return (
     <div className="space-y-1.5">
       <Label htmlFor="linear-team">Default team (optional)</Label>
@@ -102,7 +104,11 @@ function TeamSelector({ form, loading, update, teams, loadingTeams }: FieldsRowP
         onValueChange={(v) => update("defaultTeamKey", v === "__none__" ? "" : v)}
         disabled={loading || loadingTeams}
       >
-        <SelectTrigger id="linear-team" className="w-full">
+        <SelectTrigger
+          id="linear-team"
+          className="w-full"
+          data-settings-dirty={form.defaultTeamKey !== baseline.defaultTeamKey}
+        >
           <SelectValue placeholder={loadingTeams ? "Loading teams…" : "Choose a team"} />
         </SelectTrigger>
         <SelectContent>
@@ -371,28 +377,12 @@ function useLinearSettings(workspaceId: string) {
 
 function EnabledPill() {
   const { enabled, setEnabled } = useLinearEnabled();
-  const draft = useDraftedIntegrationEnabled({
-    id: "linear-enabled",
-    enabled,
-    persist: setEnabled,
-  });
-  return (
-    <div className="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1">
-      <Switch
-        id="linear-enabled"
-        checked={draft.enabled}
-        onCheckedChange={draft.setEnabled}
-        className="cursor-pointer"
-      />
-      <Label htmlFor="linear-enabled" className="text-xs cursor-pointer">
-        {draft.enabled ? "Enabled" : "Disabled"}
-      </Label>
-    </div>
-  );
+  return <DraftedIntegrationEnabledControl id="linear" enabled={enabled} persist={setEnabled} />;
 }
 
 export function LinearConnectionSection({ workspaceId }: { workspaceId: string }) {
   const s = useLinearSettings(workspaceId);
+  const baseline = configToForm(s.baselineConfig);
   const missingSecret = !s.config?.hasSecret && !s.form.secret;
   const disableSave = s.saving || missingSecret;
   const disableTest = missingSecret;
@@ -421,12 +411,14 @@ export function LinearConnectionSection({ workspaceId }: { workspaceId: string }
           <IntegrationAuthStatusBanner health={s.health} />
           <SecretField
             form={s.form}
+            baseline={baseline}
             loading={s.loading}
             update={s.update}
             hasSavedSecret={!!s.config?.hasSecret}
           />
           <TeamSelector
             form={s.form}
+            baseline={baseline}
             loading={s.loading}
             update={s.update}
             hasSavedSecret={!!s.config?.hasSecret}

@@ -37,5 +37,5 @@ export function useDraftedIntegrationEnabled({
     discard,
   });
 
-  return { enabled: draft, setEnabled: setDraft };
+  return { enabled: draft, setEnabled: setDraft, isDirty: draft !== baseline };
 }

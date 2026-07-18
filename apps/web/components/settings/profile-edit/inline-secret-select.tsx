@@ -20,6 +20,7 @@ type InlineSecretSelectProps = {
   secrets: SecretListItem[];
   label?: string;
   placeholder?: string;
+  isDirty?: boolean;
 };
 
 export function InlineSecretSelect({
@@ -28,6 +29,7 @@ export function InlineSecretSelect({
   secrets,
   label,
   placeholder = "Select a secret...",
+  isDirty = false,
 }: InlineSecretSelectProps) {
   const [creating, setCreating] = useState(false);
 
@@ -43,7 +45,7 @@ export function InlineSecretSelect({
     <div className="space-y-2">
       {label && <Label className="text-xs text-muted-foreground">{label}</Label>}
       <Select value={secretId ?? NONE_VALUE} onValueChange={handleValueChange}>
-        <SelectTrigger className="cursor-pointer">
+        <SelectTrigger className="cursor-pointer" data-settings-dirty={isDirty}>
           <SelectValue placeholder={placeholder} />
         </SelectTrigger>
         <SelectContent>

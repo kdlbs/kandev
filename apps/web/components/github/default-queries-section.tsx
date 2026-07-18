@@ -3,11 +3,13 @@
 import { useState, useCallback, useMemo } from "react";
 import { IconPlus, IconTrash, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@kandev/ui/tabs";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import {
   useDefaultQueryPresets,
@@ -30,20 +32,27 @@ function newPreset(): StoredQueryPreset {
 
 function QueryRow({
   preset,
+  baseline,
   onPatch,
   onRemove,
 }: {
   preset: StoredQueryPreset;
+  baseline?: StoredQueryPreset;
   onPatch: (patch: Partial<StoredQueryPreset>) => void;
   onRemove: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 rounded-md border p-2">
+    <div
+      className="flex items-center gap-2 rounded-md border p-2"
+      data-settings-dirty={JSON.stringify(preset) !== JSON.stringify(baseline)}
+      data-settings-dirty-level="container"
+    >
       <div className="flex flex-col gap-0.5">
         <span className="text-[10px] text-muted-foreground">Label</span>
         <Input
           className="h-8 w-36"
           value={preset.label}
+          data-settings-dirty={preset.label !== baseline?.label}
           placeholder="Label"
           onChange={(e) => onPatch({ label: e.target.value })}
         />
@@ -53,6 +62,7 @@ function QueryRow({
         <Input
           className="h-8 font-mono text-xs"
           value={preset.filter}
+          data-settings-dirty={preset.filter !== baseline?.filter}
           placeholder="e.g. review-requested:@me is:open"
           onChange={(e) => onPatch({ filter: e.target.value })}
         />
@@ -63,7 +73,10 @@ function QueryRow({
           value={preset.group}
           onValueChange={(v) => onPatch({ group: v as "inbox" | "created" })}
         >
-          <SelectTrigger className="h-8 w-28 cursor-pointer">
+          <SelectTrigger
+            className="h-8 w-28 cursor-pointer"
+            data-settings-dirty={preset.group !== baseline?.group}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -91,10 +104,12 @@ function QueryRow({
 
 function QueryEditor({
   presets,
+  baseline,
   onChange,
   addLabel,
 }: {
   presets: StoredQueryPreset[];
+  baseline: StoredQueryPreset[];
   onChange: (presets: StoredQueryPreset[]) => void;
   addLabel: string;
 }) {
@@ -116,6 +131,7 @@ function QueryEditor({
         <QueryRow
           key={preset.value}
           preset={preset}
+          baseline={baseline.find((candidate) => candidate.value === preset.value)}
           onPatch={(p) => patch(index, p)}
           onRemove={() => remove(index)}
         />
@@ -213,6 +229,9 @@ function useDefaultQueryDrafts(workspaceId?: string) {
   return {
     prDraft,
     issueDraft,
+    prBaseline,
+    issueBaseline,
+    dirty,
     setPrDraft: (next: StoredQueryPreset[]) => {
       setResetRequested(false);
       setPrDraft(next);
@@ -249,30 +268,36 @@ export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string })
         </div>
       }
     >
-      <Tabs defaultValue="pr">
-        <TabsList>
-          <TabsTrigger value="pr" className="cursor-pointer">
-            Pull requests
-          </TabsTrigger>
-          <TabsTrigger value="issue" className="cursor-pointer">
-            Issues
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="pr">
-          <QueryEditor
-            presets={drafts.prDraft}
-            onChange={drafts.setPrDraft}
-            addLabel="Add PR query"
-          />
-        </TabsContent>
-        <TabsContent value="issue">
-          <QueryEditor
-            presets={drafts.issueDraft}
-            onChange={drafts.setIssueDraft}
-            addLabel="Add issue query"
-          />
-        </TabsContent>
-      </Tabs>
+      <SettingsCard isDirty={drafts.dirty}>
+        <CardContent className="pt-6">
+          <Tabs defaultValue="pr">
+            <TabsList>
+              <TabsTrigger value="pr" className="cursor-pointer">
+                Pull requests
+              </TabsTrigger>
+              <TabsTrigger value="issue" className="cursor-pointer">
+                Issues
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="pr">
+              <QueryEditor
+                presets={drafts.prDraft}
+                baseline={drafts.prBaseline}
+                onChange={drafts.setPrDraft}
+                addLabel="Add PR query"
+              />
+            </TabsContent>
+            <TabsContent value="issue">
+              <QueryEditor
+                presets={drafts.issueDraft}
+                baseline={drafts.issueBaseline}
+                onChange={drafts.setIssueDraft}
+                addLabel="Add issue query"
+              />
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </SettingsCard>
     </SettingsSection>
   );
 }

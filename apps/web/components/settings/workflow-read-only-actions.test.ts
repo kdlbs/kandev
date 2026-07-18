@@ -9,11 +9,7 @@ import {
   updateWorkflowStepAction,
 } from "@/app/actions/workspaces";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
-import {
-  useWorkflowDeleteHandlers,
-  useWorkflowSaveActions,
-  useWorkflowStepActions,
-} from "./workflow-card-actions";
+import { useWorkflowDeleteHandlers, useWorkflowStepActions } from "./workflow-card-actions";
 import { useWorkflowMutationGuard } from "./workflow-mutation-guard";
 
 vi.mock("@/app/actions/workspaces", () => ({
@@ -115,7 +111,6 @@ it("refuses to open or confirm workflow deletion when read-only", async () => {
   const { result } = renderHook(() =>
     useWorkflowDeleteHandlers({
       workflow,
-      isNewWorkflow: false,
       readOnly: true,
       otherWorkflows: [],
       wfDel,
@@ -134,27 +129,4 @@ it("refuses to open or confirm workflow deletion when read-only", async () => {
   expect(deleteWorkflowRun).not.toHaveBeenCalled();
   expect(wfDel.setDeleteOpen).not.toHaveBeenCalled();
   expect(wfDel.setMigrateLoading).not.toHaveBeenCalled();
-});
-
-it("refuses to save an existing workflow when read-only", async () => {
-  const onSaveWorkflow = vi.fn();
-  const { result } = renderHook(() => {
-    const mutationGuard = useWorkflowMutationGuard([]);
-    return useWorkflowSaveActions({
-      workflow,
-      isNewWorkflow: false,
-      readOnly: true,
-      workflowSteps: [],
-      templateStepCount: 0,
-      onSaveWorkflow,
-      toast: vi.fn(),
-      mutationGuard,
-    });
-  });
-
-  await act(async () => {
-    await result.current.handleSaveWorkflow();
-  });
-
-  expect(onSaveWorkflow).not.toHaveBeenCalled();
 });

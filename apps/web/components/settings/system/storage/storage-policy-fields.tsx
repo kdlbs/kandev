@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { StorageSettingHelp } from "./storage-setting-help";
 
 export function PolicySection({
@@ -9,20 +10,26 @@ export function PolicySection({
   title,
   description,
   children,
+  isDirty = false,
 }: {
   sectionId: string;
   title: string;
   description: string;
   children: ReactNode;
+  isDirty?: boolean;
 }) {
   return (
-    <Card className="min-w-0" data-testid={`storage-policy-section-${sectionId}`}>
+    <SettingsCard
+      className="min-w-0"
+      isDirty={isDirty}
+      data-testid={`storage-policy-section-${sectionId}`}
+    >
       <CardHeader>
         <CardTitle className="text-sm">{title}</CardTitle>
         <CardDescription className="text-xs">{description}</CardDescription>
       </CardHeader>
       <CardContent>{children}</CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -60,6 +67,7 @@ export function NumberField({
   disabled,
   onChange,
   testId,
+  isDirty = false,
 }: {
   label: string;
   help: string;
@@ -69,6 +77,7 @@ export function NumberField({
   disabled?: boolean;
   onChange: (value: number) => void;
   testId: string;
+  isDirty?: boolean;
 }) {
   return (
     <div className="min-w-0 space-y-1">
@@ -88,6 +97,7 @@ export function NumberField({
         onChange={(event) => onChange(Number(event.target.value))}
         className="h-11"
         data-testid={testId}
+        data-settings-dirty={isDirty}
       />
     </div>
   );

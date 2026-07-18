@@ -18,7 +18,7 @@ vi.mock("@/lib/api/domains/sentry-api", () => ({
 }));
 
 import { SentryInstanceForm } from "./sentry-instance-form";
-import { updateSentryInstance } from "@/lib/api/domains/sentry-api";
+import { createSentryInstance, updateSentryInstance } from "@/lib/api/domains/sentry-api";
 
 const savedInstance: SentryConfig = {
   id: "instance-1",
@@ -102,5 +102,40 @@ describe("SentryInstanceForm", () => {
     expect(screen.getByTestId("sentry-add-form-heading").textContent).toBe("New Instance");
     expect(screen.getByTestId("sentry-add-form-heading").className).toContain("font-semibold");
     expect(screen.queryByTestId("sentry-edit-form-heading")).toBeNull();
+  });
+
+  it("treats a new instance as dirty and creates it through the shared save action", async () => {
+    vi.mocked(createSentryInstance).mockResolvedValue(savedInstance);
+    render(
+      <TooltipProvider>
+        <SettingsSaveProvider>
+          <SentryInstanceForm
+            workspaceId="workspace-1"
+            instance={null}
+            idPrefix="sentry-add"
+            onSaved={vi.fn()}
+            onCancel={vi.fn()}
+          />
+        </SettingsSaveProvider>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByTestId("sentry-add-form").getAttribute("data-settings-dirty")).toBe("true");
+    expect(screen.queryByTestId("sentry-add-save-button")).toBeNull();
+    fireEvent.change(screen.getByTestId("sentry-add-name-input"), {
+      target: { value: "Production" },
+    });
+    fireEvent.change(screen.getByTestId("sentry-add-secret-input"), {
+      target: { value: "sntrys_token" },
+    });
+    expect(createSentryInstance).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(createSentryInstance).toHaveBeenCalledWith(
+        "workspace-1",
+        expect.objectContaining({ name: "Production", secret: "sntrys_token" }),
+      ),
+    );
   });
 });

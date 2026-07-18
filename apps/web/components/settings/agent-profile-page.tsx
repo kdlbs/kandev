@@ -113,6 +113,7 @@ function DeleteProfileCard({ onDelete }: DeleteProfileCardProps) {
 type ProfileSettingsCardProps = {
   agent: Agent;
   draft: AgentProfile;
+  savedProfile: AgentProfile;
   isDirty: boolean;
   onDraftChange: (patch: Partial<AgentProfile>) => void;
   modelConfig: ModelConfig;
@@ -123,6 +124,7 @@ type ProfileSettingsCardProps = {
 function ProfileSettingsCard({
   agent,
   draft,
+  savedProfile,
   isDirty,
   onDraftChange,
   modelConfig,
@@ -133,6 +135,7 @@ function ProfileSettingsCard({
     onDraftChange(toAgentProfilePatch(patch));
   };
   const permissionValues = profilePermissionValues(draft, permissionSettings);
+  const savedPermissionValues = profilePermissionValues(savedProfile, permissionSettings);
 
   return (
     <SettingsCard isDirty={isDirty}>
@@ -153,6 +156,16 @@ function ProfileSettingsCard({
             allow_indexing: permissionValues.allow_indexing,
             cli_passthrough: draft.cliPassthrough,
             cli_flags: draft.cliFlags ?? [],
+          }}
+          baselineProfile={{
+            name: savedProfile.name,
+            model: savedProfile.model,
+            mode: savedProfile.mode ?? "",
+            config_options: savedProfile.configOptions ?? {},
+            auto_approve: savedPermissionValues.auto_approve,
+            allow_indexing: savedPermissionValues.allow_indexing,
+            cli_passthrough: savedProfile.cliPassthrough,
+            cli_flags: savedProfile.cliFlags ?? [],
           }}
           onChange={handleFormChange}
           modelConfig={modelConfig}
@@ -405,6 +418,7 @@ function ProfileDeleteDialogs({
 type ProfileEditorBodyProps = {
   agent: Agent;
   draft: AgentProfile;
+  savedProfile: AgentProfile;
   isDirty: boolean;
   updateDraft: (patch: Partial<AgentProfile>) => void;
   modelConfig: ModelConfig;
@@ -418,6 +432,7 @@ type ProfileEditorBodyProps = {
 function ProfileEditorBody({
   agent,
   draft,
+  savedProfile,
   isDirty,
   updateDraft,
   modelConfig,
@@ -432,6 +447,7 @@ function ProfileEditorBody({
       <ProfileSettingsCard
         agent={agent}
         draft={draft}
+        savedProfile={savedProfile}
         isDirty={isDirty}
         onDraftChange={updateDraft}
         modelConfig={modelConfig}
@@ -441,11 +457,16 @@ function ProfileEditorBody({
 
       <CustomCLIFlagsCard
         flags={draft.cliFlags ?? []}
+        baselineFlags={savedProfile.cliFlags ?? []}
         onChange={(next) => updateDraft({ cliFlags: next })}
         permissionSettings={permissionSettings}
       />
 
-      <ProfileEnvVarsSection envVars={draft.envVars} onChange={updateDraft} />
+      <ProfileEnvVarsSection
+        envVars={draft.envVars}
+        baselineEnvVars={savedProfile.envVars}
+        onChange={updateDraft}
+      />
 
       <CommandPreviewCard
         agentName={agent.name}
@@ -539,6 +560,7 @@ function ProfileEditor({
       <ProfileEditorBody
         agent={agent}
         draft={draft}
+        savedProfile={savedProfile}
         isDirty={isDirty}
         updateDraft={updateDraft}
         modelConfig={modelConfig}

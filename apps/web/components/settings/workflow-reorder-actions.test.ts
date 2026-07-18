@@ -54,75 +54,71 @@ function renderReorderActions(initialSteps: WorkflowStep[]) {
   );
   const view = renderHook(() => {
     const mutationGuard = useWorkflowMutationGuard(initialSteps);
-    return useWorkflowStepActions({
-      workflow,
-      isNewWorkflow: false,
-      workflowSteps: initialSteps,
-      setWorkflowSteps,
-      setStepToDelete: vi.fn(),
-      setStepTaskCount: vi.fn(),
-      setTargetStepForMigration: vi.fn(),
-      setStepDeleteOpen: vi.fn(),
-      toast: vi.fn(),
+    return {
+      actions: useWorkflowStepActions({
+        workflow,
+        isNewWorkflow: false,
+        workflowSteps: initialSteps,
+        setWorkflowSteps,
+        setStepToDelete: vi.fn(),
+        setStepTaskCount: vi.fn(),
+        setTargetStepForMigration: vi.fn(),
+        setStepDeleteOpen: vi.fn(),
+        toast: vi.fn(),
+        mutationGuard,
+      }),
       mutationGuard,
-    });
+    };
   });
   return { ...view, setWorkflowSteps, getSteps: () => currentSteps };
 }
 
-function deferredPromise<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
-}
-
-it("keeps a reorder optimistic until the authoritative response arrives", async () => {
+it("stages a reorder locally without calling persistence", async () => {
   const work = step("work", "Work", 0, true);
   const review = step("review", "Review", 1, false);
   const proposed = [
     { ...review, position: 0 },
     { ...work, position: 1 },
   ];
-  const authoritative = proposed.map((workflowStep) => ({
-    ...workflowStep,
-    updated_at: "server-update",
-  }));
-  const response = deferredPromise<{ steps: WorkflowStep[]; total: number }>();
-  vi.mocked(reorderWorkflowStepsAction).mockReturnValue(response.promise);
   const { result, getSteps } = renderReorderActions([work, review]);
 
-  let request!: Promise<void>;
   await act(async () => {
-    request = result.current.handleReorderWorkflowSteps([review, work]);
-    await vi.waitFor(() => expect(reorderWorkflowStepsAction).toHaveBeenCalledTimes(1));
+    await result.current.actions.handleReorderWorkflowSteps([review, work]);
   });
-  expect(getSteps()).toEqual(proposed);
 
-  await act(async () => {
-    response.resolve({ steps: authoritative, total: 2 });
-    await request;
-  });
-  expect(getSteps()).toEqual(authoritative);
+  expect(getSteps()).toEqual(proposed);
+  expect(reorderWorkflowStepsAction).not.toHaveBeenCalled();
 });
 
-it("rolls an optimistic reorder back when persistence fails", async () => {
+it("holds a cycle-introducing reorder until the warning is confirmed", async () => {
   const work = step("work", "Work", 0, true);
-  const review = step("review", "Review", 1, false);
-  const initial = [work, review];
+  work.events = {
+    on_enter: [{ type: "auto_start_agent" }],
+    on_turn_complete: [{ type: "move_to_next" }],
+  };
+  const parked = step("parked", "Parked", 1, false);
+  const review = step("review", "Review", 2, false);
+  review.events = {
+    on_turn_complete: [{ type: "move_to_step", config: { step_id: work.id } }],
+  };
+  const initial = [work, parked, review];
   const proposed = [
-    { ...review, position: 0 },
-    { ...work, position: 1 },
+    { ...work, position: 0 },
+    { ...review, position: 1 },
+    { ...parked, position: 2 },
   ];
-  vi.mocked(reorderWorkflowStepsAction).mockRejectedValue(new Error("reorder failed"));
   const { result, setWorkflowSteps, getSteps } = renderReorderActions(initial);
 
   await act(async () => {
-    await result.current.handleReorderWorkflowSteps([review, work]);
+    await result.current.actions.handleReorderWorkflowSteps([work, review, parked]);
   });
-
-  expect(setWorkflowSteps).toHaveBeenNthCalledWith(1, proposed);
-  expect(setWorkflowSteps).toHaveBeenNthCalledWith(2, initial);
+  expect(result.current.mutationGuard.proposal?.severity).toBe("warning");
+  expect(setWorkflowSteps).not.toHaveBeenCalled();
   expect(getSteps()).toEqual(initial);
+
+  await act(async () => {
+    await result.current.mutationGuard.confirmProposal();
+  });
+  expect(getSteps()).toEqual(proposed);
+  expect(reorderWorkflowStepsAction).not.toHaveBeenCalled();
 });

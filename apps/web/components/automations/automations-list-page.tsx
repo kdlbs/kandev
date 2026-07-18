@@ -52,6 +52,7 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
       ) : (
         <AutomationsTable
           automations={enabledDrafts.automations}
+          dirtyIds={enabledDrafts.dirtyIds}
           workspaceId={workspaceId}
           onToggleEnabled={enabledDrafts.setEnabled}
           onTrigger={handleTrigger}

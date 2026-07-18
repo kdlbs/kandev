@@ -98,9 +98,17 @@ describe("usePluginConfigForm", () => {
     const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
     await waitFor(() => expect(result.current.configLoading).toBe(false));
 
-    await act(() => result.current.handleSave());
+    let saveError: unknown;
+    await act(async () => {
+      try {
+        await result.current.handleSave();
+      } catch (error) {
+        saveError = error;
+      }
+    });
 
     expect(updatePluginConfig).not.toHaveBeenCalled();
+    expect(saveError).toEqual(new Error("Required: github_token"));
     expect(toastError).toHaveBeenCalledWith(expect.stringContaining("Required"));
   });
 
@@ -127,10 +135,32 @@ describe("usePluginConfigForm", () => {
     await waitFor(() => expect(result.current.configLoading).toBe(false));
 
     act(() => result.current.handleChange("github_token", "ghp_x"));
-    await act(() => result.current.handleSave());
+    let saveError: unknown;
+    await act(async () => {
+      try {
+        await result.current.handleSave();
+      } catch (error) {
+        saveError = error;
+      }
+    });
 
+    expect(saveError).toEqual(new Error("boom"));
     expect(result.current.saveStatus).toBe("error");
     expect(toastError).toHaveBeenCalledWith("boom");
+  });
+
+  it("discards a dirty draft back to the loaded values", async () => {
+    getPluginConfig.mockResolvedValue({ github_token: SECRET_MASK, org: "kdlbs" });
+    const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
+    await waitFor(() => expect(result.current.configLoading).toBe(false));
+
+    act(() => result.current.handleChange("org", "changed"));
+    expect(result.current.isDirty).toBe(true);
+    expect(result.current.revision).not.toBe(JSON.stringify(result.current.initialValues));
+
+    act(() => result.current.discard());
+    expect(result.current.values.org).toBe("kdlbs");
+    expect(result.current.isDirty).toBe(false);
   });
 
   it("treats a refetch failure after a successful PATCH as saved — and masks typed secrets", async () => {

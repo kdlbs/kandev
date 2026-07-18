@@ -49,11 +49,10 @@ function renderCard(
     <TooltipProvider>
       <StoragePolicyCard
         settings={currentSettings}
+        savedSettings={settings}
         capabilities={capabilities}
         pending={pending}
         onChange={onChange}
-        onSave={vi.fn()}
-        onDedicatedConfirm={vi.fn()}
         onAdopt={vi.fn()}
       />
     </TooltipProvider>,
@@ -122,7 +121,6 @@ describe("StoragePolicyCard interactions", () => {
       testIds.dockerBuildCacheUnused,
       "storage-docker-unused-images",
       testIds.dockerImagesUnused,
-      "storage-save-settings",
     ];
     for (const testId of pendingTestIds) {
       expect((screen.getByTestId(testId) as HTMLButtonElement | HTMLInputElement).disabled).toBe(
@@ -178,6 +176,20 @@ describe("StoragePolicyCard interactions", () => {
         screen.getByTestId(`storage-policy-section-${section}`).getAttribute("data-slot"),
       ).toBe("card");
     }
+  });
+
+  it("marks the changed field and owning policy card as dirty", () => {
+    renderCard(false, vi.fn(), { ...settings, idle_for_minutes: 31 });
+
+    expect(screen.getByTestId("storage-idle-period").getAttribute("data-settings-dirty")).toBe(
+      "true",
+    );
+    expect(
+      screen.getByTestId("storage-policy-section-schedule").getAttribute("data-settings-dirty"),
+    ).toBe("true");
+    expect(
+      screen.getByTestId("storage-policy-section-docker").getAttribute("data-settings-dirty"),
+    ).toBe("false");
   });
 
   it("groups related settings and provides help for every policy option", () => {

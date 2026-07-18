@@ -9,20 +9,18 @@ import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { TaskPresetsSection } from "@/components/jira/task-presets-section";
 import { JiraIssueWatchersSection } from "@/components/jira/jira-issue-watchers-section";
-import { useJiraEnabled } from "@/hooks/domains/jira/use-jira-enabled";
+import { JiraEnabledControl } from "@/components/jira/jira-enabled-control";
 import {
   IntegrationAuthStatusBanner,
   type IntegrationAuthHealth,
 } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
-import { useDraftedIntegrationEnabled } from "@/components/integrations/use-drafted-integration-enabled";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
 import {
   getJiraConfig,
@@ -102,6 +100,7 @@ function authAllowedForInstance(auth: JiraAuthMethod, instance: JiraInstanceType
 
 type FieldsRowProps = {
   form: FormState;
+  baseline: FormState;
   loading: boolean;
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 };
@@ -110,7 +109,7 @@ type InstanceFieldsProps = FieldsRowProps & {
   setForm: Dispatch<SetStateAction<FormState>>;
 };
 
-function InstanceFields({ form, loading, setForm }: InstanceFieldsProps) {
+function InstanceFields({ form, baseline, loading, setForm }: InstanceFieldsProps) {
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div className="space-y-1.5">
@@ -131,7 +130,11 @@ function InstanceFields({ form, loading, setForm }: InstanceFieldsProps) {
           }}
           disabled={loading}
         >
-          <SelectTrigger id="jira-instance" className="w-full cursor-pointer">
+          <SelectTrigger
+            id="jira-instance"
+            className="w-full cursor-pointer"
+            data-settings-dirty={form.instanceType !== baseline.instanceType}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -152,6 +155,7 @@ function InstanceFields({ form, loading, setForm }: InstanceFieldsProps) {
           data-testid="jira-project-input"
           placeholder="PROJ"
           value={form.defaultProjectKey}
+          data-settings-dirty={form.defaultProjectKey !== baseline.defaultProjectKey}
           onChange={(e) =>
             setForm((prev) => ({ ...prev, defaultProjectKey: e.target.value.toUpperCase() }))
           }
@@ -162,7 +166,7 @@ function InstanceFields({ form, loading, setForm }: InstanceFieldsProps) {
   );
 }
 
-function SiteFields({ form, loading, update }: FieldsRowProps) {
+function SiteFields({ form, baseline, loading, update }: FieldsRowProps) {
   const placeholder =
     form.instanceType === "server" ? "https://jira.your-company.com" : "https://acme.atlassian.net";
   return (
@@ -173,6 +177,7 @@ function SiteFields({ form, loading, update }: FieldsRowProps) {
         data-testid="jira-site-input"
         placeholder={placeholder}
         value={form.siteUrl}
+        data-settings-dirty={form.siteUrl !== baseline.siteUrl}
         onChange={(e) => update("siteUrl", e.target.value)}
         disabled={loading}
       />
@@ -180,7 +185,7 @@ function SiteFields({ form, loading, update }: FieldsRowProps) {
   );
 }
 
-function AuthFields({ form, loading, update }: FieldsRowProps) {
+function AuthFields({ form, baseline, loading, update }: FieldsRowProps) {
   const showEmail = form.instanceType === "cloud" && form.authMethod === "api_token";
   return (
     <div className="grid gap-4 sm:grid-cols-2">
@@ -191,7 +196,11 @@ function AuthFields({ form, loading, update }: FieldsRowProps) {
           onValueChange={(v) => update("authMethod", v as JiraAuthMethod)}
           disabled={loading}
         >
-          <SelectTrigger id="jira-auth" className="w-full cursor-pointer">
+          <SelectTrigger
+            id="jira-auth"
+            className="w-full cursor-pointer"
+            data-settings-dirty={form.authMethod !== baseline.authMethod}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -215,6 +224,7 @@ function AuthFields({ form, loading, update }: FieldsRowProps) {
             type="email"
             placeholder="you@example.com"
             value={form.email}
+            data-settings-dirty={form.email !== baseline.email}
             onChange={(e) => update("email", e.target.value)}
             disabled={loading}
           />
@@ -299,6 +309,7 @@ type SecretFieldPropsWithExpiry = SecretFieldProps & { secretExpiresAt?: string 
 
 function SecretField({
   form,
+  baseline,
   loading,
   update,
   hasSavedSecret,
@@ -323,6 +334,7 @@ function SecretField({
         type="password"
         placeholder={secretPlaceholder(method, hasSavedSecret)}
         value={form.secret}
+        data-settings-dirty={form.secret !== baseline.secret}
         onChange={(e) => update("secret", e.target.value)}
         disabled={loading}
       />
@@ -557,28 +569,6 @@ function useJiraSettings(workspaceId: string) {
   };
 }
 
-function EnabledPill() {
-  const { enabled, setEnabled } = useJiraEnabled();
-  const draft = useDraftedIntegrationEnabled({ id: "jira-enabled", enabled, persist: setEnabled });
-  return (
-    <div className="flex items-center gap-2 rounded-full border bg-muted/30 px-3 py-1">
-      <Switch
-        id="jira-enabled"
-        checked={draft.enabled}
-        onCheckedChange={draft.setEnabled}
-        className="cursor-pointer"
-      />
-      <Label htmlFor="jira-enabled" className="text-xs cursor-pointer">
-        {draft.enabled ? "Enabled" : "Disabled"}
-      </Label>
-    </div>
-  );
-}
-
-// normalizeComparableSiteUrl mirrors the backend's normalizeSiteURL (strip
-// trailing slash, prepend https:// if no scheme) so that
-// "acme.atlassian.net" and "https://acme.atlassian.net" don't read as
-// different hosts in savedSecretMatches.
 function normalizeComparableSiteUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/, "");
   if (!trimmed) return "";
@@ -605,10 +595,9 @@ function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean
 
 export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
   const s = useJiraSettings(workspaceId);
+  const baseline = configToForm(s.config);
   const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
   const missingSecret = !savedSecretMatchesMode && !s.form.secret;
-  // Email is only required for the Cloud + api_token combination. Server PAT
-  // and session cookies authenticate the user out of the token itself.
   const emailRequired = s.form.instanceType === "cloud" && s.form.authMethod === "api_token";
   const disableSave =
     s.saving || !s.form.siteUrl || (emailRequired && !s.form.email) || missingSecret;
@@ -635,16 +624,23 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
       icon={<IconTicket className="h-5 w-5" />}
       title="Jira integration"
       description="Connect this workspace to Atlassian Cloud or a self-hosted Jira Server / Data Center instance. Credentials are stored encrypted server-side for the selected workspace."
-      action={<EnabledPill />}
+      action={<JiraEnabledControl />}
     >
       <SettingsCard isDirty={dirty}>
         <CardContent className="space-y-4 pt-6">
           <IntegrationAuthStatusBanner health={s.health} />
-          <InstanceFields form={s.form} loading={s.loading} update={s.update} setForm={s.setForm} />
-          <SiteFields form={s.form} loading={s.loading} update={s.update} />
-          <AuthFields form={s.form} loading={s.loading} update={s.update} />
+          <InstanceFields
+            form={s.form}
+            baseline={baseline}
+            loading={s.loading}
+            update={s.update}
+            setForm={s.setForm}
+          />
+          <SiteFields form={s.form} baseline={baseline} loading={s.loading} update={s.update} />
+          <AuthFields form={s.form} baseline={baseline} loading={s.loading} update={s.update} />
           <SecretField
             form={s.form}
+            baseline={baseline}
             loading={s.loading}
             update={s.update}
             hasSavedSecret={savedSecretMatchesMode}

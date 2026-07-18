@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card, CardContent } from "@kandev/ui/card";
+import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import {
   fetchGitHubWorkspaceSettings,
@@ -42,6 +43,7 @@ type ScopeFieldsProps = {
   mode: GitHubRepoScopeMode;
   orgs: string;
   repos: string;
+  baseline: { mode: GitHubRepoScopeMode; orgs: string; repos: string };
   loading: boolean;
   invalidRepos: boolean;
   onModeChange: (mode: GitHubRepoScopeMode) => void;
@@ -53,6 +55,7 @@ function RepositoryScopeFields({
   mode,
   orgs,
   repos,
+  baseline,
   loading,
   invalidRepos,
   onModeChange,
@@ -60,7 +63,9 @@ function RepositoryScopeFields({
   onReposChange,
 }: ScopeFieldsProps) {
   return (
-    <Card>
+    <SettingsCard
+      isDirty={mode !== baseline.mode || orgs !== baseline.orgs || repos !== baseline.repos}
+    >
       <CardContent className="grid gap-4 py-4 md:grid-cols-[220px_minmax(0,1fr)]">
         <div className="space-y-1.5">
           <label className="text-sm font-medium" htmlFor="github-scope-mode">
@@ -71,7 +76,11 @@ function RepositoryScopeFields({
             onValueChange={(value) => onModeChange(value as GitHubRepoScopeMode)}
             disabled={loading}
           >
-            <SelectTrigger id="github-scope-mode" data-testid="github-scope-mode">
+            <SelectTrigger
+              id="github-scope-mode"
+              data-testid="github-scope-mode"
+              data-settings-dirty={mode !== baseline.mode}
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -89,6 +98,7 @@ function RepositoryScopeFields({
             <Input
               id="github-scope-orgs"
               value={orgs}
+              data-settings-dirty={orgs !== baseline.orgs}
               onChange={(event) => onOrgsChange(event.target.value)}
               disabled={loading || mode !== "orgs"}
               placeholder="kdlbs, example-org"
@@ -102,6 +112,7 @@ function RepositoryScopeFields({
             <Input
               id="github-scope-repos"
               value={repos}
+              data-settings-dirty={repos !== baseline.repos}
               onChange={(event) => onReposChange(event.target.value)}
               disabled={loading || mode !== "repos"}
               aria-invalid={invalidRepos}
@@ -114,7 +125,7 @@ function RepositoryScopeFields({
           </div>
         </div>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -214,6 +225,7 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
     mode,
     orgs,
     repos,
+    baseline,
     loading,
     invalidRepos,
     setMode,
@@ -234,6 +246,7 @@ export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string })
         mode={draft.mode}
         orgs={draft.orgs}
         repos={draft.repos}
+        baseline={draft.baseline}
         loading={draft.loading}
         invalidRepos={draft.invalidRepos}
         onModeChange={draft.setMode}

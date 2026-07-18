@@ -47,6 +47,18 @@ describe("useAutomationTriggerDrafts", () => {
     expect(addTrigger).not.toHaveBeenCalled();
   });
 
+  it("discards trigger changes back to the loaded baseline", async () => {
+    const { result } = renderHook(() => useAutomationTriggerDrafts(AUTOMATION_ID));
+    act(() => result.current.loadTriggers([trigger("trigger-1")]));
+
+    await act(() => result.current.handleToggle("trigger-1", false));
+    await act(() => result.current.handleAdd("webhook", {}));
+    act(() => result.current.discardDrafts());
+
+    expect(result.current.allTriggers).toEqual([trigger("trigger-1")]);
+    expect(result.current.pending).toEqual([]);
+  });
+
   it("does not recreate completed trigger drafts when a save is retried", async () => {
     const first = trigger("created-1");
     const second = trigger("created-2");

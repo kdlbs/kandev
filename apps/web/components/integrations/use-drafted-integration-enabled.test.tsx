@@ -14,7 +14,11 @@ function Harness({ persist }: { persist: (enabled: boolean) => void }) {
       setEnabled(next);
     },
   });
-  return <button onClick={() => draft.setEnabled(!draft.enabled)}>Toggle</button>;
+  return (
+    <button data-settings-dirty={draft.isDirty} onClick={() => draft.setEnabled(!draft.enabled)}>
+      Toggle
+    </button>
+  );
 }
 
 describe("useDraftedIntegrationEnabled", () => {
@@ -28,6 +32,9 @@ describe("useDraftedIntegrationEnabled", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Toggle" }));
     expect(persist).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Toggle" }).getAttribute("data-settings-dirty")).toBe(
+      "true",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(persist).toHaveBeenCalledWith(false));

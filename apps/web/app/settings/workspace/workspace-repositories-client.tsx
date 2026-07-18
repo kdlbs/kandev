@@ -563,6 +563,7 @@ export function WorkspaceRepositoriesClient({
             <RepositoryCard
               key={repo.id}
               repository={repo}
+              savedRepository={savedRepositoriesById.get(repo.id)}
               isRepositoryDirty={isRepositoryDirty(repo, savedRepositoriesById.get(repo.id))}
               areScriptsDirty={areRepositoryScriptsDirty(repo, savedRepositoriesById.get(repo.id))}
               autoOpen={Boolean(repo.__autoOpen)}

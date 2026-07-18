@@ -21,6 +21,7 @@ test.describe("Automations settings page", () => {
 
     // Fill in name
     await automations.nameInput.fill("Daily Check");
+    await expect(automations.nameInput).toHaveAttribute("data-settings-dirty", "true");
 
     // Select a schedule preset
     await automations.schedulePreset("@daily").click();
@@ -276,6 +277,8 @@ test.describe("Automations settings page", () => {
     // Disable it
     await toggle.click();
     await expect(toggle).not.toBeChecked();
+    await expect(toggle).toHaveAttribute("data-settings-dirty", "true");
+    await expect(automations.table).toHaveAttribute("data-settings-dirty", "true");
 
     const floatingSave = testPage.getByTestId("settings-floating-save");
     await expect(floatingSave).toBeVisible();

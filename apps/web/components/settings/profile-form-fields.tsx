@@ -1,22 +1,9 @@
 "use client";
 
 import { useId } from "react";
-import {
-  IconAlertCircle,
-  IconAlertTriangle,
-  IconRefresh,
-  IconTerminal2,
-} from "@tabler/icons-react";
+import { IconAlertCircle, IconAlertTriangle, IconRefresh } from "@tabler/icons-react";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Skeleton } from "@kandev/ui/skeleton";
@@ -38,6 +25,12 @@ import {
   type PermissionKey,
 } from "@/lib/agent-permissions";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
+import {
+  CommandsButton,
+  findActiveMode,
+  profileModeIsDirty,
+  profileModelIsDirty,
+} from "@/components/settings/profile-capability-helpers";
 import type {
   CLIFlag,
   CommandEntry,
@@ -59,6 +52,7 @@ export type ProfileFormData = {
 
 export type ProfileFormFieldsProps = {
   profile: ProfileFormData;
+  baselineProfile?: ProfileFormData;
   onChange: (patch: Partial<ProfileFormData>) => void;
   modelConfig: ModelConfig;
   permissionSettings: Record<string, PermissionSetting>;
@@ -79,6 +73,7 @@ export type ProfileFormFieldsProps = {
 
 type PermissionToggleProps = {
   profile: ProfileFormData;
+  baselineProfile?: ProfileFormData;
   onChange: (patch: Partial<ProfileFormData>) => void;
   permissionSettings: Record<string, PermissionSetting>;
   passthroughConfig: PassthroughConfig | null;
@@ -102,12 +97,14 @@ function PermissionToggleRow({
   checked,
   onCheckedChange,
   compact,
+  isDirty,
 }: {
   settingKey: string;
   setting: PermissionSetting;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   compact: boolean;
+  isDirty: boolean;
 }) {
   const isDanger = setting.apply_method === PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE;
   const switchSize = compact ? ("sm" as const) : ("default" as const);
@@ -120,6 +117,8 @@ function PermissionToggleRow({
     <div
       key={settingKey}
       className={wrapperCls}
+      data-settings-dirty={isDirty}
+      data-settings-dirty-level="container"
       data-testid={isDanger ? "permission-auto-approve-danger" : `permission-toggle-${settingKey}`}
     >
       <div className={`flex-1 min-w-0 ${compact && !isDanger ? "space-y-0.5" : "space-y-1"}`}>
@@ -149,6 +148,7 @@ function PermissionToggles({
   passthroughConfig,
   variant,
   lockPassthrough,
+  baselineProfile,
 }: PermissionToggleProps) {
   const isCompact = variant === "compact";
   const switchSize = isCompact ? ("sm" as const) : ("default" as const);
@@ -160,14 +160,19 @@ function PermissionToggles({
           const setting = permissionSettings[key];
           if (!setting?.supported) return null;
           if (setting.apply_method === "cli_flag") return null;
+          const checked = readPermissionValue(profile, key, permissionSettings);
           return (
             <PermissionToggleRow
               key={key}
               settingKey={key}
               setting={setting}
-              checked={readPermissionValue(profile, key, permissionSettings)}
+              checked={checked}
               onCheckedChange={(checked) => onChange({ [key]: checked })}
               compact
+              isDirty={
+                Boolean(baselineProfile) &&
+                checked !== readPermissionValue(baselineProfile!, key, permissionSettings)
+              }
             />
           );
         })}
@@ -184,6 +189,10 @@ function PermissionToggles({
               checked={profile.cli_passthrough}
               onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}
               disabled={lockPassthrough}
+              data-settings-dirty={
+                Boolean(baselineProfile) &&
+                profile.cli_passthrough !== baselineProfile?.cli_passthrough
+              }
             />
           </div>
         )}
@@ -205,6 +214,11 @@ function PermissionToggles({
             checked={readPermissionValue(profile, key, permissionSettings)}
             onCheckedChange={(checked) => onChange({ [key]: checked })}
             compact={false}
+            isDirty={
+              Boolean(baselineProfile) &&
+              readPermissionValue(profile, key, permissionSettings) !==
+                readPermissionValue(baselineProfile!, key, permissionSettings)
+            }
           />
         );
       })}
@@ -218,6 +232,10 @@ function PermissionToggles({
             checked={profile.cli_passthrough}
             onCheckedChange={(checked) => onChange({ cli_passthrough: checked })}
             disabled={lockPassthrough}
+            data-settings-dirty={
+              Boolean(baselineProfile) &&
+              profile.cli_passthrough !== baselineProfile?.cli_passthrough
+            }
           />
         </div>
       )}
@@ -378,43 +396,23 @@ function modelConfigOptions(modelConfig: ModelConfig): SelectConfigOption[] {
   );
 }
 
-function CommandsButton({ commands }: { commands: CommandEntry[] }) {
-  if (commands.length === 0) return null;
-  return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="cursor-pointer"
-          data-testid="profile-commands-button"
-        >
-          <IconTerminal2 className="mr-2 h-4 w-4" />
-          Available commands ({commands.length})
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Available slash commands</DialogTitle>
-          <DialogDescription>
-            Type these during a session chat to invoke them — e.g. <code>/init</code>.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="max-h-[60vh] overflow-y-auto space-y-2">
-          {commands.map((c) => (
-            <div key={c.name} className="rounded-md border p-3">
-              <code className="text-sm font-semibold">/{c.name}</code>
-              {c.description && (
-                <p className="text-xs text-muted-foreground mt-1">{c.description}</p>
-              )}
-            </div>
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
+type CapabilitiesRowProps = {
+  profile: ProfileFormData;
+  models: ModelEntry[];
+  modes: ModeEntry[];
+  commands: CommandEntry[];
+  currentModelId: string | undefined;
+  currentModeId: string | undefined;
+  status: ModelConfig["status"];
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  isCompact: boolean;
+  isLoading: boolean;
+  onRefresh: () => Promise<void>;
+  error: string | null;
+  modelConfig: ModelConfig;
+  agentName: string;
+  baselineProfile?: ProfileFormData;
+};
 
 function CapabilitiesRow({
   profile,
@@ -431,27 +429,11 @@ function CapabilitiesRow({
   error,
   modelConfig,
   agentName,
-}: {
-  profile: ProfileFormData;
-  models: ModelEntry[];
-  modes: ModeEntry[];
-  commands: CommandEntry[];
-  currentModelId: string | undefined;
-  currentModeId: string | undefined;
-  status: ModelConfig["status"];
-  onChange: (patch: Partial<ProfileFormData>) => void;
-  isCompact: boolean;
-  isLoading: boolean;
-  onRefresh: () => Promise<void>;
-  error: string | null;
-  modelConfig: ModelConfig;
-  agentName: string;
-}) {
+  baselineProfile,
+}: CapabilitiesRowProps) {
   const hasModes = modes.length > 0;
   const configOptions = modelConfigOptions(modelConfig);
-  const activeMode = hasModes
-    ? modes.find((m) => m.id === (profile.mode || currentModeId || modes[0]?.id))
-    : undefined;
+  const activeMode = findActiveMode(modes, profile.mode, currentModeId);
   const labelCls = isCompact ? "text-xs text-muted-foreground" : undefined;
   const gapCls = isCompact ? "space-y-1.5" : "space-y-2";
 
@@ -483,7 +465,11 @@ function CapabilitiesRow({
   return (
     <div className={gapCls}>
       <div className="flex items-end gap-2">
-        <div className={`flex-1 min-w-0 ${gapCls}`}>
+        <div
+          className={`flex-1 min-w-0 ${gapCls}`}
+          data-settings-dirty={profileModelIsDirty(profile, baselineProfile)}
+          data-settings-dirty-level="container"
+        >
           <Label className={labelCls}>Start model</Label>
           <ModelPicker
             profile={profile}
@@ -494,7 +480,12 @@ function CapabilitiesRow({
           />
         </div>
         {hasModes && (
-          <div data-testid="profile-mode-field" className={`flex-1 min-w-0 ${gapCls}`}>
+          <div
+            data-testid="profile-mode-field"
+            className={`flex-1 min-w-0 ${gapCls}`}
+            data-settings-dirty={profileModeIsDirty(profile, baselineProfile)}
+            data-settings-dirty-level="container"
+          >
             <Label className={labelCls}>Start mode</Label>
             <ModePicker
               profile={profile}
@@ -520,11 +511,13 @@ function NameField({
   onChange,
   canRemove,
   onRemove,
+  baselineName,
 }: {
   profile: ProfileFormData;
   onChange: (patch: Partial<ProfileFormData>) => void;
   canRemove?: boolean;
   onRemove?: () => void;
+  baselineName?: string;
 }) {
   return (
     <div className="flex items-center justify-between gap-4">
@@ -535,6 +528,7 @@ function NameField({
           value={profile.name}
           onChange={(event) => onChange({ name: event.target.value })}
           placeholder="Default profile"
+          data-settings-dirty={baselineName !== undefined && profile.name !== baselineName}
         />
       </div>
       {canRemove && onRemove && (
@@ -548,6 +542,7 @@ function NameField({
 
 export function ProfileFormFields({
   profile,
+  baselineProfile,
   onChange,
   modelConfig,
   permissionSettings,
@@ -571,6 +566,7 @@ export function ProfileFormFields({
           onChange={onChange}
           canRemove={canRemove}
           onRemove={onRemove}
+          baselineName={baselineProfile?.name}
         />
       )}
 
@@ -589,6 +585,7 @@ export function ProfileFormFields({
         onRefresh={caps.refresh}
         error={caps.error}
         modelConfig={modelConfig}
+        baselineProfile={baselineProfile}
       />
 
       <PermissionToggles
@@ -598,15 +595,24 @@ export function ProfileFormFields({
         passthroughConfig={passthroughConfig}
         variant={variant}
         lockPassthrough={lockPassthrough}
+        baselineProfile={baselineProfile}
       />
 
-      <CLIFlagsField
-        flags={profile.cli_flags}
-        onChange={(next) => onChange({ cli_flags: next })}
-        permissionSettings={permissionSettings}
-        variant={variant}
-        hideCustomFlags={hideCustomCLIFlags}
-      />
+      <div
+        data-settings-dirty={
+          Boolean(baselineProfile) &&
+          JSON.stringify(profile.cli_flags) !== JSON.stringify(baselineProfile?.cli_flags)
+        }
+        data-settings-dirty-level="container"
+      >
+        <CLIFlagsField
+          flags={profile.cli_flags}
+          onChange={(next) => onChange({ cli_flags: next })}
+          permissionSettings={permissionSettings}
+          variant={variant}
+          hideCustomFlags={hideCustomCLIFlags}
+        />
+      </div>
     </div>
   );
 }

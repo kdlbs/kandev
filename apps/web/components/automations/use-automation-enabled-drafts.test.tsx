@@ -13,7 +13,10 @@ function Harness({ disable }: { disable: (id: string) => Promise<unknown> }) {
     disable,
   });
   return (
-    <button onClick={() => draft.setEnabled(automation.id, !draft.automations[0].enabled)}>
+    <button
+      data-dirty={draft.dirtyIds.has(automation.id)}
+      onClick={() => draft.setEnabled(automation.id, !draft.automations[0].enabled)}
+    >
       Toggle
     </button>
   );
@@ -28,11 +31,14 @@ describe("useAutomationEnabledDrafts", () => {
       </SettingsSaveProvider>,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle" }));
+    const toggle = screen.getByRole("button", { name: "Toggle" });
+    fireEvent.click(toggle);
     expect(disable).not.toHaveBeenCalled();
+    expect(toggle.getAttribute("data-dirty")).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(disable).toHaveBeenCalledWith(automation.id));
+    await waitFor(() => expect(toggle.getAttribute("data-dirty")).toBe("false"));
   });
 
   it("does not retry a toggle that succeeded before another toggle failed", async () => {

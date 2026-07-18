@@ -13,6 +13,7 @@ const ENUM_UNSET_SENTINEL = "__kandev_enum_unset__";
 type PluginConfigFormProps = {
   fields: PluginConfigField[];
   values: Record<string, string | boolean>;
+  initialValues: Record<string, string | boolean>;
   disabled: boolean;
   onChange: (name: string, value: string | boolean) => void;
 };
@@ -23,7 +24,13 @@ type PluginConfigFormProps = {
  * mask; editing replaces the value, leaving it untouched keeps the stored
  * secret. Purely controlled — load/save/dirty state lives in PluginDetail.
  */
-export function PluginConfigForm({ fields, values, disabled, onChange }: PluginConfigFormProps) {
+export function PluginConfigForm({
+  fields,
+  values,
+  initialValues,
+  disabled,
+  onChange,
+}: PluginConfigFormProps) {
   return (
     <div className="space-y-5">
       {fields.map((field) => (
@@ -31,6 +38,7 @@ export function PluginConfigForm({ fields, values, disabled, onChange }: PluginC
           key={field.name}
           field={field}
           value={values[field.name] ?? ""}
+          isDirty={values[field.name] !== initialValues[field.name]}
           disabled={disabled}
           onChange={onChange}
         />
@@ -42,11 +50,12 @@ export function PluginConfigForm({ fields, values, disabled, onChange }: PluginC
 type ConfigFieldRowProps = {
   field: PluginConfigField;
   value: string | boolean;
+  isDirty: boolean;
   disabled: boolean;
   onChange: (name: string, value: string | boolean) => void;
 };
 
-function ConfigFieldRow({ field, value, disabled, onChange }: ConfigFieldRowProps) {
+function ConfigFieldRow({ field, value, isDirty, disabled, onChange }: ConfigFieldRowProps) {
   const inputId = `plugin-config-${field.name}`;
   return (
     <div className="space-y-1.5" data-testid={`plugin-config-field-${field.name}`}>
@@ -58,6 +67,7 @@ function ConfigFieldRow({ field, value, disabled, onChange }: ConfigFieldRowProp
         field={field}
         inputId={inputId}
         value={value}
+        isDirty={isDirty}
         disabled={disabled}
         onChange={onChange}
       />
@@ -72,6 +82,7 @@ function ConfigFieldControl({
   field,
   inputId,
   value,
+  isDirty,
   disabled,
   onChange,
 }: ConfigFieldControlProps) {
@@ -82,6 +93,7 @@ function ConfigFieldControl({
           id={inputId}
           checked={value === true}
           disabled={disabled}
+          data-settings-dirty={isDirty}
           onCheckedChange={(checked) => onChange(field.name, checked)}
         />
       </div>
@@ -98,7 +110,11 @@ function ConfigFieldControl({
         disabled={disabled}
         onValueChange={(next) => onChange(field.name, next === ENUM_UNSET_SENTINEL ? "" : next)}
       >
-        <SelectTrigger id={inputId} className="max-w-md cursor-pointer">
+        <SelectTrigger
+          id={inputId}
+          className="max-w-md cursor-pointer"
+          data-settings-dirty={isDirty}
+        >
           <SelectValue placeholder="Select..." />
         </SelectTrigger>
         <SelectContent>
@@ -129,6 +145,7 @@ function ConfigFieldControl({
       step={!field.secret && field.type === "integer" ? "1" : undefined}
       value={typeof value === "string" ? value : ""}
       disabled={disabled}
+      data-settings-dirty={isDirty}
       autoComplete={field.secret ? "off" : undefined}
       className="max-w-md"
       onChange={(event) => onChange(field.name, event.target.value)}

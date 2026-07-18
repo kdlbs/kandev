@@ -22,6 +22,7 @@ import { WebhookConfig } from "./trigger-configs/webhook-config";
 
 type TriggerCardProps = {
   trigger: AutomationTrigger;
+  savedTrigger?: AutomationTrigger;
   automationId: string | null;
   workspaceId: string;
   onUpdate: (config: Record<string, unknown>) => void;
@@ -86,6 +87,7 @@ function getTriggerSummary(trigger: AutomationTrigger): string {
 
 export function TriggerCard({
   trigger,
+  savedTrigger,
   automationId,
   workspaceId,
   onUpdate,
@@ -95,9 +97,17 @@ export function TriggerCard({
   const [expanded, setExpanded] = useState(false);
   const Icon = TRIGGER_ICON[trigger.type];
   const color = TRIGGER_COLOR[trigger.type];
+  const isDirty =
+    !savedTrigger ||
+    trigger.enabled !== savedTrigger.enabled ||
+    JSON.stringify(trigger.config) !== JSON.stringify(savedTrigger.config);
 
   return (
-    <div className="rounded-lg border bg-card">
+    <div
+      className="rounded-lg border bg-card"
+      data-settings-dirty={isDirty}
+      data-settings-dirty-level="container"
+    >
       <div className="flex items-center gap-3 px-4 py-3">
         <Icon className={`h-4 w-4 ${color} shrink-0`} />
         <button
@@ -127,6 +137,7 @@ export function TriggerCard({
         <Switch
           size="sm"
           checked={trigger.enabled}
+          data-settings-dirty={!savedTrigger || trigger.enabled !== savedTrigger.enabled}
           onCheckedChange={onToggleEnabled}
           className="cursor-pointer"
         />

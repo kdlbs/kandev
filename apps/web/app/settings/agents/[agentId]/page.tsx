@@ -87,7 +87,7 @@ function useAgentFormState(
   availableAgents: AvailableAgent[],
 ) {
   const [draftAgent, setDraftAgent] = useState<DraftAgent>(initialAgent);
-  const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [_saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
 
   const resolveDisplayName = (name: string) =>
     availableAgents.find((item: AvailableAgent) => item.name === name)?.display_name ?? "";
@@ -136,7 +136,6 @@ function useAgentFormState(
   return {
     draftAgent,
     setDraftAgent,
-    saveStatus,
     setSaveStatus,
     resolveDisplayName,
     currentAgentModelConfig,
@@ -375,7 +374,6 @@ function AgentSetupForm({
   const {
     draftAgent,
     setDraftAgent,
-    saveStatus,
     setSaveStatus,
     resolveDisplayName,
     currentAgentModelConfig,
@@ -424,7 +422,7 @@ function AgentSetupForm({
   useSettingsSaveContributor({
     id: `agent:${draftAgent.id}`,
     revision: saveRevision.revision,
-    isDirty: !isCreateMode && saveRevision.revision !== saveRevision.saved,
+    isDirty: isCreateMode ? isAgentDirty : saveRevision.revision !== saveRevision.saved,
     canSave: profilesValid && !hasInvalidMcpConfig,
     invalidReason: saveInvalidReason,
     save: handleCoordinatedSave,
@@ -448,18 +446,16 @@ function AgentSetupForm({
         isCreateMode={isCreateMode}
         isAgentDirty={isAgentDirty}
         draftAgent={draftAgent}
+        savedAgent={savedAgent}
         newProfileId={newProfileId}
         currentAgentModelConfig={currentAgentModelConfig}
         permissionSettings={permissionSettings}
         passthroughConfig={passthroughConfig}
-        saveStatus={saveStatus}
-        hasInvalidMcpConfig={hasInvalidMcpConfig}
         onAddProfile={handleAddProfile}
         onProfileChange={handleProfileChange}
         onProfileMcpChange={handleProfileMcpChange}
         onRemoveProfile={handleRemoveProfile}
         onToastError={onToastError}
-        onSave={() => void handleSave().catch(() => undefined)}
       />
     </div>
   );

@@ -29,6 +29,7 @@ export function useAutomationEnabledDrafts({
     [automations, overrides],
   );
   const revision = JSON.stringify(dirtyEntries);
+  const dirtyIds = useMemo(() => new Set(dirtyEntries.map(([id]) => id)), [dirtyEntries]);
 
   const save = useCallback(async () => {
     let firstError: unknown;
@@ -61,6 +62,7 @@ export function useAutomationEnabledDrafts({
       ...automation,
       enabled: overrides[automation.id] ?? automation.enabled,
     })),
+    dirtyIds,
     setEnabled: (id: string, enabled: boolean) =>
       setOverrides((current) => ({ ...current, [id]: enabled })),
   };

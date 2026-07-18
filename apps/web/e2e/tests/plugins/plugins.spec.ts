@@ -241,7 +241,16 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect(tokenInput).toHaveAttribute("type", "password");
     await tokenInput.fill(secretToken);
     await greetingInput.fill("hello from e2e");
-    await testPage.getByRole("button", { name: "Save" }).click();
+    await expect(tokenInput).toHaveAttribute("data-settings-dirty", "true");
+    await expect(greetingInput).toHaveAttribute("data-settings-dirty", "true");
+    await expect(testPage.getByTestId("plugin-settings-card")).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
 
     // --- After save the form re-fetches the MASKED config: the token shows
     // as the placeholder, never the cleartext; the greeting round-trips. ---

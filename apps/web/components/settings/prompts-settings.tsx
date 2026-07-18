@@ -149,7 +149,6 @@ function PromptListItem({
             size="icon"
             onClick={() => onOpenDelete(prompt)}
             disabled={isBusy}
-            data-settings-dirty={nameIsDirty}
             className="cursor-pointer"
           >
             <IconTrash className="h-4 w-4" />
@@ -164,7 +163,7 @@ function PromptListItem({
             placeholder="Prompt name"
             data-testid="prompt-name-input"
             disabled={isBusy}
-            data-settings-dirty={contentIsDirty}
+            data-settings-dirty={nameIsDirty}
           />
           <Textarea
             value={formState.content}
@@ -174,6 +173,7 @@ function PromptListItem({
             className="resize-y max-h-60 overflow-auto"
             data-testid="prompt-content-input"
             disabled={isBusy}
+            data-settings-dirty={contentIsDirty}
           />
           <div className="flex items-center gap-2">
             <Button variant="ghost" onClick={onCancel} disabled={isBusy}>

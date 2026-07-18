@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { IconVolume } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
@@ -16,11 +16,17 @@ import {
 } from "@/lib/notifications/sound";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 
-export function NotificationSoundSection() {
+export function NotificationSoundSection({
+  onDirtyChange,
+}: {
+  onDirtyChange?: (isDirty: boolean) => void;
+}) {
   const [saved, setSaved] = useState<SoundPreferences>(getSoundPreferences);
   const [prefs, setPrefs] = useState<SoundPreferences>(saved);
   const revision = JSON.stringify(prefs);
   const isDirty = revision !== JSON.stringify(saved);
+
+  useEffect(() => onDirtyChange?.(isDirty), [isDirty, onDirtyChange]);
 
   useSettingsSaveContributor({
     id: "general-notification-sound",

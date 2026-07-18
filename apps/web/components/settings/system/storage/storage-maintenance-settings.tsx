@@ -6,6 +6,7 @@ import { Spinner } from "@kandev/ui/spinner";
 import { IconAlertTriangle, IconCheck, IconPlayerPlay, IconRefresh } from "@tabler/icons-react";
 import { useStorageMaintenance } from "@/hooks/domains/system/use-storage-maintenance";
 import type { StorageMaintenanceSettings as Settings, SystemJob } from "@/lib/types/system";
+import { useSettingsSaveContributor } from "../../settings-save-provider";
 import { StorageActionButton } from "./storage-action-button";
 import { StorageOverviewCard } from "./storage-overview-card";
 import { StoragePolicyCard } from "./storage-policy-card";
@@ -122,22 +123,56 @@ function StorageActions({
   );
 }
 
-export function StorageMaintenanceSettings() {
-  const controller = useStorageMaintenance();
+function serializeSettings(settings: Settings | null): string {
+  return settings ? JSON.stringify(settings) : "loading";
+}
+
+function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenance>) {
   const [draft, setDraft] = useState<Settings | null>(null);
   const previousServerSettings = useRef<Settings | null>(null);
+  const savedSettings = controller.overview?.settings ?? null;
+
   useEffect(() => {
-    if (!controller.overview) return;
-    const nextSettings = controller.overview.settings;
+    if (!savedSettings) return;
     setDraft((current) => {
       const previous = previousServerSettings.current;
-      if (!current || !previous || JSON.stringify(current) === JSON.stringify(previous)) {
-        return nextSettings;
+      if (!current || !previous || serializeSettings(current) === serializeSettings(previous)) {
+        return savedSettings;
       }
       return current;
     });
-    previousServerSettings.current = nextSettings;
-  }, [controller.overview]);
+    previousServerSettings.current = savedSettings;
+  }, [savedSettings]);
+
+  const pending = controller.pendingAction !== null;
+  useSettingsSaveContributor({
+    id: "system:storage-policy",
+    revision: serializeSettings(draft),
+    isDirty: Boolean(
+      draft && savedSettings && serializeSettings(draft) !== serializeSettings(savedSettings),
+    ),
+    canSave: !pending,
+    invalidReason: pending ? "Wait for the current storage action to finish." : undefined,
+    save: async () => {
+      if (!draft || !savedSettings) return;
+      const confirmation =
+        draft.docker.dedicated_daemon_acknowledged &&
+        !savedSettings.docker.dedicated_daemon_acknowledged
+          ? "DEDICATED"
+          : undefined;
+      await controller.save(draft, confirmation);
+    },
+    discard: () => {
+      if (savedSettings) setDraft(savedSettings);
+    },
+  });
+
+  return { draft, setDraft, savedSettings };
+}
+
+export function StorageMaintenanceSettings() {
+  const controller = useStorageMaintenance();
+  const { draft, setDraft, savedSettings } = useStoragePolicyDraft(controller);
   const pending = controller.pendingAction !== null;
   const disabledReason = pending ? "Wait for the current storage action to finish." : undefined;
 
@@ -159,14 +194,13 @@ export function StorageMaintenanceSettings() {
           disabledReason={disabledReason}
           onRunGoCache={() => void controller.runNow(["go_cache"])}
         />
-        {draft && controller.overview && (
+        {draft && savedSettings && controller.overview && (
           <StoragePolicyCard
             settings={draft}
+            savedSettings={savedSettings}
             capabilities={controller.overview.capabilities}
             pending={pending}
             onChange={setDraft}
-            onSave={() => controller.save(draft)}
-            onDedicatedConfirm={(next) => controller.save(next, "DEDICATED")}
             onAdopt={controller.adopt}
           />
         )}

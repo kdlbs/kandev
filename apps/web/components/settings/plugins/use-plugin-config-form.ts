@@ -15,6 +15,20 @@ import type { PluginRecord } from "@/lib/types/plugins";
 type SaveStatus = "idle" | "loading" | "success" | "error";
 type FormValues = Record<string, string | boolean>;
 
+function maskSecretsIn(
+  source: FormValues,
+  fields: ReturnType<typeof parseConfigSchema>,
+): FormValues {
+  const masked = { ...source };
+  for (const field of fields) {
+    const current = masked[field.name];
+    if (field.secret && typeof current === "string" && current !== "") {
+      masked[field.name] = SECRET_MASK;
+    }
+  }
+  return masked;
+}
+
 /**
  * Load/edit/save state for one plugin's schema-driven settings form.
  * Mirrors use-plugin-actions' local-hook pattern: fetch + toast wiring lives
@@ -65,6 +79,7 @@ export function usePluginConfigForm(plugin: PluginRecord | null) {
     () => fields.some((field) => values[field.name] !== initialValues[field.name]),
     [fields, values, initialValues],
   );
+  const missing = useMemo(() => missingRequiredFields(fields, values), [fields, values]);
 
   const handleChange = (name: string, value: string | boolean) => {
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -73,10 +88,9 @@ export function usePluginConfigForm(plugin: PluginRecord | null) {
 
   const handleSave = async () => {
     if (!pluginId) return;
-    const missing = missingRequiredFields(fields, values);
     if (missing.length > 0) {
       toast.error(`Required: ${missing.join(", ")}`);
-      return;
+      throw new Error(`Required: ${missing.join(", ")}`);
     }
     setSaveStatus("loading");
     try {
@@ -84,7 +98,7 @@ export function usePluginConfigForm(plugin: PluginRecord | null) {
     } catch (err) {
       setSaveStatus("error");
       toast.error(err instanceof Error ? err.message : "Failed to save plugin settings");
-      return;
+      throw err;
     }
     // The config IS persisted from here on — a refetch failure (e.g. a
     // transient hiccup while the plugin restarts) must not be reported as a
@@ -96,44 +110,30 @@ export function usePluginConfigForm(plugin: PluginRecord | null) {
       setInitialValues(initial);
       toast.success("Plugin settings saved");
     } catch {
-      maskSecretValues();
+      const masked = maskSecretsIn(values, fields);
+      setValues(masked);
+      setInitialValues(masked);
       toast.warning("Settings saved, but reloading them failed — refresh to confirm.");
     }
     setSaveStatus("success");
   };
 
-  // On a post-save refetch failure, replace any typed secret input with the
-  // mask (so cleartext never lingers) and rebase initialValues onto the
-  // masked snapshot — the config IS saved, so the masked form is the new
-  // baseline and must not read as dirty (e.g. a previously-unset secret the
-  // user just entered). Computed from the current `values` and applied to
-  // both state setters directly, rather than as a side effect inside a
-  // functional updater (which would run twice under StrictMode).
-  const maskSecretValues = () => {
-    const masked = maskSecretsIn(values);
-    setValues(masked);
-    setInitialValues(masked);
-  };
-
-  const maskSecretsIn = (source: FormValues): FormValues => {
-    const masked = { ...source };
-    for (const field of fields) {
-      const current = masked[field.name];
-      if (field.secret && typeof current === "string" && current !== "") {
-        masked[field.name] = SECRET_MASK;
-      }
-    }
-    return masked;
-  };
-
   return {
     fields,
     values,
+    initialValues,
     configLoading,
     configError,
     saveStatus,
     isDirty,
+    canSave: missing.length === 0,
+    invalidReason: missing.length > 0 ? `Required: ${missing.join(", ")}` : undefined,
+    revision: JSON.stringify(values),
     handleChange,
     handleSave,
+    discard: () => {
+      setValues(initialValues);
+      setSaveStatus("idle");
+    },
   };
 }

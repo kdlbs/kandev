@@ -25,7 +25,7 @@ import {
 import { useRequest } from "@/lib/http/use-request";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
-type SecretFormState = {
+export type SecretFormState = {
   name: string;
   value: string;
 };
@@ -327,9 +327,9 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
     resetForm,
     isValid,
     isBusy,
-    handleCreate: () => {
+    handleCreate: async () => {
       if (!isValid || isBusy) return;
-      createRequest.run(formState).catch(() => undefined);
+      await createRequest.run(formState);
     },
     handleUpdate: async () => {
       if (!isValid || isBusy || !editingId) return;
@@ -378,12 +378,32 @@ function getSecretEditState(
   };
 }
 
+export function getSecretDraftMeta(
+  items: SecretListItem[],
+  editingId: string | null,
+  showCreate: boolean,
+  formState: SecretFormState,
+) {
+  const edit = getSecretEditState(items, editingId, formState);
+  return {
+    edit,
+    isDirty: showCreate || edit.isDirty,
+    revision: `${showCreate ? "new" : (editingId ?? "none")}:${edit.revision}`,
+  };
+}
+
 export function SecretsSettings() {
   const state = useSecretsState();
   const { loaded, editingId, showCreate, formState, setFormState, deleteTarget, items } = state;
   const actions = useSecretsActions(state);
   const { isValid, isBusy } = actions;
-  const edit = getSecretEditState(items, editingId, formState);
+  const { edit, isDirty, revision } = getSecretDraftMeta(items, editingId, showCreate, formState);
+  let invalidReason: string | undefined;
+  if (isDirty && !isValid) {
+    invalidReason = showCreate
+      ? "A secret name and value are required."
+      : "A secret name is required.";
+  }
 
   const onFormChange = (patch: Partial<SecretFormState>) =>
     setFormState((prev) => ({ ...prev, ...patch }));
@@ -392,13 +412,13 @@ export function SecretsSettings() {
     <SettingsPageTemplate
       title="Secrets"
       description="Manage API keys and credentials. Secrets are encrypted at rest and injected into agent environments via executor profile env vars."
-      isDirty={edit.isDirty}
+      isDirty={isDirty}
       saveStatus="idle"
-      saveId="secrets-existing-item"
-      saveRevision={`${editingId ?? "none"}:${edit.revision}`}
-      canSave={!editingId || isValid}
-      invalidReason={editingId && !isValid ? "A secret name is required." : undefined}
-      onSave={actions.handleUpdate}
+      saveId="secrets-item-draft"
+      saveRevision={revision}
+      canSave={!isDirty || isValid}
+      invalidReason={invalidReason}
+      onSave={showCreate ? actions.handleCreate : actions.handleUpdate}
       onDiscard={actions.resetForm}
     >
       <div className="space-y-6">
@@ -423,6 +443,8 @@ export function SecretsSettings() {
             isValid={isValid}
             isBusy={isBusy}
             submitLabel="Add secret"
+            showSubmit={false}
+            baselineState={defaultFormState}
           />
         )}
 

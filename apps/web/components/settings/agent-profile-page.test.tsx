@@ -8,6 +8,7 @@ import {
 import type { AgentProfile, ProfileEnvVar } from "@/lib/types/http";
 
 afterEach(cleanup);
+const DIRTY_ATTRIBUTE = "data-settings-dirty";
 
 function EnvVarsHarness({ initialEnvVars = [] }: { initialEnvVars?: ProfileEnvVar[] }) {
   const [envVars, setEnvVars] = useState<ProfileEnvVar[]>(initialEnvVars);
@@ -17,6 +18,7 @@ function EnvVarsHarness({ initialEnvVars = [] }: { initialEnvVars?: ProfileEnvVa
     <>
       <ProfileEnvVarsEditor
         envVars={envVars}
+        baselineEnvVars={initialEnvVars}
         secrets={[]}
         onChange={(nextEnvVars) => {
           setChangeCount((count) => count + 1);
@@ -42,6 +44,18 @@ describe("ProfileEnvVarsEditor", () => {
     fireEvent.click(screen.getByTestId("env-var-add-button"));
 
     await waitFor(() => expect(screen.getByTestId("change-count").textContent).toBe("1"));
+    expect(screen.getByTestId("env-vars-card").getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
+    expect(screen.getByTestId("env-var-row-0").getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
+  });
+
+  it("marks only the changed saved row and its owning card dirty", () => {
+    render(<EnvVarsHarness initialEnvVars={[{ key: "FOO", value: "bar" }]} />);
+
+    expect(screen.getByTestId("env-vars-card").getAttribute(DIRTY_ATTRIBUTE)).toBe("false");
+    fireEvent.change(screen.getByDisplayValue("bar"), { target: { value: "baz" } });
+
+    expect(screen.getByTestId("env-vars-card").getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
+    expect(screen.getByTestId("env-var-row-0").getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
   });
 });
 

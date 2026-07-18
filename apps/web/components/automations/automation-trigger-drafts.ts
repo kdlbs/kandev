@@ -86,8 +86,13 @@ export function useAutomationTriggerDrafts(currentId: string | null) {
 
   return {
     loadTriggers,
+    baselineTriggers,
     pending,
     clearPending: () => setPending([]),
+    discardDrafts: () => {
+      setTriggers(baselineTriggers);
+      setPending([]);
+    },
     persistDrafts,
     allTriggers,
     handleAdd,

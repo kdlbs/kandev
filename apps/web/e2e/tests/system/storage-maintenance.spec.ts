@@ -85,7 +85,15 @@ test.describe("System storage maintenance", () => {
     await expect(testPage.getByTestId("storage-check-interval")).toBeEnabled();
     await expect(testPage.getByTestId("storage-idle-period")).toBeEnabled();
     await testPage.getByTestId("storage-idle-period").fill("11");
-    await testPage.getByTestId("storage-save-settings").click();
+    await expect(testPage.getByTestId("storage-idle-period")).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
+    await expect(testPage.getByTestId("storage-policy-section-schedule")).toHaveAttribute(
+      "data-settings-dirty",
+      "true",
+    );
+    await testPage.getByRole("button", { name: "Save changes" }).click();
     await expect(testPage.getByText("Storage policy saved")).toBeVisible();
     await testPage.reload();
     await expect(scheduling).toHaveAttribute("data-state", "checked");
@@ -93,7 +101,7 @@ test.describe("System storage maintenance", () => {
 
     // Stop the newly enabled scheduler before exercising a deterministic manual run.
     await scheduling.click();
-    await testPage.getByTestId("storage-save-settings").click();
+    await testPage.getByRole("button", { name: "Save changes" }).click();
     await expect(scheduling).toHaveAttribute("data-state", "unchecked");
 
     await testPage.getByTestId("storage-analyze").click();

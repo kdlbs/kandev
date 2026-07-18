@@ -63,19 +63,17 @@ const TERMINAL_REFRESH_RETRY_MS = 1000;
 const TERMINAL_REFRESH_MAX_RETRY_MS = 8000;
 const MAX_TERMINAL_REFRESH_ATTEMPTS = 6;
 
-function useStorageActions(reload: Reload) {
+function useStorageActionRunner() {
   const { toast } = useToast();
   const [pendingAction, setPendingAction] = useState<StoragePendingAction>("load");
   const [error, setError] = useState<string | null>(null);
-  const [analysisJobId, setAnalysisJobId] = useState<string | null>(null);
-  const [cleanupJobId, setCleanupJobId] = useState<string | null>(null);
-  const [deleteJobId, setDeleteJobId] = useState<string | null>(null);
   const finishLoading = useCallback(() => setPendingAction(null), []);
-  const analysisJob = useSystemJob(analysisJobId);
-  const cleanupJob = useSystemJob(cleanupJobId);
-  const deleteJob = useSystemJob(deleteJobId);
   const perform = useCallback(
-    async (action: Exclude<StoragePendingAction, "load" | null>, work: () => Promise<void>) => {
+    async (
+      action: Exclude<StoragePendingAction, "load" | null>,
+      work: () => Promise<void>,
+      rethrow = false,
+    ) => {
       setPendingAction(action);
       setError(null);
       try {
@@ -84,20 +82,37 @@ function useStorageActions(reload: Reload) {
         const message = messageFromError(requestError);
         setError(message);
         toast({ title: "Storage action failed", description: message, variant: "error" });
+        if (rethrow) throw requestError;
       } finally {
         setPendingAction(null);
       }
     },
     [toast],
   );
+  return { pendingAction, error, setError, finishLoading, perform };
+}
+
+function useStorageActions(reload: Reload) {
+  const { toast } = useToast();
+  const { pendingAction, error, setError, finishLoading, perform } = useStorageActionRunner();
+  const [analysisJobId, setAnalysisJobId] = useState<string | null>(null);
+  const [cleanupJobId, setCleanupJobId] = useState<string | null>(null);
+  const [deleteJobId, setDeleteJobId] = useState<string | null>(null);
+  const analysisJob = useSystemJob(analysisJobId);
+  const cleanupJob = useSystemJob(cleanupJobId);
+  const deleteJob = useSystemJob(deleteJobId);
 
   const save = useCallback(
     async (settings: StorageMaintenanceSettings, confirmation?: "DEDICATED") =>
-      perform("save", async () => {
-        await saveStorageSettings(settings, confirmation);
-        await reload();
-        toast({ title: "Storage policy saved", variant: "success" });
-      }),
+      perform(
+        "save",
+        async () => {
+          await saveStorageSettings(settings, confirmation);
+          await reload();
+          toast({ title: "Storage policy saved", variant: "success" });
+        },
+        true,
+      ),
     [perform, reload, toast],
   );
 
