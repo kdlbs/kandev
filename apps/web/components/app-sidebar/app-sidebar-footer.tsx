@@ -29,7 +29,7 @@ import {
   resolveLastKanbanWorkspace,
   workspaceHomeHref,
 } from "./app-sidebar-workspace-navigation";
-import { isSettingsRoute } from "./app-sidebar";
+import { isSettingsRoute } from "./app-sidebar-route";
 
 type AppSidebarFooterProps = {
   collapsed: boolean;
