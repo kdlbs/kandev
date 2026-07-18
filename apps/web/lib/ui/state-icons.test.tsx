@@ -57,6 +57,21 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     expect(iconType(getTaskStateIcon("COMPLETED", undefined, false, undefined))).toBe(IconCheck);
   });
 
+  it("safe fallback: an in-progress task with a MISSING aggregate reads not-done, never a check", () => {
+    // §spec:live-propagation-fallback safe default: a task whose turn is still
+    // open (coarse IN_PROGRESS) but whose task-level aggregate is unknown — e.g.
+    // the aggregate never reached this client, or the in-memory tracker reset on
+    // a backend restart — must fall back to the working spinner, never the done
+    // check. The coarse IN_PROGRESS reading is itself not-done, so a missing
+    // aggregate can only ever soften to working, never harden to done.
+    const missingUndefined = getTaskStateIcon("IN_PROGRESS", undefined, false, undefined);
+    const missingNull = getTaskStateIcon("IN_PROGRESS", undefined, false, null);
+    expect(iconType(missingUndefined)).toBe(IconLoader2);
+    expect(iconType(missingUndefined)).not.toBe(IconCheck);
+    expect(iconType(missingNull)).toBe(IconLoader2);
+    expect(iconType(missingNull)).not.toBe(IconCheck);
+  });
+
   it("distinguishes background from BOTH generating and done by icon SHAPE, not hue alone", () => {
     // Icon TYPE (glyph) differs for all three, so the reading survives a
     // grayscale/desaturated scan for color-vision-deficient operators
