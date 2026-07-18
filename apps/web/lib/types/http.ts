@@ -317,6 +317,16 @@ export type Task = {
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  /**
+   * Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions
+   * (§spec:task-level-indicator): "generating" when any session is generating,
+   * "background" when none is generating but at least one RUNNING session holds a
+   * turn open for background work, and absent/`null` when no session is running
+   * (task-level surfaces then fall through to the coarse task state). Computed on
+   * the backend and carried on the task record so every task-level surface reads
+   * one authoritative value.
+   */
+  foreground_activity?: ForegroundActivity | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;

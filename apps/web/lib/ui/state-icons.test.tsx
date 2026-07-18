@@ -4,6 +4,7 @@ import {
   IconCheck,
   IconCircleCheck,
   IconCircleFilled,
+  IconLoader,
   IconLoader2,
   IconMessageQuestion,
 } from "@tabler/icons-react";
@@ -30,6 +31,42 @@ describe("getTaskStateIcon", () => {
 
   it("keeps review task state as the review check without pending clarification", () => {
     expect(iconType(getTaskStateIcon("REVIEW", undefined, false))).toBe(IconCheck);
+  });
+});
+
+describe("getTaskStateIcon — task-level activity tri-state", () => {
+  //  (a) generating → the established running spinner (IconLoader2)
+  //  (b) background → a distinct spinner (IconLoader), NEVER the done check
+  //  (c) done       → the coarse check (IconCheck)
+  it("(a) generating shows the running spinner even when the coarse state is done", () => {
+    // Most-active-wins: a generating session outranks a finished primary that
+    // would otherwise render the done check.
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined, false, "generating"))).toBe(
+      IconLoader2,
+    );
+  });
+
+  it("(b) background shows a working spinner — never the done check — over a done coarse state", () => {
+    const bg = getTaskStateIcon("COMPLETED", undefined, false, "background");
+    expect(iconType(bg)).toBe(IconLoader);
+    expect(iconType(bg)).not.toBe(IconCheck);
+  });
+
+  it("(c) falls through to the coarse task state when no session is active", () => {
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined, false, null))).toBe(IconCheck);
+    expect(iconType(getTaskStateIcon("COMPLETED", undefined, false, undefined))).toBe(IconCheck);
+  });
+
+  it("distinguishes background from BOTH generating and done by icon SHAPE, not hue alone", () => {
+    // Icon TYPE (glyph) differs for all three, so the reading survives a
+    // grayscale/desaturated scan for color-vision-deficient operators
+    // (§req:not-color-alone).
+    const generating = iconType(getTaskStateIcon("IN_PROGRESS", undefined, false, "generating"));
+    const background = iconType(getTaskStateIcon("IN_PROGRESS", undefined, false, "background"));
+    const done = iconType(getTaskStateIcon("COMPLETED", undefined, false, null));
+    expect(background).not.toBe(generating);
+    expect(background).not.toBe(done);
+    expect(generating).not.toBe(done);
   });
 });
 

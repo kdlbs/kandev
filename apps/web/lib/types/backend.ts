@@ -90,6 +90,9 @@ export type TaskEventPayload = {
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions
+  // (§spec:task-level-indicator); absent/null when no session is running.
+  foreground_activity?: ForegroundActivity | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;

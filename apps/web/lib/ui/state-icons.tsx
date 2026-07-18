@@ -6,6 +6,7 @@ import {
   IconCircleCheck,
   IconCircleFilled,
   IconClock,
+  IconLoader,
   IconLoader2,
   IconMessageQuestion,
   IconPlayerPause,
@@ -71,6 +72,27 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
 const SESSION_BACKGROUND_ICON: IconConfig = {
   Icon: IconLoader2,
   className: "text-emerald-500 animate-spin",
+};
+
+// The task-level generating affordance — the established running spinner
+// (IconLoader2, smooth arc). Rendered when the task-level MOST-ACTIVE-WINS
+// aggregate is "generating"; kept identical to the existing card spinner so the
+// generating look is unchanged (§spec:task-level-indicator).
+const TASK_GENERATING_ICON: IconConfig = {
+  Icon: IconLoader2,
+  className: STYLE_LOADING,
+};
+
+// The task-level background-running affordance (§spec:task-level-indicator):
+// spawned background work is running while the foreground turns are idle. It is a
+// segmented spinner (IconLoader) — distinct from BOTH the generating spinner
+// (IconLoader2, a smooth arc) by SHAPE and from the done check (IconCheck) by
+// shape AND motion — so the three read apart in a grayscale/desaturated scan, not
+// by hue alone (§req:not-color-alone). The motion (a spinner) reads as "still
+// working" while never being mistaken for the done check.
+const TASK_BACKGROUND_ICON: IconConfig = {
+  Icon: IconLoader,
+  className: STYLE_LOADING,
 };
 
 const DEFAULT_TASK_ICON: IconConfig = {
@@ -140,7 +162,18 @@ export function shouldUsePermissionTaskIcon(hasPendingPermission = false): boole
   return hasPendingPermission;
 }
 
-function getTaskStateIconConfig(state?: TaskState, hasPendingClarification = false): IconConfig {
+function getTaskStateIconConfig(
+  state?: TaskState,
+  hasPendingClarification = false,
+  foregroundActivity?: ForegroundActivity | null,
+): IconConfig {
+  // The task-level MOST-ACTIVE-WINS aggregate sits ABOVE the coarse task state
+  // (§spec:task-level-indicator): a task whose foreground turns are idle while
+  // spawned background work runs reads as background-running, never as done; and a
+  // task with any generating session reads as generating even if its coarse state
+  // (e.g. a finished primary session) would otherwise render done.
+  if (foregroundActivity === "background") return TASK_BACKGROUND_ICON;
+  if (foregroundActivity === "generating") return TASK_GENERATING_ICON;
   if (shouldUseQuestionTaskIcon(state, hasPendingClarification)) {
     return TASK_STATE_ICONS.WAITING_FOR_INPUT;
   }
@@ -152,8 +185,9 @@ export function getTaskStateIcon(
   state?: TaskState,
   className?: string,
   hasPendingClarification = false,
+  foregroundActivity?: ForegroundActivity | null,
 ) {
-  const config = getTaskStateIconConfig(state, hasPendingClarification);
+  const config = getTaskStateIconConfig(state, hasPendingClarification, foregroundActivity);
   return <config.Icon className={cn("h-4 w-4", config.className, className)} />;
 }
 

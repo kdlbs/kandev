@@ -4,7 +4,12 @@ import {
   issueFieldsFromMetadata,
 } from "@/lib/metadata-utils";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
-import type { TaskPendingAction, TaskState, TaskSessionState } from "@/lib/types/http";
+import type {
+  ForegroundActivity,
+  TaskPendingAction,
+  TaskState,
+  TaskSessionState,
+} from "@/lib/types/http";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -36,6 +41,7 @@ export type TaskLike = {
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  foreground_activity?: ForegroundActivity | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -109,6 +115,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
+    foregroundActivity: source.foreground_activity ?? undefined,
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
     primaryExecutorId: source.primary_executor_id ?? undefined,
