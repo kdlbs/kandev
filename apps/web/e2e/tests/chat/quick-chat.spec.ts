@@ -107,7 +107,7 @@ test.describe("Quick Chat", () => {
     const dialog = await openQuickChatSetup(testPage);
     const setup = dialog.getByTestId("quick-chat-setup");
 
-    await expect(setup.getByText(/questions, exploration, and small requests/i)).toBeVisible();
+    await expect(setup.getByText(/quick chats stay outside your task board/i)).toBeVisible();
     await setup.getByRole("switch", { name: "Configuration chat" }).click();
 
     const configSetup = dialog.getByTestId("config-chat-setup");
@@ -127,6 +127,7 @@ test.describe("Quick Chat", () => {
     const configTab = dialog
       .getByTestId("quick-chat-tab")
       .filter({ has: testPage.getByRole("img", { name: "Configuration chat" }) });
+    await configTab.getByRole("button").first().click();
     await expect(configTab).toHaveClass(/bg-background/);
 
     await dialog.getByRole("button", { name: "Start new chat" }).click();
