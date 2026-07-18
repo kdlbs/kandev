@@ -4,7 +4,7 @@ The system already tracks, per session, a fine-grained substate that
 distinguishes an actively-generating foreground turn from a foreground turn that
 has gone idle and is only held open by spawned background work — a subagent, a
 backgrounded shell, or an active monitor (the busy signal recorded in
-ADR-0043). This spec makes the operator-facing status indicators as
+ADR-0046). This spec makes the operator-facing status indicators as
 fine-grained as that signal: everywhere a task or session status appears, the
 "still working in the background" condition reads as its own state, distinct
 from both "actively generating" and "done".
@@ -60,7 +60,7 @@ recognize.
 
 **Additive, not a re-signal.** The background-running affordance communicates
 only "work is still in progress." It deliberately does not signal "you may now
-type" — composer input-gating is a separate concern (ADR-0043) and is not
+type" — composer input-gating is a separate concern (ADR-0046) and is not
 represented by this indicator.
 
 **Alternatives considered.**
@@ -235,7 +235,7 @@ defect: the indicator's whole value is being trusted at a glance, so it must be
 correct at the moment of the glance, including immediately after load.
 
 **Safe fallback.** The fine-grained substate is in-memory and best-effort by
-design (ADR-0043); after a backend restart the in-memory tracker resets. The
+design (ADR-0046); after a backend restart the in-memory tracker resets. The
 fallback is chosen so that an unknown substate never resolves to "done" while a
 turn is open: an in-flight session whose substate is unknown reads as working
 (generating), not done, and a task with such a session does not read done.
@@ -245,7 +245,7 @@ finer distinction.
 **Alternatives considered.**
 
 - *Persist the fine-grained substate so it survives restart.* Rejected
-  (consistent with ADR-0043): a persisted copy becomes a second source of truth
+  (consistent with ADR-0046): a persisted copy becomes a second source of truth
   that can drift, can survive a restart as a false reading for a session whose
   turn is already gone, and adds write churn on the hot streaming path. The
   substate only matters for a live in-flight turn; resetting to the safe default
