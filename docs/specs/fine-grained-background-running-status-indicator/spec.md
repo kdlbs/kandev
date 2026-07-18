@@ -16,7 +16,14 @@ distinction into Office is a possible follow-up, not part of this work.
 
 ## Three-state status vocabulary §spec:three-state-vocabulary
 
-*Status: not started*
+*Status: in progress*
+
+<!-- The shared vocabulary is established: getSessionStateIcon (apps/web/lib/ui/
+state-icons.tsx) is the single source of the background-running affordance,
+distinct from generating and done by shape+motion (not hue alone), and the
+session-level surfaces now render it. Full cross-surface completion is pending
+the task-level surfaces adopting it (§spec:task-level-indicator). -->
+
 
 Every status surface in scope communicates three mutually distinguishable
 conditions for an in-flight unit of work:
@@ -157,7 +164,7 @@ when both are finished.
 
 ## Session-level indicators surface the substate uniformly §spec:session-level-indicator
 
-*Status: not started*
+*Status: complete*
 
 Every surface that shows a per-session status reflects the same three states.
 The session switcher already does. The session-reopen menu — which today shows
