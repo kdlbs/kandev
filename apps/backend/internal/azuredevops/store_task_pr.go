@@ -87,7 +87,8 @@ func (s *Store) DeleteTaskPRsByTask(ctx context.Context, taskID string) error {
 	if taskID == "" {
 		return errors.New("azure devops store: task id is required")
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM azure_devops_task_prs WHERE task_id = ?`, taskID)
+	query := s.db.Rebind(`DELETE FROM azure_devops_task_prs WHERE task_id = ?`)
+	_, err := s.db.ExecContext(ctx, query, taskID)
 	return err
 }
 
