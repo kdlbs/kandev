@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useEffect, type ReactNode } from "react";
 import { StateProvider, useAppStore } from "@/components/state-provider";
@@ -8,13 +8,19 @@ import type { Task } from "@/app/office/tasks/[id]/types";
 import { ParentPicker } from "./parent-picker";
 
 const detachTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "child" }));
+const fetchTaskMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({
+    id: "child",
+    metadata: { workspace: { mode: "inherit_parent", group_id: "group-1" } },
+  }),
+);
 const updateTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ ok: true }));
 
 vi.mock("@/lib/api/domains/kanban-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api/domains/kanban-api")>(
     "@/lib/api/domains/kanban-api",
   );
-  return { ...actual, detachTask: detachTaskMock };
+  return { ...actual, detachTask: detachTaskMock, fetchTask: fetchTaskMock };
 });
 
 vi.mock("@/lib/api/domains/office-extended-api", async () => {
@@ -94,10 +100,12 @@ describe("ParentPicker", () => {
       </Wrapper>,
     );
 
+    await waitFor(() => expect(fetchTaskMock).toHaveBeenCalledWith(task.id));
+
     fireEvent.click(screen.getByTestId("parent-picker-trigger"));
     fireEvent.click(await screen.findByText("No parent"));
     const dialog = await screen.findByRole("alertdialog", { name: "Detach task from parent?" });
-    expect(dialog.textContent).toContain("shared workspace");
+    expect(dialog.textContent).toContain("shares its parent's workspace");
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Detach" }));
     });
