@@ -108,8 +108,8 @@ Chat and the `mobile-chrome` configuration/repository specs.
 
 ## Risks
 
-- A blank tab is keyed by an empty session ID; typed setup actions must replace or close the existing
-  placeholder deterministically instead of creating colliding React/store keys.
+- Blank setup tabs use deterministic workspace-and-kind-scoped IDs; typed setup actions must replace
+  or close the matching placeholder without leaking abandoned client-only sessions.
 - Config initial prompts must remain component/session scoped so hydration or tab switching cannot
   replay them.
 - Failed task deletion must remain recoverable on reload; client removal cannot become the only

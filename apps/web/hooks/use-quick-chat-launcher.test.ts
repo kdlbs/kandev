@@ -25,7 +25,7 @@ beforeEach(() => {
 });
 
 describe("useQuickChatLauncher typed sessions", () => {
-  it("reopens the active configuration session from the generic quick chat launcher", () => {
+  it("opens an ordinary session from the generic quick chat launcher", () => {
     sessions = [
       { sessionId: "chat-1", workspaceId: WORKSPACE_ID, kind: "chat" },
       { sessionId: ACTIVE_CONFIG_ID, workspaceId: WORKSPACE_ID, kind: "config" },
@@ -35,7 +35,7 @@ describe("useQuickChatLauncher typed sessions", () => {
 
     act(() => result.current());
 
-    expect(openQuickChat).toHaveBeenCalledWith(ACTIVE_CONFIG_ID, WORKSPACE_ID, undefined, "config");
+    expect(openQuickChat).toHaveBeenCalledWith("chat-1", WORKSPACE_ID, undefined, "chat");
   });
 
   it("opens the matching ordinary session when config and chat tabs coexist", () => {

@@ -32,6 +32,8 @@ type ConfigChatStore = ReturnType<typeof useConfigChatStore>;
 type AppStoreApi = ReturnType<typeof useAppStoreApi>;
 type StartedConfigChat = Awaited<ReturnType<typeof startConfigChat>>;
 
+const activeWorkspaceStarts = new Map<string, symbol>();
+
 type RegisterStartedSessionParams = {
   store: ConfigChatStore;
   storeApi: AppStoreApi;
@@ -141,8 +143,11 @@ export function useConfigChat(workspaceId: string) {
         setError("The selected agent profile is not available yet. Try again shortly.");
         return undefined;
       }
+      if (activeWorkspaceStarts.has(workspaceId)) return undefined;
       const requestId = ++latestRequestId.current;
+      const workspaceStart = Symbol(workspaceId);
       activeRequestId.current = requestId;
+      activeWorkspaceStarts.set(workspaceId, workspaceStart);
       setIsStarting(true);
       setError(null);
       try {
@@ -179,6 +184,9 @@ export function useConfigChat(workspaceId: string) {
         setError(err instanceof Error ? err.message : "Unknown error");
         return undefined;
       } finally {
+        if (activeWorkspaceStarts.get(workspaceId) === workspaceStart) {
+          activeWorkspaceStarts.delete(workspaceId);
+        }
         if (latestRequestId.current === requestId) {
           activeRequestId.current = null;
           setIsStarting(false);

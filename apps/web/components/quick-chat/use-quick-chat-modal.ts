@@ -156,10 +156,13 @@ function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () 
     const sessionId = sessionToClose;
     setSessionToClose(null);
     const taskId = store.taskSessions[sessionId]?.task_id;
-    store.closeQuickChatSession(sessionId);
-    if (!taskId) return;
+    if (!taskId) {
+      store.closeQuickChatSession(sessionId);
+      return;
+    }
     try {
       await deleteQuickChatTask(taskId);
+      store.closeQuickChatSession(sessionId);
     } catch (error) {
       console.error("Failed to delete quick chat task:", error);
       toast({

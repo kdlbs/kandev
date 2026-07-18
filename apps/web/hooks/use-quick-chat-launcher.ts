@@ -6,7 +6,10 @@ import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
  * Hook to handle opening quick chat.
  * Just opens the modal - the user will select an agent from the picker.
  */
-export function useQuickChatLauncher(workspaceId?: string | null, kind?: QuickChatSessionKind) {
+export function useQuickChatLauncher(
+  workspaceId?: string | null,
+  kind: QuickChatSessionKind = "chat",
+) {
   const openQuickChat = useAppStore((state) => state.openQuickChat);
   const quickChatSessions = useAppStore((state) => state.quickChat.sessions);
   const activeSessionId = useAppStore((state) => state.quickChat.activeSessionId);
@@ -16,8 +19,7 @@ export function useQuickChatLauncher(workspaceId?: string | null, kind?: QuickCh
 
     // If there's an existing session, open it. Otherwise just open the modal with agent picker
     const matchingSessions = quickChatSessions.filter(
-      (session) =>
-        session.workspaceId === workspaceId && (!kind || (session.kind ?? "chat") === kind),
+      (session) => session.workspaceId === workspaceId && (session.kind ?? "chat") === kind,
     );
     const existingSession =
       matchingSessions.find((session) => session.sessionId === activeSessionId) ??
@@ -31,7 +33,7 @@ export function useQuickChatLauncher(workspaceId?: string | null, kind?: QuickCh
       );
     } else {
       // Open modal without a session - will show agent picker
-      openQuickChat("", workspaceId, undefined, kind ?? "chat");
+      openQuickChat("", workspaceId, undefined, kind);
     }
   }, [workspaceId, kind, quickChatSessions, activeSessionId, openQuickChat]);
 

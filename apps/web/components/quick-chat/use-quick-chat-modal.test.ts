@@ -154,6 +154,25 @@ describe("useQuickChatModal — persisted config lifecycle", () => {
     expect(mockDeleteTask).toHaveBeenCalledWith("config-task");
   });
 
+  it("keeps the session open when backing-task deletion fails", async () => {
+    const configSessionId = "config-session";
+    mockAppState.quickChat.sessions = [
+      { sessionId: configSessionId, workspaceId: WORKSPACE_ID, kind: "config" },
+    ];
+    mockAppState.quickChat.activeSessionId = configSessionId;
+    mockAppState.taskSessions.items = { [configSessionId]: { task_id: "config-task" } };
+    mockDeleteTask.mockRejectedValueOnce(new Error("delete failed"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    act(() => result.current.handleCloseTab(configSessionId));
+    await act(async () => result.current.handleConfirmClose());
+
+    expect(mockAppState.closeQuickChatSession).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
+    consoleError.mockRestore();
+  });
+
   it("exposes only sessions from the hydrated workspace", () => {
     mockAppState.quickChat.sessions = [
       { sessionId: "session-a", workspaceId: WORKSPACE_ID, kind: "chat" },

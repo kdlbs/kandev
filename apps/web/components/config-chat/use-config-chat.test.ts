@@ -162,3 +162,35 @@ describe("useConfigChat unified launch", () => {
     expect(setTaskSession).not.toHaveBeenCalled();
   });
 });
+
+describe("useConfigChat launch serialization", () => {
+  it("serializes config starts across hook instances in the same workspace", async () => {
+    let resolveStart!: (value: { task_id: string; session_id: string }) => void;
+    startConfigChat.mockImplementationOnce(
+      () =>
+        new Promise<{ task_id: string; session_id: string }>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const first = renderHook(() => useConfigChat(WORKSPACE_ID));
+    const second = renderHook(() => useConfigChat(WORKSPACE_ID));
+    let firstStart!: Promise<string | undefined>;
+
+    act(() => {
+      firstStart = first.result.current.startSession(CONFIG_PROFILE_ID, PROMPT);
+    });
+    await act(async () => {
+      await second.result.current.startSession(CONFIG_PROFILE_ID, PROMPT);
+    });
+
+    expect(startConfigChat).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveStart({ task_id: TASK_ID, session_id: SESSION_ID });
+      await firstStart;
+      await second.result.current.startSession(CONFIG_PROFILE_ID, PROMPT);
+    });
+
+    expect(startConfigChat).toHaveBeenCalledTimes(2);
+  });
+});
