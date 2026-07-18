@@ -71,10 +71,9 @@ Plugins are a peer extension mechanism to the seams above, aimed at
 extensions that should ship and version independently of a kandev release.
 A plugin backend is a Go binary that kandev spawns and supervises as a
 subprocess, communicating over a strict typed gRPC protocol
-(`internal/plugins/`, `pkg/pluginsdk`) — it receives bus events, serves
-agent-invocable tools, and relays external webhooks, calling back into
-kandev through a capability-gated Host RPC service (state, secrets,
-cross-plugin events). A plugin may additionally ship an optional **native
+(`internal/plugins/`, `pkg/pluginsdk`) — it receives bus events and relays
+external webhooks, calling back into kandev through a capability-gated Host
+RPC service (state, secrets, read-only data, cross-plugin events). A plugin may additionally ship an optional **native
 frontend bundle** that the SPA loads at boot to register real routes, nav
 items, slot components, and WebSocket handlers, sharing kandev's own React
 instance and app store.

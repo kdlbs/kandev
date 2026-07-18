@@ -66,8 +66,8 @@ Either path runs the same pipeline:
    wired up, so every package — signed or not — installs and is reported
    as unsigned today (see "Signed vs. unsigned packages" below).
 3. Parse and validate `manifest.yaml` **before any code runs**: schema, `id`
-   pattern, capability vocabulary, and that `runtime.executables` contains
-   an entry for the host's OS/arch.
+   pattern, the `categories` and UI-surface enums, and that
+   `runtime.executables` contains an entry for the host's OS/arch.
 4. Extract to `~/.kandev/plugins/<id>/<version>/` and record the
    installation.
 5. Spawn the platform-matched binary and complete the go-plugin handshake.
@@ -79,8 +79,9 @@ A successful install that failed to spawn returns HTTP 201 with a
 `warning` field rather than failing outright — the package is installed,
 just not yet running.
 
-Once installed, the plugin appears in the list with its category and an
-`active` (or `unsigned`) badge, plus **Disable** and **Uninstall** actions:
+Once installed, the plugin appears in the list with its category, a status
+badge (`active`), a signing badge (`unsigned` today), and **Disable** and
+**Uninstall** actions:
 
 ![The Settings > Plugins page listing an installed, active plugin with its category, an unsigned badge, and Disable/Uninstall actions.](../screenshots/plugin-settings-list.png)
 
@@ -161,10 +162,10 @@ identically to an unsigned one; signing is not required in v1.
 ## Security posture
 
 - **Auth is the spawn relationship.** Kandev spawns the plugin subprocess
-  itself over a unix domain socket (macOS/Linux) or loopback TCP with
-  AutoMTLS (Windows) — never a routable network address. There is no
-  `api_key`, `webhook_secret`, or HMAC signing anywhere in the contract; the
-  go-plugin handshake plus AutoMTLS authenticate the channel.
+  itself over a unix domain socket (macOS/Linux) or loopback TCP (Windows) —
+  never a routable network address — and secures it in both cases with the
+  go-plugin handshake plus AutoMTLS. There is no `api_key`, `webhook_secret`,
+  or HMAC signing anywhere in the contract.
 - **Capability-based access control.** A plugin can only call the Host RPCs
   it declared in its manifest: `state` gates the state RPCs, `secrets` gates
   the plugin-owned secret RPCs, and each read-only data accessor (tasks,

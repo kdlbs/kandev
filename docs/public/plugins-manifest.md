@@ -101,7 +101,7 @@ nav items, icons, and per-route title-bar chrome (`registerNavItem`,
 Setting `runtime.type: binary` makes a manifest **runtime-managed**: kandev
 spawns and supervises the declared executable itself. A managed manifest
 must **not** set `base_url` or an `endpoints` block (`health`/`events`/
-`tools`/`webhooks` paths on a remote service) — those describe the old
+`webhooks` paths on a remote service) — those describe the old
 remote/operator-hosted tier, and validation rejects a managed manifest that
 sets them.
 
@@ -217,7 +217,7 @@ they have no effect there and are overwritten on install:
 |---|---|
 | `status` | Current lifecycle state: `registered`, `active`, `error`, `disabled`, or `uninstalled`. |
 | `install_path` | Absolute path the package was extracted to (`~/.kandev/plugins/<id>/<version>/`). |
-| `signed` | Whether the installed package included a verified `checksums.txt.sig`. |
+| `signed` | Whether the package's `checksums.txt.sig` was cryptographically verified. Signature verification is not currently wired, so this is always false today (every package is reported unsigned). |
 | `installed_at` | Install timestamp. |
 | `restart_count` | Best-effort restart bookkeeping used by the supervision loop. |
 
