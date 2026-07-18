@@ -222,6 +222,36 @@ func TestDetachTaskEventReflectsConcurrentReparent(t *testing.T) {
 	}
 }
 
+func TestDetachTaskPublishesOfficeTaskUpdated(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createDetachmentFixture(t, ctx, repo)
+	eventBus.ClearEvents()
+
+	if _, err := svc.DetachTask(ctx, "child"); err != nil {
+		t.Fatalf("DetachTask: %v", err)
+	}
+
+	for _, event := range eventBus.GetPublishedEvents() {
+		if event.Type != events.OfficeTaskUpdated {
+			continue
+		}
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("office event data type = %T, want map", event.Data)
+		}
+		if data["task_id"] != "child" || data["workspace_id"] != "workspace" {
+			t.Fatalf("office event identity = %#v", data)
+		}
+		fields, ok := data["fields"].([]string)
+		if !ok || len(fields) != 2 || fields[0] != "parent_id" || fields[1] != "metadata" {
+			t.Fatalf("office event fields = %#v, want parent_id and metadata", data["fields"])
+		}
+		return
+	}
+	t.Fatal("office.task.updated event was not published")
+}
+
 func createDetachmentFixture(t *testing.T, ctx context.Context, repo taskEventTestRepository) {
 	t.Helper()
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "workspace", Name: "Workspace"}); err != nil {
@@ -255,12 +285,16 @@ func createDetachmentFixture(t *testing.T, ctx context.Context, repo taskEventTe
 func singleDetachmentEventData(t *testing.T, eventBus *MockEventBus) map[string]interface{} {
 	t.Helper()
 	published := eventBus.GetPublishedEvents()
-	if len(published) != 1 || published[0].Type != events.TaskUpdated {
-		t.Fatalf("published events = %#v, want one task.updated", published)
+	for _, event := range published {
+		if event.Type != events.TaskUpdated {
+			continue
+		}
+		data, ok := event.Data.(map[string]interface{})
+		if !ok {
+			t.Fatalf("event data type = %T, want map", event.Data)
+		}
+		return data
 	}
-	data, ok := published[0].Data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("event data type = %T, want map", published[0].Data)
-	}
-	return data
+	t.Fatalf("published events = %#v, want task.updated", published)
+	return nil
 }

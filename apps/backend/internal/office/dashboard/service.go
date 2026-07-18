@@ -150,7 +150,8 @@ type TaskCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error
 }
 
-// TaskDetacher applies the canonical task hierarchy/workspace detachment.
+// TaskDetacher applies the canonical task hierarchy/workspace detachment and
+// publishes the task lifecycle and Office refresh events.
 type TaskDetacher interface {
 	DetachTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
 }

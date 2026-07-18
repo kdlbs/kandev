@@ -78,7 +78,6 @@ func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, paren
 		if _, err := s.taskDetacher.DetachTask(ctx, taskID); err != nil {
 			return err
 		}
-		s.publishTaskUpdated(ctx, taskID, []string{"parent_id", "metadata"})
 		return nil
 	}
 	if err := s.repo.UpdateTaskParentID(ctx, taskID, parentID); err != nil {

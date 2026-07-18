@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 
 	"go.uber.org/zap"
@@ -36,5 +37,22 @@ func (s *Service) DetachTask(ctx context.Context, id string) (*models.Task, erro
 		extra = map[string]interface{}{"parent_id": nil}
 	}
 	s.publishTaskEventWithExtra(ctx, events.TaskUpdated, task, nil, extra)
+	s.publishDetachOfficeEvent(ctx, task)
 	return task, nil
+}
+
+func (s *Service) publishDetachOfficeEvent(ctx context.Context, task *models.Task) {
+	if s.eventBus == nil {
+		return
+	}
+	data := map[string]interface{}{
+		"task_id":      task.ID,
+		"workspace_id": task.WorkspaceID,
+		"fields":       []string{"parent_id", "metadata"},
+	}
+	event := bus.NewEvent(events.OfficeTaskUpdated, "task-service", data)
+	if err := s.eventBus.Publish(ctx, events.OfficeTaskUpdated, event); err != nil {
+		s.logger.Error("failed to publish Office task detach event",
+			zap.String("task_id", task.ID), zap.Error(err))
+	}
 }
