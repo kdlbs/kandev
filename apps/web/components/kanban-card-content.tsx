@@ -211,6 +211,23 @@ function KanbanCardBadges({ task }: { task: Task }) {
   );
 }
 
+// renderTaskStatusIcon resolves the card status icon with the backend task-level
+// MOST-ACTIVE-WINS aggregate taking precedence (§spec:task-level-indicator): a
+// background-running task shows the distinct background affordance rather than the
+// primary-session spinner or a done check, and any generating session keeps the
+// spinner. When the aggregate is absent it falls back to the primary-session-driven
+// spinner (covers STARTING/SCHEDULING before a session reads RUNNING).
+function renderTaskStatusIcon(
+  task: Task,
+  showRunningSpinner: boolean,
+  hasPendingClarification: boolean,
+) {
+  if (showRunningSpinner && task.foregroundActivity !== "background") {
+    return <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />;
+  }
+  return getTaskStateIcon(task.state, "h-4 w-4", hasPendingClarification, task.foregroundActivity);
+}
+
 function KanbanCardActions({
   task,
   showMaximizeButton,
@@ -238,11 +255,7 @@ function KanbanCardActions({
     showRunningSpinner &&
     storeWouldShowRunningSpinner === false &&
     task.primarySessionState !== storePrimarySessionState;
-  const statusIcon = showRunningSpinner ? (
-    <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />
-  ) : (
-    getTaskStateIcon(task.state, "h-4 w-4", hasPendingClarificationRequest)
-  );
+  const statusIcon = renderTaskStatusIcon(task, showRunningSpinner, hasPendingClarificationRequest);
   const hasKnownSession =
     Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
 
