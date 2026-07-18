@@ -210,7 +210,6 @@ export function MobileColumnTabs({
   };
   const selectWorkflow = (workflowId: string) => {
     workflowNavigation?.onWorkflowChange(workflowId);
-    setOpen(false);
   };
 
   return (

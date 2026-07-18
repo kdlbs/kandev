@@ -186,16 +186,11 @@ function WorkflowItemContent({
   const content = <ViewComponent workflowId={wf.id} steps={steps} tasks={tasks} {...viewProps} />;
 
   if (hideHeader) {
-    return (
-      <div key={wf.id} className={fillHeight ? "h-full min-h-0" : undefined}>
-        {content}
-      </div>
-    );
+    return <div className={fillHeight ? "h-full min-h-0" : undefined}>{content}</div>;
   }
 
   return (
     <SwimlaneSection
-      key={wf.id}
       workflowId={wf.id}
       workflowName={wf.name}
       taskCount={tasks.length}
@@ -348,7 +343,7 @@ function WorkflowItems({
     if (!snapshot) return null;
     return (
       <SortableWorkflowItem
-        key={workflow.id}
+        key={fillHeight ? "mobile-active-workflow" : workflow.id}
         wf={workflow}
         snapshot={snapshot}
         tasks={getFilteredTasks(workflow.id)}

@@ -154,15 +154,24 @@ function getInitialColumnIndex(steps: WorkflowStep[], tasks: Task[]): number {
   return idx !== -1 ? idx : 0;
 }
 
-function useMobileColumnIndex(steps: WorkflowStep[], tasks: Task[]) {
-  const [rawIndex, setActiveIndex] = useState(() => getInitialColumnIndex(steps, tasks));
+function useMobileColumnIndex(workflowId: string, steps: WorkflowStep[], tasks: Task[]) {
+  const [selection, setSelection] = useState(() => ({
+    workflowId,
+    index: getInitialColumnIndex(steps, tasks),
+  }));
 
   // Derive clamped index — avoids calling setState in an effect
   const activeIndex = useMemo(() => {
     if (steps.length === 0) return 0;
-    if (rawIndex >= steps.length) return getInitialColumnIndex(steps, tasks);
-    return rawIndex;
-  }, [steps, tasks, rawIndex]);
+    if (selection.workflowId !== workflowId || selection.index >= steps.length) {
+      return getInitialColumnIndex(steps, tasks);
+    }
+    return selection.index;
+  }, [steps, tasks, selection, workflowId]);
+  const setActiveIndex = useCallback(
+    (index: number) => setSelection({ workflowId, index }),
+    [workflowId],
+  );
 
   return { activeIndex, setActiveIndex };
 }
@@ -440,7 +449,7 @@ export function SwimlaneKanbanContent({
   const { isMobile, isTablet, isCompactDesktop } = useResponsiveBreakpoint();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const externalLinkAvailability = useKanbanExternalLinkAvailability(activeWorkspaceId);
-  const { activeIndex, setActiveIndex } = useMobileColumnIndex(steps, tasks);
+  const { activeIndex, setActiveIndex } = useMobileColumnIndex(workflowId, steps, tasks);
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
     useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError });
 

@@ -128,14 +128,18 @@ test.describe("Mobile kanban view", () => {
     await mobile.goto();
 
     await mobile.boardNavigator.click();
+    const navigatorDrawer = testPage.getByTestId("mobile-board-navigator-drawer");
     await mobile.workflowItem(steplessWorkflow.id).click();
+    await expect(navigatorDrawer).toBeVisible();
     await expect(mobile.boardNavigator).toBeVisible();
     await expect(mobile.boardNavigator).toContainText("Stepless Workflow");
     await expect(mobile.boardNavigator).toContainText("No steps configured");
     await expect(testPage.getByTestId("mobile-kanban-no-steps")).toBeVisible();
 
-    await mobile.boardNavigator.click();
     await mobile.workflowItem(seedData.workflowId).click();
+    await expect(navigatorDrawer).toBeVisible();
+    await navigatorDrawer.getByTestId("column-tab-0").click();
+    await expect(navigatorDrawer).not.toBeVisible();
     await expect(mobile.boardNavigator).toContainText("E2E Workflow");
   });
 
@@ -257,13 +261,24 @@ test.describe("Mobile kanban view", () => {
     expect(navigatorBox.height).toBeGreaterThanOrEqual(44);
     await expect(mobile.mobileKanbanLayout()).toHaveCount(1);
     await mobile.boardNavigator.click();
-    await expect(testPage.getByTestId("mobile-board-navigator-drawer")).toBeVisible();
+    const navigatorDrawer = testPage.getByTestId("mobile-board-navigator-drawer");
+    await expect(navigatorDrawer).toBeVisible();
+    await navigatorDrawer.evaluate((element) => {
+      element.setAttribute("data-test-instance", "workflow-selection");
+    });
     await expect(testPage.getByTestId("column-tab-0")).toBeVisible();
     const secondWorkflowItem = mobile.workflowItem(secondWorkflow.id);
     const workflowItemBox = await secondWorkflowItem.boundingBox();
     if (!workflowItemBox) throw new Error("mobile workflow item has no layout box");
     expect(workflowItemBox.height).toBeGreaterThanOrEqual(44);
     await secondWorkflowItem.click();
+    await expect(navigatorDrawer).toBeVisible();
+    await expect(navigatorDrawer).toHaveAttribute("data-test-instance", "workflow-selection");
+    await expect(secondWorkflowItem).toBeFocused();
+    const productStepItem = navigatorDrawer.getByTestId("column-tab-0");
+    await expect(productStepItem).toContainText("Product queue");
+    await productStepItem.click();
+    await expect(navigatorDrawer).not.toBeVisible();
 
     await mobile.mobileFab.click();
     const createDialog = testPage.getByRole("dialog");
