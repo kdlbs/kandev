@@ -106,6 +106,11 @@ func provideOrchestrator(
 	// step moves, and the primary-session-set callback below.
 	orchestratorSvc.SetTaskEventPublisher(taskSvc)
 
+	// Let the task service read the live per-session busy substate so it can
+	// compute the task-level MOST-ACTIVE-WINS activity aggregate carried on the
+	// boot payload and task.updated events (§spec:task-level-indicator).
+	taskSvc.SetForegroundActivityProvider(orchestratorSvc)
+
 	// Publish task.updated when the first session is marked primary so the
 	// frontend receives primary_session_id for newly created tasks.
 	orchestratorSvc.SetOnPrimarySessionSet(func(ctx context.Context, taskID, _ string) {

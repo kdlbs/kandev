@@ -61,6 +61,36 @@ const (
 	ForegroundActivityBackground ForegroundActivity = "background"
 )
 
+// AggregateForegroundActivity reduces the per-session foreground activities of a
+// task's RUNNING sessions to a single task-level value using MOST-ACTIVE-WINS
+// (§spec:task-level-indicator):
+//
+//   - ForegroundActivityGenerating — any session is generating;
+//   - ForegroundActivityBackground — none is generating but at least one is
+//     holding a turn open for background work;
+//   - ""                           — neither, so task-level surfaces fall through
+//     to the coarse task state (done / waiting / failed).
+//
+// Callers pass only the activities of RUNNING sessions (a non-RUNNING session
+// carries no busy substate); empty values are ignored, so passing "" for a
+// non-RUNNING session is harmless. The background tier is inserted BETWEEN
+// generating and done and does not redefine the other states.
+func AggregateForegroundActivity(activities []ForegroundActivity) ForegroundActivity {
+	sawBackground := false
+	for _, activity := range activities {
+		switch activity {
+		case ForegroundActivityGenerating:
+			return ForegroundActivityGenerating
+		case ForegroundActivityBackground:
+			sawBackground = true
+		}
+	}
+	if sawBackground {
+		return ForegroundActivityBackground
+	}
+	return ""
+}
+
 // MessageType represents a normalized session message type.
 type MessageType string
 

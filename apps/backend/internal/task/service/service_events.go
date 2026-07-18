@@ -221,6 +221,19 @@ func (s *Service) logTaskLifecycleEventPublished(eventType string, task *models.
 // primary executor details into the task event payload. Extracted to keep
 // publishTaskEvent under the project's function-length limit.
 func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, data map[string]interface{}) {
+	// Task-level MOST-ACTIVE-WINS activity aggregate (§spec:task-level-indicator).
+	// Always present (nil when no session is running) so a coarse state change never
+	// leaves a stale background-running reading on the client. Recording it keeps the
+	// live-propagation dedup baseline in step with every task event, whichever path
+	// emitted it.
+	activity := s.computeTaskForegroundActivity(ctx, taskID)
+	s.recordTaskActivity(taskID, activity)
+	if activity != "" {
+		data["foreground_activity"] = string(activity)
+	} else {
+		data["foreground_activity"] = nil
+	}
+
 	if sessionCountMap, err := s.GetSessionCountsForTasks(ctx, []string{taskID}); err == nil {
 		if count, ok := sessionCountMap[taskID]; ok {
 			data["session_count"] = count

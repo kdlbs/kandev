@@ -251,3 +251,67 @@ func TestForegroundActivitySignal_DispatchPublishesBackgroundRegisteredDuringCla
 		t.Fatalf("expected dispatch-time background activity broadcast %v, got %v", want, got)
 	}
 }
+
+// recordingTaskEvents captures task-level publish calls so the test can assert
+// the per-session activity flip is propagated to the task-level aggregate.
+type recordingTaskEvents struct {
+	activityTaskIDs []string
+}
+
+func (r *recordingTaskEvents) PublishTaskUpdated(context.Context, *models.Task) {}
+
+func (r *recordingTaskEvents) PublishTaskStateChanged(context.Context, *models.Task, v1.TaskState) {
+}
+
+func (r *recordingTaskEvents) PublishTaskActivityIfChanged(_ context.Context, taskID string) {
+	r.activityTaskIDs = append(r.activityTaskIDs, taskID)
+}
+
+// TestForegroundActivitySignal_PropagatesToTaskLevel proves each per-session flip
+// also drives the task-level MOST-ACTIVE-WINS recompute so at-a-glance task
+// surfaces (board card, task list) update live (§spec:task-level-indicator).
+func TestForegroundActivitySignal_PropagatesToTaskLevel(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	svc.messageCreator = &mockMessageCreator{}
+	taskEvents := &recordingTaskEvents{}
+	svc.SetTaskEventPublisher(taskEvents)
+
+	const (
+		taskID    = "task1"
+		sessionID = "session-tasklevel"
+	)
+
+	// Yield to background work, then stream foreground output again: two flips.
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       agentEventToolCall,
+			ToolCallID: "subagent-1",
+			ToolStatus: "running",
+			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+		},
+	})
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:      "message_streaming",
+			MessageID: "m1",
+			Text:      "still working on it",
+		},
+	})
+
+	want := []string{taskID, taskID}
+	if len(taskEvents.activityTaskIDs) != len(want) {
+		t.Fatalf("expected task-level recompute on each flip %v, got %v", want, taskEvents.activityTaskIDs)
+	}
+	for i := range want {
+		if taskEvents.activityTaskIDs[i] != want[i] {
+			t.Fatalf("task-level recompute %d: got %q, want %q", i, taskEvents.activityTaskIDs[i], want[i])
+		}
+	}
+}
