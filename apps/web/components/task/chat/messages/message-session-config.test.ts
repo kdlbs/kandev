@@ -84,6 +84,12 @@ describe("formatMessageSessionConfig", () => {
     ).toContain("turn-model ·");
   });
 
+  it("prefers captured turn model over legacy message metadata", () => {
+    expect(formatMessageSessionConfig({ model: "message-model" }, turnMetadata())).toContain(
+      "gpt-5.6-sol ·",
+    );
+  });
+
   it("uses raw identifiers and values when captured display names are absent", () => {
     const metadata = turnMetadata({
       config_options: [{ id: "reasoning_effort", value: "high" }],

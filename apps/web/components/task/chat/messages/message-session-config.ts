@@ -87,8 +87,8 @@ export function formatMessageSessionConfig(
   const snapshot = parseTurnConfigSnapshot(turnMetadata);
   const model =
     stringValue(turnMetadata?.model) ??
-    stringValue(messageMetadata?.model) ??
     snapshot?.model ??
+    stringValue(messageMetadata?.model) ??
     null;
   if (!model) return null;
   if (!snapshot) return model;

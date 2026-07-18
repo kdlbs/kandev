@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/stretchr/testify/require"
 )
 
 type nilTaskSessionRepo struct {
@@ -112,9 +113,7 @@ func TestStartTurnPersistsImmutableEffectiveRuntimeConfigSnapshot(t *testing.T) 
 		{ID: "collaboration_mode", Name: "Collaboration mode", Value: "default", ValueName: "Default"},
 		{ID: "reasoning_effort", Name: "Reasoning effort", Value: "high", ValueName: "High"},
 	}
-	if fmt.Sprint(firstSnapshot.ConfigOptions) != fmt.Sprint(wantFirstOptions) {
-		t.Fatalf("first options = %#v, want %#v", firstSnapshot.ConfigOptions, wantFirstOptions)
-	}
+	require.Equal(t, wantFirstOptions, firstSnapshot.ConfigOptions, "first turn config options")
 	if firstSnapshot.ConfigBaseline["reasoning_effort"] != "medium" {
 		t.Fatalf("first baseline = %#v", firstSnapshot.ConfigBaseline)
 	}

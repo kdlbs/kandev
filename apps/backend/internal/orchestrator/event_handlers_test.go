@@ -205,6 +205,7 @@ type mockAgentManager struct {
 	// liveness per row. Nil → the mock is not a prober and reconciliation treats
 	// every row as Unknown.
 	rowLivenessFn       func(*models.ExecutorRunning) models.ProcessLiveness
+	resolveProfileInfo  *executor.AgentProfileInfo
 	resolveProfileErr   error
 	restartProcessCalls []string // tracks execution IDs passed to RestartAgentProcess
 	restartProcessErr   error
@@ -405,6 +406,9 @@ func (m *mockAgentManager) RowLiveness(row *models.ExecutorRunning) models.Proce
 func (m *mockAgentManager) ResolveAgentProfile(_ context.Context, _ string) (*executor.AgentProfileInfo, error) {
 	if m.resolveProfileErr != nil {
 		return nil, m.resolveProfileErr
+	}
+	if m.resolveProfileInfo != nil {
+		return m.resolveProfileInfo, nil
 	}
 	return &executor.AgentProfileInfo{
 		SupportsMCP:    true,

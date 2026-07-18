@@ -2088,7 +2088,13 @@ func TestStartCreatedSession_WorkflowOverridePromotesPreparedWhenTaskHasNoPrimar
 	}
 
 	var launchedProfile string
+	profileOptions := map[string]string{"reasoning_effort": "high"}
 	agentMgr := &mockAgentManager{
+		resolveProfileInfo: &executor.AgentProfileInfo{
+			ProfileID:     "profile-b",
+			Mode:          "agent",
+			ConfigOptions: profileOptions,
+		},
 		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			launchedProfile = req.AgentProfileID
 			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
@@ -2131,6 +2137,14 @@ func TestStartCreatedSession_WorkflowOverridePromotesPreparedWhenTaskHasNoPrimar
 	}
 	if launchedProfile != "profile-b" {
 		t.Fatalf("launched profile = %q, want profile-b", launchedProfile)
+	}
+	if updated.AgentProfileSnapshot["mode"] != "agent" {
+		t.Fatalf("profile snapshot mode = %#v", updated.AgentProfileSnapshot["mode"])
+	}
+	profileOptions["reasoning_effort"] = "low"
+	configOptions, ok := updated.AgentProfileSnapshot["config_options"].(map[string]interface{})
+	if !ok || configOptions["reasoning_effort"] != "high" {
+		t.Fatalf("profile snapshot config options = %#v", updated.AgentProfileSnapshot["config_options"])
 	}
 }
 
