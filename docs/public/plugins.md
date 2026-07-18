@@ -24,38 +24,18 @@ backend restart and surfaces **Settings > Plugins** in the sidebar.
 
 ## How it works
 
-```
-                 install (URL / upload / filesystem sync)
-                              │
-                              ▼
-                 verify checksums.txt, validate manifest.yaml
-                              │
-                              ▼
-        extract to ~/.kandev/plugins/<id>/<version>/
-                              │
-                              ▼
-        spawn platform executable as a subprocess (hashicorp/go-plugin)
-                              │
-              ┌───────────────┼────────────────────────┐
-              ▼               ▼                         ▼
-      gRPC DeliverEvent   gRPC InvokeTool        gRPC HandleWebhook
-      (bus events, at-    (agent tool calls)     (external webhook
-       least-once,                                relayed via
-       buffered while                             POST /api/plugins/
-       unhealthy)                                  {id}/webhooks/{key})
-              │               │                         │
-              └───────────────┴────────────┬────────────┘
-                                            ▼
-                        plugin calls back over the same connection:
-                        Host state/config/secrets (GetState/SetState/...,
-                        GetConfig, GetSecret/SetSecret/DeleteSecret,
-                        RevealSecret), EmitEvent, and capability-gated
-                        read-only data accessors (Tasks, Sessions,
-                        Workspaces, Workflows, AgentProfiles, Repositories)
-                                            │
-                                            ▼
-                       (optional) SPA loads ui.bundle at boot,
-                       registers native routes/nav/slots/WS handlers
+```mermaid
+flowchart TD
+    Install["Install: URL / upload / filesystem sync"] --> Verify["Verify checksums.txt, validate manifest.yaml"]
+    Verify --> Extract["Extract to ~/.kandev/plugins/&lt;id&gt;/&lt;version&gt;/"]
+    Extract --> Spawn["Spawn platform executable as a subprocess (hashicorp/go-plugin)"]
+    Spawn -->|gRPC| Deliver["DeliverEvent: bus events (at-least-once, buffered while unhealthy)"]
+    Spawn -->|gRPC| Invoke["InvokeTool: agent tool calls"]
+    Spawn -->|gRPC| Webhook["HandleWebhook: external webhook via POST /api/plugins/{id}/webhooks/{key}"]
+    Deliver --> Host["Plugin calls back on the same connection: Host state / config / secrets, EmitEvent, and capability-gated read-only data accessors"]
+    Invoke --> Host
+    Webhook --> Host
+    Host -.optional.-> UI["SPA loads ui.bundle at boot: registers native routes / nav / slots / WS handlers"]
 ```
 
 Kandev owns the whole process lifecycle: it extracts the package, spawns the
