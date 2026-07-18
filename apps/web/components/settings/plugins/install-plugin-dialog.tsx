@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -44,14 +44,19 @@ export function InstallPluginDialog({
   const [url, setUrl] = useState("");
   const [file, setFile] = useState<File | null>(null);
 
-  const handleOpenChange = (next: boolean) => {
-    if (!next) {
+  // Reset the lifted input state whenever the dialog closes. This keys off the
+  // `open` prop rather than `onOpenChange` because a successful install closes
+  // the dialog by flipping the controlled `open` prop directly
+  // (usePluginActions.afterInstall), which never routes through onOpenChange —
+  // so resetting only in an onOpenChange handler would leave a stale file/url
+  // selected the next time the dialog opens.
+  useEffect(() => {
+    if (!open) {
       setUrl("");
       setFile(null);
       setTab("url");
     }
-    onOpenChange(next);
-  };
+  }, [open]);
 
   const trimmedUrl = url.trim();
   // The single Install button submits whichever tab is active; its testid,
@@ -71,7 +76,7 @@ export function InstallPluginDialog({
         };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg" data-testid="install-plugin-dialog">
         <DialogHeader>
           <DialogTitle>Install plugin</DialogTitle>
@@ -115,7 +120,7 @@ export function InstallPluginDialog({
           <Button
             type="button"
             variant="outline"
-            onClick={() => handleOpenChange(false)}
+            onClick={() => onOpenChange(false)}
             className="cursor-pointer"
           >
             Cancel
