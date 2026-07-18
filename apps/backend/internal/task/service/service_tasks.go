@@ -1407,6 +1407,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 		extra = map[string]interface{}{"reason": reason}
 	}
 	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
+	s.forgetTaskActivity(id)
 	s.logger.Info("task deleted",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))

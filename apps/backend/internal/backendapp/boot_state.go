@@ -707,7 +707,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			sessionCount = &count
 		}
 		info := bootSessionInfo(primaryInfoByTask[task.ID])
-		result = append(result, taskdto.FromTaskWithSessionInfo(
+		dto := taskdto.FromTaskWithSessionInfo(
 			task,
 			primarySessionID,
 			sessionCount,
@@ -719,7 +719,15 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			info.workingDirectory,
 			info.sessionState,
 			bootPendingActionPtr(info.sessionID, pendingActionsBySession),
-		))
+		)
+		// Stamp the task-level MOST-ACTIVE-WINS activity aggregate so the board
+		// card and task list show the background-running affordance on first paint
+		// / in a second tab, without holding the task's full session set client-side
+		// (§spec:task-level-indicator). No-op when no session is running.
+		if b.p.orchestratorSvc != nil {
+			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
+		}
+		result = append(result, dto)
 	}
 	return result
 }

@@ -111,6 +111,11 @@ type TurnService interface {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState)
+	// PublishTaskActivityIfChanged recomputes the task-level MOST-ACTIVE-WINS
+	// activity aggregate and emits task.updated only when its three-state value
+	// changed — including a generating↔background flip that leaves the coarse
+	// state unchanged (§spec:task-level-indicator).
+	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.
@@ -728,6 +733,16 @@ func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task
 		return
 	}
 	s.taskEvents.PublishTaskStateChanged(ctx, task, oldState)
+}
+
+// publishTaskActivityIfChanged forwards a per-session activity flip to the task
+// service, which recomputes the task-level aggregate and emits task.updated only
+// when the aggregated value actually changes. No-op when the publisher isn't wired.
+func (s *Service) publishTaskActivityIfChanged(ctx context.Context, taskID string) {
+	if s.taskEvents == nil || taskID == "" {
+		return
+	}
+	s.taskEvents.PublishTaskActivityIfChanged(ctx, taskID)
 }
 
 func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID string) {

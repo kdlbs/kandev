@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // WorktreeCleanup provides worktree cleanup on task deletion.
@@ -216,6 +217,15 @@ type Service struct {
 	comments              CommentRepository
 	baseBranchPusher      AgentBaseBranchPusher
 	runtimeOverridesMu    sync.Mutex
+	// foregroundActivity resolves the live fine-grained busy substate of a RUNNING
+	// session (satisfied by the orchestrator). Used to compute the task-level
+	// MOST-ACTIVE-WINS activity aggregate carried on task.updated events. Optional.
+	foregroundActivity ForegroundActivityProvider
+	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
+	// emitted per task. It bounds live-propagation task.updated emissions to an
+	// actual change of the aggregated three-state value (§spec:live-propagation-fallback).
+	taskActivityMu   sync.Mutex
+	lastTaskActivity map[string]v1.ForegroundActivity
 	// cleanupDoneForTest lets unit tests wait for async cleanup; nil in production.
 	cleanupDoneForTest  chan struct{}
 	cleanupWorkerMu     sync.Mutex
@@ -255,6 +265,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		logger:           log,
 		discoveryConfig:  discoveryConfig,
 		branchFetcher:    newBranchFetcher(log.Zap()),
+		lastTaskActivity: make(map[string]v1.ForegroundActivity),
 	}
 }
 
