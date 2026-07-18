@@ -110,7 +110,17 @@ func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, execution
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	return m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
+	if err != nil {
+		return nil, err
+	}
+	key := executionActivityKey(executionID)
+	m.trackActivity(key, lease)
+	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	if err != nil || !dispatchOnly {
+		m.releaseActivity(key)
+	}
+	return result, err
 }
 
 // cancelWaitTimeout bounds how long CancelAgent waits for the in-flight SendPrompt
