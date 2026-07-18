@@ -201,7 +201,11 @@ export function RepoTreeGroup(props: RepoTreeGroupProps) {
   const label = displayName || repositoryName || "Repository";
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   return (
-    <div data-testid="changes-repo-group" data-repository-name={repositoryName || ""}>
+    <div
+      className="-ml-2"
+      data-testid="changes-repo-group"
+      data-repository-name={repositoryName || ""}
+    >
       <div className="flex items-center justify-between gap-2 px-1 py-0.5">
         <button
           type="button"

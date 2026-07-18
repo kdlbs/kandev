@@ -8,15 +8,19 @@ import { SessionPage } from "../../pages/session-page";
 
 async function expectTreeNestedUnderRepository(panel: Locator) {
   const group = panel.getByTestId("changes-repo-group").first();
+  const sectionHeader = panel.getByTestId("unstaged-files-section-collapse-toggle");
   const repositoryLabel = group.getByTestId("changes-repo-header").locator("span").first();
   const directoryLabel = group.locator("[data-testid^='tree-dir-'] span").first();
-  const [repositoryBox, directoryBox] = await Promise.all([
+  const [sectionHeaderBox, repositoryBox, directoryBox] = await Promise.all([
+    sectionHeader.boundingBox(),
     repositoryLabel.boundingBox(),
     directoryLabel.boundingBox(),
   ]);
 
+  expect(sectionHeaderBox).not.toBeNull();
   expect(repositoryBox).not.toBeNull();
   expect(directoryBox).not.toBeNull();
+  expect(repositoryBox!.x - sectionHeaderBox!.x).toBeLessThanOrEqual(14);
   expect(directoryBox!.x).toBeGreaterThan(repositoryBox!.x);
 }
 
