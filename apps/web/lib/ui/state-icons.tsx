@@ -85,14 +85,19 @@ const TASK_GENERATING_ICON: IconConfig = {
 
 // The task-level background-running affordance (§spec:task-level-indicator):
 // spawned background work is running while the foreground turns are idle. It is a
-// segmented spinner (IconLoader) — distinct from BOTH the generating spinner
-// (IconLoader2, a smooth arc) by SHAPE and from the done check (IconCheck) by
-// shape AND motion — so the three read apart in a grayscale/desaturated scan, not
-// by hue alone (§req:not-color-alone). The motion (a spinner) reads as "still
-// working" while never being mistaken for the done check.
+// violet segmented spinner (IconLoader) — distinct from the generating spinner
+// (IconLoader2, a blue smooth arc) by BOTH shape AND hue, and from the done check
+// (IconCheck, green) by shape, motion, AND hue. The compact scanning surfaces
+// (board card, task-list row, graph/swimlane node) are dense, so the extra hue
+// separation makes background read apart from generating at a glance, while the
+// shape difference still carries the distinction in a grayscale/desaturated scan
+// (§req:not-color-alone). Violet is otherwise unused by the task states (blue =
+// generating/loading, green = done, yellow = waiting, red = error), so it reads as
+// its own "still working in the background" state; the motion (a spinner) keeps it
+// from ever being mistaken for the done check.
 const TASK_BACKGROUND_ICON: IconConfig = {
   Icon: IconLoader,
-  className: STYLE_LOADING,
+  className: "text-violet-500 animate-spin",
 };
 
 const DEFAULT_TASK_ICON: IconConfig = {

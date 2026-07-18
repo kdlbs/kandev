@@ -83,6 +83,22 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
     expect(background).not.toBe(done);
     expect(generating).not.toBe(done);
   });
+
+  it("also separates background from generating and done by HUE on the compact surfaces", () => {
+    // The dense board/list/graph surfaces get an extra hue separation on top of the
+    // shape difference so background reads apart from generating at a glance — its
+    // own violet, distinct from generating's blue and done's green.
+    const generating = iconClassName(
+      getTaskStateIcon("IN_PROGRESS", undefined, false, "generating"),
+    );
+    const background = iconClassName(
+      getTaskStateIcon("IN_PROGRESS", undefined, false, "background"),
+    );
+    const done = iconClassName(getTaskStateIcon("COMPLETED", undefined, false, null));
+    expect(background).toContain("text-violet-500");
+    expect(background).not.toBe(generating);
+    expect(background).not.toBe(done);
+  });
 });
 
 describe("getSessionStateIcon — fine-grained busy tri-state", () => {
