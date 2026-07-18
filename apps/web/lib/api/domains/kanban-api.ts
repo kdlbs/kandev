@@ -118,6 +118,13 @@ export async function updateTask(
   });
 }
 
+export async function detachTask(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<Task>(`/api/v1/tasks/${taskId}/detach`, {
+    ...options,
+    init: { method: "POST", ...(options?.init ?? {}) },
+  });
+}
+
 export async function updateTaskRepositoryBaseBranch(
   taskId: string,
   taskRepositoryId: string,

@@ -81,6 +81,12 @@ The subtask dialog currently does not enforce agent/executor credential compatib
 
 Regular Kanban allows one subtask level: a root task can have children, but a child cannot have another child. Split further work into sibling subtasks, additional sessions, or a separate top-level task. Arbitrary-depth trees belong to the in-progress Office surface.
 
+### Detach a subtask
+
+Open the subtask's action menu from its sidebar entry or Kanban card, choose **Detach from parent**, and confirm. The subtask becomes a top-level task without changing its workflow position, blockers, sessions, or descendants. The Office parent picker's **No parent** choice performs the same operation.
+
+Detaching changes task hierarchy only. An inherited workspace remains shared with the former parent, and the confirmation dialog calls this out explicitly. Create a task with **Create new workspace** when the work needs isolated files or a separate branch.
+
 ### Create a subtask from an agent
 
 Call `create_task_kandev` with `parent_id: "self"`. `workspace_mode` defaults to `inherit_parent`; set it to `new_workspace` for isolated materialization.

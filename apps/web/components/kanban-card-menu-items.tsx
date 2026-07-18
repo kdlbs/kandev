@@ -13,6 +13,7 @@ import {
   IconPencil,
   IconTicket,
   IconTrash,
+  IconUnlink,
 } from "@tabler/icons-react";
 import {
   ContextMenuItem,
@@ -80,9 +81,12 @@ type BuildKanbanCardMenuEntriesArgs = {
   disabled?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
+  isDetaching?: boolean;
+  parentTaskId?: string | null;
   onEdit?: () => void;
   onArchive?: () => void;
   onDelete?: () => void;
+  onDetach?: () => void;
   onLinkPullRequest?: () => void;
   onLinkIssue?: () => void;
   onLinkJiraTicket?: () => void;
@@ -323,9 +327,12 @@ export function buildKanbanCardMenuEntries({
   disabled,
   isDeleting,
   isArchiving,
+  isDetaching,
+  parentTaskId,
   onEdit,
   onArchive,
   onDelete,
+  onDetach,
   onLinkPullRequest,
   onLinkIssue,
   onLinkJiraTicket,
@@ -336,7 +343,7 @@ export function buildKanbanCardMenuEntries({
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
   const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
-  const isProcessing = Boolean(disabled || isDeleting || isArchiving);
+  const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
   const entries: KanbanCardMenuEntry[] = [
     {
       kind: "item",
@@ -388,6 +395,9 @@ export function buildKanbanCardMenuEntries({
     onSelect: onArchive,
   });
 
+  const detachEntry = buildDetachEntry({ parentTaskId, onDetach, isDetaching, isProcessing });
+  if (detachEntry) entries.push(detachEntry);
+
   entries.push({ kind: "separator", key: "delete-separator" });
   entries.push({
     kind: "item",
@@ -404,6 +414,30 @@ export function buildKanbanCardMenuEntries({
   });
 
   return entries;
+}
+
+function buildDetachEntry({
+  parentTaskId,
+  onDetach,
+  isDetaching,
+  isProcessing,
+}: Pick<BuildKanbanCardMenuEntriesArgs, "parentTaskId" | "onDetach" | "isDetaching"> & {
+  isProcessing: boolean;
+}): KanbanCardMenuEntry | null {
+  if (!parentTaskId || !onDetach) return null;
+  return {
+    kind: "item",
+    key: "detach",
+    testId: "task-context-detach",
+    icon: isDetaching ? (
+      <IconLoader className="mr-2 h-4 w-4 animate-spin" />
+    ) : (
+      <IconUnlink className="mr-2 h-4 w-4" />
+    ),
+    label: "Detach from parent",
+    disabled: isProcessing,
+    onSelect: onDetach,
+  };
 }
 
 export function useKanbanCardMoveTargets(

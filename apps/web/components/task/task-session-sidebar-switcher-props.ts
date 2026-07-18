@@ -45,6 +45,7 @@ export function buildTaskSwitcherProps(args: {
     onRenameTask: args.sidebarActions.handleRenameTask,
     onArchiveTask: args.sidebarActions.handleArchiveTask,
     onDeleteTask: args.sidebarActions.handleDeleteTask,
+    onDetachTask: args.sidebarActions.handleDetachTask,
     ...args.taskLinkHandlers,
     onMoveToStep: args.sidebarActions.handleMoveToStep,
     onTogglePin: args.togglePinnedTask,

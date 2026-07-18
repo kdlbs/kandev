@@ -11,6 +11,7 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
+import { TaskDetachConfirmDialog } from "@/components/task/task-detach-confirm-dialog";
 import {
   TaskExternalLinkDialog,
   type ExternalLinkProvider,
@@ -20,6 +21,7 @@ import { TaskGitHubIssueDialog } from "@/components/task/task-github-issue-dialo
 import { TaskGitHubPRDialog } from "@/components/task/task-github-pr-dialog";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
+import { useDetachTask } from "@/hooks/use-detach-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import { formatUserHomePath } from "@/lib/utils";
 import {
@@ -54,6 +56,7 @@ export interface Task {
   primaryExecutorName?: string | null;
   isRemoteExecutor?: boolean;
   parentTaskId?: string | null;
+  workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   updatedAt?: string;
   createdAt?: string;
   issueUrl?: string;
@@ -198,12 +201,25 @@ function useKanbanCardMenus({
   const moveMenu = useKanbanCardMoveMenuActions({ task, steps, isSelected, selectedIds, onMove });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
+  const [showDetachConfirm, setShowDetachConfirm] = useState(false);
   const [showPRDialog, setShowPRDialog] = useState(false);
   const [showIssueDialog, setShowIssueDialog] = useState(false);
   const [externalLinkProvider, setExternalLinkProvider] = useState<ExternalLinkProvider | null>(
     null,
   );
-  const disabled = Boolean(isDeleting || isArchiving);
+  const { detachTask, detachingTaskId } = useDetachTask();
+  const isDetaching = detachingTaskId === task.id;
+  const disabled = Boolean(isDeleting || isArchiving || isDetaching);
+  const actingOnMultiSelection = Boolean(isSelected && selectedIds && selectedIds.size > 1);
+
+  const handleDetachConfirm = async () => {
+    try {
+      await detachTask(task.id);
+      setShowDetachConfirm(false);
+    } catch (error) {
+      console.error("Failed to detach task:", error);
+    }
+  };
 
   const menuBase = {
     currentWorkflowId: moveMenu.moveTargets.currentWorkflowId,
@@ -213,9 +229,13 @@ function useKanbanCardMenus({
     disabled,
     isDeleting,
     isArchiving,
+    isDetaching,
+    parentTaskId: task.parentTaskId,
     onEdit: onEdit ? () => onEdit(task) : undefined,
     onArchive: onArchive ? () => setShowArchiveConfirm(true) : undefined,
     onDelete: onDelete ? () => setShowDeleteConfirm(true) : undefined,
+    onDetach:
+      task.parentTaskId && !actingOnMultiSelection ? () => setShowDetachConfirm(true) : undefined,
     onLinkPullRequest: () => setShowPRDialog(true),
     onLinkIssue: () => setShowIssueDialog(true),
     ...externalLinkHandlers(externalLinkAvailability, setExternalLinkProvider),
@@ -236,6 +256,10 @@ function useKanbanCardMenus({
     setShowDeleteConfirm,
     showArchiveConfirm,
     setShowArchiveConfirm,
+    showDetachConfirm,
+    setShowDetachConfirm,
+    isDetaching,
+    handleDetachConfirm,
     showPRDialog,
     setShowPRDialog,
     showIssueDialog,
@@ -285,6 +309,14 @@ function KanbanCardDialogs({
         executorType={task.primaryExecutorType}
         isArchiving={isArchiving}
         onConfirm={({ cascade }) => onArchive?.(task, { cascade })}
+      />
+      <TaskDetachConfirmDialog
+        open={menu.showDetachConfirm}
+        onOpenChange={menu.setShowDetachConfirm}
+        taskTitle={task.title}
+        sharesParentWorkspace={task.workspaceMode === "inherit_parent"}
+        isDetaching={menu.isDetaching}
+        onConfirm={menu.handleDetachConfirm}
       />
       <TaskGitHubPRDialog
         open={menu.showPRDialog}

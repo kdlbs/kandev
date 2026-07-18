@@ -19,6 +19,7 @@ import { WorkspaceSwitcher } from "../workspace-switcher";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "../task-delete-confirm-dialog";
+import { TaskDetachTargetConfirmDialog } from "../task-detach-confirm-dialog";
 import { TaskRenameDialog } from "../task-rename-dialog";
 import { SidebarLinkDialogs } from "../task-session-sidebar-dialogs";
 import { useSidebarLinkActions } from "../task-session-sidebar-link-actions";
@@ -58,6 +59,7 @@ export function MobileTaskList({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onDetachTask,
   onLinkPullRequest,
   onLinkIssue,
   onLinkJiraTicket,
@@ -75,6 +77,7 @@ export function MobileTaskList({
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask: (taskId: string) => void;
   onDeleteTask: (taskId: string) => Promise<void> | void;
+  onDetachTask: (taskId: string) => Promise<void> | void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
   onLinkIssue?: (taskId: string, taskTitle?: string) => void;
   onLinkJiraTicket?: (taskId: string, taskTitle?: string) => void;
@@ -123,6 +126,7 @@ export function MobileTaskList({
       onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
+      onDetachTask={onDetachTask}
       onLinkPullRequest={onLinkPullRequest}
       onLinkIssue={onLinkIssue}
       onLinkJiraTicket={onLinkJiraTicket}
@@ -274,6 +278,7 @@ function TaskSwitcherSurfaceContent({
           onRenameTask={surfaceAction(presentation, onOpenChange, rename.handleRenameTask)}
           onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)}
           onDeleteTask={surfaceAction(presentation, onOpenChange, actions.handleDeleteTask)}
+          onDetachTask={surfaceAction(presentation, onOpenChange, actions.handleDetachTask)}
           onLinkPullRequest={surfaceAction(
             presentation,
             onOpenChange,
@@ -367,6 +372,12 @@ function TaskSwitcherDialogs({
         executorType={actions.deletingTask?.executorType}
         isDeleting={actions.isDeleting}
         onConfirm={({ cascade }) => actions.handleDeleteConfirm({ cascade })}
+      />
+      <TaskDetachTargetConfirmDialog
+        target={actions.detachingTask}
+        detachingTaskId={actions.detachingTaskId}
+        onDismiss={() => actions.setDetachingTask(null)}
+        onConfirm={actions.handleDetachConfirm}
       />
       <SidebarLinkDialogs
         actions={linking.actions}

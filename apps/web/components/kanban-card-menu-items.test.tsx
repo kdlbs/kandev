@@ -130,3 +130,33 @@ describe("buildKanbanCardMenuEntries — external issue links", () => {
     expect(itemLabels(linkMenu)).toEqual(["GitHub Pull Request", "GitHub Issue", "Jira Ticket"]);
   });
 });
+
+describe("buildKanbanCardMenuEntries — detach", () => {
+  const baseArgs = {
+    workflows: [],
+    stepsByWorkflowId: {},
+  };
+
+  it("offers detach for a child task and invokes the action", () => {
+    const onDetach = vi.fn();
+    const entries = buildKanbanCardMenuEntries({
+      ...baseArgs,
+      parentTaskId: "parent-1",
+      onDetach,
+    });
+    const detach = entries.find((entry) => entry.kind === "item" && entry.key === "detach");
+
+    expect(detach?.kind).toBe("item");
+    if (detach?.kind === "item") detach.onSelect?.();
+    expect(onDetach).toHaveBeenCalledOnce();
+  });
+
+  it("omits detach for a root task", () => {
+    const entries = buildKanbanCardMenuEntries({
+      ...baseArgs,
+      onDetach: vi.fn(),
+    });
+
+    expect(entries.some((entry) => entry.key === "detach")).toBe(false);
+  });
+});

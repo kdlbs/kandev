@@ -14,7 +14,7 @@ vi.mock("@/lib/state/dockview-store", () => ({
   useDockviewStore: () => null,
 }));
 
-import { ChangesTree } from "./changes-panel-tree";
+import { ChangesTree, RepoTreeGroup } from "./changes-panel-tree";
 
 afterEach(cleanup);
 
@@ -103,5 +103,21 @@ describe("ChangesTree", () => {
     // Even without the attribute, the spy proves the parent's hook ran for
     // this file's path during render.
     expect(isSelected).toHaveBeenCalledWith(FOO_TS);
+  });
+
+  it("indents root files beneath a repository header", () => {
+    render(
+      <RepoTreeGroup
+        {...baseProps}
+        variant="unstaged"
+        repositoryName="frontend"
+        files={[file("README.md")]}
+        collapsed={false}
+        onToggle={vi.fn()}
+        primaryLabel="Stage all"
+      />,
+    );
+
+    expect(screen.getByTestId("file-row").getAttribute("data-indent")).toBe("12");
   });
 });

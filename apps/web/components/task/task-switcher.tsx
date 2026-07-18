@@ -37,6 +37,7 @@ export type TaskSwitcherItem = {
   hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   parentTaskId?: string;
+  workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   prInfo?: { number: number; state: string };
   isPRReview?: boolean;
   isIssueWatch?: boolean;
@@ -58,6 +59,7 @@ type TaskSwitcherProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
   onLinkIssue?: TaskLinkHandler;
   onLinkJiraTicket?: TaskLinkHandler;
@@ -141,6 +143,7 @@ type TaskRowProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
   onLinkIssue?: TaskLinkHandler;
   onLinkJiraTicket?: TaskLinkHandler;
@@ -193,6 +196,7 @@ function TaskRow({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onDetachTask,
   onMoveToStep,
   onTogglePin,
   isPinned,
@@ -222,6 +226,7 @@ function TaskRow({
       onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
       onDeleteTask={onDeleteTask}
+      onDetachTask={onDetachTask}
       {...taskLinkHandlerProps(props)}
       onMoveToStep={onMoveToStep}
       onTogglePin={onTogglePin}
@@ -396,6 +401,7 @@ type GroupSectionProps = {
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onDeleteTask?: (taskId: string) => void;
+  onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
   onLinkIssue?: TaskLinkHandler;
   onLinkJiraTicket?: TaskLinkHandler;
@@ -435,6 +441,7 @@ function GroupSection({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onDetachTask,
   onLinkPullRequest,
   onLinkIssue,
   onLinkJiraTicket,
@@ -472,6 +479,7 @@ function GroupSection({
       onRenameTask,
       onArchiveTask,
       onDeleteTask,
+      onDetachTask,
       onLinkPullRequest,
       onLinkIssue,
       onLinkJiraTicket,
@@ -527,6 +535,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onRenameTask,
   onArchiveTask,
   onDeleteTask,
+  onDetachTask,
   onLinkPullRequest,
   onLinkIssue,
   onLinkJiraTicket,
@@ -582,6 +591,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
           onDeleteTask={onDeleteTask}
+          onDetachTask={onDetachTask}
           onLinkPullRequest={onLinkPullRequest}
           onLinkIssue={onLinkIssue}
           onLinkJiraTicket={onLinkJiraTicket}

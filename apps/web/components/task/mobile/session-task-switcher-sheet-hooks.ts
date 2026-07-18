@@ -8,13 +8,14 @@ import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
+import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import {
   hasPendingClarification,
   hasPendingPermissionRequest,
 } from "@/lib/utils/pending-clarification";
-import { toKanbanTask } from "@/lib/kanban/map-task";
+import { toKanbanTask, workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import {
   repositoryId as toRepositoryId,
   type TaskState,
@@ -98,6 +99,7 @@ function toSheetItem(
     // Carry the parent link so the mobile task switcher nests subtasks the same
     // way the desktop sidebar does (applyView/TaskSwitcher read parentTaskId).
     parentTaskId: task.parentTaskId ?? undefined,
+    workspaceMode: task.workspaceMode,
     state: task.state as TaskState | undefined,
     sessionState: resolvedSessionState,
     description: task.description,
@@ -377,6 +379,7 @@ function buildKanbanTaskUpsert(
   return {
     id: task.id,
     parentTaskId: task.parent_id ?? undefined,
+    workspaceMode: workspaceModeFromMetadata(task.metadata),
     workflowStepId: task.workflow_step_id,
     title: task.title,
     description: task.description,
@@ -562,6 +565,7 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
   const deleteActions = useSheetDeleteActions(store, removeTaskFromBoard);
+  const detachActions = useTaskDetachDialog(store);
 
   const handleSelectTask = useCallback(
     (taskId: string) => {
@@ -646,5 +650,6 @@ export function useSheetActions(workspaceId: string | null, onOpenChange: (open:
     isArchiving,
     handleArchiveConfirm,
     ...deleteActions,
+    ...detachActions,
   };
 }
