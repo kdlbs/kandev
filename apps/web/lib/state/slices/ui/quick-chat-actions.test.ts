@@ -98,6 +98,22 @@ describe("typed quick chat sessions", () => {
     expect(store.getState().quickChat.activeSessionId).toBe(SESSION_A);
   });
 
+  it("does not activate a registered session from another workspace while quick chat is open", () => {
+    const store = makeStore();
+    store.getState().openQuickChat(SESSION_B, WORKSPACE_B, undefined, "chat");
+
+    store.getState().addQuickChatSession(SESSION_A, WORKSPACE_A, "agent-a", "config");
+
+    expect(store.getState().quickChat).toMatchObject({
+      isOpen: true,
+      activeSessionId: SESSION_B,
+      sessions: expect.arrayContaining([
+        expect.objectContaining({ sessionId: SESSION_A, workspaceId: WORKSPACE_A }),
+        expect.objectContaining({ sessionId: SESSION_B, workspaceId: WORKSPACE_B }),
+      ]),
+    });
+  });
+
   it("does not activate another workspace after the last local tab closes", () => {
     const store = makeStore();
     store.getState().openQuickChat(SESSION_B, WORKSPACE_B, undefined, "chat");

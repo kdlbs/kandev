@@ -251,6 +251,11 @@ function buildQuickChatActions(set: ImmerSet) {
       kind: "chat" | "config" = "chat",
     ) =>
       set((draft) => {
+        const activeWorkspaceId = draft.quickChat.sessions.find(
+          (session) => session.sessionId === draft.quickChat.activeSessionId,
+        )?.workspaceId;
+        const shouldActivate =
+          !draft.quickChat.isOpen || !activeWorkspaceId || activeWorkspaceId === workspaceId;
         const existing = draft.quickChat.sessions.find(
           (session) => session.sessionId === sessionId,
         );
@@ -260,7 +265,7 @@ function buildQuickChatActions(set: ImmerSet) {
         } else {
           draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind });
         }
-        draft.quickChat.activeSessionId = sessionId;
+        if (shouldActivate) draft.quickChat.activeSessionId = sessionId;
       }),
     openQuickChat: (
       sessionId: string,
