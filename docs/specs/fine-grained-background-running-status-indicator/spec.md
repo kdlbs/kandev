@@ -215,7 +215,7 @@ background-running affordance — distinct from generating and never a done chec
 
 ## Live propagation, fresh-load correctness, and safe fallback §spec:live-propagation-fallback
 
-*Status: not started*
+*Status: complete*
 
 As a session moves between generating, background-running, and done, every
 in-scope surface — session-level and task-level — updates promptly without a
