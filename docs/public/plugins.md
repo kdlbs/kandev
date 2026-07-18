@@ -29,9 +29,10 @@ flowchart TD
     Install["Install: URL / upload / filesystem sync"] --> Verify["Verify checksums.txt, validate manifest.yaml"]
     Verify --> Extract["Extract to ~/.kandev/plugins/&lt;id&gt;/&lt;version&gt;/"]
     Extract --> Spawn["Spawn platform executable as a subprocess (hashicorp/go-plugin)"]
-    Spawn -->|gRPC| Deliver["DeliverEvent: bus events (at-least-once, buffered while unhealthy)"]
-    Spawn -->|gRPC| Invoke["InvokeTool: declared tool calls (not agent-invocable yet)"]
-    Spawn -->|gRPC| Webhook["HandleWebhook: external webhook via POST /api/plugins/{id}/webhooks/{key}"]
+    Spawn -->|"gRPC DeliverEvent"| Deliver["Bus events (at-least-once, buffered while unhealthy)"]
+    Spawn -->|"gRPC InvokeTool"| Invoke["Declared tool calls (not agent-invocable yet)"]
+    Ext["External caller"] -->|"HTTP POST/GET /api/plugins/{id}/webhooks/{key}"| Route["kandev webhook route"]
+    Route -->|"gRPC HandleWebhook"| Webhook["Plugin webhook handler (plugin serves no HTTP itself)"]
     Deliver --> Host["Plugin calls back on the same connection: Host state / config / secrets, EmitEvent, and capability-gated read-only data accessors"]
     Invoke --> Host
     Webhook --> Host
