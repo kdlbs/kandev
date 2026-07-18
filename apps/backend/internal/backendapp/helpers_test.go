@@ -996,6 +996,9 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-qc", Name: "Quick Chats"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-other", Name: "Other"}); err != nil {
+		t.Fatalf("CreateWorkspace(other): %v", err)
+	}
 	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-qc", WorkspaceID: "ws-qc", Name: "Workflow"}); err != nil {
 		t.Fatalf("CreateWorkflow: %v", err)
 	}
@@ -1011,6 +1014,18 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
 		id: "task-config", title: "Config", updatedAt: base, sessionUpdatedAt: base,
 		agentProfileID: "agent-config", metadata: map[string]interface{}{"config_mode": true},
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-archived", title: "Archived", updatedAt: base, sessionUpdatedAt: base,
+		agentProfileID: "agent-archived", archived: true,
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-no-primary", title: "No Primary", updatedAt: base,
+		agentProfileID: "agent-no-primary", withoutPrimary: true,
+	})
+	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
+		id: "task-other-workspace", workspaceID: "ws-other", title: "Foreign", updatedAt: base,
+		sessionUpdatedAt: base, agentProfileID: "agent-foreign",
 	})
 	seedBootQuickChatTask(t, repo, ctx, bootQuickChatFixture{
 		id: "task-automation", title: "Automation", updatedAt: base, sessionUpdatedAt: base,
@@ -1040,8 +1055,10 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 					WorkspaceID    string `json:"workspaceId"`
 					Name           string `json:"name"`
 					AgentProfileID string `json:"agentProfileId"`
+					Kind           string `json:"kind"`
 				} `json:"sessions"`
-				IsOpen bool `json:"isOpen"`
+				IsOpen          bool    `json:"isOpen"`
+				ActiveSessionID *string `json:"activeSessionId"`
 			} `json:"quickChat"`
 			TaskSessions struct {
 				Items map[string]struct {
@@ -1055,20 +1072,32 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	}
 
 	sessions := decoded.InitialState.QuickChat.Sessions
-	if len(sessions) != 2 {
-		t.Fatalf("quickChat sessions = %#v, want 2 restored sessions", sessions)
+	if len(sessions) != 3 {
+		t.Fatalf("quickChat sessions = %#v, want 3 restored sessions", sessions)
 	}
-	if got := sessions[0].SessionID; got != "task-old-session" {
-		t.Fatalf("first restored session = %q, want first-created task-old-session", got)
+	if got := sessions[0].SessionID; got != "task-config-session" {
+		t.Fatalf("first restored session = %q, want newest task-config-session", got)
 	}
-	if sessions[0].AgentProfileID != "agent-old" || sessions[1].AgentProfileID != "agent-new" {
+	if sessions[0].Kind != "config" || sessions[1].Kind != "chat" || sessions[2].Kind != "chat" {
+		t.Fatalf("restored session kinds = %#v, want config, chat, chat", sessions)
+	}
+	if sessions[0].WorkspaceID != "ws-qc" || sessions[0].Name != "Config" {
+		t.Fatalf("config session identity = %#v, want workspace and task title preserved", sessions[0])
+	}
+	if sessions[0].AgentProfileID != "agent-config" || sessions[1].AgentProfileID != "agent-new" || sessions[2].AgentProfileID != "agent-old" {
 		t.Fatalf("agent profile IDs = %#v", sessions)
 	}
-	if got := decoded.InitialState.TaskSessions.Items["task-new-session"].TaskID; got != "task-new" {
-		t.Fatalf("quick chat task session task_id = %q, want task-new", got)
+	if got := decoded.InitialState.TaskSessions.Items["task-config-session"].TaskID; got != "task-config" {
+		t.Fatalf("config chat task session task_id = %q, want task-config", got)
+	}
+	if len(decoded.InitialState.TaskSessions.Items) != 3 {
+		t.Fatalf("taskSessions items = %#v, want only the 3 restored primary sessions", decoded.InitialState.TaskSessions.Items)
 	}
 	if decoded.InitialState.QuickChat.IsOpen {
 		t.Fatal("quick chat should hydrate closed")
+	}
+	if decoded.InitialState.QuickChat.ActiveSessionID != nil {
+		t.Fatalf("quick chat active session = %q, want nil", *decoded.InitialState.QuickChat.ActiveSessionID)
 	}
 }
 
@@ -1133,8 +1162,8 @@ func TestBootPayloadRestoresQuickChatsFromTaskRouteWorkspace(t *testing.T) {
 			if len(sessions) != 2 {
 				t.Fatalf("quickChat sessions = %#v, want 2 task-workspace sessions", sessions)
 			}
-			if sessions[0].SessionID != "task-route-first-session" || sessions[1].SessionID != "task-route-second-session" {
-				t.Fatalf("quickChat sessions = %#v, want task-workspace creation order", sessions)
+			if sessions[0].SessionID != "task-route-second-session" || sessions[1].SessionID != "task-route-first-session" {
+				t.Fatalf("quickChat sessions = %#v, want task-workspace activity order", sessions)
 			}
 			for _, session := range sessions {
 				if session.WorkspaceID != "ws-task" {
@@ -1155,6 +1184,8 @@ type bootQuickChatFixture struct {
 	metadata         map[string]interface{}
 	updatedAt        time.Time
 	sessionUpdatedAt time.Time
+	archived         bool
+	withoutPrimary   bool
 }
 
 func seedBootQuickChatTask(t *testing.T, repo *sqlitetaskrepo.Repository, ctx context.Context, f bootQuickChatFixture) {
@@ -1185,6 +1216,14 @@ func seedBootQuickChatTask(t *testing.T, repo *sqlitetaskrepo.Repository, ctx co
 		f.updatedAt.Add(-time.Hour), f.updatedAt, f.id,
 	); err != nil {
 		t.Fatalf("backdate task(%s): %v", f.id, err)
+	}
+	if f.archived {
+		if _, err := repo.DB().ExecContext(ctx, `UPDATE tasks SET archived_at = ? WHERE id = ?`, f.updatedAt, f.id); err != nil {
+			t.Fatalf("archive task(%s): %v", f.id, err)
+		}
+	}
+	if f.withoutPrimary {
+		return
 	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:             f.id + "-session",

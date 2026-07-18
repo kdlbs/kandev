@@ -17,9 +17,8 @@ function useIsMounted() {
 
 /**
  * Global provider for Config Chat functionality.
- * Renders the floating popover that can be opened from anywhere in the app.
- * The FAB trigger is only visible on settings pages; on other pages the popover
- * can be opened via the command panel (Cmd+K → "Configuration Chat").
+ * Renders the Settings FAB and floating configuration chat.
+ * Other pages use the command panel (Cmd+K -> "Configuration Chat").
  */
 export function ConfigChatProvider({ children }: { children: React.ReactNode }) {
   const activeWorkspace = useAppStore((s) => s.workspaces.activeId);
@@ -33,8 +32,8 @@ export function ConfigChatProvider({ children }: { children: React.ReactNode }) 
   return (
     <>
       {children}
-      {mounted && activeWorkspace && (
-        <ConfigChatPanel workspaceId={activeWorkspace} showFab={isSettingsPage} />
+      {mounted && activeWorkspace && isSettingsPage && (
+        <ConfigChatPanel workspaceId={activeWorkspace} />
       )}
     </>
   );

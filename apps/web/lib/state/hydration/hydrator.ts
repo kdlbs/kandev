@@ -237,7 +237,7 @@ export function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): voi
       const storedNames = getStoredQuickChatNames();
       draft.quickChat.sessions = state.quickChat.sessions.map((s) => {
         const local = storedNames[s.sessionId];
-        return local ? { ...s, name: local } : s;
+        return { ...s, kind: s.kind ?? "chat", ...(local ? { name: local } : {}) };
       });
       // Validate activeSessionId exists in sessions after merge
       if (

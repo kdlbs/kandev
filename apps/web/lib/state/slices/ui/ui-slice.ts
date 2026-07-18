@@ -18,6 +18,7 @@ import { DEFAULT_VIEW } from "./sidebar-view-builtins";
 import type { SidebarView, SortSpec } from "./sidebar-view-types";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
+import { getQuickChatSetupSessionId } from "./quick-chat-session";
 
 function createDefaultSidebarState(): UISliceState["sidebarViews"] {
   return { views: [DEFAULT_VIEW], activeViewId: DEFAULT_VIEW.id, draft: null, syncError: null };
@@ -76,7 +77,6 @@ export const defaultUIState: UISliceState = {
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], checks: [], healthy: true, loaded: false, loading: false },
   quickChat: { isOpen: false, sessions: [], activeSessionId: null },
-  configChat: { isOpen: false, sessions: [], activeSessionId: null, workspaceId: null },
   sessionFailureNotification: null,
   taskDeletedNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
@@ -229,58 +229,6 @@ function buildCollapsedSubtaskActions(set: ImmerSet, get: () => UISlice) {
   };
 }
 
-function buildConfigChatActions(set: ImmerSet) {
-  return {
-    openConfigChat: (sessionId: string, workspaceId: string) =>
-      set((draft) => {
-        draft.configChat.isOpen = true;
-        draft.configChat.workspaceId = workspaceId;
-        const exists = draft.configChat.sessions.some((s) => s.sessionId === sessionId);
-        if (!exists) {
-          draft.configChat.sessions.push({ sessionId, workspaceId });
-        }
-        draft.configChat.activeSessionId = sessionId;
-      }),
-    startNewConfigChat: (workspaceId: string) =>
-      set((draft) => {
-        draft.configChat.isOpen = true;
-        draft.configChat.activeSessionId = null;
-        draft.configChat.workspaceId = workspaceId;
-      }),
-    closeConfigChat: () =>
-      set((draft) => {
-        draft.configChat.isOpen = false;
-      }),
-    closeConfigChatSession: (sessionId: string) =>
-      set((draft) => {
-        draft.configChat.sessions = draft.configChat.sessions.filter(
-          (s) => s.sessionId !== sessionId,
-        );
-        if (draft.configChat.activeSessionId === sessionId) {
-          if (draft.configChat.sessions.length > 0) {
-            const next = draft.configChat.sessions[0];
-            draft.configChat.activeSessionId = next.sessionId;
-            draft.configChat.workspaceId = next.workspaceId;
-          } else {
-            draft.configChat.activeSessionId = null;
-            draft.configChat.workspaceId = null;
-          }
-        }
-      }),
-    setActiveConfigChatSession: (sessionId: string) =>
-      set((draft) => {
-        draft.configChat.activeSessionId = sessionId;
-      }),
-    renameConfigChatSession: (sessionId: string, name: string) =>
-      set((draft) => {
-        const session = draft.configChat.sessions.find((s) => s.sessionId === sessionId);
-        if (session) {
-          session.name = name;
-        }
-      }),
-  };
-}
-
 function buildNotificationActions(set: ImmerSet) {
   return {
     setSessionFailureNotification: (n: UISlice["sessionFailureNotification"]) =>
@@ -294,40 +242,86 @@ function buildNotificationActions(set: ImmerSet) {
   };
 }
 
-function buildQuickChatActions(set: ImmerSet) {
-  return {
-    openQuickChat: (sessionId: string, workspaceId: string, agentProfileId?: string) =>
-      set((draft) => {
-        draft.quickChat.isOpen = true;
-        if (!sessionId) {
-          // Blank tabs have no stable ID, so keep one scoped to the workspace being opened.
-          draft.quickChat.sessions = draft.quickChat.sessions.filter(
-            (session) => session.sessionId !== "" || session.workspaceId === workspaceId,
-          );
-          const emptyTabExists = draft.quickChat.sessions.some(
-            (session) => session.sessionId === "" && session.workspaceId === workspaceId,
-          );
-          if (!emptyTabExists) draft.quickChat.sessions.push({ sessionId: "", workspaceId });
-          draft.quickChat.activeSessionId = "";
+function findWorkspaceConfigSession(
+  sessions: UISliceState["quickChat"]["sessions"],
+  workspaceId: string,
+) {
+  return sessions.find(
+    (session) => session.workspaceId === workspaceId && session.kind === "config",
+  );
+}
+
+function buildOpenQuickChatAction(set: ImmerSet) {
+  return (
+    sessionId: string,
+    workspaceId: string,
+    agentProfileId?: string,
+    kind: "chat" | "config" = "chat",
+  ) =>
+    set((draft) => {
+      if (!sessionId) {
+        const existingConfigSession =
+          kind === "config"
+            ? findWorkspaceConfigSession(draft.quickChat.sessions, workspaceId)
+            : undefined;
+        if (existingConfigSession) {
+          draft.quickChat.isOpen = true;
+          draft.quickChat.activeSessionId = existingConfigSession.sessionId;
           return;
         }
+        const setupSessionId = getQuickChatSetupSessionId(workspaceId, kind);
+        if (!draft.quickChat.sessions.some((session) => session.sessionId === setupSessionId)) {
+          draft.quickChat.sessions.push({ sessionId: setupSessionId, workspaceId, kind });
+        }
+        draft.quickChat.isOpen = true;
+        draft.quickChat.activeSessionId = setupSessionId;
+        return;
+      }
+      const existing = draft.quickChat.sessions.find((session) => session.sessionId === sessionId);
+      if (existing) {
+        if (existing.workspaceId !== workspaceId) return;
+        if (agentProfileId) existing.agentProfileId = agentProfileId;
+      } else {
+        draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind });
+      }
+      draft.quickChat.isOpen = true;
+      draft.quickChat.activeSessionId = sessionId;
+    });
+}
+
+function buildQuickChatActions(set: ImmerSet) {
+  return {
+    addQuickChatSession: (
+      sessionId: string,
+      workspaceId: string,
+      agentProfileId?: string,
+      kind: "chat" | "config" = "chat",
+    ) =>
+      set((draft) => {
+        const activeWorkspaceId = draft.quickChat.sessions.find(
+          (session) => session.sessionId === draft.quickChat.activeSessionId,
+        )?.workspaceId;
+        const shouldActivate =
+          !draft.quickChat.isOpen || !activeWorkspaceId || activeWorkspaceId === workspaceId;
         const existing = draft.quickChat.sessions.find(
           (session) => session.sessionId === sessionId,
         );
         if (existing) {
+          if (existing.workspaceId !== workspaceId) return;
           if (agentProfileId) existing.agentProfileId = agentProfileId;
         } else {
-          draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId });
+          draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind });
         }
-        draft.quickChat.activeSessionId = sessionId;
+        if (shouldActivate) draft.quickChat.activeSessionId = sessionId;
       }),
+    openQuickChat: buildOpenQuickChatAction(set),
     closeQuickChat: () =>
       set((draft) => {
         draft.quickChat.isOpen = false;
       }),
     closeQuickChatSession: (sessionId: string) =>
       set((draft) => {
-        const closedSession = draft.quickChat.sessions.find(
+        const closingSession = draft.quickChat.sessions.find(
           (session) => session.sessionId === sessionId,
         );
         draft.quickChat.sessions = draft.quickChat.sessions.filter(
@@ -335,13 +329,15 @@ function buildQuickChatActions(set: ImmerSet) {
         );
         if (draft.quickChat.activeSessionId !== sessionId) return;
         const nextSession = draft.quickChat.sessions.find(
-          (session) => session.workspaceId === closedSession?.workspaceId,
+          (session) => session.workspaceId === closingSession?.workspaceId,
         );
         draft.quickChat.activeSessionId = nextSession?.sessionId ?? null;
         if (!nextSession) draft.quickChat.isOpen = false;
       }),
-    setActiveQuickChatSession: (sessionId: string) =>
+    setActiveQuickChatSession: (sessionId: string, workspaceId: string) =>
       set((draft) => {
+        const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
+        if (!session || session.workspaceId !== workspaceId) return;
         draft.quickChat.activeSessionId = sessionId;
       }),
     renameQuickChatSession: (sessionId: string, name: string) => {
@@ -355,6 +351,11 @@ function buildQuickChatActions(set: ImmerSet) {
       });
       if (renamed) setStoredQuickChatName(sessionId, name);
     },
+    setQuickChatInitialPrompt: (sessionId: string, prompt?: string) =>
+      set((draft) => {
+        const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
+        if (session) session.initialPrompt = prompt;
+      }),
   };
 }
 
@@ -372,7 +373,6 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildPreviewActions(set),
   ...buildMobileActions(set),
   ...buildBottomTerminalActions(set),
-  ...buildConfigChatActions(set),
   ...buildSidebarViewActions(set, get),
   ...buildSidebarTaskPrefsActions(set, get),
   ...buildCollapsedSubtaskActions(set, get),

@@ -1,190 +1,275 @@
 ---
 status: shipped
 created: 2026-07-02
-owner: José Almeida
+owner: kandev
 ---
 
-# Quick Chat Persistence & Expiration
+# Quick Chat Sessions, Persistence, and Expiration
 
 ## Why
 
-A user reported her quick chats "disappearing much faster." Quick chats are
-ephemeral tasks whose open-tab list lives only in the in-memory frontend store,
-so a page reload drops every tab even though the underlying task, session, and
-workspace directory still exist on the backend. Those now-unreachable rows and
-directories never get cleaned up, so they leak indefinitely. Users want their
-recent quick chats to survive a reload, and the system needs a bound so
-abandoned quick chats don't accumulate forever.
+Utility conversations need to remain available across page reloads without becoming detached
+backend tasks. Configuration conversations need a compact Settings surface for in-context changes
+and an explicit handoff to the larger Quick Chat dialog for reports and clarification questions,
+while retaining the elevated tools that distinguish them from ordinary quick chats.
 
 ## What
 
-- Open quick-chat tabs SHALL be restored after a full page reload, reconstructed
-  from backend state rather than client-only memory.
-- Hydration SHALL resolve the workspace represented by the current route. On `/t/:id`
-  and `/office/tasks/:id` task-detail routes, the task's workspace is authoritative over
-  a stale active-workspace cookie or user setting.
-- A quick chat that has been idle longer than the retention window SHALL be
-  deleted automatically (task row, its sessions, and its workspace directory),
-  the same as an explicit close.
-- The default retention window is **7 days** of inactivity, applied per quick
-  chat based on its last activity. The window is a hardcoded constant; it is not
-  user-configurable in this iteration.
-- Expiration SHALL reuse the existing quick-chat delete path so that workspace
-  directory cleanup and task-lifecycle events fire exactly as they do for a
-  user-initiated close.
-- Only quick chats expire. Config-mode chats, automation-run ephemeral tasks,
-  and non-ephemeral kanban/office tasks are untouched.
-- A quick chat that is actively in use (recent message or running session)
-  SHALL NOT expire, regardless of how old it is.
+- Quick Chat presents ordinary and configuration conversations as typed sessions in one session
+  store and one tab model. A session has `kind: "chat" | "config"`.
+- Configuration sessions are clearly identified with a sparkle/configuration indicator and an
+  accessible label wherever their tab kind is presented.
+- Settings Configuration Chat opens a floating configuration panel. The Command Palette
+  Configuration Chat command opens the same typed setup/session in the Quick Chat modal.
+- The Settings panel can transfer its current setup or session into the Quick Chat modal
+  without creating a second task, losing messages, or replaying the initial prompt.
+- Blank setup tabs use client-local workspace-and-kind-scoped identities, so ordinary and
+  configuration setup can coexist without crossing workspace boundaries.
+- Configuration setup retains its configuration-agent selection, introductory copy, suggestion
+  prompts, and `Ask anything about your configuration...` prompt. It explains that the agent can
+  manage workflows, agent profiles, and MCP configuration.
+- Configuration setup never offers repository or branch selectors. Ordinary quick-chat setup
+  retains the optional repository context defined by
+  [Quick Chat Repository Context](quick-chat-repository-context.md).
+- Creating an ordinary chat remains the default behavior when Quick Chat first opens. The tab-bar
+  `+` action opens that setup directly. The setup always explains when to use Quick Chat instead of
+  a tracked task and offers configuration mode in the form while the workspace has no existing or
+  pending configuration session.
+- A workspace currently presents one configuration session. Configuration entry points reopen that
+  session when it exists, and the Settings floating panel shows it without a tab strip or new-session
+  action. The larger Quick Chat dialog retains tabs so the configuration session can coexist with
+  ordinary chats and be deleted through the established tab lifecycle.
+- Desktop Settings uses the compact floating configuration panel until the user expands it. Mobile
+  Settings uses a viewport-bounded floating panel and the existing full-screen Quick Chat layout
+  after expansion, with the same creation, tab, clarification, and deletion capabilities.
+- Pending clarification questions remain inline below a visible message history. The clarification
+  region is scrollable, resizable on pointer-capable desktop and mobile devices, and collapsible so
+  a user can recover conversation context without dismissing the question.
+- Closing the modal or switching tabs preserves every real session. Closing a persisted tab asks
+  for confirmation and deletes its backing ephemeral task through the existing task deletion path.
+  Closing a blank setup tab only removes that client-side placeholder.
+- When a setup start is superseded before its backend response arrives, the returned ephemeral task
+  is deleted instead of reopening the abandoned tab.
+- Restorable utility sessions are reconstructed from backend task/session state for the active
+  workspace after a reload. They are available as tabs while the modal itself starts closed.
+- Hydration resolves the workspace represented by the current route. On `/t/:id` and
+  `/office/tasks/:id`, the task workspace takes precedence over a stale active-workspace setting.
+- Ordinary quick chats expire after seven days of inactivity through the existing task deletion
+  path. Configuration sessions do not use that idle expiration policy and remain until explicitly
+  deleted or their workspace is deleted.
+- Ordinary and configuration sessions can coexist without sharing setup state, initial prompts,
+  repository choices, or workspace state.
+
+Decision: [ADR-2026-07-14-typed-utility-chat-sessions](../../decisions/2026-07-14-typed-utility-chat-sessions.md). Repository-backed ordinary
+chats additionally follow [ADR 0038](../../decisions/0038-quick-chat-repository-isolation.md).
 
 ## Data model
 
-No new tables. This feature operates on existing `tasks` and `task_sessions`
-rows. A **quick chat** is precisely the set of tasks matching:
+No database migration is required. Both session kinds use existing `tasks` and `task_sessions`
+rows. A restorable utility-chat task satisfies all of these predicates:
 
-```
-tasks
-  is_ephemeral = 1
-  workflow_id  = ''                      -- ephemeral tasks carry no workflow
-  origin      != 'automation_run'        -- excludes run-mode ephemeral tasks
-  metadata.config_mode IS NOT 1          -- excludes config-mode settings chats
-  archived_at  IS NULL
-```
-
-This mirrors the existing list filters: `onlyEphemeral = true` plus the
-`excludeConfigModePredicate` (`json_extract(metadata,'$.config_mode') IS NOT 1`,
-`internal/task/repository/sqlite/task.go:62`) plus an `origin != 'automation_run'`
-guard. The `origin` guard distinguishes user-started quick chats (`origin =
-'manual'`) from automation run-mode ephemeral tasks.
-
-**Last-activity timestamp** for a quick chat is defined as:
-
-```
-last_activity = MAX(task.updated_at, MAX(session.updated_at) over its task_sessions)
+```text
+tasks.is_ephemeral = true
+tasks.workflow_id = ""
+tasks.origin != "automation_run"
+tasks.archived_at IS NULL
+primary task_session exists
 ```
 
-Message and turn writes update their own rows only. A dispatched prompt changes
-the quick-chat session's runtime state, which updates `task_sessions.updated_at`;
-the associated task runtime-state transition can also update `tasks.updated_at`.
-Using the greater of the task row and its newest session row therefore captures
-the persisted activity written by the shipped prompt lifecycle. A quick chat
-expires when `now - last_activity > 7 days`.
+The persisted discriminator is task metadata, not the task title:
+
+```text
+metadata.config_mode == true  -> kind = "config"
+otherwise                     -> kind = "chat"
+```
+
+The unified frontend/boot session shape is:
+
+```ts
+type QuickChatSession = {
+  kind: "chat" | "config";
+  sessionId: string;
+  workspaceId: string;
+  name?: string;
+  agentProfileId?: string;
+};
+```
+
+For backward compatibility, a session object without `kind` is normalized to `kind: "chat"`.
+Blank setup tabs use the same frontend shape with a generated workspace-and-kind-scoped
+`sessionId`, but are never persisted or included in boot state.
+
+Ordinary-chat last activity is the greater of `tasks.updated_at` and the newest associated
+`task_sessions.updated_at`. An ordinary chat is eligible for deletion when that timestamp is more
+than seven days old and none of its sessions is active. Configuration sessions are excluded from
+this query by `metadata.config_mode`.
 
 ## API surface
 
-- **Hydration (read):** reuse the existing workspace task listing rather than a
-  new endpoint. The backend boot payload fetches quick chats via
-  `ListTasksByWorkspace(workspaceId, workflowID="", …, onlyEphemeral=true,
-  excludeConfig=true)` and filters out `origin == "automation_run"`, then
-  rebuilds the `quickChat.sessions` store slice (one tab per returned task, in
-  creation order). Each restored tab needs
-  `{ sessionId, workspaceId, agentProfileId }`, all resolvable from the task and
-  its primary session. The persisted display name is already available via
-  `getStoredQuickChatName` / `setStoredQuickChatName`.
-- **Deletion (expiration):** no new external contract. Expiration runs as a
-  backend background sweep that calls the existing `Service.DeleteTask` path
-  (which invokes `cleanupQuickChatDirs`, `internal/task/service/service_tasks.go:1402`,
-  and publishes `task.deleted`). Deleted quick chats propagate to any connected
-  client through the existing `task.deleted` WS handler.
+The creation endpoints remain distinct because they grant different backend capabilities:
+
+- `POST /api/v1/workspaces/:id/quick-chat` creates an ordinary ephemeral chat and retains the
+  optional repository contract from [Quick Chat Repository Context](quick-chat-repository-context.md).
+- `POST /api/v1/workspaces/:id/config-chat` creates an ephemeral task with
+  `metadata.config_mode=true`, selects the requested/workspace configuration agent profile, and
+  prepares a session with configuration MCP tools.
+- Both return `{ "task_id": string, "session_id": string }`.
+
+The SPA boot payload includes the active workspace's sessions and primary session DTOs:
+
+```json
+{
+  "quickChat": {
+    "isOpen": false,
+    "sessions": [
+      {
+        "kind": "config",
+        "sessionId": "session-id",
+        "workspaceId": "workspace-id",
+        "name": "Config Chat",
+        "agentProfileId": "profile-id"
+      }
+    ],
+    "activeSessionId": null
+  },
+  "taskSessions": {
+    "items": {
+      "session-id": { "id": "session-id", "task_id": "task-id" }
+    }
+  }
+}
+```
+
+Sessions are sorted by last activity, newest first. Boot classification always derives `kind` from
+`metadata.config_mode`; titles are display values only.
 
 ## State machine
 
-A quick chat task is created `active`, and reaches a terminal `deleted` state via
-one of these triggers (this feature adds only the last one):
+| State                                     | Trigger                                     | Result                                                                                                                                                                                                                             |
+| ----------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Closed, restored sessions available       | Quick Chat or command action                | Modal opens on an eligible session or typed setup tab in the active workspace.                                                                                                                                                     |
+| Settings configuration panel closed       | Settings FAB                                | Floating panel opens on an eligible configuration session or configuration setup.                                                                                                                                                  |
+| Floating setup/session                    | Open in Quick Chat                          | Floating panel closes and the same setup/session becomes active in the large dialog without creating a task.                                                                                                                       |
+| Existing configuration session            | Configuration entry point                   | Existing session opens; no second configuration setup is created.                                                                                                                                                                  |
+| Blank `chat` setup                        | Start succeeds                              | Placeholder is replaced by a persisted `chat` session.                                                                                                                                                                             |
+| Blank `config` setup                      | Prompt/profile submit succeeds              | The task session is seeded and the typed persisted tab opens. ACP prompts are delivered once after the chat subscription is ready; passthrough prompts are delivered once by the backend launch path before the terminal attaches. |
+| Persisted session open                    | Switch tab or close modal                   | Session remains persisted and restorable.                                                                                                                                                                                          |
+| Persisted tab close requested             | User confirms                               | Backing task is deleted, then the tab is removed or reconciled by task deletion state.                                                                                                                                             |
+| Blank setup tab close requested           | User closes tab/modal                       | Placeholder is removed without a backend request.                                                                                                                                                                                  |
+| Ordinary chat idle longer than seven days | Expiration sweep                            | Existing task deletion path removes task, sessions, workspace materialization, and tab.                                                                                                                                            |
+| Configuration chat idle                   | Expiration sweep                            | Session is retained.                                                                                                                                                                                                               |
 
-| Trigger                                     | Actor                | Existing?                                            |
-| ------------------------------------------- | -------------------- | ---------------------------------------------------- |
-| User closes a tab (confirm)                 | user                 | yes (`use-quick-chat-modal.ts` `handleConfirmClose`) |
-| Rapid re-pick supersedes an in-flight start | frontend             | yes (`useAgentSelection` orphan cleanup)             |
-| Agent profile deleted                       | user                 | yes (`DeleteEphemeralTasksByAgentProfile`)           |
-| **Idle longer than retention window**       | **background sweep** | **new**                                              |
+## Permissions
 
-All triggers use the existing quick-chat deletion cleanup and event path.
-Expiration first rechecks the expiry predicate at delete time, then performs
-the same directory cleanup and event publishing.
+Configuration capabilities continue to be granted by the backend's config-mode task/session
+preparation. A frontend `kind: "config"` label does not itself grant tools. Workspace scoping and
+the existing task/session authorization rules apply to creation, restoration, continuation, and
+deletion.
 
 ## Failure modes
 
-- **Last-activity query fails / returns error:** the sweep fails closed — it
-  deletes nothing that pass and logs a warning. A transient DB error must never
-  cause an over-broad delete.
-- **A single quick chat delete fails** (dir busy, session stop error): the sweep
-  logs the failure, leaves that task in place, and continues with the rest. One
-  bad row does not abort the batch. The next sweep retries it.
-- **Hydration list query fails on boot:** quick chat tabs render empty (current
-  behavior); the app is otherwise unaffected. No error toast is required — this
-  degrades to today's behavior.
-- **A hydrated tab's backend session is already stopped/gone** (e.g. backend was
-  restarted between reloads): the tab still restores and shows its history;
-  sending a new message follows the normal resume/relaunch path. A tab whose
-  task no longer exists is simply not returned by the list and thus not shown.
-- **Clock skew / non-monotonic time:** expiration compares stored timestamps to
-  `now`; it does not assume monotonic wall clock beyond the 7-day granularity.
+- A failed ordinary or configuration start leaves its setup visible with an error. Any task that
+  was created before launch failed is deleted through the existing rollback path.
+- A non-passthrough configuration prompt is held only until its created session is available to
+  `QuickChatContent`; it is sent once after subscription and is not replayed by tab switches or
+  rerenders. A passthrough prompt is included in the config-chat start request because that session
+  renders a terminal instead of `QuickChatContent`.
+- A boot-state query failure omits utility sessions for that response and logs the error. It does
+  not alter or delete persisted tasks.
+- A task without a primary session is not restored as a tab.
+- A tab-delete failure surfaces an error and leaves the backend task eligible for restoration; it
+  must not be converted into a permanently hidden client-only config session.
+- A workspace change closes or re-scopes the visible modal before sessions from another workspace
+  can be activated. Launch and tab actions reject or ignore cross-workspace session state.
+- An expiration candidate query failure deletes nothing. A single ordinary-chat delete failure is
+  logged and does not stop later candidates from being evaluated.
 
 ## Persistence guarantees
 
-- **Survives reload:** open quick-chat tabs (restored from backend), quick-chat
-  task rows, sessions, and workspace directories — until they expire or are
-  closed.
-- **Survives backend restart:** quick-chat task rows and directories (subject to
-  the same 7-day idle expiration). Tab restoration on the client depends only on
-  the backend list, so it works across a backend restart as long as the task row
-  still exists.
-- **Does NOT survive:** a quick chat idle > 7 days (deleted on the next sweep).
-  The in-memory `quickChat.sessions` slice remains client-only and is rebuilt
-  from the backend on each load rather than persisted to `localStorage`.
-- **Retention window:** 7 days of inactivity, hardcoded. Sweep cadence is an
-  implementation detail (piggy-backing on an existing periodic job is
-  acceptable) but SHALL run at least daily so expiry is observed within roughly
-  a day of the window elapsing.
+- Persisted ordinary and configuration tasks, their primary sessions, messages, agent profile
+  identity, and display names available from task/local name state survive browser reloads and
+  backend restarts.
+- The modal starts closed after boot. Opening it reveals only the restored sessions for the active
+  workspace.
+- Blank setup tabs, unsent setup input, and a collapsed clarification presentation state do not
+  survive reloads.
+- Ordinary quick chats remain subject to the seven-day inactivity deletion policy.
+- Configuration chats are not automatically expired. Explicit tab deletion and workspace deletion
+  use established task cleanup so they do not leave unrecoverable ephemeral tasks.
 
 ## Scenarios
 
-- **GIVEN** an open quick chat with one or more tabs, **WHEN** the user reloads
-  the page, **THEN** the same tabs reappear in creation order,
-  each showing its prior chat history and persisted name.
-- **GIVEN** Quick Chats created from a task whose workspace differs from the
-  persisted active-workspace setting, **WHEN** the user reloads the task route,
-  **THEN** the task workspace's tabs restore without tabs from another workspace.
-- **GIVEN** a quick-chat task whose `last_activity` is 8 days ago, **WHEN** the
-  expiration sweep runs, **THEN** the task, its sessions, and its workspace
-  directory are deleted, a `task.deleted` event is published, and the tab
-  disappears from any connected client.
-- **GIVEN** a quick-chat task with a message sent 10 minutes ago (older than 7
-  days since creation but recently active), **WHEN** the sweep runs, **THEN** the
-  task is retained.
-- **GIVEN** a config-mode chat (`metadata.config_mode = 1`) idle for 30 days,
-  **WHEN** the sweep runs, **THEN** it is NOT deleted.
-- **GIVEN** an automation-run ephemeral task (`origin = 'automation_run'`) idle
-  for 30 days, **WHEN** the sweep runs, **THEN** it is NOT deleted.
-- **GIVEN** a non-ephemeral kanban task idle for a year, **WHEN** the sweep runs,
-  **THEN** it is NOT deleted.
-- **GIVEN** the last-activity query errors, **WHEN** the sweep runs, **THEN** no
-  quick chats are deleted and a warning is logged.
-- **GIVEN** two idle quick chats where deleting the first fails, **WHEN** the
-  sweep runs, **THEN** the second is still evaluated and deleted, and the failure
-  on the first is logged.
-- **GIVEN** the workspace has 12 quick chats within the retention window, **WHEN**
-  the user reloads, **THEN** all 12 tabs restore (no count cap in this
-  iteration).
+- **GIVEN** an ordinary quick chat and a configuration chat in one workspace, **WHEN** the user
+  opens Quick Chat, **THEN** both appear as tabs and the configuration tab has a visible and
+  accessible configuration indicator.
+- **GIVEN** a configuration agent is selected in Settings, **WHEN** the user starts Configuration
+  Chat from the Settings FAB, **THEN** a floating configuration setup/session opens and the created
+  task retains config-mode MCP tools.
+- **GIVEN** the floating configuration setup is open, **WHEN** its empty state renders, **THEN** the
+  panel header is the only Configuration Chat title, the composer action remains visible, and no
+  separate cancel footer is rendered.
+- **GIVEN** a floating configuration conversation, **WHEN** the user chooses Open in Quick Chat,
+  **THEN** the floating panel closes and the large dialog shows the same session, history, task, and
+  pending initial prompt.
+- **GIVEN** the Quick Chat modal has no configuration session, **WHEN** the user starts a new chat,
+  **THEN** its setup explains Quick Chat versus a tracked task and offers configuration mode inside
+  the panel.
+- **GIVEN** a workspace already has a configuration session, **WHEN** the user starts a new Quick
+  Chat, **THEN** configuration mode is not offered and configuration entry points reopen the
+  existing session.
+- **GIVEN** Settings Configuration Chat is open, **WHEN** setup or the existing conversation is
+  shown, **THEN** the floating panel has no session tabs or new-configuration-session action.
+- **GIVEN** any application route, **WHEN** the user chooses Configuration Chat from the Command
+  Palette, **THEN** the same unified configuration setup/session opens in Quick Chat.
+- **GIVEN** a configuration setup tab, **WHEN** it renders, **THEN** it shows configuration copy,
+  suggestions, the configuration profile choice, and no repository controls.
+- **GIVEN** an ordinary setup tab, **WHEN** it renders, **THEN** optional repository/branch controls
+  and the existing isolated repository behavior remain available.
+- **GIVEN** a configuration prompt starts an ACP session, **WHEN** the frontend subscribes to the
+  created task session, **THEN** the prompt is delivered exactly once and its response appears in
+  that tab.
+- **GIVEN** a passthrough configuration profile, **WHEN** its session starts, **THEN** the backend
+  launch receives the initial prompt exactly once and the unified tab renders the passthrough
+  terminal.
+- **GIVEN** a completed configuration conversation, **WHEN** the browser reloads and Quick Chat is
+  reopened, **THEN** the configuration tab and prior messages are restored and the conversation can
+  continue.
+- **GIVEN** Quick Chat is closed with a configuration tab active, **WHEN** the generic Quick Chat
+  action reopens the dialog, **THEN** that configuration tab remains active regardless of chat kind.
+- **GIVEN** restored sessions with different activity times, **WHEN** boot state is built, **THEN**
+  eligible ordinary and configuration sessions are ordered newest first with the correct kind.
+- **GIVEN** config-mode, automation-run, workflow-bound ephemeral, and ordinary quick-chat tasks,
+  **WHEN** boot state is built, **THEN** only the config-mode and ordinary utility chats are restored.
+- **GIVEN** sessions belonging to two workspaces, **WHEN** either workspace is active, **THEN** only
+  that workspace's sessions can be shown or activated.
+- **GIVEN** a task route whose workspace differs from the persisted active-workspace setting,
+  **WHEN** the page reloads, **THEN** the task workspace's utility sessions are restored.
+- **GIVEN** an agent clarification is pending, **WHEN** the Quick Chat tab is visible, **THEN** the
+  question remains inline in a scrollable region, meaningful preceding message context remains
+  visible, and the user can resize or collapse the question before answering it.
+- **GIVEN** a narrow mobile viewport and a pending clarification, **WHEN** the user expands, scrolls,
+  collapses, or answers it, **THEN** the primary question actions remain visible and usable without
+  horizontal clipping.
+- **GIVEN** a real ordinary or configuration session, **WHEN** the user switches tabs or closes the
+  modal, **THEN** no backing task is deleted.
+- **GIVEN** a real configuration tab, **WHEN** the user confirms its close action, **THEN** its
+  backing ephemeral task is deleted through the Quick Chat deletion path and does not return after
+  reload.
+- **GIVEN** a blank typed setup tab, **WHEN** it is closed or the modal is dismissed, **THEN** only
+  that placeholder is removed and no task deletion request is issued.
+- **GIVEN** a quick-chat session object from an older boot/client shape without `kind`, **WHEN** it is
+  hydrated, **THEN** it behaves as an ordinary `chat` session.
+- **GIVEN** a configuration chat idle for more than seven days, **WHEN** the expiration sweep runs,
+  **THEN** it is retained.
+- **GIVEN** an ordinary quick chat idle for more than seven days with no active session, **WHEN** the
+  expiration sweep runs, **THEN** its task, sessions, and workspace materialization are deleted.
 
 ## Out of scope
 
-- A user-configurable retention window (per-workspace or global setting). Ships
-  as a hardcoded 7-day constant; revisit only if requested.
-- A hard count cap on number of quick chats (idle TTL only). If clutter becomes
-  a problem, a cap is a follow-up.
-- Persisting quick-chat tabs to `localStorage`. Backend is the source of truth;
-  no client-side durable store.
-- Archiving/soft-deleting expired quick chats — they are hard-deleted, matching
-  the existing close behavior.
-- Changing config-mode chat, automation-run, or kanban/office task lifecycles.
-
-## Verified implementation
-
-- Raw message and turn persistence does not update the parent task or session.
-- Prompt dispatch and completion transition the quick-chat session state and
-  update `task_sessions.updated_at`.
-- A quick-chat task runtime-state transition can also update `tasks.updated_at`.
-- The expiration query reads both parent timestamps and excludes `RUNNING` and
-  `IDLE` sessions, so active or recently completed prompt lifecycles are retained.
+- Redesigning the agent protocol, configuration MCP tools, or config-chat creation endpoint.
+- A new persistence table for UI tabs or duplicating task/session history in frontend storage.
+- A separate configuration session store, message renderer, or backend conversation.
+- A general task/chat navigation redesign.
+- Multiple configuration sessions per workspace.
+- Repository context for configuration sessions.
+- A user-configurable ordinary-chat retention window or automatic expiration for config sessions.

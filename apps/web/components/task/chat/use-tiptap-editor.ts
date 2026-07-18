@@ -231,6 +231,7 @@ function buildEditorProps(args: {
 }) {
   return {
     attributes: {
+      "data-testid": "chat-input-editor",
       class: cn(
         "w-full h-full resize-none bg-transparent px-2 py-2 overflow-y-auto",
         TIPTAP_EDITOR_TEXT_SIZE_CLASS,
