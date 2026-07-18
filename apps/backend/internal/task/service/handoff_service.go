@@ -137,11 +137,17 @@ func (p WorkspacePolicy) NeedsAttachment() bool {
 
 // RelatedTask is the lightweight projection of a task surfaced through the
 // list_related_tasks_kandev MCP tool. Document keys are precomputed so an
-// agent can decide what to fetch without a follow-up list call.
+// agent can decide what to fetch without a follow-up list call. Description
+// is included so a coordinating agent can read dependency metadata (e.g. a
+// "Depends on:" line) from a related task — including a CREATED sibling that
+// has no session yet — without an unbounded list_tasks call. The relation
+// graph itself is the bound: only parent/children/siblings/blockers are ever
+// projected, so descriptions never leak from unrelated tasks.
 type RelatedTask struct {
 	ID            string             `json:"id"`
 	Identifier    string             `json:"identifier,omitempty"`
 	Title         string             `json:"title"`
+	Description   string             `json:"description,omitempty"`
 	State         string             `json:"state"`
 	WorkspaceID   string             `json:"workspace_id"`
 	ParentID      string             `json:"parent_id,omitempty"`
@@ -556,6 +562,7 @@ func (s *HandoffService) toRelated(ctx context.Context, t *models.Task) RelatedT
 		ID:            t.ID,
 		Identifier:    t.Identifier,
 		Title:         t.Title,
+		Description:   t.Description,
 		State:         string(t.State),
 		WorkspaceID:   t.WorkspaceID,
 		ParentID:      t.ParentID,
