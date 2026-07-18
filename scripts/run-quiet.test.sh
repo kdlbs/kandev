@@ -60,7 +60,7 @@ fi
 
 custom_tmp="$TMP_DIR/custom-tmp"
 mkdir -p "$custom_tmp"
-custom_tmp_output="$(TMPDIR="$custom_tmp" "$SCRIPT" ordinary -- bash -c 'printf "custom tmp success\\n"')"
+custom_tmp_output="$(env -u KANDEV_RUN_QUIET_DIR TMPDIR="$custom_tmp" "$SCRIPT" ordinary -- bash -c 'printf "custom tmp success\\n"')"
 if grep -q "^exit=0 log=$custom_tmp/kandev-run\.ordinary\." <<<"$custom_tmp_output"; then
   pass "TMPDIR controls the log location"
 else

@@ -29,10 +29,14 @@ if [ ! -d apps/node_modules ]; then
 fi
 
 # Resolve the current PR base; stacked PRs may not target main.
-PR_BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || printf 'main')"
-git fetch origin "$PR_BASE"
-git merge-base --is-ancestor "origin/$PR_BASE" HEAD || echo "branch is behind origin/$PR_BASE"
-git rebase "origin/$PR_BASE"
+PR_BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || true)"
+if [ -n "$PR_BASE" ]; then
+  git fetch origin "$PR_BASE"
+  git merge-base --is-ancestor "origin/$PR_BASE" HEAD || echo "branch is behind origin/$PR_BASE"
+  git rebase "origin/$PR_BASE"
+else
+  echo "No PR base resolved; skipping rebase to avoid rewriting a stacked branch."
+fi
 
 # Keep verbose output out of the main agent context. The helper prints the log
 # path and extracts targeted failure lines when a command fails.
@@ -96,8 +100,8 @@ installed matching rustup toolchain, extending `PATH` rather than replacing it
 and losing Node/pnpm. If no matching toolchain is installed, report the exact
 requirement or request installation instead of silently skipping Rust tests.
 
-Before rebasing, check whether the current `origin/$PR_BASE` is already an
-ancestor of `HEAD`.
+When a PR base was resolved, check whether `origin/$PR_BASE` is already an
+ancestor of `HEAD` before rebasing.
 If tracked files for the intended change are dirty, stash only those pathspecs
 before `git rebase "origin/$PR_BASE"`, then pop the stash before running
 `make fmt/typecheck/test/lint`. Do not use a broad `git stash` that could hide

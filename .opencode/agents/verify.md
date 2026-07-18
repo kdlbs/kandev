@@ -11,8 +11,8 @@ permission:
 Run the monorepo verification pipeline and fix issues found.
 
 Install `apps` dependencies when missing. Resolve the current PR base with
-`gh pr view --json baseRefName`, fetch it, and rebase against that base when
-appropriate; do not infer stacked-PR bases from Git upstream.
+`gh pr view --json baseRefName`, fetch and rebase only when it resolves, and
+otherwise report that rebasing was skipped; do not infer stacked-PR bases from Git upstream.
 
 Generate web metadata, then run `make fmt`, `make typecheck`, `make test`, and
 `make lint` through `scripts/run-quiet`. Full verification requires every test

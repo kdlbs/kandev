@@ -16,10 +16,10 @@ Run the full verification pipeline for the monorepo, then fix any issues found.
    - Fresh worktrees share `.git/` but not dependencies. If `apps/node_modules` is missing, run `pnpm install --frozen-lockfile` from `apps/`.
    - Resolve the PR base from GitHub because stacked PRs may not target `main` and can be retargeted after a parent merges:
      ```bash
-     PR_BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || printf 'main')"
-     git fetch origin "$PR_BASE" --quiet
+     PR_BASE="$(gh pr view --json baseRefName --jq .baseRefName 2>/dev/null || true)"
+     if [[ -n "$PR_BASE" ]]; then git fetch origin "$PR_BASE" --quiet; fi
      ```
-   - If the current branch is the base branch, skip the rebase. Otherwise rebase onto `origin/$PR_BASE`.
+   - If the PR base is unavailable, skip rebasing and report it. Otherwise, if the current branch is not the base branch, rebase onto `origin/$PR_BASE`.
    - Resolve conflicts by preserving the intended behavior from both sides. Stage each resolved file and continue. If a conflict is ambiguous, abort and report it rather than guessing.
 
 2. **Format and generate metadata:**
