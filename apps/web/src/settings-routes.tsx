@@ -355,7 +355,7 @@ function renderWorkspaceSettingsRoute(pathname: string) {
     if (section === "workflows") {
       return <WorkspaceWorkflowsRoute workspaceId={id} />;
     }
-    return <AutomationsPage params={Promise.resolve({ id })} />;
+    return <AutomationsPage workspaceId={id} />;
   }
 
   const workspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)$/);
