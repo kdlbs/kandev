@@ -41,11 +41,13 @@ func (h *Handlers) handleListRelatedTasks(ctx context.Context, msg *ws.Message) 
 	}
 	related, err := svc.ListRelatedForCaller(ctx, caller, req.TaskID)
 	if err != nil {
-		if errors.Is(err, service.ErrAccessDenied) {
-			return mapHandoffError(msg, err)
+		// Access denied is an expected 403; log only genuine
+		// infrastructure errors, then route everything through
+		// mapHandoffError for the same code mapping the document handlers use.
+		if !errors.Is(err, service.ErrAccessDenied) {
+			h.logger.Error("list related tasks", zap.Error(err))
 		}
-		h.logger.Error("list related tasks", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		return mapHandoffError(msg, err)
 	}
 	h.enrichRelatedTasksWithPRs(ctx, related)
 	return ws.NewResponse(msg.ID, msg.Action, related)

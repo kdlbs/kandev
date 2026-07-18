@@ -435,7 +435,10 @@ func (s *HandoffService) ListRelatedForCaller(ctx context.Context, callerTaskID,
 	if targetTaskID == "" {
 		return nil, ErrDocumentTaskRequired
 	}
-	if callerTaskID != "" && callerTaskID != targetTaskID {
+	// Any target other than the caller itself must pass the read guard. An
+	// empty caller has no identity to authorize against, so canReadDocuments
+	// denies it (rather than silently delegating to the ungated ListRelated).
+	if callerTaskID != targetTaskID {
 		ok, err := canReadDocuments(ctx,
 			repoTaskLookupAdapter{r: s.tasks},
 			blockerLookupAdapter{repo: s.blockers},

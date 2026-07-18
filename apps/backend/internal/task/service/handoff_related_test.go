@@ -150,6 +150,10 @@ func TestListRelatedForCaller_GatesUnrelatedAndCrossWorkspace(t *testing.T) {
 	if _, err := svc.ListRelatedForCaller(context.Background(), "caller", "other-ws"); !errors.Is(err, ErrAccessDenied) {
 		t.Errorf("cross-workspace should be denied, got %v", err)
 	}
+	// An empty caller has no identity to authorize a non-self target.
+	if _, err := svc.ListRelatedForCaller(context.Background(), "", "sibling"); !errors.Is(err, ErrAccessDenied) {
+		t.Errorf("empty caller should be denied for a non-self target, got %v", err)
+	}
 }
 
 // TestListRelatedForCaller_ReturnsSiblingDescription confirms the gated entry
