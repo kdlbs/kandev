@@ -236,7 +236,7 @@ func (p *SystemProvider) sendDarwinNotification(ctx context.Context, cfg systemC
 		}
 		return runCommand(ctx, "terminal-notifier", args...)
 	}
-	return runCommand(ctx, "osascript", "-e", buildAppleScript(title, body))
+	return runCommand(ctx, "osascript", osascriptNotifyArgs(title, body)...)
 }
 
 func (p *SystemProvider) sendWindowsNotification(ctx context.Context, cfg systemConfig, title, body string) error {
@@ -339,10 +339,22 @@ func (p *SystemProvider) playWindowsSound(ctx context.Context, cfg systemConfig)
 	return runCommand(ctx, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-c", "[console]::beep(800,200)")
 }
 
-func buildAppleScript(title, body string) string {
-	escapedTitle := strings.ReplaceAll(title, `"`, `\"`)
-	escapedBody := strings.ReplaceAll(body, `"`, `\"`)
-	return fmt.Sprintf(`display notification "%s" with title "%s"`, escapedBody, escapedTitle)
+// osascriptNotifyArgs builds the osascript argument vector for a macOS
+// notification. Title and body are passed as run-handler arguments (item 1/2 of
+// argv) rather than interpolated into the AppleScript source. osascript treats
+// everything after the trailing `-e` script fragment as arguments to `run`, so
+// attacker-controlled title/body text is delivered as opaque string data and
+// can never break out of a string literal to execute as AppleScript (e.g.
+// `do shell script`). This closes the AppleScript-injection RCE that arose when
+// untrusted external-integration issue titles were interpolated and escaped by
+// quote-replacement alone (a trailing backslash defeated that escaping).
+func osascriptNotifyArgs(title, body string) []string {
+	return []string{
+		"-e", "on run argv",
+		"-e", "display notification (item 2 of argv) with title (item 1 of argv)",
+		"-e", "end run",
+		title, body,
+	}
 }
 
 func escapePowerShell(value string) string {
