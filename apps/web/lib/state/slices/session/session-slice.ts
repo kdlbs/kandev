@@ -447,6 +447,42 @@ function reorderStoredSessions(draft: SessionSliceState, taskId: string): void {
   }
 }
 
+/**
+ * Plain-object counterpart to `reorderStoredSessions` for callers outside the
+ * immer-backed slice `set` (e.g. the `workflow.step.updated` WS handler,
+ * which uses the base zustand `store.setState` and returns whole state
+ * objects rather than mutating a draft). Re-derives step-flow order for every
+ * loaded task from the caller's already-updated step positions, since a step
+ * reorder invalidates the cached tab order for every task on that workflow
+ * without any session-level event firing to trigger `reorderStoredSessions`.
+ * Returns `null` when no task's order actually changed, so callers can skip
+ * the state update entirely.
+ */
+export function reorderAllStoredSessionsPlain(
+  state: SessionSliceState & Parameters<typeof buildStepPositionById>[0],
+): SessionSliceState["taskSessionsByTask"] | null {
+  const itemsByTaskIdSource = state.taskSessionsByTask?.itemsByTaskId;
+  if (!itemsByTaskIdSource) return null;
+  const stepPositionById = buildStepPositionById(state);
+  let changed = false;
+  const itemsByTaskId: SessionSliceState["taskSessionsByTask"]["itemsByTaskId"] = {};
+  for (const [taskId, list] of Object.entries(itemsByTaskIdSource)) {
+    if (!list || list.length < 2) {
+      itemsByTaskId[taskId] = list;
+      continue;
+    }
+    const sorted = sortSessionsByStepFlow(list, stepPositionById);
+    if (sorted.some((session, index) => session.id !== list[index].id)) {
+      itemsByTaskId[taskId] = sorted;
+      changed = true;
+    } else {
+      itemsByTaskId[taskId] = list;
+    }
+  }
+  if (!changed) return null;
+  return { ...state.taskSessionsByTask, itemsByTaskId };
+}
+
 function buildTaskSessionActions(set: ImmerSet) {
   return {
     setTaskSession: (session: Parameters<SessionSlice["setTaskSession"]>[0]) =>

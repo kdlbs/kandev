@@ -6,6 +6,8 @@ import { registerWorkflowsHandlers } from "./workflows";
 
 type WorkflowItem = { id: string; workspaceId: string; name: string; hidden?: boolean };
 
+const STEP_COLOR = "bg-blue-500";
+
 function makeStore(items: WorkflowItem[], activeId: string | null) {
   let state = {
     workflows: { items, activeId },
@@ -161,7 +163,7 @@ describe("workflow step handlers", () => {
       ...store.getState(),
       kanban: {
         workflowId: "wf-1",
-        steps: [{ id: "step-1", title: "Review", color: "bg-blue-500", position: 1 }],
+        steps: [{ id: "step-1", title: "Review", color: STEP_COLOR, position: 1 }],
         tasks: [],
       },
     } as AppState);
@@ -174,7 +176,7 @@ describe("workflow step handlers", () => {
         name: "Review",
         state: "",
         position: 1,
-        color: "bg-blue-500",
+        color: STEP_COLOR,
         wip_limit: 2,
         pull_from_step_id: "step-0",
       }),
@@ -184,5 +186,47 @@ describe("workflow step handlers", () => {
       wip_limit: 2,
       pull_from_step_id: "step-0",
     });
+  });
+
+  it("re-sorts cached task session lists when a step position changes", () => {
+    const store = makeStore([{ id: "wf-1", workspaceId: "ws-1", name: "Workflow" }], "wf-1");
+    store.setState({
+      ...store.getState(),
+      kanban: {
+        workflowId: "wf-1",
+        steps: [
+          { id: "step-spec", title: "Spec", color: STEP_COLOR, position: 0 },
+          { id: "step-work", title: "Work", color: STEP_COLOR, position: 1 },
+        ],
+        tasks: [],
+      },
+      taskSessionsByTask: {
+        itemsByTaskId: {
+          "task-1": [
+            { id: "s-work", workflow_step_id: "step-work", started_at: "2025-06-01T00:00:00Z" },
+            { id: "s-spec", workflow_step_id: "step-spec", started_at: "2025-06-01T00:00:01Z" },
+          ],
+        },
+      },
+    } as unknown as AppState);
+    const handlers = registerWorkflowsHandlers(store);
+
+    // Flip "Work" to sort before "Spec" — the cached session list for
+    // task-1 was ordered for the old positions and must be re-derived.
+    handlers["workflow.step.updated"]?.(
+      stepUpdatedMessage({
+        id: "step-work",
+        workflow_id: "wf-1",
+        name: "Work",
+        state: "",
+        position: -1,
+        color: STEP_COLOR,
+      }),
+    );
+
+    expect(store.getState().taskSessionsByTask.itemsByTaskId["task-1"].map((s) => s.id)).toEqual([
+      "s-work",
+      "s-spec",
+    ]);
   });
 });

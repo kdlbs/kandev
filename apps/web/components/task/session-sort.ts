@@ -78,12 +78,18 @@ export function buildStepPositionById(state: StepAwareState): Record<string, num
   return map;
 }
 
-/** Resolves a workflow step's display title from loaded board metadata. */
+/** Resolves a workflow step's display title from loaded board metadata.
+ * Precedence matches `buildStepTitleById`: the active board (`kanban.steps`)
+ * wins over any multi-board snapshot for the same step id, so a tab title and
+ * a dropdown/menu label can never disagree for a step that (against the
+ * "step ids are globally unique" assumption) appears in both. */
 export function resolveWorkflowStepTitle(
   state: StepAwareState,
   stepId: string | null | undefined,
 ): string | null {
   if (!stepId) return null;
+  const active = state.kanban?.steps?.find((step) => step.id === stepId);
+  if (active?.title) return active.title;
   const snapshots = state.kanbanMulti?.snapshots;
   if (snapshots) {
     for (const snapshot of Object.values(snapshots)) {
@@ -91,8 +97,7 @@ export function resolveWorkflowStepTitle(
       if (found?.title) return found.title;
     }
   }
-  const active = state.kanban?.steps?.find((step) => step.id === stepId);
-  return active?.title ?? null;
+  return null;
 }
 
 /** Builds a { stepId → title } map from all loaded workflow step metadata. */

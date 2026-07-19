@@ -141,6 +141,19 @@ describe("workflow-step metadata helpers", () => {
     expect(resolveWorkflowStepTitle(state, "missing")).toBeNull();
     expect(resolveWorkflowStepTitle(state, null)).toBeNull();
   });
+
+  it("prefers the active board over a multi-board snapshot for the same step id, matching buildStepTitleById", () => {
+    const conflicting = {
+      kanban: { steps: [{ id: "shared", position: 0, title: "Active Title" }] },
+      kanbanMulti: {
+        snapshots: {
+          wf1: { steps: [{ id: "shared", position: 5, title: "Snapshot Title" }] },
+        },
+      },
+    };
+    expect(resolveWorkflowStepTitle(conflicting, "shared")).toBe("Active Title");
+    expect(buildStepTitleById(conflicting)).toEqual({ shared: "Active Title" });
+  });
 });
 
 describe("resolveAgentLabelFor", () => {

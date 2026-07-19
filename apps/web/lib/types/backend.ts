@@ -238,6 +238,11 @@ export type TaskSessionStateChangedPayload = {
   suppress_toast?: boolean;
   // Workflow-related fields (sent during workflow transitions)
   review_status?: string;
+  /** The workflow step id a session currently belongs to, sent by the backend
+   * on step-transition state-change broadcasts (e.g. WAITING_FOR_INPUT /
+   * CREATED events published from processOnEnter). Drives the tab strip /
+   * dropdown / mobile / reopen-menu `<stepName> #<rank>` label contract. */
+  workflow_step_id?: string;
   // Task environment (for session→environment mapping)
   task_environment_id?: string;
 };

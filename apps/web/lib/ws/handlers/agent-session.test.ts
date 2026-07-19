@@ -190,6 +190,68 @@ describe("session.state_changed name propagation", () => {
   });
 });
 
+describe("session.state_changed workflow_step_id propagation", () => {
+  let store: ReturnType<typeof makeStore>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let handler: (msg: any) => void;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("applies workflow_step_id from a step-transition broadcast so tab order/label stay live", () => {
+    store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "WAITING_FOR_INPUT",
+            started_at: "",
+            workflow_step_id: "step-spec",
+          },
+        },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "WAITING_FOR_INPUT",
+        workflow_step_id: "step-work",
+      }),
+    );
+
+    expect(store.getState().upsertTaskSessionFromEvent).toHaveBeenCalledWith(
+      "t-1",
+      expect.objectContaining({ id: "s-1", workflow_step_id: "step-work" }),
+    );
+  });
+
+  it("does not touch workflow_step_id when the event omits it", () => {
+    store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "RUNNING",
+            started_at: "",
+            workflow_step_id: "step-spec",
+          },
+        },
+      },
+    });
+    handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "COMPLETED" }));
+    const call = vi.mocked(store.getState().upsertTaskSessionFromEvent).mock.calls.at(-1);
+    expect(call?.[1]).not.toHaveProperty("workflow_step_id");
+  });
+});
+
 describe("session.state_changed context window provenance", () => {
   it("retains the backend context-window source", () => {
     const setContextWindow = vi.fn();

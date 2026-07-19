@@ -184,6 +184,7 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   // (including "" for a cleared label); other session events omit it.
   if (payload.name !== undefined) update.name = payload.name;
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
+  if (payload.workflow_step_id !== undefined) update.workflow_step_id = payload.workflow_step_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
   return update;
 }
