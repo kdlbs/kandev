@@ -4,11 +4,13 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -71,6 +73,36 @@ func TestGithubTarballStrategyInstallRepairsPartialInstall(t *testing.T) {
 	}
 	if requestCount != 1 {
 		t.Fatalf("download request count after completed install = %d, want 1", requestCount)
+	}
+}
+
+func TestGithubTarballStrategyInstallReportsCacheInspectionError(t *testing.T) {
+	installDir := t.TempDir()
+	target := runtime.GOOS + "-" + runtime.GOARCH
+	binaryPath := filepath.Join(installDir, "tool-1.0.0-"+target, "bin", "tool")
+	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
+		t.Fatalf("create install directory: %v", err)
+	}
+	if err := os.Symlink("tool", binaryPath); err != nil {
+		t.Fatalf("create symlink loop: %v", err)
+	}
+
+	strategy := NewGithubTarballStrategy(installDir, "tool", GithubTarballConfig{
+		Owner:        "owner",
+		Repo:         "repo",
+		Version:      "1.0.0",
+		AssetPattern: "tool-{version}-{os}-{arch}.tar.gz",
+		BinaryPath:   "tool-{version}-{os}-{arch}/bin/tool",
+		Targets: map[string]string{
+			runtime.GOOS + "/" + runtime.GOARCH: target,
+		},
+	}, testLogger())
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := strategy.Install(ctx)
+	if err == nil || !strings.Contains(err.Error(), "failed to inspect installed binary") {
+		t.Fatalf("Install() error = %v, want cache inspection error", err)
 	}
 }
 

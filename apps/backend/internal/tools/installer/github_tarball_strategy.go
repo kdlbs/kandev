@@ -4,8 +4,10 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -56,17 +58,25 @@ func (s *GithubTarballStrategy) Install(ctx context.Context) (*InstallResult, er
 
 	binaryPath := s.resolveBinaryPath(target)
 	completionMarker := binaryPath + ".install-complete"
+	binaryExists, err := pathExists(binaryPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect installed binary %s: %w", binaryPath, err)
+	}
+	markerExists, err := pathExists(completionMarker)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect install completion marker %s: %w", completionMarker, err)
+	}
 
 	// The archive's entrypoint can be extracted before its runtime dependencies.
 	// Only a marker written after the full extraction proves the install is usable.
-	if fileExists(binaryPath) && fileExists(completionMarker) {
+	if binaryExists && markerExists {
 		s.logger.Info("binary already installed, skipping download", zap.String("binary", binaryPath))
 		return &InstallResult{BinaryPath: binaryPath}, nil
 	}
-	if fileExists(binaryPath) {
+	if binaryExists {
 		s.logger.Warn("incomplete binary install found, reinstalling", zap.String("binary", binaryPath))
 	}
-	if err := os.Remove(completionMarker); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(completionMarker); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("failed to clear install completion marker: %w", err)
 	}
 
@@ -90,9 +100,15 @@ func (s *GithubTarballStrategy) Install(ctx context.Context) (*InstallResult, er
 	return &InstallResult{BinaryPath: binaryPath}, nil
 }
 
-func fileExists(path string) bool {
+func pathExists(path string) (bool, error) {
 	_, err := os.Stat(path)
-	return err == nil
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func (s *GithubTarballStrategy) resolveTarget() (string, error) {
