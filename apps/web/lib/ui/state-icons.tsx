@@ -167,6 +167,19 @@ export function shouldUsePermissionTaskIcon(hasPendingPermission = false): boole
   return hasPendingPermission;
 }
 
+// The single "task still has work running" predicate, derived from the SAME
+// task-level MOST-ACTIVE-WINS aggregate that drives the board card / task-list
+// busy affordance (getTaskStateIconConfig above): a foreground turn actively
+// generating, or spawned background work running while the foreground is idle,
+// both count as in-flight. The destructive-action guard
+// (§spec:destructive-action-guard) consumes this so the archive/delete "still
+// working" warning always agrees with the indicator the operator sees — never a
+// separately-computed truth that could warn when the board shows done, or stay
+// silent when the board shows working.
+export function isTaskInFlight(foregroundActivity?: ForegroundActivity | null): boolean {
+  return foregroundActivity === "generating" || foregroundActivity === "background";
+}
+
 function getTaskStateIconConfig(
   state?: TaskState,
   hasPendingClarification = false,

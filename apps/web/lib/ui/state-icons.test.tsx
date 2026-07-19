@@ -8,7 +8,12 @@ import {
   IconLoader2,
   IconMessageQuestion,
 } from "@tabler/icons-react";
-import { getSessionStateIcon, getTaskStateIcon, shouldShowTaskRunningSpinner } from "./state-icons";
+import {
+  getSessionStateIcon,
+  getTaskStateIcon,
+  isTaskInFlight,
+  shouldShowTaskRunningSpinner,
+} from "./state-icons";
 
 function iconType(node: ReactNode) {
   if (!isValidElement(node)) throw new Error("Expected React element");
@@ -238,5 +243,25 @@ describe("shouldShowTaskRunningSpinner", () => {
     expect(shouldShowTaskRunningSpinner("TODO", "COMPLETED")).toBe(false);
     expect(shouldShowTaskRunningSpinner("TODO", "WAITING_FOR_INPUT")).toBe(false);
     expect(shouldShowTaskRunningSpinner("TODO", "IDLE")).toBe(false);
+  });
+});
+
+describe("isTaskInFlight", () => {
+  // The destructive-action guard (§spec:destructive-action-guard) reads the same
+  // task-level foreground_activity aggregate the board indicators show:
+  // generating OR background-running ⇒ still working. Sharing this derivation with
+  // getTaskStateIconConfig keeps the archive/delete warning in lockstep with the
+  // card's busy affordance — the guard can never disagree with what the operator sees.
+  it("reports in-flight while the task is generating", () => {
+    expect(isTaskInFlight("generating")).toBe(true);
+  });
+
+  it("reports in-flight while spawned background work is running", () => {
+    expect(isTaskInFlight("background")).toBe(true);
+  });
+
+  it("reports idle when there is no foreground activity", () => {
+    expect(isTaskInFlight(null)).toBe(false);
+    expect(isTaskInFlight(undefined)).toBe(false);
   });
 });
