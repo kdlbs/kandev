@@ -81,6 +81,13 @@ func TestAddRejectsBadAndDuplicateURL(t *testing.T) {
 	if _, err := s.Add("empty", ""); err == nil {
 		t.Fatalf("expected empty url to be rejected")
 	}
+	// Remote plain-http is rejected (MITM risk); loopback http is allowed.
+	if _, err := s.Add("remote-http", "http://registry.example/index.json"); err == nil {
+		t.Fatalf("expected remote http url to be rejected")
+	}
+	if _, err := s.Add("local-http", "http://127.0.0.1:8080/index.json"); err != nil {
+		t.Fatalf("loopback http should be allowed, got %v", err)
+	}
 	if _, err := s.Add("first", "https://dup.example/index.json"); err != nil {
 		t.Fatalf("add: %v", err)
 	}

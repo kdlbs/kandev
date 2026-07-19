@@ -190,12 +190,23 @@ func TestCatalogCachesWithinTTLAndRefreshInvalidates(t *testing.T) {
 
 func TestDownloadRejectsNon200AndOversized(t *testing.T) {
 	s := newTestService(t)
+
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	t.Cleanup(bad.Close)
 	if _, err := s.download(context.Background(), bad.URL); err == nil {
 		t.Fatalf("expected non-200 to error")
+	}
+
+	// A body over maxIndexBytes must be rejected (the memory-exhaustion bound):
+	// io.LimitReader lets ReadAll see one byte past the cap, tripping the guard.
+	oversized := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(make([]byte, maxIndexBytes+10))
+	}))
+	t.Cleanup(oversized.Close)
+	if _, err := s.download(context.Background(), oversized.URL); err == nil {
+		t.Fatalf("expected oversized body to error")
 	}
 }
 

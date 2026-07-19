@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -208,14 +210,32 @@ func scanSource(sc rowScanner) (SourceRecord, error) {
 	return rec, nil
 }
 
-func validateSourceURL(url string) error {
-	if url == "" {
+func validateSourceURL(raw string) error {
+	if raw == "" {
 		return errors.New("source url is required")
 	}
-	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return errors.New("source url must be an http(s) URL")
 	}
+	// A remote plain-http source can be MITM'd to inject catalog entries
+	// (including a package_url pointing at a trojanized tarball), so require
+	// https for non-loopback hosts. Loopback http is allowed for local dev/e2e
+	// fixtures.
+	if u.Scheme == "http" && !isLoopbackHost(u.Hostname()) {
+		return errors.New("remote source urls must use https")
+	}
 	return nil
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func boolToInt(b bool) int {
