@@ -12,7 +12,7 @@ spec: "../../specs/tasks/mcp-task-agent-profile-default/spec.md"
 
 ## Acceptance
 
-- Task Actions displays accessible **Current task profile** and **Workspace default profile** choices, explains that workspace-default mode still honors workflow profiles first, and selects `current_task` for missing/unknown server values.
+- Task Actions displays accessible **Current task profile** and **Workspace default profile** choices. Visible plain-language copy explains when the setting applies, the explicit-profile override, what each option does, when to choose it, and the cost risk of inheriting the current profile. Missing or unknown server values select `current_task`.
 - Choosing a value updates state optimistically, sends only `mcp_task_agent_profile_default`, disables duplicate saves, and rolls back only when doing so cannot overwrite newer state.
 - HTTP boot hydration, WebSocket updates, reloads, and narrow mobile layouts preserve the selected value without clipped text or horizontal page overflow.
 

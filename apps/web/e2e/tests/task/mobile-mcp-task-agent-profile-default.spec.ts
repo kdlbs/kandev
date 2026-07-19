@@ -14,6 +14,9 @@ test.describe("MCP-created task agent profile default on mobile", () => {
     await expect(
       testPage.getByRole("heading", { name: "Task Actions", exact: true }),
     ).toBeVisible();
+    await expect(
+      testPage.getByText(/when an agent creates another task without choosing a profile/i),
+    ).toBeVisible();
 
     const currentTask = testPage.getByRole("radio", { name: "Current task profile" });
     const workspaceDefault = testPage.getByRole("radio", {
@@ -24,7 +27,7 @@ test.describe("MCP-created task agent profile default on mobile", () => {
     const choice = testPage.locator('label[for="mcp-task-profile-workspace_default"]');
     const card = testPage
       .locator('[data-slot="card"]')
-      .filter({ hasText: "MCP-Created Task Profile" });
+      .filter({ hasText: "Profile for Tasks Created by Agents" });
     const [choiceBox, cardBox, viewport] = await Promise.all([
       choice.boundingBox(),
       card.boundingBox(),

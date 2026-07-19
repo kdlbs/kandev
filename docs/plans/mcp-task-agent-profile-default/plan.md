@@ -43,7 +43,7 @@ Add a normalized enum to backend-owned portable user settings, then consume it a
 ### Task Actions control
 
 - Add `apps/web/components/settings/mcp-task-agent-profile-default-settings.tsx` and its focused test.
-- Render an accessible two-choice control in `TaskActionsSettings` in `apps/web/components/settings/general-settings.tsx`, with labels **Current task profile** and **Workspace default profile**, short explanatory text that the latter still honors workflow profiles first, optimistic persistence, disabled saving state, and guarded rollback matching `ArchiveConfirmationSettings`.
+- Render an accessible two-choice control in `TaskActionsSettings` in `apps/web/components/settings/general-settings.tsx`, with labels **Current task profile** and **Workspace default profile**. Visible plain-language copy explains the trigger, explicit-profile override, each resolution path, when to choose it, and the risk of reusing an expensive current-task profile. Keep optimistic persistence, disabled saving state, and guarded rollback matching `ArchiveConfirmationSettings`.
 - Keep both options fully visible and touch-accessible at narrow widths. Use the existing settings card and radio-choice patterns; do not introduce a desktop-only interaction.
 - Update `apps/web/components/settings/general-nav.ts` so the Task Actions description covers MCP task defaults as well as archive safeguards.
 

@@ -92,6 +92,11 @@ surface.
 - Components: <200 lines, extract to domain components, composition over props.
 - Hooks: domain-organized in `hooks/domains/`, encapsulate subscription + selection.
 - **Interactivity:** all buttons and links with actions must have `cursor-pointer` class.
+- **Self-documenting settings:** every setting must explain in visible, plain-language copy what
+  changes, when the setting applies, and when the user should choose each non-obvious option. State
+  important exclusions, precedence, cost, or destructive consequences next to the control when they
+  can affect the decision. Do not rely on tooltips, external documentation, or implementation terms
+  alone to teach the setting.
 - **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
   activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),
   so per-dialog "submit on Enter" input handlers are unnecessary — let the base own it.

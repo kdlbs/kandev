@@ -68,14 +68,14 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
 
-### Choose the profile for MCP-created tasks
+### Choose the profile for tasks created by agents
 
-Open **Settings → General → Task Actions → MCP-Created Task Profile** to choose the global agent-profile policy for tasks and subtasks created through `create_task_kandev` when the call omits `agent_profile_id`:
+Open **Settings → General → Task Actions → Profile for Tasks Created by Agents** to choose which profile Kandev uses when an agent creates another task without choosing a profile. This setting does not affect tasks you create yourself:
 
-- **Current task profile** preserves compatibility with existing behavior and is selected by default. Kandev first inherits the parent or calling task profile, then checks the workflow step or workflow default, and finally checks the target workspace's **Default Agent Profile**.
-- **Workspace default profile** skips the parent and calling task profiles. Kandev still uses the workflow step or workflow default first, then the **Default Agent Profile** from the workspace that will own the new task.
+- **Current task profile** is useful when follow-up work needs the same model and agent setup as the task creating it. It preserves compatibility with existing behavior and is selected by default. Kandev first inherits the parent or calling task profile, then checks the workflow step or workflow default, and finally checks the target workspace's **Default Agent Profile**. This option can unintentionally reuse a more expensive profile.
+- **Workspace default profile** is useful when you want agent-created tasks to use your standard workspace model and cost policy. It skips the parent and calling task profiles. Kandev still uses the workflow step or workflow default first, then the **Default Agent Profile** from the workspace that will own the new task.
 
-This preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. An explicit `agent_profile_id` in the tool call always overrides the saved preference. If **Workspace default profile** is selected and neither the workflow nor the target workspace supplies a profile, task creation fails without creating the task, including when `start_agent=false`.
+This preference applies only to tasks and subtasks created through `create_task_kandev` when the call omits `agent_profile_id`. It applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. An explicit `agent_profile_id` in the tool call always overrides the saved preference. If **Workspace default profile** is selected and neither the workflow nor the target workspace supplies a profile, task creation fails without creating the task, including when `start_agent=false`.
 
 ### Multiple repositories
 

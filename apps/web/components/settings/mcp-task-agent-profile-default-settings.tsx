@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -16,13 +16,14 @@ const OPTIONS: Array<{
   {
     value: "current_task",
     label: "Current task profile",
-    description: "Inherit the agent profile from the task making the MCP request.",
+    description:
+      "The new task uses the same profile as the task that created it. Choose this when follow-up work needs the same model and agent setup. This may reuse a more expensive profile.",
   },
   {
     value: "workspace_default",
     label: "Workspace default profile",
     description:
-      "Use the workflow profile first, then the default agent profile for the target workspace.",
+      "The new task uses its workflow profile when one is set; otherwise it uses the default profile of the workspace receiving the task. Choose this to keep agent-created tasks on your standard workspace model and avoid accidentally reusing an expensive profile.",
   },
 ];
 
@@ -58,11 +59,23 @@ export function MCPTaskAgentProfileDefaultSettings() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">MCP-Created Task Profile</CardTitle>
+        <CardTitle className="text-base">
+          <h3>Profile for Tasks Created by Agents</h3>
+        </CardTitle>
+        <CardDescription className="space-y-1">
+          <p>
+            This setting decides which profile Kandev uses when an agent creates another task
+            without choosing a profile.
+          </p>
+          <p>
+            It does not affect tasks you create yourself. A profile chosen in the Create Task tool
+            always wins.
+          </p>
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <RadioGroup
-          aria-label="Default agent profile for MCP-created tasks"
+          aria-label="Profile for tasks created by agents"
           value={preference}
           onValueChange={handleChange}
           disabled={isSaving}

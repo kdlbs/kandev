@@ -18,6 +18,7 @@ Agents can create tasks and subtasks through `create_task_kandev`. When the tool
 - `current_task` is the default for new users and for existing settings that do not contain the preference. Selecting `workspace_default` is opt-in.
 - The preference applies only to tasks and subtasks created by `create_task_kandev` when `agent_profile_id` is omitted.
 - An explicit `agent_profile_id` always wins and does not require the preference to be read.
+- The setting explains in visible, plain language when it applies, what does not use it, and that an explicitly chosen profile wins. Each option describes both its resolution behavior and when to choose it, including the risk that current-task inheritance can reuse a more expensive profile.
 - In `current_task` mode, the existing fallback order remains unchanged: parent task or calling source task, workflow step or workflow default, then target workspace default.
 - In `workspace_default` mode, parent/source task inheritance is skipped. The profile resolves from the workflow step or workflow default first, then from the target workspace default. This preserves workflow policy while avoiding inheritance from the calling task.
 - Executor and executor-profile inheritance are unchanged in both modes.
@@ -71,6 +72,7 @@ The `create_task_kandev` input and response schemas do not change. The preferenc
 ## Scenarios
 
 - **GIVEN** an existing user with no stored preference, **WHEN** Task Actions settings loads, **THEN** **Current task profile** is selected.
+- **GIVEN** a user opens the setting without knowing MCP terminology, **WHEN** they read the control, **THEN** they can tell when it applies, what each option does, which option controls accidental model cost, and that an explicit profile selection overrides it.
 - **GIVEN** `current_task` is selected and the calling task uses profile A while its workspace default is profile B, **WHEN** the agent creates a task without `agent_profile_id`, **THEN** the created task records profile A under the existing resolution rules.
 - **GIVEN** `workspace_default` is selected, the calling task uses profile A, no workflow profile applies, and the target workspace default is profile B, **WHEN** the agent creates a top-level task without `agent_profile_id`, **THEN** the created task records profile B.
 - **GIVEN** `workspace_default` is selected, a parent task uses profile A, no workflow profile applies, and its workspace default is profile B, **WHEN** the agent creates a subtask without `agent_profile_id`, **THEN** the subtask records profile B and retains the existing executor inheritance.

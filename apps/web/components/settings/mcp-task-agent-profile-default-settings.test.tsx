@@ -109,13 +109,20 @@ describe("MCPTaskAgentProfileDefaultSettings", () => {
   it("renders accessible descriptive choices", () => {
     renderSettings();
 
+    screen.getByRole("heading", { name: "Profile for Tasks Created by Agents" });
+    screen.getByText(/when an agent creates another task without choosing a profile/i);
+    screen.getByText(/does not affect tasks you create yourself/i);
+    screen.getByText(/profile chosen in the Create Task tool always wins/i);
     expect(screen.getByRole("radio", { name: CURRENT_TASK_LABEL }).getAttribute(ARIA_CHECKED)).toBe(
       "true",
     );
     expect(
       screen.getByRole("radio", { name: WORKSPACE_DEFAULT_LABEL }).getAttribute(ARIA_CHECKED),
     ).toBe("false");
-    screen.getByText(/workflow profile first/i);
+    screen.getByText(/follow-up work needs the same model and agent setup/i);
+    screen.getByText(/may reuse a more expensive profile/i);
+    screen.getByText(/workflow profile when one is set/i);
+    screen.getByText(/keep agent-created tasks on your standard workspace model/i);
   });
 
   it("selects optimistically and sends only the changed preference", async () => {
