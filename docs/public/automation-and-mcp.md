@@ -136,7 +136,7 @@ Task mode currently registers these tool groups:
 | Group | Available operations |
 |---|---|
 | Board lookups and task lifecycle | List workspaces, workflows, workflow steps, tasks, agents, and executor profiles; create, update, move, archive, or delete tasks; halt all live work on a direct child. This mode does not mutate workflows, profiles, or executors. |
-| Coordination | Message a task or targeted session, spawn a named session on the current or another same-workspace task, and read task conversation. |
+| Coordination | Message a task or targeted session, spawn a named session on the current or another same-workspace task, and read task conversation. See [Agent Communication](agent-communication.md) for delivery semantics, bidirectional reply patterns, and a worked example. |
 | User interaction | Ask a structured question when the current agent/session supports it. |
 | Plans | Create, get, update, and delete the current task plan. |
 | Walkthroughs | Show, get, and delete the task's code walkthrough. |

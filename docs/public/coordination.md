@@ -145,6 +145,8 @@ Additional messaging boundaries:
 
 Use `get_task_conversation_kandev` to read a primary or explicit session conversation. It supports limits, before/after cursors, ascending or descending order, and message-type filters. Use `list_related_tasks_kandev` for the current or another same-workspace task to list its parent, direct children, siblings, stored blocker relationships, and associated GitHub pull requests.
 
+Replies close the loop: the receiving agent calls `message_task_kandev` back with the originating task's ID, turning a one-way notification into a genuine bidirectional conversation. This enables multi-turn negotiations between agents — for example, agreeing on an API contract before both sides implement. See [Agent Communication](agent-communication.md) for delivery semantics, discovery patterns, and a worked negotiation example.
+
 ## Wait for child tasks
 
 On the parent's current workflow step, configure **When Child Tasks Complete** to move next, previous, or to a selected step. It runs once when every active direct child is `COMPLETED`, `FAILED`, or `CANCELLED` and the parent has an active session.

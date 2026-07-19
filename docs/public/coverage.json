@@ -90,7 +90,7 @@
       "id": "sessions-and-coordination",
       "audiences": ["user"],
       "stability": "stable",
-      "docs": ["sessions-and-review", "coordination", "automation-and-mcp"],
+      "docs": ["sessions-and-review", "coordination", "automation-and-mcp", "agent-communication"],
       "sources": ["apps/backend/internal/mcp/handlers/spawn_session.go", "apps/web/components/task/dockview-session-tabs.ts"],
       "tests": ["apps/backend/internal/mcp/handlers/spawn_session_test.go", "apps/web/components/task/dockview-session-tabs.test.ts"],
       "mcpTools": [
