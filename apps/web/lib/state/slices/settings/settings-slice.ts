@@ -21,7 +21,6 @@ export const defaultSettingsState: SettingsSliceState = {
     loading: false,
   },
   settingsData: { executorsLoaded: false, agentsLoaded: false },
-  userSettingsServerRevision: 0,
   userSettings: {
     workspaceId: null,
     kanbanViewMode: null,

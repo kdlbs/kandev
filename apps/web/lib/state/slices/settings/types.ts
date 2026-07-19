@@ -223,7 +223,6 @@ export type SettingsSliceState = {
   notificationProviders: NotificationProvidersState;
   settingsData: SettingsDataState;
   userSettings: UserSettingsState;
-  userSettingsServerRevision: number;
 };
 
 export type SettingsSliceActions = {

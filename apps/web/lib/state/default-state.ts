@@ -37,7 +37,6 @@ export const defaultState = {
   notificationProviders: defaultSettingsState.notificationProviders,
   settingsData: defaultSettingsState.settingsData,
   userSettings: defaultSettingsState.userSettings,
-  userSettingsServerRevision: defaultSettingsState.userSettingsServerRevision,
   messages: defaultSessionState.messages,
   turns: defaultSessionState.turns,
   taskSessions: defaultSessionState.taskSessions,

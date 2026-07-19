@@ -934,6 +934,7 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 		return mcpAutoStartConfig{}, fmt.Errorf("read MCP task agent profile default: %w", err)
 	}
 	profileForInheritance := &agentProfileID
+	// Workspace-default mode keeps executor inheritance but discards inherited agent profiles.
 	ignoredInheritedProfile := ""
 	if profileDefault == usermodels.MCPTaskAgentProfileDefaultWorkspaceDefault {
 		profileForInheritance = &ignoredInheritedProfile

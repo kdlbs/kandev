@@ -147,7 +147,6 @@ export type AppState = {
   notificationProviders: (typeof defaultSettingsState)["notificationProviders"];
   settingsData: (typeof defaultSettingsState)["settingsData"];
   userSettings: (typeof defaultSettingsState)["userSettings"];
-  userSettingsServerRevision: (typeof defaultSettingsState)["userSettingsServerRevision"];
 
   // Session slice
   messages: (typeof defaultSessionState)["messages"];

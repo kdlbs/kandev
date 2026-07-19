@@ -20,7 +20,6 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
         sidebarViews: buildSidebarViewsState(state, message.payload),
         sidebarTaskPrefs: buildSidebarTaskPrefsState(state, message.payload),
         userSettings: buildUserSettingsState(state, message.payload),
-        userSettingsServerRevision: state.userSettingsServerRevision + 1,
       }));
     },
   };
