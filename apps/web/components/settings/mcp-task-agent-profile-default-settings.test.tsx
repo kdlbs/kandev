@@ -1,15 +1,14 @@
-import { type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { StateProvider } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
 import type { MCPTaskAgentProfileDefault } from "@/lib/types/http";
+import { SettingsSaveProvider } from "./settings-save-provider";
 
 const updateUserSettings = vi.fn();
 const ARIA_CHECKED = "aria-checked";
 const CURRENT_TASK_LABEL = "Current task profile";
 const WORKSPACE_DEFAULT_LABEL = "Workspace default profile";
-const SAVE_FAILED = "save failed";
 
 vi.mock("@/lib/api", () => ({
   updateUserSettings: (...args: unknown[]) => updateUserSettings(...args),
@@ -17,10 +16,7 @@ vi.mock("@/lib/api", () => ({
 
 import { MCPTaskAgentProfileDefaultSettings } from "./mcp-task-agent-profile-default-settings";
 
-function renderSettings(
-  preference: MCPTaskAgentProfileDefault = "current_task",
-  children?: ReactNode,
-) {
+function renderSettings(preference: MCPTaskAgentProfileDefault = "current_task") {
   return render(
     <StateProvider
       initialState={{
@@ -31,72 +27,11 @@ function renderSettings(
         },
       }}
     >
-      <MCPTaskAgentProfileDefaultSettings />
-      {children}
+      <SettingsSaveProvider>
+        <MCPTaskAgentProfileDefaultSettings />
+      </SettingsSaveProvider>
     </StateProvider>,
   );
-}
-
-function RemoteSettingsUpdate({
-  workspaceId = "workspace-2",
-  preference = "current_task",
-}: {
-  workspaceId?: string;
-  preference?: MCPTaskAgentProfileDefault;
-}) {
-  const storeApi = useAppStoreApi();
-
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        storeApi.setState((state) => ({
-          ...state,
-          userSettings: {
-            ...defaultState.userSettings,
-            workspaceId,
-            mcpTaskAgentProfileDefault: preference,
-            loaded: true,
-          },
-          userSettingsServerRevision: state.userSettingsServerRevision + 1,
-        }));
-      }}
-    >
-      Apply remote settings
-    </button>
-  );
-}
-
-function LocalSettingsUpdate() {
-  const setUserSettings = useAppStore((state) => state.setUserSettings);
-  const storeApi = useAppStoreApi();
-  const confirmTaskArchive = useAppStore((state) => state.userSettings.confirmTaskArchive);
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => {
-          const current = storeApi.getState().userSettings;
-          setUserSettings({ ...current, confirmTaskArchive: false });
-        }}
-      >
-        Apply local settings
-      </button>
-      <output>{confirmTaskArchive ? "archive-enabled" : "archive-disabled"}</output>
-    </>
-  );
-}
-
-function mockPendingSave() {
-  let rejectSave: (reason?: unknown) => void = () => {};
-  updateUserSettings.mockImplementationOnce(
-    () =>
-      new Promise((_, reject: (reason?: unknown) => void) => {
-        rejectSave = reject;
-      }),
-  );
-  return () => rejectSave(new Error(SAVE_FAILED));
 }
 
 beforeEach(() => {
@@ -125,7 +60,7 @@ describe("MCPTaskAgentProfileDefaultSettings", () => {
     screen.getByText(/keep agent-created tasks on your standard workspace model/i);
   });
 
-  it("selects optimistically and sends only the changed preference", async () => {
+  it("keeps the choice local until Save changes is pressed", async () => {
     renderSettings();
     const workspaceDefault = screen.getByRole("radio", {
       name: WORKSPACE_DEFAULT_LABEL,
@@ -134,90 +69,35 @@ describe("MCPTaskAgentProfileDefaultSettings", () => {
     fireEvent.click(workspaceDefault);
 
     expect(workspaceDefault.getAttribute(ARIA_CHECKED)).toBe("true");
+    expect(updateUserSettings).not.toHaveBeenCalled();
+    expect(screen.getByRole("radiogroup").getAttribute("data-settings-dirty")).toBe("true");
+    expect(
+      screen.getByTestId("mcp-task-profile-default-card").getAttribute("data-settings-dirty"),
+    ).toBe("true");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
+
     await waitFor(() =>
       expect(updateUserSettings).toHaveBeenCalledWith({
         mcp_task_agent_profile_default: "workspace_default",
       }),
     );
+    await waitFor(() =>
+      expect(screen.getByRole("radiogroup").getAttribute("data-settings-dirty")).toBe("false"),
+    );
   });
 
-  it("disables duplicate changes while a save is pending", async () => {
-    updateUserSettings.mockImplementationOnce(() => new Promise(() => {}));
+  it("keeps the draft selected when saving fails", async () => {
+    updateUserSettings.mockRejectedValueOnce(new Error("save failed"));
     renderSettings();
-    const currentTask = screen.getByRole("radio", { name: CURRENT_TASK_LABEL });
     const workspaceDefault = screen.getByRole("radio", {
       name: WORKSPACE_DEFAULT_LABEL,
     });
 
     fireEvent.click(workspaceDefault);
-
-    await waitFor(() => expect(currentTask.hasAttribute("disabled")).toBe(true));
-    expect(workspaceDefault.hasAttribute("disabled")).toBe(true);
-    fireEvent.click(currentTask);
-    expect(updateUserSettings).toHaveBeenCalledTimes(1);
-  });
-
-  it("rolls back the optimistic selection when saving fails", async () => {
-    const rejectSave = mockPendingSave();
-    renderSettings();
-    const currentTask = screen.getByRole("radio", { name: CURRENT_TASK_LABEL });
-    const workspaceDefault = screen.getByRole("radio", {
-      name: WORKSPACE_DEFAULT_LABEL,
-    });
-
-    fireEvent.click(workspaceDefault);
+    fireEvent.click(await screen.findByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(workspaceDefault.getAttribute(ARIA_CHECKED)).toBe("true"));
-    rejectSave();
-    await waitFor(() => expect(currentTask.getAttribute(ARIA_CHECKED)).toBe("true"));
-  });
-
-  it("does not overwrite a newer workspace update when saving fails", async () => {
-    const rejectSave = mockPendingSave();
-    renderSettings("current_task", <RemoteSettingsUpdate />);
-
-    fireEvent.click(screen.getByRole("radio", { name: WORKSPACE_DEFAULT_LABEL }));
-    fireEvent.click(screen.getByRole("button", { name: "Apply remote settings" }));
-    rejectSave();
-
-    await waitFor(() =>
-      expect(
-        screen.getByRole("radio", { name: CURRENT_TASK_LABEL }).getAttribute(ARIA_CHECKED),
-      ).toBe("true"),
-    );
-  });
-
-  it("does not overwrite a same-value remote update when saving fails", async () => {
-    const rejectSave = mockPendingSave();
-    renderSettings(
-      "current_task",
-      <RemoteSettingsUpdate workspaceId="workspace-1" preference="workspace_default" />,
-    );
-
-    fireEvent.click(screen.getByRole("radio", { name: WORKSPACE_DEFAULT_LABEL }));
-    fireEvent.click(screen.getByRole("button", { name: "Apply remote settings" }));
-    rejectSave();
-
-    await waitFor(() =>
-      expect(
-        screen.getByRole("radio", { name: WORKSPACE_DEFAULT_LABEL }).getAttribute(ARIA_CHECKED),
-      ).toBe("true"),
-    );
-  });
-
-  it("rolls back after an unrelated local settings replacement", async () => {
-    const rejectSave = mockPendingSave();
-    renderSettings("current_task", <LocalSettingsUpdate />);
-
-    fireEvent.click(screen.getByRole("radio", { name: WORKSPACE_DEFAULT_LABEL }));
-    fireEvent.click(screen.getByRole("button", { name: "Apply local settings" }));
-    rejectSave();
-
-    await waitFor(() =>
-      expect(
-        screen.getByRole("radio", { name: CURRENT_TASK_LABEL }).getAttribute(ARIA_CHECKED),
-      ).toBe("true"),
-    );
-    expect(screen.getByText("archive-disabled")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Couldn't save")).toBeTruthy());
   });
 });

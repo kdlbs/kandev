@@ -60,7 +60,7 @@ The `create_task_kandev` input and response schemas do not change. The preferenc
 - If a workspace lookup required by the selected resolution chain fails, task creation fails and creates no partial task.
 - If user settings cannot be read for an omitted-profile request, task creation fails and creates no partial task; the server does not silently choose another policy.
 - An explicit `agent_profile_id` continues through existing validation and resolution even if reading the preference would fail.
-- A failed settings save restores the last confirmed selection in the UI. A live update for another saved value remains authoritative over stale optimistic state.
+- Changing the choice creates a local settings draft. The preference is persisted only when the user chooses **Save changes**; a failed save keeps the draft selected and leaves the stored preference unchanged.
 
 ## Persistence guarantees
 
@@ -81,8 +81,8 @@ The `create_task_kandev` input and response schemas do not change. The preferenc
 - **GIVEN** either preference is selected, **WHEN** `create_task_kandev` includes profile C explicitly, **THEN** the created task records profile C.
 - **GIVEN** `workspace_default` is selected and neither the workflow nor the target workspace has a default agent profile, **WHEN** an agent creates a task without `agent_profile_id`, **THEN** the tool returns a validation error and no task exists.
 - **GIVEN** `workspace_default` is selected, no workflow profile applies, and a workspace default exists, **WHEN** an agent creates a task with `start_agent=false` and no `agent_profile_id`, **THEN** the task is created without a session and records the target workspace default for later launch.
-- **GIVEN** the setting is open on a mobile viewport, **WHEN** the user selects **Workspace default profile**, **THEN** the choice saves and remains selected after reload without horizontal overflow.
-- **GIVEN** a settings update fails, **WHEN** the user changes the choice, **THEN** the control returns to the last confirmed value.
+- **GIVEN** the setting is open on a mobile viewport, **WHEN** the user selects **Workspace default profile** and chooses **Save changes**, **THEN** the choice saves and remains selected after reload without horizontal overflow.
+- **GIVEN** a settings update fails, **WHEN** the user chooses **Save changes**, **THEN** the draft remains selected, the page shows the save failure, and the stored preference is unchanged.
 
 ## Out of scope
 

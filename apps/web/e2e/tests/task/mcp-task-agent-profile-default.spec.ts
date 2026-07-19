@@ -36,6 +36,13 @@ test.describe("MCP-created task agent profile default", () => {
     await expect(workspaceDefault).toBeChecked();
     await expect
       .poll(async () => (await apiClient.getUserSettings()).settings.mcp_task_agent_profile_default)
+      .toBe("current_task");
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
+    await expect
+      .poll(async () => (await apiClient.getUserSettings()).settings.mcp_task_agent_profile_default)
       .toBe("workspace_default");
 
     await testPage.reload();

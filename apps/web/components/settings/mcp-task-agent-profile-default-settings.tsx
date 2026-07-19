@@ -1,12 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { useEffect, useRef, useState } from "react";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { MCPTaskAgentProfileDefault } from "@/lib/types/http";
+import { SettingsCard } from "./settings-card";
+import { useSettingsSaveContributor } from "./settings-save-provider";
 
 const OPTIONS: Array<{
   value: MCPTaskAgentProfileDefault;
@@ -31,33 +33,38 @@ export function MCPTaskAgentProfileDefaultSettings() {
   const preference = useAppStore((state) => state.userSettings.mcpTaskAgentProfileDefault);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
-  const [isSaving, setIsSaving] = useState(false);
+  const [saved, setSaved] = useState(preference);
+  const [draft, setDraft] = useState(preference);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const isDirty = draft !== saved;
 
-  const handleChange = async (value: string) => {
-    if (isSaving || value === preference) return;
+  useEffect(() => {
+    setSaved((previous) => {
+      if (draftRef.current === previous) setDraft(preference);
+      return preference;
+    });
+  }, [preference]);
 
-    const next = value as MCPTaskAgentProfileDefault;
-    const state = storeApi.getState();
-    const current = state.userSettings;
-    const previous = current.mcpTaskAgentProfileDefault;
-    const serverRevision = state.userSettingsServerRevision;
-    setIsSaving(true);
-    setUserSettings({ ...current, mcpTaskAgentProfileDefault: next });
-
-    try {
-      await updateUserSettings({ mcp_task_agent_profile_default: next });
-    } catch {
-      const latest = storeApi.getState();
-      if (latest.userSettingsServerRevision === serverRevision) {
-        setUserSettings({ ...latest.userSettings, mcpTaskAgentProfileDefault: previous });
-      }
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  useSettingsSaveContributor({
+    id: "general-mcp-task-agent-profile-default",
+    order: 10,
+    revision: draft,
+    isDirty,
+    save: async (revision) => {
+      const submitted = revision as MCPTaskAgentProfileDefault;
+      await updateUserSettings({ mcp_task_agent_profile_default: submitted });
+      setSaved(submitted);
+      setUserSettings({
+        ...storeApi.getState().userSettings,
+        mcpTaskAgentProfileDefault: submitted,
+      });
+    },
+    discard: () => setDraft(saved),
+  });
 
   return (
-    <Card>
+    <SettingsCard isDirty={isDirty} data-testid="mcp-task-profile-default-card">
       <CardHeader>
         <CardTitle className="text-base">
           <h3>Profile for Tasks Created by Agents</h3>
@@ -76,9 +83,9 @@ export function MCPTaskAgentProfileDefaultSettings() {
       <CardContent>
         <RadioGroup
           aria-label="Profile for tasks created by agents"
-          value={preference}
-          onValueChange={handleChange}
-          disabled={isSaving}
+          value={draft}
+          onValueChange={(value) => setDraft(value as MCPTaskAgentProfileDefault)}
+          data-settings-dirty={isDirty}
           className="gap-3"
         >
           {OPTIONS.map((option) => {
@@ -113,6 +120,6 @@ export function MCPTaskAgentProfileDefaultSettings() {
           })}
         </RadioGroup>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
