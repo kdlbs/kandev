@@ -348,12 +348,17 @@ func (p *SystemProvider) playWindowsSound(ctx context.Context, cfg systemConfig)
 // `do shell script`). This closes the AppleScript-injection RCE that arose when
 // untrusted external-integration issue titles were interpolated and escaped by
 // quote-replacement alone (a trailing backslash defeated that escaping).
+//
+// The `--` terminates osascript option parsing before the positional title/body.
+// Without it a title of e.g. "-e" would be consumed as another script-fragment
+// flag, turning the following body into AppleScript source and reopening the
+// injection; the terminator guarantees untrusted text always lands in argv.
 func osascriptNotifyArgs(title, body string) []string {
 	return []string{
 		"-e", "on run argv",
 		"-e", "display notification (item 2 of argv) with title (item 1 of argv)",
 		"-e", "end run",
-		title, body,
+		"--", title, body,
 	}
 }
 

@@ -82,6 +82,30 @@ func TestPoC_LegacyAppleScriptBreakout(t *testing.T) {
 		"`do shell script` would execute on the host. RCE reproduced.")
 }
 
+// splitOsascriptArgs mirrors osascript's option parsing: `-e X` builds script
+// fragments, `--` terminates option parsing so every following token is a
+// positional `run` argument. Returns the collected script fragments and run
+// args.
+func splitOsascriptArgs(args []string) (scriptFragments, runArgs []string) {
+	optsDone := false
+	for i := 0; i < len(args); i++ {
+		if optsDone {
+			runArgs = append(runArgs, args[i])
+			continue
+		}
+		switch {
+		case args[i] == "--":
+			optsDone = true
+		case args[i] == "-e" && i+1 < len(args):
+			scriptFragments = append(scriptFragments, args[i+1])
+			i++
+		default:
+			runArgs = append(runArgs, args[i])
+		}
+	}
+	return scriptFragments, runArgs
+}
+
 // TestOsascriptNotifyArgs_NoInjection is the regression guard: the fixed
 // argv-based builder must pass title/body as opaque `run` arguments, never
 // interpolated into any `-e` AppleScript source. This FAILS against the legacy
@@ -89,17 +113,7 @@ func TestPoC_LegacyAppleScriptBreakout(t *testing.T) {
 func TestOsascriptNotifyArgs_NoInjection(t *testing.T) {
 	title := "Kandev"
 	args := osascriptNotifyArgs(title, breakoutPayload)
-
-	// Split the `-e` script fragments from the trailing run arguments.
-	var scriptFragments, runArgs []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "-e" && i+1 < len(args) {
-			scriptFragments = append(scriptFragments, args[i+1])
-			i++
-			continue
-		}
-		runArgs = append(runArgs, args[i])
-	}
+	scriptFragments, runArgs := splitOsascriptArgs(args)
 
 	// 1. The untrusted title/body must appear ONLY as trailing run arguments,
 	//    byte-for-byte, and never embedded in any AppleScript source fragment.
@@ -121,4 +135,41 @@ func TestOsascriptNotifyArgs_NoInjection(t *testing.T) {
 		t.Fatalf("expected argv-referencing display notification, got: %q", joined)
 	}
 	t.Logf("safe osascript args: %#v", args)
+}
+
+// TestOsascriptNotifyArgs_OptionTerminator guards the second injection vector:
+// a title that looks like an osascript flag (e.g. "-e") must not be consumed as
+// an option. The `--` terminator must precede the untrusted text so title/body
+// always land in argv instead of becoming script fragments.
+func TestOsascriptNotifyArgs_OptionTerminator(t *testing.T) {
+	// A title of "-e" with a malicious body: without the terminator osascript
+	// would treat "-e <body>" as another script fragment, reopening injection.
+	title := "-e"
+	body := `do shell script "touch /tmp/pwn"`
+	args := osascriptNotifyArgs(title, body)
+
+	// The builder must emit a `--` terminator, and it must come before the
+	// untrusted title/body (i.e. every token after `--` is untrusted).
+	term := -1
+	for i, a := range args {
+		if a == "--" {
+			term = i
+			break
+		}
+	}
+	if term == -1 {
+		t.Fatalf("missing `--` option terminator: %#v", args)
+	}
+
+	// After the terminator, the flag-like title and body must be confined to
+	// argv, byte-for-byte, and never surface as script fragments.
+	scriptFragments, runArgs := splitOsascriptArgs(args)
+	if len(runArgs) != 2 || runArgs[0] != title || runArgs[1] != body {
+		t.Fatalf("flag-like title/body not confined to argv: %#v", runArgs)
+	}
+	for _, frag := range scriptFragments {
+		if strings.Contains(frag, "do shell script") {
+			t.Fatalf("body leaked into AppleScript source as a fragment: %q", frag)
+		}
+	}
 }
