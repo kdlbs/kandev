@@ -24,6 +24,46 @@ function findCodeServerInstall(): string | null {
   return null;
 }
 
+/** Mirror an existing code-server install without writing into the host cache. */
+function seedCodeServerInstall(sourceInstallDir: string, targetInstallDir: string): void {
+  if (fs.existsSync(targetInstallDir)) return;
+
+  fs.mkdirSync(targetInstallDir, { recursive: true });
+  for (const entry of fs.readdirSync(sourceInstallDir)) {
+    const sourceRoot = path.join(sourceInstallDir, entry);
+    const sourceBinDir = path.join(sourceRoot, "bin");
+    const sourceBinary = path.join(sourceBinDir, "code-server");
+    if (!fs.existsSync(sourceBinary)) continue;
+
+    const targetRoot = path.join(targetInstallDir, entry);
+    const targetBinDir = path.join(targetRoot, "bin");
+    fs.mkdirSync(targetBinDir, { recursive: true });
+    for (const child of fs.readdirSync(sourceRoot)) {
+      if (child === "bin") continue;
+      fs.symlinkSync(path.join(sourceRoot, child), path.join(targetRoot, child));
+    }
+    for (const child of fs.readdirSync(sourceBinDir)) {
+      if (child.endsWith(".install-complete")) continue;
+      fs.symlinkSync(path.join(sourceBinDir, child), path.join(targetBinDir, child));
+    }
+    fs.writeFileSync(path.join(targetBinDir, "code-server.install-complete"), "");
+  }
+}
+
+const codeServerDir = findCodeServerInstall();
+
+test.beforeEach(async ({ backend }) => {
+  if (!codeServerDir) {
+    test.skip(true, "code-server not installed — skipping VS Code e2e tests");
+    return;
+  }
+
+  seedCodeServerInstall(
+    codeServerDir,
+    path.join(backend.tmpDir, ".kandev", "tools", "code-server"),
+  );
+});
+
 /**
  * Seed a task + session via the API and navigate directly to the session page.
  * Waits for the mock agent to complete its turn (idle input visible).
@@ -80,23 +120,6 @@ test.describe("VS Code toolbar open", () => {
 
 test.describe("VS Code open panel", () => {
   test.describe.configure({ retries: 1 });
-
-  const codeServerDir = findCodeServerInstall();
-
-  test.beforeEach(async ({ backend }) => {
-    if (!codeServerDir) {
-      test.skip(true, "code-server not installed — skipping VS Code e2e tests");
-      return;
-    }
-
-    // Symlink the real code-server install into the e2e backend's HOME so
-    // ResolveBinary finds the pre-installed binary without re-downloading.
-    const targetDir = path.join(backend.tmpDir, ".kandev", "tools", "code-server");
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(path.dirname(targetDir), { recursive: true });
-      fs.symlinkSync(codeServerDir, targetDir);
-    }
-  });
 
   /**
    * Regression test for VS Code panel placement.
