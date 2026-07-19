@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { StateProvider } from "@/components/state-provider";
 import { defaultState } from "@/lib/state/default-state";
 import type { MCPTaskAgentProfileDefault } from "@/lib/types/http";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { SettingsSaveProvider } from "./settings-save-provider";
 
 const updateUserSettings = vi.fn();
@@ -27,9 +28,11 @@ function renderSettings(preference: MCPTaskAgentProfileDefault = "current_task")
         },
       }}
     >
-      <SettingsSaveProvider>
-        <MCPTaskAgentProfileDefaultSettings />
-      </SettingsSaveProvider>
+      <TooltipProvider delayDuration={0}>
+        <SettingsSaveProvider>
+          <MCPTaskAgentProfileDefaultSettings />
+        </SettingsSaveProvider>
+      </TooltipProvider>
     </StateProvider>,
   );
 }
@@ -45,9 +48,15 @@ describe("MCPTaskAgentProfileDefaultSettings", () => {
     renderSettings();
 
     screen.getByRole("heading", { name: "Profile for Tasks Created by Agents" });
-    screen.getByText(/when an agent creates another task without choosing a profile/i);
-    screen.getByText(/does not affect tasks you create yourself/i);
-    screen.getByText(/profile chosen in the Create Task tool always wins/i);
+    screen.getByText(/when an agent calls a Kandev MCP tool that creates a task/i);
+    screen.getByText(/Kandev must assign an agent profile/i);
+    screen.getByText("create_task_kandev");
+    screen.getByText(/creates new tasks and subtasks/i);
+    screen.getByText(/applies only when the call omits/i);
+    screen.getByText("agent_profile_id");
+    screen.getByText("spawn_session_kandev");
+    screen.getByText(/tasks you create yourself are not affected/i);
+    screen.getByRole("button", { name: "About affected Kandev MCP tools" });
     expect(screen.getByRole("radio", { name: CURRENT_TASK_LABEL }).getAttribute(ARIA_CHECKED)).toBe(
       "true",
     );
@@ -58,6 +67,16 @@ describe("MCPTaskAgentProfileDefaultSettings", () => {
     screen.getByText(/may reuse a more expensive profile/i);
     screen.getByText(/workflow profile when one is set/i);
     screen.getByText(/keep agent-created tasks on your standard workspace model/i);
+  });
+
+  it("explains why session creation does not use this preference", async () => {
+    renderSettings();
+
+    fireEvent.focus(screen.getByRole("button", { name: "About affected Kandev MCP tools" }));
+
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip.textContent).toMatch(/create_task_kandev creates a separate task/i);
+    expect(tooltip.textContent).toMatch(/spawn_session_kandev adds a session to the current task/i);
   });
 
   it("keeps the choice local until Save changes is pressed", async () => {

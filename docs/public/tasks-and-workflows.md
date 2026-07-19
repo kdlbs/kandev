@@ -70,12 +70,12 @@ Kandev remembers draft or recently used repository, branch, executor, and profil
 
 ### Choose the profile for tasks created by agents
 
-Open **Settings → General → Task Actions → Profile for Tasks Created by Agents** to choose which profile Kandev uses when an agent creates another task without choosing a profile. This setting does not affect tasks you create yourself:
+Open **Settings → General → Task Actions → Profile for Tasks Created by Agents** to choose which agent profile Kandev assigns when an agent calls a Kandev MCP tool that creates a task without choosing `agent_profile_id`. The profile determines the agent, model, and setup used when the new task starts:
 
 - **Current task profile** is useful when follow-up work needs the same model and agent setup as the task creating it. It preserves compatibility with existing behavior and is selected by default. Kandev first inherits the parent or calling task profile, then checks the workflow step or workflow default, and finally checks the target workspace's **Default Agent Profile**. This option can unintentionally reuse a more expensive profile.
 - **Workspace default profile** is useful when you want agent-created tasks to use your standard workspace model and cost policy. It skips the parent and calling task profiles. Kandev still uses the workflow step or workflow default first, then the **Default Agent Profile** from the workspace that will own the new task.
 
-Select an option, then choose **Save changes**. This preference applies only to tasks and subtasks created through `create_task_kandev` when the call omits `agent_profile_id`. It applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. An explicit `agent_profile_id` in the tool call always overrides the saved preference. If **Workspace default profile** is selected and neither the workflow nor the target workspace supplies a profile, task creation fails without creating the task, including when `start_agent=false`.
+Select an option, then choose **Save changes**. The only affected Kandev MCP tool is `create_task_kandev`; the preference covers both new tasks and subtasks when the call omits `agent_profile_id`. It does not affect `spawn_session_kandev`, because that tool adds a session to the current task instead of creating a task. It also does not affect tasks you create in the UI. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. An explicit `agent_profile_id` in the tool call always overrides the saved preference. If **Workspace default profile** is selected and neither the workflow nor the target workspace supplies a profile, task creation fails without creating the task, including when `start_agent=false`.
 
 ### Multiple repositories
 

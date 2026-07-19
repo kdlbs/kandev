@@ -28,6 +28,15 @@ test.describe("MCP-created task agent profile default", () => {
     });
 
     await testPage.goto("/settings/general/task-actions");
+    await expect(testPage.getByText("create_task_kandev", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("spawn_session_kandev", { exact: true })).toBeVisible();
+    const mcpToolHelp = testPage.getByRole("button", {
+      name: "About affected Kandev MCP tools",
+    });
+    await mcpToolHelp.hover();
+    await expect(testPage.getByRole("tooltip")).toContainText(
+      "spawn_session_kandev adds a session to the current task",
+    );
     const workspaceDefault = testPage.getByRole("radio", {
       name: "Workspace default profile",
     });
