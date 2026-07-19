@@ -7,6 +7,7 @@ import {
   IconLoader,
   IconLoader2,
   IconMessageQuestion,
+  IconShieldQuestion,
 } from "@tabler/icons-react";
 import {
   getSessionStateIcon,
@@ -36,6 +37,48 @@ describe("getTaskStateIcon", () => {
 
   it("keeps review task state as the review check without pending clarification", () => {
     expect(iconType(getTaskStateIcon("REVIEW", undefined, false))).toBe(IconCheck);
+  });
+});
+
+describe("getTaskStateIcon — waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+  //  clarification / plain waiting → message-question (needs me: answer)
+  //  permission                    → shield-question (needs me: approve/deny)
+  //  Both must read apart from done AND from both running affordances by SHAPE.
+  it("uses the shield-question icon for a pending permission prompt", () => {
+    expect(iconType(getTaskStateIcon("REVIEW", undefined, false, null, true))).toBe(
+      IconShieldQuestion,
+    );
+  });
+
+  it("lets a pending permission win over a coarse WAITING_FOR_INPUT state (not masked)", () => {
+    // A permission prompt often coincides with the coarse WAITING_FOR_INPUT
+    // state; the shield must not be hidden behind the generic question icon.
+    expect(iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, false, null, true))).toBe(
+      IconShieldQuestion,
+    );
+  });
+
+  it("distinguishes both waiting variants from done and from both running affordances by SHAPE", () => {
+    const clarification = iconType(getTaskStateIcon("REVIEW", undefined, true));
+    const permission = iconType(getTaskStateIcon("REVIEW", undefined, false, null, true));
+    const generating = iconType(getTaskStateIcon("IN_PROGRESS", undefined, false, "generating"));
+    const background = iconType(getTaskStateIcon("IN_PROGRESS", undefined, false, "background"));
+    const done = iconType(getTaskStateIcon("COMPLETED", undefined, false, null));
+    for (const running of [generating, background]) {
+      expect(clarification).not.toBe(running);
+      expect(permission).not.toBe(running);
+    }
+    expect(clarification).not.toBe(done);
+    expect(permission).not.toBe(done);
+    expect(clarification).not.toBe(permission);
+  });
+
+  it("keeps foreground activity ahead of the waiting variants (a generating task still generates)", () => {
+    // A genuinely generating/background task is not "waiting on me"; activity
+    // wins so a stale pending flag can't paint a needs-me icon over live work.
+    expect(
+      iconType(getTaskStateIcon("WAITING_FOR_INPUT", undefined, true, "generating", true)),
+    ).toBe(IconLoader2);
   });
 });
 
@@ -162,6 +205,51 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
     expect(background).not.toBe(generating);
     expect(background).not.toBe(done);
     expect(generating).not.toBe(done);
+  });
+});
+
+describe("getSessionStateIcon — waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+  it("reads a plain WAITING_FOR_INPUT session as the needs-me question, not a muted clock", () => {
+    // Matches the sidebar: a finished turn awaiting a reply reads as "needs me".
+    expect(iconType(getSessionStateIcon("WAITING_FOR_INPUT"))).toBe(IconMessageQuestion);
+  });
+
+  it("uses the question icon for a pending clarification even while coarsely RUNNING", () => {
+    // The agent stopped mid-turn to ask; the coarse state can still be RUNNING.
+    expect(iconType(getSessionStateIcon("RUNNING", undefined, null, true, false))).toBe(
+      IconMessageQuestion,
+    );
+  });
+
+  it("uses the shield icon for a pending permission, taking precedence over clarification", () => {
+    expect(iconType(getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, true, true))).toBe(
+      IconShieldQuestion,
+    );
+  });
+
+  it("keeps background-running ahead of a waiting flag (still working in background)", () => {
+    // Session-level background is the emerald IconLoader2 spinner (ADR-0046),
+    // distinct from the task-level violet IconLoader.
+    expect(iconType(getSessionStateIcon("RUNNING", undefined, "background", true, false))).toBe(
+      IconLoader2,
+    );
+  });
+
+  it("distinguishes both waiting variants from done and from both running affordances by SHAPE", () => {
+    const clarification = iconType(getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, true));
+    const permission = iconType(
+      getSessionStateIcon("WAITING_FOR_INPUT", undefined, null, false, true),
+    );
+    const generating = iconType(getSessionStateIcon("RUNNING", undefined, "generating"));
+    const background = iconType(getSessionStateIcon("RUNNING", undefined, "background"));
+    const done = iconType(getSessionStateIcon("COMPLETED"));
+    for (const running of [generating, background]) {
+      expect(clarification).not.toBe(running);
+      expect(permission).not.toBe(running);
+    }
+    expect(clarification).not.toBe(done);
+    expect(permission).not.toBe(done);
+    expect(clarification).not.toBe(permission);
   });
 });
 
