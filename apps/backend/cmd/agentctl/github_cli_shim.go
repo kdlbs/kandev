@@ -60,6 +60,7 @@ func runGitHubCLIShim(
 	if err != nil {
 		return err
 	}
+	defer func() { _ = os.RemoveAll(configDir) }()
 	childEnv := replaceEnvironment(environ(), map[string]string{
 		"GH_TOKEN":      credential.Password,
 		"GH_CONFIG_DIR": configDir,
@@ -198,11 +199,12 @@ func repositoryFromHostAndPath(host, path, raw string) (*githubCLIRepository, er
 
 func isolatedGitHubCLIConfigDir(taskID, sessionID string) (string, error) {
 	digest := sha256.Sum256([]byte(taskID + "\x00" + sessionID))
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("kandev-gh-%x", digest[:8]))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	dir, err := os.MkdirTemp(os.TempDir(), fmt.Sprintf("kandev-gh-%x-", digest[:8]))
+	if err != nil {
 		return "", fmt.Errorf("create isolated gh config directory: %w", err)
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
 		return "", fmt.Errorf("secure isolated gh config directory: %w", err)
 	}
 	return dir, nil

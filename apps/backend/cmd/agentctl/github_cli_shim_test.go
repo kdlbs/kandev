@@ -75,7 +75,11 @@ func TestGitHubCLIShimRefreshesAndIsolatesEachInvocation(t *testing.T) {
 			t.Errorf("args = %v", args)
 		}
 		childTokens = append(childTokens, envValue(childEnv, "GH_TOKEN"))
-		configDirs = append(configDirs, envValue(childEnv, "GH_CONFIG_DIR"))
+		configDir := envValue(childEnv, "GH_CONFIG_DIR")
+		configDirs = append(configDirs, configDir)
+		if _, err := os.Stat(configDir); err != nil {
+			t.Errorf("GH_CONFIG_DIR was not available to gh: %v", err)
+		}
 		if got := envValue(childEnv, "GITHUB_TOKEN"); got != "" {
 			t.Errorf("child GITHUB_TOKEN = %q, want removed", got)
 		}
@@ -99,8 +103,13 @@ func TestGitHubCLIShimRefreshesAndIsolatesEachInvocation(t *testing.T) {
 	if got, want := strings.Join(childTokens, ","), "fresh-token-1,fresh-token-2"; got != want {
 		t.Fatalf("child GH_TOKEN values = %q, want %q", got, want)
 	}
-	if configDirs[0] == "" || configDirs[0] != configDirs[1] {
-		t.Fatalf("GH_CONFIG_DIR values = %v, want stable isolated directory", configDirs)
+	if configDirs[0] == "" || configDirs[0] == configDirs[1] {
+		t.Fatalf("GH_CONFIG_DIR values = %v, want unique isolated directories", configDirs)
+	}
+	for _, configDir := range configDirs {
+		if _, err := os.Stat(configDir); !os.IsNotExist(err) {
+			t.Fatalf("GH_CONFIG_DIR %q remains after invocation", configDir)
+		}
 	}
 }
 

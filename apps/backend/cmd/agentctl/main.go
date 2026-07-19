@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/githubauth"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -118,7 +119,7 @@ func runGitHubUtilityCommand() (int, bool) {
 }
 
 func prepareGitHubCLIShim() (func(), error) {
-	if os.Getenv(envGitHubCredentialBrokerURL) == "" {
+	if os.Getenv(githubauth.CredentialBrokerURLEnv) == "" {
 		return func() {}, nil
 	}
 	executable, err := os.Executable()
