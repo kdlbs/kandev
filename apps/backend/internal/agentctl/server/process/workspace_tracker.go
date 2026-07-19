@@ -14,10 +14,15 @@ import (
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
 // DefaultGitPollInterval is the default interval for polling git status
 const DefaultGitPollInterval = 3 * time.Second
+
+// workspaceGitStatusObserveTimeout bounds a shared live status observation so
+// a wedged Git process cannot retain the tracker flight indefinitely.
+const workspaceGitStatusObserveTimeout = 60 * time.Second
 
 // fileStatus constants for FileInfo.Status values.
 const (
@@ -84,6 +89,16 @@ type WorkspaceTracker struct {
 	// updateMu prevents concurrent updateGitStatus calls from the two polling loops.
 	// Polling loops use TryLock (skip if busy); RefreshGitStatus uses Lock (always completes).
 	updateMu sync.Mutex
+
+	// gitStatusObserver is the expensive live repository observation. Keeping it
+	// as a dependency makes the concurrency contract deterministic to test while
+	// production uses computeGitStatus.
+	gitStatusObserver       func(context.Context) (types.GitStatusUpdate, error)
+	gitStatusObserveTimeout time.Duration
+	gitStatusGroup          singleflight.Group
+	gitStatusObserveMu      sync.Mutex
+	gitStatusObserveWG      sync.WaitGroup
+	gitStatusWaiterJoined   func() // Optional test synchronization hook; nil in production.
 
 	// Control
 	stopCh          chan struct{}
@@ -211,7 +226,7 @@ func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Log
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &WorkspaceTracker{
+	tracker := &WorkspaceTracker{
 		workDir:                    resolvedWorkDir,
 		gitIndexPath:               gitIndexPath,
 		repositoryName:             repositoryName,
@@ -227,15 +242,18 @@ func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Log
 		// about to be used by someone, historically). Retained-task CPU
 		// savings still apply because those instances eventually receive a
 		// slow or paused mode push.
-		pollMode:           PollModeFast,
-		monitorModeChanged: make(chan struct{}, 1),
-		gitPollModeChanged: make(chan struct{}, 1),
-		stopCh:             make(chan struct{}),
-		initialScanDone:    make(chan struct{}),
-		tickDone:           make(chan struct{}, 1),
-		cancelCtx:          ctx,
-		cancelFunc:         cancel,
+		pollMode:                PollModeFast,
+		monitorModeChanged:      make(chan struct{}, 1),
+		gitPollModeChanged:      make(chan struct{}, 1),
+		stopCh:                  make(chan struct{}),
+		initialScanDone:         make(chan struct{}),
+		tickDone:                make(chan struct{}, 1),
+		cancelCtx:               ctx,
+		cancelFunc:              cancel,
+		gitStatusObserveTimeout: workspaceGitStatusObserveTimeout,
 	}
+	tracker.gitStatusObserver = tracker.computeGitStatus
+	return tracker
 }
 
 // preferGitRepoChildIfRootIsBare returns workDir unchanged when it's already a
@@ -377,12 +395,19 @@ const stopTimeout = 5 * time.Second
 // up to 5 seconds for goroutines to exit before proceeding.
 func (wt *WorkspaceTracker) Stop() {
 	wt.stopOnce.Do(func() {
-		wt.cancelFunc() // Kill in-flight git commands immediately
+		// Synchronize cancellation with shared-observation admission. Once this
+		// lock is released, no observation can Add to gitStatusObserveWG.
+		wt.gitStatusObserveMu.Lock()
+		if wt.cancelFunc != nil {
+			wt.cancelFunc() // Kill in-flight git commands immediately
+		}
+		wt.gitStatusObserveMu.Unlock()
 		close(wt.stopCh)
 
 		done := make(chan struct{})
 		go func() {
 			wt.wg.Wait()
+			wt.gitStatusObserveWG.Wait()
 			close(done)
 		}()
 		select {

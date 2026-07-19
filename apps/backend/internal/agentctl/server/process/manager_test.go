@@ -262,7 +262,7 @@ func TestStartOneShotRestoresTempEnvAfterStrip(t *testing.T) {
 		m.workspaceTracker.Stop()
 	})
 
-	wantDir := filepath.Join(os.TempDir(), agentTempDirRoot, agentTempDirName("session-1", 0))
+	wantDir := filepath.Join(os.TempDir(), agentTempDirRoot, agentTempDirName("session-1", "", 0))
 	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
 		if got := lookupEnvValue(m.adapterCfg.OneShotConfig.Env, key); got != wantDir {
 			t.Fatalf("OneShotConfig.Env %s = %q, want %q", key, got, wantDir)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -301,6 +302,55 @@ func TestVscodeManager_Start_Idempotent(t *testing.T) {
 	// Start should be a no-op when already installing
 	v.Start()
 	assert.Equal(t, VscodeStatusInstalling, v.Info().Status)
+}
+
+func TestVscodeManager_StopCancelsGenerationBeforeProcessCommit(t *testing.T) {
+	v := NewVscodeManager("code-server", t.TempDir(), "dark", nil, newTestLogger(t))
+	v.resolveBinaryFn = func(context.Context) (string, error) { return "/unused/code-server", nil }
+	v.allocatePortFn = func() (int, error) { return 43210, nil }
+	beforeStart := make(chan struct{})
+	releaseStart := make(chan struct{})
+	startCanceled := make(chan struct{})
+	v.beforeProcessStart = func() {
+		close(beforeStart)
+		<-releaseStart
+	}
+	v.afterStartCancel = func() { close(startCanceled) }
+
+	v.Start()
+	<-beforeStart
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- v.Stop(context.Background()) }()
+	<-startCanceled
+	select {
+	case err := <-stopDone:
+		t.Fatalf("Stop() returned before startup generation joined: %v", err)
+	default:
+	}
+
+	close(releaseStart)
+	require.NoError(t, <-stopDone)
+	require.Equal(t, VscodeStatusStopped, v.Info().Status)
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	require.Nil(t, v.cmd, "canceled generation committed a process")
+}
+
+func TestVscodeManager_StopReturnsLiveProcessGroupError(t *testing.T) {
+	v := NewVscodeManager("code-server", t.TempDir(), "dark", nil, newTestLogger(t))
+	done := make(chan struct{})
+	close(done)
+	v.status = VscodeStatusRunning
+	v.stopCh = make(chan struct{})
+	v.doneCh = done
+	v.cmd = &exec.Cmd{Process: &os.Process{Pid: 424245}}
+	v.groupAliveFn = func(int) bool { return true }
+	v.terminateGroupFn = func(int) error { return nil }
+	v.killGroupFn = func(int) error { return nil }
+	v.waitGroupExitFn = func(context.Context, int) bool { return false }
+
+	err := v.Stop(context.Background())
+	require.ErrorContains(t, err, "process group 424245 remains alive")
 }
 
 func TestVscodeInfo_JSON(t *testing.T) {

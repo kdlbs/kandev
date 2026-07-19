@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +14,30 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestInstanceInfoSynchronizesConcurrentStatusChanges(t *testing.T) {
+	inst := &Instance{ID: "instance-race", Status: "running"}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 1_000 {
+			inst.setStatus("stopping")
+			inst.setStatus("running")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 1_000 {
+			status := inst.Info().Status
+			if status != "running" && status != "stopping" {
+				t.Errorf("Info().Status = %q", status)
+				return
+			}
+		}
+	}()
+	wg.Wait()
+}
 
 func TestStopInstanceBoundsHTTPServerShutdown(t *testing.T) {
 	log := newTestLogger(t)
@@ -108,7 +133,7 @@ func TestStopHTTPServerReturnsCloseError(t *testing.T) {
 	require.True(t, server.closed)
 }
 
-func TestStopInstanceReleasesPortWhenHTTPServerCloseFails(t *testing.T) {
+func TestStopInstanceRetainsPortWhenHTTPServerCloseFails(t *testing.T) {
 	log := newTestLogger(t)
 	mgr := NewManager(&config.Config{
 		Ports:    config.PortConfig{Base: 12345, Max: 12345},
@@ -128,6 +153,7 @@ func TestStopInstanceReleasesPortWhenHTTPServerCloseFails(t *testing.T) {
 			shutdownErr: context.DeadlineExceeded,
 			closeErr:    closeErr,
 		},
+		manager: &fakeProcessManager{stopErr: cleanupOnlyError{err: errors.New("temp cleanup failed")}},
 	}
 
 	mgr.mu.Lock()
@@ -137,9 +163,50 @@ func TestStopInstanceReleasesPortWhenHTTPServerCloseFails(t *testing.T) {
 	err = mgr.StopInstance(context.Background(), inst.ID)
 	require.ErrorIs(t, err, closeErr)
 
+	_, err = mgr.portAlloc.Allocate("next-instance")
+	require.Error(t, err)
+}
+
+func TestStopInstanceReleasesPortAfterTempCleanupFailure(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 12345, Max: 12345},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+
+	port, err := mgr.portAlloc.Allocate("process-cleanup-failure")
+	require.NoError(t, err)
+	processErr := errors.New("agent temp cleanup failed")
+	procMgr := &fakeProcessManager{stopErr: cleanupOnlyError{err: processErr}}
+	server := &fakeHTTPServer{}
+	inst := &Instance{
+		ID:        "process-cleanup-failure",
+		Port:      port,
+		Status:    "running",
+		CreatedAt: time.Now(),
+		manager:   procMgr,
+		server:    server,
+	}
+	mgr.mu.Lock()
+	mgr.instances[inst.ID] = inst
+	mgr.mu.Unlock()
+
+	err = mgr.StopInstance(context.Background(), inst.ID)
+	require.ErrorIs(t, err, processErr)
+	require.True(t, procMgr.stopped)
+	require.True(t, server.shutdown)
+	_, ok := mgr.GetInstance(inst.ID)
+	require.True(t, ok, "cleanup-only failure must retain a retry tombstone")
 	reusedPort, err := mgr.portAlloc.Allocate("next-instance")
 	require.NoError(t, err)
 	require.Equal(t, port, reusedPort)
+
+	procMgr.stopErr = nil
+	require.NoError(t, mgr.StopInstance(context.Background(), inst.ID))
+	_, ok = mgr.GetInstance(inst.ID)
+	require.False(t, ok)
+	_, err = mgr.portAlloc.Allocate("third-instance")
+	require.Error(t, err, "retry must not release a port that was reassigned")
 }
 
 func TestStopHTTPServerTreatsCanceledShutdownAsStoppedAfterClose(t *testing.T) {
@@ -159,14 +226,38 @@ func TestStopHTTPServerTreatsCanceledShutdownAsStoppedAfterClose(t *testing.T) {
 type fakeHTTPServer struct {
 	shutdownErr error
 	closeErr    error
+	shutdown    bool
 	closed      bool
 }
 
 func (s *fakeHTTPServer) Shutdown(context.Context) error {
+	s.shutdown = true
 	return s.shutdownErr
 }
 
 func (s *fakeHTTPServer) Close() error {
 	s.closed = true
 	return s.closeErr
+}
+
+type fakeProcessManager struct {
+	stopErr error
+	stopped bool
+}
+
+type cleanupOnlyError struct {
+	err error
+}
+
+func (e cleanupOnlyError) Error() string { return e.err.Error() }
+func (e cleanupOnlyError) Unwrap() error { return e.err }
+func (e cleanupOnlyError) RetainInstanceResources() bool {
+	return false
+}
+
+func (m *fakeProcessManager) CloseAdmission() {}
+
+func (m *fakeProcessManager) StopForTeardown(context.Context) error {
+	m.stopped = true
+	return m.stopErr
 }

@@ -1,6 +1,6 @@
 # 0045: Install-wide storage maintenance uses typed ownership providers and quarantine
 
-**Status:** accepted
+**Status:** accepted (amended 2026-07-19)
 **Date:** 2026-07-14
 **Area:** backend, frontend, infra
 
@@ -44,6 +44,21 @@ pending archive job and restores a matching quarantined workspace when possible.
 does not delete historical archived-task worktree rows or branch metadata used by PR #1687's branch
 recovery.
 
+Agentctl session temporary roots are a separate lifecycle-owned resource. They remain beneath the
+operating system's temporary directory under a readable, collision-resistant digest of the raw
+session and instance identity so concurrent sessions have isolated sockets, compiler work files,
+and command scratch space without mixing ephemeral data into `KANDEV_HOME_DIR`. After agent, shell,
+VS Code, and workspace subprocesses are reaped during permanent instance teardown, agentctl deletes
+only that instance's validated owned root. A later session resume creates a replacement instance
+and does not depend on the prior instance's scratch. Session temp data is not quarantined because it
+is explicitly ephemeral and contains no task recovery state.
+
+Terminal instance teardown closes process admission before its ownership sweep. A failed HTTP
+shutdown or process-tree reap retains a stopping instance tombstone and its allocated port so a
+replacement cannot adopt unresolved runtime resources. A temporary-directory-only deletion failure
+is reported but does not retain the execution port. Ordinary agent stop/start remains restartable;
+the irreversible admission close belongs to instance teardown.
+
 ## Consequences
 
 - Operators can configure and inspect cleanup from Kandev without host cron or systemd overrides.
@@ -57,6 +72,8 @@ recovery.
   reclaimable bytes for the operator.
 - The existing Office GC package and startup wiring are removed or reduced to adapters over the
   System storage service to avoid two competing sweepers.
+- Session teardown reclaims its temporary storage immediately and independently of scheduled
+  maintenance, while path containment prevents removal of the shared temp root or sibling sessions.
 
 ## Alternatives Considered
 
@@ -73,3 +90,8 @@ recovery.
   failed-cleanup directories forever.
 - **Make systemd installation enable cleanup automatically.** Rejected because process supervision
   does not imply user consent for destructive host maintenance.
+- **Store session scratch data under `KANDEV_HOME_DIR`.** Rejected because it mixes transient
+  process data with persistent application state and makes backups, retention, and disk accounting
+  retain data that should disappear at teardown or reboot.
+- **Share one temporary directory across agent sessions.** Rejected because filenames, sockets, and
+  compiler work directories can collide and teardown cannot safely determine which files it owns.

@@ -2,9 +2,9 @@
 package process
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -50,15 +50,27 @@ type VscodeManager struct {
 	logger          *logger.Logger
 
 	cmd          *exec.Cmd
+	lifecycle    processLifecycleHandle
+	reapErr      error
 	resolvedPath string // resolved code-server binary path (set after startup)
 	status       VscodeStatus
 	err          string
 	message      string
 	mu           sync.Mutex
 	cancelStart  context.CancelFunc // cancels startAsync goroutine
+	startDone    chan struct{}      // closes when the current start generation exits
 	stopCh       chan struct{}
 	doneCh       chan struct{}
 	stopped      bool // guards stopCh against double-close
+
+	resolveBinaryFn    func(context.Context) (string, error)
+	allocatePortFn     func() (int, error)
+	beforeProcessStart func()
+	afterStartCancel   func()
+	groupAliveFn       func(int) bool
+	terminateGroupFn   func(int) error
+	killGroupFn        func(int) error
+	waitGroupExitFn    func(context.Context, int) bool
 }
 
 // NewVscodeManager creates a new VS Code process manager.
@@ -98,50 +110,107 @@ func (v *VscodeManager) Start() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	v.cancelStart = cancel
+	startDone := make(chan struct{})
+	v.startDone = startDone
 
-	go v.startAsync(ctx)
+	go v.startAsync(ctx, startDone)
 }
 
 // startAsync runs the full startup sequence in a background goroutine.
-func (v *VscodeManager) startAsync(ctx context.Context) {
+func (v *VscodeManager) startAsync(ctx context.Context, done chan struct{}) {
+	defer close(done)
 	// Write theme settings before starting
 	v.writeThemeSettings()
 
 	// Resolve the binary, auto-installing if needed (the slow part)
-	v.setMessage("Installing code-server (this may take a moment)...")
-	resolvedPath, err := tools.ResolveBinary(ctx, v.command, nil, v.installStrategy, v.logger)
-	if err != nil {
-		v.setError(fmt.Sprintf("code-server binary not available: %s", err))
+	if !v.commitStartState(ctx, done, func() {
+		v.message = "Installing code-server (this may take a moment)..."
+	}) {
 		return
 	}
-	v.mu.Lock()
-	v.resolvedPath = resolvedPath
-	v.mu.Unlock()
+	resolvedPath, err := v.resolveBinary(ctx)
+	if err != nil {
+		v.setStartError(ctx, done, fmt.Sprintf("code-server binary not available: %s", err))
+		return
+	}
+	if !v.commitStartState(ctx, done, func() { v.resolvedPath = resolvedPath }) {
+		return
+	}
 
 	// Allocate a random port via the OS to avoid collisions
 	// with other kandev instances or concurrent sessions.
-	port, err := allocatePort()
+	port, err := v.allocateStartupPort()
 	if err != nil {
-		v.setError(fmt.Sprintf("failed to allocate port: %s", err))
+		v.setStartError(ctx, done, fmt.Sprintf("failed to allocate port: %s", err))
+		return
+	}
+	if !v.commitStartState(ctx, done, func() {
+		v.port = port
+		v.status = VscodeStatusStarting
+		v.message = "Starting code-server..."
+	}) {
+		return
+	}
+	if v.beforeProcessStart != nil {
+		v.beforeProcessStart()
+	}
+	if ctx.Err() != nil {
+		return
+	}
+
+	if err := v.startProcess(ctx, done, resolvedPath); err != nil {
+		v.setStartError(ctx, done, fmt.Sprintf("code-server failed to start: %s", err))
+		return
+	}
+	if !v.commitStartState(ctx, done, func() {
+		v.status = VscodeStatusRunning
+		v.message = ""
+	}) {
 		return
 	}
 	v.mu.Lock()
-	v.port = port
-	v.mu.Unlock()
-
-	v.setStatus(VscodeStatusStarting)
-	v.setMessage("Starting code-server...")
-
-	if err := v.startProcess(ctx, resolvedPath); err != nil {
-		v.setError(fmt.Sprintf("code-server failed to start: %s", err))
-		return
+	pid := 0
+	startedPort := 0
+	if v.startDone == done && v.cmd != nil && v.cmd.Process != nil {
+		pid = v.cmd.Process.Pid
+		startedPort = v.port
 	}
-
-	v.setStatus(VscodeStatusRunning)
-	v.setMessage("")
+	v.mu.Unlock()
 	v.logger.Info("code-server started",
-		zap.Int("port", v.port),
-		zap.Int("pid", v.cmd.Process.Pid))
+		zap.Int("port", startedPort),
+		zap.Int("pid", pid))
+}
+
+func (v *VscodeManager) resolveBinary(ctx context.Context) (string, error) {
+	if v.resolveBinaryFn != nil {
+		return v.resolveBinaryFn(ctx)
+	}
+	return tools.ResolveBinary(ctx, v.command, nil, v.installStrategy, v.logger)
+}
+
+func (v *VscodeManager) allocateStartupPort() (int, error) {
+	if v.allocatePortFn != nil {
+		return v.allocatePortFn()
+	}
+	return allocatePort()
+}
+
+func (v *VscodeManager) commitStartState(ctx context.Context, done chan struct{}, commit func()) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if ctx.Err() != nil || v.startDone != done || v.status == VscodeStatusStopped {
+		return false
+	}
+	commit()
+	return true
+}
+
+func (v *VscodeManager) setStartError(ctx context.Context, done chan struct{}, message string) {
+	v.commitStartState(ctx, done, func() {
+		v.status = VscodeStatusError
+		v.err = message
+		v.message = ""
+	})
 }
 
 // allocatePort finds a free port using the OS.
@@ -156,7 +225,7 @@ func allocatePort() (int, error) {
 }
 
 // startProcess creates and starts the code-server subprocess.
-func (v *VscodeManager) startProcess(ctx context.Context, binaryPath string) error {
+func (v *VscodeManager) startProcess(ctx context.Context, generationDone chan struct{}, binaryPath string) error {
 	workDir := resolveExistingWorkDir(v.workDir, v.logger)
 	bindAddr := fmt.Sprintf("0.0.0.0:%d", v.port)
 	args := []string{
@@ -170,63 +239,69 @@ func (v *VscodeManager) startProcess(ctx context.Context, binaryPath string) err
 	args = append(args, workDir)
 
 	v.mu.Lock()
-	v.cmd = exec.Command(binaryPath, args...)
-	v.cmd.Dir = workDir
+	if ctx.Err() != nil || v.startDone != generationDone || v.status == VscodeStatusStopped {
+		v.mu.Unlock()
+		return context.Canceled
+	}
+	cmd := exec.Command(binaryPath, args...)
+	cmd.Dir = workDir
 	v.workDir = workDir
 	// Give code-server its own process group so Stop() can kill the entire
 	// process tree (main process + Node.js workers) without affecting agentctl.
-	setProcGroup(v.cmd)
+	setManagedProcGroup(cmd)
 
-	stderr, err := v.cmd.StderrPipe()
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		v.mu.Unlock()
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
-	if err := v.cmd.Start(); err != nil {
+	if err := cmd.Start(); err != nil {
 		v.mu.Unlock()
 		return fmt.Errorf("failed to start code-server: %w", err)
 	}
+	lifecycle, lifecycleErr := installProcessLifecycle(cmd)
+	if lifecycleErr != nil {
+		reapErr := killAndWaitStartedCommand(cmd)
+		v.mu.Unlock()
+		return errors.Join(fmt.Errorf("failed to install code-server process lifecycle: %w", lifecycleErr), reapErr)
+	}
 
+	doneCh := make(chan struct{})
+	v.cmd = cmd
+	v.lifecycle = lifecycle
+	v.reapErr = nil
 	v.stopCh = make(chan struct{})
-	v.doneCh = make(chan struct{})
+	v.doneCh = doneCh
 	v.mu.Unlock()
 
-	// Read stderr in background for logging
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			v.logger.Debug("code-server", zap.String("line", scanner.Text()))
-		}
-	}()
-
-	// Wait for process exit in background
-	pid := v.cmd.Process.Pid
-	go func() {
-		defer close(v.doneCh)
-		waitErr := v.cmd.Wait()
-
-		v.mu.Lock()
-		defer v.mu.Unlock()
-
-		if waitErr != nil && v.status != VscodeStatusStopped {
-			v.status = VscodeStatusError
-			v.err = waitErr.Error()
-			v.logger.Error("code-server exited with error",
-				zap.Int("pid", pid), zap.Error(waitErr))
-		} else {
-			v.status = VscodeStatusStopped
-			v.logger.Info("code-server exited", zap.Int("pid", pid))
-		}
-	}()
+	go v.readProcessStderr(stderr)
+	go v.monitorProcess(cmd, doneCh)
 
 	// Wait for code-server to become ready
 	if err := v.waitForReady(ctx); err != nil {
-		_ = v.Stop(ctx)
+		v.stopProcessAfterStartupFailure()
 		return fmt.Errorf("code-server failed to become ready: %w", err)
 	}
 
 	return nil
+}
+
+func (v *VscodeManager) stopProcessAfterStartupFailure() {
+	v.mu.Lock()
+	cmd := v.cmd
+	doneCh := v.doneCh
+	v.mu.Unlock()
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	_ = killProcessGroup(cmd.Process.Pid)
+	if doneCh != nil {
+		select {
+		case <-doneCh:
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func resolveExistingWorkDir(workDir string, log *logger.Logger) string {
@@ -299,89 +374,6 @@ func (v *VscodeManager) waitForReady(ctx context.Context) error {
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
-}
-
-// Stop stops the code-server process.
-func (v *VscodeManager) Stop(ctx context.Context) error {
-	v.mu.Lock()
-	if v.status == VscodeStatusStopped {
-		v.mu.Unlock()
-		return nil
-	}
-
-	v.logger.Info("stopping code-server")
-	v.status = VscodeStatusStopped
-
-	// Cancel any in-progress startAsync goroutine (e.g. slow binary download).
-	if v.cancelStart != nil {
-		v.cancelStart()
-		v.cancelStart = nil
-	}
-
-	if v.stopCh != nil && !v.stopped {
-		close(v.stopCh)
-		v.stopped = true
-	}
-
-	cmd := v.cmd
-	doneCh := v.doneCh
-	v.mu.Unlock()
-
-	if cmd != nil && cmd.Process != nil {
-		pid := cmd.Process.Pid
-		v.logger.Info("stopping code-server process group",
-			zap.Int("pid", pid), zap.Int("pgid", pid))
-		logChildProcesses(v.logger, pid)
-
-		// Phase 1: Graceful SIGTERM to the entire process group.
-		v.logger.Debug("code-server process group SIGTERM requested",
-			zap.Int("pgid", pid),
-			zap.String("reason", "stop_requested"))
-		if err := terminateProcessGroup(pid); err != nil {
-			v.logger.Warn("failed to send SIGTERM to code-server group",
-				zap.Int("pgid", pid), zap.Error(err))
-		}
-
-		// Phase 2: Wait for graceful exit, then escalate to SIGKILL.
-		if doneCh != nil {
-			select {
-			case <-doneCh:
-				v.logger.Info("code-server stopped gracefully", zap.Int("pid", pid))
-				return nil
-			case <-ctx.Done():
-				v.logger.Warn("context cancelled during SIGTERM wait, force killing",
-					zap.Int("pgid", pid))
-			case <-time.After(5 * time.Second):
-				v.logger.Warn("code-server did not exit after SIGTERM, force killing",
-					zap.Int("pgid", pid))
-			}
-
-			v.logger.Debug("code-server process group SIGKILL requested",
-				zap.Int("pgid", pid),
-				zap.String("reason", "grace_expired_or_context_canceled"))
-			if err := killProcessGroup(pid); err != nil {
-				v.logger.Warn("failed to force kill code-server group",
-					zap.Int("pgid", pid), zap.Error(err))
-			}
-			select {
-			case <-doneCh:
-			case <-ctx.Done():
-			case <-time.After(2 * time.Second):
-				v.logger.Error("code-server still alive after SIGKILL",
-					zap.Int("pid", pid))
-			}
-		}
-	} else if doneCh != nil {
-		// No process but doneCh exists (startup cancelled before process started)
-		select {
-		case <-doneCh:
-		case <-ctx.Done():
-		case <-time.After(2 * time.Second):
-		}
-	}
-
-	v.logger.Info("code-server stopped")
-	return nil
 }
 
 // WaitForRunning blocks until the code-server reaches "running" status.

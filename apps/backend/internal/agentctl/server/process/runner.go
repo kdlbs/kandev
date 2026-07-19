@@ -139,7 +139,11 @@ type commandProcess struct {
 	buffer     *ringBuffer   // Memory-bounded output storage
 	stopOnce   sync.Once     // Ensures stopSignal is only closed once
 	stopSignal chan struct{} // Signals output readers to exit before process termination
-	mu         sync.Mutex    // Protects info fields during updates
+	done       chan struct{} // Closed after cmd.Wait returns and lifecycle cleanup finishes
+	pgid       int
+	lifecycle  processLifecycleHandle
+	reapErr    error
+	mu         sync.Mutex // Protects info fields during updates
 }
 
 // ProcessRunner manages multiple background processes with output streaming.
@@ -167,8 +171,22 @@ type ProcessRunner struct {
 	workspaceTracker *WorkspaceTracker // WebSocket stream coordinator (can be nil)
 	bufferMaxBytes   int64             // Default output buffer size for new processes
 
-	mu        sync.RWMutex               // Protects processes map
-	processes map[string]*commandProcess // Active processes by ID
+	mu               sync.RWMutex               // Protects processes map
+	processes        map[string]*commandProcess // Active processes by ID
+	admission        sync.RWMutex
+	stopping         bool
+	groupAliveFn     func(int) bool
+	terminateGroupFn func(int) error
+	killGroupFn      func(int) error
+	waitGroupExitFn  func(context.Context, int) bool
+}
+
+// BeginStop closes process admission and waits for any in-flight spawn to
+// finish committing its process to the tracked set.
+func (r *ProcessRunner) BeginStop() {
+	r.admission.Lock()
+	r.stopping = true
+	r.admission.Unlock()
 }
 
 // NewProcessRunner creates a new process runner.
@@ -219,6 +237,11 @@ func NewProcessRunner(workspaceTracker *WorkspaceTracker, log *logger.Logger, bu
 //   - ProcessInfo with "running" status and unique process ID
 //   - Error if validation fails or process spawn fails
 func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*ProcessInfo, error) {
+	r.admission.RLock()
+	defer r.admission.RUnlock()
+	if r.stopping {
+		return nil, errManagerStopping
+	}
 	if req.SessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
@@ -237,7 +260,7 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 	}
 	cmd.Env = mergeEnv(req.Env)
 	// Create new process group for clean shutdown (allows killing entire subprocess tree)
-	setProcGroup(cmd)
+	setManagedProcGroup(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -269,6 +292,7 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 		cmd:        cmd,
 		buffer:     newRingBuffer(bufferMaxBytes),
 		stopSignal: make(chan struct{}),
+		done:       make(chan struct{}),
 	}
 
 	r.mu.Lock()
@@ -307,8 +331,29 @@ func (r *ProcessRunner) startAndActivate(proc *commandProcess, cmd *exec.Cmd, id
 		r.mu.Lock()
 		delete(r.processes, id)
 		r.mu.Unlock()
+		close(proc.done)
 		return fmt.Errorf("failed to start process: %w", err)
 	}
+	lifecycle, err := installProcessLifecycle(cmd)
+	if err != nil {
+		_ = stdout.Close()
+		_ = stderr.Close()
+		reapErr := killAndWaitStartedCommand(cmd)
+		proc.mu.Lock()
+		proc.info.Status = types.ProcessStatusFailed
+		proc.info.UpdatedAt = time.Now().UTC()
+		proc.mu.Unlock()
+		r.publishStatus(proc)
+		r.mu.Lock()
+		delete(r.processes, id)
+		r.mu.Unlock()
+		close(proc.done)
+		return errors.Join(fmt.Errorf("failed to install workspace process lifecycle: %w", err), reapErr)
+	}
+	proc.mu.Lock()
+	proc.pgid = cmd.Process.Pid
+	proc.lifecycle = lifecycle
+	proc.mu.Unlock()
 	proc.mu.Lock()
 	proc.info.Status = types.ProcessStatusRunning
 	proc.info.UpdatedAt = time.Now().UTC()
@@ -356,7 +401,10 @@ func (r *ProcessRunner) Stop(ctx context.Context, req StopProcessRequest) error 
 	if !ok {
 		return fmt.Errorf("process not found: %s", req.ProcessID)
 	}
+	return r.stopProcess(ctx, proc)
+}
 
+func (r *ProcessRunner) stopProcess(ctx context.Context, proc *commandProcess) error {
 	// Signal output readers to exit before attempting to terminate the process.
 	// This prevents goroutine leaks from blocked pipe reads.
 	proc.stopOnce.Do(func() {
@@ -368,7 +416,7 @@ func (r *ProcessRunner) Stop(ctx context.Context, req StopProcessRequest) error 
 		pid := proc.cmd.Process.Pid
 		info := proc.snapshot(false)
 		r.logger.Debug("workspace process stop requested",
-			zap.String("process_id", req.ProcessID),
+			zap.String("process_id", info.ID),
 			zap.Int("pid", pid),
 			zap.String("session_id", info.SessionID),
 			zap.String("kind", string(info.Kind)),
@@ -378,17 +426,19 @@ func (r *ProcessRunner) Stop(ctx context.Context, req StopProcessRequest) error 
 
 		// Phase 1: Graceful shutdown (SIGTERM on Unix, interrupt on Windows)
 		r.logger.Debug("workspace process interrupt requested",
-			zap.String("process_id", req.ProcessID),
+			zap.String("process_id", info.ID),
 			zap.Int("pid", pid),
 			zap.String("signal", fmt.Sprint(os.Interrupt)))
 		_ = proc.cmd.Process.Signal(os.Interrupt)
 
 		// Wait for graceful exit (2 seconds) or context cancellation
 		select {
+		case <-proc.done:
+			return r.ensureProcessGroupReaped(ctx, proc)
 		case <-ctx.Done():
 			// Context cancelled - force kill immediately
 			r.logger.Debug("workspace process group SIGKILL requested",
-				zap.String("process_id", req.ProcessID),
+				zap.String("process_id", info.ID),
 				zap.Int("pgid", pid),
 				zap.String("reason", "context_canceled"),
 				zap.Error(ctx.Err()))
@@ -396,7 +446,7 @@ func (r *ProcessRunner) Stop(ctx context.Context, req StopProcessRequest) error 
 		case <-time.After(2 * time.Second):
 			// Phase 2: Grace period expired - force kill entire process tree
 			r.logger.Debug("workspace process group SIGKILL requested",
-				zap.String("process_id", req.ProcessID),
+				zap.String("process_id", info.ID),
 				zap.Int("pgid", pid),
 				zap.String("reason", "grace_expired"))
 			_ = killProcessGroup(pid)
@@ -413,18 +463,45 @@ func (r *ProcessRunner) Stop(ctx context.Context, req StopProcessRequest) error 
 //
 // Typical usage: Shutdown cleanup when agentctl server is stopping.
 func (r *ProcessRunner) StopAll(ctx context.Context) error {
+	processes := r.snapshotProcesses()
+	return r.stopProcesses(ctx, processes)
+}
+
+// StopAllAndWait stops every tracked process and waits until each cmd.Wait
+// goroutine has reaped its process and removed it from runner state.
+func (r *ProcessRunner) StopAllAndWait(ctx context.Context) error {
+	processes := r.snapshotProcesses()
+	stopErr := r.stopProcesses(ctx, processes)
+	var waitErrs []error
+	for _, proc := range processes {
+		select {
+		case <-proc.done:
+			if err := r.ensureProcessGroupReaped(ctx, proc); err != nil {
+				waitErrs = append(waitErrs, err)
+			}
+		case <-ctx.Done():
+			waitErrs = append(waitErrs, fmt.Errorf("wait for workspace process %s: %w", proc.info.ID, ctx.Err()))
+		}
+	}
+	return errors.Join(stopErr, errors.Join(waitErrs...))
+}
+
+func (r *ProcessRunner) snapshotProcesses() []*commandProcess {
 	r.mu.RLock()
-	ids := make([]string, 0, len(r.processes))
-	for id := range r.processes {
-		ids = append(ids, id)
+	processes := make([]*commandProcess, 0, len(r.processes))
+	for _, proc := range r.processes {
+		processes = append(processes, proc)
 	}
 	r.mu.RUnlock()
+	return processes
+}
 
-	r.logger.Debug("workspace process stop all requested", zap.Int("processes", len(ids)))
+func (r *ProcessRunner) stopProcesses(ctx context.Context, processes []*commandProcess) error {
+	r.logger.Debug("workspace process stop all requested", zap.Int("processes", len(processes)))
 
 	var errs []error
-	for _, id := range ids {
-		if err := r.Stop(ctx, StopProcessRequest{ProcessID: id}); err != nil {
+	for _, proc := range processes {
+		if err := r.stopProcess(ctx, proc); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -535,6 +612,7 @@ func (r *ProcessRunner) readOutput(proc *commandProcess, reader io.ReadCloser, s
 //   - wait() is the sole authority for final status updates
 //   - Cleanup happens after a delay to allow polling
 func (r *ProcessRunner) wait(proc *commandProcess) {
+	defer close(proc.done)
 	err := proc.cmd.Wait()
 	exitCode := 0
 	status := types.ProcessStatusExited
@@ -566,11 +644,73 @@ func (r *ProcessRunner) wait(proc *commandProcess) {
 	// Publish final status to WebSocket clients
 	r.publishStatus(proc)
 
-	// Remove from tracking map - process is no longer queryable
-	// Output buffer is lost after this point (not persisted)
+	if err := r.ensureProcessGroupReaped(context.Background(), proc); err != nil {
+		proc.mu.Lock()
+		proc.reapErr = err
+		proc.mu.Unlock()
+	}
+}
+
+func (r *ProcessRunner) ensureProcessGroupReaped(ctx context.Context, proc *commandProcess) error {
+	proc.mu.Lock()
+	pgid := proc.pgid
+	lifecycle := proc.lifecycle
+	proc.mu.Unlock()
+	if err := reapProcessLifecycle(lifecycle); err != nil {
+		return fmt.Errorf("reap workspace process job: %w", err)
+	}
+	if pgid != 0 && r.processGroupAlive(pgid) {
+		_ = r.terminateProcessGroup(pgid)
+		waitCtx, cancel := context.WithTimeout(ctx, processGroupTerminateGrace)
+		stopped := r.waitForProcessGroupExit(waitCtx, pgid)
+		cancel()
+		if !stopped {
+			_ = r.killProcessGroup(pgid)
+			killCtx, killCancel := context.WithTimeout(context.Background(), processGroupTerminateGrace)
+			stopped = r.waitForProcessGroupExit(killCtx, pgid)
+			killCancel()
+		}
+		if !stopped {
+			return fmt.Errorf("workspace process group %d remains alive", pgid)
+		}
+	}
+	proc.mu.Lock()
+	proc.reapErr = nil
+	proc.mu.Unlock()
 	r.mu.Lock()
-	delete(r.processes, proc.info.ID)
+	if r.processes[proc.info.ID] == proc {
+		delete(r.processes, proc.info.ID)
+	}
 	r.mu.Unlock()
+	return nil
+}
+
+func (r *ProcessRunner) processGroupAlive(pid int) bool {
+	if r.groupAliveFn != nil {
+		return r.groupAliveFn(pid)
+	}
+	return processGroupAlive(pid)
+}
+
+func (r *ProcessRunner) terminateProcessGroup(pid int) error {
+	if r.terminateGroupFn != nil {
+		return r.terminateGroupFn(pid)
+	}
+	return terminateProcessGroup(pid)
+}
+
+func (r *ProcessRunner) killProcessGroup(pid int) error {
+	if r.killGroupFn != nil {
+		return r.killGroupFn(pid)
+	}
+	return killProcessGroup(pid)
+}
+
+func (r *ProcessRunner) waitForProcessGroupExit(ctx context.Context, pid int) bool {
+	if r.waitGroupExitFn != nil {
+		return r.waitGroupExitFn(ctx, pid)
+	}
+	return waitForProcessGroupExit(ctx, pid)
 }
 
 func (r *ProcessRunner) publishOutput(proc *commandProcess, chunk ProcessOutputChunk) {

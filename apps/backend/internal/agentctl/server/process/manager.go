@@ -4,6 +4,7 @@ package process
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -88,14 +89,15 @@ type Manager struct {
 	logger *logger.Logger
 
 	// Process state
-	cmd              *exec.Cmd
-	processLifecycle processLifecycleHandle
-	stdin            io.WriteCloser
-	stdout           io.ReadCloser
-	stderr           io.ReadCloser
-	status           atomic.Value // Status
-	exitCode         atomic.Int32
-	exitErr          atomic.Value // error
+	cmd                *exec.Cmd
+	processLifecycle   processLifecycleHandle
+	processLifecycleMu sync.Mutex
+	stdin              io.WriteCloser
+	stdout             io.ReadCloser
+	stderr             io.ReadCloser
+	status             atomic.Value // Status
+	exitCode           atomic.Int32
+	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
 	stderrBuffer []string
@@ -181,12 +183,93 @@ type Manager struct {
 	// Final command string (full command with all adapter args)
 	finalCommand string
 
+	// agentTempRoot and agentTempDir record the exact temporary directory
+	// created for this manager. The retained Root keeps cleanup anchored to the
+	// directory opened at creation even if its pathname is later replaced.
+	agentTempRoot       string
+	agentTempDir        string
+	agentTempChild      string
+	agentTempRootHandle *os.Root
+
 	// Synchronization
-	mu      sync.RWMutex
-	wg      sync.WaitGroup
-	stopCh  chan struct{}
-	doneCh  chan struct{}
-	startMu sync.Mutex
+	mu               sync.RWMutex
+	wg               sync.WaitGroup
+	stopCh           chan struct{}
+	doneCh           chan struct{}
+	startMu          sync.Mutex
+	admissionMu      sync.Mutex
+	admissionCount   int
+	admissionDrained chan struct{}
+	stopping         bool
+	mainReapPending  atomic.Bool
+	groupAliveFn     func(int) bool
+	terminateGroupFn func(int) error
+	killGroupFn      func(int) error
+	waitGroupExitFn  func(context.Context, int) bool
+	managerWaitFn    func(context.Context, <-chan struct{}, time.Duration) bool
+}
+
+var errManagerStopping = errors.New("process manager is stopping")
+
+func (m *Manager) admitStart() (func(), error) {
+	m.admissionMu.Lock()
+	if m.stopping {
+		m.admissionMu.Unlock()
+		return nil, errManagerStopping
+	}
+	if m.admissionCount == 0 {
+		m.admissionDrained = make(chan struct{})
+	}
+	m.admissionCount++
+	m.admissionMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			m.admissionMu.Lock()
+			m.admissionCount--
+			if m.admissionCount == 0 {
+				close(m.admissionDrained)
+			}
+			m.admissionMu.Unlock()
+		})
+	}, nil
+}
+
+// CloseAdmission rejects new process owners without waiting for in-flight
+// handlers. Instance teardown calls it before shutting down HTTP.
+func (m *Manager) CloseAdmission() {
+	m.admissionMu.Lock()
+	m.stopping = true
+	m.admissionMu.Unlock()
+	if m.processRunner != nil {
+		m.processRunner.BeginStop()
+	}
+	if m.shellMgr != nil {
+		m.shellMgr.BeginStop()
+	}
+}
+
+// WaitForAdmission waits for starts admitted before CloseAdmission to finish.
+func (m *Manager) WaitForAdmission(ctx context.Context) error {
+	m.admissionMu.Lock()
+	if m.admissionCount == 0 {
+		m.admissionMu.Unlock()
+		return nil
+	}
+	drained := m.admissionDrained
+	m.admissionMu.Unlock()
+	select {
+	case <-drained:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// BeginStop closes process admission and drains starts already in flight.
+func (m *Manager) BeginStop() {
+	m.CloseAdmission()
+	_ = m.WaitForAdmission(context.Background())
 }
 
 // NewManager creates a new process manager
@@ -509,6 +592,11 @@ func (m *Manager) refreshTrackersDetached(root *WorkspaceTracker, trackers []*Wo
 
 // StartProcess runs a script/process with isolated stdout/stderr.
 func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*ProcessInfo, error) {
+	release, err := m.admitStart()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if m.processRunner == nil {
 		return nil, fmt.Errorf("process runner not available")
 	}
@@ -692,6 +780,11 @@ func (m *Manager) JoinRepoPath(subpath, path string) (string, error) {
 func (m *Manager) Start(ctx context.Context) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
+	release, err := m.admitStart()
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	if m.Status() == StatusRunning || m.Status() == StatusStarting {
 		return fmt.Errorf("agent is already running")
@@ -748,23 +841,29 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	processLifecycle, err := installProcessLifecycle(m.cmd)
 	if err != nil {
-		m.logger.Warn("failed to install agent process lifecycle; falling back to process-tree cleanup",
-			zap.Error(err))
-	} else {
-		m.processLifecycle = processLifecycle
+		reapErr := killAndWaitStartedCommand(m.cmd)
+		m.status.Store(StatusError)
+		return errors.Join(fmt.Errorf("failed to install agent process lifecycle: %w", err), reapErr)
 	}
+	m.processLifecycle = processLifecycle
 
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
 
 	// Connect adapter to the process stdin/stdout pipes
 	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
-		releaseProcessLifecycle(m.processLifecycle)
-		m.processLifecycle = processLifecycleHandle{}
-		_ = m.cmd.Process.Kill()
-		_ = m.cmd.Wait()
+		reapErr, owned := m.reapMainProcessLifecycle()
+		switch {
+		case !owned:
+			reapErr = killAndWaitStartedCommand(m.cmd)
+		case reapErr != nil:
+			fallbackErr := killAndWaitStartedCommand(m.cmd)
+			reapErr = errors.Join(reapErr, fallbackErr)
+		default:
+			reapErr = killAndWaitStartedCommand(m.cmd)
+		}
 		m.status.Store(StatusError)
-		return fmt.Errorf("failed to connect adapter: %w", err)
+		return errors.Join(fmt.Errorf("failed to connect adapter: %w", err), reapErr)
 	}
 
 	// Start stderr reader and exit waiter
@@ -999,23 +1098,117 @@ func formatEnvEntrySizes(entries []envEntrySize) string {
 }
 
 func (m *Manager) ensureAgentTempEnv() error {
-	dir := filepath.Join(os.TempDir(), agentTempDirRoot, agentTempDirName(m.cfg.SessionID, m.cfg.Port))
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	root := filepath.Join(os.TempDir(), agentTempDirRoot)
+	child := agentTempDirName(m.cfg.SessionID, m.cfg.InstanceID, m.cfg.Port)
+	dir := filepath.Join(root, child)
+	if m.agentTempRootHandle != nil {
+		if m.agentTempRoot == root && m.agentTempDir == dir && m.agentTempChild == child {
+			for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+				m.cfg.AgentEnv = upsertEnvValue(m.cfg.AgentEnv, key, dir)
+			}
+			return nil
+		}
+		return fmt.Errorf("agent temp ownership already initialized for %q", m.agentTempDir)
+	}
+	rootHandle, err := openOwnedTempRoot(root)
+	if err != nil {
+		return err
+	}
+	if err := ensureOwnedTempChild(rootHandle, child); err != nil {
+		_ = rootHandle.Close()
 		return fmt.Errorf("failed to create agent temp dir: %w", err)
 	}
+	m.agentTempRoot = root
+	m.agentTempDir = dir
+	m.agentTempChild = child
+	m.agentTempRootHandle = rootHandle
 	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
 		m.cfg.AgentEnv = upsertEnvValue(m.cfg.AgentEnv, key, dir)
 	}
 	return nil
 }
 
-func agentTempDirName(sessionID string, port int) string {
+func openOwnedTempRoot(path string) (*os.Root, error) {
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return nil, fmt.Errorf("failed to create agent temp root %q: %w", path, err)
+	}
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inspect agent temp root %q: %w", path, err)
+	}
+	if pathInfo.Mode()&os.ModeSymlink != 0 || !pathInfo.IsDir() {
+		return nil, fmt.Errorf("unsafe agent temp root %q: expected a directory, not a symlink", path)
+	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open agent temp root %q: %w", path, err)
+	}
+	openedInfo, err := root.Stat(".")
+	if err != nil || !os.SameFile(pathInfo, openedInfo) {
+		_ = root.Close()
+		return nil, fmt.Errorf("unsafe agent temp root %q: path changed while opening", path)
+	}
+	if err := root.Chmod(".", 0o700); err != nil {
+		_ = root.Close()
+		return nil, fmt.Errorf("failed to secure agent temp root %q: %w", path, err)
+	}
+	return root, nil
+}
+
+func ensureOwnedTempChild(root *os.Root, name string) error {
+	if err := root.Mkdir(name, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	info, err := root.Lstat(name)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("unsafe agent temp child %q: expected a directory, not a symlink", name)
+	}
+	return root.Chmod(name, 0o700)
+}
+
+func (m *Manager) cleanupAgentTempDir() error {
+	root := filepath.Clean(m.agentTempRoot)
+	target := filepath.Clean(m.agentTempDir)
+	if m.agentTempRoot == "" && m.agentTempDir == "" {
+		return nil
+	}
+	if m.agentTempRoot == "" || m.agentTempDir == "" || target == root {
+		return fmt.Errorf("refusing to clean invalid agent temp dir %q under root %q", m.agentTempDir, m.agentTempRoot)
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("refusing to clean agent temp dir outside root: target %q root %q", m.agentTempDir, m.agentTempRoot)
+	}
+	if rel != m.agentTempChild || strings.ContainsRune(rel, filepath.Separator) || m.agentTempRootHandle == nil {
+		return fmt.Errorf("refusing to clean unowned agent temp dir %q under root %q", m.agentTempDir, m.agentTempRoot)
+	}
+	if err := m.agentTempRootHandle.RemoveAll(rel); err != nil {
+		return fmt.Errorf("failed to remove agent temp dir %q: %w", target, err)
+	}
+	closeErr := m.agentTempRootHandle.Close()
+	m.agentTempRoot = ""
+	m.agentTempDir = ""
+	m.agentTempChild = ""
+	m.agentTempRootHandle = nil
+	if closeErr != nil {
+		return fmt.Errorf("failed to close agent temp root %q: %w", root, closeErr)
+	}
+	return nil
+}
+
+func agentTempDirName(sessionID, instanceID string, port int) string {
 	name := strings.TrimSpace(sessionID)
+	if name == "" {
+		name = strings.TrimSpace(instanceID)
+	}
 	if name == "" && port > 0 {
 		name = fmt.Sprintf("port-%d", port)
 	}
 	if name == "" {
-		return "default"
+		name = "default"
 	}
 
 	var b strings.Builder
@@ -1028,9 +1221,14 @@ func agentTempDirName(sessionID string, port int) string {
 	}
 	cleaned := strings.Trim(b.String(), "._-")
 	if cleaned == "" {
-		return "default"
+		cleaned = "default"
 	}
-	return cleaned
+	if len(cleaned) > 40 {
+		cleaned = cleaned[:40]
+	}
+	identity := fmt.Sprintf("%d:%s|%d:%s|%d", len(sessionID), sessionID, len(instanceID), instanceID, port)
+	digest := sha256.Sum256([]byte(identity))
+	return fmt.Sprintf("%s-%x", cleaned, digest[:12])
 }
 
 func isAgentTempDirRune(r rune) bool {
@@ -1256,6 +1454,20 @@ func (m *Manager) GetSessionID() string {
 
 // Stop stops the agent process
 func (m *Manager) Stop(ctx context.Context) error {
+	return m.stop(ctx, false)
+}
+
+// StopForTeardown permanently closes process admission, drains prior owners,
+// and removes the manager's temp directory after every owned process is reaped.
+func (m *Manager) StopForTeardown(ctx context.Context) error {
+	m.CloseAdmission()
+	if err := m.WaitForAdmission(ctx); err != nil {
+		return fmt.Errorf("wait for process admission to drain: %w", err)
+	}
+	return m.stop(ctx, true)
+}
+
+func (m *Manager) stop(ctx context.Context, terminalStop bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1272,6 +1484,21 @@ func (m *Manager) Stop(ctx context.Context) error {
 		m.logger.Info("Stop called but already stopped/stopping",
 			zap.String("status", string(status)),
 			zap.Int("pid", m.agentPID()))
+		if status == StatusStopped {
+			if err := m.stopShellAndProcesses(ctx); err != nil {
+				return err
+			}
+			if m.mainReapPending.Load() {
+				if err := m.waitForProcessExit(ctx); err != nil {
+					return err
+				}
+				m.mainReapPending.Store(false)
+			}
+			if terminalStop {
+				return classifyTempCleanupError(m.cleanupAgentTempDir())
+			}
+			return nil
+		}
 		return nil
 	}
 
@@ -1283,14 +1510,39 @@ func (m *Manager) Stop(ctx context.Context) error {
 		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
 
-	m.stopShellAndProcesses(ctx)
+	auxiliaryStopErr := m.stopShellAndProcesses(ctx)
 	m.closeAdapterAndStdin()
 	m.killProcessGroupIfRequired()
-	m.waitForProcessExit(ctx)
+	mainStopErr := m.waitForProcessExit(ctx)
 
 	m.status.Store(StatusStopped)
 	m.logger.Info("stopping agent process - COMPLETE")
+	if stopErr := errors.Join(auxiliaryStopErr, mainStopErr); stopErr != nil {
+		m.mainReapPending.Store(mainStopErr != nil)
+		return stopErr
+	}
+	m.mainReapPending.Store(false)
+	if terminalStop {
+		return classifyTempCleanupError(m.cleanupAgentTempDir())
+	}
 	return nil
+}
+
+type tempCleanupError struct {
+	err error
+}
+
+func (e tempCleanupError) Error() string { return e.err.Error() }
+func (e tempCleanupError) Unwrap() error { return e.err }
+func (e tempCleanupError) RetainInstanceResources() bool {
+	return false
+}
+
+func classifyTempCleanupError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return tempCleanupError{err: err}
 }
 
 func (m *Manager) agentPID() int {
@@ -1308,11 +1560,13 @@ func (m *Manager) agentProtocol() string {
 }
 
 // stopShellAndProcesses stops the shell session, VS Code, and workspace processes.
-func (m *Manager) stopShellAndProcesses(ctx context.Context) {
+func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
+	var errs []error
 	// Stop VS Code server if running
 	m.logger.Debug("stopping vscode server")
 	if err := m.StopVscode(ctx); err != nil {
 		m.logger.Debug("failed to stop vscode server", zap.Error(err))
+		errs = append(errs, err)
 	}
 	m.logger.Debug("vscode server stopped")
 
@@ -1320,23 +1574,32 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) {
 	if m.shell != nil {
 		if err := m.shell.Stop(); err != nil {
 			m.logger.Debug("failed to stop shell session", zap.Error(err))
+			errs = append(errs, err)
+		} else {
+			m.shell = nil
 		}
-		m.shell = nil
 	}
 	m.logger.Debug("shell session stopped")
 
 	m.logger.Debug("stopping terminal shells")
-	m.shellMgr.StopAll()
+	if m.shellMgr != nil {
+		if err := m.shellMgr.StopAll(); err != nil {
+			m.logger.Debug("failed to stop terminal shells", zap.Error(err))
+			errs = append(errs, err)
+		}
+	}
 	m.logger.Debug("terminal shells stopped")
 
 	// Stop all running workspace processes (dev server, setup, cleanup, custom).
 	m.logger.Debug("stopping workspace processes")
 	if m.processRunner != nil {
-		if err := m.processRunner.StopAll(ctx); err != nil {
+		if err := m.processRunner.StopAllAndWait(ctx); err != nil {
 			m.logger.Debug("failed to stop workspace processes", zap.Error(err))
+			errs = append(errs, err)
 		}
 	}
 	m.logger.Debug("workspace processes stopped")
+	return errors.Join(errs...)
 }
 
 // closeAdapterAndStdin closes the protocol adapter, the stop channel, and stdin.
@@ -1382,7 +1645,7 @@ func (m *Manager) killProcessGroupIfRequired() {
 	m.logger.Debug("agent process group SIGKILL requested",
 		zap.Int("pgid", pid),
 		zap.String("reason", "adapter_requires_process_kill"))
-	if err := killProcessGroup(pid); err != nil {
+	if err := m.killProcessGroup(pid); err != nil {
 		m.logger.Debug("failed to kill process group, trying single process", zap.Error(err))
 		m.logger.Debug("agent process SIGKILL requested",
 			zap.Int("pid", pid),
@@ -1402,7 +1665,7 @@ func (m *Manager) killProcessGroupIfRequired() {
 // leader exits before its descendants do, we still terminate the remaining
 // process group before reporting shutdown complete. Falls back to a
 // single-process kill only if the process-group call fails.
-func (m *Manager) waitForProcessExit(ctx context.Context) {
+func (m *Manager) waitForProcessExit(ctx context.Context) error {
 	m.logger.Debug("waiting for process to exit")
 	done := make(chan struct{})
 	go func() {
@@ -1416,18 +1679,16 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 	}
 
 	exitGrace := m.processExitGrace(ctx)
-	if waitForManagerDone(ctx, done, exitGrace) {
+	if m.waitForManagerDone(ctx, done, exitGrace) {
 		m.logger.Info("agent process stopped gracefully")
-		m.reapRemainingProcessGroup(ctx, pid)
-		return
+		return m.reapRemainingProcessGroup(ctx, pid)
 	}
 	if pid == 0 {
-		return
+		return fmt.Errorf("agent process goroutines were not reaped")
 	}
 	if ctx.Err() != nil {
 		m.logger.Warn("force killing agent process group", zap.Int("pgid", pid))
-		m.forceKillProcessGroupAndWait(done, pid)
-		return
+		return m.forceKillProcessGroupAndWait(done, pid)
 	}
 
 	m.logger.Warn("agent process did not exit after graceful wait; terminating process group",
@@ -1437,24 +1698,23 @@ func (m *Manager) waitForProcessExit(ctx context.Context) {
 		zap.Int("pgid", pid),
 		zap.String("reason", "graceful_wait_expired"),
 		zap.Duration("grace", exitGrace))
-	if err := terminateProcessGroup(pid); err != nil {
+	if err := m.terminateProcessGroup(pid); err != nil {
 		if !isProcessGroupMissing(err) {
 			m.logger.Warn("failed to terminate agent process group, force killing",
 				zap.Int("pgid", pid),
 				zap.Error(err))
-			m.forceKillProcessGroupAndWait(done, pid)
+			return m.forceKillProcessGroupAndWait(done, pid)
 		}
-		return
+		return m.verifyMainReaped(done, pid)
 	}
-	if waitForManagerDone(ctx, done, processGroupTerminateGrace) {
+	if m.waitForManagerDone(ctx, done, processGroupTerminateGrace) {
 		m.logger.Info("agent process stopped after process group termination",
 			zap.Int("pgid", pid))
-		m.reapRemainingProcessGroup(ctx, pid)
-		return
+		return m.reapRemainingProcessGroup(ctx, pid)
 	}
 	m.logger.Warn("agent process did not stop after termination; force killing process group",
 		zap.Int("pgid", pid))
-	m.forceKillProcessGroupAndWait(done, pid)
+	return m.forceKillProcessGroupAndWait(done, pid)
 }
 
 // processExitGrace returns the initial graceful wait before process-group
@@ -1488,9 +1748,12 @@ func waitForManagerDone(ctx context.Context, done <-chan struct{}, timeout time.
 	}
 }
 
-func (m *Manager) reapRemainingProcessGroup(ctx context.Context, pid int) {
-	if pid == 0 || !processGroupAlive(pid) {
-		return
+func (m *Manager) reapRemainingProcessGroup(ctx context.Context, pid int) error {
+	if err, owned := m.reapMainProcessLifecycle(); owned {
+		return err
+	}
+	if pid == 0 || !m.processGroupAlive(pid) {
+		return nil
 	}
 
 	m.logger.Warn("agent process group still alive after leader exit; terminating",
@@ -1498,35 +1761,47 @@ func (m *Manager) reapRemainingProcessGroup(ctx context.Context, pid int) {
 	m.logger.Debug("agent process group SIGTERM requested",
 		zap.Int("pgid", pid),
 		zap.String("reason", "leader_exited_with_live_descendants"))
-	if err := terminateProcessGroup(pid); err != nil {
+	if err := m.terminateProcessGroup(pid); err != nil {
 		if isProcessGroupMissing(err) {
-			return
+			return nil
 		}
 		m.logger.Warn("failed to terminate agent process group, force killing",
 			zap.Int("pgid", pid),
 			zap.Error(err))
-		m.forceKillProcessGroupAndWait(nil, pid)
-		return
+		return m.forceKillProcessGroupAndWait(nil, pid)
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, processGroupTerminateGrace)
 	defer cancel()
-	if waitForProcessGroupExit(waitCtx, pid) {
+	if m.waitForProcessGroupExit(waitCtx, pid) {
 		m.logger.Info("agent process group stopped after termination",
 			zap.Int("pgid", pid))
-		return
+		return nil
 	}
 
 	m.logger.Warn("agent process group did not stop after termination; force killing",
 		zap.Int("pgid", pid))
-	m.forceKillProcessGroupAndWait(nil, pid)
+	return m.forceKillProcessGroupAndWait(nil, pid)
+}
+
+func (m *Manager) reapMainProcessLifecycle() (error, bool) {
+	m.processLifecycleMu.Lock()
+	defer m.processLifecycleMu.Unlock()
+	if !ownsProcessLifecycle(m.processLifecycle) {
+		return nil, false
+	}
+	if err := reapProcessLifecycle(m.processLifecycle); err != nil {
+		return err, true
+	}
+	m.processLifecycle = processLifecycleHandle{}
+	return nil, true
 }
 
 func (m *Manager) forceKillProcessGroup(pid int) {
 	m.logger.Debug("agent process group SIGKILL requested",
 		zap.Int("pgid", pid),
 		zap.String("reason", "force_kill"))
-	if err := killProcessGroup(pid); err != nil {
+	if err := m.killProcessGroup(pid); err != nil {
 		if isProcessGroupMissing(err) {
 			return
 		}
@@ -1545,25 +1820,89 @@ func (m *Manager) forceKillProcessGroup(pid int) {
 	}
 }
 
-func (m *Manager) forceKillProcessGroupAndWait(done <-chan struct{}, pid int) {
+func (m *Manager) forceKillProcessGroupAndWait(done <-chan struct{}, pid int) error {
 	m.forceKillProcessGroup(pid)
 
 	waitCtx, cancel := context.WithTimeout(context.Background(), processGroupTerminateGrace)
 	defer cancel()
-	if done != nil && waitForManagerDone(waitCtx, done, processGroupTerminateGrace) {
+	managerDone := done == nil || m.waitForManagerDone(waitCtx, done, processGroupTerminateGrace)
+	groupDone := m.waitForProcessGroupExit(waitCtx, pid)
+	if managerDone && groupDone {
 		m.logger.Info("agent process stopped after force kill",
 			zap.Int("pgid", pid))
-		m.reapRemainingProcessGroup(context.Background(), pid)
-		return
+		return nil
 	}
-	if waitForProcessGroupExit(waitCtx, pid) {
-		m.logger.Info("agent process group stopped after force kill",
-			zap.Int("pgid", pid))
-		return
+	var errs []error
+	if !managerDone {
+		errs = append(errs, fmt.Errorf("agent process goroutines were not reaped after force kill"))
 	}
-	m.logger.Warn("agent process group still alive after force kill wait",
-		zap.Int("pgid", pid),
-		zap.Duration("grace", processGroupTerminateGrace))
+	if !groupDone {
+		errs = append(errs, fmt.Errorf("agent process group %d remains alive after force kill", pid))
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Manager) verifyMainReaped(done <-chan struct{}, pid int) error {
+	if done != nil {
+		select {
+		case <-done:
+		default:
+			return fmt.Errorf("agent process goroutines were not reaped")
+		}
+	}
+	if pid != 0 && m.processGroupAlive(pid) {
+		return fmt.Errorf("agent process group %d remains alive", pid)
+	}
+	return nil
+}
+
+func (m *Manager) processGroupAlive(pid int) bool {
+	if m.groupAliveFn != nil {
+		return m.groupAliveFn(pid)
+	}
+	return processGroupAlive(pid)
+}
+
+func (m *Manager) waitForManagerDone(ctx context.Context, done <-chan struct{}, timeout time.Duration) bool {
+	if m.managerWaitFn != nil {
+		return m.managerWaitFn(ctx, done, timeout)
+	}
+	return waitForManagerDone(ctx, done, timeout)
+}
+
+func (m *Manager) terminateProcessGroup(pid int) error {
+	if m.terminateGroupFn != nil {
+		return m.terminateGroupFn(pid)
+	}
+	return terminateProcessGroup(pid)
+}
+
+func (m *Manager) killProcessGroup(pid int) error {
+	if m.killGroupFn != nil {
+		return m.killGroupFn(pid)
+	}
+	return killProcessGroup(pid)
+}
+
+func (m *Manager) waitForProcessGroupExit(ctx context.Context, pid int) bool {
+	if m.waitGroupExitFn != nil {
+		return m.waitGroupExitFn(ctx, pid)
+	}
+	if !m.processGroupAlive(pid) {
+		return true
+	}
+	ticker := time.NewTicker(processGroupPollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return !m.processGroupAlive(pid)
+		case <-ticker.C:
+			if !m.processGroupAlive(pid) {
+				return true
+			}
+		}
+	}
 }
 
 func waitForProcessGroupExit(ctx context.Context, pid int) bool {
@@ -1649,8 +1988,6 @@ func (m *Manager) waitForExit() {
 
 	pid := m.agentPID()
 	err := m.cmd.Wait()
-	releaseProcessLifecycle(m.processLifecycle)
-	m.processLifecycle = processLifecycleHandle{}
 
 	if err != nil {
 		m.exitErr.Store(errorWrapper{err: err})
@@ -1689,7 +2026,12 @@ func (m *Manager) waitForExit() {
 	}
 
 	if m.Status() != StatusStopping {
-		m.reapRemainingProcessGroup(context.Background(), pid)
+		if err := m.reapRemainingProcessGroup(context.Background(), pid); err != nil {
+			m.mainReapPending.Store(true)
+			m.logger.Warn("agent process group reap remains pending", zap.Error(err))
+		} else {
+			m.mainReapPending.Store(false)
+		}
 	}
 	m.status.Store(StatusStopped)
 }
@@ -1944,6 +2286,11 @@ func (m *Manager) ShellManager() *shell.Manager {
 // but we still need shell access for the workspace.
 // Returns nil if shell is already started or if ShellEnabled is false.
 func (m *Manager) StartShell() error {
+	release, err := m.admitStart()
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1972,14 +2319,26 @@ func (m *Manager) StartShell() error {
 // StartVscode starts the code-server process on a random OS-assigned port.
 // The VS Code server runs independently of the agent process.
 // Start is non-blocking — the caller should poll VscodeInfo() for status updates.
-func (m *Manager) StartVscode(_ context.Context, theme string) {
+func (m *Manager) StartVscode(_ context.Context, theme string) error {
+	release, err := m.admitStart()
+	if err != nil {
+		return err
+	}
+	defer release()
+	return m.startVscode(theme)
+}
+
+func (m *Manager) startVscode(theme string) error {
 	m.vscodeMu.Lock()
 	defer m.vscodeMu.Unlock()
 
 	if m.vscode != nil {
 		info := m.vscode.Info()
 		if info.Status == VscodeStatusRunning || info.Status == VscodeStatusStarting || info.Status == VscodeStatusInstalling {
-			return
+			return nil
+		}
+		if m.vscode.HasUnreapedOwnership() {
+			return fmt.Errorf("previous code-server process cleanup is incomplete")
 		}
 	}
 
@@ -1991,6 +2350,7 @@ func (m *Manager) StartVscode(_ context.Context, theme string) {
 	strategy := codeServerInstallStrategy(m.logger)
 	m.vscode = NewVscodeManager(command, m.cfg.WorkDir, theme, strategy, m.logger)
 	m.vscode.Start()
+	return nil
 }
 
 // codeServerInstallStrategy returns a tarball strategy that auto-installs code-server.
@@ -2026,7 +2386,9 @@ func (m *Manager) StopVscode(ctx context.Context) error {
 	}
 
 	err := m.vscode.Stop(ctx)
-	m.vscode = nil
+	if err == nil {
+		m.vscode = nil
+	}
 	return err
 }
 
@@ -2048,6 +2410,11 @@ func (m *Manager) VscodeInfo() VscodeInfo {
 // another goroutine could stop vscode in between. WaitForRunning handles this
 // correctly by returning an error for stopped/error states.
 func (m *Manager) VscodeOpenFile(ctx context.Context, path string, line, col int) error {
+	release, err := m.admitStart()
+	if err != nil {
+		return err
+	}
+	defer release()
 	m.vscodeMu.Lock()
 	needsStart := m.vscode == nil
 	if !needsStart {
@@ -2058,7 +2425,9 @@ func (m *Manager) VscodeOpenFile(ctx context.Context, path string, line, col int
 
 	if needsStart {
 		m.logger.Info("auto-starting code-server for open-file request")
-		m.StartVscode(ctx, "")
+		if err := m.startVscode(""); err != nil {
+			return err
+		}
 	}
 
 	m.vscodeMu.Lock()

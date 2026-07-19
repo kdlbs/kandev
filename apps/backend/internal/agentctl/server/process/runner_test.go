@@ -150,6 +150,64 @@ func TestProcessRunnerStopLogsSignalAttempts(t *testing.T) {
 	t.Fatal("process was not removed after stop")
 }
 
+func TestProcessRunnerStopAllAndWaitBlocksUntilReaped(t *testing.T) {
+	runner := NewProcessRunner(nil, newTestLogger(t), 1024)
+	proc := &commandProcess{
+		info:       ProcessInfo{ID: "blocked-reap"},
+		stopSignal: make(chan struct{}),
+		done:       make(chan struct{}),
+	}
+	runner.processes[proc.info.ID] = proc
+
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- runner.StopAllAndWait(context.Background()) }()
+	<-proc.stopSignal
+	select {
+	case err := <-stopDone:
+		t.Fatalf("StopAllAndWait() returned before reap: %v", err)
+	default:
+	}
+
+	close(proc.done)
+	if err := <-stopDone; err != nil {
+		t.Fatalf("StopAllAndWait() error = %v", err)
+	}
+}
+
+func TestProcessRunnerStopAllAndWaitRetainsLiveProcessGroupForRetry(t *testing.T) {
+	runner := NewProcessRunner(nil, newTestLogger(t), 1024)
+	done := make(chan struct{})
+	close(done)
+	proc := &commandProcess{
+		info:       ProcessInfo{ID: "live-process-group"},
+		stopSignal: make(chan struct{}),
+		done:       done,
+		pgid:       424244,
+	}
+	runner.processes[proc.info.ID] = proc
+	groupAlive := true
+	runner.groupAliveFn = func(int) bool { return groupAlive }
+	runner.terminateGroupFn = func(int) error { return nil }
+	runner.killGroupFn = func(int) error { return nil }
+	runner.waitGroupExitFn = func(context.Context, int) bool { return !groupAlive }
+
+	err := runner.StopAllAndWait(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "remains alive") {
+		t.Fatalf("StopAllAndWait() error = %v, want live-group error", err)
+	}
+	if _, ok := runner.Get(proc.info.ID, false); !ok {
+		t.Fatal("runner discarded process-group ownership after reap failure")
+	}
+
+	groupAlive = false
+	if err := runner.StopAllAndWait(context.Background()); err != nil {
+		t.Fatalf("StopAllAndWait() retry error = %v", err)
+	}
+	if _, ok := runner.Get(proc.info.ID, false); ok {
+		t.Fatal("runner retained process after group reap succeeded")
+	}
+}
+
 func TestStripANSI(t *testing.T) {
 	tests := []struct {
 		name     string

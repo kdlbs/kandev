@@ -24,7 +24,10 @@ func (s *Server) handleVscodeStart(c *gin.Context) {
 
 	// Start is non-blocking — it launches in a background goroutine.
 	// Port is allocated automatically using an OS-assigned random port.
-	s.procMgr.StartVscode(c.Request.Context(), req.Theme)
+	if err := s.procMgr.StartVscode(c.Request.Context(), req.Theme); err != nil {
+		c.JSON(http.StatusConflict, types.VscodeStartResponse{Error: err.Error()})
+		return
+	}
 	s.logger.Info("code-server start initiated", zap.String("theme", req.Theme))
 
 	// Return current status (will be "installing")

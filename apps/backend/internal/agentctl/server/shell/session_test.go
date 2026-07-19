@@ -2,6 +2,7 @@ package shell
 
 import (
 	"os"
+	"os/exec"
 	"runtime"
 	"sync"
 	"testing"
@@ -223,6 +224,111 @@ func TestSessionStopTimeoutIsShortForShutdown(t *testing.T) {
 
 	if elapsed > 700*time.Millisecond {
 		t.Fatalf("Stop took %s, want less than 700ms for shutdown fallback", elapsed)
+	}
+}
+
+func TestSessionStopRetriesFailedProcessGroupReap(t *testing.T) {
+	done := make(chan struct{})
+	close(done)
+	groupAlive := true
+	session := &Session{
+		logger:          newTestLogger(),
+		running:         true,
+		cmd:             &exec.Cmd{Process: &os.Process{Pid: 424246}},
+		stopCh:          make(chan struct{}),
+		doneCh:          done,
+		killGroupFn:     func(*os.Process) error { return nil },
+		waitGroupExitFn: func(*os.Process) bool { return !groupAlive },
+	}
+
+	if err := session.Stop(); err == nil {
+		t.Fatal("Stop() succeeded while the owned process group remained alive")
+	}
+	groupAlive = false
+	if err := session.Stop(); err != nil {
+		t.Fatalf("Stop() retry error = %v", err)
+	}
+}
+
+func TestSessionStopPreventsRespawnAfterLeaderExit(t *testing.T) {
+	cmd := exec.Command("true")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start fixture command: %v", err)
+	}
+	beforeRespawn := make(chan struct{})
+	releaseRespawn := make(chan struct{})
+	stopClaimed := make(chan struct{})
+	done := make(chan struct{})
+	session := &Session{
+		logger:  newTestLogger(),
+		running: true,
+		cmd:     cmd,
+		stopCh:  make(chan struct{}),
+		doneCh:  done,
+		beforeRespawn: func() {
+			close(beforeRespawn)
+			<-releaseRespawn
+		},
+		afterStopClaim: func() { close(stopClaimed) },
+	}
+	go session.waitForExit(cmd, done, shellProcessLifecycleHandle{})
+	<-beforeRespawn
+
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- session.Stop() }()
+	<-stopClaimed
+	session.mu.RLock()
+	stopping := session.stopping
+	session.mu.RUnlock()
+	if !stopping {
+		t.Fatal("Stop() did not claim shell lifecycle during respawn delay")
+	}
+	close(releaseRespawn)
+	if err := <-stopDone; err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	session.mu.RLock()
+	defer session.mu.RUnlock()
+	if session.running {
+		t.Fatal("shell respawned after teardown claimed lifecycle")
+	}
+	if session.cmd != cmd {
+		t.Fatal("shell command generation changed after teardown")
+	}
+}
+
+func TestSessionRespawnUsesGenerationCompletionChannel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY is not supported on Windows")
+	}
+	oldDone := make(chan struct{})
+	session := &Session{
+		logger:        newTestLogger(),
+		workDir:       t.TempDir(),
+		shell:         "/bin/sh",
+		config:        DefaultConfig(t.TempDir()),
+		stopCh:        make(chan struct{}),
+		doneCh:        oldDone,
+		beforeRespawn: func() {},
+	}
+	session.config.WorkDir = session.workDir
+	if err := session.respawn(); err != nil {
+		t.Fatalf("respawn() error = %v", err)
+	}
+	session.mu.RLock()
+	currentDone := session.doneCh
+	session.mu.RUnlock()
+	if currentDone == oldDone {
+		t.Fatal("respawn reused the prior generation completion channel")
+	}
+	close(oldDone)
+	select {
+	case <-currentDone:
+		t.Fatal("prior generation completion signaled the current generation")
+	default:
+	}
+	if err := session.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
 	}
 }
 
