@@ -13,7 +13,7 @@ import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
-import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
+import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 
 type StepPhase = "past" | "current" | "future";
 
@@ -101,7 +101,7 @@ export function Graph2StepNode({
 }: Graph2StepNodeProps) {
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
-  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId, {
+  const pendingInput = useTaskPendingInput(task.primarySessionId, {
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
@@ -147,8 +147,9 @@ export function Graph2StepNode({
             {getTaskStateIcon(
               task.state,
               "h-3 w-3",
-              hasPendingClarificationRequest,
+              pendingInput.clarification,
               task.foregroundActivity,
+              pendingInput.permission,
             )}
           </div>
           <span className="text-[11px] font-medium text-foreground truncate">{step.title}</span>

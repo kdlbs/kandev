@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
-import type { ForegroundActivity } from "@/lib/types/http";
+import type { ForegroundActivity, TaskPendingAction } from "@/lib/types/http";
 import { Graph2StepNode } from "./graph2-step-node";
 
 // The node renders inside the SPA router; stub it so the component mounts.
@@ -16,6 +16,8 @@ afterEach(() => {
 });
 
 const STEP: WorkflowStep = { id: "step-1", title: "In Progress", color: "#888" };
+const ICON_CHECK = ".tabler-icon-check";
+const ICON_LOADER2 = ".tabler-icon-loader-2";
 
 function makeTask(foregroundActivity?: ForegroundActivity | null): Task {
   return {
@@ -50,20 +52,61 @@ describe("Graph2StepNode — task-level background-running affordance", () => {
     // background-running (segmented IconLoader), never the done check — even when
     // the coarse task state is COMPLETED.
     expect(container.querySelector(".tabler-icon-loader")).not.toBeNull();
-    expect(container.querySelector(".tabler-icon-check")).toBeNull();
+    expect(container.querySelector(ICON_CHECK)).toBeNull();
     // Distinct by SHAPE from the generating spinner (IconLoader2), not hue alone.
-    expect(container.querySelector(".tabler-icon-loader-2")).toBeNull();
+    expect(container.querySelector(ICON_LOADER2)).toBeNull();
   });
 
   it("shows the generating spinner (IconLoader2) when any session is generating", () => {
     const { container } = renderCurrentNode("generating");
-    expect(container.querySelector(".tabler-icon-loader-2")).not.toBeNull();
-    expect(container.querySelector(".tabler-icon-check")).toBeNull();
+    expect(container.querySelector(ICON_LOADER2)).not.toBeNull();
+    expect(container.querySelector(ICON_CHECK)).toBeNull();
   });
 
   it("falls through to the coarse done check when no session is active", () => {
     const { container } = renderCurrentNode(null);
-    expect(container.querySelector(".tabler-icon-check")).not.toBeNull();
-    expect(container.querySelector(".tabler-icon-loader-2")).toBeNull();
+    expect(container.querySelector(ICON_CHECK)).not.toBeNull();
+    expect(container.querySelector(ICON_LOADER2)).toBeNull();
+  });
+});
+
+describe("Graph2StepNode — waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+  function renderWaitingNode(pendingAction: TaskPendingAction) {
+    const task = {
+      id: "task-1",
+      title: "A task",
+      workflowStepId: "step-1",
+      state: "WAITING_FOR_INPUT",
+      primarySessionId: "session-1",
+      primarySessionState: "WAITING_FOR_INPUT",
+      primarySessionPendingAction: pendingAction,
+    } as Task;
+    return render(
+      <StateProvider>
+        <Graph2StepNode
+          step={STEP}
+          phase="current"
+          task={task}
+          hasPrev={false}
+          hasNext={false}
+          onMoveTask={() => undefined}
+          onPreviewTask={() => undefined}
+        />
+      </StateProvider>,
+    );
+  }
+
+  it("shows the message-question for a pending clarification, distinct from done and running", () => {
+    const { container } = renderWaitingNode("clarification");
+    expect(container.querySelector(".tabler-icon-message-question")).not.toBeNull();
+    expect(container.querySelector(ICON_CHECK)).toBeNull();
+    expect(container.querySelector(ICON_LOADER2)).toBeNull();
+  });
+
+  it("shows the shield-question for a pending permission, distinct from done and running", () => {
+    const { container } = renderWaitingNode("permission");
+    expect(container.querySelector(".tabler-icon-shield-question")).not.toBeNull();
+    expect(container.querySelector(ICON_CHECK)).toBeNull();
+    expect(container.querySelector(ICON_LOADER2)).toBeNull();
   });
 });
