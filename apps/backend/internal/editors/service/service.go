@@ -83,6 +83,9 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 	if err != nil {
 		return "", err
 	}
+	if session == nil {
+		return "", ErrWorkspaceNotFound
+	}
 
 	settings, err := s.userSettings.GetUserSettings(ctx)
 	if err != nil {

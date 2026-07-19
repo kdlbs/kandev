@@ -70,6 +70,27 @@ func TestOpenEditor_InternalVscodeWithoutWorkspace(t *testing.T) {
 	}
 }
 
+func TestOpenEditor_InternalVscodeRejectsMissingSession(t *testing.T) {
+	const editorID = "embedded-vscode"
+	svc := NewService(
+		&openEditorRepository{editor: &editormodels.Editor{
+			ID:      editorID,
+			Kind:    editorKindInternalVscode,
+			Enabled: true,
+		}},
+		&openEditorTaskRepository{},
+		&openEditorUserSettings{defaultEditorID: editorID},
+	)
+
+	_, err := svc.OpenEditor(context.Background(), OpenEditorInput{
+		SessionID: "missing-session",
+		EditorID:  editorID,
+	})
+	if err != ErrWorkspaceNotFound {
+		t.Fatalf("OpenEditor() error = %v, want ErrWorkspaceNotFound", err)
+	}
+}
+
 func TestOpenFolder_EmptySessionID(t *testing.T) {
 	svc := &Service{}
 	err := svc.OpenFolder(context.Background(), "", "")

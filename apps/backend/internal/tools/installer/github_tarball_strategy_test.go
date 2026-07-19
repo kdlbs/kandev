@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"context"
 	"io"
 	"net/http"
 	"os"
@@ -98,9 +97,7 @@ func TestGithubTarballStrategyInstallReportsCacheInspectionError(t *testing.T) {
 		},
 	}, testLogger())
 
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	_, err := strategy.Install(ctx)
+	_, err := strategy.Install(t.Context())
 	if err == nil || !strings.Contains(err.Error(), "failed to inspect installed binary") {
 		t.Fatalf("Install() error = %v, want cache inspection error", err)
 	}
