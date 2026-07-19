@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { isValidElement, type ReactNode } from "react";
-import { IconCheck, IconLoader, IconLoader2 } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconLoader,
+  IconLoader2,
+  IconMessageQuestion,
+  IconShieldQuestion,
+} from "@tabler/icons-react";
 import { renderTaskStatusIcon } from "./kanban-card-content";
 import type { Task } from "./kanban-card";
 
@@ -26,6 +32,7 @@ describe("renderTaskStatusIcon — task-level activity aggregate", () => {
       task({ state: "REVIEW", primarySessionState: "COMPLETED", foregroundActivity: "background" }),
       false,
       false,
+      false,
     );
     expect(iconType(node)).toBe(IconLoader);
     expect(iconType(node)).not.toBe(IconCheck);
@@ -36,12 +43,13 @@ describe("renderTaskStatusIcon — task-level activity aggregate", () => {
       task({ state: "COMPLETED", foregroundActivity: "generating" }),
       false,
       false,
+      false,
     );
     expect(iconType(node)).toBe(IconLoader2);
   });
 
   it("renders nothing for a resting done task with no activity", () => {
-    expect(renderTaskStatusIcon(task({ state: "COMPLETED" }), false, false)).toBeNull();
+    expect(renderTaskStatusIcon(task({ state: "COMPLETED" }), false, false, false)).toBeNull();
   });
 
   it("keeps the running spinner for an active primary session with no aggregate yet", () => {
@@ -49,7 +57,36 @@ describe("renderTaskStatusIcon — task-level activity aggregate", () => {
       task({ state: "IN_PROGRESS", primarySessionState: "RUNNING" }),
       true,
       false,
+      false,
     );
     expect(iconType(node)).toBe(IconLoader2);
+  });
+});
+
+describe("renderTaskStatusIcon — waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+  it("shows the message-question for a pending clarification, distinct from done and running", () => {
+    const node = renderTaskStatusIcon(task({ state: "REVIEW" }), false, true, false);
+    expect(iconType(node)).toBe(IconMessageQuestion);
+    expect(iconType(node)).not.toBe(IconCheck);
+    expect(iconType(node)).not.toBe(IconLoader2);
+  });
+
+  it("shows the shield-question for a pending permission, distinct from done and running", () => {
+    const node = renderTaskStatusIcon(task({ state: "WAITING_FOR_INPUT" }), false, false, true);
+    expect(iconType(node)).toBe(IconShieldQuestion);
+    expect(iconType(node)).not.toBe(IconCheck);
+    expect(iconType(node)).not.toBe(IconLoader2);
+  });
+
+  it("keeps the needs-me icon when a mid-turn prompt coincides with the running spinner", () => {
+    // showRunningSpinner is true (coarse RUNNING) but a pending permission must
+    // not be masked by the launch-spinner short-circuit.
+    const node = renderTaskStatusIcon(
+      task({ state: "IN_PROGRESS", primarySessionState: "RUNNING" }),
+      true,
+      false,
+      true,
+    );
+    expect(iconType(node)).toBe(IconShieldQuestion);
   });
 });

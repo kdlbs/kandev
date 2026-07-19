@@ -22,11 +22,12 @@ import {
 } from "@/components/kanban-card-menu-items";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
-import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
+import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
   getTaskStateIcon,
   shouldShowTaskRunningSpinner,
+  shouldUsePermissionTaskIcon,
   shouldUseQuestionTaskIcon,
 } from "@/lib/ui/state-icons";
 import { cn } from "@/lib/utils";
@@ -224,17 +225,30 @@ export function renderTaskStatusIcon(
   task: Task,
   showRunningSpinner: boolean,
   hasPendingClarification: boolean,
+  hasPendingPermission: boolean,
 ) {
   const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarification);
+  const showPermissionIcon = shouldUsePermissionTaskIcon(hasPendingPermission);
+  const needsMe = showQuestionIcon || showPermissionIcon;
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (!showRunningSpinner && !showQuestionIcon && !hasActivity) {
+  if (!showRunningSpinner && !needsMe && !hasActivity) {
     return null;
   }
-  if (showRunningSpinner && task.foregroundActivity !== "background") {
+  // A "needs me" prompt (pending clarification / permission) must not be masked
+  // by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
+  // coarse running state. Live foreground activity still wins, handled inside
+  // getTaskStateIcon (§spec:waiting-for-input-parity).
+  if (showRunningSpinner && !needsMe && task.foregroundActivity !== "background") {
     return <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />;
   }
-  return getTaskStateIcon(task.state, "h-4 w-4", hasPendingClarification, task.foregroundActivity);
+  return getTaskStateIcon(
+    task.state,
+    "h-4 w-4",
+    hasPendingClarification,
+    task.foregroundActivity,
+    hasPendingPermission,
+  );
 }
 
 function KanbanCardActions({
@@ -250,7 +264,7 @@ function KanbanCardActions({
   const storeApi = useAppStoreApi();
   const debugEnabled = isDebug();
   const effectiveMenuOpen = menuOpen || Boolean(isDeleting) || Boolean(isArchiving);
-  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId, {
+  const pendingInput = useTaskPendingInput(task.primarySessionId, {
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
@@ -263,7 +277,12 @@ function KanbanCardActions({
     showRunningSpinner &&
     storeWouldShowRunningSpinner === false &&
     task.primarySessionState !== storePrimarySessionState;
-  const statusIcon = renderTaskStatusIcon(task, showRunningSpinner, hasPendingClarificationRequest);
+  const statusIcon = renderTaskStatusIcon(
+    task,
+    showRunningSpinner,
+    pendingInput.clarification,
+    pendingInput.permission,
+  );
   const hasKnownSession =
     Boolean(task.primarySessionId) || Boolean(task.sessionCount && task.sessionCount > 0);
 
