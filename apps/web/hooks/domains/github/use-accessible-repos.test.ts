@@ -39,7 +39,7 @@ describe("useAccessibleRepos — initial fetch", () => {
   it("fetches once on mount with limit=100 and an empty query", async () => {
     fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("site"), makeRepo("api")]);
 
-    const { result } = renderHook(() => useAccessibleRepos());
+    const { result } = renderHook(() => useAccessibleRepos("ws-1"));
 
     await waitFor(() => expect(result.current.repos).toHaveLength(2));
     expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
@@ -60,7 +60,7 @@ describe("useAccessibleRepos — initial fetch", () => {
         }),
     );
 
-    const { result } = renderHook(() => useAccessibleRepos());
+    const { result } = renderHook(() => useAccessibleRepos("ws-1"));
 
     expect(result.current.loading).toBe(true);
     expect(result.current.repos).toEqual([]);
@@ -83,7 +83,7 @@ describe("useAccessibleRepos — client-side filtering", () => {
       makeRepo("api", "acme"),
     ]);
 
-    const { result } = renderHook(() => useAccessibleRepos());
+    const { result } = renderHook(() => useAccessibleRepos("ws-1"));
     await waitFor(() => expect(result.current.repos).toHaveLength(3));
     expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1);
 
@@ -114,7 +114,7 @@ describe("useAccessibleRepos — client-side filtering", () => {
   it("empty / whitespace query returns the full list", async () => {
     fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("a"), makeRepo("b")]);
 
-    const { result } = renderHook(() => useAccessibleRepos());
+    const { result } = renderHook(() => useAccessibleRepos("ws-1"));
     await waitFor(() => expect(result.current.repos).toHaveLength(2));
 
     act(() => result.current.search("foo"));
@@ -128,7 +128,7 @@ describe("useAccessibleRepos — client-side filtering", () => {
   it("repeated identical search() is idempotent (no extra fetches, stable result)", async () => {
     fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("foo"), makeRepo("bar")]);
 
-    const { result } = renderHook(() => useAccessibleRepos());
+    const { result } = renderHook(() => useAccessibleRepos("ws-1"));
     await waitFor(() => expect(result.current.repos).toHaveLength(2));
 
     act(() => result.current.search("foo"));
@@ -142,7 +142,7 @@ describe("useAccessibleRepos — client-side filtering", () => {
   it("rapid search() calls do NOT trigger any backend requests", async () => {
     fetchAccessibleReposMock.mockResolvedValueOnce([makeRepo("foo")]);
 
-    const { result } = renderHook(() => useAccessibleRepos());
+    const { result } = renderHook(() => useAccessibleRepos("ws-1"));
     await waitFor(() => expect(result.current.repos).toHaveLength(1));
 
     act(() => {
@@ -162,7 +162,7 @@ describe("useAccessibleRepos — errors & unmount", () => {
   it("surfaces GitHubUnavailableError as unavailable: true (and not error)", async () => {
     fetchAccessibleReposMock.mockRejectedValueOnce(new GitHubUnavailableError("nope"));
 
-    const { result } = renderHook(() => useAccessibleRepos());
+    const { result } = renderHook(() => useAccessibleRepos("ws-1"));
 
     await waitFor(() => expect(result.current.unavailable).toBe(true));
     expect(result.current.error).toBeNull();
@@ -173,7 +173,7 @@ describe("useAccessibleRepos — errors & unmount", () => {
   it("surfaces non-unavailable errors via the error field", async () => {
     fetchAccessibleReposMock.mockRejectedValueOnce(new Error("boom"));
 
-    const { result } = renderHook(() => useAccessibleRepos());
+    const { result } = renderHook(() => useAccessibleRepos("ws-1"));
 
     await waitFor(() => expect(result.current.error).toBeInstanceOf(Error));
     expect(result.current.unavailable).toBe(false);
@@ -193,7 +193,7 @@ describe("useAccessibleRepos — errors & unmount", () => {
         }),
     );
 
-    const { unmount } = renderHook(() => useAccessibleRepos());
+    const { unmount } = renderHook(() => useAccessibleRepos("ws-1"));
 
     await waitFor(() => expect(fetchAccessibleReposMock).toHaveBeenCalledTimes(1));
     unmount();

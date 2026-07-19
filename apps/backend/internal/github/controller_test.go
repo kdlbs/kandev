@@ -3,6 +3,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,25 @@ import (
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+func TestValidGitHubCallbackState(t *testing.T) {
+	valid := base64.RawURLEncoding.EncodeToString(make([]byte, oauthRandomBytes))
+	for name, test := range map[string]struct {
+		state string
+		want  bool
+	}{
+		"valid":              {state: valid, want: true},
+		"empty":              {state: "", want: false},
+		"malformed":          {state: "%%%", want: false},
+		"wrong decoded size": {state: base64.RawURLEncoding.EncodeToString([]byte("short")), want: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := validGitHubCallbackState(test.state); got != test.want {
+				t.Fatalf("validGitHubCallbackState(%q) = %v, want %v", test.state, got, test.want)
+			}
+		})
+	}
+}
 
 // stubClient implements Client with no-op defaults; override fields as needed.
 type stubClient struct {
@@ -70,6 +90,9 @@ func (s *stubClient) ListUserRepos(context.Context, string, int) ([]GitHubRepo, 
 }
 func (s *stubClient) ListAccessibleRepos(context.Context, string, int) ([]GitHubRepo, error) {
 	return nil, nil
+}
+func (s *stubClient) HasRepositoryAccess(context.Context, string, string) (bool, error) {
+	return true, nil
 }
 func (s *stubClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
 	return nil, nil
@@ -138,12 +161,61 @@ func newControllerTestLogger() *logger.Logger {
 	return log
 }
 
+type controllerTestConnectionReader struct {
+	connection *WorkspaceConnection
+}
+
+func (r controllerTestConnectionReader) GetWorkspaceConnection(
+	context.Context,
+	string,
+) (*WorkspaceConnection, error) {
+	return r.connection, nil
+}
+
+func (controllerTestConnectionReader) GetUserConnection(
+	context.Context,
+	string,
+	string,
+) (*UserConnection, error) {
+	return nil, nil
+}
+
+func useControllerTestWorkspace(router *gin.Engine) {
+	router.Use(func(ctx *gin.Context) {
+		query := ctx.Request.URL.Query()
+		if query.Get("workspace_id") == "" && ctx.GetHeader("X-Test-Omit-Workspace") == "" {
+			query.Set("workspace_id", "ws-1")
+			ctx.Request.URL.RawQuery = query.Encode()
+		}
+		ctx.Next()
+	})
+}
+
+func configureControllerTestResolver(svc *Service, client Client, workspaceID string) {
+	resolver := NewCredentialResolver(controllerTestConnectionReader{connection: &WorkspaceConnection{
+		WorkspaceID:          workspaceID,
+		Source:               ConnectionSourceLegacyShared,
+		GitHubHost:           defaultGitHubHost,
+		Status:               ConnectionStatusActive,
+		CredentialGeneration: 1,
+	}}, nil)
+	resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+		if client == nil {
+			return nil, AuthMethodNone, ErrGitHubNotConfigured
+		}
+		return client, AuthMethodPAT, nil
+	})
+	svc.resolver = resolver
+}
+
 func setupControllerTest(client Client) (*gin.Engine, *Controller) {
 	gin.SetMode(gin.TestMode)
 	log := newControllerTestLogger()
 	svc := NewService(client, "pat", nil, nil, nil, log)
+	configureControllerTestResolver(svc, client, "ws-1")
 	ctrl := NewController(svc, log)
 	router := gin.New()
+	useControllerTestWorkspace(router)
 	ctrl.RegisterHTTPRoutes(router)
 	return router, ctrl
 }
@@ -169,7 +241,11 @@ func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
-	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (
+	if _, err := sqlxDB.Exec(`CREATE TABLE workspaces (
+		id TEXT PRIMARY KEY
+	);
+	INSERT INTO workspaces (id) VALUES ('ws-1');
+	CREATE TABLE tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT,
 		title TEXT NOT NULL DEFAULT '',
@@ -185,11 +261,43 @@ func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
 	}
 	log := newControllerTestLogger()
 	svc := NewService(&stubClient{}, "pat", nil, store, nil, log)
+	if err := store.UpsertWorkspaceConnection(context.Background(), &WorkspaceConnection{
+		WorkspaceID:          "ws-1",
+		Source:               ConnectionSourceLegacyShared,
+		GitHubHost:           defaultGitHubHost,
+		Status:               ConnectionStatusActive,
+		CredentialGeneration: 1,
+	}); err != nil {
+		t.Fatalf("seed workspace connection: %v", err)
+	}
+	svc.resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+		return svc.client, AuthMethodPAT, nil
+	})
 	svc.SetPromptResolver(staticPromptResolver{content: "resolved default prompt"})
 	ctrl := NewController(svc, log)
 	router := gin.New()
+	useControllerTestWorkspace(router)
 	ctrl.RegisterHTTPRoutes(router)
 	return router, store
+}
+
+func TestCredentialBrokerReadinessUsesExactResolveRoute(t *testing.T) {
+	router, controller := setupControllerTest(&stubClient{})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/github/credentials/resolve", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured readiness status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+
+	controller.service.SetCredentialBroker(&CredentialBroker{})
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/github/credentials/resolve", nil)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("configured readiness response = %d headers=%v", response.Code, response.Header())
+	}
 }
 
 func TestHttpListTaskIssues_WorkspaceScopedMetadataLinks(t *testing.T) {
@@ -282,6 +390,7 @@ func TestHttpListTaskIssues_WorkspaceScopedMetadataLinks(t *testing.T) {
 func TestHttpListTaskIssues_RequiresWorkspace(t *testing.T) {
 	router, _ := setupControllerStoreTest(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/task-issues", nil)
+	req.Header.Set("X-Test-Omit-Workspace", "true")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -334,6 +443,7 @@ func TestHttpTriggerReviewWatchPublishesNewPREvents(t *testing.T) {
 	log := newControllerTestLogger()
 	eb := &mockEventBus{}
 	svc := NewService(client, "pat", nil, store, eb, log)
+	configureControllerTestResolver(svc, client, "ws-1")
 	router := gin.New()
 	NewController(svc, log).RegisterHTTPRoutes(router)
 
@@ -438,6 +548,7 @@ func TestResetReviewWatchPublishesNewPREvents(t *testing.T) {
 	log := newControllerTestLogger()
 	eb := &mockEventBus{publishedCh: make(chan struct{}, 1)}
 	svc := NewService(client, "pat", nil, store, eb, log)
+	configureControllerTestResolver(svc, client, "ws-1")
 	svc.SetCascadeTaskDeleter(noopCascadeTaskDeleter{})
 
 	deleted, err := svc.ResetReviewWatch(context.Background(), watch.ID)
@@ -505,6 +616,7 @@ func TestHttpResetReviewWatchPublishesNewPREvents(t *testing.T) {
 	log := newControllerTestLogger()
 	eb := &mockEventBus{publishedCh: make(chan struct{}, 1)}
 	svc := NewService(client, "pat", nil, store, eb, log)
+	configureControllerTestResolver(svc, client, "ws-1")
 	svc.SetCascadeTaskDeleter(noopCascadeTaskDeleter{})
 	router := gin.New()
 	NewController(svc, log).RegisterHTTPRoutes(router)
@@ -541,7 +653,7 @@ func TestHttpLinkTaskIssue_SuccessAndInvalidJSON(t *testing.T) {
 		},
 	})
 	ctrl.service.SetTaskIssueStore(&fakeTaskIssueStore{
-		task:  &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{"keep": "me"}},
+		task:  &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{"keep": "me"}},
 		repos: []*taskmodels.TaskRepository{{RepositoryID: "repo-1"}},
 		entities: map[string]*taskmodels.Repository{
 			"repo-1": {ID: "repo-1", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
@@ -630,7 +742,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 		{
 			name:       "no client",
 			client:     nil,
-			store:      &fakeTaskIssueStore{},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1"}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusServiceUnavailable,
 			wantError:  "GitHub is not configured. Connect GitHub in Settings > Integrations.",
@@ -647,7 +759,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 		{
 			name:       "invalid reference",
 			client:     &stubClient{},
-			store:      &fakeTaskIssueStore{},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1"}},
 			body:       `{"issue":"#1470"}`,
 			wantStatus: http.StatusBadRequest,
 			wantError:  "invalid GitHub issue reference: owner and repo are required for issue numbers",
@@ -658,7 +770,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 				return &Issue{Number: 1, HTMLURL: "https://github.com/other/repo/issues/1", RepoOwner: "other", RepoName: "repo"}, nil
 			}},
 			store: &fakeTaskIssueStore{
-				task:  &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}},
+				task:  &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{}},
 				repos: []*taskmodels.TaskRepository{{RepositoryID: "repo-1"}},
 				entities: map[string]*taskmodels.Repository{
 					"repo-1": {ID: "repo-1", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
@@ -673,7 +785,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
 				return nil, &GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
 			}},
-			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}}},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{}}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusNotFound,
 			wantError:  "failed to fetch GitHub issue",
@@ -683,7 +795,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
 				return nil, &GitHubAPIError{StatusCode: http.StatusUnauthorized, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
 			}},
-			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}}},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{}}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusUnauthorized,
 			wantError:  "failed to fetch GitHub issue",
@@ -693,7 +805,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
 				return nil, &GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
 			}},
-			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}}},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{}}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusForbidden,
 			wantError:  "failed to fetch GitHub issue",
@@ -714,7 +826,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 				return &Issue{Number: 1470, HTMLURL: "https://github.com/kdlbs/kandev/issues/1470", RepoOwner: "kdlbs", RepoName: "kandev"}, nil
 			}},
 			store: &fakeTaskIssueStore{
-				task:      &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}},
+				task:      &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{}},
 				updateErr: errors.New("database unavailable"),
 			},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
@@ -1208,7 +1320,7 @@ func TestHttpGetRepoMergeMethods_OK(t *testing.T) {
 	}
 	router, _ := setupControllerTest(sc)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods?workspace_id=ws-1", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -1234,7 +1346,7 @@ func TestHttpGetRepoMergeMethods_NoClient_Returns503(t *testing.T) {
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods?workspace_id=ws-1", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -1303,7 +1415,7 @@ func TestHttpMergePR_NoClient_Returns503(t *testing.T) {
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", nil)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge?workspace_id=ws-1", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -1416,7 +1528,7 @@ func TestHandleListAccessibleRepos_503_WhenUnavailable(t *testing.T) {
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos?workspace_id=ws-1", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 

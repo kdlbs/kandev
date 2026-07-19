@@ -35,7 +35,10 @@ const (
 // Cloner is the minimal subset of repoclone.Cloner the bootstrap endpoint uses.
 // Defined as an interface so tests can substitute a fake without network access.
 type Cloner interface {
-	EnsureCloned(ctx context.Context, cloneURL, owner, name string) (string, error)
+	EnsureWorkspaceCloned(
+		ctx context.Context,
+		workspaceID, provider, cloneURL, owner, name string,
+	) (string, error)
 }
 
 // Handler exposes the improve-kandev HTTP endpoints.
@@ -200,7 +203,9 @@ func (h *Handler) resolveOrCloneRepo(ctx context.Context, workspaceID string) (*
 		return match, nil
 	}
 
-	localPath, err := h.cloner.EnsureCloned(ctx, repoCloneURL, repoOwner, repoName)
+	localPath, err := h.cloner.EnsureWorkspaceCloned(
+		ctx, workspaceID, repoProvider, repoCloneURL, repoOwner, repoName,
+	)
 	if err != nil {
 		return nil, err
 	}

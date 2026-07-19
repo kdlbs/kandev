@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,12 +12,13 @@ import (
 // --- GitHubChecker tests ---
 
 type mockGitHubProvider struct {
-	authenticated bool
-	authMethod    string
+	health GitHubConnectionHealth
+	err    error
 }
 
-func (m *mockGitHubProvider) IsAuthenticated() bool { return m.authenticated }
-func (m *mockGitHubProvider) AuthMethod() string    { return m.authMethod }
+func (m *mockGitHubProvider) GitHubConnectionHealth(context.Context) (GitHubConnectionHealth, error) {
+	return m.health, m.err
+}
 
 // expectedGitHubFixURL is the live route in apps/web/app/settings/integrations/github.
 // Kept here so a typo or accidental rename breaks a single test instead of
@@ -44,7 +46,9 @@ func TestGitHubChecker_NilProvider(t *testing.T) {
 }
 
 func TestGitHubChecker_NotAuthenticated(t *testing.T) {
-	checker := NewGitHubChecker(&mockGitHubProvider{authenticated: false, authMethod: "gh_cli"})
+	checker := NewGitHubChecker(&mockGitHubProvider{health: GitHubConnectionHealth{
+		WorkspaceCount: 2, Disconnected: 2,
+	}})
 	issues := checker.Check(context.Background())
 	if len(issues) != 1 {
 		t.Fatalf("expected 1 issue, got %d", len(issues))
@@ -61,7 +65,9 @@ func TestGitHubChecker_NotAuthenticated(t *testing.T) {
 }
 
 func TestGitHubChecker_Authenticated(t *testing.T) {
-	checker := NewGitHubChecker(&mockGitHubProvider{authenticated: true, authMethod: "gh_cli"})
+	checker := NewGitHubChecker(&mockGitHubProvider{health: GitHubConnectionHealth{
+		WorkspaceCount: 2, Active: 2,
+	}})
 	issues := checker.Check(context.Background())
 	if len(issues) != 0 {
 		t.Errorf("expected 0 issues, got %d", len(issues))
@@ -80,7 +86,9 @@ func TestGitHubChecker_AuthenticatedButRateLimited(t *testing.T) {
 	rate := &stubRateLimitProvider{exhausted: []GitHubRateLimitStatus{
 		{Resource: "graphql", ResetAt: time.Now().Add(15 * time.Minute)},
 	}}
-	checker := NewGitHubChecker(&mockGitHubProvider{authenticated: true, authMethod: "gh_cli"})
+	checker := NewGitHubChecker(&mockGitHubProvider{health: GitHubConnectionHealth{
+		WorkspaceCount: 1, Active: 1,
+	}})
 	checker.WithRateLimitProvider(rate)
 	issues := checker.Check(context.Background())
 	if len(issues) != 1 {
@@ -99,10 +107,38 @@ func TestGitHubChecker_AuthenticatedButRateLimited(t *testing.T) {
 
 func TestGitHubChecker_AuthenticatedRateProviderEmpty(t *testing.T) {
 	rate := &stubRateLimitProvider{}
-	checker := NewGitHubChecker(&mockGitHubProvider{authenticated: true})
+	checker := NewGitHubChecker(&mockGitHubProvider{health: GitHubConnectionHealth{
+		WorkspaceCount: 1, Active: 1,
+	}})
 	checker.WithRateLimitProvider(rate)
 	if got := checker.Check(context.Background()); len(got) != 0 {
 		t.Errorf("expected 0 issues when rate provider empty, got %d", len(got))
+	}
+}
+
+func TestGitHubChecker_ReportsDegradedWorkspacesAndRateLimitsTogether(t *testing.T) {
+	provider := &mockGitHubProvider{health: GitHubConnectionHealth{
+		WorkspaceCount: 4, Active: 1, Disconnected: 1, Invalid: 1, Suspended: 1,
+	}}
+	rate := &stubRateLimitProvider{exhausted: []GitHubRateLimitStatus{{Resource: "core"}}}
+	issues := NewGitHubChecker(provider).WithRateLimitProvider(rate).Check(context.Background())
+	if len(issues) != 2 {
+		t.Fatalf("issues = %+v, want connection and rate-limit issues", issues)
+	}
+	if issues[0].ID != "github_workspace_connections_unhealthy" ||
+		!strings.Contains(issues[0].Message, "3 of 4") {
+		t.Fatalf("connection issue = %+v", issues[0])
+	}
+	if issues[1].ID != "github_rate_limit_core" {
+		t.Fatalf("rate-limit issue = %+v", issues[1])
+	}
+}
+
+func TestGitHubChecker_StatusFailureDoesNotInspectAmbientAuth(t *testing.T) {
+	checker := NewGitHubChecker(&mockGitHubProvider{err: errors.New("database unavailable")})
+	issues := checker.Check(context.Background())
+	if len(issues) != 1 || issues[0].ID != "github_status_unavailable" {
+		t.Fatalf("issues = %+v", issues)
 	}
 }
 

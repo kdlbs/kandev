@@ -91,6 +91,32 @@ export type MockCheckRun = {
   completed_at?: string;
 };
 
+export type MockGitHubConnectionStatus = "active" | "invalid" | "suspended" | "revoked";
+
+export type MockGitHubWorkspaceConnection = {
+  source: "pat" | "gh_cli" | "github_app_installation" | "legacy_shared";
+  status: MockGitHubConnectionStatus;
+  login?: string;
+  installation_id?: number;
+  installation_account_login?: string;
+  installation_account_type?: string;
+  capabilities?: Record<string, boolean>;
+};
+
+export type MockGitHubPersonalConnection = {
+  login: string;
+  status: MockGitHubConnectionStatus;
+  github_user_id?: number;
+  access_expires_at?: string;
+};
+
+export type MockGitHubCLIAccount = {
+  host: string;
+  login: string;
+  active: boolean;
+  state: string;
+};
+
 function setIf(body: Record<string, unknown>, key: string, value: unknown) {
   if (value !== undefined && value !== null) body[key] = value;
 }
@@ -195,11 +221,17 @@ export class ApiClient {
   constructor(private baseUrl: string) {}
 
   /** Perform an HTTP request and return the raw Response (does not throw on non-2xx). */
-  async rawRequest(method: string, path: string, body?: unknown): Promise<Response> {
+  async rawRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: Pick<RequestInit, "redirect">,
+  ): Promise<Response> {
     return fetch(`${this.baseUrl}${path}`, {
       method,
       headers: body ? { "Content-Type": "application/json" } : undefined,
       body: body ? JSON.stringify(body) : undefined,
+      ...options,
     });
   }
 
@@ -962,6 +994,61 @@ export class ApiClient {
 
   async mockGitHubSetUser(username: string): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/user", { username });
+  }
+
+  async mockGitHubSetWorkspaceConnection(
+    workspaceId: string,
+    connection: MockGitHubWorkspaceConnection,
+  ): Promise<void> {
+    await this.request(
+      "PUT",
+      `/api/v1/github/mock/workspace-connections/${encodeURIComponent(workspaceId)}`,
+      connection,
+    );
+  }
+
+  async mockGitHubDeleteWorkspaceConnection(workspaceId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/github/mock/workspace-connections/${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async mockGitHubSetWorkspaceConnectionStatus(
+    workspaceId: string,
+    status: MockGitHubConnectionStatus,
+  ): Promise<void> {
+    await this.request(
+      "PUT",
+      `/api/v1/github/mock/workspace-connections/${encodeURIComponent(workspaceId)}/status`,
+      { status },
+    );
+  }
+
+  async mockGitHubSetPersonalConnection(
+    workspaceId: string,
+    connection: MockGitHubPersonalConnection,
+  ): Promise<void> {
+    await this.request(
+      "PUT",
+      `/api/v1/github/mock/personal-connections/${encodeURIComponent(workspaceId)}`,
+      connection,
+    );
+  }
+
+  async mockGitHubDeletePersonalConnection(workspaceId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/github/mock/personal-connections/${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async mockGitHubSetCLIAccounts(accounts: MockGitHubCLIAccount[]): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/cli-accounts", { accounts });
+  }
+
+  async mockGitHubSetAppAvailable(available: boolean): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/app-available", { available });
   }
 
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {

@@ -13,9 +13,9 @@ var ErrSameWorkspace = errors.New("github: source and target workspaces are the 
 
 // CopyWorkspaceSettingsToWorkspace copies the per-workspace GitHub operational
 // settings (repo scope + saved/default query presets) and the workspace's
-// quick-action presets from sourceWorkspaceID to targetWorkspaceID. GitHub
-// authentication is install-wide, so there are no credentials to copy — only the
-// workspace-scoped settings. Watchers are intentionally out of scope.
+// quick-action presets from sourceWorkspaceID to targetWorkspaceID. Workspace
+// automation and personal authentication are intentionally excluded. Watchers
+// are also out of scope.
 func (s *Service) CopyWorkspaceSettingsToWorkspace(ctx context.Context, sourceWorkspaceID, targetWorkspaceID string) (*WorkspaceSettings, error) {
 	sourceWorkspaceID = strings.TrimSpace(sourceWorkspaceID)
 	targetWorkspaceID = strings.TrimSpace(targetWorkspaceID)

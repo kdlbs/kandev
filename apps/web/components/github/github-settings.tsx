@@ -8,7 +8,7 @@ import { Separator } from "@kandev/ui/separator";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
-import { GitHubStatusCard } from "./github-status";
+import { GitHubAutomationSettings, GitHubPersonalSettings } from "./github-status";
 import { ReviewWatchTable } from "./review-watch-table";
 import { ReviewWatchDialog } from "./review-watch-dialog";
 import { IssueWatchTable } from "./issue-watch-table";
@@ -236,7 +236,7 @@ function useIssueWatchActions(workspaceId?: string | null) {
   };
 }
 
-export function GitHubConnectionSection() {
+export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }) {
   return (
     <>
       <div>
@@ -248,18 +248,24 @@ export function GitHubConnectionSection() {
           GitHub Integration
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect Kandev to GitHub. Authentication is shared across all workspaces; PR/issue
-          watchers and presets are configured per workspace.
+          Choose the automation and personal identities used by this workspace.
         </p>
       </div>
       <Separator />
-      <SettingsSection title="Connection Status" description="GitHub authentication status">
-        <Card>
-          <CardContent className="py-3">
-            <GitHubStatusCard />
-          </CardContent>
-        </Card>
+      <SettingsSection
+        title="Workspace automation"
+        description="Used by agents, background jobs, repository sync, and GitHub watches."
+      >
+        <GitHubAutomationSettings workspaceId={workspaceId} />
       </SettingsSection>
+      <div className="pr-16 sm:pr-0">
+        <SettingsSection
+          title="My GitHub identity"
+          description="Used for My GitHub and user-triggered actions when a personal actor is required."
+        >
+          <GitHubPersonalSettings workspaceId={workspaceId} />
+        </SettingsSection>
+      </div>
     </>
   );
 }
@@ -267,6 +273,7 @@ export function GitHubConnectionSection() {
 function PerWorkspaceSection({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-8">
+      <GitHubConnectionSection workspaceId={workspaceId} />
       <GitHubRepoScopeSection workspaceId={workspaceId} />
       <ReviewWatchSection workspaceId={workspaceId} />
       <IssueWatchSection workspaceId={workspaceId} />
@@ -286,8 +293,7 @@ type GitHubIntegrationPageProps = {
 export function GitHubIntegrationPage({ workspaceId }: GitHubIntegrationPageProps = {}) {
   return (
     <TooltipProvider>
-      <div className="space-y-8">
-        <GitHubConnectionSection />
+      <div className="space-y-8 lg:pr-16">
         <WorkspaceScopedSection workspaceId={workspaceId}>
           {(ws) => <PerWorkspaceSection key={ws} workspaceId={ws} />}
         </WorkspaceScopedSection>

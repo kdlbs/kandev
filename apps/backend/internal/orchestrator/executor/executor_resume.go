@@ -110,8 +110,11 @@ func (e *Executor) resolveTaskRepoInfo(ctx context.Context, tr *models.TaskRepos
 		return nil, err
 	}
 
-	// Clone provider-backed repos that have no local path yet
-	if repo.LocalPath == "" && repo.ProviderOwner != "" && repo.ProviderName != "" {
+	// Clone provider-backed repos that have no local path yet. Legacy managed
+	// paths are also rematerialized into the workspace-isolated layout.
+	needsWorkspaceClone := repo.LocalPath == "" ||
+		(e.repoCloner != nil && e.repoCloner.ShouldRecloneForWorkspace(repo.WorkspaceID, repo.LocalPath))
+	if needsWorkspaceClone && repo.ProviderOwner != "" && repo.ProviderName != "" {
 		if localPath, cloneErr := e.ensureRepoCloned(ctx, repo); cloneErr != nil {
 			return nil, cloneErr
 		} else if localPath != "" {
@@ -164,7 +167,14 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 		zap.String("repository_id", repo.ID),
 		zap.String("repo", repo.ProviderOwner+"/"+repo.ProviderName))
 
-	localPath, err := e.repoCloner.EnsureCloned(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName)
+	localPath, err := e.repoCloner.EnsureWorkspaceCloned(
+		ctx,
+		repo.WorkspaceID,
+		repo.Provider,
+		cloneURL,
+		repo.ProviderOwner,
+		repo.ProviderName,
+	)
 	if err != nil {
 		e.logger.Error("failed to clone repository",
 			zap.String("repository_id", repo.ID),
@@ -528,6 +538,7 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	}
 	req := &LaunchAgentRequest{
 		TaskID:               task.ID,
+		WorkspaceID:          task.WorkspaceID,
 		SessionID:            session.ID,
 		TaskTitle:            task.Title,
 		AgentProfileID:       executionProfileID,
@@ -554,6 +565,9 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	req.WorktreeBranchTicket = worktree.TicketForBranchName(task.Identifier, metadata)
 
 	execConfig := e.applyExecutorConfigToResumeRequest(ctx, req, task, session, metadata)
+	if executorNeedsResolvedCredentials(execConfig.ExecutorType) {
+		e.applyContainerCredentials(ctx, req, metadata)
+	}
 
 	existingEnv, err := e.resolveResumeTaskEnvironment(ctx, task.ID, session)
 	if err != nil {
@@ -565,6 +579,13 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 
 	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req, existingEnv)
 	if err != nil {
+		return nil, "", execConfig, nil, nil, err
+	}
+	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
+	if err != nil {
+		return nil, "", execConfig, nil, nil, err
+	}
+	if err := e.configureGitHubCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
 		return nil, "", execConfig, nil, nil, err
 	}
 

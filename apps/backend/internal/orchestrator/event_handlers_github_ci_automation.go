@@ -166,7 +166,9 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	if state != nil && state.AutoFixExhaustedAt != nil {
 		return !ciAutomationReadyToMerge(pr)
 	}
-	feedback, err := s.githubService.GetPRFeedback(ctx, pr.Owner, pr.Repo, pr.PRNumber)
+	feedback, err := s.githubService.GetPRFeedbackForAutomation(
+		ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber,
+	)
 	if err != nil {
 		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("fetch PR feedback: %v", err))
 		return true
@@ -298,7 +300,9 @@ func (s *Service) handleTaskPRCIAutoMerge(ctx context.Context, pr *github.TaskPR
 		Signature:    signature,
 		AttemptedAt:  time.Now().UTC(),
 	}
-	if err := s.githubService.MergePR(ctx, pr.Owner, pr.Repo, pr.PRNumber, ""); err != nil {
+	if err := s.githubService.MergePRForAutomation(
+		ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber, "",
+	); err != nil {
 		s.recordCIAutomationError(ctx, pr, fmt.Sprintf("merge PR: %v", err))
 		return
 	}

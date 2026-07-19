@@ -1,0 +1,187 @@
+import { describe, expect, it } from "vitest";
+import { getGitHubMutationActor } from "@/lib/github-auth";
+import { normalizeGitHubStatus } from "./use-github-status";
+
+const WORKSPACE_A = "workspace-a";
+const GITHUB_COM = "github.com";
+const AUTOMATION_USER = "automation-user";
+
+describe("normalizeGitHubStatus for GitHub Apps", () => {
+  it("uses the personal identity for App-backed workspaces", () => {
+    const status = normalizeGitHubStatus({
+      workspace_id: WORKSPACE_A,
+      authenticated: true,
+      username: "acme",
+      auth_method: "github_app_installation",
+      token_configured: false,
+      required_scopes: [],
+      app_available: true,
+      effective_personal_actor: {
+        kind: "human",
+        source: "github_app_user",
+        login: "alice",
+        workspace_id: WORKSPACE_A,
+        user_id: "user-a",
+      },
+      automation: {
+        workspace_id: WORKSPACE_A,
+        source: "github_app_installation",
+        github_host: GITHUB_COM,
+        installation_id: 42,
+        installation_account_login: "acme",
+        status: "active",
+        credential_generation: 1,
+      },
+      personal: {
+        workspace_id: WORKSPACE_A,
+        user_id: "user-a",
+        github_user_id: 7,
+        login: "alice",
+        status: "active",
+        access_expires_at: "2030-01-01T00:00:00Z",
+        credential_generation: 1,
+      },
+    });
+
+    expect(status).toMatchObject({
+      authenticated: true,
+      auth_method: "github_app_installation",
+      username: "alice",
+    });
+  });
+
+  it("does not present the App installation account as a human user", () => {
+    const status = normalizeGitHubStatus({
+      workspace_id: WORKSPACE_A,
+      authenticated: true,
+      username: "acme",
+      auth_method: "github_app_installation",
+      token_configured: false,
+      required_scopes: [],
+      effective_manual_mutation_actor: {
+        kind: "app",
+        source: "github_app_installation",
+        login: "acme",
+        installation_id: 42,
+        workspace_id: WORKSPACE_A,
+      },
+      automation: {
+        workspace_id: WORKSPACE_A,
+        source: "github_app_installation",
+        github_host: GITHUB_COM,
+        installation_id: 42,
+        installation_account_login: "acme",
+        status: "active",
+        credential_generation: 1,
+      },
+      personal: null,
+    });
+
+    expect(status.authenticated).toBe(true);
+    expect(status.username).toBe("");
+    expect(getGitHubMutationActor(status)).toBe("acme GitHub App");
+  });
+
+  it("preserves a failed backend authentication result for active metadata", () => {
+    const status = normalizeGitHubStatus({
+      workspace_id: WORKSPACE_A,
+      authenticated: false,
+      username: "",
+      auth_method: "github_app_installation",
+      token_configured: false,
+      required_scopes: [],
+      automation: {
+        workspace_id: WORKSPACE_A,
+        source: "github_app_installation",
+        github_host: GITHUB_COM,
+        installation_id: 42,
+        installation_account_login: "acme",
+        status: "active",
+        credential_generation: 1,
+        last_error: "installation token mint failed",
+      },
+      personal: null,
+    });
+
+    expect(status.authenticated).toBe(false);
+    expect(status.auth_method).toBe("none");
+    expect(getGitHubMutationActor(status)).toBeNull();
+  });
+});
+
+describe("normalizeGitHubStatus for human automation", () => {
+  it("ignores an invalid personal login when resolving the effective actor", () => {
+    const status = normalizeGitHubStatus({
+      workspace_id: WORKSPACE_A,
+      authenticated: true,
+      username: AUTOMATION_USER,
+      auth_method: "pat",
+      token_configured: true,
+      required_scopes: [],
+      effective_personal_actor: {
+        kind: "human",
+        source: "pat",
+        login: AUTOMATION_USER,
+        workspace_id: WORKSPACE_A,
+      },
+      effective_manual_mutation_actor: {
+        kind: "human",
+        source: "pat",
+        login: AUTOMATION_USER,
+        workspace_id: WORKSPACE_A,
+      },
+      automation: {
+        workspace_id: WORKSPACE_A,
+        source: "pat",
+        github_host: GITHUB_COM,
+        login: AUTOMATION_USER,
+        status: "active",
+        credential_generation: 1,
+      },
+      personal: {
+        workspace_id: WORKSPACE_A,
+        user_id: "user-a",
+        github_user_id: 7,
+        login: "expired-user",
+        status: "invalid",
+        access_expires_at: "2025-01-01T00:00:00Z",
+        credential_generation: 2,
+      },
+    });
+
+    expect(status.username).toBe(AUTOMATION_USER);
+    expect(getGitHubMutationActor(status)).toBe(AUTOMATION_USER);
+  });
+
+  it("preserves a named CLI actor for compatibility surfaces", () => {
+    const status = normalizeGitHubStatus({
+      workspace_id: "workspace-b",
+      authenticated: true,
+      username: "bob",
+      auth_method: "gh_cli",
+      token_configured: false,
+      required_scopes: [],
+      effective_personal_actor: {
+        kind: "human",
+        source: "gh_cli",
+        login: "bob",
+        workspace_id: "workspace-b",
+      },
+      automation: {
+        workspace_id: "workspace-b",
+        source: "gh_cli",
+        github_host: "github.example.com",
+        login: "bob",
+        status: "active",
+        credential_generation: 3,
+      },
+      personal: null,
+    });
+
+    expect(status).toMatchObject({
+      authenticated: true,
+      auth_method: "gh_cli",
+      username: "bob",
+    });
+  });
+});

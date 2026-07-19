@@ -2,7 +2,7 @@ import type { StateCreator } from "zustand";
 import type { GitHubSlice, GitHubSliceState } from "./types";
 
 export const defaultGitHubState: GitHubSliceState = {
-  githubStatus: { status: null, loaded: false, loading: false },
+  githubStatus: { workspaceId: null, status: null, loaded: false, loading: false },
   taskPRs: { byTaskId: {} },
   taskIssues: { workspaceId: null, byTaskId: {} },
   pendingPrUrlByTaskId: { byTaskId: {} },
@@ -22,16 +22,25 @@ type ImmerSet = Parameters<
 
 function createGitHubStatusActions(
   set: ImmerSet,
-): Pick<GitHubSlice, "setGitHubStatus" | "setGitHubStatusLoading"> {
+): Pick<GitHubSlice, "setGitHubStatus" | "setGitHubStatusLoading" | "resetGitHubStatus"> {
   return {
-    setGitHubStatus: (status) =>
+    setGitHubStatus: (workspaceId, status) =>
       set((draft) => {
+        if (draft.githubStatus.workspaceId !== workspaceId) return;
         draft.githubStatus.status = status;
         draft.githubStatus.loaded = true;
       }),
-    setGitHubStatusLoading: (loading) =>
+    setGitHubStatusLoading: (workspaceId, loading) =>
       set((draft) => {
+        if (draft.githubStatus.workspaceId !== workspaceId) return;
         draft.githubStatus.loading = loading;
+      }),
+    resetGitHubStatus: (workspaceId) =>
+      set((draft) => {
+        draft.githubStatus.workspaceId = workspaceId;
+        draft.githubStatus.status = null;
+        draft.githubStatus.loaded = false;
+        draft.githubStatus.loading = false;
       }),
   };
 }

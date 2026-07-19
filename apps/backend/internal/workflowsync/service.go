@@ -28,11 +28,14 @@ type Applier interface {
 	ReleaseSyncedWorkflows(ctx context.Context, workspaceID string) ([]string, error)
 }
 
-// ClientProvider hands out the GitHub client used to read the sync repo.
-// Satisfied by the GitHub service; Client() may return nil when GitHub is not
-// authenticated.
+// ClientProvider exposes workspace-routed GitHub repository reads.
 type ClientProvider interface {
-	Client() github.Client
+	ListRepoDirectoryForWorkspace(
+		ctx context.Context, workspaceID, owner, repo, path, ref string,
+	) ([]github.RepoContentEntry, error)
+	GetRepoFileContentForWorkspace(
+		ctx context.Context, workspaceID, owner, repo, path, ref string,
+	) ([]byte, error)
 }
 
 // Service owns workflow sync configuration and sync execution.
@@ -177,11 +180,12 @@ func (s *Service) recordFailure(ctx context.Context, workspaceID string, syncErr
 // fetchFiles lists the configured directory and downloads every workflow
 // definition file in it (non-recursive).
 func (s *Service) fetchFiles(ctx context.Context, cfg *Config) ([]fetchedFile, error) {
-	client := s.clients.Client()
-	if client == nil {
+	if s.clients == nil {
 		return nil, fmt.Errorf("GitHub is not authenticated; configure a GitHub token to sync workflows")
 	}
-	entries, err := client.ListRepoDirectory(ctx, cfg.RepoOwner, cfg.RepoName, cfg.Path, cfg.Branch)
+	entries, err := s.clients.ListRepoDirectoryForWorkspace(
+		ctx, cfg.WorkspaceID, cfg.RepoOwner, cfg.RepoName, cfg.Path, cfg.Branch,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list %s/%s@%s:%s: %w", cfg.RepoOwner, cfg.RepoName, cfg.Branch, cfg.Path, err)
 	}
@@ -190,7 +194,9 @@ func (s *Service) fetchFiles(ctx context.Context, cfg *Config) ([]fetchedFile, e
 		if entry.Type != "file" || !isSyncableFile(entry.Name) {
 			continue
 		}
-		content, err := client.GetRepoFileContent(ctx, cfg.RepoOwner, cfg.RepoName, entry.Path, cfg.Branch)
+		content, err := s.clients.GetRepoFileContentForWorkspace(
+			ctx, cfg.WorkspaceID, cfg.RepoOwner, cfg.RepoName, entry.Path, cfg.Branch,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch %s: %w", entry.Path, err)
 		}

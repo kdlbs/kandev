@@ -79,6 +79,15 @@ type SecretManager interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// ConnectionSecretStore provides deterministic encrypted keys for workspace
+// and user GitHub connections.
+type ConnectionSecretStore interface {
+	Reveal(ctx context.Context, id string) (string, error)
+	Set(ctx context.Context, id, name, value string) error
+	Delete(ctx context.Context, id string) error
+	Exists(ctx context.Context, id string) (bool, error)
+}
+
 // PromptResolver resolves editable prompt content by name.
 type PromptResolver interface {
 	ResolvePromptContent(ctx context.Context, name, fallback string) string
@@ -86,16 +95,27 @@ type PromptResolver interface {
 
 // Service coordinates GitHub integration operations.
 type Service struct {
-	mu             sync.Mutex
-	client         Client
-	authMethod     string
-	secrets        SecretProvider
-	secretManager  SecretManager
-	store          *Store
-	eventBus       bus.EventBus
-	logger         *logger.Logger
-	taskDeleter    TaskDeleter
-	taskIssueStore TaskIssueStore
+	mu                      sync.Mutex
+	connectionMutationLocks [64]sync.Mutex
+	client                  Client
+	authMethod              string
+	secrets                 SecretProvider
+	secretManager           SecretManager
+	connectionSecrets       ConnectionSecretStore
+	personalConnections     *StorePersonalConnectionRepository
+	resolver                *CredentialResolver
+	appClient               *AppClient
+	installationTokens      *InstallationTokenCache
+	appInstallationAuth     *AppInstallationService
+	personalAuth            *PersonalAuthService
+	webhookAuth             *GitHubWebhookService
+	appAvailable            bool
+	credentialBroker        *CredentialBroker
+	store                   *Store
+	eventBus                bus.EventBus
+	logger                  *logger.Logger
+	taskDeleter             TaskDeleter
+	taskIssueStore          TaskIssueStore
 	// cascadeTaskDeleter is the cascade-delete entry point used by the
 	// watch reset flow. It is distinct from taskDeleter (which only deletes
 	// a single task by ID) because reset must walk the task tree and clean
@@ -114,6 +134,9 @@ type Service struct {
 	protectionCache      *branchProtectionCache
 	rateTracker          *RateTracker
 	promptResolver       PromptResolver
+	tokenClientFactory   func(string) Client
+	ghAccountLister      func(context.Context) ([]GHAccount, error)
+	mockAuth             *MockAuthState
 
 	// cleanupFailureMu guards cleanupFailureCounts; the cleanup loop is the
 	// only writer but the global sweep + per-watch sweep can run concurrently
@@ -146,7 +169,7 @@ type Service struct {
 // NewService creates a new GitHub service.
 func NewService(client Client, authMethod string, secrets SecretProvider, store *Store, eventBus bus.EventBus, log *logger.Logger) *Service {
 	stopCtx, stopCancel := context.WithCancel(context.Background())
-	return &Service{
+	service := &Service{
 		client:               client,
 		authMethod:           authMethod,
 		secrets:              secrets,
@@ -161,10 +184,28 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		repoErrorCache:       newRepoErrorCache(),
 		protectionCache:      newBranchProtectionCache(),
 		rateTracker:          NewRateTracker(eventBus, log),
+		tokenClientFactory:   func(token string) Client { return NewPATClient(token) },
+		ghAccountLister:      ListGHAccounts,
 		cleanupFailureCounts: make(map[string]int),
 		stopCtx:              stopCtx,
 		stopCancel:           stopCancel,
 	}
+	if store != nil {
+		service.resolver = NewCredentialResolver(store, secrets)
+		service.resolver.SetLegacyFactory(func(ctx context.Context) (Client, string, error) {
+			return NewClient(ctx, secrets, log)
+		})
+	}
+	return service
+}
+
+// ListGHAccounts returns the configured account source. Production uses the
+// host CLI; mock mode injects deterministic accounts and never shells out.
+func (s *Service) ListGHAccounts(ctx context.Context) ([]GHAccount, error) {
+	if s == nil || s.ghAccountLister == nil {
+		return nil, ErrGitHubNotConfigured
+	}
+	return s.ghAccountLister(ctx)
 }
 
 // Stop cancels in-flight background goroutines (currently the
@@ -228,6 +269,48 @@ func (s *Service) SetTaskSessionChecker(c TaskSessionChecker) { s.taskSessionChe
 
 // SetSecretManager sets the secret manager for token configuration operations.
 func (s *Service) SetSecretManager(m SecretManager) { s.secretManager = m }
+
+// SetConnectionSecretStore wires deterministic workspace/user secret storage.
+func (s *Service) SetConnectionSecretStore(store ConnectionSecretStore) {
+	s.connectionSecrets = store
+	if s.store != nil && store != nil {
+		s.personalConnections = NewStorePersonalConnectionRepository(s.store, store)
+	}
+	if s.resolver != nil {
+		s.resolver.secrets = store
+	}
+}
+
+// SetGitHubAppClient enables installation-backed workspace credentials. The
+// App private key remains encapsulated by AppClient and is never exposed by
+// the service or credential resolver.
+func (s *Service) SetGitHubAppClient(client *AppClient) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appClient = client
+	if client == nil {
+		s.installationTokens = nil
+		if s.resolver != nil {
+			s.resolver.SetInstallationProvider(nil)
+		}
+		return
+	}
+	s.installationTokens = NewInstallationTokenCache(client)
+	if s.resolver != nil {
+		s.resolver.SetInstallationProvider(NewCachedInstallationCredentialProvider(s.installationTokens))
+	}
+}
+
+// InvalidateInstallationCredentials revokes cached installation tokens after
+// disconnect, suspension, replacement, or a corresponding GitHub webhook.
+func (s *Service) InvalidateInstallationCredentials(installationID int64) {
+	s.mu.Lock()
+	tokens := s.installationTokens
+	s.mu.Unlock()
+	if tokens != nil {
+		tokens.Invalidate(installationID)
+	}
+}
 
 // Client returns the underlying GitHub client (may be nil if not authenticated).
 func (s *Service) Client() Client {

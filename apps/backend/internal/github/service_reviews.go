@@ -22,6 +22,28 @@ import (
 
 // CreateReviewWatch creates a new review watch and triggers an initial poll.
 func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchRequest) (*ReviewWatch, error) {
+	return s.createReviewWatch(ctx, req, "")
+}
+
+func (s *Service) CreateReviewWatchForUser(
+	ctx context.Context, userID string, req *CreateReviewWatchRequest,
+) (*ReviewWatch, error) {
+	if req == nil || strings.TrimSpace(req.WorkspaceID) == "" {
+		return nil, ErrGitHubWorkspaceRequired
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, req.WorkspaceID, userID, "", "")
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(resolved.Principal.Login) == "" {
+		return nil, ErrGitHubPersonalRequired
+	}
+	return s.createReviewWatch(ctx, req, resolved.Principal.Login)
+}
+
+func (s *Service) createReviewWatch(
+	ctx context.Context, req *CreateReviewWatchRequest, targetLogin string,
+) (*ReviewWatch, error) {
 	if req.PollIntervalSeconds <= 0 {
 		req.PollIntervalSeconds = defaultWatchPollIntervalSec
 	}
@@ -49,6 +71,7 @@ func (s *Service) CreateReviewWatch(ctx context.Context, req *CreateReviewWatchR
 		Prompt:              req.Prompt,
 		ReviewScope:         reviewScope,
 		CustomQuery:         req.CustomQuery,
+		TargetLogin:         targetLogin,
 		Enabled:             true,
 		PollIntervalSeconds: req.PollIntervalSeconds,
 		CleanupPolicy:       NormalizeCleanupPolicy(req.CleanupPolicy),
@@ -208,8 +231,26 @@ func (s *Service) DeleteReviewWatchesByWorkspace(ctx context.Context, workspaceI
 // CheckReviewWatch checks for new PRs needing review and returns ones not yet tracked.
 // If watch.Repos is empty, all repos are queried. Otherwise, each repo is queried individually.
 func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*PR, error) {
-	if s.client == nil {
-		return nil, fmt.Errorf("github client not available")
+	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
+		return nil, ErrGitHubWorkspaceRequired
+	}
+	connection, err := s.store.GetWorkspaceConnection(ctx, watch.WorkspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("load review watch workspace connection: %w", err)
+	}
+	if connection != nil && connection.Source == ConnectionSourceGitHubAppInstallation &&
+		strings.TrimSpace(watch.TargetLogin) == "" {
+		const cause = "Reconnect a personal GitHub identity to select the review target."
+		if disableErr := s.store.DisableReviewWatchWithError(ctx, watch.ID, cause); disableErr != nil {
+			return nil, disableErr
+		}
+		watch.Enabled = false
+		watch.LastError = cause
+		return nil, ErrGitHubPersonalRequired
+	}
+	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, "", "")
+	if err != nil {
+		return nil, err
 	}
 
 	s.logger.Debug("checking review watch for pending PRs",
@@ -230,7 +271,7 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 	if len(fetchWatch.Repos) == 0 {
 		fetchWatch.Repos = workspaceScopeRepoFilters(settings)
 	}
-	prs, err := s.fetchReviewPRs(ctx, &fetchWatch)
+	prs, err := s.fetchReviewPRs(ctx, resolved.Client, &fetchWatch)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +306,7 @@ func (s *Service) CheckReviewWatch(ctx context.Context, watch *ReviewWatch) ([]*
 
 	// Enrich new PRs with full details (branch info) from the PR API,
 	// since the search API does not return head/base branch.
-	s.enrichPRDetails(ctx, newPRs)
+	s.enrichPRDetails(ctx, resolved.Client, newPRs)
 
 	s.logger.Debug("review watch check complete",
 		zap.String("watch_id", watch.ID),
@@ -297,8 +338,9 @@ func (s *Service) TriggerReviewWatch(ctx context.Context, watch *ReviewWatch) ([
 // fetchReviewPRs fetches PRs needing review based on the watch configuration.
 // When repo filters are set, they are always applied — even when a custom query is present
 // (the filter qualifier is appended to the query for each repo).
-func (s *Service) fetchReviewPRs(ctx context.Context, watch *ReviewWatch) ([]*PR, error) {
+func (s *Service) fetchReviewPRs(ctx context.Context, client Client, watch *ReviewWatch) ([]*PR, error) {
 	hasRepos := len(watch.Repos) > 0
+	customQuery := reviewWatchQuery(watch)
 
 	s.logger.Debug("fetchReviewPRs: starting",
 		zap.String("watch_id", watch.ID),
@@ -309,24 +351,24 @@ func (s *Service) fetchReviewPRs(ctx context.Context, watch *ReviewWatch) ([]*PR
 
 	// No repo filters: use query verbatim (custom or scope-based)
 	if !hasRepos {
-		if watch.CustomQuery != "" {
+		if customQuery != "" {
 			s.logger.Debug("fetchReviewPRs: using custom query (all repos)",
-				zap.String("query", watch.CustomQuery))
-			return s.client.ListReviewRequestedPRs(ctx, "", "", watch.CustomQuery)
+				zap.String("query", customQuery))
+			return client.ListReviewRequestedPRs(ctx, "", "", customQuery)
 		}
 		s.logger.Debug("fetchReviewPRs: using scope (all repos)",
 			zap.String("scope", watch.ReviewScope))
-		return s.client.ListReviewRequestedPRs(ctx, watch.ReviewScope, "", "")
+		return client.ListReviewRequestedPRs(ctx, watch.ReviewScope, "", "")
 	}
 
 	// Has repo filters: iterate repos, appending filter to customQuery or scope
-	prs := s.fetchReviewPRsWithFilter(ctx, watch)
+	prs := s.fetchReviewPRsWithFilter(ctx, client, watch)
 	return prs, nil
 }
 
 // fetchReviewPRsWithFilter queries each repo filter individually and deduplicates results.
 // When customQuery is set, the repo qualifier is appended to it; otherwise scope+filter is used.
-func (s *Service) fetchReviewPRsWithFilter(ctx context.Context, watch *ReviewWatch) []*PR {
+func (s *Service) fetchReviewPRsWithFilter(ctx context.Context, client Client, watch *ReviewWatch) []*PR {
 	var allPRs []*PR
 	seen := make(map[string]bool)
 
@@ -335,18 +377,18 @@ func (s *Service) fetchReviewPRsWithFilter(ctx context.Context, watch *ReviewWat
 
 		var prs []*PR
 		var err error
-		if watch.CustomQuery != "" {
-			query := watch.CustomQuery + " " + qualifier
+		if queryBase := reviewWatchQuery(watch); queryBase != "" {
+			query := queryBase + " " + qualifier
 			s.logger.Debug("fetchReviewPRs: querying with custom query + filter",
 				zap.String("watch_id", watch.ID),
 				zap.String("query", query))
-			prs, err = s.client.ListReviewRequestedPRs(ctx, "", "", query)
+			prs, err = client.ListReviewRequestedPRs(ctx, "", "", query)
 		} else {
 			s.logger.Debug("fetchReviewPRs: querying with scope + filter",
 				zap.String("watch_id", watch.ID),
 				zap.String("scope", watch.ReviewScope),
 				zap.String("filter", qualifier))
-			prs, err = s.client.ListReviewRequestedPRs(ctx, watch.ReviewScope, qualifier, "")
+			prs, err = client.ListReviewRequestedPRs(ctx, watch.ReviewScope, qualifier, "")
 		}
 		if err != nil {
 			if isConnectivityError(err) {
@@ -374,6 +416,22 @@ func (s *Service) fetchReviewPRsWithFilter(ctx context.Context, watch *ReviewWat
 	return allPRs
 }
 
+func reviewWatchQuery(watch *ReviewWatch) string {
+	query := strings.TrimSpace(watch.CustomQuery)
+	login := strings.TrimSpace(watch.TargetLogin)
+	if login == "" {
+		return query
+	}
+	qualifier := "review-requested:" + login
+	if watch.ReviewScope == ReviewScopeUser {
+		qualifier = "user-review-requested:" + login
+	}
+	if query != "" {
+		return query + " " + qualifier
+	}
+	return "type:pr state:open " + qualifier + " -is:draft"
+}
+
 // repoFilterToQualifier converts a RepoFilter to a GitHub search qualifier string.
 func repoFilterToQualifier(repo RepoFilter) string {
 	if repo.Name == "" {
@@ -383,7 +441,7 @@ func repoFilterToQualifier(repo RepoFilter) string {
 }
 
 // enrichPRDetails fetches full PR details for PRs missing branch info (from the search API).
-func (s *Service) enrichPRDetails(ctx context.Context, prs []*PR) {
+func (s *Service) enrichPRDetails(ctx context.Context, client Client, prs []*PR) {
 	for _, pr := range prs {
 		if pr.HeadBranch != "" && pr.BaseBranch != "" {
 			continue
@@ -392,7 +450,7 @@ func (s *Service) enrichPRDetails(ctx context.Context, prs []*PR) {
 			zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
 			zap.Int("pr_number", pr.Number))
 
-		full, err := s.client.GetPR(ctx, pr.RepoOwner, pr.RepoName, pr.Number)
+		full, err := client.GetPR(ctx, pr.RepoOwner, pr.RepoName, pr.Number)
 		if err != nil {
 			s.logger.Warn("failed to fetch full PR details, branch info will be empty",
 				zap.String("repo", pr.RepoOwner+"/"+pr.RepoName),
@@ -414,12 +472,26 @@ func (s *Service) ListUserOrgs(ctx context.Context) ([]GitHubOrg, error) {
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
-	orgs, err := s.client.ListUserOrgs(ctx)
+	return listUserOrgs(ctx, s.client)
+}
+
+func (s *Service) ListUserOrgsForWorkspace(
+	ctx context.Context, workspaceID, userID string,
+) ([]GitHubOrg, error) {
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, "", "")
+	if err != nil {
+		return nil, err
+	}
+	return listUserOrgs(ctx, resolved.Client)
+}
+
+func listUserOrgs(ctx context.Context, client Client) ([]GitHubOrg, error) {
+	orgs, err := client.ListUserOrgs(ctx)
 	if err != nil {
 		return nil, err
 	}
 	// Prepend the authenticated user as a pseudo-org (for personal repos).
-	user, userErr := s.client.GetAuthenticatedUser(ctx)
+	user, userErr := client.GetAuthenticatedUser(ctx)
 	if userErr == nil && user != "" {
 		orgs = append([]GitHubOrg{{Login: user}}, orgs...)
 	}
@@ -432,6 +504,30 @@ func (s *Service) SearchOrgRepos(ctx context.Context, org, query string, limit i
 		return nil, fmt.Errorf("github client not available")
 	}
 	return s.client.SearchOrgRepos(ctx, org, query, limit)
+}
+
+func (s *Service) SearchOrgReposForWorkspace(
+	ctx context.Context, workspaceID, org, query string, limit int,
+) ([]GitHubRepo, error) {
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, org, "")
+	if err != nil {
+		return nil, err
+	}
+	settings, err := s.GetWorkspaceSettings(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	repos, err := resolved.Client.SearchOrgRepos(ctx, org, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	filtered := repos[:0]
+	for _, repo := range repos {
+		if repositoryInWorkspaceScope(settings, repo.Owner, repo.Name) {
+			filtered = append(filtered, repo)
+		}
+	}
+	return filtered, nil
 }
 
 // ListRepoBranches lists branches for a repository.
@@ -456,6 +552,24 @@ func (s *Service) ListRepoBranches(ctx context.Context, owner, repo string) ([]R
 		if err != nil {
 			return nil, err
 		}
+	}
+	sortBranchesMainFirst(branches)
+	return branches, nil
+}
+
+func (s *Service) ListRepoBranchesForWorkspace(
+	ctx context.Context, workspaceID, owner, repo string,
+) ([]RepoBranch, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	branches, err := resolved.Client.ListRepoBranches(ctx, owner, repo)
+	if err != nil {
+		return nil, err
 	}
 	sortBranchesMainFirst(branches)
 	return branches, nil
@@ -567,6 +681,24 @@ func (s *Service) SearchUserPRs(ctx context.Context, filter, customQuery string)
 	return s.client.SearchPRs(ctx, filter, customQuery)
 }
 
+func (s *Service) SearchUserPRsForWorkspace(
+	ctx context.Context, workspaceID, userID, filter, customQuery string,
+) ([]*PR, error) {
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, "", "")
+	if err != nil {
+		return nil, err
+	}
+	settings, err := s.GetWorkspaceSettings(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	prs, err := resolved.Client.SearchPRs(ctx, filter, customQuery)
+	if err != nil {
+		return nil, err
+	}
+	return s.filterPersonalPRsByAutomation(ctx, workspaceID, filterPRsByWorkspaceScope(prs, settings))
+}
+
 // SearchUserIssues searches for issues using a filter or custom query. Unless
 // the caller already pins a type qualifier, `type:issue` is injected into the
 // composed query.
@@ -577,6 +709,39 @@ func (s *Service) SearchUserIssues(ctx context.Context, filter, customQuery stri
 	return s.client.ListIssues(ctx, filter, customQuery)
 }
 
+func (s *Service) SearchUserIssuesForWorkspace(
+	ctx context.Context, workspaceID, userID, filter, customQuery string,
+) ([]*Issue, error) {
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, "", "")
+	if err != nil {
+		return nil, err
+	}
+	settings, err := s.GetWorkspaceSettings(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	issues, err := resolved.Client.ListIssues(ctx, filter, customQuery)
+	if err != nil {
+		return nil, err
+	}
+	return s.filterPersonalIssuesByAutomation(ctx, workspaceID, filterIssuesByWorkspaceScope(issues, settings))
+}
+
+// ListAutomationPRs is the background-automation search path. It always uses
+// the workspace automation identity and enforces the configured repo boundary.
+func (s *Service) ListAutomationPRs(
+	ctx context.Context, workspaceID, owner, repo, customQuery string,
+) ([]*PR, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Client.ListReviewRequestedPRs(ctx, "", "", customQuery)
+}
+
 // SearchUserPRsPaged is the paginated variant of SearchUserPRs. Results are
 // cached for a short window (see searchCacheTTL) — callers must not mutate
 // the returned page, since it is shared across concurrent requests.
@@ -584,13 +749,19 @@ func (s *Service) SearchUserPRsPaged(ctx context.Context, filter, customQuery st
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
+	return s.searchUserPRsPagedWithClient(ctx, s.client, "legacy", filter, customQuery, page, perPage)
+}
+
+func (s *Service) searchUserPRsPagedWithClient(
+	ctx context.Context, client Client, cacheScope, filter, customQuery string, page, perPage int,
+) (*PRSearchPage, error) {
 	// Clamp before composing the cache key so perPage=150 and perPage=100
 	// share the same cached page instead of creating two entries for
 	// identical results.
 	page, perPage = clampSearchPage(page, perPage)
-	key := searchCacheKey("pr", filter, customQuery, page, perPage)
+	key := scopedCacheKey(cacheScope, searchCacheKey("pr", filter, customQuery, page, perPage))
 	v, err := s.searchCache.doOrFetch(key, func() (any, error) {
-		result, err := s.client.SearchPRsPaged(ctx, filter, customQuery, page, perPage)
+		result, err := client.SearchPRsPaged(ctx, filter, customQuery, page, perPage)
 		if err != nil {
 			return nil, err
 		}
@@ -611,10 +782,16 @@ func (s *Service) SearchUserIssuesPaged(ctx context.Context, filter, customQuery
 	if s.client == nil {
 		return nil, fmt.Errorf("github client not available")
 	}
+	return s.searchUserIssuesPagedWithClient(ctx, s.client, "legacy", filter, customQuery, page, perPage)
+}
+
+func (s *Service) searchUserIssuesPagedWithClient(
+	ctx context.Context, client Client, cacheScope, filter, customQuery string, page, perPage int,
+) (*IssueSearchPage, error) {
 	page, perPage = clampSearchPage(page, perPage)
-	key := searchCacheKey("issue", filter, customQuery, page, perPage)
+	key := scopedCacheKey(cacheScope, searchCacheKey("issue", filter, customQuery, page, perPage))
 	v, err := s.searchCache.doOrFetch(key, func() (any, error) {
-		result, err := s.client.ListIssuesPaged(ctx, filter, customQuery, page, perPage)
+		result, err := client.ListIssuesPaged(ctx, filter, customQuery, page, perPage)
 		if err != nil {
 			return nil, err
 		}

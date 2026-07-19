@@ -7,6 +7,135 @@ import (
 	"time"
 )
 
+// ConnectionSource identifies the credential source selected for workspace
+// automation. Legacy shared auth is migration-only and cannot be selected for
+// a new workspace.
+type ConnectionSource string
+
+const (
+	ConnectionSourceLegacyShared          ConnectionSource = "legacy_shared"
+	ConnectionSourcePAT                   ConnectionSource = "pat"
+	ConnectionSourceGHCLI                 ConnectionSource = "gh_cli"
+	ConnectionSourceGitHubAppInstallation ConnectionSource = "github_app_installation"
+	ConnectionSourceGitHubAppUser         ConnectionSource = "github_app_user"
+)
+
+// ConnectionStatus is the persisted health/lifecycle state for a GitHub
+// automation or personal connection.
+type ConnectionStatus string
+
+const (
+	ConnectionStatusActive    ConnectionStatus = "active"
+	ConnectionStatusInvalid   ConnectionStatus = "invalid"
+	ConnectionStatusSuspended ConnectionStatus = "suspended"
+	ConnectionStatusRevoked   ConnectionStatus = "revoked"
+)
+
+// WorkspaceConnection is the single automation identity selected by a
+// workspace. Long-lived secret material is stored separately under a
+// deterministic workspace-scoped secret key.
+type WorkspaceConnection struct {
+	WorkspaceID              string           `json:"workspace_id" db:"workspace_id"`
+	Source                   ConnectionSource `json:"source" db:"source"`
+	GitHubHost               string           `json:"github_host" db:"github_host"`
+	Login                    string           `json:"login,omitempty" db:"login"`
+	InstallationID           *int64           `json:"installation_id,omitempty" db:"installation_id"`
+	InstallationAccountLogin string           `json:"installation_account_login,omitempty" db:"installation_account_login"`
+	InstallationAccountType  string           `json:"installation_account_type,omitempty" db:"installation_account_type"`
+	Status                   ConnectionStatus `json:"status" db:"status"`
+	CredentialGeneration     int64            `json:"credential_generation" db:"credential_generation"`
+	LastError                string           `json:"last_error,omitempty" db:"last_error"`
+	CreatedAt                time.Time        `json:"created_at" db:"created_at"`
+	UpdatedAt                time.Time        `json:"updated_at" db:"updated_at"`
+}
+
+// UserConnection is an optional personal GitHub identity for one Kandev user
+// in one workspace. Its OAuth access and refresh tokens live in the encrypted
+// secret store and are never placed in this row.
+type UserConnection struct {
+	WorkspaceID          string           `json:"workspace_id" db:"workspace_id"`
+	UserID               string           `json:"user_id" db:"user_id"`
+	GitHubUserID         int64            `json:"github_user_id" db:"github_user_id"`
+	Login                string           `json:"login" db:"login"`
+	Status               ConnectionStatus `json:"status" db:"status"`
+	AccessExpiresAt      time.Time        `json:"access_expires_at" db:"access_expires_at"`
+	RefreshExpiresAt     *time.Time       `json:"refresh_expires_at,omitempty" db:"refresh_expires_at"`
+	CredentialGeneration int64            `json:"credential_generation" db:"credential_generation"`
+	LastError            string           `json:"last_error,omitempty" db:"last_error"`
+	CreatedAt            time.Time        `json:"created_at" db:"created_at"`
+	UpdatedAt            time.Time        `json:"updated_at" db:"updated_at"`
+}
+
+type AuthFlowKind string
+
+const (
+	AuthFlowKindAppInstallation AuthFlowKind = "app_installation"
+	AuthFlowKindPersonal        AuthFlowKind = "personal"
+)
+
+// AuthFlow stores one short-lived, single-use GitHub authorization attempt.
+// StateHash stores a digest rather than the bearer state returned to a browser.
+type AuthFlow struct {
+	StateHash                   string           `json:"-" db:"state_hash"`
+	WorkspaceID                 string           `json:"workspace_id" db:"workspace_id"`
+	UserID                      string           `json:"user_id" db:"user_id"`
+	Kind                        AuthFlowKind     `json:"kind" db:"kind"`
+	PKCEVerifier                string           `json:"-" db:"pkce_verifier"`
+	ExpectedWorkspaceSource     ConnectionSource `json:"-" db:"expected_workspace_source"`
+	ExpectedWorkspaceGeneration int64            `json:"-" db:"expected_workspace_generation"`
+	ExpectedInstallationID      *int64           `json:"-" db:"expected_installation_id"`
+	ExpectedPersonalGeneration  int64            `json:"-" db:"expected_personal_generation"`
+	ExpiresAt                   time.Time        `json:"expires_at" db:"expires_at"`
+	ConsumedAt                  *time.Time       `json:"consumed_at,omitempty" db:"consumed_at"`
+	CreatedAt                   time.Time        `json:"created_at" db:"created_at"`
+}
+
+type WorkspaceConnectionExpectation struct {
+	Source               ConnectionSource
+	CredentialGeneration int64
+	InstallationID       *int64
+}
+
+type WebhookDeliveryStatus string
+
+const (
+	WebhookDeliveryStatusReceived  WebhookDeliveryStatus = "received"
+	WebhookDeliveryStatusProcessed WebhookDeliveryStatus = "processed"
+	WebhookDeliveryStatusIgnored   WebhookDeliveryStatus = "ignored"
+	WebhookDeliveryStatusFailed    WebhookDeliveryStatus = "failed"
+)
+
+// WebhookDelivery records GitHub delivery IDs so webhook state transitions are
+// idempotent without persisting payloads or authentication material.
+type WebhookDelivery struct {
+	DeliveryID  string                `json:"delivery_id" db:"delivery_id"`
+	Event       string                `json:"event" db:"event"`
+	Status      WebhookDeliveryStatus `json:"status" db:"status"`
+	Result      string                `json:"result,omitempty" db:"result"`
+	ReceivedAt  time.Time             `json:"received_at" db:"received_at"`
+	ProcessedAt *time.Time            `json:"processed_at,omitempty" db:"processed_at"`
+}
+
+type WebhookDeliveryClaim struct {
+	Acquired bool
+	Status   WebhookDeliveryStatus
+}
+
+// WorkspacePATSecretKey returns the encrypted-secret ID for workspace PAT auth.
+func WorkspacePATSecretKey(workspaceID string) string {
+	return "github:workspace:" + workspaceID + ":pat"
+}
+
+// UserAccessTokenSecretKey returns the encrypted-secret ID for personal access.
+func UserAccessTokenSecretKey(workspaceID, userID string) string {
+	return "github:user:" + workspaceID + ":" + userID + ":access"
+}
+
+// UserRefreshTokenSecretKey returns the encrypted-secret ID for personal refresh.
+func UserRefreshTokenSecretKey(workspaceID, userID string) string {
+	return "github:user:" + workspaceID + ":" + userID + ":refresh"
+}
+
 // TaskCIAutoFixMaxRounds is the server-enforced CI auto-fix loop guard.
 const TaskCIAutoFixMaxRounds = 10
 
@@ -145,6 +274,7 @@ type IssueSearchPage struct {
 // for legacy rows).
 type PRWatch struct {
 	ID              string     `json:"id" db:"id"`
+	WorkspaceID     string     `json:"workspace_id" db:"workspace_id"`
 	SessionID       string     `json:"session_id" db:"session_id"`
 	TaskID          string     `json:"task_id" db:"task_id"`
 	RepositoryID    string     `json:"repository_id,omitempty" db:"repository_id"`
@@ -165,6 +295,7 @@ type PRWatch struct {
 // Empty for legacy rows persisted before multi-repo support.
 type TaskPR struct {
 	ID                 string `json:"id" db:"id"`
+	WorkspaceID        string `json:"workspace_id" db:"workspace_id"`
 	TaskID             string `json:"task_id" db:"task_id"`
 	RepositoryID       string `json:"repository_id,omitempty" db:"repository_id"`
 	Owner              string `json:"owner" db:"owner"`
@@ -337,6 +468,7 @@ type ReviewWatch struct {
 	Prompt              string       `json:"prompt" db:"prompt"`
 	ReviewScope         string       `json:"review_scope" db:"review_scope"`
 	CustomQuery         string       `json:"custom_query" db:"custom_query"`
+	TargetLogin         string       `json:"target_login" db:"target_login"`
 	Enabled             bool         `json:"enabled" db:"enabled"`
 	PollIntervalSeconds int          `json:"poll_interval_seconds" db:"poll_interval_seconds"`
 	CleanupPolicy       string       `json:"cleanup_policy" db:"cleanup_policy"`
@@ -655,8 +787,8 @@ const (
 )
 
 // WorkspaceSettings stores per-workspace GitHub operational settings.
-// Authentication remains install-wide; these settings scope GitHub UI/search
-// surfaces to the workspace's intended repositories.
+// Authentication is stored separately and is intentionally not copied with
+// these operational settings.
 type WorkspaceSettings struct {
 	WorkspaceID         string          `json:"workspace_id" db:"workspace_id"`
 	RepoScopeMode       string          `json:"repo_scope_mode" db:"repo_scope_mode"`

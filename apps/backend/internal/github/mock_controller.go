@@ -2,8 +2,10 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -19,6 +21,7 @@ const defaultPRState = "open"
 // MockController handles HTTP endpoints for controlling the MockClient in E2E tests.
 type MockController struct {
 	mock     *MockClient
+	auth     *MockAuthState
 	store    *Store
 	eventBus bus.EventBus
 	logger   *logger.Logger
@@ -27,7 +30,11 @@ type MockController struct {
 
 // NewMockController creates a new MockController.
 func NewMockController(mock *MockClient, store *Store, eventBus bus.EventBus, svc *Service, log *logger.Logger) *MockController {
-	return &MockController{mock: mock, store: store, eventBus: eventBus, service: svc, logger: log}
+	auth := NewMockAuthState(mock)
+	if svc != nil {
+		auth = svc.enableMockAuth(mock)
+	}
+	return &MockController{mock: mock, auth: auth, store: store, eventBus: eventBus, service: svc, logger: log}
 }
 
 // RegisterRoutes registers all mock control HTTP routes.
@@ -48,8 +55,228 @@ func (c *MockController) RegisterRoutes(router *gin.Engine) {
 	api.POST("/task-prs", c.associateTaskPR)
 	api.POST("/pr-feedback", c.seedPRFeedback)
 	api.PUT("/auth-health", c.setAuthHealth)
+	api.PUT("/workspace-connections/:workspaceId", c.setWorkspaceConnection)
+	api.DELETE("/workspace-connections/:workspaceId", c.deleteWorkspaceConnection)
+	api.PUT("/workspace-connections/:workspaceId/status", c.setWorkspaceConnectionStatus)
+	api.PUT("/personal-connections/:workspaceId", c.setPersonalConnection)
+	api.DELETE("/personal-connections/:workspaceId", c.deletePersonalConnection)
+	api.PUT("/cli-accounts", c.setCLIAccounts)
+	api.PUT("/app-available", c.setAppAvailable)
 	api.PUT("/repos-unavailable", c.setReposUnavailable)
 	api.DELETE("/reset", c.reset)
+}
+
+type mockWorkspaceConnectionRequest struct {
+	Source                   ConnectionSource             `json:"source"`
+	Status                   ConnectionStatus             `json:"status"`
+	Login                    string                       `json:"login"`
+	InstallationID           *int64                       `json:"installation_id"`
+	InstallationAccountLogin string                       `json:"installation_account_login"`
+	InstallationAccountType  string                       `json:"installation_account_type"`
+	Capabilities             map[GitHubAppCapability]bool `json:"capabilities"`
+}
+
+func (c *MockController) setWorkspaceConnection(ctx *gin.Context) {
+	if c.store == nil || c.service == nil || c.auth == nil {
+		ctx.JSON(http.StatusConflict, gin.H{errKey: "mock GitHub auth is unavailable"})
+		return
+	}
+	workspaceID := strings.TrimSpace(ctx.Param("workspaceId"))
+	var req mockWorkspaceConnectionRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		respondInvalidPayload(ctx)
+		return
+	}
+	if req.Status == "" {
+		req.Status = ConnectionStatusActive
+	}
+	if err := validateMockWorkspaceConnectionRequest(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{errKey: err.Error()})
+		return
+	}
+	existing, err := c.store.GetWorkspaceConnection(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+		return
+	}
+	connection := &WorkspaceConnection{
+		WorkspaceID: workspaceID, Source: req.Source, GitHubHost: defaultGitHubHost,
+		Login: req.Login, InstallationID: req.InstallationID,
+		InstallationAccountLogin: req.InstallationAccountLogin,
+		InstallationAccountType:  req.InstallationAccountType,
+		Status:                   req.Status, CredentialGeneration: nextCredentialGeneration(existing),
+	}
+	if err := c.store.UpsertWorkspaceConnection(ctx.Request.Context(), connection); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+		return
+	}
+	if req.Capabilities == nil {
+		c.auth.DeleteWorkspace(workspaceID)
+	} else {
+		c.auth.SetWorkspaceCapabilities(workspaceID, req.Capabilities)
+	}
+	c.service.invalidateWorkspaceCredential(workspaceID)
+	ctx.JSON(http.StatusOK, gin.H{"connection": connection, "capabilities": c.auth.workspaceCapabilities(workspaceID)})
+}
+
+func validateMockWorkspaceConnectionRequest(req *mockWorkspaceConnectionRequest) error {
+	if req == nil || !validMockConnectionSource(req.Source) || !validMockConnectionStatus(req.Status) {
+		return errors.New(errMsgInvalidPayload)
+	}
+	switch req.Source {
+	case ConnectionSourceGitHubAppInstallation:
+		if req.InstallationID == nil || *req.InstallationID <= 0 {
+			return errors.New("installation_id is required for GitHub App connections")
+		}
+		if strings.TrimSpace(req.InstallationAccountLogin) == "" {
+			return errors.New("installation_account_login is required for GitHub App connections")
+		}
+		if req.InstallationAccountType == "" {
+			req.InstallationAccountType = "Organization"
+		}
+	case ConnectionSourcePAT, ConnectionSourceGHCLI:
+		if strings.TrimSpace(req.Login) == "" {
+			return errors.New("login is required for PAT and CLI connections")
+		}
+	}
+	return nil
+}
+
+func validMockConnectionSource(source ConnectionSource) bool {
+	switch source {
+	case ConnectionSourcePAT, ConnectionSourceGHCLI, ConnectionSourceGitHubAppInstallation,
+		ConnectionSourceLegacyShared:
+		return true
+	default:
+		return false
+	}
+}
+
+func validMockConnectionStatus(status ConnectionStatus) bool {
+	switch status {
+	case "", ConnectionStatusActive, ConnectionStatusInvalid, ConnectionStatusSuspended, ConnectionStatusRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
+func (c *MockController) deleteWorkspaceConnection(ctx *gin.Context) {
+	workspaceID := strings.TrimSpace(ctx.Param("workspaceId"))
+	if c.service == nil {
+		ctx.JSON(http.StatusConflict, gin.H{errKey: "mock GitHub auth is unavailable"})
+		return
+	}
+	if err := c.service.DeleteWorkspaceConnection(ctx.Request.Context(), workspaceID); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+		return
+	}
+	c.auth.DeleteWorkspace(workspaceID)
+	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+func (c *MockController) setWorkspaceConnectionStatus(ctx *gin.Context) {
+	var req struct {
+		Status ConnectionStatus `json:"status"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.Status == "" || !validMockConnectionStatus(req.Status) {
+		respondInvalidPayload(ctx)
+		return
+	}
+	workspaceID := strings.TrimSpace(ctx.Param("workspaceId"))
+	connection, err := c.store.GetWorkspaceConnection(ctx.Request.Context(), workspaceID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+		return
+	}
+	if connection == nil {
+		ctx.JSON(http.StatusNotFound, gin.H{errKey: "workspace connection not found"})
+		return
+	}
+	connection.Status = req.Status
+	connection.CredentialGeneration++
+	if err := c.store.UpsertWorkspaceConnection(ctx.Request.Context(), connection); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+		return
+	}
+	c.service.invalidateWorkspaceCredential(workspaceID)
+	ctx.JSON(http.StatusOK, connection)
+}
+
+func (c *MockController) setPersonalConnection(ctx *gin.Context) {
+	var req struct {
+		Login           string           `json:"login"`
+		Status          ConnectionStatus `json:"status"`
+		GitHubUserID    int64            `json:"github_user_id"`
+		AccessExpiresAt time.Time        `json:"access_expires_at"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Login) == "" ||
+		req.GitHubUserID <= 0 || req.AccessExpiresAt.IsZero() ||
+		(req.Status != ConnectionStatusActive && req.Status != ConnectionStatusInvalid && req.Status != ConnectionStatusRevoked) {
+		respondInvalidPayload(ctx)
+		return
+	}
+	workspaceID := strings.TrimSpace(ctx.Param("workspaceId"))
+	existing, err := c.store.GetUserConnection(ctx.Request.Context(), workspaceID, DefaultUserID)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+		return
+	}
+	generation := int64(1)
+	if existing != nil {
+		generation = existing.CredentialGeneration + 1
+	}
+	connection := &UserConnection{
+		WorkspaceID: workspaceID, UserID: DefaultUserID, Login: req.Login,
+		GitHubUserID: req.GitHubUserID, Status: req.Status, AccessExpiresAt: req.AccessExpiresAt,
+		CredentialGeneration: generation,
+	}
+	if err := c.store.UpsertUserConnection(ctx.Request.Context(), connection); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+		return
+	}
+	c.service.invalidateWorkspaceCredential(workspaceID)
+	ctx.JSON(http.StatusOK, connection)
+}
+
+func (c *MockController) deletePersonalConnection(ctx *gin.Context) {
+	workspaceID := strings.TrimSpace(ctx.Param("workspaceId"))
+	if err := c.store.DeleteUserConnection(ctx.Request.Context(), workspaceID, DefaultUserID); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+		return
+	}
+	c.service.invalidateWorkspaceCredential(workspaceID)
+	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
+}
+
+func (c *MockController) setCLIAccounts(ctx *gin.Context) {
+	var req struct {
+		Accounts []GHAccount `json:"accounts"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		respondInvalidPayload(ctx)
+		return
+	}
+	for _, account := range req.Accounts {
+		if strings.TrimSpace(account.Host) == "" || strings.TrimSpace(account.Login) == "" {
+			respondInvalidPayload(ctx)
+			return
+		}
+	}
+	c.auth.SetCLIAccounts(req.Accounts)
+	ctx.JSON(http.StatusOK, gin.H{"accounts": req.Accounts})
+}
+
+func (c *MockController) setAppAvailable(ctx *gin.Context) {
+	var req struct {
+		Available *bool `json:"available"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil || req.Available == nil {
+		respondInvalidPayload(ctx)
+		return
+	}
+	c.service.setMockAppAvailable(*req.Available)
+	ctx.JSON(http.StatusOK, gin.H{"available": *req.Available})
 }
 
 // setReposUnavailable toggles the mock client's "list accessible repos
@@ -474,6 +701,13 @@ func (c *MockController) reset(ctx *gin.Context) {
 	c.mock.Reset()
 	if c.service != nil {
 		c.service.ClearAccessibleReposCaches()
+		c.service.ResetMockAuth("")
+	}
+	if c.store != nil {
+		if err := c.store.DeleteAllMockAuthData(ctx.Request.Context()); err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
 	}
 	ctx.JSON(http.StatusOK, gin.H{"reset": true})
 }

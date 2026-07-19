@@ -52,7 +52,7 @@ func TestService_SearchUserPRsPagedForWorkspace_FiltersToSelectedRepos(t *testin
 	client.AddPR(&PR{RepoOwner: "kdlbs", RepoName: "kandev", Number: 1, Title: "in scope"})
 	client.AddPR(&PR{RepoOwner: "other", RepoName: "repo", Number: 2, Title: "out of scope"})
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
@@ -79,7 +79,7 @@ func TestService_SearchUserPRsPagedForWorkspace_AppendsScopeToQuery(t *testing.T
 	client := &capturingSearchClient{MockClient: NewMockClient()}
 	client.AddPR(&PR{RepoOwner: "kdlbs", RepoName: "kandev", Number: 1, Title: "in scope"})
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
@@ -140,7 +140,7 @@ func TestService_SearchUserPRsPagedForWorkspace_OrgScopeIncludesPersonalOwner(t 
 	client := &capturingSearchClient{MockClient: NewMockClient()}
 	client.AddPR(&PR{RepoOwner: "octo", RepoName: "personal", Number: 1, Title: "in scope"})
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
@@ -166,7 +166,7 @@ func TestService_SearchUserPRsPagedForWorkspace_FanoutFetchesDeeperProviderPages
 		client.AddPR(&PR{RepoOwner: "example", RepoName: "api", Number: i, Title: fmt.Sprintf("api-%d", i)})
 	}
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
@@ -205,7 +205,7 @@ func TestService_SearchUserPRsPagedForWorkspace_OrgScopeDedupesFanoutTotal(t *te
 		client.AddPR(&PR{RepoOwner: "octo", RepoName: "repo", Number: i, Title: fmt.Sprintf("octo-%d", i)})
 	}
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
@@ -233,7 +233,7 @@ func TestService_SearchUserPRsPagedForWorkspace_EmptyRepoScopeFailsClosed(t *tes
 	client := NewMockClient()
 	client.AddPR(&PR{RepoOwner: "kdlbs", RepoName: "kandev", Number: 1, Title: "hidden"})
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
@@ -255,7 +255,7 @@ func TestService_SearchUserPRsPagedForWorkspace_EmptyRepoScopeFailsClosed(t *tes
 
 func TestService_UpdateWorkspaceSettings_PartialUpdateAndNullClear(t *testing.T) {
 	store := newTestStore(t)
-	svc := NewService(NewMockClient(), AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, NewMockClient(), store, "ws-1")
 	ctx := context.Background()
 	defaults := json.RawMessage(`{"pr":[{"value":"mine","label":"Mine","filter":"is:open","group":"inbox"}],"issue":[]}`)
 	saved := json.RawMessage(`[{"id":"p1","kind":"pr","label":"Mine"}]`)
@@ -343,7 +343,7 @@ func TestUpdateWorkspaceSettingsRequest_UnmarshalTracksSavedPresetsNull(t *testi
 
 func TestService_UpdateWorkspaceSettings_RejectsUnknownRepoScopeMode(t *testing.T) {
 	store := newTestStore(t)
-	svc := NewService(NewMockClient(), AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, NewMockClient(), store, "ws-1")
 	mode := "everything"
 
 	_, err := svc.UpdateWorkspaceSettings(context.Background(), &UpdateWorkspaceSettingsRequest{
@@ -357,7 +357,7 @@ func TestService_UpdateWorkspaceSettings_RejectsUnknownRepoScopeMode(t *testing.
 
 func TestService_UpdateWorkspaceSettings_RejectsConflictingScopePatch(t *testing.T) {
 	store := newTestStore(t)
-	svc := NewService(NewMockClient(), AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, NewMockClient(), store, "ws-1")
 	mode := RepoScopeModeAll
 	orgs := []string{"octo"}
 
@@ -379,7 +379,7 @@ func TestService_SearchUserIssuesPagedForWorkspace_AllScopePreservesResults(t *t
 		},
 	}
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 
 	page, err := svc.SearchUserIssuesPagedForWorkspace(context.Background(), "ws-1", "", "is:open", 1, 25)
 	if err != nil {
@@ -403,7 +403,7 @@ func TestService_SearchUserIssuesPagedForWorkspace_FansOutSelectedRepos(t *testi
 		},
 	}
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
@@ -452,7 +452,7 @@ func TestService_CheckReviewWatch_AppliesWorkspaceRepoScope(t *testing.T) {
 		RequestedReviewers: []RequestedReviewer{{Login: "octo", Type: "user"}},
 	})
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
@@ -489,7 +489,7 @@ func TestService_CheckReviewWatch_EmptyWorkspaceScopeSkipsProviderFetch(t *testi
 		RequestedReviewers: []RequestedReviewer{{Login: "octo", Type: "user"}},
 	})
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
@@ -527,7 +527,7 @@ func TestService_CheckIssueWatch_AppliesWorkspaceRepoScope(t *testing.T) {
 		},
 	}
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
@@ -556,7 +556,7 @@ func TestService_CheckIssueWatch_AppliesWorkspaceRepoScope(t *testing.T) {
 func TestService_CheckIssueWatch_EmptyWorkspaceScopeSkipsProviderFetch(t *testing.T) {
 	client := &countingWorkspaceIssueClient{MockClient: NewMockClient()}
 	store := newTestStore(t)
-	svc := NewService(client, AuthMethodPAT, nil, store, nil, testLogger(t))
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, "ws-1")
 	ctx := context.Background()
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{

@@ -57,3 +57,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-18-turn-configuration-snapshots | [Attribute runtime configuration to turns](2026-07-18-turn-configuration-snapshots.md) | accepted | backend, frontend | 2026-07-18 |
 | 2026-07-19-reject-mcp-actions-on-raw-websocket | [Reject MCP Actions on the Raw WebSocket](2026-07-19-reject-mcp-actions-on-raw-websocket.md) | accepted | backend, protocol | 2026-07-19 |
 | 2026-07-19-workspace-symlink-entries | [Treat Nested Workspace Symlinks as Entries](2026-07-19-workspace-symlink-entries.md) | accepted | backend, infra | 2026-07-19 |
+| 0047 | [Separate GitHub deployment, workspace automation, and personal identities](0047-github-authentication-ownership.md)                | accepted   | backend, frontend, security | 2026-07-19 |

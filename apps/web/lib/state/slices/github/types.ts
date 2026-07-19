@@ -12,6 +12,7 @@ import type {
 } from "@/lib/types/github";
 
 export type GitHubStatusState = {
+  workspaceId: string | null;
   status: GitHubStatus | null;
   loaded: boolean;
   loading: boolean;
@@ -89,8 +90,9 @@ export type GitHubSliceState = {
 };
 
 export type GitHubSliceActions = {
-  setGitHubStatus: (status: GitHubStatus | null) => void;
-  setGitHubStatusLoading: (loading: boolean) => void;
+  setGitHubStatus: (workspaceId: string, status: GitHubStatus | null) => void;
+  setGitHubStatusLoading: (workspaceId: string, loading: boolean) => void;
+  resetGitHubStatus: (workspaceId: string | null) => void;
   setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
   setTaskIssues: (workspaceId: string, issues: Record<string, TaskIssueLink>) => void;
   upsertTaskIssue: (workspaceId: string, issue: TaskIssueLink) => void;

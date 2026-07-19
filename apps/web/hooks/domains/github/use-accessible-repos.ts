@@ -45,7 +45,10 @@ export type UseAccessibleReposResult = {
  * the filter client-side trades a one-shot full-list fetch (already cached
  * server-side) for zero per-keystroke load.
  */
-export function useAccessibleRepos(initialQuery: string = ""): UseAccessibleReposResult {
+export function useAccessibleRepos(
+  workspaceId: string | null,
+  initialQuery: string = "",
+): UseAccessibleReposResult {
   const [allRepos, setAllRepos] = useState<AccessibleRepo[]>([]);
   const [query, setQuery] = useState(initialQuery);
   const [loading, setLoading] = useState(true);
@@ -55,11 +58,19 @@ export function useAccessibleRepos(initialQuery: string = ""): UseAccessibleRepo
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    if (!workspaceId) {
+      setAllRepos([]);
+      setLoading(false);
+      setError(null);
+      setUnavailable(false);
+      return;
+    }
+    setLoading(true);
     const controller = new AbortController();
     abortRef.current = controller;
     let cancelled = false;
 
-    fetchAccessibleRepos({ limit: INITIAL_LIMIT, signal: controller.signal })
+    fetchAccessibleRepos({ workspaceId, limit: INITIAL_LIMIT, signal: controller.signal })
       .then((result) => {
         if (cancelled || controller.signal.aborted) return;
         setAllRepos(result);
@@ -86,7 +97,7 @@ export function useAccessibleRepos(initialQuery: string = ""): UseAccessibleRepo
       cancelled = true;
       controller.abort();
     };
-  }, []);
+  }, [workspaceId]);
 
   const repos = useMemo(() => {
     const normalized = query.trim().toLowerCase();

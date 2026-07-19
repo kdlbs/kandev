@@ -158,6 +158,7 @@ function finalizeRequest(refs: Refs, url: string, seq: number): void {
 }
 
 function runGitHubInfoRequest(args: {
+  workspaceId: string;
   refs: Refs;
   setState: SetState;
   url: string;
@@ -166,10 +167,12 @@ function runGitHubInfoRequest(args: {
   pr: NonNullable<ReturnType<typeof parseGitHubPrUrl>> | null;
   issue: ReturnType<typeof parseGitHubIssueUrl>;
 }): void {
-  const { refs, setState, url, seq, signal, pr, issue } = args;
+  const { workspaceId, refs, setState, url, seq, signal, pr, issue } = args;
   let request: Promise<void>;
   if (pr) {
-    request = fetchPRInfo(pr.owner, pr.repo, pr.prNumber, { init: { signal } }).then((res) =>
+    request = fetchPRInfo(workspaceId, pr.owner, pr.repo, pr.prNumber, {
+      init: { signal },
+    }).then((res) =>
       handleSuccess({
         refs,
         setState,
@@ -185,7 +188,7 @@ function runGitHubInfoRequest(args: {
       }),
     );
   } else if (issue) {
-    request = fetchIssueInfo(issue.owner, issue.repo, issue.issueNumber, {
+    request = fetchIssueInfo(workspaceId, issue.owner, issue.repo, issue.issueNumber, {
       init: { signal },
     }).then((res) =>
       handleSuccess({
@@ -208,7 +211,7 @@ function runGitHubInfoRequest(args: {
     .finally(() => finalizeRequest(refs, url, seq));
 }
 
-export function usePRInfoByURL(): UsePRInfoByURLResult {
+export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult {
   const [state, setState] = useState<Record<string, URLState>>({});
   const inFlightRef = useRef<Set<string>>(new Set());
   const loadedRef = useRef<Set<string>>(new Set());
@@ -241,28 +244,40 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     };
   }, []);
 
-  const ensure = useCallback((rawUrl: string) => {
-    // Normalize on entry so all internal state (in-flight, loaded, aborters,
-    // sequence counter, state map) is keyed on the same canonical form.
-    // Without this, a chip wiring that called ensure() with stray whitespace
-    // could cache under the whitespaced key while consumers that look up
-    // via the trimmed URL would miss the cache.
-    const url = rawUrl.trim();
-    if (!url) return;
-    if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
-    const pr = parseGitHubPrUrl(url);
-    const issue = pr ? null : parseGitHubIssueUrl(url);
-    if (!pr && !issue) {
-      // Non-PR URLs (plain repo, invalid) are recorded as "loaded with no
-      // info" so subsequent ensure() calls for the same URL no-op instead
-      // of re-parsing on every call.
-      loadedRef.current.add(url);
-      return;
-    }
-    const refs = refsRef.current;
-    const { seq, signal } = initRequest(refs, setState, url);
-    runGitHubInfoRequest({ refs, setState, url, seq, signal, pr, issue });
-  }, []);
+  useEffect(() => {
+    for (const controller of abortersRef.current.values()) controller.abort();
+    abortersRef.current.clear();
+    inFlightRef.current.clear();
+    loadedRef.current.clear();
+    seqRef.current.clear();
+    setState({});
+  }, [workspaceId]);
+
+  const ensure = useCallback(
+    (rawUrl: string) => {
+      // Normalize on entry so all internal state (in-flight, loaded, aborters,
+      // sequence counter, state map) is keyed on the same canonical form.
+      // Without this, a chip wiring that called ensure() with stray whitespace
+      // could cache under the whitespaced key while consumers that look up
+      // via the trimmed URL would miss the cache.
+      const url = rawUrl.trim();
+      if (!url || !workspaceId) return;
+      if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
+      const pr = parseGitHubPrUrl(url);
+      const issue = pr ? null : parseGitHubIssueUrl(url);
+      if (!pr && !issue) {
+        // Non-PR URLs (plain repo, invalid) are recorded as "loaded with no
+        // info" so subsequent ensure() calls for the same URL no-op instead
+        // of re-parsing on every call.
+        loadedRef.current.add(url);
+        return;
+      }
+      const refs = refsRef.current;
+      const { seq, signal } = initRequest(refs, setState, url);
+      runGitHubInfoRequest({ workspaceId, refs, setState, url, seq, signal, pr, issue });
+    },
+    [workspaceId],
+  );
 
   const info = useCallback(
     (rawUrl: string): PRInfo | undefined => state[rawUrl.trim()]?.info,

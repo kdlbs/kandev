@@ -169,7 +169,17 @@ func provideGateway(
 				// (single-repo task) yields empty repositoryID and preserves legacy
 				// 1:1 task→PR semantics.
 				repositoryID := resolveRepositoryIDForSubpath(ctx, taskRepo, taskID, repo, log)
-				githubSvc.AssociatePRByURL(ctx, sessionID, taskID, repositoryID, prURL, branch)
+				task, taskErr := taskRepo.GetTask(ctx, taskID)
+				if taskErr != nil || task == nil || task.WorkspaceID == "" {
+					log.Warn("cannot associate GitHub PR without task workspace", zap.String("task_id", taskID), zap.Error(taskErr))
+					return
+				}
+				if err := githubSvc.AssociatePRByURLForWorkspace(
+					ctx, task.WorkspaceID, github.DefaultUserID,
+					sessionID, taskID, repositoryID, prURL, branch,
+				); err != nil {
+					log.Warn("failed to associate created GitHub PR", zap.String("task_id", taskID), zap.Error(err))
+				}
 			})
 		}
 		gitHandlers.SetOnBranchRenamed(func(ctx context.Context, sessionID, newName, repo string) {

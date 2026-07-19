@@ -374,6 +374,24 @@ func (m *MockClient) ListAccessibleRepos(_ context.Context, query string, _ int)
 	return filterReposByQuery(all, query), nil
 }
 
+func (m *MockClient) HasRepositoryAccess(_ context.Context, owner, repo string) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return false, ErrNoClient
+	}
+	want := owner + "/" + repo
+	for _, repos := range m.repos {
+		for _, candidate := range repos {
+			if strings.EqualFold(candidate.FullName, want) ||
+				(strings.EqualFold(candidate.Owner, owner) && strings.EqualFold(candidate.Name, repo)) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (m *MockClient) ListPRReviews(_ context.Context, owner, repo string, number int) ([]PRReview, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

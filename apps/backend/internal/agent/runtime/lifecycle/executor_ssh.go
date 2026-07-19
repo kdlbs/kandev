@@ -54,6 +54,8 @@ type SSHExecutor struct {
 	secretStore      secrets.SecretStore
 	agentList        RemoteAuthAgentLister
 	logger           *logger.Logger
+	brokerPreflight  func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error
+	stopRemote       func(context.Context, *ssh.Client, string, int) error
 
 	mu       sync.Mutex
 	sessions map[string]*sshSessionState // keyed by ExecutorInstance.InstanceID
@@ -67,13 +69,16 @@ func NewSSHExecutor(
 	resolver *AgentctlResolver,
 	log *logger.Logger,
 ) *SSHExecutor {
-	return &SSHExecutor{
+	executor := &SSHExecutor{
 		agentctlResolver: resolver,
 		secretStore:      secretStore,
 		agentList:        agentList,
 		logger:           log.WithFields(zap.String("runtime", "ssh")),
 		sessions:         make(map[string]*sshSessionState),
 	}
+	executor.brokerPreflight = executor.preflightGitHubCredentialBroker
+	executor.stopRemote = stopRemoteAgentctl
+	return executor
 }
 
 func (r *SSHExecutor) Name() executor.Name { return executor.NameSSH }
@@ -163,9 +168,7 @@ func (r *SSHExecutor) workdirRoot(md map[string]interface{}) string {
 // backend restart), reuse the resumed SSH client + forwarder + remote pid
 // instead of starting a second remote agentctl on top of the live one.
 func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
-	r.mu.Lock()
-	resumed, ok := r.sessions[req.InstanceID]
-	r.mu.Unlock()
+	resumed, ok := r.resumedStateForCreate(req)
 	if ok {
 		return r.buildResumedInstance(req, resumed), nil
 	}
@@ -188,6 +191,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 
 	agentctlBin, platform, err := r.prepareRemoteHost(ctx, client, req)
 	if err != nil {
+		return nil, err
+	}
+	if err := r.preflightGitHubCredentialBroker(ctx, client, req, platform); err != nil {
 		return nil, err
 	}
 
@@ -219,6 +225,35 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	released = true // ownership transferred to session state; released on StopInstance
 
 	return r.buildInstance(req, target, fwd, taskDir, sessionDir, port, pid, workdir), nil
+}
+
+func (r *SSHExecutor) resumedStateForCreate(req *ExecutorCreateRequest) (*sshSessionState, bool) {
+	if req == nil || hasManagedGitHubBrokerEnv(req.Env) {
+		return nil, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	state, ok := r.sessions[req.InstanceID]
+	return state, ok
+}
+
+func (r *SSHExecutor) preflightGitHubCredentialBroker(
+	ctx context.Context,
+	client *ssh.Client,
+	req *ExecutorCreateRequest,
+	platform SSHRemotePlatform,
+) error {
+	shell := sshShellForRemote(req.Metadata, platform)
+	return runBrokerReachabilityPreflight(ctx, req.Env, func(
+		ctx context.Context,
+		command string,
+		env map[string]string,
+	) ([]byte, error) {
+		input := strings.NewReader(buildSSHEnvInitScript(env))
+		wrapped := WrapLoginShell(shell, "set -a; . /dev/stdin; set +a\n"+command)
+		stdout, stderr, err := runSSHCommandStdin(ctx, client, wrapped, input)
+		return []byte(stdout + stderr), err
+	})
 }
 
 // prepareRemoteHost runs the steps that are independent of any particular
@@ -285,7 +320,9 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 	platform SSHRemotePlatform,
 ) (int, int, *SSHPortForwarder, error) {
 	shell := sshShellForRemote(req.Metadata, platform)
-	controlPort, pid, err := startRemoteAgentctl(ctx, client, shell, agentctlBin, taskDir, sessionDir, r.logger)
+	controlPort, pid, err := startRemoteAgentctl(
+		ctx, client, shell, agentctlBin, taskDir, sessionDir, managedGitHubBrokerEnv(req.Env), r.logger,
+	)
 	if err != nil {
 		r.report(req.OnProgress, "Starting agent controller", PrepareStepFailed, err.Error())
 		return 0, 0, nil, err
@@ -441,6 +478,9 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	if pidStr == "" || portStr == "" || sessionDir == "" || taskDir == "" {
 		return nil // not a resume — proceed with normal create
 	}
+	if hasManagedGitHubBrokerEnv(req.Env) {
+		return r.resetManagedBrokerResume(ctx, req, pidStr, sessionDir)
+	}
 
 	// Idempotency: if a previous resume attempt for this InstanceID already
 	// produced live client+forwarder state, return success without dialing
@@ -507,6 +547,90 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	}
 	req.Metadata[MetadataKeySSHLocalForwardPort] = strconv.Itoa(fwd.LocalPort())
 	return nil
+}
+
+func (r *SSHExecutor) resetManagedBrokerResume(
+	ctx context.Context,
+	req *ExecutorCreateRequest,
+	pidStr, sessionDir string,
+) error {
+	brokerPreflight := r.brokerPreflight
+	if brokerPreflight == nil {
+		brokerPreflight = r.preflightGitHubCredentialBroker
+	}
+	stopRemote := r.stopRemote
+	if stopRemote == nil {
+		stopRemote = stopRemoteAgentctl
+	}
+
+	r.mu.Lock()
+	state := r.sessions[req.InstanceID]
+	r.mu.Unlock()
+	if state != nil {
+		return r.resetTrackedManagedBrokerResume(ctx, req, state, brokerPreflight, stopRemote)
+	}
+
+	target, err := r.targetFromMetadata(req.Metadata)
+	if err != nil {
+		return err
+	}
+	client, err := dialSSH(ctx, target)
+	if err != nil {
+		return fmt.Errorf("ssh resume: connect for broker refresh: %w", err)
+	}
+	defer func() { _ = client.Close() }()
+	if err := brokerPreflight(ctx, client, req, SSHRemotePlatform{}); err != nil {
+		return err
+	}
+	pid, _ := strconv.Atoi(pidStr)
+	if err := stopRemote(ctx, client, sessionDir, pid); err != nil {
+		return fmt.Errorf("ssh resume: stop stale broker-backed agentctl: %w", err)
+	}
+	clearSSHResumeRuntimeMetadata(req.Metadata)
+	return nil
+}
+
+func (r *SSHExecutor) resetTrackedManagedBrokerResume(
+	ctx context.Context,
+	req *ExecutorCreateRequest,
+	state *sshSessionState,
+	brokerPreflight func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error,
+	stopRemote func(context.Context, *ssh.Client, string, int) error,
+) error {
+	if err := brokerPreflight(ctx, state.client, req, SSHRemotePlatform{}); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	if r.sessions[req.InstanceID] == state {
+		delete(r.sessions, req.InstanceID)
+	}
+	r.mu.Unlock()
+	if state.forwarder != nil {
+		_ = state.forwarder.Close()
+	}
+	if err := stopRemote(ctx, state.client, state.remoteDir, state.pid); err != nil {
+		if state.client != nil {
+			_ = state.client.Close()
+		}
+		return fmt.Errorf("ssh resume: stop stale broker-backed agentctl: %w", err)
+	}
+	if state.client != nil {
+		_ = state.client.Close()
+	}
+	clearSSHResumeRuntimeMetadata(req.Metadata)
+	return nil
+}
+
+func clearSSHResumeRuntimeMetadata(metadata map[string]interface{}) {
+	for _, key := range []string{
+		MetadataKeySSHRemoteSessionDir,
+		MetadataKeySSHRemoteAgentctlPort,
+		MetadataKeySSHRemoteAgentctlPID,
+		MetadataKeySSHLocalForwardPort,
+		MetadataKeySSHRemoteAgentctlURL,
+	} {
+		delete(metadata, key)
+	}
 }
 
 // GetRemoteStatus reports the SSH host's current reachability for the UI

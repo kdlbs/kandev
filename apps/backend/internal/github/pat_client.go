@@ -38,24 +38,6 @@ func (e *GitHubAPIError) Error() string {
 	return fmt.Sprintf("GitHub API %s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
 }
 
-// PATClient implements Client using a GitHub Personal Access Token.
-type PATClient struct {
-	token       string
-	httpClient  *http.Client
-	username    string // cached after first GetAuthenticatedUser call
-	rateTracker *RateTracker
-}
-
-// NewPATClient creates a new PAT-based GitHub client.
-func NewPATClient(token string) *PATClient {
-	return &PATClient{
-		token: token,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-	}
-}
-
 // WithRateTracker attaches a rate tracker so response headers are recorded.
 // Returns the client for chaining; safe to call before any requests are made.
 func (c *PATClient) WithRateTracker(t *RateTracker) *PATClient {
@@ -155,6 +137,19 @@ func (c *PATClient) GetAuthenticatedUser(ctx context.Context) (string, error) {
 	}
 	c.username = user.Login
 	return c.username, nil
+}
+
+// HasRepositoryAccess checks the repository root without invoking any
+// operation-specific endpoint or mutating service caches.
+func (c *PATClient) HasRepositoryAccess(ctx context.Context, owner, repo string) (bool, error) {
+	var metadata struct {
+		FullName string `json:"full_name"`
+	}
+	endpoint := fmt.Sprintf("/repos/%s/%s", owner, repo)
+	if err := c.get(ctx, endpoint, &metadata); err != nil {
+		return false, err
+	}
+	return metadata.FullName != "", nil
 }
 
 func (c *PATClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
@@ -357,6 +352,16 @@ func (c *PATClient) ListUserRepos(ctx context.Context, query string, limit int) 
 // without revisiting the picker contract.
 func (c *PATClient) ListAccessibleRepos(ctx context.Context, query string, limit int) ([]GitHubRepo, error) {
 	limit = clampRepoSearchLimit(limit)
+	if c.principal.Kind == TokenCredentialInstallation {
+		endpoint := fmt.Sprintf("/installation/repositories?per_page=%d", limit)
+		var response struct {
+			Repositories []repoListItem `json:"repositories"`
+		}
+		if err := c.get(ctx, endpoint, &response); err != nil {
+			return nil, fmt.Errorf("list installation repositories: %w", err)
+		}
+		return filterReposByQuery(convertRepoListItems(response.Repositories), query), nil
+	}
 	endpoint := fmt.Sprintf("/user/repos?affiliation=%s&sort=pushed&per_page=%d",
 		url.QueryEscape(accessibleReposAffiliation), limit)
 	var items []repoListItem

@@ -87,6 +87,15 @@ type mockGitHubService struct {
 }
 
 func (m *mockGitHubService) Client() github.Client { return m.client }
+
+func (m *mockGitHubService) FindPRByBranchForWorkspace(
+	ctx context.Context, _, owner, repo, branch string,
+) (*github.PR, error) {
+	if m.client == nil {
+		return nil, nil
+	}
+	return m.client.FindPRByBranch(ctx, owner, repo, branch)
+}
 func (m *mockGitHubService) GetTaskPR(_ context.Context, _ string) (*github.TaskPR, error) {
 	m.getTaskPRCalls++
 	return m.taskPR, m.taskPRErr
@@ -204,14 +213,32 @@ func (m *mockGitHubService) GetPRFeedback(context.Context, string, string, int) 
 	}
 	return &github.PRFeedback{}, nil
 }
+
+func (m *mockGitHubService) GetPRFeedbackForAutomation(
+	ctx context.Context, _, owner, repo string, number int,
+) (*github.PRFeedback, error) {
+	return m.GetPRFeedback(ctx, owner, repo, number)
+}
 func (m *mockGitHubService) MergePR(context.Context, string, string, int, string) error {
 	m.mergeCalls++
 	return m.mergeErr
+}
+
+func (m *mockGitHubService) MergePRForAutomation(
+	ctx context.Context, _, owner, repo string, number int, method string,
+) error {
+	return m.MergePR(ctx, owner, repo, number, method)
 }
 func (m *mockGitHubService) EnsurePRWatch(_ context.Context, _, _, _, _, _, branch string) (*github.PRWatch, error) {
 	m.ensureWatchCalls++
 	m.ensureWatchBranch = branch
 	return &github.PRWatch{}, nil
+}
+
+func (m *mockGitHubService) EnsurePRWatchForWorkspace(
+	ctx context.Context, _, sessionID, taskID, repositoryID, owner, repo, branch string,
+) (*github.PRWatch, error) {
+	return m.EnsurePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, branch)
 }
 func (m *mockGitHubService) GetPRWatchBySession(_ context.Context, _ string) (*github.PRWatch, error) {
 	return m.prWatch, nil

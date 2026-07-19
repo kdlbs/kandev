@@ -117,7 +117,7 @@ function finalizeRequest(refs: Refs, url: string, seq: number): void {
   refs.abortersRef.current.delete(url);
 }
 
-export function useBranchesByURL(): UseBranchesByURLResult {
+export function useBranchesByURL(workspaceId: string | null): UseBranchesByURLResult {
   const [state, setState] = useState<Record<string, URLState>>({});
   // Tracks in-flight URLs so concurrent ensure() calls coalesce. We use a ref
   // (not state) because the dedup check must observe the latest value
@@ -158,30 +158,42 @@ export function useBranchesByURL(): UseBranchesByURLResult {
     };
   }, []);
 
-  const ensure = useCallback((rawUrl: string) => {
-    // Normalize on entry so the cache key is canonical — see the matching
-    // comment in usePRInfoByURL for the rationale.
-    const url = rawUrl.trim();
-    if (!url) return;
-    if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
-    // Accept plain repo URLs plus PR/issue URLs — branches are listed against
-    // the repo in every case, so we extract just `{ owner, repo }` and ignore
-    // the item number. Using the repo-only parser here used to reject PR URLs
-    // outright, leaving the branch picker permanently empty when the user
-    // pasted a PR link into the Remote tab.
-    const parsed = parseGitHubAnyUrl(url);
-    if (!parsed) {
-      loadedRef.current.add(url);
-      setState((prev) => ({ ...prev, [url]: { branches: [], loading: false } }));
-      return;
-    }
-    const refs = refsRef.current;
-    const { seq, signal } = initRequest(refs, setState, url);
-    fetchRepoBranches(parsed.owner, parsed.repo, { init: { signal } })
-      .then((res) => handleSuccess(refs, setState, url, seq, res))
-      .catch(() => handleFailure(refs, setState, url, seq))
-      .finally(() => finalizeRequest(refs, url, seq));
-  }, []);
+  useEffect(() => {
+    for (const controller of abortersRef.current.values()) controller.abort();
+    abortersRef.current.clear();
+    inFlightRef.current.clear();
+    loadedRef.current.clear();
+    seqRef.current.clear();
+    setState({});
+  }, [workspaceId]);
+
+  const ensure = useCallback(
+    (rawUrl: string) => {
+      // Normalize on entry so the cache key is canonical — see the matching
+      // comment in usePRInfoByURL for the rationale.
+      const url = rawUrl.trim();
+      if (!url || !workspaceId) return;
+      if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
+      // Accept plain repo URLs plus PR/issue URLs — branches are listed against
+      // the repo in every case, so we extract just `{ owner, repo }` and ignore
+      // the item number. Using the repo-only parser here used to reject PR URLs
+      // outright, leaving the branch picker permanently empty when the user
+      // pasted a PR link into the Remote tab.
+      const parsed = parseGitHubAnyUrl(url);
+      if (!parsed) {
+        loadedRef.current.add(url);
+        setState((prev) => ({ ...prev, [url]: { branches: [], loading: false } }));
+        return;
+      }
+      const refs = refsRef.current;
+      const { seq, signal } = initRequest(refs, setState, url);
+      fetchRepoBranches(workspaceId, parsed.owner, parsed.repo, { init: { signal } })
+        .then((res) => handleSuccess(refs, setState, url, seq, res))
+        .catch(() => handleFailure(refs, setState, url, seq))
+        .finally(() => finalizeRequest(refs, url, seq));
+    },
+    [workspaceId],
+  );
 
   const clear = useCallback((rawUrl: string) => {
     const url = rawUrl.trim();

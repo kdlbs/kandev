@@ -7,6 +7,7 @@ import { PRCIPopover } from "@/components/github/pr-ci-popover";
 import { getPRStatusColor, pickDefaultPR } from "@/components/github/pr-task-icon";
 import { prIdentitySlug } from "@/components/github/pr-utils";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
+import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
 /**
@@ -15,7 +16,8 @@ import type { TaskPR } from "@/lib/types/github";
  * PR (keyed by id) so the hook count stays stable as the list changes.
  */
 function PRFeedbackWarmer({ pr }: { pr: TaskPR }) {
-  usePRFeedbackBackgroundSync(pr);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  usePRFeedbackBackgroundSync(workspaceId, pr);
   return null;
 }
 

@@ -92,8 +92,8 @@ export function useConfiguredIntegrationLinks(): IntegrationLink[] {
   // Jira and Linear are per-workspace integrations, so their availability must
   // be checked against the active workspace. Omitting the id makes the backend
   // fall back to a legacy default-workspace resolver that can point at the
-  // wrong workspace, hiding a configured integration from the sidebar. GitHub
-  // and GitLab are install-wide and don't need the workspace id.
+  // wrong workspace, hiding a configured integration from the sidebar. GitHub,
+  // Jira, and Linear all follow the active workspace; GitLab remains install-wide.
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const activeWorkspaceExists = useAppStore((s) =>
     s.workspaces.items.some((item) => item.id === s.workspaces.activeId),

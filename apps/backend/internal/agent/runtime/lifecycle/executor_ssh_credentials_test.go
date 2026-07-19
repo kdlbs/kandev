@@ -1,9 +1,78 @@
 package lifecycle
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/remoteauth"
 )
+
+func TestRemoteExecutorsIgnoreLegacyHostGHTokenSelection(t *testing.T) {
+	binDir := t.TempDir()
+	ghPath := filepath.Join(binDir, "gh")
+	if err := os.WriteFile(ghPath, []byte("#!/bin/sh\nprintf host-global-token\n"), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	tests := []struct {
+		name    string
+		resolve func([]string, *ExecutorCreateRequest) []string
+	}{
+		{name: "ssh", resolve: (&SSHExecutor{logger: newTestLogger()}).resolveGHToken},
+		{name: "sprites", resolve: (&SpritesExecutor{logger: newTestLogger()}).resolveGHToken},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &ExecutorCreateRequest{Env: map[string]string{}}
+			remaining := tt.resolve([]string{"gh_cli_token", "agent:codex:files:0"}, req)
+			if got := req.Env["GITHUB_TOKEN"]; got != "" {
+				t.Fatalf("GITHUB_TOKEN = %q, want no host-global token injection", got)
+			}
+			if len(remaining) != 1 || remaining[0] != "agent:codex:files:0" {
+				t.Fatalf("remaining methods = %v, want stale gh_cli_token filtered", remaining)
+			}
+		})
+	}
+}
+
+func TestRemoteExecutorsResolveExplicitGitHubTokenSecret(t *testing.T) {
+	store := &mockSecretStore{store: map[string]string{"secret-1": "workspace-token"}}
+	metadata := map[string]interface{}{
+		"remote_auth_secrets": `{"gh_cli_env":"secret-1"}`,
+	}
+	tests := []struct {
+		name    string
+		resolve func(context.Context, *ExecutorCreateRequest, remoteauth.Catalog)
+	}{
+		{
+			name: "ssh",
+			resolve: (&SSHExecutor{
+				secretStore: store,
+				logger:      newTestLogger(),
+			}).resolveAuthSecrets,
+		},
+		{
+			name: "sprites",
+			resolve: (&SpritesExecutor{
+				secretStore: store,
+				logger:      newTestLogger(),
+			}).resolveAuthSecrets,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &ExecutorCreateRequest{Metadata: metadata, Env: map[string]string{}}
+			tt.resolve(context.Background(), req, remoteauth.BuildCatalogForHost(nil, "linux", ""))
+			if got := req.Env["GITHUB_TOKEN"]; got != "workspace-token" {
+				t.Fatalf("GITHUB_TOKEN = %q, want selected stored secret", got)
+			}
+		})
+	}
+}
 
 func TestWrapLoginShell(t *testing.T) {
 	t.Run("empty shell defaults to bash", func(t *testing.T) {

@@ -114,7 +114,13 @@ describe("RemoteRepoChipsRow", () => {
       ],
     });
     renderInProvider(
-      <RemoteRepoChipsRow fs={fs} onUpdateRow={vi.fn()} onAddRow={vi.fn()} onRemoveRow={vi.fn()} />,
+      <RemoteRepoChipsRow
+        workspaceId="ws-1"
+        fs={fs}
+        onUpdateRow={vi.fn()}
+        onAddRow={vi.fn()}
+        onRemoveRow={vi.fn()}
+      />,
     );
     expect(screen.getAllByTestId("remote-repo-chip")).toHaveLength(2);
   });
@@ -122,7 +128,13 @@ describe("RemoteRepoChipsRow", () => {
   it("renders a placeholder chip when remoteRepos is empty", () => {
     const fs = makeFs({ remoteRepos: [] });
     renderInProvider(
-      <RemoteRepoChipsRow fs={fs} onUpdateRow={vi.fn()} onAddRow={vi.fn()} onRemoveRow={vi.fn()} />,
+      <RemoteRepoChipsRow
+        workspaceId="ws-1"
+        fs={fs}
+        onUpdateRow={vi.fn()}
+        onAddRow={vi.fn()}
+        onRemoveRow={vi.fn()}
+      />,
     );
     // Defends against the seed-effect edge case — at minimum, the add button
     // must be available so the user can add a row from nothing.
@@ -133,6 +145,7 @@ describe("RemoteRepoChipsRow", () => {
     const onAddRow = vi.fn();
     renderInProvider(
       <RemoteRepoChipsRow
+        workspaceId="ws-1"
         fs={makeFs({
           remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
         })}
@@ -149,6 +162,7 @@ describe("RemoteRepoChipsRow", () => {
     const onRemoveRow = vi.fn();
     renderInProvider(
       <RemoteRepoChipsRow
+        workspaceId="ws-1"
         fs={makeFs({
           remoteRepos: [
             { key: "remote-0", url: URL_AB, branch: "", source: "paste" },
@@ -175,7 +189,13 @@ describe("RemoteRepoChipsRow", () => {
       branchesByUrl: makeBranchesByUrl(ensure),
     });
     renderInProvider(
-      <RemoteRepoChipsRow fs={fs} onUpdateRow={vi.fn()} onAddRow={vi.fn()} onRemoveRow={vi.fn()} />,
+      <RemoteRepoChipsRow
+        workspaceId="ws-1"
+        fs={fs}
+        onUpdateRow={vi.fn()}
+        onAddRow={vi.fn()}
+        onRemoveRow={vi.fn()}
+      />,
     );
     expect(ensure).toHaveBeenCalledWith(URL_AB);
     expect(ensure).toHaveBeenCalledWith(URL_CD);
@@ -188,6 +208,7 @@ describe("RemoteRepoChipsRow — onURLChange wiring", () => {
     const onUpdateRow = vi.fn();
     renderInProvider(
       <RemoteRepoChipsRow
+        workspaceId="ws-1"
         fs={makeFs({
           remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
         })}
@@ -210,6 +231,7 @@ describe("RemoteRepoChipsRow — onURLChange wiring", () => {
     const onUpdateRow = vi.fn();
     renderInProvider(
       <RemoteRepoChipsRow
+        workspaceId="ws-1"
         fs={makeFs({
           remoteRepos: [{ key: "remote-0", url: "", branch: "", source: "paste" }],
         })}

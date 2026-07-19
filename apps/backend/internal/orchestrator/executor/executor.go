@@ -609,6 +609,9 @@ type Executor struct {
 	capabilities ExecutorTypeCapabilities
 	logger       *logger.Logger
 
+	githubCredentialIssuer    GitHubCredentialLeaseIssuer
+	githubCredentialBrokerURL string
+
 	// Configuration
 	retryLimit int
 	retryDelay time.Duration
@@ -687,7 +690,11 @@ func (e *Executor) taskEnvLock(taskID string) *sync.Mutex {
 
 // RepoCloner clones remote repositories to local disk.
 type RepoCloner interface {
-	EnsureCloned(ctx context.Context, cloneURL, owner, name string) (string, error)
+	EnsureWorkspaceCloned(
+		ctx context.Context,
+		workspaceID, provider, cloneURL, owner, name string,
+	) (string, error)
+	ShouldRecloneForWorkspace(workspaceID, path string) bool
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
 	BuildCloneURL(provider, owner, name string) (string, error)
 }

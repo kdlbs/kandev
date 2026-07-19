@@ -3,8 +3,12 @@
 package config
 
 import (
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -28,22 +32,172 @@ type Config struct {
 	// <repo>/.kandev-dev during local development). When empty, falls back
 	// to ~/.kandev. All workspace artifacts (data, tasks, worktrees, repos)
 	// live under this root.
-	HomeDir             string                    `mapstructure:"homeDir"`
-	Server              ServerConfig              `mapstructure:"server"`
-	Database            DatabaseConfig            `mapstructure:"database"`
-	NATS                NATSConfig                `mapstructure:"nats"`
-	Events              EventsConfig              `mapstructure:"events"`
-	Docker              DockerConfig              `mapstructure:"docker"`
-	Agent               AgentConfig               `mapstructure:"agent"`
-	Auth                AuthConfig                `mapstructure:"auth"`
-	Logging             LoggingConfig             `mapstructure:"logging"`
-	RepositoryDiscovery RepositoryDiscoveryConfig `mapstructure:"repositoryDiscovery"`
-	Worktree            WorktreeConfig            `mapstructure:"worktree"`
-	RepoClone           RepoCloneConfig           `mapstructure:"repoClone"`
-	Debug               DebugConfig               `mapstructure:"debug"`
-	Office              OfficeConfig              `mapstructure:"office"`
-	Voice               VoiceConfig               `mapstructure:"voice"`
-	Features            FeaturesConfig            `mapstructure:"features"`
+	HomeDir                string                       `mapstructure:"homeDir"`
+	Server                 ServerConfig                 `mapstructure:"server"`
+	Database               DatabaseConfig               `mapstructure:"database"`
+	NATS                   NATSConfig                   `mapstructure:"nats"`
+	Events                 EventsConfig                 `mapstructure:"events"`
+	Docker                 DockerConfig                 `mapstructure:"docker"`
+	Agent                  AgentConfig                  `mapstructure:"agent"`
+	Auth                   AuthConfig                   `mapstructure:"auth"`
+	Logging                LoggingConfig                `mapstructure:"logging"`
+	RepositoryDiscovery    RepositoryDiscoveryConfig    `mapstructure:"repositoryDiscovery"`
+	Worktree               WorktreeConfig               `mapstructure:"worktree"`
+	RepoClone              RepoCloneConfig              `mapstructure:"repoClone"`
+	Debug                  DebugConfig                  `mapstructure:"debug"`
+	Office                 OfficeConfig                 `mapstructure:"office"`
+	Voice                  VoiceConfig                  `mapstructure:"voice"`
+	Features               FeaturesConfig               `mapstructure:"features"`
+	GitHubApp              GitHubAppConfig              `mapstructure:"githubApp"`
+	GitHubCredentialBroker GitHubCredentialBrokerConfig `mapstructure:"githubCredentialBroker"`
+}
+
+// GitHubCredentialBrokerConfig holds the externally reachable service URL
+// used by managed remote executors. It is independent of GitHub App setup so
+// PAT and named gh CLI workspaces can use remote executors.
+type GitHubCredentialBrokerConfig struct {
+	PublicBaseURL string `mapstructure:"publicBaseUrl" json:"-"`
+}
+
+func (c GitHubCredentialBrokerConfig) validate() error {
+	if strings.TrimSpace(c.PublicBaseURL) == "" {
+		return nil
+	}
+	return validatePublicBaseURL("githubCredentialBroker.publicBaseUrl", c.PublicBaseURL)
+}
+
+// GitHubAppConfig holds deployment-owned GitHub App registration material.
+// Workspace APIs must expose Availability rather than serializing this value.
+type GitHubAppConfig struct {
+	AppID          int64  `mapstructure:"appId" json:"-"`
+	ClientID       string `mapstructure:"clientId" json:"-"`
+	ClientSecret   string `mapstructure:"clientSecret" json:"-"`
+	PrivateKey     string `mapstructure:"privateKey" json:"-"`
+	PrivateKeyFile string `mapstructure:"privateKeyFile" json:"-"`
+	WebhookSecret  string `mapstructure:"webhookSecret" json:"-"`
+	Slug           string `mapstructure:"slug" json:"-"`
+	PublicBaseURL  string `mapstructure:"publicBaseUrl" json:"-"`
+}
+
+// GitHubAppAvailability is the non-secret deployment status safe for APIs.
+type GitHubAppAvailability struct {
+	Configured bool   `json:"configured"`
+	Available  bool   `json:"available"`
+	Reason     string `json:"reason,omitempty"`
+}
+
+// Availability reports whether the deployment App is usable without exposing
+// registration identifiers, paths, or secret material.
+func (c GitHubAppConfig) Availability() GitHubAppAvailability {
+	if !c.configured() {
+		return GitHubAppAvailability{}
+	}
+	if err := c.validate(); err != nil {
+		return GitHubAppAvailability{Configured: true, Reason: "invalid_configuration"}
+	}
+	return GitHubAppAvailability{Configured: true, Available: true}
+}
+
+func (c GitHubAppConfig) configured() bool {
+	return c.AppID != 0 || c.ClientID != "" || c.ClientSecret != "" ||
+		c.PrivateKey != "" || c.PrivateKeyFile != "" || c.WebhookSecret != "" ||
+		c.Slug != "" || c.PublicBaseURL != ""
+}
+
+// PrivateKeyPEM resolves inline or file-backed private key material. Inline
+// values may contain literal newlines or escaped newlines from environment
+// configuration.
+func (c GitHubAppConfig) PrivateKeyPEM() ([]byte, error) {
+	if c.PrivateKey != "" && c.PrivateKeyFile != "" {
+		return nil, fmt.Errorf("githubApp.privateKey and githubApp.privateKeyFile are mutually exclusive")
+	}
+	if c.PrivateKey != "" {
+		return []byte(strings.ReplaceAll(c.PrivateKey, `\n`, "\n")), nil
+	}
+	if c.PrivateKeyFile == "" {
+		return nil, fmt.Errorf("githubApp private key is required")
+	}
+	key, err := os.ReadFile(expandTilde(c.PrivateKeyFile))
+	if err != nil {
+		return nil, fmt.Errorf("read githubApp private key file: %w", err)
+	}
+	return key, nil
+}
+
+func (c GitHubAppConfig) validate() error {
+	if !c.configured() {
+		return nil
+	}
+	var missing []string
+	if c.AppID <= 0 {
+		missing = append(missing, "appId")
+	}
+	if strings.TrimSpace(c.ClientID) == "" {
+		missing = append(missing, "clientId")
+	}
+	if c.ClientSecret == "" {
+		missing = append(missing, "clientSecret")
+	}
+	if c.PrivateKey == "" && c.PrivateKeyFile == "" {
+		missing = append(missing, "privateKey or privateKeyFile")
+	}
+	if c.WebhookSecret == "" {
+		missing = append(missing, "webhookSecret")
+	}
+	if strings.TrimSpace(c.Slug) == "" {
+		missing = append(missing, "slug")
+	}
+	if strings.TrimSpace(c.PublicBaseURL) == "" {
+		missing = append(missing, "publicBaseUrl")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("githubApp requires all fields; missing %s", strings.Join(missing, ", "))
+	}
+
+	keyPEM, err := c.PrivateKeyPEM()
+	if err != nil {
+		return err
+	}
+	if _, err := parseRSAPrivateKey(keyPEM); err != nil {
+		return fmt.Errorf("githubApp private key is not a valid RSA private key")
+	}
+	if err := validatePublicBaseURL("githubApp.publicBaseUrl", c.PublicBaseURL); err != nil {
+		return err
+	}
+	return nil
+}
+
+func parseRSAPrivateKey(keyPEM []byte) (*rsa.PrivateKey, error) {
+	block, _ := pem.Decode(keyPEM)
+	if block == nil {
+		return nil, fmt.Errorf("PEM block not found")
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	parsed, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	key, ok := parsed.(*rsa.PrivateKey)
+	if !ok {
+		return nil, fmt.Errorf("key is not RSA")
+	}
+	return key, nil
+}
+
+func validatePublicBaseURL(field, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || u.Hostname() == "" {
+		return fmt.Errorf("%s must be an absolute URL", field)
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%s must not include credentials, query, or fragment", field)
+	}
+	if u.Scheme != "https" && (u.Scheme != "http" || !IsLoopbackHost(u.Hostname())) {
+		return fmt.Errorf("%s must use HTTPS outside loopback development", field)
+	}
+	return nil
 }
 
 // expandTilde expands a leading "~/" to the user's home directory.
@@ -625,6 +779,18 @@ func LoadWithPath(configPath string) (*Config, error) {
 	_ = v.BindEnv("debug.devMode", "KANDEV_DEBUG_DEV_MODE")
 	_ = v.BindEnv("debug.pprofEnabled", "KANDEV_DEBUG_PPROF_ENABLED")
 	_ = v.BindEnv("voice.openAIApiKey", "KANDEV_VOICE_OPENAI_API_KEY")
+	_ = v.BindEnv("githubApp.appId", "KANDEV_GITHUB_APP_APP_ID")
+	_ = v.BindEnv("githubApp.clientId", "KANDEV_GITHUB_APP_CLIENT_ID")
+	_ = v.BindEnv("githubApp.clientSecret", "KANDEV_GITHUB_APP_CLIENT_SECRET")
+	_ = v.BindEnv("githubApp.privateKey", "KANDEV_GITHUB_APP_PRIVATE_KEY")
+	_ = v.BindEnv("githubApp.privateKeyFile", "KANDEV_GITHUB_APP_PRIVATE_KEY_FILE")
+	_ = v.BindEnv("githubApp.webhookSecret", "KANDEV_GITHUB_APP_WEBHOOK_SECRET")
+	_ = v.BindEnv("githubApp.slug", "KANDEV_GITHUB_APP_SLUG")
+	_ = v.BindEnv("githubApp.publicBaseUrl", "KANDEV_GITHUB_APP_PUBLIC_BASE_URL")
+	_ = v.BindEnv(
+		"githubCredentialBroker.publicBaseUrl",
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL",
+	)
 
 	// Configure config file
 	v.SetConfigName("config")
@@ -720,6 +886,13 @@ func validate(cfg *Config) error {
 
 	if cfg.RepositoryDiscovery.MaxDepth <= 0 {
 		errs = append(errs, "repositoryDiscovery.maxDepth must be positive")
+	}
+
+	if err := cfg.GitHubApp.validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if err := cfg.GitHubCredentialBroker.validate(); err != nil {
+		errs = append(errs, err.Error())
 	}
 
 	if len(errs) > 0 {

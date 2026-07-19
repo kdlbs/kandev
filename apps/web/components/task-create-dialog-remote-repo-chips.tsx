@@ -23,6 +23,7 @@ import { useAccessibleRepos } from "@/hooks/domains/github/use-accessible-repos"
  * `ensure("")` is a no-op anyway.
  */
 export type RemoteRepoChipsRowProps = {
+  workspaceId: string | null;
   fs: DialogFormState;
   onUpdateRow: (key: string, update: Partial<TaskRemoteRepoRow>) => void;
   onAddRow: () => void;
@@ -30,6 +31,7 @@ export type RemoteRepoChipsRowProps = {
 };
 
 export function RemoteRepoChipsRow({
+  workspaceId,
   fs,
   onUpdateRow,
   onAddRow,
@@ -59,7 +61,7 @@ export function RemoteRepoChipsRow({
   // popover doesn't reset another), at the cost of the shared cache: if
   // two popovers are open with different searches, both see the latest
   // search's results. In practice only one popover is open at a time.
-  const accessibleRepos = useAccessibleRepos();
+  const accessibleRepos = useAccessibleRepos(workspaceId);
 
   const rows = fs.remoteRepos;
   return (

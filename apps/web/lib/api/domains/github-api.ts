@@ -1,12 +1,10 @@
 import { fetchJson, fetchJsonWithRetry, ApiError, type ApiRequestOptions } from "../client";
 import type {
-  GitHubStatusResponse,
   GitHubOrg,
   GitHubRepoInfo,
   GitHubPR,
   TaskPRsResponse,
   TaskPR,
-  PRFeedback,
   PRWatchesResponse,
   ReviewWatch,
   ReviewWatchesResponse,
@@ -24,26 +22,22 @@ import type {
   TaskIssueLinksResponse,
   SearchPRsResponse,
   SearchIssuesResponse,
-  GitHubPRStatus,
   GitHubActionPresets,
   UpdateGitHubActionPresetsRequest,
   GitHubWorkspaceSettings,
   UpdateGitHubWorkspaceSettingsRequest,
   CleanupTasksResponse,
-  MergeMethod,
-  RepoMergeMethods,
   TaskCIAutomationOptions,
   TaskCIAutomationPatch,
 } from "@/lib/types/github";
 
-// Status
-export async function fetchGitHubStatus(options?: ApiRequestOptions) {
-  return fetchJson<GitHubStatusResponse>("/api/v1/github/status", options);
-}
+export * from "./github-auth-api";
+export * from "./github-pr-api";
 
 // Token configuration
-export async function configureGitHubToken(token: string) {
-  return fetchJson<{ configured: boolean }>("/api/v1/github/token", {
+export async function configureGitHubToken(workspaceId: string, token: string) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<{ configured: boolean }>(`/api/v1/github/token?${query}`, {
     init: {
       method: "POST",
       body: JSON.stringify({ token }),
@@ -51,8 +45,9 @@ export async function configureGitHubToken(token: string) {
   });
 }
 
-export async function clearGitHubToken() {
-  return fetchJson<{ cleared: boolean }>("/api/v1/github/token", {
+export async function clearGitHubToken(workspaceId: string) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<{ cleared: boolean }>(`/api/v1/github/token?${query}`, {
     init: { method: "DELETE" },
   });
 }
@@ -76,7 +71,7 @@ export async function getTaskPR(taskId: string, options?: ApiRequestOptions) {
 }
 
 export async function createTaskPR(
-  data: { task_id: string; repository_id?: string; pr_url: string },
+  data: { workspace_id: string; task_id: string; repository_id?: string; pr_url: string },
   options?: ApiRequestOptions,
 ) {
   return fetchJson<TaskPR>(`/api/v1/github/task-prs`, {
@@ -146,92 +141,6 @@ export async function updateTaskCIAutomationOptions(
         body: JSON.stringify(patch),
       },
     },
-  );
-}
-
-// PR feedback (live from GitHub)
-export async function getPRFeedback(
-  owner: string,
-  repo: string,
-  number: number,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<PRFeedback>(`/api/v1/github/prs/${owner}/${repo}/${number}`, options);
-}
-
-// Lightweight PR status (review + checks + mergeable), skips comments.
-export async function getPRStatus(
-  owner: string,
-  repo: string,
-  number: number,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<GitHubPRStatus>(`/api/v1/github/prs/${owner}/${repo}/${number}/status`, options);
-}
-
-export type PRStatusRef = { owner: string; repo: string; number: number };
-
-// Batch variant of getPRStatus: one round-trip for a whole list page. The
-// backend fans out concurrently and caches per-PR, so repeat calls for the
-// same page are cheap. Keys in the returned map are "<owner>/<repo>#<number>".
-export async function getPRStatusesBatch(refs: PRStatusRef[], options?: ApiRequestOptions) {
-  return fetchJson<{ statuses: Record<string, GitHubPRStatus> }>(`/api/v1/github/prs/statuses`, {
-    ...options,
-    init: {
-      method: "POST",
-      body: JSON.stringify({ refs }),
-      ...(options?.init ?? {}),
-    },
-  });
-}
-
-// Submit PR review
-export async function submitPRReview(
-  owner: string,
-  repo: string,
-  number: number,
-  event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES",
-  body?: string,
-) {
-  return fetchJson<{ submitted: boolean }>(
-    `/api/v1/github/prs/${owner}/${repo}/${number}/reviews`,
-    {
-      init: {
-        method: "POST",
-        body: JSON.stringify({ event, body: body ?? "" }),
-      },
-    },
-  );
-}
-
-// Merge a pull request. Omit mergeMethod to let the backend pick the first
-// method the repo allows (avoids GitHub's "default to merge commit" 405 on
-// squash-only / rebase-only repos).
-export async function mergePR(
-  owner: string,
-  repo: string,
-  number: number,
-  mergeMethod?: MergeMethod,
-) {
-  return fetchJson<{ merged: boolean }>(`/api/v1/github/prs/${owner}/${repo}/${number}/merge`, {
-    init: {
-      method: "PUT",
-      body: JSON.stringify({ merge_method: mergeMethod ?? "" }),
-    },
-  });
-}
-
-// Fetch the merge methods a repository allows (allow_merge_commit /
-// allow_squash_merge / allow_rebase_merge). Used by the merge button to
-// hide disallowed options and avoid 405s.
-export async function getRepoMergeMethods(
-  owner: string,
-  repo: string,
-  options?: ApiRequestOptions,
-) {
-  return fetchJson<RepoMergeMethods>(
-    `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/merge-methods`,
-    options,
   );
 }
 
@@ -398,11 +307,12 @@ function isGitHubNotConfigured(err: unknown): boolean {
 }
 
 export async function fetchAccessibleRepos(opts: {
+  workspaceId: string;
   q?: string;
   limit?: number;
   signal?: AbortSignal;
 }): Promise<AccessibleRepo[]> {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams({ workspace_id: opts.workspaceId });
   if (opts.q) params.set("q", opts.q);
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit));
   const suffix = params.toString();
@@ -423,12 +333,18 @@ export async function fetchAccessibleRepos(opts: {
 }
 
 // Orgs & repo search
-export async function listUserOrgs(options?: ApiRequestOptions) {
-  return fetchJson<{ orgs: GitHubOrg[] }>("/api/v1/github/orgs", options);
+export async function listUserOrgs(workspaceId: string, options?: ApiRequestOptions) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<{ orgs: GitHubOrg[] }>(`/api/v1/github/orgs?${query}`, options);
 }
 
-export async function searchOrgRepos(org: string, query?: string, options?: ApiRequestOptions) {
-  const params = new URLSearchParams({ org });
+export async function searchOrgRepos(
+  workspaceId: string,
+  org: string,
+  query?: string,
+  options?: ApiRequestOptions,
+) {
+  const params = new URLSearchParams({ workspace_id: workspaceId, org });
   if (query) params.set("q", query);
   return fetchJson<{ repos: GitHubRepoInfo[] }>(
     `/api/v1/github/repos/search?${params.toString()}`,
@@ -438,34 +354,44 @@ export async function searchOrgRepos(org: string, query?: string, options?: ApiR
 
 // PR info (lightweight)
 export async function fetchPRInfo(
+  workspaceId: string,
   owner: string,
   repo: string,
   number: number,
   options?: ApiRequestOptions,
 ) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
   return fetchJsonWithRetry<GitHubPR>(
-    `/api/v1/github/prs/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info`,
+    `/api/v1/github/prs/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info?${query}`,
     options,
   );
 }
 
 // Issue info (lightweight)
 export async function fetchIssueInfo(
+  workspaceId: string,
   owner: string,
   repo: string,
   number: number,
   options?: ApiRequestOptions,
 ) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
   return fetchJsonWithRetry<GitHubIssue>(
-    `/api/v1/github/issues/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info`,
+    `/api/v1/github/issues/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/${number}/info?${query}`,
     options,
   );
 }
 
 // Remote repo branches
-export async function fetchRepoBranches(owner: string, repo: string, options?: ApiRequestOptions) {
+export async function fetchRepoBranches(
+  workspaceId: string,
+  owner: string,
+  repo: string,
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
   return fetchJsonWithRetry<{ branches: { name: string }[] }>(
-    `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`,
+    `/api/v1/github/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches?${query}`,
     options,
   );
 }
@@ -607,11 +533,11 @@ export async function cleanupClosedIssueTasks(workspaceId?: string, options?: Ap
 // Pass `query` to use a verbatim GitHub search string, or `filter` to append to
 // the default (type:pr state:open / type:issue state:open).
 type SearchParams = {
+  workspaceId: string;
   query?: string;
   filter?: string;
   page?: number;
   perPage?: number;
-  workspaceId?: string | null;
 };
 
 function buildSearchQuery(params: SearchParams) {
@@ -620,7 +546,7 @@ function buildSearchQuery(params: SearchParams) {
   if (params.filter) search.set("filter", params.filter);
   if (params.page && params.page > 1) search.set("page", String(params.page));
   if (params.perPage) search.set("per_page", String(params.perPage));
-  if (params.workspaceId) search.set("workspace_id", params.workspaceId);
+  search.set("workspace_id", params.workspaceId);
   return search.toString();
 }
 

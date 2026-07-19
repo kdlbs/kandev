@@ -52,9 +52,10 @@ func TestResumeSession_RejectsArchivedTask(t *testing.T) {
 func setupLiveResumeTestFixture(repo *mockRepository) {
 	now := time.Now().UTC()
 	repo.tasks["task-1"] = &models.Task{
-		ID:        "task-1",
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          "task-1",
+		WorkspaceID: "workspace-1",
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	repo.sessions["sess-1"] = &models.TaskSession{
 		ID:             "sess-1",
@@ -372,6 +373,9 @@ func TestResumeSession_PropagatesTaskEnvironmentID(t *testing.T) {
 	if capturedReq.TaskEnvironmentID != "env-1" {
 		t.Errorf("TaskEnvironmentID = %q, want %q — without this the lifecycle execution is indexed under empty env_id and GetByTaskEnvironmentID never finds it",
 			capturedReq.TaskEnvironmentID, "env-1")
+	}
+	if capturedReq.WorkspaceID != "workspace-1" {
+		t.Errorf("WorkspaceID = %q, want workspace-1 for resumed credential resolution", capturedReq.WorkspaceID)
 	}
 }
 

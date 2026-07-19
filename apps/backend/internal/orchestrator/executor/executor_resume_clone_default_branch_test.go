@@ -213,12 +213,53 @@ func TestResolveTaskRepoInfo_BackfillIsBestEffortWhenLocalPathBroken(t *testing.
 	}
 }
 
-// fakeRepoCloner returns a fixed local path for any clone request.
-type fakeRepoCloner struct{ returnPath string }
+func TestResolveTaskRepoInfoRematerializesLegacyManagedCloneForWorkspace(t *testing.T) {
+	t.Parallel()
 
-func (f *fakeRepoCloner) EnsureCloned(_ context.Context, _, _, _ string) (string, error) {
+	repoStore := newMockRepository()
+	repoStore.repositories["repo-1"] = &models.Repository{
+		ID:            "repo-1",
+		WorkspaceID:   "workspace-a",
+		Provider:      "github",
+		ProviderOwner: "acme",
+		ProviderName:  "private",
+		LocalPath:     "/managed/repos/acme/private",
+		DefaultBranch: "main",
+	}
+	taskRepo := &models.TaskRepository{ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1"}
+	cloner := &fakeRepoCloner{returnPath: "/managed/repos/workspaces/workspace-a/github/acme/private", shouldReclone: true}
+	updater := &recordingRepoUpdater{}
+	exc := newTestExecutor(t, &mockAgentManager{}, repoStore)
+	exc.SetRepoCloner(cloner, updater)
+
+	info, err := exc.resolveTaskRepoInfo(context.Background(), taskRepo)
+	if err != nil {
+		t.Fatalf("resolveTaskRepoInfo: %v", err)
+	}
+	if cloner.workspaceID != "workspace-a" {
+		t.Fatalf("clone workspace = %q, want workspace-a", cloner.workspaceID)
+	}
+	if got := info.RepositoryPath; got != cloner.returnPath {
+		t.Fatalf("RepositoryPath = %q, want %q", got, cloner.returnPath)
+	}
+	if got := updater.getLocalPath("repo-1"); got != cloner.returnPath {
+		t.Fatalf("persisted local path = %q, want %q", got, cloner.returnPath)
+	}
+}
+
+// fakeRepoCloner returns a fixed local path for any clone request.
+type fakeRepoCloner struct {
+	returnPath    string
+	shouldReclone bool
+	workspaceID   string
+}
+
+func (f *fakeRepoCloner) EnsureWorkspaceCloned(_ context.Context, workspaceID, _, _, _, _ string) (string, error) {
+	f.workspaceID = workspaceID
 	return f.returnPath, nil
 }
+
+func (f *fakeRepoCloner) ShouldRecloneForWorkspace(_, _ string) bool { return f.shouldReclone }
 
 func (f *fakeRepoCloner) BuildCloneURL(_, owner, name string) (string, error) {
 	return "https://github.com/" + owner + "/" + name + ".git", nil
@@ -228,9 +269,16 @@ func (f *fakeRepoCloner) BuildCloneURL(_, owner, name string) (string, error) {
 type recordingRepoUpdater struct {
 	mu            sync.Mutex
 	defaultBranch map[string]string
+	localPath     map[string]string
 }
 
-func (r *recordingRepoUpdater) UpdateRepositoryLocalPath(_ context.Context, _, _ string) error {
+func (r *recordingRepoUpdater) UpdateRepositoryLocalPath(_ context.Context, repositoryID, localPath string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.localPath == nil {
+		r.localPath = make(map[string]string)
+	}
+	r.localPath[repositoryID] = localPath
 	return nil
 }
 
@@ -248,6 +296,12 @@ func (r *recordingRepoUpdater) getDefaultBranch(repositoryID string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.defaultBranch[repositoryID]
+}
+
+func (r *recordingRepoUpdater) getLocalPath(repositoryID string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.localPath[repositoryID]
 }
 
 // initBareOriginWithMain creates a bare git repo with one commit on `main`.

@@ -122,6 +122,78 @@ Do not infer security from `auth.jwtSecret`: setting it currently does not turn 
 
 The voice fallback sends audio to the configured OpenAI transcription service and incurs that provider's network, data-handling, and billing behavior. Browser-native speech recognition has its own browser/vendor behavior and does not use this server key.
 
+### GitHub credential broker
+
+Managed SSH, Sprites, and remote-container executors redeem task-scoped GitHub credentials through
+the Kandev backend. Configure a public broker base URL independently of GitHub App registration so
+PAT-only and named GitHub CLI workspaces can use those executors.
+
+| YAML key | Environment variable | Default | Current behavior |
+|---|---|---|---|
+| `githubCredentialBroker.publicBaseUrl` | `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` | empty | Externally reachable Kandev base URL used for `/api/v1/github/credentials/resolve`. Must be absolute HTTPS, except HTTP is allowed for loopback development. Credentials, query strings, and fragments are rejected. |
+
+When this value is empty, `githubApp.publicBaseUrl` remains a compatibility fallback. Local and
+worktree execution can use the backend loopback URL; non-local executors require an externally
+reachable HTTPS URL. Before clone or agent startup, managed executors send an unauthenticated
+`GET` to the exact resolution route and require `204 No Content`. This readiness response contains
+no connection or credential data; credential redemption remains a lease-authenticated `POST`.
+
+### GitHub App
+
+`githubApp` is deployment-owned configuration for workspace App installations and personal GitHub App authorizations. Leave every field empty to disable GitHub App choices while retaining workspace PAT and GitHub CLI authentication. If any field is set, the configuration is treated as enabled. Startup rejects a missing required value, an invalid key, or an unsafe public URL; an invalid App slug is rejected when an installation flow starts.
+
+| YAML key | Environment variable | Default | Current behavior |
+|---|---|---|---|
+| `githubApp.appId` | `KANDEV_GITHUB_APP_APP_ID` | `0` | Positive numeric App ID from the GitHub App registration. |
+| `githubApp.clientId` | `KANDEV_GITHUB_APP_CLIENT_ID` | empty | GitHub App OAuth client ID used for installation verification and personal authorization. |
+| `githubApp.clientSecret` | `KANDEV_GITHUB_APP_CLIENT_SECRET` | empty | OAuth client secret. Treat as a deployment secret. |
+| `githubApp.privateKey` | `KANDEV_GITHUB_APP_PRIVATE_KEY` | empty | Inline RSA private key in PEM format. Literal newlines and escaped `\n` sequences are accepted. Mutually exclusive with `privateKeyFile`. |
+| `githubApp.privateKeyFile` | `KANDEV_GITHUB_APP_PRIVATE_KEY_FILE` | empty | Path to an RSA private-key PEM file readable by the Kandev service user. A leading `~/` expands. Mutually exclusive with `privateKey`. |
+| `githubApp.webhookSecret` | `KANDEV_GITHUB_APP_WEBHOOK_SECRET` | empty | Shared secret configured on the GitHub App webhook, used for HMAC-SHA256 verification. |
+| `githubApp.slug` | `KANDEV_GITHUB_APP_SLUG` | empty | URL slug from `https://github.com/apps/<slug>`; lowercase letters, digits, and hyphens only. |
+| `githubApp.publicBaseUrl` | `KANDEV_GITHUB_APP_PUBLIC_BASE_URL` | empty | Externally reachable base URL used to build installation, OAuth, and webhook callbacks. It is also the broker URL compatibility fallback. Must be absolute HTTPS, except HTTP is allowed for loopback development. Credentials, query strings, and fragments are rejected. |
+
+The App requires `appId`, `clientId`, `clientSecret`, `webhookSecret`, `slug`, `publicBaseUrl`, and exactly one of `privateKey` or `privateKeyFile`. Kandev accepts PKCS#1 or RSA PKCS#8 PEM keys. It validates the key and public URL at startup without returning secret values through workspace APIs.
+
+Configure the GitHub App registration with these URLs, based on the same `publicBaseUrl`:
+
+| GitHub setting | Path appended to `publicBaseUrl` |
+|---|---|
+| First user authorization callback URL | `/api/v1/github/app/install/callback` |
+| Additional user authorization callback URL | `/api/v1/github/personal-connection/callback` |
+| Webhook URL | `/api/v1/github/app/webhook` |
+
+Enable **Request user authorization (OAuth) during installation**. Leave **Setup URL** empty;
+GitHub makes it unavailable in this mode. The first callback receives the combined installation
+and authorizer result. The additional callback is selected explicitly by Kandev's personal OAuth
+flow. Keep expiring user authorization tokens enabled.
+
+The public URL must route those paths to the Kandev backend. For a non-local executor, configure
+`githubCredentialBroker.publicBaseUrl` so the task environment can reach
+`/api/v1/github/credentials/resolve` over HTTPS. Do not expose a separate unauthenticated copy of
+that endpoint; its non-secret `GET` readiness check and lease-authenticated `POST` redemption must
+both reach the normal Kandev service boundary.
+
+Prefer mounting the private key as an owner-readable secret file instead of placing multiline PEM content in YAML or a general-purpose environment file. The client and webhook secrets have no `*File` configuration variants; inject their exact environment variables from the deployment secret manager. For example:
+
+```yaml
+# config.yaml
+githubApp:
+  appId: 123456
+  clientId: "Iv1.example-client-id"
+  privateKeyFile: "/run/secrets/kandev-github-app.pem"
+  slug: "company-kandev"
+  publicBaseUrl: "https://kandev.example.com"
+```
+
+```bash
+# Values supplied by the service manager or container secret integration.
+KANDEV_GITHUB_APP_CLIENT_SECRET="replace-at-deployment-time"
+KANDEV_GITHUB_APP_WEBHOOK_SECRET="replace-at-deployment-time"
+```
+
+Mount `/run/secrets/kandev-github-app.pem` read-only, restrict it to the Kandev service account (for example mode `0400` or `0600`), and do not include it in the image or source repository. Follow GitHub's [private-key storage and rotation guidance](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/managing-private-keys-for-github-apps): add a new key, update the mounted file, restart Kandev, verify connections, and then delete the old key. Rotate the client and webhook secrets in GitHub and deployment configuration together. See [Integrations](./integrations.md#host-a-github-app) for required permissions, events, identity behavior, and recovery.
+
 ### Logging
 
 | YAML key | Environment variable | Default | Current behavior |
@@ -202,6 +274,9 @@ server:
   writeTimeout: 30
   webInternalUrl: ""
 
+githubCredentialBroker:
+  publicBaseUrl: ""
+
 database:
   driver: "sqlite"
   path: ""
@@ -275,6 +350,16 @@ voice:
 features:
   office: false
   plugins: false
+
+githubApp:
+  appId: 0
+  clientId: ""
+  clientSecret: ""
+  privateKey: ""
+  privateKeyFile: ""
+  webhookSecret: ""
+  slug: ""
+  publicBaseUrl: ""
 ```
 
 Copying this entire file is unnecessary and can freeze old defaults in a deployment. Keep only deliberate overrides. On Windows, do not copy the Unix Docker host/path literals from this example.
@@ -353,7 +438,8 @@ Startup validation currently enforces:
 - PostgreSQL port, non-empty user/database name, and supported SSL mode;
 - positive `auth.tokenDuration`;
 - logging level/format; and
-- positive `repositoryDiscovery.maxDepth`.
+- positive `repositoryDiscovery.maxDepth`; and
+- all-or-none GitHub App configuration, a valid RSA private key, and a safe public base URL when `githubApp` is enabled.
 
 Other fields can pass configuration validation and still fail later—for example an unreachable NATS/PostgreSQL/Docker endpoint, unwritable log path, nonsensical timeout, or incompatible pool sizes. A field appearing in the schema does not prove its subsystem is available.
 

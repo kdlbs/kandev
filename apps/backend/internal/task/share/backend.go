@@ -12,6 +12,10 @@ import (
 // per-file size cap. The HTTP handler maps this to 413.
 var ErrSnapshotTooLarge = errors.New("snapshot exceeds maximum size")
 
+// ErrWorkspaceRequired prevents share operations from falling back to an
+// installation-global GitHub identity when task ownership is missing.
+var ErrWorkspaceRequired = errors.New("task workspace is required for GitHub sharing")
+
 // Backend is the contract every storage backend must implement. The snapshot
 // has already been redacted by the caller; the backend is responsible only
 // for transport and persistence.
@@ -21,11 +25,15 @@ type Backend interface {
 
 	// Upload publishes the snapshot and returns the backend-specific
 	// identifier (e.g. gist ID) and the public URL where it can be viewed.
-	Upload(ctx context.Context, snap *Snapshot) (externalID, externalURL string, err error)
+	Upload(ctx context.Context, workspaceID string, snap *Snapshot) (externalID, externalURL string, err error)
 
 	// Delete removes a previously-uploaded snapshot. Backends MAY return a
 	// "not found" error which the service detects via IsAlreadyGone.
-	Delete(ctx context.Context, externalID string) error
+	Delete(ctx context.Context, workspaceID, externalID string) error
+
+	// CheckAccess validates that the workspace-owned principal can use this
+	// backend without performing the upload.
+	CheckAccess(ctx context.Context, workspaceID string) error
 }
 
 // IsAlreadyGone reports whether err signals the backend resource no longer

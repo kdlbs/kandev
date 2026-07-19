@@ -16,6 +16,22 @@ import (
 
 // CreateIssueWatch creates a new issue watch and triggers an initial poll.
 func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchRequest) (*IssueWatch, error) {
+	return s.createIssueWatch(ctx, req)
+}
+
+func (s *Service) CreateIssueWatchForWorkspace(
+	ctx context.Context, req *CreateIssueWatchRequest,
+) (*IssueWatch, error) {
+	if req == nil || strings.TrimSpace(req.WorkspaceID) == "" {
+		return nil, ErrGitHubWorkspaceRequired
+	}
+	if _, err := s.resolveAutomationClient(ctx, req.WorkspaceID, "", ""); err != nil {
+		return nil, err
+	}
+	return s.createIssueWatch(ctx, req)
+}
+
+func (s *Service) createIssueWatch(ctx context.Context, req *CreateIssueWatchRequest) (*IssueWatch, error) {
 	if req.PollIntervalSeconds <= 0 {
 		req.PollIntervalSeconds = defaultWatchPollIntervalSec
 	}
@@ -182,8 +198,12 @@ func (s *Service) DeleteIssueWatch(ctx context.Context, id string) error {
 
 // CheckIssueWatch checks for new issues matching the watch and returns ones not yet tracked.
 func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Issue, error) {
-	if s.client == nil {
-		return nil, fmt.Errorf("github client not available")
+	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
+		return nil, ErrGitHubWorkspaceRequired
+	}
+	resolved, err := s.resolveAutomationClient(ctx, watch.WorkspaceID, "", "")
+	if err != nil {
+		return nil, err
 	}
 
 	s.logger.Debug("checking issue watch for new issues",
@@ -203,7 +223,7 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 	if len(fetchWatch.Repos) == 0 {
 		fetchWatch.Repos = workspaceScopeRepoFilters(settings)
 	}
-	issues, err := s.fetchIssues(ctx, &fetchWatch)
+	issues, err := s.fetchIssues(ctx, resolved.Client, &fetchWatch)
 	if err != nil {
 		return nil, err
 	}
@@ -229,15 +249,15 @@ func (s *Service) CheckIssueWatch(ctx context.Context, watch *IssueWatch) ([]*Is
 }
 
 // fetchIssues fetches issues based on the watch configuration.
-func (s *Service) fetchIssues(ctx context.Context, watch *IssueWatch) ([]*Issue, error) {
+func (s *Service) fetchIssues(ctx context.Context, client Client, watch *IssueWatch) ([]*Issue, error) {
 	hasRepos := len(watch.Repos) > 0
 
 	if !hasRepos {
 		filter := s.buildIssueFilter(watch)
-		return s.client.ListIssues(ctx, filter, watch.CustomQuery)
+		return client.ListIssues(ctx, filter, watch.CustomQuery)
 	}
 
-	return s.fetchIssuesWithRepoFilter(ctx, watch), nil
+	return s.fetchIssuesWithRepoFilter(ctx, client, watch), nil
 }
 
 // buildIssueFilter builds the filter qualifier from watch labels. `state:open`
@@ -257,7 +277,7 @@ func (s *Service) buildIssueFilter(watch *IssueWatch) string {
 }
 
 // fetchIssuesWithRepoFilter queries each repo individually and deduplicates.
-func (s *Service) fetchIssuesWithRepoFilter(ctx context.Context, watch *IssueWatch) []*Issue {
+func (s *Service) fetchIssuesWithRepoFilter(ctx context.Context, client Client, watch *IssueWatch) []*Issue {
 	var allIssues []*Issue
 	seen := make(map[string]bool)
 
@@ -274,9 +294,9 @@ func (s *Service) fetchIssuesWithRepoFilter(ctx context.Context, watch *IssueWat
 		var err error
 		if watch.CustomQuery != "" {
 			query := watch.CustomQuery + " " + qualifier
-			issues, err = s.client.ListIssues(ctx, "", query)
+			issues, err = client.ListIssues(ctx, "", query)
 		} else {
-			issues, err = s.client.ListIssues(ctx, filter, "")
+			issues, err = client.ListIssues(ctx, filter, "")
 		}
 		if err != nil {
 			if isConnectivityError(err) {

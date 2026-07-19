@@ -44,11 +44,7 @@ func Provide(
 	svc := NewService(store, eventBus, log)
 	scheduler := NewCronScheduler(svc, log)
 
-	var ghClient github.Client
-	if ghSvc != nil {
-		ghClient = ghSvc.Client()
-	}
-	evaluator := NewGitHubEvaluator(svc, ghClient, log)
+	evaluator := NewGitHubEvaluator(svc, ghSvc, log)
 
 	return &Components{
 		Service:   svc,

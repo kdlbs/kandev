@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -101,9 +102,12 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		buildAgentProfileMatcher(repos),
 	)
 
-	githubSvc := initGitHubService(dbPool, eventBus, repos.Secrets, log)
+	githubSvc := initGitHubService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if githubSvc != nil {
 		githubSvc.SetPromptResolver(promptSvc)
+		if brokerErr := githubSvc.ConfigureCredentialBroker(&githubBrokerScopeAuthorizer{repo: repos.Task}); brokerErr != nil {
+			log.Warn("GitHub credential broker initialization failed", zap.Error(brokerErr))
+		}
 	}
 	gitlabSvc := initGitLabService(dbPool, eventBus, repos.Secrets, log)
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
@@ -158,6 +162,96 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		// Notification service is initialized after gateway is available.
 		Notification: nil,
 	}, agentSettingsController, nil
+}
+
+type githubBrokerScopeAuthorizer struct {
+	repo interface {
+		GetTask(context.Context, string) (*taskmodels.Task, error)
+		GetTaskSession(context.Context, string) (*taskmodels.TaskSession, error)
+		GetRepository(context.Context, string) (*taskmodels.Repository, error)
+		ListTaskRepositories(context.Context, string) ([]*taskmodels.TaskRepository, error)
+	}
+}
+
+func (a *githubBrokerScopeAuthorizer) AuthorizeGitHubRepository(
+	ctx context.Context,
+	workspaceID, taskID, sessionID, repositoryID, owner, repoName string,
+) error {
+	if a == nil || a.repo == nil {
+		return fmt.Errorf("task repository is unavailable")
+	}
+	if err := a.authorizeTaskSession(ctx, workspaceID, taskID, sessionID); err != nil {
+		return err
+	}
+	if err := a.authorizeTaskRepository(ctx, taskID, repositoryID); err != nil {
+		return err
+	}
+	return a.authorizeRepositoryIdentity(ctx, workspaceID, repositoryID, owner, repoName)
+}
+
+func (a *githubBrokerScopeAuthorizer) authorizeTaskSession(
+	ctx context.Context,
+	workspaceID, taskID, sessionID string,
+) error {
+	task, err := a.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	if task == nil || task.WorkspaceID != workspaceID {
+		return fmt.Errorf("task does not belong to workspace")
+	}
+	session, err := a.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.TaskID != taskID {
+		return fmt.Errorf("session does not belong to task")
+	}
+	switch session.State {
+	case taskmodels.TaskSessionStateCompleted,
+		taskmodels.TaskSessionStateFailed,
+		taskmodels.TaskSessionStateCancelled:
+		return fmt.Errorf("session is terminal")
+	}
+	return nil
+}
+
+func (a *githubBrokerScopeAuthorizer) authorizeTaskRepository(
+	ctx context.Context,
+	taskID, repositoryID string,
+) error {
+	links, err := a.repo.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	linked := false
+	for _, link := range links {
+		if link != nil && link.RepositoryID == repositoryID {
+			linked = true
+			break
+		}
+	}
+	if !linked {
+		return fmt.Errorf("repository is not linked to task")
+	}
+	return nil
+}
+
+func (a *githubBrokerScopeAuthorizer) authorizeRepositoryIdentity(
+	ctx context.Context,
+	workspaceID, repositoryID, owner, repoName string,
+) error {
+	repository, err := a.repo.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return err
+	}
+	if repository == nil || repository.WorkspaceID != workspaceID ||
+		!strings.EqualFold(repository.Provider, "github") ||
+		!strings.EqualFold(repository.ProviderOwner, owner) ||
+		!strings.EqualFold(repository.ProviderName, repoName) {
+		return fmt.Errorf("repository identity does not match lease scope")
+	}
+	return nil
 }
 
 // loadCustomTUIAgents loads user-defined TUI agents from the database into the registry.
@@ -270,7 +364,13 @@ func (a *githubSecretAdapter) Delete(ctx context.Context, id string) error {
 
 // initGitHubService wires up the GitHub integration. Failures are non-fatal:
 // the rest of the backend still boots without GitHub configured.
-func initGitHubService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secrets.SecretStore, log *logger.Logger) *github.Service {
+func initGitHubService(
+	cfg *config.Config,
+	dbPool *db.Pool,
+	eventBus bus.EventBus,
+	secretsStore secrets.SecretStore,
+	log *logger.Logger,
+) *github.Service {
 	adapter := &githubSecretAdapter{store: secretsStore}
 	svc, _, err := github.Provide(dbPool.Writer(), dbPool.Reader(), adapter, eventBus, log)
 	if err != nil {
@@ -281,6 +381,29 @@ func initGitHubService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 		// (mutating) — same adapter satisfies both interfaces, but the
 		// service needs the mutating one wired explicitly.
 		svc.SetSecretManager(adapter)
+		svc.SetConnectionSecretStore(secretadapter.New(secretsStore))
+		if cfg.GitHubApp.Availability().Available {
+			privateKey, keyErr := cfg.GitHubApp.PrivateKeyPEM()
+			if keyErr != nil {
+				log.Warn("GitHub App private key unavailable", zap.Error(keyErr))
+				return svc
+			}
+			appClient, appErr := github.NewAppClient(cfg.GitHubApp.AppID, privateKey)
+			if appErr != nil {
+				log.Warn("GitHub App client initialization failed", zap.Error(appErr))
+				return svc
+			}
+			svc.SetGitHubAppClient(appClient)
+			if authErr := svc.ConfigureGitHubAppAuth(github.GitHubAppRuntimeConfig{
+				ClientID:      cfg.GitHubApp.ClientID,
+				ClientSecret:  cfg.GitHubApp.ClientSecret,
+				WebhookSecret: cfg.GitHubApp.WebhookSecret,
+				Slug:          cfg.GitHubApp.Slug,
+				PublicBaseURL: cfg.GitHubApp.PublicBaseURL,
+			}); authErr != nil {
+				log.Warn("GitHub App authentication initialization failed", zap.Error(authErr))
+			}
+		}
 	}
 	return svc
 }
@@ -427,8 +550,7 @@ func initSentryService(dbPool *db.Pool, eventBus bus.EventBus, secretsStore secr
 
 // initShareHandlers wires up the public-share-links HTTP surface. Failures
 // are non-fatal: the rest of the backend boots without the share endpoints.
-// The github.Client may be nil; CreateShare will fail at the IsAuthenticated
-// probe with a 412 in that case.
+// GitHub access resolves from the owning task workspace on every operation.
 func initShareHandlers(
 	dbPool *db.Pool,
 	taskRepo share.TaskReader,
@@ -436,14 +558,10 @@ func initShareHandlers(
 	log *logger.Logger,
 	version string,
 ) *share.HTTPHandlers {
-	var ghClient github.Client
-	if githubSvc != nil {
-		ghClient = githubSvc.Client()
-	}
-	if ghClient == nil {
-		ghClient = &github.NoopClient{}
-	}
-	h, _, err := share.Provide(dbPool.Writer(), dbPool.Reader(), taskRepo, ghClient, log, share.Config{KandevVersion: version})
+	h, _, err := share.Provide(
+		dbPool.Writer(), dbPool.Reader(), taskRepo, githubSvc, log,
+		share.Config{KandevVersion: version},
+	)
 	if err != nil {
 		log.Warn("Share handlers initialization failed (non-fatal)", zap.Error(err))
 		return nil
@@ -606,8 +724,10 @@ type githubBranchListerAdapter struct {
 	svc *github.Service
 }
 
-func (a githubBranchListerAdapter) ListRepoBranches(ctx context.Context, owner, repo string) ([]taskservice.Branch, error) {
-	remote, err := a.svc.ListRepoBranches(ctx, owner, repo)
+func (a githubBranchListerAdapter) ListRepoBranches(
+	ctx context.Context, workspaceID, owner, repo string,
+) ([]taskservice.Branch, error) {
+	remote, err := a.svc.ListRepoBranchesForWorkspace(ctx, workspaceID, owner, repo)
 	if err != nil {
 		return nil, err
 	}

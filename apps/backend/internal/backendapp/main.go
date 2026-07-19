@@ -399,10 +399,11 @@ func startAgentInfrastructure(
 	agentctlBinaryPath string,
 	runCleanups func(),
 ) bool {
+	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, repos.Secrets)
+	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, userSecretStore)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
@@ -451,7 +452,10 @@ func startAgentInfrastructure(
 	// ============================================
 	repoCloner := repoclone.NewCloner(repoclone.Config{
 		BasePath: cfg.RepoClone.BasePath,
-	}, repoclone.DetectGitProtocol(), cfg.ResolvedHomeDir(), log)
+	}, repoclone.ProtocolHTTPS, cfg.ResolvedHomeDir(), log)
+	if services.GitHub != nil {
+		repoCloner.SetGitCredentialProvider(services.GitHub)
+	}
 	log.Info("Repository cloner configured",
 		zap.String("base_path", cfg.RepoClone.BasePath))
 
@@ -468,7 +472,7 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
-		lifecycleMgr, agentRegistry, services.Workflow, repos.Secrets, repoCloner)
+		lifecycleMgr, agentRegistry, services.Workflow, userSecretStore, repoCloner, services.GitHub)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
@@ -1631,6 +1635,7 @@ func buildHTTPServer(
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
 ) *http.Server {
+	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(httpmw.RequestLogger(log, "kandev"))
@@ -1668,8 +1673,8 @@ func buildHTTPServer(
 		promptCtrl:              promptcontroller.NewController(services.Prompts),
 		utilityCtrl:             utilitycontroller.NewController(services.Utility),
 		msgCreator:              msgCreator,
-		secretsSvc:              secrets.NewService(repos.Secrets, log),
-		secretStore:             repos.Secrets,
+		secretsSvc:              secrets.NewService(userSecretStore, log),
+		secretStore:             userSecretStore,
 		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
 		addCleanup:              addCleanup,
 		repoCloner:              repoCloner,

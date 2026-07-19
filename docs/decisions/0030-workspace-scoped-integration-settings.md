@@ -1,5 +1,9 @@
 # Workspace-scoped integration settings
 
+> Amended by [ADR 0047](0047-github-authentication-ownership.md): existing GitHub authentication
+> uses an explicit install-wide `legacy_shared` compatibility mode until each workspace is
+> reconfigured. The target ownership remains workspace-scoped.
+
 ## Status
 
 accepted

@@ -66,6 +66,31 @@ Two current preparation exceptions are easy to miss:
 - A repository-free Local task bypasses the environment-preparer stage, even when it uses an explicit workspace folder. Its profile prepare script therefore does not run.
 - A Worktree task with two or more attached repositories runs each repository's setup script while creating that repository's worktree, but the current multi-repository preparer does not run the executor profile's task-level prepare script.
 
+## Managed GitHub credentials
+
+For attached GitHub repositories, Kandev normally gives the task an opaque lease for each
+repository instead of placing the workspace PAT, selected CLI token, or App installation token in
+its ambient environment. Git's credential helper selects the lease whose HTTPS host and path
+exactly match the repository. A broker-aware `gh` shim redeems the primary repository lease for
+each invocation, sets `GH_TOKEN` only on the child `gh` process, and isolates CLI configuration
+from the host.
+
+When the workspace uses a GitHub App, the redeemed installation token is minted for that one
+repository. On a multi-repository task, Git can redeem each repository's lease, but App-backed
+`gh` commands are primary-repository scoped. Run cross-repository GitHub API work through Kandev's
+workspace-aware backend surfaces.
+
+PAT and named-CLI automation tokens cannot be cryptographically reduced after redemption. Exact
+lease matching prevents accidental cross-repository redemption, but the trusted agent subprocess
+receives a bearer token with all scopes and repositories granted by GitHub. An explicit profile
+`GITHUB_TOKEN` or `GH_TOKEN` bypasses managed broker selection entirely and is the operator's
+unmanaged grant. Personal GitHub tokens and the deployment App private key never enter executors.
+
+Managed Docker, Sprites, and SSH launches probe the exact credential-resolution route from inside
+the executor before clone or agent startup and require its `204 No Content` readiness response.
+Network failures, redirects, proxy routing errors, and broker server errors stop launch instead of
+falling back to another GitHub credential.
+
 ## Worktree
 
 Worktree creates a dedicated host Git worktree and runs the standalone `agentctl` service against it. It separates branches and files between tasks, but the process still has the Kandev user's host permissions, network access, and readable credentials.
@@ -143,7 +168,7 @@ docker ps -a --filter label=kandev.managed=true
 3. Select that secret for the required `SPRITES_API_TOKEN` profile environment variable.
 4. Review remote credential methods, Git identity, prepare/cleanup scripts, and network policy.
 
-New Sprites profiles initially select the local `gh` CLI token method. Kandev may also copy explicitly selected agent credential files, resolve selected Kandev secrets into agent environment variables, or run an agent auth setup script. Credential upload is best-effort: provisioning can continue while later agent authentication fails. The remote sandbox receives highly sensitive data; use a scoped provider token and least-privilege repository credentials.
+Sprites profiles do not copy the host-active `gh` CLI token. Kandev may copy explicitly selected agent credential files, resolve selected Kandev secrets into agent environment variables, or run an agent auth setup script. A profile-selected GitHub token is an unmanaged override; otherwise an attached GitHub repository uses the workspace credential broker. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to an HTTPS Kandev URL reachable from remote executors; this setting is independent of GitHub App registration. Credential upload is best-effort: provisioning can continue while later agent authentication fails. The remote sandbox receives highly sensitive data; use a scoped provider token and least-privilege repository credentials.
 
 Network rules are stored in `sprites_network_policy_rules` as JSON entries with `domain`, `action` (`allow` or `deny`), and optional `include`. Kandev applies them only on fresh sandbox creation, and currently does so after credential upload, prepare, controller startup, and agent-instance creation. Bootstrap traffic can therefore occur before the profile policy is installed. A parse/provider failure is reported as skipped and does not abort launch. Provider semantics remain authoritative; do not treat this late, best-effort step as a security boundary, and test the resulting policy.
 
@@ -181,7 +206,7 @@ Run **Test Connection**, independently verify the observed SHA256 host fingerpri
 
 The profile editor exposes remote shell and agent-readiness checks. Backend/API configuration also recognizes `ssh_workdir_root` (default `~/.kandev`) and `ssh_shell`; the current profile UI exposes `ssh_shell` but not a workdir-root field.
 
-The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can instead use a stored `GITHUB_TOKEN` or the local `gh auth token`. These transfers write sensitive material under the remote user's home and are best-effort—verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
+The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can use an explicitly selected `GITHUB_TOKEN` secret as an unmanaged profile override; Kandev does not copy the host-active `gh` token. These transfers write sensitive material under the remote user's home and are best-effort—verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
 ### Current repository limitation
 

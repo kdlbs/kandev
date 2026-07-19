@@ -31,7 +31,12 @@ function reducer(state: State, action: Action): State {
  * This is not stored in the global store since it's session-scoped
  * and fetched on demand.
  */
-export function usePRFeedback(owner: string | null, repo: string | null, prNumber: number | null) {
+export function usePRFeedback(
+  workspaceId: string | null,
+  owner: string | null,
+  repo: string | null,
+  prNumber: number | null,
+) {
   const [state, dispatch] = useReducer(reducer, { feedback: null, loading: false, error: null });
   const [fetchCount, setFetchCount] = useState(0);
 
@@ -40,10 +45,10 @@ export function usePRFeedback(owner: string | null, repo: string | null, prNumbe
   }, []);
 
   useEffect(() => {
-    if (!owner || !repo || !prNumber) return;
+    if (!workspaceId || !owner || !repo || !prNumber) return;
     let cancelled = false;
     dispatch({ type: "fetch" });
-    getPRFeedback(owner, repo, prNumber, { cache: "no-store" })
+    getPRFeedback(workspaceId, owner, repo, prNumber, { cache: "no-store" })
       .then((response) => {
         if (!cancelled) dispatch({ type: "success", feedback: response });
       })
@@ -57,7 +62,7 @@ export function usePRFeedback(owner: string | null, repo: string | null, prNumbe
     return () => {
       cancelled = true;
     };
-  }, [owner, repo, prNumber, fetchCount]);
+  }, [workspaceId, owner, repo, prNumber, fetchCount]);
 
   return { feedback: state.feedback, loading: state.loading, error: state.error, refresh };
 }

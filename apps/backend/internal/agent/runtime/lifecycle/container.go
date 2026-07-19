@@ -479,7 +479,14 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	//nolint:dupword // two `fi` tokens close two distinct shell blocks.
 	bootstrap := []string{
 		"sh", "-c",
-		`if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
+		`if [ -n "${KANDEV_GITHUB_CREDENTIAL_BROKER_URL:-}" ] && [ -n "${KANDEV_GITHUB_CREDENTIAL_LEASE:-}" ]; then
+` + brokerReachabilityScript + `
+  probe_rc=$?
+  if [ "$probe_rc" -ne 0 ]; then
+    exit "$probe_rc"
+  fi
+fi
+if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
   (eval "$KANDEV_PREPARE_SCRIPT")
   prep_rc=$?
   if [ "$prep_rc" -ne 0 ]; then

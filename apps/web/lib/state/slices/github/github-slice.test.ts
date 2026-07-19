@@ -63,6 +63,8 @@ function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCI
 
 const FUTURE_RESET = "2030-01-01T00:00:00Z";
 const NOW = "2026-05-04T12:00:00Z";
+const WORKSPACE_A = "workspace-a";
+const WORKSPACE_B = "workspace-b";
 
 const baseStatus: GitHubStatus = {
   authenticated: true,
@@ -75,7 +77,8 @@ const baseStatus: GitHubStatus = {
 describe("applyGitHubRateLimitUpdate", () => {
   it("merges incoming snapshots into the existing status", () => {
     const store = makeStore();
-    store.getState().setGitHubStatus({ ...baseStatus });
+    store.getState().resetGitHubStatus("ws-1");
+    store.getState().setGitHubStatus("ws-1", { ...baseStatus });
 
     store.getState().applyGitHubRateLimitUpdate({
       trigger: "graphql",
@@ -105,7 +108,8 @@ describe("applyGitHubRateLimitUpdate", () => {
 
   it("overwrites only the resources present in the update", () => {
     const store = makeStore();
-    store.getState().setGitHubStatus({
+    store.getState().resetGitHubStatus("ws-1");
+    store.getState().setGitHubStatus("ws-1", {
       ...baseStatus,
       rate_limit: {
         core: {
@@ -152,6 +156,33 @@ describe("applyGitHubRateLimitUpdate", () => {
         },
       ],
     });
+
+    expect(store.getState().githubStatus.status).toBeNull();
+  });
+});
+
+describe("workspace-scoped GitHub status", () => {
+  it("clears the previous workspace actor before the next fetch", () => {
+    const store = makeStore();
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    store.getState().setGitHubStatus(WORKSPACE_A, { ...baseStatus, username: "alice" });
+
+    store.getState().resetGitHubStatus(WORKSPACE_B);
+
+    expect(store.getState().githubStatus).toMatchObject({
+      workspaceId: WORKSPACE_B,
+      status: null,
+      loaded: false,
+      loading: false,
+    });
+  });
+
+  it("ignores a late response from the previous workspace", () => {
+    const store = makeStore();
+    store.getState().resetGitHubStatus(WORKSPACE_A);
+    store.getState().resetGitHubStatus(WORKSPACE_B);
+
+    store.getState().setGitHubStatus(WORKSPACE_A, { ...baseStatus, username: "alice" });
 
     expect(store.getState().githubStatus.status).toBeNull();
   });

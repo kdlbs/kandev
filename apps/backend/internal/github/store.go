@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+
+	dbutil "github.com/kandev/kandev/internal/db"
 )
 
 // Store provides SQLite persistence for GitHub integration data.
@@ -29,7 +31,9 @@ type taskIssueMetadataRow struct {
 // NewStore creates a new GitHub store and initializes the schema.
 func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	s := &Store{db: writer, ro: reader}
-	if err := s.initSchema(); err != nil {
+	legacyUpgrade := s.tableExists("github_workspace_settings") &&
+		!s.tableExists("github_workspace_connections")
+	if err := s.initSchema(legacyUpgrade); err != nil {
 		return nil, fmt.Errorf("github schema init: %w", err)
 	}
 	return s, nil
@@ -46,6 +50,7 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 const createTablesSQL = `
 	CREATE TABLE IF NOT EXISTS github_pr_watches (
 		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL DEFAULT '',
 		session_id TEXT NOT NULL,
 		task_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL DEFAULT '',
@@ -64,6 +69,7 @@ const createTablesSQL = `
 
 	CREATE TABLE IF NOT EXISTS github_task_prs (
 		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL DEFAULT '',
 		task_id TEXT NOT NULL,
 		repository_id TEXT NOT NULL DEFAULT '',
 		owner TEXT NOT NULL,
@@ -106,6 +112,7 @@ const createTablesSQL = `
 		prompt TEXT DEFAULT '',
 		review_scope TEXT NOT NULL DEFAULT 'user_and_teams',
 		custom_query TEXT NOT NULL DEFAULT '',
+		target_login TEXT NOT NULL DEFAULT '',
 		enabled BOOLEAN DEFAULT 1,
 		poll_interval_seconds INTEGER DEFAULT 300,
 		cleanup_policy TEXT NOT NULL DEFAULT 'auto',
@@ -179,6 +186,81 @@ const createTablesSQL = `
 		updated_at DATETIME NOT NULL
 	);
 
+	CREATE TABLE IF NOT EXISTS github_workspace_connections (
+		workspace_id TEXT PRIMARY KEY,
+		source TEXT NOT NULL CHECK (source IN ('legacy_shared', 'pat', 'gh_cli', 'github_app_installation')),
+		github_host TEXT NOT NULL CHECK (github_host <> ''),
+		login TEXT,
+		installation_id BIGINT,
+		installation_account_login TEXT,
+		installation_account_type TEXT CHECK (
+			installation_account_type IS NULL OR installation_account_type IN ('User', 'Organization')
+		),
+		status TEXT NOT NULL CHECK (status IN ('active', 'invalid', 'suspended', 'revoked')),
+		credential_generation BIGINT NOT NULL DEFAULT 1 CHECK (credential_generation > 0),
+		last_error TEXT,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		CHECK (
+			(source = 'legacy_shared' AND login IS NULL AND installation_id IS NULL) OR
+			(source IN ('pat', 'gh_cli') AND login IS NOT NULL AND login <> '' AND installation_id IS NULL) OR
+			(source = 'github_app_installation' AND installation_id IS NOT NULL AND installation_id > 0 AND
+			 installation_account_login IS NOT NULL AND installation_account_login <> '' AND
+			 installation_account_type IS NOT NULL)
+		),
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS github_user_connections (
+		workspace_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		github_user_id BIGINT NOT NULL CHECK (github_user_id > 0),
+		login TEXT NOT NULL CHECK (login <> ''),
+		status TEXT NOT NULL CHECK (status IN ('active', 'invalid', 'revoked')),
+		access_expires_at TIMESTAMP NOT NULL,
+		refresh_expires_at TIMESTAMP,
+		credential_generation BIGINT NOT NULL DEFAULT 1 CHECK (credential_generation > 0),
+		last_error TEXT,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (workspace_id, user_id),
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS github_user_connection_versions (
+		workspace_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		credential_generation BIGINT NOT NULL DEFAULT 0 CHECK (credential_generation >= 0),
+		updated_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (workspace_id, user_id),
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS github_auth_flows (
+		state_hash TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		kind TEXT NOT NULL CHECK (kind IN ('app_installation', 'personal')),
+		pkce_verifier TEXT NOT NULL DEFAULT '',
+		expected_workspace_source TEXT NOT NULL DEFAULT '',
+		expected_workspace_generation BIGINT NOT NULL DEFAULT 0,
+		expected_installation_id BIGINT,
+		expected_personal_generation BIGINT NOT NULL DEFAULT 0,
+		expires_at TIMESTAMP NOT NULL,
+		consumed_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS github_webhook_deliveries (
+		delivery_id TEXT PRIMARY KEY,
+		event TEXT NOT NULL,
+		status TEXT NOT NULL CHECK (status IN ('received', 'processed', 'ignored', 'failed')),
+		result TEXT NOT NULL DEFAULT '',
+		received_at TIMESTAMP NOT NULL,
+		processed_at TIMESTAMP
+	);
+
 	CREATE TABLE IF NOT EXISTS github_task_ci_options (
 		task_id TEXT PRIMARY KEY,
 		auto_fix_enabled BOOLEAN NOT NULL DEFAULT 0,
@@ -207,8 +289,14 @@ const createTablesSQL = `
 	);
 `
 
-func (s *Store) initSchema() error {
+func (s *Store) initSchema(legacyUpgrade bool) error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
+		return err
+	}
+	if err := s.addWorkspaceOwnershipColumns(); err != nil {
+		return err
+	}
+	if err := s.addReviewWatchTargetLogin(); err != nil {
 		return err
 	}
 	// Idempotent migrations for existing databases.
@@ -245,6 +333,12 @@ func (s *Store) initSchema() error {
 	if err := s.addTaskCIRoundColumns(); err != nil {
 		return err
 	}
+	if err := s.addGitHubAuthFlowExpectationColumns(); err != nil {
+		return err
+	}
+	if err := s.backfillGitHubUserConnectionVersions(); err != nil {
+		return err
+	}
 	if err := s.migratePRTablesForMultiRepo(); err != nil {
 		return fmt.Errorf("migrate PR tables for multi-repo: %w", err)
 	}
@@ -254,11 +348,141 @@ func (s *Store) initSchema() error {
 	if err := s.backfillPRWatchesRepositoryID(); err != nil {
 		return fmt.Errorf("backfill github_pr_watches.repository_id: %w", err)
 	}
+	if err := s.backfillGitHubWorkspaceOwnership(); err != nil {
+		return err
+	}
+	if legacyUpgrade {
+		if err := s.seedLegacyWorkspaceConnections(); err != nil {
+			return err
+		}
+	}
 	// pr_number is the 3rd column of UNIQUE(task_id, repository_id, pr_number),
 	// so SQLite can't use that index for the PR-number task search. Add a
 	// dedicated leading-key index so lookups by PR number stay index-backed.
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_prs_pr_number ON github_task_prs (pr_number)`)
+	if err := s.ensureWorkspaceOwnershipIndexes(); err != nil {
+		return err
+	}
 	_, _ = s.db.Exec(`CREATE INDEX IF NOT EXISTS idx_github_task_ci_pr_state_task ON github_task_ci_pr_state (task_id)`)
+	return nil
+}
+
+func (s *Store) backfillGitHubUserConnectionVersions() error {
+	// Package-local tests may initialize the GitHub store before the shared
+	// workspace schema. A database with existing user connections necessarily
+	// has the workspace table, so skipping this empty backfill is lossless.
+	if !s.tableExists("workspaces") {
+		return nil
+	}
+	if _, err := s.db.Exec(`
+		INSERT INTO github_user_connection_versions (workspace_id, user_id, credential_generation, updated_at)
+		SELECT workspace_id, user_id, credential_generation, updated_at FROM github_user_connections
+		WHERE true
+		ON CONFLICT(workspace_id, user_id) DO UPDATE SET
+			credential_generation = MAX(github_user_connection_versions.credential_generation, excluded.credential_generation),
+			updated_at = excluded.updated_at`); err != nil {
+		return fmt.Errorf("backfill GitHub user connection versions: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) addGitHubAuthFlowExpectationColumns() error {
+	columns, err := s.tableColumns("github_auth_flows")
+	if err != nil {
+		return fmt.Errorf("read github_auth_flows columns: %w", err)
+	}
+	for name, statement := range map[string]string{
+		"expected_workspace_source":     `ALTER TABLE github_auth_flows ADD COLUMN expected_workspace_source TEXT NOT NULL DEFAULT ''`,
+		"expected_workspace_generation": `ALTER TABLE github_auth_flows ADD COLUMN expected_workspace_generation BIGINT NOT NULL DEFAULT 0`,
+		"expected_installation_id":      `ALTER TABLE github_auth_flows ADD COLUMN expected_installation_id BIGINT`,
+		"expected_personal_generation":  `ALTER TABLE github_auth_flows ADD COLUMN expected_personal_generation BIGINT NOT NULL DEFAULT 0`,
+	} {
+		if _, ok := columns[name]; ok {
+			continue
+		}
+		if _, err := s.db.Exec(statement); err != nil {
+			return fmt.Errorf("add github_auth_flows.%s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) ensureWorkspaceOwnershipIndexes() error {
+	for name, statement := range map[string]string{
+		"github_task_prs":   `CREATE INDEX IF NOT EXISTS idx_github_task_prs_workspace ON github_task_prs (workspace_id)`,
+		"github_pr_watches": `CREATE INDEX IF NOT EXISTS idx_github_pr_watches_workspace ON github_pr_watches (workspace_id)`,
+	} {
+		if _, err := s.db.Exec(statement); err != nil {
+			return fmt.Errorf("index %s workspace ownership: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) addWorkspaceOwnershipColumns() error {
+	for _, migration := range []struct {
+		table string
+		stmt  string
+	}{
+		{"github_pr_watches", `ALTER TABLE github_pr_watches ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`},
+		{"github_task_prs", `ALTER TABLE github_task_prs ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''`},
+	} {
+		if _, err := s.db.Exec(migration.stmt); err != nil && !dbutil.IsDuplicateColumnError(err) {
+			return fmt.Errorf("add %s.workspace_id: %w", migration.table, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) addReviewWatchTargetLogin() error {
+	_, err := s.db.Exec(`ALTER TABLE github_review_watches ADD COLUMN target_login TEXT NOT NULL DEFAULT ''`)
+	if err != nil && !dbutil.IsDuplicateColumnError(err) {
+		return fmt.Errorf("add github_review_watches.target_login: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) backfillGitHubWorkspaceOwnership() error {
+	if !s.tableExists("tasks") {
+		return nil
+	}
+	taskColumns, err := s.tableColumns("tasks")
+	if err != nil {
+		return fmt.Errorf("read tasks columns for github ownership backfill: %w", err)
+	}
+	if _, ok := taskColumns["workspace_id"]; !ok {
+		return nil
+	}
+	for _, table := range []string{"github_pr_watches", "github_task_prs"} {
+		query := `UPDATE ` + table + `
+			SET workspace_id = (
+				SELECT tasks.workspace_id FROM tasks WHERE tasks.id = ` + table + `.task_id
+			)
+			WHERE workspace_id = ''
+			  AND EXISTS (SELECT 1 FROM tasks WHERE tasks.id = ` + table + `.task_id)
+			  AND (SELECT tasks.workspace_id FROM tasks WHERE tasks.id = ` + table + `.task_id) <> ''`
+		if _, err := s.db.Exec(query); err != nil {
+			return fmt.Errorf("backfill %s.workspace_id: %w", table, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) seedLegacyWorkspaceConnections() error {
+	if !s.tableExists("workspaces") {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO github_workspace_connections (
+			workspace_id, source, github_host, status, credential_generation, created_at, updated_at
+		)
+		SELECT id, 'legacy_shared', 'github.com', 'active', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+		FROM workspaces
+		WHERE TRUE
+		ON CONFLICT(workspace_id) DO NOTHING`)
+	if err != nil {
+		return fmt.Errorf("seed legacy github workspace connections: %w", err)
+	}
 	return nil
 }
 
@@ -478,6 +702,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			trigger,
 			`CREATE TABLE github_pr_watches_new (
 				id TEXT PRIMARY KEY,
+				workspace_id TEXT NOT NULL DEFAULT '',
 				session_id TEXT NOT NULL,
 				task_id TEXT NOT NULL,
 				repository_id TEXT NOT NULL DEFAULT '',
@@ -494,11 +719,11 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 				UNIQUE(session_id, repository_id, branch)
 			)`,
 			`INSERT INTO github_pr_watches_new (
-				id, session_id, task_id, repository_id, owner, repo, pr_number, branch,
+				id, workspace_id, session_id, task_id, repository_id, owner, repo, pr_number, branch,
 				last_checked_at, last_comment_at, last_check_status, last_review_state,
 				created_at, updated_at
 			) SELECT
-				id, session_id, task_id, COALESCE(repository_id, ''), owner, repo, pr_number, branch,
+				id, COALESCE(workspace_id, ''), session_id, task_id, COALESCE(repository_id, ''), owner, repo, pr_number, branch,
 				last_checked_at, last_comment_at, last_check_status, last_review_state,
 				created_at, updated_at
 			FROM github_pr_watches`,
@@ -511,6 +736,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 		"UNIQUE(task_id, pr_number)",
 		`CREATE TABLE github_task_prs_new (
 			id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL DEFAULT '',
 			task_id TEXT NOT NULL,
 			repository_id TEXT NOT NULL DEFAULT '',
 			owner TEXT NOT NULL,
@@ -542,12 +768,12 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			UNIQUE(task_id, repository_id, pr_number)
 		)`,
 		`INSERT INTO github_task_prs_new (
-			id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
+			id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, author_login, state, review_state, checks_state,
 			mergeable_state, review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, updated_at
 		) SELECT
-			id, task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
+			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, author_login, state, review_state, checks_state,
 			mergeable_state, review_count, pending_review_count, comment_count,
 			additions, deletions, created_at, merged_at, closed_at, last_synced_at, updated_at
@@ -603,9 +829,9 @@ func (s *Store) CreatePRWatch(ctx context.Context, w *PRWatch) error {
 	w.CreatedAt = now
 	w.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_pr_watches (id, session_id, task_id, repository_id, owner, repo, pr_number, branch, last_check_status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		w.ID, w.SessionID, w.TaskID, w.RepositoryID, w.Owner, w.Repo, w.PRNumber, w.Branch, w.LastCheckStatus, w.CreatedAt, w.UpdatedAt)
+		INSERT INTO github_pr_watches (id, workspace_id, session_id, task_id, repository_id, owner, repo, pr_number, branch, last_check_status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		w.ID, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, w.Owner, w.Repo, w.PRNumber, w.Branch, w.LastCheckStatus, w.CreatedAt, w.UpdatedAt)
 	return err
 }
 
@@ -834,12 +1060,12 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 	now := time.Now().UTC()
 	tp.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO github_task_prs (id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
+		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tp.ID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
 		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt)
@@ -1023,12 +1249,12 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO github_task_prs (id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
+		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
 			created_at, merged_at, closed_at, last_synced_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		tp.ID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
 		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt); err != nil {
@@ -1302,11 +1528,11 @@ func (s *Store) CreateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 	rw.ReposJSON = string(reposJSON)
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO github_review_watches (id, workspace_id, workflow_id, workflow_step_id, repos,
-			agent_profile_id, executor_profile_id, prompt, review_scope, custom_query,
+			agent_profile_id, executor_profile_id, prompt, review_scope, custom_query, target_login,
 			enabled, poll_interval_seconds, cleanup_policy, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rw.ID, rw.WorkspaceID, rw.WorkflowID, rw.WorkflowStepID, rw.ReposJSON,
-		rw.AgentProfileID, rw.ExecutorProfileID, rw.Prompt, rw.ReviewScope, rw.CustomQuery,
+		rw.AgentProfileID, rw.ExecutorProfileID, rw.Prompt, rw.ReviewScope, rw.CustomQuery, rw.TargetLogin,
 		rw.Enabled, rw.PollIntervalSeconds, rw.CleanupPolicy, rw.CreatedAt, rw.UpdatedAt)
 	return err
 }
@@ -1396,12 +1622,12 @@ func (s *Store) UpdateReviewWatch(ctx context.Context, rw *ReviewWatch) error {
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE github_review_watches SET workflow_id = ?, workflow_step_id = ?, repos = ?,
 			agent_profile_id = ?, executor_profile_id = ?,
-			prompt = ?, review_scope = ?, custom_query = ?,
+			prompt = ?, review_scope = ?, custom_query = ?, target_login = ?,
 			enabled = ?, poll_interval_seconds = ?, cleanup_policy = ?, last_polled_at = ?, updated_at = ?
 		WHERE id = ?`,
 		rw.WorkflowID, rw.WorkflowStepID, rw.ReposJSON,
 		rw.AgentProfileID, rw.ExecutorProfileID,
-		rw.Prompt, rw.ReviewScope, rw.CustomQuery,
+		rw.Prompt, rw.ReviewScope, rw.CustomQuery, rw.TargetLogin,
 		rw.Enabled, rw.PollIntervalSeconds, rw.CleanupPolicy, rw.LastPolledAt, rw.UpdatedAt, rw.ID)
 	return err
 }
