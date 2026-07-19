@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +19,22 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func stubGithubTarballDownload(t *testing.T, archive []byte) func() int {
+	t.Helper()
+	requestCount := 0
+	originalClient := http.DefaultClient
+	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		requestCount++
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewReader(archive)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	t.Cleanup(func() { http.DefaultClient = originalClient })
+	return func() int { return requestCount }
 }
 
 func TestGithubTarballStrategyInstallRepairsPartialInstall(t *testing.T) {
@@ -34,17 +52,7 @@ func TestGithubTarballStrategyInstallRepairsPartialInstall(t *testing.T) {
 		"tool-1.0.0-" + target + "/bin/tool":    "complete",
 		"tool-1.0.0-" + target + "/lib/runtime": "runtime",
 	})
-	requestCount := 0
-	originalClient := http.DefaultClient
-	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
-		requestCount++
-		return &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(bytes.NewReader(archive)),
-			Header:     make(http.Header),
-		}, nil
-	})}
-	t.Cleanup(func() { http.DefaultClient = originalClient })
+	requestCount := stubGithubTarballDownload(t, archive)
 
 	strategy := NewGithubTarballStrategy(installDir, "tool", GithubTarballConfig{
 		Owner:        "owner",
@@ -60,8 +68,8 @@ func TestGithubTarballStrategyInstallRepairsPartialInstall(t *testing.T) {
 	if _, err := strategy.Install(t.Context()); err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
-	if requestCount != 1 {
-		t.Fatalf("download request count = %d, want 1", requestCount)
+	if requestCount() != 1 {
+		t.Fatalf("download request count = %d, want 1", requestCount())
 	}
 	if _, err := os.Stat(filepath.Join(installDir, "tool-1.0.0-"+target, "lib", "runtime")); err != nil {
 		t.Fatalf("partial install was not repaired: %v", err)
@@ -70,8 +78,33 @@ func TestGithubTarballStrategyInstallRepairsPartialInstall(t *testing.T) {
 	if _, err := strategy.Install(t.Context()); err != nil {
 		t.Fatalf("second Install() error = %v", err)
 	}
-	if requestCount != 1 {
-		t.Fatalf("download request count after completed install = %d, want 1", requestCount)
+	if requestCount() != 1 {
+		t.Fatalf("download request count after completed install = %d, want 1", requestCount())
+	}
+}
+
+func TestGithubTarballStrategyInstallPreservesMissingBinaryError(t *testing.T) {
+	installDir := t.TempDir()
+	target := runtime.GOOS + "-" + runtime.GOARCH
+	archive := tarGzWithFiles(t, map[string]string{
+		"tool-1.0.0-" + target + "/lib/runtime": "runtime",
+	})
+	stubGithubTarballDownload(t, archive)
+
+	strategy := NewGithubTarballStrategy(installDir, "tool", GithubTarballConfig{
+		Owner:        "owner",
+		Repo:         "repo",
+		Version:      "1.0.0",
+		AssetPattern: "tool-{version}-{os}-{arch}.tar.gz",
+		BinaryPath:   "tool-{version}-{os}-{arch}/bin/tool",
+		Targets: map[string]string{
+			runtime.GOOS + "/" + runtime.GOARCH: target,
+		},
+	}, testLogger())
+
+	_, err := strategy.Install(t.Context())
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("Install() error = %v, want wrapped fs.ErrNotExist", err)
 	}
 }
 

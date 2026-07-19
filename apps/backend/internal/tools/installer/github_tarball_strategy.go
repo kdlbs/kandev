@@ -90,7 +90,7 @@ func (s *GithubTarballStrategy) Install(ctx context.Context) (*InstallResult, er
 	}
 
 	if _, err := os.Stat(binaryPath); err != nil {
-		return nil, fmt.Errorf("binary not found after extraction: %s", binaryPath)
+		return nil, fmt.Errorf("binary not found after extraction %s: %w", binaryPath, err)
 	}
 	if err := os.WriteFile(completionMarker, nil, 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write install completion marker: %w", err)
