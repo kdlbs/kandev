@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
 import { GitLabIntegrationPage } from "./gitlab-settings";
 
 const fetchGitLabStatusMock = vi.fn();
@@ -41,7 +43,11 @@ describe("GitLabIntegrationPage", () => {
       username: "",
     });
 
-    render(<GitLabIntegrationPage workspaceId="workspace-1" />);
+    render(
+      <QueryClientProvider client={makeQueryClient()}>
+        <GitLabIntegrationPage workspaceId="workspace-1" />
+      </QueryClientProvider>,
+    );
 
     const host = await screen.findByDisplayValue("https://gitlab.com");
     const card = host.closest('[data-slot="card"]');

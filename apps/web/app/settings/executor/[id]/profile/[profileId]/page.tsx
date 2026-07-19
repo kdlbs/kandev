@@ -18,7 +18,6 @@ import {
   DialogTitle,
 } from "@kandev/ui/dialog";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
-import { RequestIndicator } from "@/components/request-indicator";
 import { useToast } from "@/components/toast-provider";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
@@ -31,10 +30,7 @@ import {
   listScriptPlaceholders,
 } from "@/lib/api/domains/settings-api";
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
-import {
-  getSaveButtonLabel,
-  type SaveStatus,
-} from "@/components/settings/profile-edit/profile-edit-page-chrome";
+import type { SaveStatus } from "@/components/settings/profile-edit/profile-edit-page-chrome";
 import {
   SpritesConnectionCard,
   SpritesInstancesCard,

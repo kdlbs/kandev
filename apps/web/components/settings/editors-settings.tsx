@@ -501,10 +501,6 @@ function getEditorsSaveRevision(state: EditorsSettingsState): string {
   });
 }
 
-function useSyncEditors(editors: EditorOption[], setEditors: (editors: EditorOption[]) => void) {
-  useEffect(() => setEditors(editors), [editors, setEditors]);
-}
-
 export function EditorsSettings() {
   const state = useEditorsSettingsState();
   const {
@@ -550,7 +546,6 @@ export function EditorsSettings() {
     [availableEditors, state.defaultEditorId],
   );
 
-  useSyncEditors(editors, setEditors);
   return (
     <SettingsPageTemplate
       title="Editors"

@@ -283,15 +283,6 @@ test.beforeEach(async ({ apiClient, seedData }) => {
 
 export { expect } from "@playwright/test";
 
-function defaultTaskCreateLastUsed(seedData: SeedData) {
-  return {
-    repository_id: seedData.repositoryId,
-    branch: "main",
-    agent_profile_id: seedData.agentProfileId,
-    executor_profile_id: seedData.worktreeExecutorProfileId,
-  };
-}
-
 async function setupPage(page: Page, backend: BackendContext): Promise<void> {
   await page.addInitScript(
     ({ backendPort }: { backendPort: string }) => {

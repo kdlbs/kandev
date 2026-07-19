@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { IconBrandSentry, IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -132,13 +139,13 @@ function AddInstanceButton({ onAdd }: { onAdd: () => void }) {
   );
 }
 
-export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
-  const { instances, loading } = useInstanceList(workspaceId);
+function useSentryInstanceActions(
+  workspaceId: string,
+  setMode: Dispatch<SetStateAction<EditMode>>,
+  setFormDirty: Dispatch<SetStateAction<boolean>>,
+) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [mode, setMode] = useState<EditMode>({ kind: "none" });
-  const [formDirty, setFormDirty] = useState(false);
-
   const closeForm = useCallback(() => {
     setMode({ kind: "none" });
     setFormDirty(false);
@@ -187,6 +194,18 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
     [queryClient, workspaceId, toast],
   );
 
+  return { closeForm, handleSaved, handleDelete };
+}
+
+export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const { instances, loading } = useInstanceList(workspaceId);
+  const [mode, setMode] = useState<EditMode>({ kind: "none" });
+  const [formDirty, setFormDirty] = useState(false);
+  const { closeForm, handleSaved, handleDelete } = useSentryInstanceActions(
+    workspaceId,
+    setMode,
+    setFormDirty,
+  );
   const canAddInstance =
     mode.kind === "none" ||
     (mode.kind === "edit" && !instances.some((instance) => instance.id === mode.id));

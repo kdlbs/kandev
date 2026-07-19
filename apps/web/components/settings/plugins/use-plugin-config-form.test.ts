@@ -162,7 +162,7 @@ describe("usePluginConfigForm", () => {
 
   it("discards a dirty draft back to the loaded values", async () => {
     getPluginConfig.mockResolvedValue({ github_token: SECRET_MASK, org: "kdlbs" });
-    const { result } = renderHook(() => usePluginConfigForm(testPlugin()));
+    const { result } = renderPluginHook();
     await waitFor(() => expect(result.current.configLoading).toBe(false));
 
     act(() => result.current.handleChange("org", "changed"));

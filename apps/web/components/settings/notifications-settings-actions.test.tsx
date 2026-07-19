@@ -1,5 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/query/client";
 import type { NotificationProvider } from "@/lib/types/http";
 import {
   useIsDirty,
@@ -55,6 +58,14 @@ function useHarness() {
   return { state, saveRequest, actions, isDirty: useIsDirty(state) };
 }
 
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: makeQueryClient() }, children);
+}
+
+function renderHarness() {
+  return renderHook(useHarness, { wrapper });
+}
+
 const createdProvider: NotificationProvider = {
   ...savedProvider,
   id: "provider-2",
@@ -69,7 +80,7 @@ beforeEach(() => {
 
 describe("notification provider drafts", () => {
   it("stages a new Apprise provider until the shared save runs", async () => {
-    const { result } = renderHook(useHarness);
+    const { result } = renderHarness();
 
     act(() => result.current.actions.openAppriseForm("create"));
     expect(result.current.isDirty).toBe(true);
@@ -94,7 +105,7 @@ describe("notification provider drafts", () => {
 
   it("keeps a failed create draft open and dirty", async () => {
     mocks.createNotificationProvider.mockRejectedValueOnce(new Error("create unavailable"));
-    const { result } = renderHook(useHarness);
+    const { result } = renderHarness();
     act(() => {
       result.current.actions.openAppriseForm("create");
       result.current.state.setAppriseName("Pager");
@@ -112,7 +123,7 @@ describe("notification provider drafts", () => {
   });
 
   it("cancels a new draft without persisting it", () => {
-    const { result } = renderHook(useHarness);
+    const { result } = renderHarness();
     act(() => {
       result.current.actions.openAppriseForm("create");
       result.current.state.setAppriseUrls(PAGER_URL);
@@ -127,7 +138,7 @@ describe("notification provider drafts", () => {
   });
 
   it("discards staged provider edits back to the loaded baseline", () => {
-    const { result } = renderHook(useHarness);
+    const { result } = renderHarness();
     act(() => result.current.actions.handleAppriseNameEdit(savedProvider.id, "Changed"));
     expect(result.current.isDirty).toBe(true);
 

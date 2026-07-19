@@ -7,7 +7,6 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import { useExecutorsQuerySync } from "@/hooks/domains/settings/use-executors-query-sync";
 import {

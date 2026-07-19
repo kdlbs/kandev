@@ -160,15 +160,13 @@ describe("useWorkflowSettings cache updates", () => {
     expect(result.current.workflowItems[0].name).toEqual("Renamed B1");
   });
 
-  it("does not overwrite a dirty name when the store refreshes", () => {
+  it("does not overwrite a dirty name when the query cache refreshes", () => {
     const initial = [wf("wf-b1", "ws-b", NAME_B1)];
-    const { result, rerender } = renderHook(
-      ({ store }: { store: StoreWorkflow[] }) => {
-        setStore(store);
-        return useWorkflowSettings(initial, "ws-b");
-      },
-      { initialProps: { store: [STORE_B1] } },
-    );
+    const queryClient = createQueryClient();
+    setWorkflowCache(queryClient, [CACHE_B1]);
+    const { result, rerender } = renderHook(() => useWorkflowSettings(initial, "ws-b"), {
+      wrapper: wrapperFor(queryClient),
+    });
 
     act(() => {
       result.current.setWorkflowItems((items) =>
@@ -176,8 +174,9 @@ describe("useWorkflowSettings cache updates", () => {
       );
     });
     act(() => {
-      rerender({ store: [{ ...STORE_B1, name: "Remote name" }] });
+      setWorkflowCache(queryClient, [{ ...CACHE_B1, name: "Remote name" }]);
     });
+    rerender();
 
     expect(result.current.workflowItems[0].name).toBe("Unsaved local name");
     expect(result.current.savedWorkflowItems[0].name).toBe("Remote name");

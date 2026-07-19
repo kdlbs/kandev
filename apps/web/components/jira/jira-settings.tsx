@@ -469,13 +469,7 @@ function useJiraSettings(workspaceId: string) {
     }
   }, [configQuery.data, configQuery.isSuccess]);
 
-  useEffect(() => {
-    if (!configQuery.isError) return;
-    toast({
-      description: `Failed to load Jira config: ${String(configQuery.error)}`,
-      variant: "error",
-    });
-  }, [configQuery.error, configQuery.isError, toast]);
+  useJiraLoadError(configQuery.error, configQuery.isError);
 
   const update = useCallback(
     <K extends keyof FormState>(key: K, value: FormState[K]) =>
@@ -558,6 +552,14 @@ function useJiraSettings(workspaceId: string) {
     handleDelete,
     discard,
   };
+}
+
+function useJiraLoadError(error: unknown, isError: boolean) {
+  const { toast } = useToast();
+  useEffect(() => {
+    if (!isError) return;
+    toast({ description: `Failed to load Jira config: ${String(error)}`, variant: "error" });
+  }, [error, isError, toast]);
 }
 
 function normalizeComparableSiteUrl(value: string): string {

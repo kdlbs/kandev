@@ -38,38 +38,15 @@ import { listUtilityAgents, type UtilityAgent } from "@/lib/api/domains/utility-
 import { qk } from "@/lib/query/keys";
 import { slackConfigQueryOptions } from "@/lib/query/query-options/slack";
 import type { SlackConfig, TestSlackConnectionResult } from "@/lib/types/slack";
-
-const DEFAULT_PREFIX = "!kandev";
-const DEFAULT_POLL_INTERVAL_SECONDS = 30;
-const MIN_POLL_INTERVAL_SECONDS = 5;
-const MAX_POLL_INTERVAL_SECONDS = 600;
-
-type FormState = {
-  utilityAgentId: string;
-  commandPrefix: string;
-  pollIntervalSeconds: number;
-  token: string;
-  cookie: string;
-};
-
-const emptyForm: FormState = {
-  utilityAgentId: "",
-  commandPrefix: DEFAULT_PREFIX,
-  pollIntervalSeconds: DEFAULT_POLL_INTERVAL_SECONDS,
-  token: "",
-  cookie: "",
-};
-
-function configToForm(cfg: SlackConfig | null): FormState {
-  if (!cfg) return emptyForm;
-  return {
-    utilityAgentId: cfg.utilityAgentId,
-    commandPrefix: cfg.commandPrefix || DEFAULT_PREFIX,
-    pollIntervalSeconds: cfg.pollIntervalSeconds || DEFAULT_POLL_INTERVAL_SECONDS,
-    token: "",
-    cookie: "",
-  };
-}
+import {
+  DEFAULT_POLL_INTERVAL_SECONDS,
+  DEFAULT_PREFIX,
+  MAX_POLL_INTERVAL_SECONDS,
+  MIN_POLL_INTERVAL_SECONDS,
+  emptySlackSettingsForm,
+  slackConfigToForm,
+  type SlackSettingsFormState as FormState,
+} from "./slack-settings-form";
 
 function configToHealth(config: SlackConfig | null): IntegrationAuthHealth | null {
   if (!config?.hasToken || !config.hasCookie) return null;
@@ -453,7 +430,7 @@ function useSettingsActions({
       queryClient.setQueryData(qk.integrations.slack.config(workspaceId), saved);
       setConfig(saved);
       setForm((current) =>
-        JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
+        JSON.stringify(current) === JSON.stringify(submitted) ? slackConfigToForm(saved) : current,
       );
       setTestResult(null);
       toast({ description: "Slack configuration saved", variant: "success" });
@@ -472,7 +449,7 @@ function useSettingsActions({
       await deleteSlackConfig({ workspaceId });
       queryClient.setQueryData(qk.integrations.slack.config(workspaceId), null);
       setConfig(null);
-      setForm(emptyForm);
+      setForm(emptySlackSettingsForm);
       setTestResult(null);
       toast({ description: "Slack configuration removed", variant: "success" });
     } catch (err) {
@@ -489,7 +466,7 @@ function useSlackSettings(workspaceId: string) {
   const { toast } = useToast();
   const configQuery = useQuery(slackConfigQueryOptions(workspaceId));
   const [config, setConfig] = useState<SlackConfig | null>(null);
-  const [form, setForm] = useState<FormState>(emptyForm);
+  const [form, setForm] = useState<FormState>(emptySlackSettingsForm);
   const [testResult, setTestResult] = useState<TestSlackConnectionResult | null>(null);
   const formHydratedRef = useRef(false);
   const health = configToHealth(config);
@@ -500,7 +477,7 @@ function useSlackSettings(workspaceId: string) {
     const cfg = configQuery.data ?? null;
     setConfig(cfg);
     if (!formHydratedRef.current) {
-      setForm(configToForm(cfg));
+      setForm(slackConfigToForm(cfg));
       formHydratedRef.current = true;
     }
   }, [configQuery.data, configQuery.isSuccess]);
@@ -518,7 +495,7 @@ function useSlackSettings(workspaceId: string) {
       setForm((prev) => ({ ...prev, [key]: value })),
     [],
   );
-  const discard = useCallback(() => setForm(configToForm(config)), [config]);
+  const discard = useCallback(() => setForm(slackConfigToForm(config)), [config]);
 
   const { saving, testing, deleting, handleTest, handleSave, handleDelete } = useSettingsActions({
     workspaceId,
@@ -554,14 +531,14 @@ function EnabledPill() {
 
 export function SlackConnectionSection({ workspaceId }: { workspaceId: string }) {
   const s = useSlackSettings(workspaceId);
-  const baseline = configToForm(s.config);
+  const baseline = slackConfigToForm(s.config);
   const missingSecrets =
     (!s.config?.hasToken && !s.form.token) || (!s.config?.hasCookie && !s.form.cookie);
   const missingAgent = !s.form.utilityAgentId;
   const disableSave = s.saving || missingSecrets || missingAgent;
   const disableTest = missingSecrets;
   const revision = JSON.stringify(s.form);
-  const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
+  const dirty = !s.loading && revision !== JSON.stringify(slackConfigToForm(s.config));
   let invalidReason: string | undefined;
   if (missingSecrets) invalidReason = "A session token and cookie are required.";
   else if (missingAgent) invalidReason = "A triage agent is required.";

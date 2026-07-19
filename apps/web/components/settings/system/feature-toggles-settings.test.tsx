@@ -90,11 +90,7 @@ describe("FeatureTogglesSettings", () => {
     const persisted = flagState({ override_value: true, effective_value: true });
     updateRuntimeFlagMock.mockResolvedValueOnce({ flags: [persisted] });
 
-    render(
-      <TooltipProvider>
-        <FeatureTogglesSettings initialFlags={[initial]} restartCapability={null} />
-      </TooltipProvider>,
-    );
+    renderFeatureToggles({ initialFlags: [initial], restartCapability: null });
 
     fireEvent.click(screen.getByRole("button", { name: `Toggle ${DEBUG_MODE_LABEL}` }));
 

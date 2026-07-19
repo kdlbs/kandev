@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useAllCachedWorkflows, useCachedWorkflows } from "@/hooks/use-workflow-cache";
 import { useWorkflows } from "@/hooks/use-workflows";
 import { workflowId, workspaceId as toWorkspaceId, type Workflow } from "@/lib/types/http";
@@ -36,32 +36,7 @@ export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: 
   const savedWorkflowItemsRef = useRef(savedWorkflowItems);
   savedWorkflowItemsRef.current = savedWorkflowItems;
 
-  // Track all IDs we've ever seen from SSR props so we only add genuinely new ones
-  // (not re-add workflows the user deleted locally).
-  const seenInitialIdsRef = useRef<Set<string>>(new Set(visibleInitialWorkflows.map((w) => w.id)));
-
-  // Merge new workflows from SSR props (e.g. after router.refresh() following import).
-  // useState ignores updated initialWorkflows on re-render, so we sync manually.
-  useEffect(() => {
-    const seen = seenInitialIdsRef.current;
-    const newWorkflows = visibleInitialWorkflows.filter((w) => !seen.has(w.id));
-    if (newWorkflows.length === 0) return;
-
-    for (const w of newWorkflows) seen.add(w.id);
-
-    setWorkflowItems((prev) => {
-      const localIds = new Set(prev.map((w) => w.id));
-      const toAdd = newWorkflows.filter((w) => !localIds.has(w.id));
-      if (toAdd.length === 0) return prev;
-      return [...prev, ...toAdd];
-    });
-    setSavedWorkflowItems((prev) => {
-      const localIds = new Set(prev.map((w) => w.id));
-      const toAdd = newWorkflows.filter((w) => !localIds.has(w.id));
-      if (toAdd.length === 0) return prev;
-      return [...prev, ...toAdd];
-    });
-  }, [visibleInitialWorkflows]);
+  useSyncInitialWorkflows(visibleInitialWorkflows, setWorkflowItems, setSavedWorkflowItems);
 
   // Track which IDs the cache has previously reported so we only remove
   // workflows that were actually deleted, not ones the cache never knew about.
@@ -149,6 +124,29 @@ export function useWorkflowSettings(initialWorkflows: Workflow[], workspaceId?: 
     setSavedWorkflowItems,
     isWorkflowDirty,
   };
+}
+
+function useSyncInitialWorkflows(
+  visibleInitialWorkflows: Workflow[],
+  setWorkflowItems: Dispatch<SetStateAction<Workflow[]>>,
+  setSavedWorkflowItems: Dispatch<SetStateAction<Workflow[]>>,
+) {
+  const seenInitialIdsRef = useRef<Set<string>>(new Set(visibleInitialWorkflows.map((w) => w.id)));
+
+  useEffect(() => {
+    const seen = seenInitialIdsRef.current;
+    const newWorkflows = visibleInitialWorkflows.filter((w) => !seen.has(w.id));
+    if (newWorkflows.length === 0) return;
+    for (const workflow of newWorkflows) seen.add(workflow.id);
+
+    const appendNewWorkflows = (previous: Workflow[]) => {
+      const localIds = new Set(previous.map((workflow) => workflow.id));
+      const toAdd = newWorkflows.filter((workflow) => !localIds.has(workflow.id));
+      return toAdd.length === 0 ? previous : [...previous, ...toAdd];
+    };
+    setWorkflowItems(appendNewWorkflows);
+    setSavedWorkflowItems(appendNewWorkflows);
+  }, [setSavedWorkflowItems, setWorkflowItems, visibleInitialWorkflows]);
 }
 
 function workflowIsDirty(workflow: Workflow, savedWorkflows: Map<string, Workflow>): boolean {
