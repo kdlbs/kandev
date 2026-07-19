@@ -1322,6 +1322,12 @@ describe("query bridge audit", () => {
   it("patches session runtime query caches from runtime events", () => {
     const ws = new FakeWebSocketClient();
     const queryClient = makeQueryClient();
+    queryClient.setQueryData(qk.sessionRuntime.models("session-1"), {
+      currentModelId: "gpt-4",
+      models: [],
+      configOptions: [],
+      configBaseline: { effort: "medium" },
+    });
     queryClient.setQueryData(qk.taskSession.byId("session-1"), {
       id: "session-1",
       task_id: "task-1",
@@ -1449,6 +1455,7 @@ describe("query bridge audit", () => {
     expect(queryClient.getQueryData(qk.sessionRuntime.models("session-1"))).toMatchObject({
       currentModelId: "gpt-5",
       models: [{ modelId: "gpt-5", name: "GPT-5" }],
+      configBaseline: { effort: "medium" },
       configOptions: [
         {
           id: "effort",

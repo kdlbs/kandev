@@ -405,11 +405,14 @@ function patchSessionModels(
       category: option.category,
       options: option.options,
     })),
-    configBaseline: payload.config_baseline,
   };
   queryClient.setQueryData(qk.sessionRuntime.models(payload.session_id), (current: unknown) => {
-    previousModelId = isRecord(current) ? String(current.currentModelId ?? "") : "";
-    return next;
+    const currentData = isRecord(current) ? (current as Partial<SessionModelsQueryData>) : {};
+    previousModelId = String(currentData.currentModelId ?? "");
+    return {
+      ...next,
+      configBaseline: payload.config_baseline ?? currentData.configBaseline,
+    };
   });
   if (previousModelId && currentModelId && previousModelId !== currentModelId) {
     queryClient.setQueryData(qk.sessionRuntime.contextWindow(payload.session_id), null);
