@@ -57,6 +57,8 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 
 Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
 
+Stopping a turn does not itself run the next queued message. Expand the queue and select **Run next** when you want processing to continue.
+
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
 ## Let agents coordinate sessions

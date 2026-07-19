@@ -601,64 +601,41 @@ func TestCancelAgent_TaskStateReconcile(t *testing.T) {
 	}
 }
 
-// TestCancelAgent_DeliversQueuedMessageOnResume pins the corrected pause→resume
-// contract (#1597 pause→resume recovery): a message queued while the agent was
-// running is DELIVERED once cancel settles the session to WAITING_FOR_INPUT, not
-// stranded on the queue for indefinite manual drain.
-//
-// This replaces the former TestCancelAgent_LeavesQueuedMessageForManualDrain,
-// which codified the wedge as expected. On a normal cancel the agent's
-// complete(cancelled) event fires handleAgentReady → on_turn_complete → drain,
-// but on an escalated / dead-process cancel no agent.ready event ever fires, so
-// nothing drained the queue and the operator's queued message was lost until a
-// second manual send. Cancel now drains directly after reconciling the session.
-//
-// Proof of delivery is the queue emptying: drainQueuedMessageForPromptableSession
-// pops the message synchronously (TakeQueued) before dispatching it, so a
-// Count==0 immediately after CancelAgent returns is deterministic. The actual
-// PromptTask dispatch runs in a goroutine (state may already be RUNNING by the
-// time we re-read), mirroring TestHandleAgentBootReady_DrainsOrphanedQueuedMessage.
-func TestCancelAgent_DeliversQueuedMessageOnResume(t *testing.T) {
-	ctx := context.Background()
-	repo := setupTestRepo(t)
-	// repoForExecutionLookup + isAgentRunning let the executeQueuedMessage
-	// goroutine's PromptTask → ensureSessionRunning → GetExecutionBySession land
-	// on a working path instead of nil-derefing s.executor under -race.
-	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
-	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
-	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
-
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
-	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
-	if _, err := svc.messageQueue.QueueMessage(
-		ctx, "session1", "task1", "queued after cancel", "", messagequeue.QueuedByUser, false, nil,
-	); err != nil {
-		t.Fatalf("queue message: %v", err)
+// TestCancelAgent_LeavesQueuedMessageParked pins the user-cancel contract: a
+// forceful interruption stops the active turn without starting the next queued
+// message. Explicit draining remains available when processing should resume.
+func TestCancelAgent_LeavesQueuedMessageParked(t *testing.T) {
+	tests := []struct {
+		name      string
+		cancelErr error
+	}{
+		{name: "acknowledged"},
+		{name: "force escalated", cancelErr: lifecycle.ErrCancelEscalated},
+		{name: "execution missing", cancelErr: lifecycle.ErrNoExecutionForSession},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			agentMgr := &mockAgentManager{cancelAgentErr: tt.cancelErr}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
 
-	if err := svc.CancelAgent(ctx, "session1"); err != nil {
-		t.Fatalf("cancel agent: %v", err)
-	}
+			seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+			queued, err := svc.messageQueue.QueueMessage(
+				ctx, "session1", "task1", "queued after cancel", "", messagequeue.QueuedByUser, false, nil,
+			)
+			require.NoError(t, err)
+			require.NoError(t, svc.CancelAgent(ctx, "session1"))
 
-	// Cancel settles the session so a new prompt can land. The drain goroutine
-	// may already have moved it back to RUNNING; either state proves the wedge
-	// (stuck RUNNING with a full queue) is gone.
-	updated, err := repo.GetTaskSession(ctx, "session1")
-	if err != nil {
-		t.Fatalf("get updated session: %v", err)
-	}
-	if updated.State != models.TaskSessionStateWaitingForInput &&
-		updated.State != models.TaskSessionStateRunning {
-		t.Fatalf("expected session state WAITING_FOR_INPUT or RUNNING after cancel, got %q", updated.State)
-	}
-
-	status := svc.messageQueue.GetStatus(ctx, "session1")
-	if status.Count != 0 {
-		t.Fatalf("expected cancel to deliver the queued message on resume, count=%d entries=%+v", status.Count, status.Entries)
+			status := svc.messageQueue.GetStatus(ctx, "session1")
+			require.Equal(t, 1, status.Count)
+			require.Len(t, status.Entries, 1)
+			require.Equal(t, queued.ID, status.Entries[0].ID, "cancel must leave the same queued entry parked")
+		})
 	}
 }
 
-func TestCancelAgent_DrainsQueuedMessageAfterCancelGuardClears(t *testing.T) {
+func TestCancelAgent_QueuedMessageRunsAfterExplicitDrain(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	promptDone := make(chan struct{})
@@ -687,6 +664,13 @@ func TestCancelAgent_DrainsQueuedMessageAfterCancelGuardClears(t *testing.T) {
 	if err := svc.CancelAgent(ctx, "session1"); err != nil {
 		t.Fatalf("cancel agent: %v", err)
 	}
+	drained, err := svc.DrainQueuedMessage(ctx, "session1")
+	if err != nil {
+		t.Fatalf("drain queued message: %v", err)
+	}
+	if !drained {
+		t.Fatal("expected explicit drain to run the parked queued message")
+	}
 
 	select {
 	case <-promptDone:
@@ -696,7 +680,7 @@ func TestCancelAgent_DrainsQueuedMessageAfterCancelGuardClears(t *testing.T) {
 
 	status := svc.messageQueue.GetStatus(ctx, "session1")
 	if status.Count != 0 {
-		t.Fatalf("expected queued prompt to stay drained after cancel guard clears, count=%d entries=%+v", status.Count, status.Entries)
+		t.Fatalf("expected explicit drain to remove the queued prompt, count=%d entries=%+v", status.Count, status.Entries)
 	}
 }
 
@@ -704,11 +688,10 @@ func TestCancelAgent_DrainsQueuedMessageAfterCancelGuardClears(t *testing.T) {
 
 // TestQueueAndInterruptForPeerMessage_DeliversQueuedMessageWithoutUserCancelSideEffects
 // pins the parent -> child steering contract: QueueAndInterruptForPeerMessage
-// cancels the child's in-flight turn and drains its queue like CancelAgent
-// does, but — unlike the user-facing cancel button — it must not write a
-// visible "Turn cancelled" message and must not move the task to REVIEW
-// (writeTaskReviewStateOnCancel). Those are user-cancel-specific side effects
-// that would misrepresent an internal steering signal from the parent task.
+// cancels the child's in-flight turn and immediately dispatches its targeted
+// message. Unlike that explicit steering path, the user-facing cancel button
+// parks queued messages. Peer steering also must not write a visible "Turn
+// cancelled" message or move the task to REVIEW (writeTaskReviewStateOnCancel).
 func TestQueueAndInterruptForPeerMessage_DeliversQueuedMessageWithoutUserCancelSideEffects(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1859,18 +1842,14 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 	require.Equal(t, 0, status.Count, "accepted parent message must be removed from the queue exactly once")
 }
 
-// TestCancelAgent_RacesHandleAgentReady_QueuedMessageStillDelivered covers a
+// TestCancelAgent_RacesHandleAgentReady_QueuedMessageStaysParked covers a
 // real cross-goroutine race at the orchestrator level: a user's Cancel-button
 // click (Service.CancelAgent) racing the same agent's own asynchronous
 // ready/complete event (handleAgentReady) for the same session, with a
-// message already queued while the turn was running. CancelAgent's own doc
-// comment claims its synchronous drainQueuedMessageForPromptableSessionLocked
-// call — made while still holding the per-session cancelInFlight guard —
-// delivers the queued message even when no agent.ready fires; this pins that
-// the queued message is *actually* delivered exactly once even when a real
-// handleAgentReady call for this exact cancellation *does* arrive
-// concurrently, mid-cancel, rather than being stranded because neither side
-// ends up taking it.
+// message already queued while the turn was running. Once CancelAgent settles
+// the session to WAITING_FOR_INPUT, the racing ready event must treat its old
+// completion as stale and leave the queue parked rather than starting a new
+// turn immediately after the user stopped one.
 //
 // This does NOT reproduce the #1653 E2E CI regression (a same-goroutine
 // reentrant deadlock inside the real agent lifecycle manager's escalation
@@ -1879,13 +1858,12 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 // that never triggers a reentrant handleAgentReady call on this same
 // goroutine the way the real lifecycle.Manager's escalateStuckCancel does;
 // handleAgentReady here always runs on its own, genuinely separate goroutine.
-func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStillDelivered(t *testing.T) {
+func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStaysParked(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{
 		isAgentRunning:         true,
 		repoForExecutionLookup: repo,
-		promptDone:             make(chan struct{}, 4),
 		cancelAgentBlock:       make(chan struct{}),
 		cancelAgentEntered:     make(chan struct{}, 1),
 	}
@@ -1956,14 +1934,11 @@ func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStillDelivered(t *testin
 		t.Fatal("timed out waiting for handleAgentReady to finish once the guard was released")
 	}
 
-	require.Eventually(t, func() bool {
-		agentMgr.mu.Lock()
-		defer agentMgr.mu.Unlock()
-		return len(agentMgr.capturedPrompts) == 1
-	}, 2*time.Second, 10*time.Millisecond, "expected the queued message to be dispatched exactly once")
-
 	status := svc.messageQueue.GetStatus(ctx, "session1")
-	require.Equal(t, 0, status.Count, "the queued message must not be stranded when a concurrent agent.ready races the cancel button's own drain")
+	require.Equal(t, 1, status.Count, "the racing ready event must leave the queue parked after user cancel")
+	agentMgr.mu.Lock()
+	defer agentMgr.mu.Unlock()
+	require.Empty(t, agentMgr.capturedPrompts, "user cancel must not dispatch a queued prompt")
 }
 
 // TestAcquireCancelInFlightGuard_PrunesEntryWhenNoLongerReferenced pins the
@@ -1972,10 +1947,9 @@ func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStillDelivered(t *testin
 // probed — including read-only isCancelInFlight peeks and every busy-skip
 // in handleAgentReady/handleAgentBootReady — with no path to remove it.
 // acquireCancelInFlightGuard/releaseCancelInFlightGuard must keep the
-// registry bounded by concurrently-active sessions instead: every acquire
-// (successful lock, failed TryLock, or a passive isCancelInFlight peek)
-// must be paired with a release that prunes the entry once nobody
-// references it anymore.
+// registry bounded by concurrently-active sessions instead: every acquire,
+// including a passive isCancelInFlight peek, must be paired with a release
+// that prunes the entry once nobody references it anymore.
 func TestAcquireCancelInFlightGuard_PrunesEntryWhenNoLongerReferenced(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
@@ -1989,8 +1963,8 @@ func TestAcquireCancelInFlightGuard_PrunesEntryWhenNoLongerReferenced(t *testing
 		t.Fatalf("expected the registry to be pruned after a used-and-released claim, got %d entries", got)
 	}
 
-	// A losing TryLock — the busy-skip path every guard claim site takes —
-	// must still release its reference without ever calling Unlock.
+	// A losing TryLock, as used by the passive isCancelInFlight probe, must
+	// still release its reference without ever calling Unlock.
 	holderLock, holderRelease := svc.acquireCancelInFlightGuard("s2")
 	holderLock.Lock()
 	waiterLock, waiterRelease := svc.acquireCancelInFlightGuard("s2")

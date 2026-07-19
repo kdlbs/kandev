@@ -648,8 +648,8 @@ func TestHandleMessageTask_ParentToChildRunningSession_InterruptFailure_KeepsMes
 // (false, nil) — no error, but nothing actually dispatched by this call,
 // e.g. because a concurrent cancel already owned the session — must still
 // report "queued" (not "sent"). Reporting "sent" here would tell the parent
-// its message was delivered immediately when it is still only sitting in
-// the queue for the in-flight cancel to deliver later.
+// its message was delivered immediately when it is still parked for a later
+// explicit drain or another valid delivery trigger.
 func TestHandleMessageTask_ParentToChildRunningSession_InterruptSkipped_KeepsQueuedStatus(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	parent, child, sess := seedChildTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
