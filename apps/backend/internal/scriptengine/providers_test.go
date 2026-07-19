@@ -1,9 +1,25 @@
 package scriptengine
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 )
+
+// shellUnquote runs `printf %s <arg>` through /bin/sh so the test can prove that
+// a single-quoted, shell-escaped value parses back to the intended literal
+// without any command substitution firing.
+func shellUnquote(t *testing.T, arg string) string {
+	t.Helper()
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not available")
+	}
+	out, err := exec.Command("sh", "-c", "printf %s "+arg).CombinedOutput()
+	if err != nil {
+		t.Fatalf("sh failed for %q: %v\n%s", arg, err, out)
+	}
+	return string(out)
+}
 
 func TestAgentInstallProvider(t *testing.T) {
 	t.Run("empty scripts produce empty placeholder", func(t *testing.T) {
@@ -51,6 +67,70 @@ func TestRepositoryProvider_UsesRepositorySetupScriptKey(t *testing.T) {
 	if got := vars["repository.setup_script"]; got != "npm ci" {
 		t.Fatalf("repository.setup_script = %q, want %q", got, "npm ci")
 	}
+}
+
+// TestProviders_ShellEscapeDataPlaceholders is the scriptengine-level
+// regression guard for the branch-name command-injection RCE. Data
+// placeholders that land in shell text (branch/url/path) must be
+// shell-single-quoted so a hostile value like "$(touch pwned)" or "a;b" cannot
+// break out of the surrounding single quotes in the prepare-script templates.
+func TestProviders_ShellEscapeDataPlaceholders(t *testing.T) {
+	// A payload containing a single quote exercises the escape sequence: the
+	// only character shellSingleQuote transforms is `'` -> `'"'"'`.
+	const evil = `x'$(touch pwned)`
+	const wantEscaped = `x'"'"'$(touch pwned)` // ' closed, "'" literal quote, ' reopened
+
+	t.Run("WorktreeProvider escapes branch and paths", func(t *testing.T) {
+		vars := WorktreeProvider("/base", "/wt", "wt-id", evil, evil)()
+		for _, key := range []string{"worktree.branch", "worktree.base_branch"} {
+			if got := vars[key]; got != wantEscaped {
+				t.Errorf("%s = %q, want %q", key, got, wantEscaped)
+			}
+		}
+		// worktree.id is a kandev UUID, intentionally not escaped.
+		if got := vars["worktree.id"]; got != "wt-id" {
+			t.Errorf("worktree.id = %q, want unmodified", got)
+		}
+	})
+
+	t.Run("WorkspaceProvider escapes path", func(t *testing.T) {
+		if got := WorkspaceProvider(evil)()["workspace.path"]; got != wantEscaped {
+			t.Errorf("workspace.path = %q, want %q", got, wantEscaped)
+		}
+	})
+
+	t.Run("RepositoryProvider escapes branch and clone url", func(t *testing.T) {
+		vars := RepositoryProvider(map[string]any{
+			"base_branch":          evil,
+			"repository_clone_url": evil,
+			"repository_path":      "/tmp/repo",
+		}, nil, nil, nil)()
+		if got := vars["repository.branch"]; got != wantEscaped {
+			t.Errorf("repository.branch = %q, want %q", got, wantEscaped)
+		}
+		if got := vars["repository.clone_url"]; got != wantEscaped {
+			t.Errorf("repository.clone_url = %q, want %q", got, wantEscaped)
+		}
+	})
+
+	t.Run("repository.setup_script is NOT escaped (script fragment)", func(t *testing.T) {
+		fragment := "npm ci\necho 'hi'"
+		vars := RepositoryProvider(map[string]any{
+			"repository_setup_script": fragment,
+		}, nil, nil, nil)()
+		if got := vars["repository.setup_script"]; got != fragment {
+			t.Errorf("repository.setup_script = %q, want unmodified %q", got, fragment)
+		}
+	})
+
+	t.Run("wrapping escaped value in single quotes yields the literal", func(t *testing.T) {
+		// This is the invariant the templates rely on: '<escaped>' parses back
+		// to the original string with no command substitution.
+		wrapped := "'" + wantEscaped + "'"
+		if out := shellUnquote(t, wrapped); out != evil {
+			t.Errorf("'%s' evaluated to %q, want literal %q", wantEscaped, out, evil)
+		}
+	})
 }
 
 func TestGitHubAuthProvider(t *testing.T) {

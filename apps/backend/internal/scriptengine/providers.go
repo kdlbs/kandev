@@ -20,18 +20,24 @@ func RepositoryProvider(
 	return func() map[string]string {
 		vars := make(map[string]string)
 
+		// SECURITY: repository.path/name/branch/clone_url/ssh_url are DATA that
+		// land in shell text (git clone args, etc.). Shell-single-quote them so
+		// a hostile value (e.g. a fork PR branch named "$(...)") is a literal
+		// string, not executable shell. The templates wrap each in '...'.
 		repoPath := getMetaString(metadata, "repository_path")
 		if repoPath != "" {
-			vars["repository.path"] = repoPath
-			vars["repository.name"] = repoNameFromPath(repoPath)
+			vars["repository.path"] = shellSingleQuote(repoPath)
+			vars["repository.name"] = shellSingleQuote(repoNameFromPath(repoPath))
 		}
 
 		branch := getMetaString(metadata, "base_branch")
 		if branch == "" {
 			branch = getMetaString(metadata, "repository_branch")
 		}
-		vars["repository.branch"] = branch
+		vars["repository.branch"] = shellSingleQuote(branch)
 
+		// repository.setup_script is a script FRAGMENT (intentional multi-line
+		// shell), not data — do NOT escape it.
 		setupScript := getMetaString(metadata, "repository_setup_script")
 		vars["repository.setup_script"] = setupScript
 
@@ -39,12 +45,12 @@ func RepositoryProvider(
 		cloneURL := getMetaString(metadata, "repository_clone_url")
 		if cloneURL == "" && repoPath != "" && repoURLResolver != nil {
 			if remoteURL, err := repoURLResolver(repoPath); err == nil && remoteURL != "" {
-				vars["repository.ssh_url"] = remoteURL
+				vars["repository.ssh_url"] = shellSingleQuote(remoteURL)
 				cloneURL = remoteURL
 			}
 		}
 		if cloneURL != "" {
-			vars["repository.clone_url"] = injectToken(cloneURL, env, tokenInjector)
+			vars["repository.clone_url"] = shellSingleQuote(injectToken(cloneURL, env, tokenInjector))
 		}
 
 		return vars
@@ -67,23 +73,32 @@ func AgentctlProvider(agentctlPort int, workspacePath string) PlaceholderProvide
 }
 
 // WorkspaceProvider returns workspace path placeholder.
+//
+// SECURITY: workspace.path is DATA in shell text; shell-single-quote it so it
+// stays a literal even if it ever carries metacharacters. Templates wrap '...'.
 func WorkspaceProvider(workspacePath string) PlaceholderProvider {
 	return func() map[string]string {
 		return map[string]string{
-			"workspace.path": workspacePath,
+			"workspace.path": shellSingleQuote(workspacePath),
 		}
 	}
 }
 
 // WorktreeProvider returns placeholders that describe the selected worktree context.
+//
+// SECURITY: worktree paths and the (untrusted, possibly fork-PR-controlled)
+// branch names are DATA that land in shell text. Shell-single-quote them so a
+// hostile branch like "$(touch pwned)" cannot inject commands; the templates
+// wrap each value in '...'. worktree.id is a kandev-generated UUID (not shell
+// data), left as-is.
 func WorktreeProvider(basePath, path, id, branch, baseBranch string) PlaceholderProvider {
 	return func() map[string]string {
 		return map[string]string{
-			"worktree.base_path":   basePath,
-			"worktree.path":        path,
+			"worktree.base_path":   shellSingleQuote(basePath),
+			"worktree.path":        shellSingleQuote(path),
 			"worktree.id":          id,
-			"worktree.branch":      branch,
-			"worktree.base_branch": baseBranch,
+			"worktree.branch":      shellSingleQuote(branch),
+			"worktree.base_branch": shellSingleQuote(baseBranch),
 		}
 	}
 }

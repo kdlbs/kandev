@@ -14,15 +14,17 @@ import (
 // part of the default) still get the checkout.
 func TestKandevBranchCheckoutPostlude_HasInvariantSteps(t *testing.T) {
 	postlude := KandevBranchCheckoutPostlude()
+	// Data placeholders are single-quoted (security: double quotes still allow
+	// $(...) command substitution from a hostile branch name).
 	want := []string{
-		`if [ -d "{{workspace.path}}/.git" ]`,
-		`[ -n "{{worktree.branch}}" ]`,
-		`[ "{{worktree.branch}}" != "{{repository.branch}}" ]`,
-		`cd "{{workspace.path}}"`,
-		`git rev-parse --verify "{{worktree.branch}}"`,
-		`git fetch --depth=1 origin "{{worktree.branch}}"`,
-		`git checkout -b "{{worktree.branch}}" "origin/{{worktree.branch}}"`,
-		`git checkout -b "{{worktree.branch}}"`,
+		`if [ -d '{{workspace.path}}/.git' ]`,
+		`[ -n '{{worktree.branch}}' ]`,
+		`[ '{{worktree.branch}}' != '{{repository.branch}}' ]`,
+		`cd '{{workspace.path}}'`,
+		`git rev-parse --verify '{{worktree.branch}}'`,
+		`git fetch --depth=1 origin '{{worktree.branch}}'`,
+		`git checkout -b '{{worktree.branch}}' 'origin/{{worktree.branch}}'`,
+		`git checkout -b '{{worktree.branch}}'`,
 		`|| true`,
 	}
 	for _, w := range want {
@@ -30,10 +32,17 @@ func TestKandevBranchCheckoutPostlude_HasInvariantSteps(t *testing.T) {
 			t.Errorf("postlude missing %q", w)
 		}
 	}
+	// Data placeholders must never be double-quoted: double quotes do not stop
+	// $(...) / backtick command substitution, which is the RCE we fixed.
+	if strings.Contains(postlude, `"{{worktree.branch}}"`) ||
+		strings.Contains(postlude, `"{{repository.branch}}"`) ||
+		strings.Contains(postlude, `"{{workspace.path}}`) {
+		t.Errorf("postlude must single-quote data placeholders, not double-quote them:\n%s", postlude)
+	}
 	// The destructive `-B "branch" "origin/branch"` form orphaned local
 	// commits on resume — verify it does NOT come back.
 	forbidden := []string{
-		`git checkout -B "{{worktree.branch}}" "origin/{{worktree.branch}}"`,
+		`git checkout -B '{{worktree.branch}}' 'origin/{{worktree.branch}}'`,
 	}
 	for _, f := range forbidden {
 		if strings.Contains(postlude, f) {
@@ -183,8 +192,8 @@ func runIn(t *testing.T, dir string, cmd string, args ...string) []byte {
 func TestDefaultPrepareScripts_NoInlineFeatureBranchCheckout(t *testing.T) {
 	executors := []string{"local_docker", "remote_docker", "sprites"}
 	forbidden := []string{
-		`if [ -n "{{worktree.branch}}" ] && [ "{{worktree.branch}}" != "{{repository.branch}}" ]; then`,
-		`git checkout -B "{{worktree.branch}}" "origin/{{worktree.branch}}"`,
+		`if [ -n '{{worktree.branch}}' ] && [ '{{worktree.branch}}' != '{{repository.branch}}' ]; then`,
+		`git checkout -B '{{worktree.branch}}' 'origin/{{worktree.branch}}'`,
 	}
 
 	for _, executorType := range executors {
