@@ -1156,9 +1156,8 @@ func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromS
 // Callers must ensure the session is ready for input *before* calling this
 // — exactly as before this was guarded — but must not have already claimed
 // the guard themselves; use drainQueuedMessageForPromptableSessionLocked
-// instead when the guard is already held (e.g. inside CancelAgent,
-// cancelAndTakeForPeerMessage, handleAgentBootReady, handleAgentReady,
-// applyPendingMove).
+// instead when the guard is already held (e.g. inside
+// cancelAndTakeForPeerMessage, handleAgentReady, or applyPendingMove).
 //
 // Reloads the session and re-confirms promptability *after* acquiring the
 // guard rather than trusting the caller's own earlier check: callers like

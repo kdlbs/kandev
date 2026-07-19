@@ -17,8 +17,8 @@ import { SessionPage } from "../../pages/session-page";
 //   1. Pausing a running turn returns the SAME session to an input-ready state;
 //      a newly typed message resumes it with prior context intact — no wedged
 //      "still running" composer, no service restart.
-//   2. A message queued while the turn was running is DELIVERED once the pause
-//      settles the session, rather than being stranded on the queue.
+//   2. A message queued while the turn was running stays parked when the pause
+//      settles the session, then runs only after the operator explicitly asks.
 // ---------------------------------------------------------------------------
 
 /** Seed an ACP task, open its session, and wait for the initial turn to idle. */
@@ -99,7 +99,7 @@ test.describe("Pause → resume recovery", () => {
     ).toBeVisible({ timeout: 15_000 });
   });
 
-  test("a message queued during a running turn is delivered when the turn is paused", async ({
+  test("a message queued during a running turn stays parked when the turn is paused", async ({
     testPage,
     apiClient,
     seedData,
@@ -110,7 +110,7 @@ test.describe("Pause → resume recovery", () => {
       testPage,
       apiClient,
       seedData,
-      "Pause drains queued message",
+      "Pause parks queued message",
     );
 
     // Keep the agent busy, then queue a follow-up while it is running.
@@ -125,13 +125,18 @@ test.describe("Pause → resume recovery", () => {
     // The queued message is parked while the turn runs.
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
 
-    // Pause the running turn. Cancel must DELIVER the queued message rather than
-    // strand it: on an escalated / dead-process cancel no agent.ready fires, so
-    // CancelAgent drains the queue directly.
+    // Pause the running turn. Cancel must stop here rather than interpreting the
+    // queued follow-up as an instruction to begin another turn immediately.
     await session.cancelAgentButton().click();
 
-    // The queued message drains (chip clears) and its response arrives — proof
-    // the paused session accepted the queued input instead of losing it.
+    // Session is idle, but queued message remains visible until explicit resume.
+    await expect(session.agentStatus()).not.toBeVisible({ timeout: 30_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
+
+    // Explicit "Run next" resumes queue processing and delivers the parked input.
+    await testPage.getByTestId("queue-chip").click();
+    await testPage.getByTestId("queue-drain-next").click();
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 30_000 });
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
