@@ -40,6 +40,14 @@ test("records dense semantic pointer and target geometry", () => {
   assert.match(bundle, /visibility interval/i);
 });
 
+test("keeps the DOM overlay and real browser pointer in lockstep", () => {
+  assert.match(bundle, /DOM overlay and (?:the )?real browser pointer/i);
+  assert.match(bundle, /at every sample/i);
+  assert.match(bundle, /never animate it independently[\s\S]{0,260}move the browser pointer/i);
+  assert.match(bundle, /zero endpoint displacement/i);
+  assert.match(bundle, /normal playback speed/i);
+});
+
 test("keeps target and pointer glyph geometry distinct over the full movement", () => {
   assert.match(
     bundle,

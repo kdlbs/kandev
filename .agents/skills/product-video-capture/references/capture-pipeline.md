@@ -75,7 +75,9 @@ Use one capture-only overlay:
 - OS pointer disabled through `-draw_mouse 0`;
 - overlay hidden only after recording for a clean poster.
 
-Move real input and the overlay together. Keep the complete rendered glyph inside the raw viewport. Preserve the hotspot on the real target, using an edge-safe glyph orientation near the right or bottom edge instead of clipping it.
+Move real input and the overlay together through one eased, time-sampled trajectory. At every sample, update the DOM overlay and the real browser pointer before advancing to the next sample. If the overlay also listens to real `mousemove` events, never animate it independently with `requestAnimationFrame` and then move the browser pointer to the destination afterward: that late input event overrides the overlay and produces a visible endpoint teleport. Keep the complete rendered glyph inside the raw viewport. Preserve the hotspot on the real target, using an edge-safe glyph orientation near the right or bottom edge instead of clipping it.
+
+Exercise the travel helper in a focused contract test before RECORD. The test must prove that intermediate overlay and browser-pointer positions stay aligned, the final real-input update causes no residual overlay displacement, and click/hover begins only after both sources reach the same destination. Inspect the resulting motion at normal playback speed; metadata interpolation alone cannot prove that recorded pixels are smooth.
 
 Record dense semantic pointer/touch metadata for every intentional movement: previous settled point, motion start, 10-12 timed intermediate samples or an equally dense tested easing contract, arrival, next motion start, and visibility interval. Click-only timestamps cannot prove containment. Each event records target bounds, target glyph bounds, pointer/touch glyph bounds, hotspot, label, and coordinates in CSS pixels:
 
