@@ -14,7 +14,9 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
+import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
+import { StillWorkingWarning } from "./task-still-working-warning";
 
 type TaskDeleteConfirmDialogProps = {
   open: boolean;
@@ -59,6 +61,7 @@ export function TaskDeleteConfirmDialog({
 
   const [cascade, setCascade] = useState(false);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
+  const isInFlight = useTaskInFlight(taskId, taskIds);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setCascade(false);
@@ -81,6 +84,7 @@ export function TaskDeleteConfirmDialog({
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {isInFlight && <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />}
         {subtaskCount > 0 && (
           <label className="flex items-start gap-2 text-sm cursor-pointer">
             <Checkbox
