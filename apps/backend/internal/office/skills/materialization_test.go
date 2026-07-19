@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -123,8 +124,8 @@ func TestGitCloneArgs_HasEndOfOptionsSeparator(t *testing.T) {
 	repoDir := "/cache/git/deadbeef"
 	args := gitCloneArgs(locator, repoDir)
 
-	sep := indexOf(args, "--")
-	loc := indexOf(args, locator)
+	sep := slices.Index(args, "--")
+	loc := slices.Index(args, locator)
 	if sep == -1 {
 		t.Fatalf("expected -- separator in clone args, got %v", args)
 	}

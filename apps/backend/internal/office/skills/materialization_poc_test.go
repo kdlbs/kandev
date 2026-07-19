@@ -1,50 +1,47 @@
 package skills
 
 import (
+	"slices"
 	"testing"
 )
 
 // TestGitClone_MissingEndOfOptionsSeparator_PoC demonstrates the LOW-severity
-// defense-in-depth gap in materializeGit: it invokes
+// defense-in-depth gap that materializeGit used to have: it invoked
 //
 //	runGit("", "clone", "--depth=1", skill.SourceLocator, repoDir)
 //
 // with NO `--` end-of-options separator before the locator (the sibling
-// configloader/git.go correctly appends `"--", repoURL, wsPath`). Today this is
+// configloader/git.go correctly appends `"--", repoURL, wsPath`). It was
 // unreachable because validateGitLocator requires an https/ssh/git scheme or a
-// `git@host:` SCP prefix and rejects `..`, so a leading `-` can't get through.
-// But if that validator were ever relaxed, a locator like `--upload-pack=...`
-// would be handed to git as a FLAG rather than a positional URL.
+// `git@host:` SCP prefix and rejects `..`, so a leading `-` couldn't get
+// through. But if that validator were ever relaxed, a locator like
+// `--upload-pack=...` would be handed to git as a FLAG rather than a positional
+// URL.
 //
-// This test mirrors the exact argv materializeGit builds today and asserts the
-// missing separator; the fix inserts `--` (see gitCloneArgs regression test).
+// This test contrasts the old argv (no separator) with the fixed builder
+// (gitCloneArgs, which inserts `--`) so it genuinely FLIPS: the unsafe shape
+// lacks `--`, the fixed shape has it before the locator.
 func TestGitClone_MissingEndOfOptionsSeparator_PoC(t *testing.T) {
 	// A hostile locator that only matters if validateGitLocator were relaxed.
 	locator := "--upload-pack=touch /tmp/pwned;"
 	repoDir := "/cache/git/deadbeef"
 
-	// Exactly the args materializeGit passes to runGit today.
-	args := []string{"clone", "--depth=1", locator, repoDir}
-
-	sep := indexOf(args, "--")
-	loc := indexOf(args, locator)
-
-	if sep != -1 {
-		t.Fatalf("PoC expected NO end-of-options separator in current argv, found -- at %d", sep)
+	// The argv materializeGit used to pass to runGit — no `--` guard.
+	unsafe := []string{"clone", "--depth=1", locator, repoDir}
+	if slices.Index(unsafe, "--") != -1 {
+		t.Fatalf("PoC expected the pre-fix argv to omit the -- separator, got %v", unsafe)
 	}
-	if loc == -1 {
-		t.Fatalf("PoC could not find locator in argv %v", args)
+	// In the unsafe argv the locator sits in option position (right after
+	// --depth=1) with nothing telling git to stop parsing flags.
+	if got := slices.Index(unsafe, locator); got != 2 {
+		t.Fatalf("PoC expected locator in flag position (index 2), got %d in %v", got, unsafe)
 	}
-	// The locator sits in option position (right after --depth=1) with nothing
-	// telling git to stop parsing flags — so a `-`-prefixed locator is a flag.
-	t.Logf("PoC: locator %q at index %d is parsed as a git FLAG (no -- guard)", locator, loc)
-}
 
-func indexOf(ss []string, target string) int {
-	for i, s := range ss {
-		if s == target {
-			return i
-		}
+	// The fixed builder places `--` immediately before the locator.
+	fixed := gitCloneArgs(locator, repoDir)
+	sep := slices.Index(fixed, "--")
+	if sep == -1 || fixed[sep+1] != locator {
+		t.Fatalf("PoC expected fixed argv to guard the locator with --, got %v", fixed)
 	}
-	return -1
+	t.Logf("PoC: pre-fix argv %v parses %q as a git flag; fixed argv %v does not", unsafe, locator, fixed)
 }
