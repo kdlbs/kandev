@@ -22,7 +22,10 @@
 # Entries are added by PR as plugins are published (see the template below).
 # An empty list builds a valid, empty index.json; the marketplace shows an
 # "no plugins yet" state until the first entry lands.
-plugins: []
+plugins:
+  - id: kandev-session-cost
+    repo: kdlbs/kandev-plugin-session-cost
+    categories: [analytics]
 # Example entry (copy, uncomment, and fill in when adding a plugin):
 #
 # plugins:
