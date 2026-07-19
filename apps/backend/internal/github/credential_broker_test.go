@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -161,6 +162,25 @@ func TestCredentialBrokerSweepsExpiredLeasesWhenIssuing(t *testing.T) {
 
 	if got := len(broker.leases); got != 1 {
 		t.Fatalf("lease records = %d, want only the active lease", got)
+	}
+}
+
+func TestCredentialBrokerLimitsActiveLeasesPerWorkspace(t *testing.T) {
+	broker, _, _ := newPATCredentialBroker(t)
+	const maxExpectedLeases = 10_000
+	request := brokerLeaseRequest()
+	for i := range maxExpectedLeases {
+		request.TaskID = fmt.Sprintf("task-%d", i)
+		request.SessionID = fmt.Sprintf("session-%d", i)
+		if _, err := broker.Issue(context.Background(), request); err != nil {
+			t.Fatalf("Issue(%d): %v", i, err)
+		}
+	}
+
+	request.TaskID = "task-over-limit"
+	request.SessionID = "session-over-limit"
+	if _, err := broker.Issue(context.Background(), request); err == nil {
+		t.Fatal("Issue() succeeded after the workspace lease limit")
 	}
 }
 

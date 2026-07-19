@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -124,13 +125,11 @@ func (r *CredentialResolver) Resolve(ctx context.Context, req ResolveCredentialR
 	for {
 		epoch := r.epoch(req.WorkspaceID)
 		resolved, err := r.resolveAtEpoch(ctx, req, epoch)
-		if !r.epochCurrent(req.WorkspaceID, epoch) {
+		if !r.epochCurrent(req.WorkspaceID, epoch) || errors.Is(err, errCredentialResolutionInvalidated) {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return nil, ctxErr
 			}
-			continue
-		}
-		if errors.Is(err, errCredentialResolutionInvalidated) {
+			runtime.Gosched()
 			continue
 		}
 		return resolved, err

@@ -13,15 +13,17 @@ import (
 )
 
 const (
-	defaultCredentialLeaseTTL = 12 * time.Hour
-	credentialLeaseBytes      = 32
-	gitHubTokenUsername       = "x-access-token"
+	defaultCredentialLeaseTTL       = 12 * time.Hour
+	credentialLeaseBytes            = 32
+	maxCredentialLeasesPerWorkspace = 10_000
+	gitHubTokenUsername             = "x-access-token"
 )
 
 var (
 	ErrCredentialLeaseInvalid = errors.New("GitHub credential lease is invalid")
 	ErrCredentialLeaseExpired = errors.New("GitHub credential lease is expired")
 	ErrCredentialLeaseRevoked = errors.New("GitHub credential lease was revoked")
+	ErrCredentialLeaseLimit   = errors.New("GitHub credential lease limit reached")
 	ErrCredentialScopeDenied  = errors.New("GitHub credential scope denied")
 )
 
@@ -145,7 +147,12 @@ func (b *CredentialBroker) Issue(ctx context.Context, req CredentialLeaseRequest
 	expiresAt := now.UTC().Add(ttl)
 
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.sweepExpiredLocked(now)
+	if len(b.leases) >= maxCredentialLeasesPerWorkspace &&
+		b.workspaceLeaseCountLocked(req.WorkspaceID) >= maxCredentialLeasesPerWorkspace {
+		return nil, fmt.Errorf("%w for workspace %s", ErrCredentialLeaseLimit, req.WorkspaceID)
+	}
 	b.leases[hash] = credentialLeaseRecord{
 		WorkspaceID:          req.WorkspaceID,
 		TaskID:               req.TaskID,
@@ -158,7 +165,6 @@ func (b *CredentialBroker) Issue(ctx context.Context, req CredentialLeaseRequest
 		TTL:                  ttl,
 		ExpiresAt:            expiresAt,
 	}
-	b.mu.Unlock()
 	return &CredentialLease{Token: token, ExpiresAt: expiresAt}, nil
 }
 
@@ -280,6 +286,16 @@ func (b *CredentialBroker) sweepExpiredLocked(now time.Time) {
 			delete(b.leases, hash)
 		}
 	}
+}
+
+func (b *CredentialBroker) workspaceLeaseCountLocked(workspaceID string) int {
+	count := 0
+	for _, record := range b.leases {
+		if record.WorkspaceID == workspaceID {
+			count++
+		}
+	}
+	return count
 }
 
 func (b *CredentialBroker) RevokeTask(taskID string) {
