@@ -400,6 +400,7 @@ function patchSessionModels(
       type: option.type,
       id: option.id,
       name: option.name,
+      description: option.description,
       currentValue: option.current_value,
       category: option.category,
       options: option.options,

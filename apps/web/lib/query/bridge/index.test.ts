@@ -1396,7 +1396,16 @@ describe("query bridge audit", () => {
         agent_id: "agent-1",
         current_model_id: "gpt-5",
         models: [{ model_id: "gpt-5", name: "GPT-5", usage_multiplier: "1" }],
-        config_options: [],
+        config_options: [
+          {
+            type: "select",
+            id: "effort",
+            name: "Effort",
+            description: "Controls reasoning effort",
+            current_value: "medium",
+            options: [{ value: "medium", name: "Medium", description: "Balanced reasoning" }],
+          },
+        ],
         timestamp: "2026-06-23T00:00:02Z",
       },
     });
@@ -1440,6 +1449,13 @@ describe("query bridge audit", () => {
     expect(queryClient.getQueryData(qk.sessionRuntime.models("session-1"))).toMatchObject({
       currentModelId: "gpt-5",
       models: [{ modelId: "gpt-5", name: "GPT-5" }],
+      configOptions: [
+        {
+          id: "effort",
+          description: "Controls reasoning effort",
+          options: [{ value: "medium", description: "Balanced reasoning" }],
+        },
+      ],
     });
     expect(queryClient.getQueryData(qk.sessionRuntime.agentctl("session-1"))).toMatchObject({
       status: "ready",
