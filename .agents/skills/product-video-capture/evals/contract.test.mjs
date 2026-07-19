@@ -19,6 +19,10 @@ const routing = fs.readFileSync(
   path.resolve(skillDir, "..", "using-agent-skills", "SKILL.md"),
   "utf8",
 );
+const qaChecklist = fs.readFileSync(
+  path.join(skillDir, "references", "qa-checklist.md"),
+  "utf8",
+);
 
 test("defines exact source and delivery profiles", () => {
   assert.match(bundle, /3840x2400[^\n]{0,100}1920x1200/i);
@@ -117,6 +121,17 @@ test("rejects camera breathing and abrupt semantic travel", () => {
   assert.match(bundle, /semantic (?:camera )?(?:move|travel)[^\n]{0,100}(?:at least|minimum)[^\n]{0,30}1\.2 seconds/i);
   assert.match(bundle, /readable hold[^\n]{0,100}(?:0\.9[^\n]{0,20}1\.5 seconds|900[^\n]{0,20}1,?500 ?ms)/i);
   assert.match(bundle, /routine pan[^\n]{0,120}(?:median|p95)[^\n]{0,80}0\.11/i);
+});
+
+test("keeps the camera timing exceptions explicit in the QA checklist", () => {
+  assert.match(
+    qaChecklist,
+    /1\.2 seconds[^\n]{0,120}(?:except|exception)[^\n]{0,100}(?:already-settled|already settled)[^\n]{0,80}focus region/i,
+  );
+  assert.match(
+    qaChecklist,
+    /single pan peak[^\n]{0,100}(?:higher|exceed)[^\n]{0,100}declared long journey[^\n]{0,100}profile cap/i,
+  );
 });
 
 test("audits readability at the production landing theater size", () => {

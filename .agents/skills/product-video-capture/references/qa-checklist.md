@@ -52,7 +52,7 @@ Save machine-readable probe output per slug under staged `qa/codec/`. Container 
 - [ ] Camera stays center-biased toward the active pointer/target and never moves away from an active pointer journey.
 - [ ] One smooth establishing tighten reaches a stable working depth; no zoom breathing occurs while the semantic subject remains unchanged.
 - [ ] Long travel uses widen-pan-tighten: widen before departure, pan with motion, tighten after arrival.
-- [ ] Every semantic camera move lasts at least 1.2 seconds, readable holds last 0.9-1.5 seconds, and routine pan median/p95 stay at or below 0.11 source-widths per second.
+- [ ] Every semantic camera move lasts at least 1.2 seconds (exception: the pointer is already settled inside one focus region), readable holds last 0.9-1.5 seconds, and routine pan median/p95 stay at or below 0.11 source-widths per second; a single pan peak may be higher only for a declared long journey that still passes the tested profile cap.
 - [ ] Full menus, provider panels, sheets, dialogs, and diffs remain visible as framing priority.
 - [ ] Frame-by-frame containment includes the full cursor/touch glyph and edge-safe margin for every visibility interval; the cursor never leaves the frame.
 - [ ] Wide shots remain readable at actual display size.
