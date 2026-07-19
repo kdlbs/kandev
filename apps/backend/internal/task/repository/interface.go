@@ -63,6 +63,15 @@ type TaskRepository interface {
 	// which integrations exist.
 	CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
+	// UpdateTaskStateIfSessionState atomically transitions task state only while
+	// the named owning session remains in expectedSessionState and the task is
+	// not archived. Returns the pre-update task state and whether a row changed.
+	UpdateTaskStateIfSessionState(
+		ctx context.Context,
+		taskID, sessionID string,
+		expectedSessionState models.TaskSessionState,
+		state v1.TaskState,
+	) (v1.TaskState, bool, error)
 	// UpdateTaskStateIfCurrentIn atomically transitions state only when the
 	// task's current state is in allowed AND the task is not archived
 	// (archived_at IS NULL). The archived check is enforced inside the same

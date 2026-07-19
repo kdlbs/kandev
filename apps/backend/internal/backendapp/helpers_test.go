@@ -137,6 +137,7 @@ func TestMapUserSettingsStateKeys(t *testing.T) {
 		"lspAutoInstallLanguages",
 		"lspAutoStartLanguages",
 		"lspServerConfigs",
+		"mcpTaskAgentProfileDefault",
 		"preferredShell",
 		"releaseNotesLastSeenVersion",
 		"repositoryIds",

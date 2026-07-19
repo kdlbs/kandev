@@ -102,8 +102,15 @@ type mockTaskRepo struct {
 	// callers must route guarded REVIEW writes through the CAS method so an
 	// archive can't race a late write; tests assert this stays 0 for those
 	// paths instead of just checking the resulting state.
-	unconditionalWrites map[string]int
-	getTaskErr          error // if set, GetTask returns this error
+	unconditionalWrites  map[string]int
+	getTaskErr           error // if set, GetTask returns this error
+	updateIfSessionState func(
+		context.Context,
+		string,
+		string,
+		models.TaskSessionState,
+		v1.TaskState,
+	) (bool, error)
 }
 
 func newMockTaskRepo() *mockTaskRepo {
@@ -191,6 +198,18 @@ func (m *mockTaskRepo) UpdateTaskStateIfNotArchived(
 	return true, nil
 }
 
+func (m *mockTaskRepo) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	if m.updateIfSessionState != nil {
+		return m.updateIfSessionState(ctx, taskID, sessionID, expectedSessionState, state)
+	}
+	return m.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+}
+
 // mockAgentManager is a minimal mock of executor.AgentManagerClient for testing.
 type mockAgentManager struct {
 	isPassthrough  bool
@@ -275,6 +294,7 @@ type mockAgentManager struct {
 	// returned to simulate "no running agent".
 	setSessionModeCalls      []sessionModeCall
 	setSessionModeErr        error
+	mcpModeCalls             []sessionModeCall
 	setSessionModelCalls     []sessionModelCall
 	setSessionModelSupported bool
 	setSessionModelErr       error
@@ -448,7 +468,11 @@ func (m *mockAgentManager) SetSessionModeBySessionID(_ context.Context, sessionI
 	m.setSessionModeCalls = append(m.setSessionModeCalls, sessionModeCall{SessionID: sessionID, ModeID: modeID})
 	return m.setSessionModeErr
 }
-func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {
+
+func (m *mockAgentManager) SetMcpMode(_ context.Context, executionID, mode string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mcpModeCalls = append(m.mcpModeCalls, sessionModeCall{SessionID: executionID, ModeID: mode})
 	return nil
 }
 func (m *mockAgentManager) WasSessionInitialized(_ string) bool { return false }
@@ -1463,6 +1487,56 @@ func TestHandleAgentCompleted_CleansUpExecution(t *testing.T) {
 	}
 }
 
+func TestHandleAgentCompleted_LegacyAutoStartDoesNotReenterCancellationGuard(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-legacy-auto-start", "session-legacy-auto-start", "step-1")
+	seedExecutorRunning(t, repo, "session-legacy-auto-start", "task-legacy-auto-start", "execution-legacy-auto-start")
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-1"] = &wfmodels.WorkflowStep{
+		ID: "step-1", WorkflowID: "wf1", Name: "Work", Position: 0,
+		Events: wfmodels.StepEvents{OnTurnComplete: []wfmodels.OnTurnCompleteAction{{
+			Type: wfmodels.OnTurnCompleteMoveToNext,
+		}}},
+	}
+	stepGetter.steps["step-2"] = &wfmodels.WorkflowStep{
+		ID: "step-2", WorkflowID: "wf1", Name: "Continue", Position: 1,
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{
+			Type: wfmodels.OnEnterAutoStartAgent,
+		}}},
+	}
+	manager := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             make(chan struct{}),
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-legacy-auto-start", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, manager)
+	// Explicitly pin the legacy path whose on_enter used to run inline and
+	// deadlock by re-entering the completion handler's session guard.
+	svc.workflowEngine = nil
+
+	done := make(chan struct{})
+	go func() {
+		svc.handleAgentCompleted(ctx, watcher.AgentEventData{
+			TaskID:           "task-legacy-auto-start",
+			SessionID:        "session-legacy-auto-start",
+			AgentExecutionID: "execution-legacy-auto-start",
+		})
+		close(done)
+	}()
+	coordinatorStopAwaitSignal(t, done, "legacy completion handler")
+	select {
+	case <-manager.promptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("legacy on_enter auto-start did not acquire the released session guard")
+	}
+	task, err := repo.GetTask(ctx, "task-legacy-auto-start")
+	require.NoError(t, err)
+	require.Equal(t, "step-2", task.WorkflowStepID)
+}
+
 func TestHandleAgentCompleted_MarksRotatedExecutionCompleted(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1825,6 +1899,49 @@ func TestHandleAgentRunning_PassthroughGuard(t *testing.T) {
 
 		// Should not panic or error with empty session ID.
 		svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: ""})
+	})
+
+	t.Run("coordinator cancellation wins while passthrough event waits", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		stepGetter := newMockStepGetter()
+		stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+			ID: "step1", WorkflowID: "wf1", Name: "Step 1", Position: 0,
+			Events: wfmodels.StepEvents{OnTurnStart: []wfmodels.OnTurnStartAction{{
+				Type: wfmodels.OnTurnStartMoveToNext,
+			}}},
+		}
+		stepGetter.steps["step2"] = &wfmodels.WorkflowStep{
+			ID: "step2", WorkflowID: "wf1", Name: "Step 2", Position: 1,
+		}
+		svc := createTestServiceWithAgent(
+			repo,
+			stepGetter,
+			newMockTaskRepo(),
+			&mockAgentManager{isPassthrough: true},
+		)
+
+		guard, release := svc.acquireCancelInFlightGuard("s1")
+		guard.Lock()
+		done := make(chan struct{})
+		go func() {
+			svc.handleAgentRunning(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+			close(done)
+		}()
+		coordinatorStopWaitForGuardRefs(t, svc, "s1", 2)
+		changed, _, err := repo.CancelActiveTaskSession(ctx, "s1", coordinatorMCPStopReason)
+		require.NoError(t, err)
+		require.True(t, changed)
+		guard.Unlock()
+		release()
+		coordinatorStopAwaitSignal(t, done, "guarded passthrough running event")
+
+		session, err := repo.GetTaskSession(ctx, "s1")
+		require.NoError(t, err)
+		require.Equal(t, models.TaskSessionStateCancelled, session.State)
+		task, err := repo.GetTask(ctx, "t1")
+		require.NoError(t, err)
+		require.Equal(t, "step1", task.WorkflowStepID)
 	})
 }
 
@@ -2247,6 +2364,68 @@ func TestHandleAgentStartFailed(t *testing.T) {
 		if !handled {
 			t.Error("expected handled=true for auth errors")
 		}
+	})
+
+	t.Run("session read failure leaves strict executor cleanup in charge", func(t *testing.T) {
+		baseRepo := setupTestRepo(t)
+		seedSession(t, baseRepo, "t1", "s1", "step1")
+		repo := &coordinatorStopRepoHooks{
+			repoStore: baseRepo,
+			getSessionFunc: func(context.Context, string) (*models.TaskSession, error) {
+				return nil, errors.New("temporary session read failure")
+			},
+		}
+		svc := createTestService(baseRepo, newMockStepGetter(), newMockTaskRepo())
+		svc.repo = repo
+
+		handled := svc.handleAgentStartFailed(
+			ctx,
+			"t1",
+			"s1",
+			"exec-1",
+			errors.New("ACP initialize handshake failed"),
+			false,
+		)
+
+		if handled {
+			t.Error("expected handled=false so executor transition and forced cleanup still run")
+		}
+	})
+
+	t.Run("cancelled session enqueues exact cleanup arbitration", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.UpdateTaskSessionState(
+			ctx,
+			"s1",
+			models.TaskSessionStateCancelled,
+			"cancelled outside coordinator stop",
+		))
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(
+			repo,
+			newMockStepGetter(),
+			newMockTaskRepo(),
+			agentMgr,
+		)
+
+		handled := svc.handleAgentStartFailed(
+			ctx,
+			"t1",
+			"s1",
+			"exec-unclaimed",
+			errors.New("ACP initialize handshake failed"),
+			false,
+		)
+
+		require.False(t, handled)
+		waitForStopCall(t, agentMgr)
+		agentMgr.mu.Lock()
+		calls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		require.Len(t, calls, 1)
+		require.Equal(t, "exec-unclaimed", calls[0].ExecutionID)
+		require.True(t, calls[0].Force)
 	})
 }
 

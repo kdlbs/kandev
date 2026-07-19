@@ -1,6 +1,8 @@
 import type { WorkspaceId } from "./ids";
 import type { VoiceModeSettings } from "./http-voice";
 
+export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
+
 export type SavedLayout = {
   id: string;
   name: string;
@@ -53,6 +55,7 @@ export type UserSettings = {
   chat_submit_key?: "enter" | "cmd_enter";
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
+  mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
   lsp_auto_start_languages?: string[];
@@ -99,6 +102,7 @@ export type UserSettingsUpdatePayload = {
   chat_submit_key?: "enter" | "cmd_enter";
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
+  mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
   lsp_auto_start_languages?: string[];

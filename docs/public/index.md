@@ -15,6 +15,7 @@ Start with the page that matches the job in front of you:
 - [Tasks and workflows](tasks-and-workflows.md): create tasks, use plans, configure workflow steps, and understand the Office-only document and label boundary.
 - [Sessions and review](sessions-and-review.md): work with named sessions, chat, files, terminal, changes, preview, pull requests, and walkthroughs.
 - [Coordinate work](coordination.md): use parallel sessions, targeted messages, subtasks, dependencies, multiple repositories, and additional branches.
+- [Agent communication](agent-communication.md): send cross-task prompts, receive replies, and negotiate contracts with built-in Kandev MCP tools.
 - [Agents and profiles](agents-and-profiles.md): configure agent CLIs, models, modes, permissions, environment, passthrough, and credentials.
 - [Executors](executors.md): choose local, worktree, Docker, SSH, or Sprites execution and understand the isolation boundary.
 - [Integrations](integrations.md): configure GitHub, GitLab, Jira, Linear, Sentry, and Slack for a workspace.

@@ -65,6 +65,129 @@ func seedTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessi
 	}
 }
 
+func newCoordinatorStopTestService(
+	repo repoStore,
+	taskRepo scheduler.TaskRepository,
+	agentManager executor.AgentManagerClient,
+) *Service {
+	log := testLogger()
+	exec := executor.NewExecutor(agentManager, repo, log, executor.ExecutorConfig{})
+	svc := &Service{
+		logger:       log,
+		repo:         repo,
+		taskRepo:     taskRepo,
+		agentManager: agentManager,
+		executor:     exec,
+		messageQueue: messagequeue.NewServiceMemory(log),
+	}
+	exec.SetOnSessionStateTransition(svc.transitionTaskSessionState)
+	exec.SetOnExecutionCleanupClaim(svc.claimForcedExecutionCleanup)
+	exec.SetOnExecutionStopOwnerRegistration(svc.RegisterExecutionStopOwner)
+	return svc
+}
+
+func TestStopTaskForCoordinator_StopsAndIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	seedExecutorRunning(t, repo, "session1", "task1", "execution1")
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+	agentManager := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := newCoordinatorStopTestService(repo, taskRepo, agentManager)
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "session1", "task1", "preserve me", "", messagequeue.QueuedByAgent, false, nil,
+	); err != nil {
+		t.Fatalf("queue message: %v", err)
+	}
+
+	result, err := svc.StopTaskForCoordinator(ctx, "task1")
+
+	if err != nil {
+		t.Fatalf("StopTaskForCoordinator: %v", err)
+	}
+	if result.Status != CoordinatorTaskStopStatusStopped {
+		t.Fatalf("status = %q, want %q", result.Status, CoordinatorTaskStopStatusStopped)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get stopped session: %v", err)
+	}
+	if session.State != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %q, want CANCELLED", session.State)
+	}
+	if got := taskRepo.updatedStates["task1"]; got != v1.TaskStateReview {
+		t.Fatalf("task state = %q, want REVIEW", got)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "session1").Count; got != 1 {
+		t.Fatalf("queued message count = %d, want 1", got)
+	}
+	waitForStopCall(t, agentManager)
+	agentManager.mu.Lock()
+	stopCall := agentManager.stopAgentWithReasonArgs[0]
+	agentManager.mu.Unlock()
+	if stopCall.ExecutionID != "execution1" || stopCall.Reason != coordinatorMCPStopReason || stopCall.Force {
+		t.Fatalf("stop call = %#v", stopCall)
+	}
+
+	repeat, err := svc.StopTaskForCoordinator(ctx, "task1")
+	if err != nil {
+		t.Fatalf("repeat StopTaskForCoordinator: %v", err)
+	}
+	if repeat.Status != CoordinatorTaskStopStatusNotRunning {
+		t.Fatalf("repeat status = %q, want %q", repeat.Status, CoordinatorTaskStopStatusNotRunning)
+	}
+}
+
+func TestStopTaskForCoordinator_AggregatesAbsentAndFailure(t *testing.T) {
+	lookupFailure := errors.New("lifecycle store unavailable")
+	tests := []struct {
+		name       string
+		lookupErr  error
+		wantStatus CoordinatorTaskStopStatus
+		wantErr    error
+	}{
+		{
+			name:       "all absent is not running",
+			lookupErr:  fmt.Errorf("wrapped: %w", lifecycle.ErrNoExecutionForSession),
+			wantStatus: CoordinatorTaskStopStatusNotRunning,
+		},
+		{
+			name:      "genuine lookup failure is returned",
+			lookupErr: lookupFailure,
+			wantErr:   lookupFailure,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+			taskRepo := newMockTaskRepo()
+			seedMockTaskState(taskRepo, "task1", v1.TaskStateInProgress)
+			agentManager := &mockAgentManager{
+				getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+					return "", tt.lookupErr
+				},
+			}
+			svc := newCoordinatorStopTestService(repo, taskRepo, agentManager)
+
+			result, err := svc.StopTaskForCoordinator(ctx, "task1")
+
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if result.Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", result.Status, tt.wantStatus)
+			}
+			if _, changed := taskRepo.updatedStates["task1"]; changed {
+				t.Fatal("task state changed without an accepted clean stop")
+			}
+		})
+	}
+}
+
 // --- PromptTask ---
 
 func TestPromptTask_EmptySessionID(t *testing.T) {
@@ -2199,11 +2322,19 @@ func TestStartCreatedSession_OfficeTaskSkipsSchedulingState(t *testing.T) {
 	stepGetter := newMockStepGetter()
 	stepGetter.steps["step-office"] = &wfmodels.WorkflowStep{ID: "step-office", WorkflowID: "wf1"}
 	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
-	svc.messageCreator = &mockMessageCreator{}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
 
-	if _, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Do the work", true, false, true, nil); err != nil {
+	if _, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Do the work", false, false, true, nil); err != nil {
 		t.Fatalf("StartCreatedSession: %v", err)
 	}
+	require.Len(t, messages.userMessages, 1)
+	assert.NotContains(t, messages.userMessages[0].content, "stop_task_kandev",
+		"Office first-turn context must not advertise a task-mode-only tool")
+	agentMgr.mu.Lock()
+	mcpModeCalls := append([]sessionModeCall(nil), agentMgr.mcpModeCalls...)
+	agentMgr.mu.Unlock()
+	require.Equal(t, []sessionModeCall{{SessionID: "exec-1", ModeID: executor.McpModeOffice}}, mcpModeCalls)
 
 	if writes := taskRepo.stateWrites["task1"]; writes != 0 {
 		t.Fatalf("office task should not write SCHEDULING, got %d state writes", writes)
@@ -2211,6 +2342,29 @@ func TestStartCreatedSession_OfficeTaskSkipsSchedulingState(t *testing.T) {
 	if got := taskRepo.tasks["task1"].State; got != v1.TaskStateReview {
 		t.Fatalf("office task state = %s, want REVIEW", got)
 	}
+}
+
+func TestStartCreatedSession_ConfigModeOmitsCoordinatorTaskControls(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	require.NoError(t, repo.UpdateSessionMetadata(ctx, "session1", map[string]interface{}{"config_mode": true}))
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Config chat", State: v1.TaskStateInProgress}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "Configure Kandev", false, false, false, nil)
+	require.NoError(t, err)
+	require.Len(t, messages.userMessages, 1)
+	assert.Contains(t, messages.userMessages[0].content, "KANDEV CONFIG MCP TOOLS")
+	assert.NotContains(t, messages.userMessages[0].content, "stop_task_kandev",
+		"Config first-turn context must not advertise a task-mode-only tool")
 }
 
 // --- recordInitialMessage ---
@@ -2889,6 +3043,18 @@ func (c *ctxAwareTaskRepo) UpdateTaskStateIfNotArchived(
 		return false, err
 	}
 	return c.inner.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+}
+
+func (c *ctxAwareTaskRepo) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return c.inner.UpdateTaskStateIfSessionState(ctx, taskID, sessionID, expectedSessionState, state)
 }
 
 // TestResumeTaskSession_FailedStateWriteSurvivesCancelledCallerCtx verifies the
@@ -3721,12 +3887,21 @@ func TestReconcileSessionsOnStartup(t *testing.T) {
 
 // --- ensureSessionRunning: prepared workspace ---
 
-func TestEnsureSessionRunning_PreparedWorkspace(t *testing.T) {
+func TestEnsureSessionRunning_PreparedOfficeWorkspaceSetsMCPMode(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 
 	// Seed task and session in CREATED state (workspace prepared, agent not started)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	dbTask, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("failed to load task: %v", err)
+	}
+	dbTask.WorkflowStepID = "step-office"
+	dbTask.AssigneeAgentProfileID = "office-agent"
+	if err := repo.UpdateTask(ctx, dbTask); err != nil {
+		t.Fatalf("failed to mark task as Office-owned: %v", err)
+	}
 
 	// Set AgentExecutionID to simulate a prepared workspace
 	session, err := repo.GetTaskSession(ctx, "session1")
@@ -3790,6 +3965,10 @@ func TestEnsureSessionRunning_PreparedWorkspace(t *testing.T) {
 	if !startAgentProcessCalled {
 		t.Fatal("expected StartAgentProcess to be called (prepared workspace path)")
 	}
+	wrappedMgr.mu.Lock()
+	mcpModeCalls := append([]sessionModeCall(nil), wrappedMgr.mcpModeCalls...)
+	wrappedMgr.mu.Unlock()
+	require.Equal(t, []sessionModeCall{{SessionID: "exec-prepare-1", ModeID: executor.McpModeOffice}}, mcpModeCalls)
 
 	// Verify the session transitioned through STARTING
 	updated, err := repo.GetTaskSession(ctx, "session1")

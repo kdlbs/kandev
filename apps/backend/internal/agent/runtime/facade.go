@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -53,7 +54,11 @@ func (f *facade) Stop(ctx context.Context, executionID string, reason string) er
 	if executionID == "" {
 		return fmt.Errorf("runtime: executionID is required")
 	}
-	return f.backend.StopAgentWithReason(ctx, executionID, reason, false)
+	err := f.backend.StopAgentWithReason(ctx, executionID, reason, false)
+	if errors.Is(err, lifecycle.ErrExecutionNotFound) {
+		return errors.Join(ErrNotFound, err)
+	}
+	return err
 }
 
 // GetExecution returns a snapshot view of an execution.

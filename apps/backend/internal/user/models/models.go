@@ -5,6 +5,18 @@ import (
 	"time"
 )
 
+const (
+	MCPTaskAgentProfileDefaultCurrentTask      = "current_task"
+	MCPTaskAgentProfileDefaultWorkspaceDefault = "workspace_default"
+)
+
+func NormalizeMCPTaskAgentProfileDefault(value string) string {
+	if value == MCPTaskAgentProfileDefaultWorkspaceDefault {
+		return value
+	}
+	return MCPTaskAgentProfileDefaultCurrentTask
+}
+
 type User struct {
 	ID        string    `json:"id"`
 	Email     string    `json:"email"`
@@ -27,6 +39,7 @@ type UserSettings struct {
 	ChatSubmitKey               string                            `json:"chat_submit_key"` // "enter" | "cmd_enter"
 	ReviewAutoMarkOnScroll      bool                              `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive          bool                              `json:"confirm_task_archive"`
+	MCPTaskAgentProfileDefault  string                            `json:"mcp_task_agent_profile_default"`
 	ShowReleaseNotification     bool                              `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion string                            `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages       []string                          `json:"lsp_auto_start_languages"`

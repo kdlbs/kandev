@@ -105,6 +105,65 @@ func TestSyspromptToolNames_MatchMCPTaskMode(t *testing.T) {
 	}
 }
 
+// TestTaskControlDocs_MatchMessageSchemaAndStopChoice keeps the short injected
+// context aligned with the task-control choices exposed by task-mode MCP. The
+// full tool descriptions remain authoritative for lifecycle detail, but the
+// first-turn context must make the queue/interrupt/stop decision discoverable.
+func TestTaskControlDocs_MatchMessageSchemaAndStopChoice(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	require.NotNil(t, s)
+	tools := s.mcpServer.ListTools()
+	messageTool, ok := tools["message_task_kandev"]
+	require.True(t, ok)
+	assert.Contains(t, tools, "stop_task_kandev")
+
+	schema, err := json.Marshal(messageTool.Tool.InputSchema)
+	require.NoError(t, err)
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+	properties, ok := parsed["properties"].(map[string]interface{})
+	require.True(t, ok)
+	deliveryMode, ok := properties["delivery_mode"].(map[string]interface{})
+	require.True(t, ok, "message_task_kandev must expose delivery_mode")
+	enumValues, ok := deliveryMode["enum"].([]interface{})
+	require.True(t, ok)
+	defaultValue, ok := deliveryMode["default"].(string)
+	require.True(t, ok)
+
+	context := sysprompt.KandevContext()
+	assert.Contains(t, context, "delivery_mode")
+	for _, rawValue := range enumValues {
+		value, ok := rawValue.(string)
+		require.True(t, ok)
+		assert.Contains(t, context, fmt.Sprintf(`delivery_mode="%s"`, value))
+	}
+	assert.Contains(t, context, fmt.Sprintf(`delivery_mode="%s" or omit it`, defaultValue))
+	assert.Contains(t, context, "direct parent")
+	assert.Contains(t, context, "stop_task_kandev")
+	assert.Contains(t, context, "halt-only")
+	assert.Contains(t, context, "no replacement turn")
+}
+
+func TestTaskControlDocs_OmittedFromRestrictedModes(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	context := sysprompt.FormatKandevContextWithOptions("task", "session", sysprompt.KandevContextOptions{})
+	for _, mode := range []string{ModeOffice, ModeConfig} {
+		t.Run(mode, func(t *testing.T) {
+			s := New(backend, "session", "task", 10005, log, "", false, mode)
+			assert.NotContains(t, s.mcpServer.ListTools(), "stop_task_kandev")
+			assert.NotContains(t, context, "stop_task_kandev")
+			assert.NotContains(t, context, "delivery_mode")
+		})
+	}
+}
+
 // TestSyspromptToolNames_MatchMCPConfigMode verifies that every `<name>_kandev`
 // tool referenced in ConfigContext is registered by an MCP server in ModeConfig.
 func TestSyspromptToolNames_MatchMCPConfigMode(t *testing.T) {

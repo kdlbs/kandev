@@ -4,8 +4,92 @@ import (
 	"context"
 	"testing"
 
+	editormodels "github.com/kandev/kandev/internal/editors/models"
+	editorstore "github.com/kandev/kandev/internal/editors/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 )
+
+type openEditorRepository struct {
+	editorstore.Repository
+	editor *editormodels.Editor
+}
+
+func (r *openEditorRepository) GetEditorByID(_ context.Context, editorID string) (*editormodels.Editor, error) {
+	if r.editor != nil && r.editor.ID == editorID {
+		return r.editor, nil
+	}
+	return nil, nil
+}
+
+type openEditorTaskRepository struct {
+	session *taskmodels.TaskSession
+}
+
+func (r *openEditorTaskRepository) GetTaskSession(_ context.Context, _ string) (*taskmodels.TaskSession, error) {
+	return r.session, nil
+}
+
+func (r *openEditorTaskRepository) GetRepository(_ context.Context, _ string) (*taskmodels.Repository, error) {
+	return nil, nil
+}
+
+type openEditorUserSettings struct {
+	defaultEditorID string
+}
+
+func (s *openEditorUserSettings) GetUserSettings(_ context.Context) (*usermodels.UserSettings, error) {
+	return &usermodels.UserSettings{DefaultEditorID: s.defaultEditorID}, nil
+}
+
+func (s *openEditorUserSettings) ClearDefaultEditorID(_ context.Context, _ string) error {
+	return nil
+}
+
+func TestOpenEditor_InternalVscodeWithoutWorkspace(t *testing.T) {
+	const editorID = "embedded-vscode"
+	svc := NewService(
+		&openEditorRepository{editor: &editormodels.Editor{
+			ID:      editorID,
+			Kind:    editorKindInternalVscode,
+			Enabled: true,
+		}},
+		&openEditorTaskRepository{session: &taskmodels.TaskSession{ID: "session-1"}},
+		&openEditorUserSettings{defaultEditorID: editorID},
+	)
+
+	url, err := svc.OpenEditor(context.Background(), OpenEditorInput{
+		SessionID: "session-1",
+		EditorID:  editorID,
+	})
+	if err != nil {
+		t.Fatalf("OpenEditor() error = %v, want nil", err)
+	}
+	if url != "internal://vscode" {
+		t.Fatalf("OpenEditor() URL = %q, want internal://vscode", url)
+	}
+}
+
+func TestOpenEditor_InternalVscodeRejectsMissingSession(t *testing.T) {
+	const editorID = "embedded-vscode"
+	svc := NewService(
+		&openEditorRepository{editor: &editormodels.Editor{
+			ID:      editorID,
+			Kind:    editorKindInternalVscode,
+			Enabled: true,
+		}},
+		&openEditorTaskRepository{},
+		&openEditorUserSettings{defaultEditorID: editorID},
+	)
+
+	_, err := svc.OpenEditor(context.Background(), OpenEditorInput{
+		SessionID: "missing-session",
+		EditorID:  editorID,
+	})
+	if err != ErrWorkspaceNotFound {
+		t.Fatalf("OpenEditor() error = %v, want ErrWorkspaceNotFound", err)
+	}
+}
 
 func TestOpenFolder_EmptySessionID(t *testing.T) {
 	svc := &Service{}

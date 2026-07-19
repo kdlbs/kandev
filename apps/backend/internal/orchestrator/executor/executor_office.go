@@ -77,13 +77,37 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 		return nil
 	}
 	snapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, executionProfileID)
-	session.ExecutionProfileID = executionProfileID
-	session.AgentProfileSnapshot = snapshot
-	session.IsPassthrough = isPassthrough
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
-		return fmt.Errorf("update office execution profile: %w", err)
+	for {
+		if isStopTerminalSessionState(session.State) {
+			return nil
+		}
+
+		expectedState := session.State
+		updated := *session
+		updated.ExecutionProfileID = executionProfileID
+		updated.AgentProfileSnapshot = snapshot
+		updated.IsPassthrough = isPassthrough
+		changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, &updated, expectedState)
+		if err != nil {
+			return fmt.Errorf("update office execution profile: %w", err)
+		}
+		if changed {
+			*session = updated
+			return nil
+		}
+
+		fresh, err := e.repo.GetTaskSession(ctx, session.ID)
+		if err != nil {
+			return fmt.Errorf("reload office session after execution profile race: %w", err)
+		}
+		if fresh == nil {
+			return fmt.Errorf("reload office session after execution profile race: %w", models.ErrTaskSessionNotFound)
+		}
+		*session = *fresh
+		if session.ExecutionProfileID == executionProfileID || isStopTerminalSessionState(session.State) {
+			return nil
+		}
 	}
-	return nil
 }
 
 // reuseDecision describes what tryReuseExistingSession did with an existing

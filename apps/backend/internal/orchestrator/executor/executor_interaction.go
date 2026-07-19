@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentctlshared "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/task/models"
@@ -25,46 +26,148 @@ func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, fo
 	return e.stopWithSession(ctx, session, reason, force)
 }
 
-// stopWithSession stops an active execution using an already-loaded session.
-// It marks the session CANCELLED in the database immediately so the WebSocket
-// caller can return quickly, then terminates the agent process asynchronously
-// to avoid blocking the caller on agentctl's blocking stop HTTP call.
+// SessionStopResult describes the synchronous, logical portion of a stop. A
+// true Changed value means CANCELLED was accepted and runtime teardown is ready
+// to be scheduled. FinalState is empty when no live execution exists.
+type SessionStopResult struct {
+	Changed     bool
+	FinalState  models.TaskSessionState
+	ExecutionID string
+	teardown    func()
+}
+
+// ScheduleTeardown starts the detached runtime teardown prepared by
+// StopSessionDetailed. It is intentionally explicit so a coordinator can
+// release its session-control locks before the teardown goroutine begins.
+// Repeated calls are harmless.
+func (r *SessionStopResult) ScheduleTeardown() bool {
+	if r == nil || r.teardown == nil {
+		return false
+	}
+	teardown := r.teardown
+	r.teardown = nil
+	teardown()
+	return true
+}
+
+// StopSessionDetailed stops a live session while preserving lookup and
+// persistence failures for callers that need a truthful structured result.
+// A naturally absent or terminal session returns Changed=false with no error.
+// Callers accepting Changed=true must invoke ScheduleTeardown after releasing
+// any lifecycle-arbitration locks.
+func (e *Executor) StopSessionDetailed(
+	ctx context.Context,
+	session *models.TaskSession,
+	reason string,
+	force bool,
+) (SessionStopResult, error) {
+	if session == nil {
+		return SessionStopResult{}, errors.New("stop session: session is nil")
+	}
+	if session.ID == "" {
+		return SessionStopResult{}, errors.New("stop session: session ID is empty")
+	}
+	return e.stopSession(ctx, session, reason, force)
+}
+
+// stopWithSession preserves the legacy error-only contract. It intentionally
+// keeps session persistence best-effort and schedules teardown whenever a live
+// execution was found; existing UI and cleanup callers rely on that behavior.
 func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSession, reason string, force bool) error {
-	// Look up the live execution for this session via the lifecycle manager —
-	// the in-memory store is the single source of truth post-refactor.
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
 	if err != nil || executionID == "" {
+		if err != nil {
+			if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+				return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+			}
+			return fmt.Errorf("%w: lookup execution for session %q: %w", ErrExecutionNotFound, session.ID, err)
+		}
 		return ErrExecutionNotFound
 	}
 
+	e.logStop(session, executionID, reason, force)
+	if e.onExecutionStopOwnerRegistration != nil {
+		e.onExecutionStopOwnerRegistration(session.ID, executionID, force)
+	}
+	if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
+		e.logger.Error("failed to update agent session status",
+			zap.String("session_id", session.ID),
+			zap.Error(dbErr))
+	}
+	e.scheduleStop(ctx, session.ID, executionID, reason, force)
+	return nil
+}
+
+func (e *Executor) stopSession(
+	ctx context.Context,
+	session *models.TaskSession,
+	reason string,
+	force bool,
+) (SessionStopResult, error) {
+	// Look up the live execution for this session via the lifecycle manager —
+	// the in-memory store is the single source of truth post-refactor.
+	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
+	if err != nil {
+		if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+			return SessionStopResult{}, nil
+		}
+		return SessionStopResult{}, fmt.Errorf("lookup execution for session %q: %w", session.ID, err)
+	}
+	if executionID == "" {
+		return SessionStopResult{}, fmt.Errorf("%w for session %q", errEmptyExecutionID, session.ID)
+	}
+
+	e.logStop(session, executionID, reason, force)
+
+	changed, finalState, stateErr := e.transitionSessionState(
+		ctx,
+		session.TaskID,
+		session.ID,
+		models.TaskSessionStateCancelled,
+		reason,
+	)
+	if stateErr != nil {
+		return SessionStopResult{FinalState: finalState}, fmt.Errorf("cancel session %q: %w", session.ID, stateErr)
+	}
+	result := SessionStopResult{
+		Changed:     changed,
+		FinalState:  finalState,
+		ExecutionID: executionID,
+	}
+	if !changed {
+		return result, nil
+	}
+
+	// Preparing rather than starting teardown here lets the coordinator release
+	// its per-session cancellation guard first. agentctl's stop endpoint blocks
+	// until the process exits, so the actual call still runs detached.
+	result.teardown = func() {
+		e.scheduleStop(ctx, session.ID, executionID, reason, force)
+	}
+	return result, nil
+}
+
+var errEmptyExecutionID = errors.New("empty execution ID")
+
+func (e *Executor) logStop(session *models.TaskSession, executionID, reason string, force bool) {
 	e.logger.Info("stopping execution",
 		zap.String("task_id", session.TaskID),
 		zap.String("session_id", session.ID),
 		zap.String("agent_execution_id", executionID),
 		zap.String("reason", reason),
 		zap.Bool("force", force))
+}
 
-	// Mark the session CANCELLED and publish a WS event immediately so the
-	// frontend updates without waiting for the agent process to exit.
-	if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
-		e.logger.Error("failed to update agent session status",
-			zap.String("session_id", session.ID),
-			zap.Error(dbErr))
-	}
-
-	// Terminate the agent process in the background — agentctl's stop endpoint
-	// blocks until the process exits, which can exceed the WS request timeout.
+func (e *Executor) scheduleStop(ctx context.Context, sessionID, executionID, reason string, force bool) {
 	stopCtx := context.WithoutCancel(ctx)
 	go func() {
 		if err := e.agentManager.StopAgentWithReason(stopCtx, executionID, reason, force); err != nil {
 			// Log the error; the agent instance may already be gone
 			e.logger.Warn("failed to stop agent (may already be stopped)",
-				zap.String("session_id", session.ID),
+				zap.String("session_id", sessionID),
 				zap.Error(err))
 		}
 	}()
-
-	return nil
 }
 
 // StopExecution stops a running execution by execution ID.
@@ -80,7 +183,10 @@ func (e *Executor) StopExecution(ctx context.Context, executionID string, reason
 		e.logger.Warn("failed to stop agent by execution id",
 			zap.String("agent_execution_id", executionID),
 			zap.Error(err))
-		return ErrExecutionNotFound
+		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
+			return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+		}
+		return fmt.Errorf("%w: stop execution %q: %w", ErrExecutionNotFound, executionID, err)
 	}
 	return nil
 }
@@ -410,7 +516,7 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 	}
 
 	if err := e.persistModelSwitchState(ctx, taskID, sessionID, session, newModel); err != nil {
-		e.stopUnstartedExecution(ctx, sessionID, resp.AgentExecutionID)
+		e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
 		return err
 	}
 
@@ -420,6 +526,14 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 			zap.String("agent_execution_id", resp.AgentExecutionID),
 			zap.Error(err))
 		return fmt.Errorf("failed to start agent after model switch: %w", err)
+	}
+	if terminalState, terminal := e.stopStartedExecutionIfSessionTerminal(
+		ctx,
+		sessionID,
+		resp.AgentExecutionID,
+		"terminal model-switch start race",
+	); terminal {
+		return &SessionStateSupersededError{SessionID: sessionID, State: terminalState}
 	}
 
 	e.logger.Info("model switch complete, agent started",
@@ -449,10 +563,11 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		TaskEnvironmentID: session.TaskEnvironmentID,
 	}
 
-	// Activate config-mode MCP tools when config_mode is set in session metadata.
-	if isConfigModeSession(session) {
-		req.McpMode = McpModeConfig
+	mcpMode, err := e.resolveTaskSessionMCPMode(ctx, task.ID, session)
+	if err != nil {
+		return nil, err
 	}
+	req.McpMode = mcpMode
 
 	repositoryPath, err := e.applyRepositoryToSwitchRequest(ctx, req, session, execConfig)
 	if err != nil {
@@ -553,13 +668,27 @@ func (e *Executor) persistInPlaceModelSwitch(ctx context.Context, sessionID, new
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
 	session.AgentProfileSnapshot["model"] = newModel
-	if err := e.repo.UpdateTaskSession(ctx, session); err != nil {
+	var persistErr error
+	if updater, ok := e.repo.(taskSessionAgentProfileSnapshotUpdater); ok {
+		persistErr = updater.UpdateTaskSessionAgentProfileSnapshot(ctx, sessionID, session.AgentProfileSnapshot)
+	} else {
+		persistErr = e.repo.UpdateTaskSession(ctx, session)
+	}
+	if persistErr != nil {
 		e.logger.Warn("failed to persist in-place model switch",
 			zap.String("session_id", sessionID),
-			zap.Error(err))
+			zap.Error(persistErr))
 		return
 	}
 	e.persistRuntimeModelMetadata(ctx, sessionID, session, newModel)
+}
+
+type taskSessionAgentProfileSnapshotUpdater interface {
+	UpdateTaskSessionAgentProfileSnapshot(
+		ctx context.Context,
+		sessionID string,
+		snapshot map[string]interface{},
+	) error
 }
 
 func (e *Executor) persistRuntimeModelMetadata(ctx context.Context, sessionID string, session *models.TaskSession, modelID string) {

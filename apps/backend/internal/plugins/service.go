@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/plugins/marketplace"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -101,6 +102,10 @@ type Service struct {
 	kandevVersion string
 
 	httpClient *http.Client
+
+	// marketplace is the plugin-discovery catalog service (nil until
+	// SetMarketplace is called by Provide). See marketplace.go.
+	marketplace *marketplace.Service
 }
 
 // NewService wires a Service from its already-constructed dependencies.

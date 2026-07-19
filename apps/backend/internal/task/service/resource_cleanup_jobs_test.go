@@ -75,6 +75,7 @@ func (g coordinatorCleanupActivityGate) AcquireTaskResourceCleanup(
 }
 
 func (s *activityCleanupStopper) StopTask(context.Context, string, string, bool) error { return nil }
+func (s *activityCleanupStopper) RegisterExecutionStopOwner(string, string, bool)      {}
 func (s *activityCleanupStopper) StopSession(context.Context, string, string, bool) error {
 	return nil
 }

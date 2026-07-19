@@ -439,6 +439,19 @@ func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.Task
 	return r.updateTaskSession(ctx, r.db, session)
 }
 
+// UpdateTaskSessionIfCurrentState persists a full session row only while the
+// stored state still matches expected. Runtime launch/resume paths use this to
+// retain their non-state fields without reviving a concurrently cancelled
+// session from a stale snapshot.
+func (r *Repository) UpdateTaskSessionIfCurrentState(
+	ctx context.Context,
+	session *models.TaskSession,
+	expected models.TaskSessionState,
+) (bool, error) {
+	session.UpdatedAt = time.Now().UTC()
+	return r.updateTaskSessionWithStateGuard(ctx, r.db, session, &expected)
+}
+
 // UpdateTaskSessionWithMetadata updates the session row and metadata column in
 // one transaction so callers cannot observe a partially-applied update.
 func (r *Repository) UpdateTaskSessionWithMetadata(
@@ -470,21 +483,37 @@ func (r *Repository) updateTaskSession(
 	exec taskSessionExecutor,
 	session *models.TaskSession,
 ) error {
+	changed, err := r.updateTaskSessionWithStateGuard(ctx, exec, session, nil)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, session.ID)
+	}
+	return nil
+}
+
+func (r *Repository) updateTaskSessionWithStateGuard(
+	ctx context.Context,
+	exec taskSessionExecutor,
+	session *models.TaskSession,
+	expected *models.TaskSessionState,
+) (bool, error) {
 	agentProfileSnapshotJSON, err := json.Marshal(session.AgentProfileSnapshot)
 	if err != nil {
-		return fmt.Errorf("failed to serialize agent profile snapshot: %w", err)
+		return false, fmt.Errorf("failed to serialize agent profile snapshot: %w", err)
 	}
 	executorSnapshotJSON, err := json.Marshal(session.ExecutorSnapshot)
 	if err != nil {
-		return fmt.Errorf("failed to serialize executor snapshot: %w", err)
+		return false, fmt.Errorf("failed to serialize executor snapshot: %w", err)
 	}
 	environmentSnapshotJSON, err := json.Marshal(session.EnvironmentSnapshot)
 	if err != nil {
-		return fmt.Errorf("failed to serialize environment snapshot: %w", err)
+		return false, fmt.Errorf("failed to serialize environment snapshot: %w", err)
 	}
 	repositorySnapshotJSON, err := json.Marshal(session.RepositorySnapshot)
 	if err != nil {
-		return fmt.Errorf("failed to serialize repository snapshot: %w", err)
+		return false, fmt.Errorf("failed to serialize repository snapshot: %w", err)
 	}
 
 	// metadata is NOT written here — callers wanting to change it must use
@@ -498,30 +527,34 @@ func (r *Repository) updateTaskSession(
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
 	}
-	result, err := exec.ExecContext(ctx, r.db.Rebind(`
+	query := `
 		UPDATE task_sessions SET
 			agent_profile_id = ?, execution_profile_id = ?, executor_id = ?, executor_profile_id = ?, environment_id = ?,
 			repository_id = ?, base_branch = ?, base_commit_sha = ?, workspace_path = ?,
 			agent_profile_snapshot = ?, executor_snapshot = ?, environment_snapshot = ?, repository_snapshot = ?,
 			state = ?, error_message = ?, completed_at = ?, updated_at = ?,
 			is_primary = ?, review_status = ?, is_passthrough = ?, task_environment_id = ?
-		WHERE id = ?
-	`), agentProfileID, session.ExecutionProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
+		WHERE id = ?`
+	args := []interface{}{agentProfileID, session.ExecutionProfileID, session.ExecutorID, session.ExecutorProfileID, session.EnvironmentID,
 		session.RepositoryID, session.BaseBranch, session.BaseCommitSHA, session.WorkspacePath,
 		string(agentProfileSnapshotJSON), string(executorSnapshotJSON), string(environmentSnapshotJSON), string(repositorySnapshotJSON),
 		string(session.State), session.ErrorMessage, session.CompletedAt, session.UpdatedAt,
 		dialect.BoolToInt(session.IsPrimary), session.ReviewStatus,
 		dialect.BoolToInt(session.IsPassthrough), session.TaskEnvironmentID,
-		session.ID)
+		session.ID}
+	if expected != nil {
+		query += " AND state = ?"
+		args = append(args, string(*expected))
+	}
+	result, err := exec.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
-		return err
+		return false, err
 	}
-
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, session.ID)
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
 	}
-	return nil
+	return rows > 0, nil
 }
 
 // RenameTaskSession updates just the user-supplied name of an agent session.
@@ -541,14 +574,37 @@ func (r *Repository) RenameTaskSession(ctx context.Context, id, name string) err
 	return nil
 }
 
+// UpdateTaskSessionAgentProfileSnapshot updates only the profile snapshot.
+// Runtime capability events may carry a stale full session row, so keeping
+// this write narrow prevents them from overwriting terminal state.
+func (r *Repository) UpdateTaskSessionAgentProfileSnapshot(
+	ctx context.Context,
+	id string,
+	snapshot map[string]interface{},
+) error {
+	snapshotJSON, err := json.Marshal(snapshot)
+	if err != nil {
+		return fmt.Errorf("failed to serialize agent profile snapshot: %w", err)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET agent_profile_snapshot = ?, updated_at = ?
+		WHERE id = ?
+	`), string(snapshotJSON), time.Now().UTC(), id)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
+	}
+	return nil
+}
+
 // UpdateTaskSessionState updates just the state and error message of an agent session
 func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, status models.TaskSessionState, errorMessage string) error {
 	now := time.Now().UTC()
-
-	var completedAt *time.Time
-	if status == models.TaskSessionStateCompleted || status == models.TaskSessionStateFailed || status == models.TaskSessionStateCancelled {
-		completedAt = &now
-	}
+	completedAt := completedAtForTaskSessionState(status, now)
 
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET state = ?, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?
@@ -560,6 +616,65 @@ func (r *Repository) UpdateTaskSessionState(ctx context.Context, id string, stat
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
+	}
+	return nil
+}
+
+// UpdateTaskSessionStateIfCurrent transitions a session only when its state
+// still matches the caller's observation. The returned timestamp belongs to
+// the committed write and remains authoritative even if a later read fails.
+func (r *Repository) UpdateTaskSessionStateIfCurrent(
+	ctx context.Context,
+	id string,
+	expected, status models.TaskSessionState,
+	errorMessage string,
+) (bool, time.Time, error) {
+	now := time.Now().UTC()
+	completedAt := completedAtForTaskSessionState(status, now)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
+		WHERE id = ? AND state = ?
+	`), string(status), errorMessage, completedAt, now, id, string(expected))
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return rows > 0, now, nil
+}
+
+// CancelActiveTaskSession atomically transitions one active session to
+// CANCELLED. A false result means the row exists in a non-active state or was
+// concurrently changed before this conditional write; callers re-read to
+// distinguish those cases from a missing row. The returned timestamp belongs
+// to the committed cancellation, so accepting callers never need a fallible
+// post-write read before scheduling teardown.
+func (r *Repository) CancelActiveTaskSession(ctx context.Context, id, reason string) (bool, time.Time, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions
+		SET state = ?, error_message = ?, completed_at = ?, updated_at = ?
+		WHERE id = ?
+			AND state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+	`), string(models.TaskSessionStateCancelled), reason, now, now, id)
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, time.Time{}, err
+	}
+	return rows > 0, now, nil
+}
+
+func completedAtForTaskSessionState(status models.TaskSessionState, now time.Time) *time.Time {
+	if status == models.TaskSessionStateCompleted ||
+		status == models.TaskSessionStateFailed ||
+		status == models.TaskSessionStateCancelled {
+		return &now
 	}
 	return nil
 }

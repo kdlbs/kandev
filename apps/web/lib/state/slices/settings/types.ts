@@ -1,4 +1,10 @@
-import type { Agent, AgentProfile, CapabilityStatus, SavedLayout } from "@/lib/types/http";
+import type {
+  Agent,
+  AgentProfile,
+  CapabilityStatus,
+  MCPTaskAgentProfileDefault,
+  SavedLayout,
+} from "@/lib/types/http";
 import type {
   VoiceInputActivationMode,
   VoiceInputEngine,
@@ -53,6 +59,7 @@ export type UserSettingsState = {
   chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;
+  mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];

@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -54,6 +55,14 @@ type TaskRepository interface {
 	// need the archived_at IS NULL guarantee. Returns whether a row was
 	// modified.
 	UpdateTaskStateIfNotArchived(ctx context.Context, taskID string, state v1.TaskState) (bool, error)
+	// UpdateTaskStateIfSessionState additionally pins the owning session's
+	// current state, closing races with clarification and terminal transitions.
+	UpdateTaskStateIfSessionState(
+		ctx context.Context,
+		taskID, sessionID string,
+		expectedSessionState models.TaskSessionState,
+		state v1.TaskState,
+	) (bool, error)
 }
 
 // QueueStatus contains queue statistics

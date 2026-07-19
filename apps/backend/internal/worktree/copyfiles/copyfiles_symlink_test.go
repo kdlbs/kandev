@@ -180,6 +180,139 @@ func TestCopy_SymlinkMode_IgnoredInPlanMode(t *testing.T) {
 	}
 }
 
+// Byte-copy analogue of TestCopy_SymlinkMode_RejectsSymlinkedParent: a plain
+// (non-symlink) copy whose destination parent is itself a symlink pointing
+// outside the worktree must be rejected before MkdirAll/os.Create follow it
+// out. The leaf os.Lstat skip only neutralizes a symlinked FINAL component, so
+// a symlinked PARENT was an arbitrary-file-write-outside-worktree primitive.
+func TestCopy_ByteCopy_RejectsSymlinkedParent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation often requires privilege on Windows")
+	}
+	src := t.TempDir()
+	dst := t.TempDir()
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(src, "config", "local.yml"), "SECRET=1", 0o644)
+	// The worktree already has a symlinked `config` ancestor pointing outside
+	// (attacker fork-PR head shipped `config` as a mode-120000 tree entry).
+	if err := os.Symlink(outside, filepath.Join(dst, "config")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	copied, warnings, err := Copy(context.Background(), src, dst,
+		[]PatternSpec{{Pattern: "config/local.yml"}}, nil)
+	if err != nil {
+		t.Fatalf("Copy err: %v", err)
+	}
+	if len(copied) != 0 {
+		t.Fatalf("copied = %v, want zero (escape rejected)", copied)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("expected 1 rejection warning, got %v", warnings)
+	}
+	// Nothing was written through the symlinked parent into the outside dir.
+	if _, statErr := os.Lstat(filepath.Join(outside, "local.yml")); !os.IsNotExist(statErr) {
+		t.Fatalf("copy escaped through symlinked parent: %v", statErr)
+	}
+}
+
+// A leaf symlink at the final destination component is (correctly) neutralized
+// by the os.Lstat skip-if-exists — nothing is written through it, and no escape
+// occurs. This pins the constraint that only a symlinked PARENT is the vector.
+func TestCopy_ByteCopy_LeafSymlinkSkipped(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation often requires privilege on Windows")
+	}
+	src := t.TempDir()
+	dst := t.TempDir()
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(src, "local.yml"), "SECRET=1", 0o644)
+
+	escaped := filepath.Join(outside, "local.yml")
+	if err := os.Symlink(escaped, filepath.Join(dst, "local.yml")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	copied, _, err := Copy(context.Background(), src, dst,
+		[]PatternSpec{{Pattern: "local.yml"}}, nil)
+	if err != nil {
+		t.Fatalf("Copy err: %v", err)
+	}
+	if len(copied) != 0 {
+		t.Fatalf("copied = %v, want zero (leaf symlink skipped)", copied)
+	}
+	if _, statErr := os.Stat(escaped); !os.IsNotExist(statErr) {
+		t.Fatalf("leaf symlink was followed, wrote outside: %v", statErr)
+	}
+}
+
+// A normal directory-segment copy into a clean worktree still works after the
+// parent-chain hardening.
+func TestCopy_ByteCopy_CleanNestedStillWorks(t *testing.T) {
+	t.Parallel()
+	src := t.TempDir()
+	dst := t.TempDir()
+	writeFile(t, filepath.Join(src, "config", "local.yml"), "SECRET=1", 0o644)
+
+	copied, warnings, err := Copy(context.Background(), src, dst,
+		[]PatternSpec{{Pattern: "config/local.yml"}}, nil)
+	if err != nil {
+		t.Fatalf("Copy err: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	if len(copied) != 1 || copied[0] != "config/local.yml" {
+		t.Fatalf("copied = %v, want [config/local.yml]", copied)
+	}
+	if got := readFile(t, filepath.Join(dst, "config", "local.yml")); got != "SECRET=1" {
+		t.Fatalf("content = %q, want SECRET=1", got)
+	}
+}
+
+// A worktree reached through a symlinked ANCESTOR (the macOS /tmp -> /private/tmp
+// case, or a user-symlinked tasks dir) must still copy: the destination
+// containment check has to compare canonical-to-canonical, not canonical parent
+// vs raw root, or every legitimate byte copy is silently dropped.
+func TestCopy_ByteCopy_SymlinkedTargetAncestorStillCopies(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation often requires privilege on Windows")
+	}
+	base := t.TempDir()
+	src := t.TempDir()
+	writeFile(t, filepath.Join(src, "config", "local.yml"), "SECRET=1", 0o644)
+
+	// base/link -> base/real; the worktree lives under the symlinked ancestor.
+	realParent := filepath.Join(base, "real")
+	if err := os.MkdirAll(realParent, 0o755); err != nil {
+		t.Fatalf("mkdir real: %v", err)
+	}
+	linkParent := filepath.Join(base, "link")
+	if err := os.Symlink(realParent, linkParent); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	target := filepath.Join(linkParent, "worktree")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+
+	copied, warnings, err := Copy(context.Background(), src, target,
+		[]PatternSpec{{Pattern: "config/local.yml"}}, nil)
+	if err != nil {
+		t.Fatalf("Copy err: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings (false rejection): %v", warnings)
+	}
+	if len(copied) != 1 || copied[0] != "config/local.yml" {
+		t.Fatalf("copied = %v, want [config/local.yml]", copied)
+	}
+	// The bytes land at the real location under the symlinked ancestor.
+	if got := readFile(t, filepath.Join(realParent, "worktree", "config", "local.yml")); got != "SECRET=1" {
+		t.Fatalf("content = %q, want SECRET=1", got)
+	}
+}
+
 // A symlink entry whose destination parent is itself a symlink pointing outside
 // the worktree must be rejected before MkdirAll/os.Symlink follow it out.
 func TestCopy_SymlinkMode_RejectsSymlinkedParent(t *testing.T) {

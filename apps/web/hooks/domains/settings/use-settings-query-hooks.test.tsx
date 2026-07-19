@@ -82,6 +82,7 @@ const createBaseState = vi.hoisted(
       enablePreviewOnClick: false,
       chatSubmitKey: "cmd_enter",
       reviewAutoMarkOnScroll: true,
+      mcpTaskAgentProfileDefault: "current_task",
       showReleaseNotification: true,
       releaseNotesLastSeenVersion: null,
       savedLayouts: [],

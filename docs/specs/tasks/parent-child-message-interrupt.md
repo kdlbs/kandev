@@ -239,4 +239,8 @@ itself via the ordinary FIFO drain — the message is not left stranded.
   whether to resend, and a resend queues a distinct message (queuing is not idempotent).
 - A `delivery_mode` value that queues *without* the possibility of a later natural interrupt,
   or that interrupts without also queuing — the two are always coupled (interrupt implies
-  queue-then-cancel-and-take as one atomic step).
+  queue-then-cancel-and-take as one atomic step). This interrupt mode remains the
+  preferred control when a direct parent has replacement instructions. A parent
+  that instead needs to halt child work without sending a replacement prompt
+  uses the separate [Parent-Child Task Stop](parent-child-task-stop.md)
+  capability.

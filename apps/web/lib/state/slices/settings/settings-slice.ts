@@ -18,6 +18,7 @@ export const defaultSettingsState: SettingsSliceState = {
     chatSubmitKey: "cmd_enter",
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
+    mcpTaskAgentProfileDefault: "current_task",
     showReleaseNotification: true,
     releaseNotesLastSeenVersion: null,
     lspAutoStartLanguages: [],

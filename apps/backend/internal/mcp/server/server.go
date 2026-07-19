@@ -362,7 +362,7 @@ func (s *Server) registerTools() {
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 14
+		count += 15
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -480,8 +480,13 @@ func (s *Server) registerKanbanTools() {
 
 Use this to communicate with a sibling task, a parent task, or any task you know the ID of — for example to ask a delegated subtask for clarification, hand it new context, or nudge a paused task forward. Pass session_id to target a specific session — including a sibling session on your OWN task (e.g. one you spawned with spawn_session_kandev).
 
+Choose the control by intent:
+- Information that can wait: use delivery_mode="queued" (the default). The current turn continues and the message waits FIFO.
+- Urgent replacement work for a running/starting direct child: use delivery_mode="interrupt". This requests immediate cancel-and-redispatch. Only the target task's direct parent may request it; non-parent requests fail. If immediate cancellation and dispatch cannot be confirmed safely, the message safely falls back to "queued".
+- Halt-only work with no replacement prompt: use stop_task_kandev instead.
+
 Behaviour by session state:
-- Running/starting: the message is queued and delivered when the current turn ends. Pass delivery_mode="interrupt" to instead interrupt the target's current turn immediately so the message is delivered without waiting — keeps a parent's steering/stop messages from piling up behind a long-running child's turn. Only honored when you are the target task's direct parent; a non-parent sender requesting "interrupt" gets a hard error instead of being silently downgraded to "queued".
+- Running/starting: queued delivery waits for turn-end; interrupt delivery follows the direct-parent behavior and safe fallback above.
 - Idle (waiting for input or completed): the message is sent immediately as a new turn (delivery_mode has no effect).
 - Created (not yet started): the agent is started with this message as its first prompt (delivery_mode has no effect).
 - Failed/cancelled: an error is returned (use create_task_kandev to start fresh).
@@ -497,6 +502,19 @@ Returns the dispatch status: "queued", "sent", or "started".`),
 			),
 		),
 		s.wrapHandler("message_task_kandev", s.messageTaskHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("stop_task_kandev",
+			mcp.WithDescription(`Stop all live sessions Kandev observes for a direct child task. Only the target task's direct parent may use this tool; self, sibling, child-to-parent, grandparent, unrelated, and cross-workspace requests are rejected. The operation has no session-specific option.
+
+This is halt-only: it does not send a prompt or start a replacement turn. For urgent stop-and-steer work, use message_task_kandev with delivery_mode="interrupt". For ordinary information that can wait, use message_task_kandev with delivery_mode="queued" or omit delivery_mode.
+
+For every accepted live execution, Kandev first marks its session CANCELLED, then schedules graceful runtime teardown. An eligible active, unarchived, non-Office task is also moved to REVIEW through the normal guarded transition; other task states are preserved. Runtime teardown continues asynchronously, so status="stopped" confirms logical cancellation and scheduled teardown, not process exit.
+
+If the child has no live execution, the call succeeds idempotently with status="not_running" and changes no task or session state. Worktrees, environments, commits, task records, descendants, and queued messages are preserved.`),
+			mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("The direct child task's full UUID (not a truncated prefix)")),
+		),
+		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
 	)
 	s.registerSpawnSessionTool()
 	s.mcpServer.AddTool(
@@ -534,8 +552,8 @@ WHEN TO OMIT parent_id (top-level task):
 
 IMPORTANT:
 - Subtasks inherit task workspace, workflow, agent profile, executor, and materialized workspace from the parent by default. Pass workspace_id/workflow_id only when deliberately targeting a different task workspace/workflow; any supplied workflow_id must belong to the effective workspace_id. Pass workspace_mode='new_workspace' when the subtask needs its own materialized workspace/worktree.
-- Agent profile precedence is explicit agent_profile_id > current/source task or parent task > workflow defaults > workspace default
-- When launched from a current task, omitting parent_id still uses the current task as the source for profile inheritance before workflow/workspace defaults. Do not rely on workspace defaults for follow-up work from an active task.
+- An explicit agent_profile_id always wins. When omitted, the saved user policy applies: current_task inherits from the current/source task or parent before workflow and target-workspace defaults; workspace_default skips current/source and parent profiles, honors workflow profiles first, then uses the target workspace default.
+- Executor and executor-profile inheritance from the current/source task or parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - Subtasks inherit the parent's repository unless you supply repository_url, repository_id, or local_path — in which case the subtask targets that repo instead
 - base_branch behaviour:
@@ -547,7 +565,7 @@ IMPORTANT:
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
 - Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
-	agentProfileDesc := "Agent profile ID to use. Precedence: explicit value > current/source task or parent task > workflow defaults > workspace default. Required unless one of those inheritance sources can resolve it. start_agent=false still needs a profile for later manual start."
+	agentProfileDesc := "Agent profile ID to use. Explicit agent_profile_id always wins. When omitted, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
 
 	if s.mode == ModeExternal {
 		toolDesc = `Create a new top-level task and auto-start an agent on it.
@@ -555,13 +573,14 @@ IMPORTANT:
 IMPORTANT:
 - Provide a repository via repository_url, repository_id, or local_path
 - workspace_id and workflow_id are auto-resolved if only one exists; provide explicitly if ambiguous
-- Agent profile precedence is explicit agent_profile_id > parent task > workflow defaults > workspace default. External mode has no current/source task.
+- An explicit agent_profile_id always wins. When omitted, the saved user policy applies: current_task inherits a parent profile before workflow and target-workspace defaults; workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no current/source task.
+- Executor and executor-profile inheritance from a parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
 - 'description' is the agent's initial prompt — be specific and detailed
 - start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
 - Use parent_id only when delegating to a known existing task by its ID`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
-		agentProfileDesc = "Agent profile ID to use. Precedence: explicit value > parent task > workflow defaults > workspace default. External mode has no current/source task. Required unless one of those inheritance sources can resolve it. start_agent=false still needs a profile for later manual start."
+		agentProfileDesc = "Agent profile ID to use. Explicit agent_profile_id always wins. When omitted, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
 	}
 
 	s.mcpServer.AddTool(
