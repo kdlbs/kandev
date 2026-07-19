@@ -826,7 +826,7 @@ func (b bootStateBuilder) taskDetailInitialState(
 	b.addTaskDetailResourceState(ctx, state, task)
 	b.addTaskDetailKanbanState(ctx, state, task)
 	b.addTaskDetailActiveTaskState(ctx, state, taskDTO, activeSessionID)
-	b.addTaskDetailSessionsState(state, task.ID, sessions, activeSessionID)
+	b.addTaskDetailSessionsState(ctx, state, task.ID, sessions, activeSessionID)
 	b.addTaskDetailAgentsState(ctx, state)
 	return state
 }
@@ -942,6 +942,7 @@ func lastSessionByTaskState(taskID, sessionID string) map[string]string {
 }
 
 func (b bootStateBuilder) addTaskDetailSessionsState(
+	ctx context.Context,
 	state map[string]any,
 	taskID string,
 	sessions []*taskmodels.TaskSession,
@@ -987,16 +988,38 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 		"loadingByTaskId": map[string]any{taskID: false},
 		"loadedByTaskId":  map[string]any{taskID: true},
 	}
-	state["turns"] = map[string]any{
-		"bySession":       map[string]any{},
-		"activeBySession": activeTurnBySessionState(activeSessionID),
-	}
+	state["turns"] = b.taskDetailTurnsState(ctx, activeSessionID)
 	state["environmentIdBySessionId"] = environmentBySession
 	state["worktrees"] = map[string]any{"items": worktrees}
 	state["sessionWorktreesBySessionId"] = map[string]any{"itemsBySessionId": worktreesBySession}
 	if len(sessionModelsByID) > 0 {
 		state["sessionModels"] = map[string]any{"bySessionId": sessionModelsByID}
 	}
+}
+
+func (b bootStateBuilder) taskDetailTurnsState(ctx context.Context, sessionID string) map[string]any {
+	bySession := map[string]any{}
+	activeBySession := activeTurnBySessionState(sessionID)
+	if sessionID == "" {
+		return map[string]any{"bySession": bySession, "activeBySession": activeBySession}
+	}
+	turns, err := b.p.taskSvc.ListTurnsBySession(ctx, sessionID)
+	if err != nil {
+		b.logBootError("list task detail turns", err)
+		return map[string]any{"bySession": bySession, "activeBySession": activeBySession}
+	}
+	items := make([]taskdto.TurnDTO, 0, len(turns))
+	for _, turn := range turns {
+		if turn == nil {
+			continue
+		}
+		items = append(items, taskdto.FromTurn(turn))
+		if turn.CompletedAt == nil {
+			activeBySession[sessionID] = turn.ID
+		}
+	}
+	bySession[sessionID] = items
+	return map[string]any{"bySession": bySession, "activeBySession": activeBySession}
 }
 
 func taskSessionModelsBootState(

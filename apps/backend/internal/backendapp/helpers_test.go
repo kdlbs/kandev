@@ -824,6 +824,82 @@ func TestBootRouteDataTaskDetailIncludesPersistedSessionModels(t *testing.T) {
 	}
 }
 
+func TestBootRouteDataTaskDetailIncludesPersistedTurns(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil {
+		t.Fatalf("ListWorkspaces: %v", err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID, WorkflowID: workflows[0].ID,
+		WorkflowStepID: steps[0].ID, Title: "Hydrated turn snapshot",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	now := time.Now().UTC()
+	session := &models.TaskSession{
+		ID: "boot-turn-session", TaskID: task.ID, IsPrimary: true,
+	}
+	if err := harness.taskRepo.CreateTaskSession(ctx, session); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	turn := &models.Turn{
+		ID: "boot-persisted-turn", TaskID: task.ID, TaskSessionID: session.ID,
+		StartedAt: now, CompletedAt: &now, CreatedAt: now, UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.TurnMetaKeyRuntimeConfigSnapshot: models.TurnRuntimeConfigSnapshot{
+				Model: "mock-fast",
+				ConfigOptions: []models.TurnRuntimeConfigOption{{
+					ID: "effort", Name: "Effort", Value: "high", ValueName: "High",
+				}},
+				ConfigBaseline: map[string]string{"effort": "medium"},
+			},
+		},
+	}
+	if err := harness.taskRepo.CreateTurn(ctx, turn); err != nil {
+		t.Fatalf("CreateTurn: %v", err)
+	}
+
+	routeData := bootRouteData(ctx, nil, routeParams{
+		taskSvc:  harness.taskSvc,
+		services: &Services{Workflow: harness.workflowSvc},
+	}, webapp.ClassifyRoute("/t/"+task.ID))
+	raw, err := json.Marshal(routeData)
+	if err != nil {
+		t.Fatalf("Marshal route data: %v", err)
+	}
+	var decoded struct {
+		TaskDetail struct {
+			InitialState struct {
+				Turns struct {
+					BySession map[string][]taskdto.TurnDTO `json:"bySession"`
+				} `json:"turns"`
+			} `json:"initialState"`
+		} `json:"taskDetail"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal route data: %v", err)
+	}
+	got := decoded.TaskDetail.InitialState.Turns.BySession[session.ID]
+	if len(got) != 1 || got[0].ID != turn.ID {
+		t.Fatalf("boot turns = %#v, want turn %q", got, turn.ID)
+	}
+	snapshot, ok := models.LoadTurnRuntimeConfigSnapshot(got[0].Metadata)
+	if !ok || len(snapshot.ConfigOptions) != 1 || snapshot.ConfigOptions[0].Value != "high" {
+		t.Fatalf("boot turn snapshot = %#v, ok=%v", snapshot, ok)
+	}
+}
+
 func TestTaskSessionModelsBootStateOmitsUnavailableBaseline(t *testing.T) {
 	state := taskSessionModelsBootState(lifecycle.SessionModelsSnapshot{
 		CurrentModelID: "gpt-5.6-sol",

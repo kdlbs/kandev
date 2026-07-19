@@ -200,6 +200,11 @@ func (s *Service) GetTurn(ctx context.Context, turnID string) (*models.Turn, err
 	return s.turns.GetTurn(ctx, turnID)
 }
 
+// ListTurnsBySession returns all persisted turns for a session.
+func (s *Service) ListTurnsBySession(ctx context.Context, sessionID string) ([]*models.Turn, error) {
+	return s.turns.ListTurnsBySession(ctx, sessionID)
+}
+
 // CompleteTurn marks a turn as completed and publishes the turn.completed event.
 func (s *Service) CompleteTurn(ctx context.Context, turnID string) error {
 	if turnID == "" {
