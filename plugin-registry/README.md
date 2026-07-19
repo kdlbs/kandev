@@ -60,11 +60,11 @@ usage telemetry** — there is no "most installed" metric, by design.
    should be left out of submissions.
 4. **Open a pull request.** The index-build workflow runs on your PR (build +
    tests, no Pages deploy) and resolves your entry against the GitHub API — your
-   repo must have a latest release whose assets include a correctly named
-   `<id>-<version>.tar.gz` package, or the entry can't be built. `plugins.yaml`
-   must follow the `schema.json` pointer-list contract, and your `id` must match
-   your manifest `id` (the index looks for `<id>-<version>.tar.gz`, so a
-   mismatch means your package can't be resolved).
+   repo must have a latest release that publishes a `.tar.gz` package and its
+   `checksums.txt`; an entry whose repo has no release or no package is skipped.
+   Name the package `<id>-<version>.tar.gz` and keep your entry `id` equal to
+   your manifest `id` so the index resolves the right asset. `plugins.yaml` must
+   also follow the `schema.json` pointer-list contract.
 5. **A maintainer reviews and merges** — maintainer approval is what gates the
    official catalog. Once merged, the index-build workflow picks up your entry
    and your plugin appears in the in-app catalog on the next build.

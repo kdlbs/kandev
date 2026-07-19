@@ -144,17 +144,17 @@ a PR that lists it.
        categories: [productivity] # optional
    ```
 
-   `id` must match your manifest `id` and be unique in the file — the index
-   build looks for a `<id>-<version>.tar.gz` release asset, so a mismatch means
-   your package can't be resolved. `categories` here are free-form curation tags
-   for catalog filtering (not the manifest's category enum). `featured` is a
-   maintainer-only pin — leave it out of submissions. The pointer-list shape is
-   defined by
+   Keep `id` equal to your manifest `id` and unique in the file, and name your
+   release package `<id>-<version>.tar.gz` to match, so the index resolves the
+   right asset. `categories` here are free-form curation tags for catalog
+   filtering (not the manifest's category enum). `featured` is a maintainer-only
+   pin — leave it out of submissions. The pointer-list shape is defined by
    [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
 2. Open a pull request. The registry index-build workflow runs on your PR
    (build + tests, no Pages deploy), resolving your entry against the GitHub API
-   — your repo must have a latest release whose assets include the correctly
-   named `<id>-<version>.tar.gz` package, or the entry can't be built.
+   — your repo must have a latest release that publishes a `.tar.gz` package and
+   its `checksums.txt`. An entry whose repo has no release or no package asset is
+   skipped.
 3. A maintainer reviews and merges — maintainer approval is what gates the
    official catalog. The index-build workflow then picks up your entry and your
    plugin appears in the in-app catalog on the next build.
