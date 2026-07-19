@@ -184,6 +184,40 @@ describe("useLayoutSettings selection and drafts", () => {
   });
 });
 
+describe("useLayoutSettings built-in editing", () => {
+  it("edits the built-in Default directly as a custom default draft", () => {
+    const { result } = renderLayoutSettings();
+    const layout = getBuiltInLayoutProfile("default").layout;
+    layout.columns = layout.columns
+      .map((column) => ({
+        ...column,
+        groups: column.groups
+          .map((group) => ({
+            ...group,
+            panels: group.panels.filter((panel) => panel.id !== "terminal-default"),
+          }))
+          .filter((group) => group.panels.length > 0),
+      }))
+      .filter((column) => column.groups.length > 0);
+
+    act(() => result.current.updateLayout(layout));
+
+    expect(result.current).toMatchObject({
+      selection: { kind: "custom", id: result.current.selection.id },
+      selectedName: "Default custom",
+      selectedIsDefault: true,
+      isDirty: true,
+    });
+    expect(result.current.selectedCustom?.is_default).toBe(true);
+    expect(
+      result.current.editorLayout?.columns
+        .flatMap((column) => column.groups)
+        .flatMap((group) => group.panels)
+        .map((panel) => panel.id),
+    ).not.toContain("terminal-default");
+  });
+});
+
 describe("useLayoutSettings persistence", () => {
   it("adopts the successful PATCH response as the authoritative baseline", async () => {
     const authoritative = profile({ name: "Server name", is_default: true });

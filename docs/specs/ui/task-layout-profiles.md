@@ -13,7 +13,7 @@ Users can arrange and save the desktop task workbench only while a task is open,
 ## What
 
 - `Settings > General > Layouts` is the central manager for reusable desktop task-layout profiles and is reachable on desktop and mobile settings navigation.
-- The page lists the built-in Default, Plan Mode, Preview Mode, and VS Code layouts as immutable templates. A user can duplicate a built-in template to create an editable custom profile.
+- The page lists the built-in Default, Plan Mode, Preview Mode, and VS Code layouts as stable templates. A user can edit a selected template directly; the first edit transparently creates an editable custom draft, and saving does not mutate the code-defined template.
 - A user can create, rename, duplicate, edit, delete, and select the default custom profile. Names must be non-empty; profile IDs must be unique.
 - Exactly one layout is effective as the user default. A custom profile marked `is_default` wins; when none is marked, the built-in Default layout is effective.
 - The visual editor supports one instance of each reusable panel: Agent, Files, Changes, Terminal, Plan, Browser, and VS Code. Agent is required and cannot be removed.
@@ -71,7 +71,7 @@ The frontend treats the returned settings payload as authoritative after each su
 ## Scenarios
 
 - **GIVEN** the user opens General settings on desktop or mobile, **WHEN** they select Layouts, **THEN** the built-in templates, custom profiles, and effective default are visible.
-- **GIVEN** the built-in Default template, **WHEN** the user duplicates it, removes Terminal, places Files and Changes in one right-side tab group, and saves it as default, **THEN** the custom profile persists with that arrangement.
+- **GIVEN** the built-in Default template, **WHEN** the user removes Terminal, places Files and Changes in one right-side tab group, and saves, **THEN** a custom default profile persists with that arrangement without requiring a duplicate step.
 - **GIVEN** a valid custom profile, **WHEN** the user reorders tabs or moves a panel into a new split and saves, **THEN** reopening the profile shows the same tab order, active tab, split order, and proportions.
 - **GIVEN** a default profile without Terminal and a task environment with no saved layout, **WHEN** the user first opens that task, **THEN** the workbench has no Terminal tab and no default user shell is created.
 - **GIVEN** an existing task with a task-specific layout, **WHEN** the user changes the default profile and returns to that task, **THEN** the task-specific layout is unchanged.
@@ -86,5 +86,5 @@ The frontend treats the returned settings payload as authoritative after each su
 - Customizing mobile or tablet task-detail layouts.
 - Forcing a changed default onto existing task-specific layouts without Reset Layout.
 - Configuring task-specific panels such as individual files, diffs, commits, pull requests, extra sessions, or extra terminals.
-- Editing the built-in templates in place.
+- Mutating the code-defined built-in templates; direct edits are persisted as custom profiles.
 - Sharing profiles between users or scoping profiles to a workspace, repository, agent, or executor.

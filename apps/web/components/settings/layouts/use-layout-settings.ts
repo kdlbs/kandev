@@ -4,6 +4,7 @@ import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import {
+  createLayoutProfile,
   createLayoutProfileId,
   deleteLayoutProfile,
   duplicateLayoutProfile,
@@ -152,7 +153,26 @@ function useProfileActions(drafts: Drafts, selected: ReturnType<typeof selectedS
       drafts.setError(validation.issues.map((issue) => issue.message).join(". "));
       return;
     }
-    updateSelected({ layout: validation.layout as unknown as Record<string, unknown> });
+    const nextLayout = validation.layout as unknown as Record<string, unknown>;
+    if (selected.selectedCustom) {
+      updateSelected({ layout: nextLayout });
+      return;
+    }
+    const builtIn = selected.selectedBuiltIn;
+    if (!builtIn) return;
+    attempt(drafts.setError, () => {
+      const id = createLayoutProfileId();
+      drafts.replaceProfiles(
+        createLayoutProfile(drafts.profiles, {
+          id,
+          name: `${builtIn.name} custom`,
+          layout: nextLayout,
+          createdAt: new Date().toISOString(),
+          isDefault: builtIn.id === "default",
+        }),
+      );
+      drafts.setSelection({ kind: "custom", id });
+    });
   };
   const setDefault = () =>
     attempt(drafts.setError, () => {

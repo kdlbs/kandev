@@ -52,9 +52,9 @@ No schema, repository, DTO, or endpoint changes are required; `users.settings.sa
 
 ## E2E Tests
 
-- **Desktop profile workflow:** `apps/web/e2e/tests/settings/layout-profiles.spec.ts`; duplicate built-in Default, remove Terminal, combine/reorder Files and Changes, save as default, reload Settings, and verify the editor restores the profile.
+- **Desktop profile workflow:** `apps/web/e2e/tests/settings/layout-profiles.spec.ts`; edit built-in Default directly, remove Terminal, combine/reorder Files and Changes, save as default, reload Settings, and verify the editor restores the profile.
 - **Fresh task and reset behavior:** the same desktop spec creates and opens a fresh task, verifies no Terminal tab/default shell, proves an existing customized task is unchanged after a default update, then verifies Reset Layout applies the latest default.
-- **Mobile settings parity:** `apps/web/e2e/tests/settings/mobile-layout-profiles.spec.ts`; navigate through the settings drawer, create/rename/duplicate/delete/select a profile, use touch-accessible layout commands, and verify there is no horizontal page scroll.
+- **Mobile settings parity:** `apps/web/e2e/tests/settings/mobile-layout-profiles.spec.ts`; navigate through the settings drawer, edit a built-in directly, rename and reorder its custom draft with touch-accessible commands, and verify there is no horizontal page scroll.
 - **Existing layout regressions:** run `apps/web/e2e/tests/task/task-default-layout.spec.ts` and `apps/web/e2e/tests/layout/saved-layout-session-isolation.spec.ts` with the new specs.
 
 ## Public Documentation

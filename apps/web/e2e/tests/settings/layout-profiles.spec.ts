@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -137,6 +138,23 @@ async function ordinaryShells(apiClient: ApiClient, taskId: string) {
 }
 
 test.describe("Task layout profile defaults", () => {
+  test("edits and saves the built-in Default without duplicating it first", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await layouts.removePanel("Terminal");
+    await layouts.renameSelected("Focused default");
+    await layouts.save();
+
+    const response = await apiClient.getUserSettings();
+    const saved = response.settings.saved_layouts;
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ name: "Focused default", is_default: true });
+    expect(JSON.stringify(saved[0].layout)).not.toContain("terminal-default");
+  });
+
   test("fresh tasks use the no-terminal default while existing tasks wait for Reset Layout", async ({
     testPage,
     apiClient,

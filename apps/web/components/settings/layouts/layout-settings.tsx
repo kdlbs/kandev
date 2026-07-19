@@ -142,7 +142,7 @@ function SelectedLayoutEditor({ controller }: { controller: Controller }) {
     <LayoutEditor
       key={editorKey}
       layout={controller.editorLayout}
-      editable={Boolean(controller.selectedCustom)}
+      editable
       onChange={controller.updateLayout}
     />
   );

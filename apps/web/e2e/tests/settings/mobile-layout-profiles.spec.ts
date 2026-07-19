@@ -7,6 +7,7 @@ import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 
 type SavedProfile = {
   name: string;
+  is_default: boolean;
   layout: {
     columns: Array<{
       groups: Array<{ panels: Array<{ id: string }> }>;
@@ -24,9 +25,9 @@ test.describe("Mobile layout profiles", () => {
     await assertNoDocumentHorizontalOverflow(testPage, "layouts page");
     await assertNoDescendantOverflowsRight(layouts.root, "layouts settings");
 
-    await layouts.duplicateDefault("Mobile focused layout");
     await layouts.selectPanel("Files");
     await layouts.moveSelectedTabRight();
+    await layouts.renameSelected("Mobile focused layout");
     await layouts.save();
 
     await expect
@@ -38,6 +39,7 @@ test.describe("Mobile layout profiles", () => {
     const response = await apiClient.getUserSettings();
     const profile = (response.settings.saved_layouts as SavedProfile[])[0];
     expect(profile.name).toBe("Mobile focused layout");
+    expect(profile).toMatchObject({ is_default: true });
     const filesGroup = profile.layout.columns
       .flatMap((column) => column.groups)
       .find((group) => group.panels.some((panel) => panel.id === "files"));

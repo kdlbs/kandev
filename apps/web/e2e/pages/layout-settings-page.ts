@@ -11,6 +11,11 @@ export class LayoutSettingsPage {
     this.toolbar = page.getByTestId("layout-editor-toolbar");
   }
 
+  async open(): Promise<void> {
+    await this.page.goto("/settings/general/layouts");
+    await expect(this.root).toBeVisible();
+  }
+
   async openFromMobileMenu(): Promise<void> {
     await this.page.goto("/settings/general/terminal");
     await this.page.getByTestId("settings-mobile-menu-button").click();
@@ -33,6 +38,20 @@ export class LayoutSettingsPage {
   async selectPanel(name: string): Promise<void> {
     await this.toolbar.getByRole("combobox", { name: "Selected panel" }).click();
     await this.page.getByRole("option", { name, exact: true }).click();
+  }
+
+  async removePanel(name: string): Promise<void> {
+    await this.selectPanel(name);
+    const button = this.toolbar.getByRole("button", { name: "Remove panel" });
+    await expect(button).toBeEnabled();
+    await button.click();
+    await expect(this.page.getByRole("textbox", { name: "Layout profile name" })).toBeVisible();
+  }
+
+  async renameSelected(name: string): Promise<void> {
+    const input = this.page.getByRole("textbox", { name: "Layout profile name" });
+    await expect(input).toBeVisible();
+    await input.fill(name);
   }
 
   async moveSelectedTabRight(): Promise<void> {
