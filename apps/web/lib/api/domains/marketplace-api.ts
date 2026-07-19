@@ -1,23 +1,7 @@
-import { bootTokenHeaders, fetchJson, type ApiRequestOptions } from "../client";
+import { fetchJson, mutationInit, type ApiRequestOptions } from "../client";
 import type { MarketplaceCatalog, MarketplaceSource } from "@/lib/types/plugins";
 
 const BASE = "/api/plugins/marketplace";
-
-// mutationInit merges the per-boot operator-token header into a state-changing
-// marketplace request, preserving caller-supplied init/headers. Source
-// add/update/delete and refresh are gated by httpmw.RequireBootToken.
-function mutationInit(
-  method: string,
-  options: ApiRequestOptions | undefined,
-  body?: BodyInit,
-): RequestInit {
-  return {
-    ...(options?.init ?? {}),
-    method,
-    headers: { ...bootTokenHeaders(), ...(options?.init?.headers ?? {}) },
-    ...(body !== undefined ? { body } : {}),
-  };
-}
 
 // CatalogQuery is the filter/sort applied server-side to the merged catalog.
 export type CatalogQuery = {

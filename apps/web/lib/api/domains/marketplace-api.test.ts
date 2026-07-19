@@ -171,7 +171,7 @@ describe("operator boot-token on state-changing marketplace calls", () => {
 
   beforeEach(() => {
     (window as unknown as { __KANDEV_BOOT_PAYLOAD__?: unknown }).__KANDEV_BOOT_PAYLOAD__ = {
-      runtime: { csrfToken: BOOT_TOKEN },
+      runtime: { bootToken: BOOT_TOKEN },
     };
   });
 

@@ -46,8 +46,12 @@ func RequireBootToken(token string) gin.HandlerFunc {
 			})
 			return
 		}
+		// No early-out on an empty/absent header: ConstantTimeCompare already
+		// returns 0 for a length mismatch, so folding both cases into one
+		// branch avoids an application-level timing distinguisher between
+		// "header absent" and "header present but wrong".
 		got := c.GetHeader(BootTokenHeader)
-		if got == "" || subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error": "missing or invalid operator token",
 			})

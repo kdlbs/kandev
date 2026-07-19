@@ -543,6 +543,23 @@ func TestReadAndWebhookRoutesAllowedWithoutBootToken(t *testing.T) {
 		t.Fatalf("GET /api/plugins wrongly gated by operator token")
 	}
 
+	// The :id/bundle and :id/ui/* asset routes are the highest-risk
+	// intentionally-open routes — the browser loads them via dynamic
+	// import()/stylesheet fetches that cannot set a custom header, so gating
+	// them would silently break plugin UI loading. Pin that they never 403
+	// (an unknown plugin yields 404, not 403).
+	for _, path := range []string{
+		"/api/plugins/missing/bundle",
+		"/api/plugins/missing/ui/style.css",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code == http.StatusForbidden {
+			t.Fatalf("GET %s wrongly gated by operator token", path)
+		}
+	}
+
 	// Webhook relay must reach the handler (404 unknown plugin), not 403.
 	wh := httptest.NewRequest(http.MethodPost, "/api/plugins/missing/webhooks/key1", strings.NewReader("{}"))
 	whRec := httptest.NewRecorder()

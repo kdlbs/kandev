@@ -4,11 +4,11 @@ import { loadBootPayload, readBootPayload, readBootToken } from "./boot-payload"
 const JIRA_BUNDLE_URL = "/api/plugins/jira/bundle";
 
 describe("readBootToken", () => {
-  it("returns the per-boot operator token from runtime.csrfToken", () => {
+  it("returns the per-boot operator token from runtime.bootToken", () => {
     const win = {
       __KANDEV_BOOT_PAYLOAD__: {
         version: 1,
-        runtime: { apiPrefix: "/api/v1", webSocketPath: "/ws", csrfToken: "boot-token-abc" },
+        runtime: { apiPrefix: "/api/v1", webSocketPath: "/ws", bootToken: "boot-token-abc" },
       },
     } as unknown as Window;
 
@@ -27,11 +27,11 @@ describe("readBootToken", () => {
   it("also surfaces the token through readBootPayload's runtime", () => {
     const win = {
       __KANDEV_BOOT_PAYLOAD__: {
-        runtime: { apiPrefix: "/api/v1", webSocketPath: "/ws", csrfToken: "tok-1" },
+        runtime: { apiPrefix: "/api/v1", webSocketPath: "/ws", bootToken: "tok-1" },
       },
     } as unknown as Window;
 
-    expect(readBootPayload(win).runtime?.csrfToken).toBe("tok-1");
+    expect(readBootPayload(win).runtime?.bootToken).toBe("tok-1");
   });
 });
 

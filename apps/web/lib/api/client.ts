@@ -19,6 +19,24 @@ export function bootTokenHeaders(): Record<string, string> {
   return token ? { [BOOT_TOKEN_HEADER]: token } : {};
 }
 
+// mutationInit builds a fetchJson `init` for a state-changing operator request:
+// it spreads caller init, sets the method/body, and merges the boot-token
+// header LAST so the correct token always wins over any caller-supplied
+// headers (a caller passing a stale/wrong token must not silently 403). Shared
+// by the plugins and marketplace API domains so both use one merge strategy.
+export function mutationInit(
+  method: string,
+  options: ApiRequestOptions | undefined,
+  body?: BodyInit,
+): RequestInit {
+  return {
+    ...(options?.init ?? {}),
+    method,
+    headers: { ...(options?.init?.headers ?? {}), ...bootTokenHeaders() },
+    ...(body !== undefined ? { body } : {}),
+  };
+}
+
 export type ApiRequestOptions = {
   baseUrl?: string;
   cache?: RequestCache;

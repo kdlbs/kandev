@@ -1,25 +1,14 @@
-import { ApiError, bootTokenHeaders, fetchJson, type ApiRequestOptions } from "../client";
+import {
+  ApiError,
+  bootTokenHeaders,
+  fetchJson,
+  mutationInit,
+  type ApiRequestOptions,
+} from "../client";
 import { getBackendConfig } from "@/lib/config";
 import type { PluginRecord, SyncResult } from "@/lib/types/plugins";
 
 const BASE = "/api/plugins";
-
-// mutationInit merges the per-boot operator-token header into a state-changing
-// request's init, preserving any caller-supplied init/headers. Every gated
-// route (install/sync/enable/disable/uninstall/config) requires it — see
-// httpmw.RequireBootToken on the backend.
-function mutationInit(
-  method: string,
-  options: ApiRequestOptions | undefined,
-  body?: BodyInit,
-): RequestInit {
-  return {
-    ...(options?.init ?? {}),
-    method,
-    headers: { ...bootTokenHeaders(), ...(options?.init?.headers ?? {}) },
-    ...(body !== undefined ? { body } : {}),
-  };
-}
 
 // listPlugins fetches every registered plugin (GET /api/plugins).
 export async function listPlugins(options?: ApiRequestOptions) {

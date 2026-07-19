@@ -683,7 +683,7 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 func bootPayload(ctx context.Context, req *http.Request, p routeParams, route webapp.RouteClassification) webapp.BootPayload {
 	payload := webapp.NewBootPayload(
 		route,
-		webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws", Debug: p.devMode, CSRFToken: p.bootToken},
+		webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws", Debug: p.devMode, BootToken: p.bootToken},
 		bootInitialState(ctx, req, p, route),
 	)
 	payload.RouteData = bootRouteData(ctx, req, p, route)

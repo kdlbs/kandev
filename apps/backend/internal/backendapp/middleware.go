@@ -29,7 +29,11 @@ func corsMiddleware() gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Origin", "*")
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, Upgrade, Connection, Sec-WebSocket-Key, Sec-WebSocket-Version, Sec-WebSocket-Protocol")
+		// httpmw.BootTokenHeader must be allowed so split-origin (Vite dev)
+		// plugin mutations — which the SPA now sends with this custom header —
+		// survive the browser's CORS preflight instead of being blocked before
+		// they reach the guarded routes.
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, "+httpmw.BootTokenHeader+", Upgrade, Connection, Sec-WebSocket-Key, Sec-WebSocket-Version, Sec-WebSocket-Protocol")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
