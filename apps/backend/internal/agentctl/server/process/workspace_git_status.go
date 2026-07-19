@@ -174,10 +174,7 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	// which the agentctl git-log handler used to silently translate into
 	// "last N commits of HEAD" (the symptom in the no-merge-base repro:
 	// `+1 -0` on the card vs. 100 unrelated commits in the panel).
-	baseBranch := wt.resolveBaseBranch(ctx)
-	if baseBranch != "" {
-		update.BaseCommit = wt.computeBaseCommit(ctx, baseBranch)
-	}
+	update.BaseCommit = wt.ResolveBaseCommit(ctx)
 
 	return nil
 }
@@ -210,6 +207,18 @@ func (wt *WorkspaceTracker) computeBaseCommit(ctx context.Context, baseBranch st
 		return strings.TrimSpace(string(out))
 	}
 	return ""
+}
+
+// ResolveBaseCommit returns the comparison anchor configured for this
+// repository. It shares the exact stored-base and fallback resolution used by
+// git status so API consumers such as commits and cumulative diff cannot drift
+// from the Changes panel's ahead/behind and branch-diff totals.
+func (wt *WorkspaceTracker) ResolveBaseCommit(ctx context.Context) string {
+	baseBranch := wt.resolveBaseBranch(ctx)
+	if baseBranch == "" {
+		return ""
+	}
+	return wt.computeBaseCommit(ctx, baseBranch)
 }
 
 // getAheadBehindCounts populates the Ahead/Behind fields relative to the base
