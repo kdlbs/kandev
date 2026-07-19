@@ -196,9 +196,22 @@ func Copy(ctx context.Context, sourceDir, targetDir string, specs []PatternSpec,
 		return nil, nil, fmt.Errorf("copyfiles: resolve source: %w", err)
 	}
 
+	// Canonicalize the target root so destination containment checks compare
+	// like-for-like. secureDestination EvalSymlinks a created parent and then
+	// Rel-checks it against this root; a worktree reached through a symlinked
+	// ancestor (e.g. macOS /tmp -> /private/tmp, or a user-symlinked tasks dir)
+	// would otherwise make the canonical parent look like it escapes the
+	// non-canonical root, silently dropping every byte copy. Mirrors the
+	// EvalSymlinks WriteEntries already does. Fall back to the raw path when the
+	// target does not exist yet (MkdirAll creates it lazily during the copy).
+	canonTarget := targetDir
+	if resolved, rerr := filepath.EvalSymlinks(targetDir); rerr == nil {
+		canonTarget = resolved
+	}
+
 	state := &copyState{
 		ctx:       ctx,
-		targetDir: targetDir,
+		targetDir: canonTarget,
 		canonRoot: canonRoot,
 		log:       log,
 		copied:    make(map[string]struct{}),

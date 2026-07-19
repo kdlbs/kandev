@@ -270,6 +270,49 @@ func TestCopy_ByteCopy_CleanNestedStillWorks(t *testing.T) {
 	}
 }
 
+// A worktree reached through a symlinked ANCESTOR (the macOS /tmp -> /private/tmp
+// case, or a user-symlinked tasks dir) must still copy: the destination
+// containment check has to compare canonical-to-canonical, not canonical parent
+// vs raw root, or every legitimate byte copy is silently dropped.
+func TestCopy_ByteCopy_SymlinkedTargetAncestorStillCopies(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation often requires privilege on Windows")
+	}
+	base := t.TempDir()
+	src := t.TempDir()
+	writeFile(t, filepath.Join(src, "config", "local.yml"), "SECRET=1", 0o644)
+
+	// base/link -> base/real; the worktree lives under the symlinked ancestor.
+	realParent := filepath.Join(base, "real")
+	if err := os.MkdirAll(realParent, 0o755); err != nil {
+		t.Fatalf("mkdir real: %v", err)
+	}
+	linkParent := filepath.Join(base, "link")
+	if err := os.Symlink(realParent, linkParent); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	target := filepath.Join(linkParent, "worktree")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+
+	copied, warnings, err := Copy(context.Background(), src, target,
+		[]PatternSpec{{Pattern: "config/local.yml"}}, nil)
+	if err != nil {
+		t.Fatalf("Copy err: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings (false rejection): %v", warnings)
+	}
+	if len(copied) != 1 || copied[0] != "config/local.yml" {
+		t.Fatalf("copied = %v, want [config/local.yml]", copied)
+	}
+	// The bytes land at the real location under the symlinked ancestor.
+	if got := readFile(t, filepath.Join(realParent, "worktree", "config", "local.yml")); got != "SECRET=1" {
+		t.Fatalf("content = %q, want SECRET=1", got)
+	}
+}
+
 // A symlink entry whose destination parent is itself a symlink pointing outside
 // the worktree must be rejected before MkdirAll/os.Symlink follow it out.
 func TestCopy_SymlinkMode_RejectsSymlinkedParent(t *testing.T) {
