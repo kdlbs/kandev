@@ -122,8 +122,12 @@ export function useGitLabSearch({
   );
 
   useEffect(() => {
+    // Gate at the effect level too (mirrors the Linear hook, which guards both
+    // its run callback and its debounce effect) so a disabled integration never
+    // schedules a fetch. The callback keeps its own guard to also cover refresh().
+    if (!enabled) return;
     void fetchData({ filter: resolved.filter, customQuery: resolved.customQuery, page });
-  }, [fetchData, resolved.filter, resolved.customQuery, page]);
+  }, [fetchData, enabled, resolved.filter, resolved.customQuery, page]);
 
   const refresh = useCallback(
     () => fetchData({ filter: resolved.filter, customQuery: resolved.customQuery, page }),
