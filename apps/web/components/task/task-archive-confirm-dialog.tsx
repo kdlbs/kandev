@@ -28,6 +28,7 @@ type TaskArchiveConfirmDialogProps = {
   isArchiving?: boolean;
   taskId?: string;
   taskIds?: string[];
+  isInFlight?: boolean;
   /** Executor type of the task being archived (single). */
   executorType?: string | null;
   /** Executor types of the tasks being archived (bulk). */
@@ -79,6 +80,7 @@ export function TaskArchiveConfirmDialog({
   isArchiving,
   taskId,
   taskIds,
+  isInFlight,
   executorType,
   executorTypes,
   onConfirm,
@@ -103,7 +105,8 @@ export function TaskArchiveConfirmDialog({
     onOpenChange,
   );
   const subtaskCount = useSubtaskCount(open && requiresConfirmation, taskId, taskIds);
-  const isInFlight = useTaskInFlight(taskId, taskIds);
+  const storeInFlight = useTaskInFlight(taskId, taskIds);
+  const taskIsInFlight = [isInFlight, storeInFlight].includes(true);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setCascade(false);
@@ -128,7 +131,7 @@ export function TaskArchiveConfirmDialog({
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {isInFlight && <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />}
+        {taskIsInFlight && <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />}
         {subtaskCount > 0 && (
           <label className="flex items-start gap-2 text-sm cursor-pointer">
             <Checkbox

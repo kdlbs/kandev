@@ -23,10 +23,6 @@ type IconConfig = {
 const STYLE_MUTED = "text-muted-foreground";
 const STYLE_LOADING = "text-blue-500 animate-spin";
 const STYLE_WARNING = "text-yellow-500";
-// The pending-permission "needs me" hue — amber, distinct from the yellow
-// clarification/waiting question so the two "needs me" variants read apart even
-// side by side (§spec:waiting-for-input-parity). Matches the sidebar's inline
-// IconShieldQuestion amber in task-item.tsx, now single-sourced here.
 const STYLE_PERMISSION = "text-amber-500";
 const STYLE_ERROR = "text-red-500";
 const WAITING_FOR_INPUT = "WAITING_FOR_INPUT";
@@ -55,12 +51,6 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
   // Office sessions: agent process torn down, conversation paused. Use the
   // pause icon — visually distinct from RUNNING and from terminal states.
   IDLE: { Icon: IconPlayerPause, className: STYLE_MUTED },
-  // waiting-for-my-input: the agent finished its turn and is waiting on a reply
-  // (§spec:waiting-for-input-parity). The message-question glyph reads as
-  // "needs me" — matching the sidebar and the task-level waiting icon — and is
-  // distinct by SHAPE from the running dot, the background spinner, and the done
-  // check, so it survives a grayscale scan (§req:not-color-alone). The pending-
-  // clarification / pending-permission variants layer on top via getSessionStateIcon.
   WAITING_FOR_INPUT: { Icon: IconMessageQuestion, className: STYLE_WARNING },
   COMPLETED: { Icon: IconCircleCheck, className: "text-green-500" },
   FAILED: { Icon: IconAlertTriangle, className: STYLE_ERROR },
@@ -111,13 +101,6 @@ const TASK_BACKGROUND_ICON: IconConfig = {
   className: "text-violet-500 animate-spin",
 };
 
-// The pending-permission waiting variant (§spec:waiting-for-input-parity): the
-// agent is blocked on a permission prompt and needs the operator to approve or
-// deny. A shield-question — distinct by SHAPE from the clarification/waiting
-// message-question (so the two "needs me" variants read apart), from the done
-// check, and from both running affordances, surviving a grayscale scan. Shared
-// verbatim by both the task-level and session-level waiting readings — a
-// permission prompt reads the same "approve/deny me" everywhere.
 const PENDING_PERMISSION_ICON: IconConfig = {
   Icon: IconShieldQuestion,
   className: STYLE_PERMISSION,
@@ -190,15 +173,6 @@ export function shouldUsePermissionTaskIcon(hasPendingPermission = false): boole
   return hasPendingPermission;
 }
 
-// The single "task still has work running" predicate, derived from the SAME
-// task-level MOST-ACTIVE-WINS aggregate that drives the board card / task-list
-// busy affordance (getTaskStateIconConfig above): a foreground turn actively
-// generating, or spawned background work running while the foreground is idle,
-// both count as in-flight. The destructive-action guard
-// (§spec:destructive-action-guard) consumes this so the archive/delete "still
-// working" warning always agrees with the indicator the operator sees — never a
-// separately-computed truth that could warn when the board shows done, or stay
-// silent when the board shows working.
 export function isTaskInFlight(foregroundActivity?: ForegroundActivity | null): boolean {
   return foregroundActivity === "generating" || foregroundActivity === "background";
 }
@@ -216,9 +190,6 @@ function getTaskStateIconConfig(
   // (e.g. a finished primary session) would otherwise render done.
   if (foregroundActivity === "background") return TASK_BACKGROUND_ICON;
   if (foregroundActivity === "generating") return TASK_GENERATING_ICON;
-  // "needs me" variants (§spec:waiting-for-input-parity). Pending-permission
-  // takes precedence over the generic waiting/clarification question so a
-  // permission prompt is never masked by a coarse WAITING_FOR_INPUT state.
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return PENDING_PERMISSION_ICON;
   }
@@ -257,13 +228,6 @@ function getSessionStateIconConfig(
   if (state === "RUNNING" && foregroundActivity === "background") {
     return SESSION_BACKGROUND_ICON;
   }
-  // "needs me" variants (§spec:waiting-for-input-parity), carrying the sidebar's
-  // rich reading to the session menus. A pending permission / clarification wins
-  // over the coarse state — including a session still coarsely RUNNING mid-turn
-  // when the agent has stopped to ask — so "needs me" is never masked. Permission
-  // (shield) takes precedence over clarification/waiting (question), matching the
-  // task-level precedence. A plain WAITING_FOR_INPUT with no message flags falls
-  // through to SESSION_STATE_ICONS.WAITING_FOR_INPUT (the same question glyph).
   if (hasPendingPermission) return PENDING_PERMISSION_ICON;
   if (hasPendingClarification) return SESSION_STATE_ICONS.WAITING_FOR_INPUT;
   if (!state) return DEFAULT_SESSION_ICON;

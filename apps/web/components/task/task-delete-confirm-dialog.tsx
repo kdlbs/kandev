@@ -27,6 +27,7 @@ type TaskDeleteConfirmDialogProps = {
   isDeleting?: boolean;
   taskId?: string;
   taskIds?: string[];
+  isInFlight?: boolean;
   /** Executor type of the task being deleted (single). */
   executorType?: string | null;
   /** Executor types of the tasks being deleted (bulk). */
@@ -44,6 +45,7 @@ export function TaskDeleteConfirmDialog({
   isDeleting,
   taskId,
   taskIds,
+  isInFlight,
   executorType,
   executorTypes,
   onConfirm,
@@ -61,7 +63,7 @@ export function TaskDeleteConfirmDialog({
 
   const [cascade, setCascade] = useState(false);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
-  const isInFlight = useTaskInFlight(taskId, taskIds);
+  const storeInFlight = useTaskInFlight(taskId, taskIds);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setCascade(false);
@@ -84,7 +86,9 @@ export function TaskDeleteConfirmDialog({
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {isInFlight && <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />}
+        {(isInFlight || storeInFlight) && (
+          <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
+        )}
         {subtaskCount > 0 && (
           <label className="flex items-start gap-2 text-sm cursor-pointer">
             <Checkbox

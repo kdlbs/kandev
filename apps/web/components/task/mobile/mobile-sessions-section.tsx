@@ -91,13 +91,11 @@ function sessionStateLabel(
   foregroundActivity: ForegroundActivity | null,
   pending: PendingInput,
 ): string {
-  // "needs me" variants (§spec:waiting-for-input-parity) name themselves, even
-  // mid-turn (coarse RUNNING), so background never masks an actionable prompt.
-  if (pending.permission) return "Permission requested";
-  if (pending.clarification) return formatTaskSessionStateLabel("WAITING_FOR_INPUT");
   if (state === "RUNNING" && foregroundActivity === "background") {
     return BACKGROUND_RUNNING_LABEL;
   }
+  if (pending.permission) return "Permission requested";
+  if (pending.clarification) return formatTaskSessionStateLabel("WAITING_FOR_INPUT");
   return formatTaskSessionStateLabel(state);
 }
 

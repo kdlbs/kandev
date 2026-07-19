@@ -207,6 +207,30 @@ describe("TaskItem background-running indicator", () => {
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
   });
 
+  it("keeps background-running visible while the foreground waits for input", () => {
+    renderTaskItem({
+      state: "WAITING_FOR_INPUT",
+      sessionState: "WAITING_FOR_INPUT",
+      foregroundActivity: "background",
+      hasPendingClarification: true,
+    });
+
+    expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId("task-state-waiting-for-input")).toBeNull();
+  });
+
+  it("keeps foreground-running visible while a waiting flag is present", () => {
+    renderTaskItem({
+      state: "WAITING_FOR_INPUT",
+      sessionState: "WAITING_FOR_INPUT",
+      foregroundActivity: "generating",
+      hasPendingClarification: true,
+    });
+
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
+  });
+
   it("drives the generating spinner from a generating aggregate even when the coarse session reads done", () => {
     // Multi-session most-active-wins: a generating secondary session keeps the row
     // on the gold generating spinner though the primary session finished.
@@ -237,7 +261,9 @@ describe("TaskItem background-running indicator", () => {
     expect(icon.getAttribute(DATA_LOADING_PHASE)).toBe(RUNNING_PHASE);
     expect(icon.classList.contains(YELLOW_SPINNER_CLASS)).toBe(true);
   });
+});
 
+describe("TaskItem background-running lifecycle", () => {
   it("reflects the full generating → background → done sequence from the aggregate", () => {
     // A single-session task driven through all three states reads each on the sidebar
     // without opening the task.

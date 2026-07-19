@@ -30,11 +30,8 @@
 
 ## Four distinguishable states, not by color alone §spec:state-vocabulary
 
-*Status: complete — all four states (generating / background-running /
-waiting-for-input / done) are landed and distinguishable by shape+label (not
-hue alone) via the shared `getTaskStateIcon` / `getSessionStateIcon` in
-`apps/web/lib/ui/state-icons.tsx`; the waiting-for-input fourth state now reads
-consistently on every surface (see §spec:waiting-for-input-parity).*
+*Status: complete — all four states are shipped across the in-scope surfaces
+and remain distinguishable without relying on color alone.*
 
 Every status surface communicates four mutually distinguishable
 conditions for a task or session:
@@ -104,16 +101,9 @@ that the distinction survives a grayscale view.
 
 ## Task-level indicators reflect all of a task's work §spec:task-level-truth
 
-*Status: complete — every at-a-glance task surface (the board/kanban card,
-task-list rows, graph/swimlane nodes, open-task header, and the desktop and
-mobile sidebar) reads the backend most-active-wins aggregate
-(`Task.foreground_activity`) and never renders "done" while a session works.
-The desktop and mobile sidebar previously derived their icon from the
-most-active single session's substate rather than the task aggregate — they
-now read the task-record aggregate (preserving the sidebar's established gold
-generating spinner and background affordance per §spec:state-vocabulary), so a
-background-running secondary session on a multi-session task is caught there
-and the sidebar agrees with the board card and open-task header.*
+*Status: complete — every at-a-glance task surface, including both sidebars,
+uses the task-level most-active-wins truth and never renders "done" while any
+owned session is working.*
 
 On every at-a-glance task surface — the board / kanban card, the task
 list rows, the graph / swimlane nodes, the open-task header, and the
@@ -190,11 +180,8 @@ level surface — including the sidebar — reads background-running, not done.
 
 ## Session-level indicators surface the substate uniformly §spec:session-level-truth
 
-*Status: complete — the session switcher, the session-reopen menu, and the
-mobile sessions section all render background-running distinctly (via
-`getSessionStateIcon` with the session's `foreground_activity`); the mobile
-sessions section's substate-blind tone map has been replaced, so every
-session-level surface now reads the substate from the shared vocabulary.*
+*Status: complete — desktop and mobile session surfaces all distinguish
+background-running from generating and done using the shared vocabulary.*
 
 Every surface that shows a per-session status reflects the same four
 states. The session switcher and the session-reopen menu already
@@ -239,15 +226,9 @@ attributes (mobile parity) · §req:constraints
 
 ## Waiting-for-my-input reads consistently everywhere §spec:waiting-for-input-parity
 
-*Status: complete — the sidebar's rich waiting reading (message-derived
-pending-clarification and pending-permission variants) is now carried to the
-kanban card, task-list row, graph/swimlane node, open-task header, and the
-session menus (desktop + mobile), lifted into the shared vocabulary
-(`getTaskStateIcon` / `getSessionStateIcon` plus the `useTaskPendingInput` /
-`useSessionPendingInput` hooks) rather than reinvented per surface. The
-task-list row's disabled clarification path is re-enabled, and each waiting
-variant is distinct from done and from both running states by icon shape/label
-(grayscale-safe), not hue alone.*
+*Status: complete — the waiting, clarification, and permission readings now
+match across every task and session surface and remain distinct from done and
+both running states without relying on color alone.*
 
 Waiting-for-my-input is a first-class fourth state, distinguishable from
 finished and from both running states, on every surface — not only the
@@ -302,13 +283,8 @@ done and from running — matching the sidebar.
 
 ## Live, durable, single-source, and safe-by-default §spec:live-and-durable
 
-*Status: complete — transitions push live over `task_session.activity_
-changed` (per-session) and `task.updated` (task aggregate); the boot
-payload and session/task records carry the current substate so first paint
-and a second tab are correct without a transition; the aggregate preserves
-its last-known value when the session set can't be loaded, and an unknown
-substate on an in-flight turn resolves to the safe running reading, never
-done.*
+*Status: complete — live updates, fresh loads, and safe fallback all preserve
+the rule that an in-flight task never reads as done.*
 
 As a task moves between the four states, every in-scope surface —
 session-level and task-level — updates promptly without a manual refresh
@@ -373,12 +349,9 @@ the session's turn is still open.
 
 ## Guard against destroying a running task §spec:destructive-action-guard
 
-*Status: complete — the archive and delete confirmation dialogs render a
-"still working" warning (`task-still-working-warning.tsx`) whenever
-`useTaskInFlight` reports the task-level `foreground_activity` aggregate is
-generating or background-running, reading the same store truth the board
-indicators show. The archive dialog honors the `confirmTaskArchive` bypass
-as designed (documented residual gap, q1_opt2); delete has no bypass and is
+*Status: complete — archive and delete confirmations warn when the same
+task-level truth shown by the indicators says work is still running. The
+operator-approved archive-confirmation bypass remains unchanged; delete is
 always guarded.*
 
 When the operator attempts to archive or delete a task that still has work

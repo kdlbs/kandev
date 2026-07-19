@@ -5,12 +5,6 @@ import {
   hasPendingPermissionForSession,
 } from "@/lib/utils/pending-clarification";
 
-/**
- * The two message-derived "needs me" flags every status surface reads to render
- * the waiting-for-input fourth state (§spec:waiting-for-input-parity). Kept
- * separate — a pending permission prompt reads distinctly from a pending
- * clarification question — so surfaces can pick the right affordance.
- */
 export type PendingInput = { clarification: boolean; permission: boolean };
 
 const NONE: PendingInput = { clarification: false, permission: false };
@@ -36,9 +30,6 @@ function fallbackFlag(
  * falls back to the boot-payload snapshot (`primary_session_state` +
  * `primary_session_pending_action`) so the reading is correct on first paint.
  *
- * Each flag is selected as its own primitive so a new object identity per render
- * never churns the store subscription — the component only re-renders when a
- * flag actually flips.
  */
 export function useTaskPendingInput(
   primarySessionId: string | null | undefined,
@@ -61,12 +52,7 @@ export function useTaskPendingInput(
   return { clarification, permission };
 }
 
-/**
- * Per-session pending-input flags for a specific session id — used by the
- * session menus, which list every session and need each one's own "needs me"
- * reading (not just the task's primary). Reads live messages only; there is no
- * per-session snapshot fallback because the menus render loaded sessions.
- */
+/** Per-session pending-input flags; session menus already operate on loaded sessions. */
 export function useSessionPendingInput(sessionId: string | null | undefined): PendingInput {
   const clarification = useAppStore((state) =>
     hasPendingClarificationForSession(state.messages.bySession, sessionId),
