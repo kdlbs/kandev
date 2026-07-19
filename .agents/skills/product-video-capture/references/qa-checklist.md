@@ -1,22 +1,26 @@
 # Product Media QA
 
-## 1. Source Contract
+## 1. Source And Isolation Contract
 
-- [ ] Disposable seed and ports documented.
-- [ ] Desktop and mobile have separate scripts and raw masters.
-- [ ] Raw is continuous 1x with no crop, camera, concat, speed change, or internal cut.
-- [ ] OS cursor disabled; exactly one DOM cursor/touch treatment visible.
-- [ ] Semantic events include timestamps, target bounds, and smooth motion samples.
-- [ ] Every visible pointer/touch waypoint is normalized against the camera source and has an explicit visibility interval.
-- [ ] Poster captured after recorder stops with pointer/touch hidden.
+- [ ] Proven clean worktree SHA equals the freshly fetched `origin/main`; no alternate revision is eligible for product capture.
+- [ ] Build/rehearsal frames show current UI and the requested theme without DOM/CSS patching.
+- [ ] Unique temp home, database, repository root, ports, X display, and browser profile are documented.
+- [ ] No developer instance, developer database, credentials, or production port was used.
+- [ ] Final take starts from fresh/reset deterministic data with no rehearsal-created duplicates.
+- [ ] Desktop and mobile use separate native scripts and raw masters.
+- [ ] Desktop source is `3840x2400` at 25 fps and delivery is `1920x1200` at 25 fps.
+- [ ] Mobile source and delivery are native `1290x2796` at 25 fps.
+- [ ] Each raw master is one continuous take at 1x: no internal cuts, concat, camera, crop, speed ramps, or audio.
+- [ ] OS cursor is disabled and exactly one DOM cursor/touch treatment is visible.
+- [ ] Dense semantic metadata includes timestamps, intermediate samples, target bounds, target glyph bounds, pointer glyph bounds, and visibility intervals.
 
-## 2. Technical Probe
+## 2. Technical And Codec Probe
 
-Use `ffprobe` on every raw and delivery file:
+Use `ffprobe` on every raw, WebM, and MP4:
 
 ```bash
 ffprobe -v error \
-  -show_entries stream=codec_name,width,height,r_frame_rate,avg_frame_rate:format=duration,size \
+  -show_entries stream=index,codec_name,codec_type,width,height,r_frame_rate,avg_frame_rate,pix_fmt:format=duration,size \
   -of json <video>
 
 ffprobe -v error -select_streams v:0 \
@@ -26,21 +30,32 @@ ffprobe -v error -select_streams v:0 \
 
 Verify:
 
-- decoded dimensions match profile;
+- decoded dimensions match the exact source/delivery profile;
 - `r_frame_rate` and `avg_frame_rate` are constant 25 fps;
-- consecutive decoded frame timestamps advance by 0.04 seconds within one stream time-base tick, with no duplicate, negative, or missing-frame gaps;
-- duration matches marked story and camera timeline;
-- WebM codec is VP9, MP4 codec is H.264;
-- no audio stream exists;
-- poster dimensions match delivery.
+- frame timestamps advance by 0.04 seconds within one stream time-base tick, with no duplicate, negative, or missing-frame gap;
+- the full FFmpeg log reports zero duplicated and dropped frames and proves measured realtime recorder capacity at the exact source profile;
+- story marks and camera timeline fit inside source duration;
+- no audio stream exists in raw or deliveries;
+- WebM is VP9 and MP4 is H.264 with fast start;
+- WebP dimensions match delivery and its selected frame is settled;
+- decoded first/middle/final raw frames fill all four edges without padded CSS-size content.
 
-Decode at least one raw frame and inspect all four edges. A 3840x2400 container with 1920x1200 active content and neutral padding is not high resolution.
+Save machine-readable probe output per slug under staged `qa/codec/`. Container metadata alone is not proof: decode pixels.
 
-## 3. Timeline Audit
+## 3. Camera And Pointer Audit
 
-Extract full-resolution frames at 10%, 25%, 50%, 75%, and 90%. Build a contact sheet for quick comparison, but inspect original frames when text appears truncated; downscaled mosaics can create false clipping.
+- [ ] Desktop config uses `formFactor: "landing"`; maximum zoom is 2.0x.
+- [ ] Mobile config uses `formFactor: "mobile"`; its tested cap is respected and never exceeds 2.0x.
+- [ ] Camera keyframes derive from semantic metadata rather than guessed click positions.
+- [ ] Camera stays center-biased toward the active pointer/target and never moves away from an active pointer journey.
+- [ ] Long travel uses widen-pan-tighten: widen before departure, pan with motion, tighten after arrival.
+- [ ] Full menus, provider panels, sheets, dialogs, and diffs remain visible as framing priority.
+- [ ] Frame-by-frame containment includes the full cursor/touch glyph and edge-safe margin for every visibility interval; the cursor never leaves the frame.
+- [ ] Wide shots remain readable at actual display size.
+- [ ] Loop starts/settles/ends on its tested identical frame and holds at least 240ms.
+- [ ] Raw master plus config can reproduce the delivery, proving a reversible camera.
 
-Watch the complete loop at normal speed and at 0.5x. Check:
+Reject lazy global zoom, cursor-opposed camera motion, clipped glyphs, tight panning after departure, or any camera crop used to hide a product defect.
 
 - no pointer teleport, duplicate pointer, or click before arrival;
 - no state jump, cut, speed-up, dead wait, blank beat, or loader hold;
@@ -52,70 +67,68 @@ Watch the complete loop at normal speed and at 0.5x. Check:
 
 For an editorial landing film, repeat the timeline audit inside the production theater at 760px, 850px, and 950px CSS widths. Reject a technically sharp delivery when the feature label, active control, changed line, feedback, or result cannot be read at those sizes.
 
-## 4. Content Audit
+## 4. Actual-Size Visual Audit
 
-Search every sampled frame and poster for:
+Extract full-resolution frames at 10%, 25%, 50%, 75%, and 90%, plus every menu/dialog/provider-panel peak and the settled loop frame.
 
-- fixture, mock, test, or E2E labels;
-- `/tmp`, `/home`, local repository paths, localhost URLs, or host username;
-- generic generated response or slash directive;
-- fake provider/executor/integration controls;
-- inconsistent organization, repository, task, branch, PR, or file names;
-- clipped title, popover, menu, stage label, diff, composer, checks, or action;
-- accidental notification, browser automation banner, browser status text, or developer tooling.
+Inspect representative originals at actual-size 100% display scale. Record reviewer, monitor scale, file, and result. A contact sheet is required for timing/context comparison, but a downscaled contact sheet never substitutes for actual-size text, cursor, and clipping inspection.
+
+Watch each complete loop at normal speed and 0.5x. Check:
+
+- no pointer teleport, duplicate pointer, click before arrival, or cursor leaving frame;
+- no state jump, cut, speed-up, dead wait, blank beat, loader hold, or stale UI;
+- stable readable copy holds long enough to understand;
+- no duplicate fixtures or tasks accumulated from rehearsal;
+- no fixture, mock, test, E2E, slash-directive, local-path, localhost, host-username, browser-status, automation-banner, or developer-tooling artifacts;
+- no fake provider, executor, or integration controls;
+- organization, repository, task, branch, PR/issue, provider, and created task stay narratively consistent;
+- titles, menus, provider panels, dialogs, sheets, diffs, checks, and primary actions are complete.
 
 For browser-managed chrome and banners, inspect the perimeter from every decoded raw frame in frame-indexed contact sheets. Fixed-fraction samples and normal-speed playback are supplementary, not frame-complete evidence.
 
-Confirm visible implementation, diff, test, and review claims are supported by seeded repository/provider state.
+If text is only legible when zooming the proof viewer beyond 100%, reject the shot as unreadable.
 
-## 5. Landing Integration
+## 5. Browser And Multi-Format QA
 
-Production bundle per slug:
+Keep candidates in staged delivery paths. In a real built player or dedicated staging page, test:
 
-```text
-public/product/loops/<slug>.webm
-public/product/loops/<slug>.mp4
-public/product/loops/<slug>.webp
-```
+- VP9 WebM source load, metadata, play, loop, and final settled reset;
+- H.264 MP4 fallback load, metadata, play, loop, and final settled reset;
+- WebP poster decode and correct pre-playback/reduced-motion rendering;
+- desktop selects `1920x1200` media and mobile selects its native `1290x2796` media;
+- muted, inline, lazy/in-view loading without layout shift;
+- `prefers-reduced-motion` keeps a meaningful poster and avoids autoplay motion;
+- no `cover` crop hides UI and browser console/network show no media error;
+- browser-reported dimensions/duration agree with codec probes.
 
-Verify player behavior:
+Capture browser screenshots/logs and codec support/playback results under `qa/browser/`. Passing FFmpeg encode alone is not browser QA; passing one source alone is not multi-format QA.
 
-- WebM primary and MP4 fallback both load;
-- poster appears before playback and under reduced motion;
-- video is muted, inline, lazy/in-view loaded, and does not shift layout;
-- only active desktop/mobile story loads;
-- native mobile media uses its own aspect ratio and source;
-- controls, tabs, and carousel semantics remain keyboard-accessible;
-- no `cover` crop hides important UI.
+Run the resolved landing repository's focused camera/encoder tests before encoding. Before an editorial landing film, confirm those tests recognize `formFactor: "landing"`; stop if the checkout has only the general desktop profile. Run broader landing checks only when integrating or promoting; staged-candidate capture must not modify production assets.
 
-Run landing checks only from the resolved landing repository root. Before encoding an editorial landing film, confirm these focused tests recognize `formFactor: "landing"`; stop if the checkout still has only the general desktop profile.
+## 6. Hashes And Provenance
 
-```bash
-cd "$LANDING_REPO"
-pnpm exec vitest run scripts/product-loop-camera.test.mjs scripts/product-loop-encoder.test.mjs
-pnpm test
-pnpm exec tsc --noEmit
-pnpm run build:pages
-```
+- [ ] Generate SHA-256 for every raw master, semantic metadata file, camera config, WebM, MP4, WebP, actual-size proof, contact sheet, and browser/codec QA record.
+- [ ] Store deterministic seed identity and provider fixture versions.
+- [ ] Store Kandev and landing commit SHAs and clean-worktree evidence.
+- [ ] Store source/delivery profiles, FPS, DPR/CSS viewport, durations, codecs, sizes, crop/camera profile, and loop mode.
+- [ ] Store capture/encode/probe commands plus resolved X display, ports, and isolated browser profile.
+- [ ] Distinguish accepted files from rejected attempts and record rejection reasons.
+- [ ] Keep raw, proof, config, and delivery candidates outside production assets.
 
-Smoke-check desktop, mobile, and `prefers-reduced-motion` in a real browser. Confirm media requests return 200/206 and browser console has no errors.
-
-## 6. Promotion And Provenance
-
-- [ ] Encode to staging first.
 - [ ] Compare old/new loops side by side.
-- [ ] Promote only approved WebM/MP4/WebP files.
 - [ ] If a docs or landing clip uses a focused loop frame, confirm the first, settled penultimate, and final crops match exactly; use focused framing only when it improves readability or removes irrelevant chrome or fixture-only detail while preserving identifying context.
-- [ ] Record SHA-256, dimensions, duration, codec, size, source seed, and capture command.
-- [ ] Keep raw/proof bundle outside production assets unless repository policy requests it.
 - [ ] Do not delete previous accepted media until replacement passes build and browser smoke.
+
+Promotion is a separate authorization. Do not overwrite or copy landing assets during capture-only work.
 
 ## 7. Teardown
 
-- [ ] Stop FFmpeg, Chrome, Playwright, backend, frontend, and Xvfb.
-- [ ] Confirm capture backend/web/CDP ports have no listeners.
+- [ ] Stop FFmpeg, Chrome, Playwright, frontend, backend, and Xvfb.
+- [ ] Confirm every allocated backend/web/CDP port has no listener.
+- [ ] Confirm the unique X socket/display is gone.
 - [ ] Remove temporary E2E spec copies and browser profiles.
-- [ ] Remove disposable executor profiles, database, repo, and temp home.
-- [ ] Check both Kandev and landing worktrees; preserve unrelated user/agent changes.
+- [ ] Remove disposable executor profiles, database, repo, temp home, and detached capture worktree after needed evidence is staged.
+- [ ] Check Kandev and landing worktrees; preserve unrelated user/agent changes.
+- [ ] Record resolved targets and teardown proof in provenance.
 
-Final report must distinguish tests that passed, checks not run, and any product surface blocked by a real UI defect.
+Final report lists tests passed, checks not run, accepted and rejected artifact paths, hashes, browser/codec results, actual-size review, and teardown. Report the skill commit separately from capture delivery paths.
