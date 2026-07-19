@@ -33,17 +33,31 @@ export type TaskHeaderProps = {
    * distinct from a generating task.
    */
   foregroundActivity?: ForegroundActivity | null;
+  /**
+   * Message-derived "needs me" flags (§spec:waiting-for-input-parity). When set
+   * the badge reads the waiting variant distinctly ("Permission requested" /
+   * "Waiting for input") instead of the raw coarse state, matching the sidebar.
+   */
+  hasPendingClarification?: boolean;
+  hasPendingPermission?: boolean;
 };
 
 // The badge reflects the task-level activity aggregate ABOVE the coarse workflow
 // state (§spec:task-level-indicator), mirroring getTaskStateIcon: background-running
 // and generating each read distinctly and never fall back to a done coarse state.
+// The waiting-for-input variants (§spec:waiting-for-input-parity) sit below live
+// activity but above the coarse state, with pending-permission taking precedence
+// over the generic waiting/clarification reading.
 function resolveBadgeLabel(
-  state?: string | null,
-  foregroundActivity?: ForegroundActivity | null,
+  state: string | null | undefined,
+  foregroundActivity: ForegroundActivity | null | undefined,
+  hasPendingClarification: boolean,
+  hasPendingPermission: boolean,
 ): string | null {
   if (foregroundActivity === "background") return "Background running";
   if (foregroundActivity === "generating") return "Generating";
+  if (hasPendingPermission) return "Permission requested";
+  if (hasPendingClarification || state === "WAITING_FOR_INPUT") return "Waiting for input";
   return state ?? null;
 }
 
@@ -54,8 +68,15 @@ export function TaskHeader({
   assigneeName,
   stateBadgeVariant = "outline",
   foregroundActivity,
+  hasPendingClarification = false,
+  hasPendingPermission = false,
 }: TaskHeaderProps) {
-  const badgeLabel = resolveBadgeLabel(state, foregroundActivity);
+  const badgeLabel = resolveBadgeLabel(
+    state,
+    foregroundActivity,
+    hasPendingClarification,
+    hasPendingPermission,
+  );
   return (
     <div className="flex items-center gap-3 min-w-0">
       {identifier && (

@@ -49,4 +49,42 @@ describe("TaskHeader", () => {
     render(<TaskHeader title="t" state="COMPLETED" foregroundActivity={null} />);
     expect(screen.getByText("COMPLETED")).toBeTruthy();
   });
+
+  // §spec:waiting-for-input-parity: the header badge carries the sidebar's rich
+  // "needs me" reading, distinct from done and from running.
+  it("reads a plain WAITING_FOR_INPUT state as 'Waiting for input'", () => {
+    render(<TaskHeader title="t" state="WAITING_FOR_INPUT" />);
+    expect(screen.getByText("Waiting for input")).toBeTruthy();
+    expect(screen.queryByText("WAITING_FOR_INPUT")).toBeNull();
+  });
+
+  it("reads a pending clarification as 'Waiting for input' even over a non-waiting coarse state", () => {
+    render(<TaskHeader title="t" state="IN_PROGRESS" hasPendingClarification />);
+    expect(screen.getByText("Waiting for input")).toBeTruthy();
+  });
+
+  it("reads a pending permission as 'Permission requested', taking precedence over clarification", () => {
+    render(
+      <TaskHeader
+        title="t"
+        state="WAITING_FOR_INPUT"
+        hasPendingClarification
+        hasPendingPermission
+      />,
+    );
+    expect(screen.getByText("Permission requested")).toBeTruthy();
+  });
+
+  it("keeps live activity ahead of a waiting flag in the badge", () => {
+    render(
+      <TaskHeader
+        title="t"
+        state="WAITING_FOR_INPUT"
+        foregroundActivity="background"
+        hasPendingPermission
+      />,
+    );
+    expect(screen.getByText("Background running")).toBeTruthy();
+    expect(screen.queryByText("Permission requested")).toBeNull();
+  });
 });
