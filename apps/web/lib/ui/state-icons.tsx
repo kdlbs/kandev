@@ -116,13 +116,9 @@ const TASK_BACKGROUND_ICON: IconConfig = {
 // deny. A shield-question — distinct by SHAPE from the clarification/waiting
 // message-question (so the two "needs me" variants read apart), from the done
 // check, and from both running affordances, surviving a grayscale scan. Shared
-// by both the task-level and session-level waiting readings.
-const TASK_PENDING_PERMISSION_ICON: IconConfig = {
-  Icon: IconShieldQuestion,
-  className: STYLE_PERMISSION,
-};
-
-const SESSION_PENDING_PERMISSION_ICON: IconConfig = {
+// verbatim by both the task-level and session-level waiting readings — a
+// permission prompt reads the same "approve/deny me" everywhere.
+const PENDING_PERMISSION_ICON: IconConfig = {
   Icon: IconShieldQuestion,
   className: STYLE_PERMISSION,
 };
@@ -224,7 +220,7 @@ function getTaskStateIconConfig(
   // takes precedence over the generic waiting/clarification question so a
   // permission prompt is never masked by a coarse WAITING_FOR_INPUT state.
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
-    return TASK_PENDING_PERMISSION_ICON;
+    return PENDING_PERMISSION_ICON;
   }
   if (shouldUseQuestionTaskIcon(state, hasPendingClarification)) {
     return TASK_STATE_ICONS.WAITING_FOR_INPUT;
@@ -268,7 +264,7 @@ function getSessionStateIconConfig(
   // (shield) takes precedence over clarification/waiting (question), matching the
   // task-level precedence. A plain WAITING_FOR_INPUT with no message flags falls
   // through to SESSION_STATE_ICONS.WAITING_FOR_INPUT (the same question glyph).
-  if (hasPendingPermission) return SESSION_PENDING_PERMISSION_ICON;
+  if (hasPendingPermission) return PENDING_PERMISSION_ICON;
   if (hasPendingClarification) return SESSION_STATE_ICONS.WAITING_FOR_INPUT;
   if (!state) return DEFAULT_SESSION_ICON;
   return SESSION_STATE_ICONS[state] ?? DEFAULT_SESSION_ICON;
