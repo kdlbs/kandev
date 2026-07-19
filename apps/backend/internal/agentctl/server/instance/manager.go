@@ -176,7 +176,9 @@ func (m *Manager) allocatePortAndListener(id string) (int, net.Listener, error) 
 		if err != nil {
 			return 0, nil, fmt.Errorf("failed to allocate port: %w", err)
 		}
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", allocated))
+		// Bind loopback-only when auth is disabled (no token); otherwise bind
+		// all interfaces so Docker/remote executors can reach the instance.
+		ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", m.config.ListenHost(), allocated))
 		if err != nil {
 			if errors.Is(err, syscall.EADDRINUSE) || strings.Contains(err.Error(), "address already in use") {
 				m.portAlloc.MarkUnavailable(allocated)

@@ -144,3 +144,21 @@ func TestApplyOverrides_BaseBranches(t *testing.T) {
 		}
 	})
 }
+
+// TestListenHost pins the loopback-only bind guard: when auth is disabled
+// (empty AuthToken) the server must bind loopback only; when a token is
+// configured it binds all interfaces (empty host → ":port").
+func TestListenHost(t *testing.T) {
+	t.Run("no token binds loopback only", func(t *testing.T) {
+		cfg := &Config{AuthToken: ""}
+		if got := cfg.ListenHost(); got != "127.0.0.1" {
+			t.Fatalf("ListenHost() = %q, want 127.0.0.1 when auth disabled", got)
+		}
+	})
+	t.Run("token binds all interfaces", func(t *testing.T) {
+		cfg := &Config{AuthToken: "secret"}
+		if got := cfg.ListenHost(); got != "" {
+			t.Fatalf("ListenHost() = %q, want \"\" (all interfaces) when auth enabled", got)
+		}
+	})
+}
