@@ -104,13 +104,16 @@ that the distinction survives a grayscale view.
 
 ## Task-level indicators reflect all of a task's work §spec:task-level-truth
 
-*Status: partially complete — the board/kanban card, task-list rows,
-graph/swimlane nodes, and open-task header (icon + text badge) read the
-backend most-active-wins aggregate (`Task.foreground_activity`) and never
-render "done" while a session works; the desktop sidebar still derives its
-icon from the most-active single session's substate rather than the task
-aggregate, so a background-running secondary session can be missed there —
-aligning the sidebar to the aggregate is not started.*
+*Status: complete — every at-a-glance task surface (the board/kanban card,
+task-list rows, graph/swimlane nodes, open-task header, and the desktop and
+mobile sidebar) reads the backend most-active-wins aggregate
+(`Task.foreground_activity`) and never renders "done" while a session works.
+The desktop and mobile sidebar previously derived their icon from the
+most-active single session's substate rather than the task aggregate — they
+now read the task-record aggregate (preserving the sidebar's established gold
+generating spinner and background affordance per §spec:state-vocabulary), so a
+background-running secondary session on a multi-session task is caught there
+and the sidebar agrees with the board card and open-task header.*
 
 On every at-a-glance task surface — the board / kanban card, the task
 list rows, the graph / swimlane nodes, the open-task header, and the
