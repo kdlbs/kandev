@@ -187,19 +187,19 @@ level surface — including the sidebar — reads background-running, not done.
 
 ## Session-level indicators surface the substate uniformly §spec:session-level-truth
 
-*Status: partially complete — the session switcher and the session-reopen
-menu render background-running distinctly (via `getSessionStateIcon` with
-the session's `foreground_activity`); the mobile sessions section still
-shows no background distinction at all (its own tone map is
-substate-blind) — bringing it onto the shared vocabulary is not started.*
+*Status: complete — the session switcher, the session-reopen menu, and the
+mobile sessions section all render background-running distinctly (via
+`getSessionStateIcon` with the session's `foreground_activity`); the mobile
+sessions section's substate-blind tone map has been replaced, so every
+session-level surface now reads the substate from the shared vocabulary.*
 
 Every surface that shows a per-session status reflects the same four
 states. The session switcher and the session-reopen menu already
 distinguish background-running from generating and from done. The mobile
-sessions section — which today has no background-running distinction —
-shows it too, so an operator on a compact view sees the same truth as on
-desktop (§req:success-criteria #5, §req:quality-attributes: mobile
-parity).
+sessions section — brought onto the shared `getSessionStateIcon`
+vocabulary — shows it too, so an operator on a compact view sees the same
+truth as on desktop (§req:success-criteria #5, §req:quality-attributes:
+mobile parity).
 
 **Decision and the constraint that drove it.** Session-level surfaces read
 the per-session substate the signal already emits and already places on
