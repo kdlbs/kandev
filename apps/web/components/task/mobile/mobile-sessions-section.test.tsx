@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   activeSessionId: "session-a" as string | null,
   sessions: [] as TaskSession[],
   agentProfiles: [] as AgentProfileOption[],
+  messagesBySession: {} as Record<string, unknown[]>,
 }));
 
 vi.mock("@/hooks/use-task-sessions", () => ({
@@ -21,6 +22,7 @@ vi.mock("@/components/state-provider", () => ({
       tasks: { activeSessionId: mocks.activeSessionId },
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
+      messages: { bySession: mocks.messagesBySession },
       setActiveSession: vi.fn(),
     }),
 }));
@@ -42,6 +44,9 @@ vi.mock("@/hooks/domains/session/use-session-actions", () => ({
   isSessionDeletable: () => false,
   isSessionResumable: () => false,
 }));
+
+const PILL_TESTID = "mobile-sessions-pill";
+const ICON_CIRCLE_CHECK = "tabler-icon-circle-check";
 
 function session(
   id: string,
@@ -92,7 +97,7 @@ describe("MobileSessionsPicker", () => {
       screen.getByRole("button", { name: "Active session: Beta. Tap to switch." }),
     ).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId("mobile-sessions-pill"));
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
     expect(screen.getByTestId("mobile-session-row-session-a").getAttribute("aria-current")).toBe(
       null,
     );
@@ -105,7 +110,7 @@ describe("MobileSessionsPicker", () => {
     mocks.activeSessionId = "session-b";
     render(<MobileSessionsPicker taskId="task-1" sessionId="session-b" fullWidth />);
 
-    const pill = screen.getByTestId("mobile-sessions-pill");
+    const pill = screen.getByTestId(PILL_TESTID);
     expect(within(pill).getByTestId("mobile-session-agent-icon")).toBeTruthy();
     expect(within(pill).getByTestId("agent-logo-codex")).toBeTruthy();
   });
@@ -133,7 +138,7 @@ describe("MobileSessionsPicker", () => {
       }),
     ];
     render(<MobileSessionsPicker taskId="task-1" sessionId="session-bg" fullWidth />);
-    fireEvent.click(screen.getByTestId("mobile-sessions-pill"));
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
 
     const bg = screen.getByTestId("mobile-session-state-session-bg");
     const gen = screen.getByTestId("mobile-session-state-session-gen");
@@ -152,7 +157,40 @@ describe("MobileSessionsPicker", () => {
     expect(svgClass(bg)).not.toContain("tabler-icon-circle-filled");
 
     // Never a done check: distinct from a finished session, which shows the check.
-    expect(svgClass(bg)).not.toContain("tabler-icon-circle-check");
-    expect(svgClass(done)).toContain("tabler-icon-circle-check");
+    expect(svgClass(bg)).not.toContain(ICON_CIRCLE_CHECK);
+    expect(svgClass(done)).toContain(ICON_CIRCLE_CHECK);
+  });
+
+  it("carries the waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+    // A pending clarification and a pending permission each read distinctly on
+    // the mobile session row — the question / shield glyphs — never a done check
+    // or a running dot, matching the sidebar and desktop menus.
+    mocks.activeSessionId = "session-clar";
+    mocks.sessions = [
+      session("session-clar", "profile-a", "2026-01-01T00:00:00Z", {
+        state: "WAITING_FOR_INPUT",
+      }),
+      session("session-perm", "profile-b", "2026-01-01T00:01:00Z", {
+        state: "WAITING_FOR_INPUT",
+      }),
+    ];
+    mocks.messagesBySession = {
+      "session-clar": [{ type: "clarification_request", metadata: { status: "pending" } }],
+      "session-perm": [{ type: "permission_request", metadata: { status: "pending" } }],
+    };
+    render(<MobileSessionsPicker taskId="task-1" sessionId="session-clar" fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+
+    const clar = screen.getByTestId("mobile-session-state-session-clar");
+    const perm = screen.getByTestId("mobile-session-state-session-perm");
+    const svgClass = (el: HTMLElement) => el.querySelector("svg")?.getAttribute("class") ?? "";
+
+    expect(svgClass(clar)).toContain("tabler-icon-message-question");
+    expect(svgClass(clar)).not.toContain(ICON_CIRCLE_CHECK);
+    expect(svgClass(perm)).toContain("tabler-icon-shield-question");
+    expect(svgClass(perm)).not.toContain(ICON_CIRCLE_CHECK);
+    expect(perm.textContent).toMatch(/permission/i);
+
+    mocks.messagesBySession = {};
   });
 });

@@ -20,9 +20,21 @@ describe("shouldShowReopenStateIcon", () => {
     expect(shouldShowReopenStateIcon("RUNNING", undefined)).toBe(false);
   });
 
-  it("keeps STARTING and WAITING_FOR_INPUT icon-less", () => {
+  it("keeps STARTING icon-less (still launching)", () => {
     expect(shouldShowReopenStateIcon("STARTING", null)).toBe(false);
-    expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null)).toBe(false);
+  });
+
+  it("now surfaces the waiting-for-input affordance (§spec:waiting-for-input-parity)", () => {
+    // Previously WAITING_FOR_INPUT was silent; it now shows the "needs me" icon
+    // so the reopen menu distinguishes waiting from done and running.
+    expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null)).toBe(true);
+  });
+
+  it("surfaces the icon for a pending prompt even mid-turn (still coarsely RUNNING)", () => {
+    // A pending clarification / permission is actionable; it must not be masked
+    // by the generating-RUNNING silence rule.
+    expect(shouldShowReopenStateIcon("RUNNING", "generating", true, false)).toBe(true);
+    expect(shouldShowReopenStateIcon("RUNNING", "generating", false, true)).toBe(true);
   });
 
   it("renders the existing icon for terminal / other states", () => {

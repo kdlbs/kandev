@@ -14,6 +14,7 @@ import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { AgentLogo } from "@/components/agent-logo";
 import { markSessionTabUserActivationIntent } from "@/components/task/session-tab-activation-intent";
+import { useSessionPendingInput } from "@/hooks/use-task-pending-input";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 
@@ -22,19 +23,23 @@ type AgentInfo = { label: string; agentName: string };
 /**
  * Whether the reopen-menu row should render a state icon for `session`.
  *
- * Background-running (RUNNING + `background`) is the one running state this menu
- * surfaces — it must read distinctly (the shared background spinner), never as
- * done. The other in-flight states keep the established silent affordance: a
- * generating RUNNING session, STARTING, and WAITING_FOR_INPUT stay icon-less.
- * Terminal states (COMPLETED / FAILED / CANCELLED) keep their existing icons.
- * A RUNNING session whose substate is unknown falls back to silence (not done).
+ * A pending "needs me" prompt (clarification / permission) always surfaces — it
+ * is actionable even mid-turn. Background-running (RUNNING + `background`) also
+ * reads distinctly (the shared background spinner), never as done, and
+ * waiting-for-input now shows its "needs me" affordance too
+ * (§spec:waiting-for-input-parity). Only STARTING stays icon-less (still
+ * launching); a generating RUNNING session with no pending prompt also stays
+ * silent. Terminal states (COMPLETED / FAILED / CANCELLED) keep their icons.
  */
 export function shouldShowReopenStateIcon(
   state: TaskSessionState,
   foregroundActivity?: ForegroundActivity | null,
+  hasPendingClarification = false,
+  hasPendingPermission = false,
 ): boolean {
+  if (hasPendingClarification || hasPendingPermission) return true;
   if (state === "RUNNING") return foregroundActivity === "background";
-  return state !== "STARTING" && state !== "WAITING_FOR_INPUT";
+  return state !== "STARTING";
 }
 
 function resolveAgentInfo(
@@ -121,37 +126,76 @@ export function SessionReopenMenuItems({
           <span className="flex-1 truncate">New Agent</span>
         </DropdownMenuItem>
       )}
-      {sortedSessions.map((session, index) => {
-        const info = resolveAgentInfo(session, profilesById);
-        const isPrimary = session.id === primarySessionId;
-        const isOpen = Boolean(api?.getPanel(`session:${session.id}`));
-        return (
-          <DropdownMenuItem
-            key={session.id}
-            onClick={() => handleClick(session.id, info.label, groupId)}
-            className={`cursor-pointer text-xs gap-1.5 ${isOpen ? "opacity-50" : ""}`}
-            data-testid={`reopen-session-${session.id}`}
-          >
-            <span
-              data-testid={`reopen-session-seq-${index + 1}`}
-              className="shrink-0 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5"
-            >
-              #{index + 1}
-            </span>
-            {info.agentName && (
-              <AgentLogo agentName={info.agentName} size={14} className="shrink-0" />
-            )}
-            <span className="flex-1 truncate">{info.label}</span>
-            {isPrimary && <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0" />}
-            {shouldShowReopenStateIcon(session.state, session.foreground_activity) && (
-              <span className="shrink-0">
-                {getSessionStateIcon(session.state, "h-3 w-3", session.foreground_activity)}
-              </span>
-            )}
-          </DropdownMenuItem>
-        );
-      })}
+      {sortedSessions.map((session, index) => (
+        <SessionReopenMenuItem
+          key={session.id}
+          session={session}
+          info={resolveAgentInfo(session, profilesById)}
+          index={index}
+          isPrimary={session.id === primarySessionId}
+          isOpen={Boolean(api?.getPanel(`session:${session.id}`))}
+          onClick={handleClick}
+          groupId={groupId}
+        />
+      ))}
       <DropdownMenuSeparator />
     </>
+  );
+}
+
+// One reopen-menu row. Split into its own component so each row can read its
+// session's message-derived "needs me" flags (§spec:waiting-for-input-parity)
+// via the useSessionPendingInput hook without violating the rules of hooks
+// inside the sessions map.
+function SessionReopenMenuItem({
+  session,
+  info,
+  index,
+  isPrimary,
+  isOpen,
+  onClick,
+  groupId,
+}: {
+  session: TaskSession;
+  info: AgentInfo;
+  index: number;
+  isPrimary: boolean;
+  isOpen: boolean;
+  onClick: (sessionId: string, label: string, groupId?: string) => void;
+  groupId?: string;
+}) {
+  const pending = useSessionPendingInput(session.id);
+  return (
+    <DropdownMenuItem
+      onClick={() => onClick(session.id, info.label, groupId)}
+      className={`cursor-pointer text-xs gap-1.5 ${isOpen ? "opacity-50" : ""}`}
+      data-testid={`reopen-session-${session.id}`}
+    >
+      <span
+        data-testid={`reopen-session-seq-${index + 1}`}
+        className="shrink-0 text-[11px] font-medium leading-none text-muted-foreground bg-foreground/10 rounded px-1.5 py-0.5"
+      >
+        #{index + 1}
+      </span>
+      {info.agentName && <AgentLogo agentName={info.agentName} size={14} className="shrink-0" />}
+      <span className="flex-1 truncate">{info.label}</span>
+      {isPrimary && <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0" />}
+      {shouldShowReopenStateIcon(
+        session.state,
+        session.foreground_activity,
+        pending.clarification,
+        pending.permission,
+      ) && (
+        <span className="shrink-0">
+          {getSessionStateIcon(
+            session.state,
+            "h-3 w-3",
+            session.foreground_activity,
+            pending.clarification,
+            pending.permission,
+          )}
+        </span>
+      )}
+    </DropdownMenuItem>
   );
 }

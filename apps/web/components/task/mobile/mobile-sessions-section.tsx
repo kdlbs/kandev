@@ -35,6 +35,7 @@ import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
+import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 
@@ -88,7 +89,12 @@ const BACKGROUND_RUNNING_LABEL = "Working in background";
 function sessionStateLabel(
   state: TaskSessionState,
   foregroundActivity: ForegroundActivity | null,
+  pending: PendingInput,
 ): string {
+  // "needs me" variants (§spec:waiting-for-input-parity) name themselves, even
+  // mid-turn (coarse RUNNING), so background never masks an actionable prompt.
+  if (pending.permission) return "Permission requested";
+  if (pending.clarification) return formatTaskSessionStateLabel("WAITING_FOR_INPUT");
   if (state === "RUNNING" && foregroundActivity === "background") {
     return BACKGROUND_RUNNING_LABEL;
   }
@@ -96,23 +102,32 @@ function sessionStateLabel(
 }
 
 function StateBadge({
+  sessionId,
   state,
   foregroundActivity,
   testId,
 }: {
+  sessionId: string;
   state: TaskSessionState | null;
   foregroundActivity: ForegroundActivity | null;
   testId?: string;
 }) {
+  const pending = useSessionPendingInput(sessionId);
   if (!state) return null;
-  const label = sessionStateLabel(state, foregroundActivity);
+  const label = sessionStateLabel(state, foregroundActivity, pending);
   return (
     <span
       data-testid={testId}
       title={label}
       className="flex items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-none text-muted-foreground shrink-0"
     >
-      {getSessionStateIcon(state, "h-3 w-3 shrink-0", foregroundActivity)}
+      {getSessionStateIcon(
+        state,
+        "h-3 w-3 shrink-0",
+        foregroundActivity,
+        pending.clarification,
+        pending.permission,
+      )}
       {label}
     </span>
   );
@@ -293,6 +308,7 @@ function SessionRowItem({
         {row.agentName && <AgentLogo agentName={row.agentName} size={16} className="shrink-0" />}
         <span className="text-sm truncate flex-1">{row.agentLabel}</span>
         <StateBadge
+          sessionId={row.id}
           state={row.state}
           foregroundActivity={row.foregroundActivity}
           testId={`mobile-session-state-${row.id}`}
