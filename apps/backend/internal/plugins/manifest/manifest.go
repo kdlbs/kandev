@@ -16,6 +16,12 @@ type Manifest struct {
 	Author      string   `yaml:"author" json:"author"`
 	Categories  []string `yaml:"categories" json:"categories"`
 
+	// Icon is an optional package-relative path (e.g. "icon.svg") to an
+	// image the plugin ships for display in the marketplace and plugin
+	// lists. The registry index-build resolves it to an absolute icon_url;
+	// for an installed plugin it is served from the extracted package.
+	Icon string `yaml:"icon,omitempty" json:"icon,omitempty"`
+
 	BaseURL string `yaml:"base_url" json:"base_url"`
 
 	Endpoints    Endpoints    `yaml:"endpoints" json:"endpoints"`

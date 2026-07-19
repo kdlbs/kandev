@@ -635,9 +635,11 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
 - **In-process backend plugins.** Plugin *backends* remain out-of-process — no Go
   plugin loading via `plugin.Open`, no WASM, no shared-memory communication. (This is
   distinct from the frontend bundle, which does load into the SPA.)
-- **Plugin marketplace or registry.** No central catalog, no one-click install, no
-  automatic discovery. Install-by-URL/upload is a manual, single-plugin action; a
-  searchable catalog is a later phase.
+- **Plugin marketplace or registry.** Out of scope *for this spec*: this spec covers
+  install-by-URL/upload as a manual, single-plugin action. The discoverable, curated
+  catalog (central registry, one-click install, star ranking, third-party sources) is
+  a sibling feature specified in [marketplace.md](marketplace.md) and built on top of
+  this spec's install pipeline.
 - **Mandatory package signing.** `checksums.txt.sig` verification is supported when
   present, but signing is optional in v1 — an unsigned package installs with a warning
   rather than being rejected. Requiring signatures is future work.

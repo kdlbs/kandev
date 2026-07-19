@@ -56,6 +56,8 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	api.GET("/:id/ui/*path", ctrl.ui)
 	api.POST("/:id/webhooks/:key", ctrl.webhook)
 	api.GET("/:id/webhooks/:key", ctrl.webhook)
+
+	ctrl.registerMarketplaceRoutes(api)
 }
 
 // --- Management ---

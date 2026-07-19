@@ -68,6 +68,63 @@ export interface PluginRecord {
 }
 
 /**
+ * Derived install state of a marketplace catalog entry relative to what is
+ * installed locally. Mirrors marketplace.InstallState
+ * (apps/backend/internal/plugins/marketplace/types.go).
+ */
+export type MarketplaceInstallState = "available" | "installed" | "update_available";
+
+/**
+ * One plugin in the marketplace catalog: the published index entry annotated
+ * with the source it came from and its install state. Mirrors
+ * marketplace.CatalogEntry.
+ */
+export interface MarketplaceEntry {
+  id: string;
+  name: string;
+  description: string;
+  author: string;
+  categories: string[];
+  /** Absolute URL to the plugin's icon; empty when it ships none. */
+  icon_url: string;
+  repo_url: string;
+  version: string;
+  min_kandev_version: string;
+  package_url: string;
+  package_sha256: string;
+  stars: number;
+  updated_at: string;
+  install_state: MarketplaceInstallState;
+  installed_version?: string;
+  source_id: string;
+  source_name: string;
+}
+
+/**
+ * A configured marketplace source plus its live fetch health, as returned in
+ * every catalog response. Mirrors marketplace.SourceStatus. The `id`/`name`/
+ * `url`/`enabled`/`builtin` fields also match the SourceRecord returned by the
+ * source-management endpoints.
+ */
+export interface MarketplaceSource {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+  builtin: boolean;
+  /** Present in catalog responses (SourceStatus); absent from bare SourceRecord. */
+  healthy?: boolean;
+  error?: string;
+  created_at?: string;
+}
+
+/** The merged, deduped catalog across all enabled sources. */
+export interface MarketplaceCatalog {
+  plugins: MarketplaceEntry[];
+  sources: MarketplaceSource[];
+}
+
+/**
  * One entry of SyncResult.errors: a filesystem path the sync scan rejected
  * (or skipped), plus a human-readable reason. Mirrors
  * apps/backend/internal/plugins/dto.go's SyncError.
