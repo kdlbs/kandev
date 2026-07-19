@@ -1744,6 +1744,61 @@ func TestService_ArchiveTaskStopsExecutorRunningForTerminalSession(t *testing.T)
 	}
 }
 
+func TestService_ArchiveTaskClaimsExactExecutionBeforeCancellingSession(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	stopper := newRecordingTaskExecutionStopper()
+	stateAtClaim := make(chan models.TaskSessionState, 1)
+	stopper.claimExecutionFunc = func(sessionID, executionID string, force bool) bool {
+		if sessionID != "session-running" || executionID != "exec-running" || !force {
+			t.Fatalf("teardown claim = (%q, %q, %v)", sessionID, executionID, force)
+		}
+		session, err := repo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			t.Fatalf("load session at teardown claim: %v", err)
+		}
+		stateAtClaim <- session.State
+		return true
+	}
+	svc.SetExecutionStopper(stopper)
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: "task-123", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Test", Priority: "medium"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-running", TaskID: "task-123", State: models.TaskSessionStateRunning,
+	})
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:               "session-running",
+		SessionID:        "session-running",
+		TaskID:           "task-123",
+		ExecutorID:       "executor-1",
+		Runtime:          agentruntime.RuntimeStandalone,
+		Status:           models.ExecutorRunningStatusStarting,
+		AgentExecutionID: "exec-running",
+	}); err != nil {
+		t.Fatalf("seed executor running: %v", err)
+	}
+
+	if err := svc.ArchiveTask(ctx, "task-123"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+	select {
+	case state := <-stateAtClaim:
+		if state != models.TaskSessionStateRunning {
+			t.Fatalf("session state at teardown claim = %q, want RUNNING", state)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("archive did not claim its exact execution")
+	}
+	call := stopper.waitForStopExecution(t)
+	if call.executionID != "exec-running" || !call.force {
+		t.Fatalf("StopExecution call = %#v", call)
+	}
+	waitForCleanupDone(t, svc)
+}
+
 func TestService_DeleteTaskFailsClosedWhenRuntimeInventoryFails(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
@@ -1902,6 +1957,7 @@ type recordingTaskExecutionStopper struct {
 	stopExecutionCh      chan stopExecutionCall
 	stopExecutionErr     error
 	stopExecutionErrByID map[string]error
+	claimExecutionFunc   func(sessionID, executionID string, force bool) bool
 }
 
 func newRecordingTaskExecutionStopper() *recordingTaskExecutionStopper {
@@ -1924,6 +1980,13 @@ func (s *recordingTaskExecutionStopper) StopExecution(_ context.Context, executi
 		}
 	}
 	return s.stopExecutionErr
+}
+
+func (s *recordingTaskExecutionStopper) RegisterExecutionStopOwner(sessionID, executionID string, force bool) {
+	if s.claimExecutionFunc == nil {
+		return
+	}
+	s.claimExecutionFunc(sessionID, executionID, force)
 }
 
 func (s *recordingTaskExecutionStopper) waitForStopExecution(t *testing.T) stopExecutionCall {

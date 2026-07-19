@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -259,6 +260,183 @@ func TestStopWithSession_PreservesLegacyBestEffortPersistence(t *testing.T) {
 	case <-stopCalls:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for legacy teardown")
+	}
+}
+
+func TestStopWithSession_PreservesLegacyLookupFailureClassification(t *testing.T) {
+	lookupFailure := errors.New("lifecycle store unavailable")
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateRunning,
+	}
+	repo.sessions[session.ID] = session
+	exec := newTestExecutor(t, &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "", lookupFailure
+		},
+	}, repo)
+
+	err := exec.stopWithSession(context.Background(), session, "legacy reason", true)
+	if !errors.Is(err, lookupFailure) {
+		t.Fatalf("error = %v, want lookup failure", err)
+	}
+	if !errors.Is(err, ErrExecutionNotFound) {
+		t.Fatalf("error = %v, want legacy ErrExecutionNotFound", err)
+	}
+	if errors.Is(err, runtimeapi.ErrNotFound) {
+		t.Fatalf("error = %v, real lookup failure must not look like exact runtime absence", err)
+	}
+}
+
+func TestStopWithSession_ClaimSuppressesLateCancelledLaunchCleanup(t *testing.T) {
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID: "session-legacy-race", TaskID: "task-legacy-race", State: models.TaskSessionStateRunning,
+	}
+	repo.sessions[session.ID] = session
+	stopCalls := make(chan bool, 2)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-legacy-race", nil
+		},
+		stopAgentWithReasonFunc: func(_ context.Context, _ string, _ string, force bool) error {
+			stopCalls <- force
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+	var claimed bool
+	exec.SetOnExecutionStopOwnerRegistration(func(sessionID, executionID string, force bool) {
+		if sessionID != session.ID || executionID != "execution-legacy-race" || force {
+			t.Fatalf("stop claim = (%q, %q, %v)", sessionID, executionID, force)
+		}
+		claimed = true
+	})
+	exec.SetOnExecutionCleanupClaim(func(sessionID, executionID string) bool {
+		if sessionID != session.ID || executionID != "execution-legacy-race" {
+			t.Fatalf("cleanup claim = (%q, %q)", sessionID, executionID)
+		}
+		return !claimed
+	})
+
+	if err := exec.stopWithSession(context.Background(), session, "legacy graceful stop", false); err != nil {
+		t.Fatalf("stopWithSession: %v", err)
+	}
+	exec.handleAgentProcessStartFailure(
+		context.Background(), session.TaskID, session.ID, "execution-legacy-race",
+		errors.New("start failed after legacy cancellation"), true, false,
+	)
+
+	select {
+	case force := <-stopCalls:
+		if force {
+			t.Fatal("legacy owner was replaced by forced launch cleanup")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for legacy graceful stop")
+	}
+	select {
+	case force := <-stopCalls:
+		t.Fatalf("duplicate teardown reached runtime (force=%v)", force)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestStopExecution_PreservesRuntimeFailureClassification(t *testing.T) {
+	runtimeFailure := errors.New("runtime teardown failed")
+	tests := []struct {
+		name    string
+		stopErr error
+		wantErr error
+	}{
+		{
+			name:    "exact absence remains classifiable",
+			stopErr: fmt.Errorf("missing: %w", lifecycle.ErrExecutionNotFound),
+			wantErr: lifecycle.ErrExecutionNotFound,
+		},
+		{
+			name:    "real runtime failure is preserved",
+			stopErr: runtimeFailure,
+			wantErr: runtimeFailure,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := newTestExecutor(t, &mockAgentManager{
+				stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+					return tt.stopErr
+				},
+			}, newMockRepository())
+
+			err := exec.StopExecution(context.Background(), "execution-1", "cleanup", true)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("StopExecution error = %v, want %v", err, tt.wantErr)
+			}
+			if !errors.Is(err, ErrExecutionNotFound) {
+				t.Fatalf("StopExecution error = %v, want legacy ErrExecutionNotFound", err)
+			}
+			if errors.Is(tt.stopErr, lifecycle.ErrExecutionNotFound) &&
+				!errors.Is(err, runtimeapi.ErrNotFound) {
+				t.Fatalf("StopExecution error = %v, want public runtime ErrNotFound", err)
+			}
+			if !errors.Is(tt.stopErr, lifecycle.ErrExecutionNotFound) &&
+				errors.Is(err, runtimeapi.ErrNotFound) {
+				t.Fatalf("StopExecution error = %v, real failure must not look like exact runtime absence", err)
+			}
+		})
+	}
+}
+
+func TestLaunchModelSwitchAgent_CleansStartedExecutionAfterTerminalRace(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepository()
+	session := &models.TaskSession{
+		ID: "session-model-race", TaskID: "task-model-race", State: models.TaskSessionStateWaitingForInput,
+	}
+	repo.sessions[session.ID] = session
+	stopCalls := make(chan struct{}, 1)
+	manager := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{AgentExecutionID: "execution-model-race"}, nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			return repo.UpdateTaskSessionState(
+				ctx,
+				session.ID,
+				models.TaskSessionStateCancelled,
+				"stopped during model switch",
+			)
+		},
+		stopAgentFunc: func(_ context.Context, executionID string, force bool) error {
+			if executionID != "execution-model-race" || !force {
+				t.Fatalf("StopAgent = (%q, %v), want (execution-model-race, true)", executionID, force)
+			}
+			stopCalls <- struct{}{}
+			return nil
+		},
+	}
+	exec := newTestExecutor(t, manager, repo)
+	exec.SetOnExecutionCleanupClaim(func(sessionID, executionID string) bool {
+		return sessionID == session.ID && executionID == "execution-model-race"
+	})
+
+	err := exec.launchModelSwitchAgent(
+		ctx,
+		session.TaskID,
+		session.ID,
+		"new-model",
+		session,
+		&LaunchAgentRequest{},
+		nil,
+	)
+
+	if !errors.Is(err, ErrSessionStateSuperseded) {
+		t.Fatalf("launchModelSwitchAgent error = %v, want ErrSessionStateSuperseded", err)
+	}
+	select {
+	case <-stopCalls:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for model-switch race cleanup")
 	}
 }
 

@@ -233,6 +233,12 @@ func TestSessionStateEventsIncludeUpdatedAt(t *testing.T) {
 			run:       (*Handlers).setSessionWaitingForInput,
 			wantState: models.TaskSessionStateWaitingForInput,
 		},
+		{
+			name:      "fast clarification waits while starting",
+			initial:   models.TaskSessionStateStarting,
+			run:       (*Handlers).setSessionWaitingForInput,
+			wantState: models.TaskSessionStateWaitingForInput,
+		},
 	}
 
 	for _, tt := range tests {

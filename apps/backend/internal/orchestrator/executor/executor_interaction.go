@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentctlshared "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/task/models"
@@ -75,10 +76,19 @@ func (e *Executor) StopSessionDetailed(
 func (e *Executor) stopWithSession(ctx context.Context, session *models.TaskSession, reason string, force bool) error {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
 	if err != nil || executionID == "" {
+		if err != nil {
+			if errors.Is(err, lifecycle.ErrNoExecutionForSession) {
+				return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+			}
+			return fmt.Errorf("%w: lookup execution for session %q: %w", ErrExecutionNotFound, session.ID, err)
+		}
 		return ErrExecutionNotFound
 	}
 
 	e.logStop(session, executionID, reason, force)
+	if e.onExecutionStopOwnerRegistration != nil {
+		e.onExecutionStopOwnerRegistration(session.ID, executionID, force)
+	}
 	if dbErr := e.updateSessionState(ctx, session.TaskID, session.ID, models.TaskSessionStateCancelled, reason); dbErr != nil {
 		e.logger.Error("failed to update agent session status",
 			zap.String("session_id", session.ID),
@@ -173,7 +183,10 @@ func (e *Executor) StopExecution(ctx context.Context, executionID string, reason
 		e.logger.Warn("failed to stop agent by execution id",
 			zap.String("agent_execution_id", executionID),
 			zap.Error(err))
-		return ErrExecutionNotFound
+		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
+			return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+		}
+		return fmt.Errorf("%w: stop execution %q: %w", ErrExecutionNotFound, executionID, err)
 	}
 	return nil
 }
@@ -513,6 +526,14 @@ func (e *Executor) launchModelSwitchAgent(ctx context.Context, taskID, sessionID
 			zap.String("agent_execution_id", resp.AgentExecutionID),
 			zap.Error(err))
 		return fmt.Errorf("failed to start agent after model switch: %w", err)
+	}
+	if terminalState, terminal := e.stopStartedExecutionIfSessionTerminal(
+		ctx,
+		sessionID,
+		resp.AgentExecutionID,
+		"terminal model-switch start race",
+	); terminal {
+		return &SessionStateSupersededError{SessionID: sessionID, State: terminalState}
 	}
 
 	e.logger.Info("model switch complete, agent started",

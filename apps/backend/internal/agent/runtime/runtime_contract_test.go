@@ -265,6 +265,20 @@ func TestRuntime_Stop_DelegatesToBackend(t *testing.T) {
 	}
 }
 
+func TestRuntime_Stop_ClassifiesMissingExecution(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend()
+	backend.stopErr = lifecycle.ErrExecutionNotFound
+	rt := agentruntime.New(backend)
+	err := rt.Stop(context.Background(), "missing", "cleanup")
+	if !errors.Is(err, agentruntime.ErrNotFound) {
+		t.Fatalf("Stop error = %v, want runtime.ErrNotFound", err)
+	}
+	if !errors.Is(err, lifecycle.ErrExecutionNotFound) {
+		t.Fatalf("Stop error = %v, want lifecycle.ErrExecutionNotFound", err)
+	}
+}
+
 func TestRuntime_Stop_RequiresExecutionID(t *testing.T) {
 	t.Parallel()
 	rt := agentruntime.New(newFakeBackend())

@@ -98,7 +98,7 @@ type sessionOwnedTaskStateUpdater interface {
 		taskID, sessionID string,
 		expectedSessionState models.TaskSessionState,
 		state v1.TaskState,
-	) (bool, error)
+	) (v1.TaskState, bool, error)
 }
 
 // EventBus interface for publishing events.
@@ -2925,13 +2925,14 @@ func (h *Handlers) setTaskInProgressForClarification(
 	taskID, sessionID string,
 ) (bool, error) {
 	if updater, ok := h.taskRepo.(sessionOwnedTaskStateUpdater); ok {
-		return updater.UpdateTaskStateIfSessionState(
+		_, updated, err := updater.UpdateTaskStateIfSessionState(
 			ctx,
 			taskID,
 			sessionID,
 			models.TaskSessionStateRunning,
 			v1.TaskStateInProgress,
 		)
+		return updated, err
 	}
 	if err := h.taskRepo.UpdateTaskState(ctx, taskID, v1.TaskStateInProgress); err != nil {
 		return false, err
@@ -2941,12 +2942,7 @@ func (h *Handlers) setTaskInProgressForClarification(
 
 // setSessionWaitingForInput updates the session and task states to waiting for input
 func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessionID string) {
-	changed, updatedAt, err := h.updateClarificationSessionState(
-		ctx,
-		sessionID,
-		models.TaskSessionStateRunning,
-		models.TaskSessionStateWaitingForInput,
-	)
+	changed, updatedAt, err := h.updateSessionWaitingForClarification(ctx, sessionID)
 	if err != nil {
 		h.logger.Warn("failed to update session state to WAITING_FOR_INPUT",
 			zap.String("session_id", sessionID),
@@ -2988,6 +2984,38 @@ func (h *Handlers) setSessionWaitingForInput(ctx context.Context, taskID, sessio
 			eventData,
 		))
 	}
+}
+
+func (h *Handlers) updateSessionWaitingForClarification(
+	ctx context.Context,
+	sessionID string,
+) (bool, time.Time, error) {
+	// A fast MCP clarification can arrive before agent startup promotes the
+	// session from STARTING to RUNNING. Re-read and retry once if that promotion
+	// races the CAS; terminal states still reject the write.
+	for attempt := 0; attempt < 2; attempt++ {
+		session, err := h.sessionRepo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return false, time.Time{}, err
+		}
+		if session == nil {
+			return false, time.Time{}, fmt.Errorf("session %q not found", sessionID)
+		}
+		if session.State != models.TaskSessionStateStarting &&
+			session.State != models.TaskSessionStateRunning {
+			return false, time.Time{}, nil
+		}
+		changed, updatedAt, err := h.updateClarificationSessionState(
+			ctx,
+			sessionID,
+			session.State,
+			models.TaskSessionStateWaitingForInput,
+		)
+		if err != nil || changed {
+			return changed, updatedAt, err
+		}
+	}
+	return false, time.Time{}, nil
 }
 
 func (h *Handlers) updateClarificationSessionState(

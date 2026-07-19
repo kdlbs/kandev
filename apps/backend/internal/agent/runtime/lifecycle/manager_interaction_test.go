@@ -35,6 +35,14 @@ type restartMockAgentctlServer struct {
 	failSessionNew bool
 }
 
+func TestStopAgentWithReason_MissingExecutionIsClassified(t *testing.T) {
+	mgr := &Manager{executionStore: NewExecutionStore(), logger: newTestLogger().WithFields()}
+
+	err := mgr.StopAgentWithReason(context.Background(), "missing", "cleanup", true)
+
+	require.ErrorIs(t, err, ErrExecutionNotFound)
+}
+
 func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *restartMockAgentctlServer {
 	t.Helper()
 

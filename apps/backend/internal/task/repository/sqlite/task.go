@@ -1234,19 +1234,71 @@ func (r *Repository) UpdateTaskState(ctx context.Context, id string, state v1.Ta
 }
 
 // UpdateTaskStateIfSessionState atomically ties a task-state write to the
-// current state of one owning session. It closes the clarification-resume
-// race where WAITING_FOR_INPUT -> RUNNING succeeds, coordinator stop commits
-// CANCELLED, then a delayed independent task write restores IN_PROGRESS.
+// current state of one owning session and to the task remaining unarchived.
+// The task-state predicate makes the returned old state authoritative for
+// task.state_changed events; a concurrent task or session write retries with
+// a fresh snapshot or makes this update a no-op.
 func (r *Repository) UpdateTaskStateIfSessionState(
 	ctx context.Context,
 	taskID, sessionID string,
 	expectedSessionState models.TaskSessionState,
 	state v1.TaskState,
-) (bool, error) {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+) (v1.TaskState, bool, error) {
+	for attempt := range updateTaskStateIfNotArchivedMaxAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return "", false, ctx.Err()
+			case <-time.After(updateTaskStateIfNotArchivedBackoff):
+			}
+		}
+		oldState, updated, retry, err := r.tryUpdateTaskStateIfSessionState(
+			ctx, taskID, sessionID, expectedSessionState, state,
+		)
+		if err != nil || !retry {
+			return oldState, updated, err
+		}
+	}
+	return "", false, fmt.Errorf("update task state if session state: exceeded %d attempts for task %s",
+		updateTaskStateIfNotArchivedMaxAttempts, taskID)
+}
+
+func (r *Repository) tryUpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (oldState v1.TaskState, updated, retry bool, err error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var archivedAt sql.NullTime
+	var currentSessionState models.TaskSessionState
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT tasks.state, tasks.archived_at, task_sessions.state
+		FROM tasks
+		JOIN task_sessions ON task_sessions.task_id = tasks.id
+		WHERE tasks.id = ? AND task_sessions.id = ?
+	`), taskID, sessionID).Scan(&oldState, &archivedAt, &currentSessionState)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, false, nil
+	}
+	if err != nil {
+		return "", false, false, err
+	}
+	if archivedAt.Valid || currentSessionState != expectedSessionState {
+		return oldState, false, false, nil
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks
 		SET state = ?, updated_at = ?
 		WHERE id = ?
+		  AND state = ?
+		  AND archived_at IS NULL
 		  AND EXISTS (
 			SELECT 1
 			FROM task_sessions
@@ -1254,15 +1306,24 @@ func (r *Repository) UpdateTaskStateIfSessionState(
 			  AND task_sessions.task_id = tasks.id
 			  AND task_sessions.state = ?
 		  )
-	`), state, time.Now().UTC(), taskID, sessionID, expectedSessionState)
+	`), state, time.Now().UTC(), taskID, oldState, sessionID, expectedSessionState)
 	if err != nil {
-		return false, err
+		if isRetryableStateRaceError(err) {
+			return oldState, false, true, nil
+		}
+		return "", false, false, err
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return false, err
+		return "", false, false, err
 	}
-	return rows > 0, nil
+	if rows == 0 {
+		return oldState, false, true, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, false, err
+	}
+	return oldState, true, false, nil
 }
 
 // RestoreTaskMessageRollbackIfSessionState atomically restores the two task

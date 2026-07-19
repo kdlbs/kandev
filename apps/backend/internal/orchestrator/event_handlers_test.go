@@ -102,8 +102,15 @@ type mockTaskRepo struct {
 	// callers must route guarded REVIEW writes through the CAS method so an
 	// archive can't race a late write; tests assert this stays 0 for those
 	// paths instead of just checking the resulting state.
-	unconditionalWrites map[string]int
-	getTaskErr          error // if set, GetTask returns this error
+	unconditionalWrites  map[string]int
+	getTaskErr           error // if set, GetTask returns this error
+	updateIfSessionState func(
+		context.Context,
+		string,
+		string,
+		models.TaskSessionState,
+		v1.TaskState,
+	) (bool, error)
 }
 
 func newMockTaskRepo() *mockTaskRepo {
@@ -189,6 +196,18 @@ func (m *mockTaskRepo) UpdateTaskStateIfNotArchived(
 		t.State = state
 	}
 	return true, nil
+}
+
+func (m *mockTaskRepo) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	if m.updateIfSessionState != nil {
+		return m.updateIfSessionState(ctx, taskID, sessionID, expectedSessionState, state)
+	}
+	return m.UpdateTaskStateIfNotArchived(ctx, taskID, state)
 }
 
 // mockAgentManager is a minimal mock of executor.AgentManagerClient for testing.
@@ -2371,6 +2390,42 @@ func TestHandleAgentStartFailed(t *testing.T) {
 		if handled {
 			t.Error("expected handled=false so executor transition and forced cleanup still run")
 		}
+	})
+
+	t.Run("cancelled session enqueues exact cleanup arbitration", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		require.NoError(t, repo.UpdateTaskSessionState(
+			ctx,
+			"s1",
+			models.TaskSessionStateCancelled,
+			"cancelled outside coordinator stop",
+		))
+		agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+		svc := createTestServiceWithScheduler(
+			repo,
+			newMockStepGetter(),
+			newMockTaskRepo(),
+			agentMgr,
+		)
+
+		handled := svc.handleAgentStartFailed(
+			ctx,
+			"t1",
+			"s1",
+			"exec-unclaimed",
+			errors.New("ACP initialize handshake failed"),
+			false,
+		)
+
+		require.False(t, handled)
+		waitForStopCall(t, agentMgr)
+		agentMgr.mu.Lock()
+		calls := append([]stopAgentCall(nil), agentMgr.stopAgentWithReasonArgs...)
+		agentMgr.mu.Unlock()
+		require.Len(t, calls, 1)
+		require.Equal(t, "exec-unclaimed", calls[0].ExecutionID)
+		require.True(t, calls[0].Force)
 	})
 }
 

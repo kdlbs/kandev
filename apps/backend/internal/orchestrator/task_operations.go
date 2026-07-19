@@ -1450,6 +1450,13 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 		}
 		return fmt.Errorf("execution id for session %s not found", sessionID)
 	}
+	if !s.claimForcedExecutionCleanup(sessionID, executionID) {
+		return fmt.Errorf(
+			"execution %s teardown is already owned for session %s",
+			executionID,
+			sessionID,
+		)
+	}
 
 	s.logger.Warn("stopping prompt-unready agent execution before resume",
 		zap.String("session_id", sessionID),
@@ -1457,6 +1464,19 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 		zap.Error(cause))
 	if err := s.executor.StopExecution(ctx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
 		return err
+	}
+	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("reload session after prompt-readiness teardown: %w", err)
+	}
+	if refreshed == nil {
+		return fmt.Errorf("reload session after prompt-readiness teardown: session %s not found", sessionID)
+	}
+	if isTerminalSessionState(refreshed.State) {
+		return &executor.SessionStateSupersededError{
+			SessionID: refreshed.ID,
+			State:     refreshed.State,
+		}
 	}
 	return nil
 }
@@ -1902,17 +1922,22 @@ func (s *Service) StopTaskForCoordinator(ctx context.Context, taskID string) (Co
 			accepted++
 		}
 	}
+	if accepted > 0 {
+		// This helper owns Office/archive/active-state guards and publishes
+		// through the task-service adapter. Remaining working sessions still
+		// block REVIEW on a partial stop.
+		s.writeTaskReviewState(ctx, taskID, "")
+	}
 	if len(failures) > 0 {
+		s.logger.Warn("coordinator stop partially failed",
+			zap.String("task_id", taskID),
+			zap.Int("accepted", accepted),
+			zap.Int("failed", len(failures)))
 		return CoordinatorTaskStopResult{}, errors.Join(failures...)
 	}
 	if accepted == 0 {
 		return CoordinatorTaskStopResult{Status: CoordinatorTaskStopStatusNotRunning}, nil
 	}
-
-	// This helper owns Office/archive/active-state guards and publishes through
-	// the task-service adapter. A reconciliation failure never revokes an
-	// already-accepted logical stop.
-	s.writeTaskReviewState(ctx, taskID, "")
 	return CoordinatorTaskStopResult{Status: CoordinatorTaskStopStatusStopped}, nil
 }
 
@@ -2622,6 +2647,9 @@ func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sess
 		return nil, promptErr
 	}
 	s.setSessionRunning(ctx, taskID, sessionID, freshSession)
+	// setSessionRunning refreshes freshSession in place when its guarded write
+	// loses, so a cancellation landing after the promptability check is visible
+	// here as a terminal state.
 	if isTerminalSessionState(freshSession.State) && freshSession.State != models.TaskSessionStateCompleted {
 		return nil, &executor.SessionStateSupersededError{
 			SessionID: freshSession.ID,

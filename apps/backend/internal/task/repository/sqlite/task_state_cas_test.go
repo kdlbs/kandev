@@ -9,8 +9,107 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func TestUpdateTaskStateIfSessionState_RequiresCurrentOwningSession(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-session-cas")
+	insertSession(t, repo, "session-cas", "task-session-cas", string(models.TaskSessionStateWaitingForInput))
+
+	if err := repo.UpdateTaskState(ctx, "task-session-cas", v1.TaskStateReview); err != nil {
+		t.Fatalf("seed REVIEW: %v", err)
+	}
+	oldState, updated, err := repo.UpdateTaskStateIfSessionState(
+		ctx,
+		"task-session-cas",
+		"session-cas",
+		models.TaskSessionStateStarting,
+		v1.TaskStateInProgress,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskStateIfSessionState: %v", err)
+	}
+	if updated {
+		t.Fatal("expected stale STARTING writer to be rejected after clarification paused the session")
+	}
+	if oldState != v1.TaskStateReview {
+		t.Fatalf("old state = %q, want %q", oldState, v1.TaskStateReview)
+	}
+	task, err := repo.GetTask(ctx, "task-session-cas")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.State != v1.TaskStateReview {
+		t.Fatalf("task state = %q, want %q", task.State, v1.TaskStateReview)
+	}
+}
+
+func TestUpdateTaskStateIfSessionState_SkipsArchivedTask(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-session-archived")
+	insertSession(t, repo, "session-archived", "task-session-archived", string(models.TaskSessionStateStarting))
+
+	if err := repo.UpdateTaskState(ctx, "task-session-archived", v1.TaskStateReview); err != nil {
+		t.Fatalf("seed REVIEW: %v", err)
+	}
+	if err := repo.ArchiveTask(ctx, "task-session-archived"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	oldState, updated, err := repo.UpdateTaskStateIfSessionState(
+		ctx,
+		"task-session-archived",
+		"session-archived",
+		models.TaskSessionStateStarting,
+		v1.TaskStateInProgress,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskStateIfSessionState: %v", err)
+	}
+	if updated {
+		t.Fatal("expected archived task write to be rejected")
+	}
+	if oldState != v1.TaskStateReview {
+		t.Fatalf("old state = %q, want %q", oldState, v1.TaskStateReview)
+	}
+}
+
+func TestUpdateTaskStateIfSessionState_UpdatesMatchingSession(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-session-match")
+	insertSession(t, repo, "session-match", "task-session-match", string(models.TaskSessionStateStarting))
+
+	if err := repo.UpdateTaskState(ctx, "task-session-match", v1.TaskStateReview); err != nil {
+		t.Fatalf("seed REVIEW: %v", err)
+	}
+	oldState, updated, err := repo.UpdateTaskStateIfSessionState(
+		ctx,
+		"task-session-match",
+		"session-match",
+		models.TaskSessionStateStarting,
+		v1.TaskStateInProgress,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskStateIfSessionState: %v", err)
+	}
+	if !updated {
+		t.Fatal("expected matching session to permit task update")
+	}
+	if oldState != v1.TaskStateReview {
+		t.Fatalf("old state = %q, want %q", oldState, v1.TaskStateReview)
+	}
+	task, err := repo.GetTask(ctx, "task-session-match")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.State != v1.TaskStateInProgress {
+		t.Fatalf("task state = %q, want %q", task.State, v1.TaskStateInProgress)
+	}
+}
 
 // TestUpdateTaskStateIfCurrentIn_SkipsArchivedTask reproduces the TOCTOU race
 // flagged in PR #1706 review: a caller's earlier archived-state guard (a

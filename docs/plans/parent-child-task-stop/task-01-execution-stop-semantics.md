@@ -59,8 +59,18 @@ lifecycle risks.
 ## Completion
 
 - Added a strict per-session outcome with accepted/final-state reporting.
-- Preserved legacy stop reason, force, lookup, persistence, and teardown policy.
-- Verified exact lifecycle absence, invariant/lookup failures, terminal races,
-  persistence failure, state-before-teardown ordering, and detached teardown.
-- Remaining concurrency boundary: the task-level caller must hold the existing
-  `cancelInFlightGuard`; that is Task 02.
+- Added exact execution teardown ownership across coordinator stops, terminal
+  cleanup, launch/recovery races, and durable task-resource cleanup.
+- Preserved legacy stop sentinels while exposing exact runtime absence as
+  idempotent; real lookup and persistence failures remain retryable.
+- Added an atomic session-owned task-state CAS so clarification/terminal state
+  cannot be overwritten by delayed runtime reconciliation.
+- Changed areas: runtime/lifecycle stop contracts, orchestrator executor and
+  recovery paths, task cleanup jobs, MCP clarification state, and focused E2E
+  coverage.
+- Tests run: `make fmt`, `make typecheck`, `make test`, `make lint`, scoped Go
+  race suites, and the sidebar-clarification and Office-onboarding Playwright
+  specs against production builds.
+- Blockers: none.
+- Remaining lifecycle risks: none known; session-scoped lookup absence remains
+  retryable until an exact execution identity is available.

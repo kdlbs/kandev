@@ -606,6 +606,42 @@ func TestStopTaskForCoordinator_PartialFailureAttemptsEveryCandidateAndSkipsRevi
 	require.Equal(t, models.TaskSessionStateCancelled, accepted.State)
 }
 
+func TestStopTaskForCoordinator_PartialFailureReconcilesAcceptedStops(t *testing.T) {
+	ctx := context.Background()
+	baseRepo := setupTestRepo(t)
+	seedTaskAndSession(t, baseRepo, "task-partial-review", "session-accepted", models.TaskSessionStateRunning)
+	acceptedSession, err := baseRepo.GetTaskSession(ctx, "session-accepted")
+	require.NoError(t, err)
+	repo := &coordinatorStopRepoHooks{
+		repoStore: baseRepo,
+		listActiveFunc: func(context.Context, string) ([]*models.TaskSession, error) {
+			return []*models.TaskSession{acceptedSession, nil}, nil
+		},
+	}
+	teardownCalled := make(chan struct{}, 1)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-accepted", nil
+		},
+		stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+			teardownCalled <- struct{}{}
+			return nil
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-partial-review", v1.TaskStateInProgress)
+	svc := newCoordinatorStopTestService(repo, taskRepo, manager)
+
+	result, stopErr := svc.StopTaskForCoordinator(ctx, "task-partial-review")
+
+	require.ErrorContains(t, stopErr, "candidate is nil or has an empty ID")
+	require.Empty(t, result.Status)
+	coordinatorStopAwaitSignal(t, teardownCalled, "accepted partial-stop teardown")
+	state, history := coordinatorStopTaskStateSnapshot(taskRepo, "task-partial-review")
+	require.Equal(t, v1.TaskStateReview, state)
+	require.Equal(t, []v1.TaskState{v1.TaskStateReview}, history)
+}
+
 func TestStopTaskForCoordinator_TerminalRereadWinsAfterCandidateSnapshot(t *testing.T) {
 	ctx := context.Background()
 	baseRepo := setupTestRepo(t)

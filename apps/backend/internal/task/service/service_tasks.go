@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
@@ -1019,6 +1020,11 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		return err
 	}
 
+	// Register the exact inventory before CANCELLED becomes visible. A launch
+	// persistence loser can then distinguish these owned executions from one
+	// that raced in after the snapshot and must clean itself up.
+	s.registerTaskRuntimeStopOwners(stopTargets, true)
+
 	// 3b. Finalize active sessions in the DB. The async cleanup below tears down
 	// the agent processes; this records the terminal session state, which
 	// process teardown does not persist on its own.
@@ -1056,6 +1062,22 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	}
 
 	return nil
+}
+
+func (s *Service) registerTaskRuntimeStopOwners(stopTargets []taskStopTarget, force bool) {
+	if s.executionStopper == nil {
+		return
+	}
+	for _, target := range stopTargets {
+		if target.sessionID == "" || target.executionID == "" {
+			continue
+		}
+		s.executionStopper.RegisterExecutionStopOwner(
+			target.sessionID,
+			target.executionID,
+			force,
+		)
+	}
 }
 
 // DeleteTask deletes a task and publishes a task.deleted event.
@@ -1331,6 +1353,16 @@ func (s *Service) runTaskCleanup(
 	cleanupStart := time.Now()
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
+	refreshedTargets, err := s.refreshTaskRuntimeStopTargets(cleanupCtx, id, stopTargets)
+	if err != nil {
+		s.logger.Warn(cleanupMsg+" deferred because runtime inventory refresh failed",
+			zap.String("task_id", id),
+			zap.Error(err))
+		s.signalCleanupDoneForTest()
+		return
+	}
+	stopTargets = refreshedTargets
+	s.registerTaskRuntimeStopOwners(stopTargets, true)
 
 	failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
 
@@ -1424,6 +1456,87 @@ func (s *Service) buildStopTargets(ctx context.Context, taskID string, activeSes
 	return targets, nil
 }
 
+// refreshTaskRuntimeStopTargets merges the durable/pre-mutation snapshot with
+// the live runtime inventory immediately before teardown. A launch may rotate
+// an execution after the snapshot but before archive/delete becomes visible;
+// keeping every exact ID makes cleanup safe across that race and worker
+// restarts. A session-only fallback is retained only when no exact ID exists
+// for that session; otherwise it would observe absence after the exact stop and
+// keep a durable cleanup retrying forever.
+func (s *Service) refreshTaskRuntimeStopTargets(
+	ctx context.Context,
+	taskID string,
+	snapshot []taskStopTarget,
+) ([]taskStopTarget, error) {
+	if s.executionStopper == nil || s.executors == nil {
+		return snapshot, nil
+	}
+	runningRows, err := s.executors.ListExecutorsRunningByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return mergeTaskStopTargets(taskStopTargetsFromRunningRows(runningRows), snapshot), nil
+}
+
+func taskStopTargetsFromRunningRows(runningRows []*models.ExecutorRunning) []taskStopTarget {
+	targets := make([]taskStopTarget, 0, len(runningRows))
+	for _, running := range runningRows {
+		if running == nil {
+			continue
+		}
+		targets = append(targets, taskStopTarget{
+			sessionID:   strings.TrimSpace(running.SessionID),
+			executionID: strings.TrimSpace(running.AgentExecutionID),
+		})
+	}
+	return targets
+}
+
+func mergeTaskStopTargets(live, snapshot []taskStopTarget) []taskStopTarget {
+	sessionsWithExactTarget := exactTaskStopTargetSessions(live, snapshot)
+	targets := make([]taskStopTarget, 0, len(live)+len(snapshot))
+	seen := make(map[string]int, len(live)+len(snapshot))
+	appendTarget := func(target taskStopTarget) {
+		target.sessionID = strings.TrimSpace(target.sessionID)
+		target.executionID = strings.TrimSpace(target.executionID)
+		if target.sessionID == "" {
+			return
+		}
+		if target.executionID == "" {
+			if _, hasExact := sessionsWithExactTarget[target.sessionID]; hasExact {
+				return
+			}
+		}
+		key := target.sessionID + "\x00" + target.executionID
+		if index, exists := seen[key]; exists {
+			targets[index].terminal = targets[index].terminal || target.terminal
+			return
+		}
+		seen[key] = len(targets)
+		targets = append(targets, target)
+	}
+	for _, target := range live {
+		appendTarget(target)
+	}
+	for _, target := range snapshot {
+		appendTarget(target)
+	}
+	return targets
+}
+
+func exactTaskStopTargetSessions(targetSets ...[]taskStopTarget) map[string]struct{} {
+	exact := make(map[string]struct{})
+	for _, targets := range targetSets {
+		for _, target := range targets {
+			sessionID := strings.TrimSpace(target.sessionID)
+			if sessionID != "" && strings.TrimSpace(target.executionID) != "" {
+				exact[sessionID] = struct{}{}
+			}
+		}
+	}
+	return exact
+}
+
 func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, stopTargets []taskStopTarget, stopReason, stopFailMsg string) map[string]struct{} {
 	failedStops := make(map[string]struct{})
 	if s.executionStopper == nil || len(stopTargets) == 0 {
@@ -1435,6 +1548,9 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 		}
 		if target.executionID != "" {
 			if err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true); err != nil {
+				if runtimeStopAlreadyComplete(err) {
+					continue
+				}
 				if target.terminal {
 					s.logger.Debug("stop failed for terminal session execution (expected), proceeding with cleanup",
 						zap.String("task_id", taskID),
@@ -1467,6 +1583,10 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 		}
 	}
 	return failedStops
+}
+
+func runtimeStopAlreadyComplete(err error) bool {
+	return errors.Is(err, runtimeapi.ErrNotFound)
 }
 
 // performTaskCleanup handles post-deletion cleanup operations.

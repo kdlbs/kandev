@@ -1324,32 +1324,13 @@ func TestHandleAgentCompleted_CancelledSessionDoesNotForceCleanup(t *testing.T) 
 		},
 	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
-	cleanupRead := make(chan struct{})
-	allowCleanupRead := make(chan struct{})
-	var readMu sync.Mutex
-	reads := 0
-	svc.repo = &coordinatorStopRepoHooks{
-		repoStore: repo,
-		getSessionFunc: func(readCtx context.Context, sessionID string) (*models.TaskSession, error) {
-			readMu.Lock()
-			reads++
-			readNumber := reads
-			readMu.Unlock()
-			if readNumber == 2 {
-				close(cleanupRead)
-				<-allowCleanupRead
-			}
-			return repo.GetTaskSession(readCtx, sessionID)
-		},
-	}
+	svc.RegisterExecutionStopOwner("s1", "execution-completed", false)
 
 	svc.handleAgentCompleted(ctx, watcher.AgentEventData{
 		TaskID:           "t1",
 		SessionID:        "s1",
 		AgentExecutionID: "execution-completed",
 	})
-	coordinatorStopAwaitSignal(t, cleanupRead, "cancelled completion cleanup state read")
-	close(allowCleanupRead)
 	coordinatorStopWaitForGuardReleased(t, svc, "s1")
 
 	agentManager.mu.Lock()
@@ -1401,6 +1382,11 @@ func TestHandleAgentCompleted_CoordinatorCancellationWinsWhileEventWaits(t *test
 	)
 	require.NoError(t, err)
 	require.True(t, changed)
+	require.True(t, svc.claimExecutionTeardown(
+		"session-completion-stop-race",
+		"execution-completion-stop-race",
+		executionTeardownIntentGraceful,
+	))
 	guard.Unlock()
 	release()
 	coordinatorStopAwaitSignal(t, eventDone, "guarded completion event")

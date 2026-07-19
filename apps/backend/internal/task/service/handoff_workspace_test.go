@@ -395,6 +395,12 @@ func (r *phase4TaskRepo) UpdateTaskState(context.Context, string, v1.TaskState) 
 	r.panicNotUsed("UpdateTaskState")
 	return nil
 }
+func (r *phase4TaskRepo) UpdateTaskStateIfSessionState(
+	context.Context, string, string, models.TaskSessionState, v1.TaskState,
+) (v1.TaskState, bool, error) {
+	r.panicNotUsed("UpdateTaskStateIfSessionState")
+	return "", false, nil
+}
 func (r *phase4TaskRepo) UpdateTaskStateIfCurrentIn(context.Context, string, v1.TaskState, []v1.TaskState) (v1.TaskState, bool, error) {
 	r.panicNotUsed("UpdateTaskStateIfCurrentIn")
 	return "", false, nil

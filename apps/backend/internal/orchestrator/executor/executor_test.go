@@ -1313,7 +1313,7 @@ verified:
 	}
 }
 
-func TestHandleAgentProcessStartFailure_CancelledSessionOwnsTeardown(t *testing.T) {
+func TestHandleAgentProcessStartFailure_CancelledWithoutTeardownStopsExecution(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-123"] = &models.TaskSession{
 		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateCancelled,
@@ -1325,7 +1325,13 @@ func TestHandleAgentProcessStartFailure_CancelledSessionOwnsTeardown(t *testing.
 	var sessionStateCalls atomic.Int32
 	var taskStateCalls atomic.Int32
 	exec := newTestExecutor(t, &mockAgentManager{
-		stopAgentFunc: func(context.Context, string, bool) error {
+		stopAgentFunc: func(_ context.Context, executionID string, force bool) error {
+			if executionID != "exec-456" {
+				t.Fatalf("execution ID = %q, want exec-456", executionID)
+			}
+			if !force {
+				t.Fatal("cancelled execution cleanup must force stop")
+			}
 			stopCalls.Add(1)
 			return nil
 		},
@@ -1353,8 +1359,8 @@ func TestHandleAgentProcessStartFailure_CancelledSessionOwnsTeardown(t *testing.
 		false,
 	)
 
-	if got := stopCalls.Load(); got != 0 {
-		t.Fatalf("StopAgent calls = %d, want 0", got)
+	if got := stopCalls.Load(); got != 1 {
+		t.Fatalf("StopAgent calls = %d, want 1", got)
 	}
 	if got := recoveryCalls.Load(); got != 0 {
 		t.Fatalf("start-failure recovery calls = %d, want 0", got)
@@ -1367,13 +1373,114 @@ func TestHandleAgentProcessStartFailure_CancelledSessionOwnsTeardown(t *testing.
 	}
 }
 
-func TestCleanupUnstartedExecutionAfterPersistError_CancelledOwnsTeardown(t *testing.T) {
+func TestHandleAgentProcessStartFailure_CancelledWithTeardownSkipsExecutionCleanup(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateCancelled,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateReview}
+
+	var stopCalls atomic.Int32
+	var claimCalls atomic.Int32
+	exec := newTestExecutor(t, &mockAgentManager{
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls.Add(1)
+			return nil
+		},
+	}, repo)
+	exec.SetOnExecutionCleanupClaim(func(sessionID, executionID string) bool {
+		claimCalls.Add(1)
+		if sessionID != "session-123" || executionID != "exec-456" {
+			t.Fatalf("cleanup claim = (%q, %q), want (session-123, exec-456)", sessionID, executionID)
+		}
+		return false
+	})
+
+	exec.handleAgentProcessStartFailure(
+		context.Background(),
+		"task-123",
+		"session-123",
+		"exec-456",
+		errors.New("start failed after stop"),
+		true,
+		false,
+	)
+
+	if got := claimCalls.Load(); got != 1 {
+		t.Fatalf("cleanup claim calls = %d, want 1", got)
+	}
+	if got := stopCalls.Load(); got != 0 {
+		t.Fatalf("StopAgent calls = %d, want 0", got)
+	}
+}
+
+func TestHandleAgentProcessStartFailure_CancellationDuringCallbackStopsUnclaimedExecution(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+
+	var stopCalls atomic.Int32
+	var callbackCalls atomic.Int32
+	var transitionCalls atomic.Int32
+	exec := newTestExecutor(t, &mockAgentManager{
+		stopAgentFunc: func(_ context.Context, executionID string, force bool) error {
+			if executionID != "exec-456" || !force {
+				t.Fatalf("StopAgent = (%q, %v), want (exec-456, true)", executionID, force)
+			}
+			stopCalls.Add(1)
+			return nil
+		},
+	}, repo)
+	exec.SetOnAgentStartFailed(func(context.Context, string, string, string, error, bool) bool {
+		callbackCalls.Add(1)
+		return false
+	})
+	exec.SetOnSessionStateTransition(func(
+		context.Context,
+		string,
+		string,
+		models.TaskSessionState,
+		string,
+	) (bool, models.TaskSessionState, error) {
+		transitionCalls.Add(1)
+		return false, models.TaskSessionStateCancelled, nil
+	})
+	exec.SetOnExecutionCleanupClaim(func(sessionID, executionID string) bool {
+		if sessionID != "session-123" || executionID != "exec-456" {
+			t.Fatalf("cleanup claim = (%q, %q), want (session-123, exec-456)", sessionID, executionID)
+		}
+		return true
+	})
+
+	exec.handleAgentProcessStartFailure(
+		context.Background(),
+		"task-123",
+		"session-123",
+		"exec-456",
+		errors.New("start failed while cancellation landed"),
+		true,
+		false,
+	)
+
+	if got := callbackCalls.Load(); got != 1 {
+		t.Fatalf("start-failure callback calls = %d, want 1", got)
+	}
+	if got := transitionCalls.Load(); got != 1 {
+		t.Fatalf("state transition calls = %d, want 1", got)
+	}
+	if got := stopCalls.Load(); got != 1 {
+		t.Fatalf("StopAgent calls = %d, want 1", got)
+	}
+}
+
+func TestCleanupUnstartedExecutionAfterPersistError_CancelledWithoutTeardownStopsExecution(t *testing.T) {
 	tests := []struct {
 		name      string
 		state     models.TaskSessionState
 		wantStops int32
 	}{
-		{name: "cancelled", state: models.TaskSessionStateCancelled, wantStops: 0},
+		{name: "cancelled", state: models.TaskSessionStateCancelled, wantStops: 1},
 		{name: "failed", state: models.TaskSessionStateFailed, wantStops: 1},
 	}
 	for _, tt := range tests {
@@ -1406,6 +1513,36 @@ func TestCleanupUnstartedExecutionAfterPersistError_CancelledOwnsTeardown(t *tes
 	}
 }
 
+func TestCleanupUnstartedExecutionAfterPersistError_CancelledWithTeardownSkipsExecutionCleanup(t *testing.T) {
+	var stopCalls atomic.Int32
+	exec := newTestExecutor(t, &mockAgentManager{
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls.Add(1)
+			return nil
+		},
+	}, newMockRepository())
+	exec.SetOnExecutionCleanupClaim(func(sessionID, executionID string) bool {
+		if sessionID != "session-123" || executionID != "exec-456" {
+			t.Fatalf("cleanup claim = (%q, %q), want (session-123, exec-456)", sessionID, executionID)
+		}
+		return false
+	})
+
+	exec.cleanupUnstartedExecutionAfterPersistError(
+		context.Background(),
+		"session-123",
+		"exec-456",
+		&SessionStateSupersededError{
+			SessionID: "session-123",
+			State:     models.TaskSessionStateCancelled,
+		},
+	)
+
+	if got := stopCalls.Load(); got != 0 {
+		t.Fatalf("StopAgent calls = %d, want 0", got)
+	}
+}
+
 func TestStartAgentProcessAsync_StopWinningStartRacePreservesReview(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-123"] = &models.TaskSession{
@@ -1415,21 +1552,37 @@ func TestStartAgentProcessAsync_StopWinningStartRacePreservesReview(t *testing.T
 
 	startEntered := make(chan struct{})
 	releaseStart := make(chan struct{})
-	reconcileDone := make(chan struct{})
+	cleanupClaimed := make(chan struct{})
+	stopDone := make(chan struct{})
+	var reconcileCalls atomic.Int32
 	agentManager := &mockAgentManager{
 		startAgentProcessFunc: func(context.Context, string) error {
 			close(startEntered)
 			<-releaseStart
 			return nil
 		},
+		stopAgentFunc: func(_ context.Context, executionID string, force bool) error {
+			if executionID != "exec-456" || !force {
+				t.Fatalf("StopAgent = (%q, %v), want (exec-456, true)", executionID, force)
+			}
+			close(stopDone)
+			return nil
+		},
 	}
 	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetOnExecutionCleanupClaim(func(sessionID, executionID string) bool {
+		if sessionID != "session-123" || executionID != "exec-456" {
+			t.Fatalf("cleanup claim = (%q, %q), want (session-123, exec-456)", sessionID, executionID)
+		}
+		close(cleanupClaimed)
+		return true
+	})
 	exec.SetOnTaskRuntimeStateReconcile(func(
 		ctx context.Context,
 		taskID, sessionID string,
 		state v1.TaskState,
 	) error {
-		defer close(reconcileDone)
+		reconcileCalls.Add(1)
 		session, err := repo.GetTaskSession(ctx, sessionID)
 		if err != nil {
 			return err
@@ -1460,9 +1613,17 @@ func TestStartAgentProcessAsync_StopWinningStartRacePreservesReview(t *testing.T
 	close(releaseStart)
 
 	select {
-	case <-reconcileDone:
+	case <-cleanupClaimed:
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for runtime task reconcile")
+		t.Fatal("timed out waiting for post-start cleanup claim")
+	}
+	select {
+	case <-stopDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for post-start runtime cleanup")
+	}
+	if got := reconcileCalls.Load(); got != 0 {
+		t.Fatalf("runtime task reconcile calls = %d, want 0", got)
 	}
 	repo.mu.Lock()
 	gotTaskState := repo.tasks["task-123"].State

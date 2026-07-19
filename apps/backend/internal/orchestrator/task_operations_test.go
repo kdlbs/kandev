@@ -81,6 +81,8 @@ func newCoordinatorStopTestService(
 		messageQueue: messagequeue.NewServiceMemory(log),
 	}
 	exec.SetOnSessionStateTransition(svc.transitionTaskSessionState)
+	exec.SetOnExecutionCleanupClaim(svc.claimForcedExecutionCleanup)
+	exec.SetOnExecutionStopOwnerRegistration(svc.RegisterExecutionStopOwner)
 	return svc
 }
 
@@ -3041,6 +3043,18 @@ func (c *ctxAwareTaskRepo) UpdateTaskStateIfNotArchived(
 		return false, err
 	}
 	return c.inner.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+}
+
+func (c *ctxAwareTaskRepo) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	return c.inner.UpdateTaskStateIfSessionState(ctx, taskID, sessionID, expectedSessionState, state)
 }
 
 // TestResumeTaskSession_FailedStateWriteSurvivesCancelledCallerCtx verifies the

@@ -133,7 +133,7 @@ func (r *clarificationTaskStateRaceRepo) UpdateTaskStateIfSessionState(
 	taskID, sessionID string,
 	expectedSessionState models.TaskSessionState,
 	state v1.TaskState,
-) (bool, error) {
+) (v1.TaskState, bool, error) {
 	if !r.stopped {
 		r.stopped = true
 		if err := r.sessionRepo.UpdateTaskSessionState(
@@ -142,10 +142,10 @@ func (r *clarificationTaskStateRaceRepo) UpdateTaskStateIfSessionState(
 			models.TaskSessionStateCancelled,
 			"stopped by parent task via MCP",
 		); err != nil {
-			return false, err
+			return "", false, err
 		}
 		if err := r.UpdateTaskState(ctx, taskID, v1.TaskStateReview); err != nil {
-			return false, err
+			return "", false, err
 		}
 	}
 	updater := r.TaskRepository.(sessionOwnedTaskStateUpdater)

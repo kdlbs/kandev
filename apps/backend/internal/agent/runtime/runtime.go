@@ -131,7 +131,7 @@ type Execution struct {
 // callers don't need to import a sibling package for a tiny struct.
 type Event = streams.AgentEvent
 
-// ErrNotFound is returned by GetExecution when no execution matches.
+// ErrNotFound reports that an execution lookup or stop found no live runtime.
 var ErrNotFound = errors.New("runtime: execution not found")
 
 // ErrUnsupported is returned by methods that have not yet been wired up

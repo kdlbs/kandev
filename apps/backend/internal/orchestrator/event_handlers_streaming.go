@@ -1337,7 +1337,7 @@ func (s *Service) reconcileTaskStateForRuntimeLocked(
 	if !runtimeSessionOwnsTaskState(session, state) {
 		return nil
 	}
-	updated, err := s.taskRepo.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+	updated, err := s.taskRepo.UpdateTaskStateIfSessionState(ctx, taskID, sessionID, session.State, state)
 	if err != nil {
 		return err
 	}

@@ -94,6 +94,14 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 			)
 			return
 		}
+		if _, terminal := e.stopStartedExecutionIfSessionTerminal(
+			updateCtx,
+			sessionID,
+			agentExecutionID,
+			"terminal post-start race",
+		); terminal {
+			return
+		}
 
 		onSuccess(updateCtx)
 	}()
@@ -112,10 +120,11 @@ func (e *Executor) handleAgentProcessStartFailure(
 		zap.Error(startErr))
 
 	// A terminal transition may have landed while StartAgentProcess was
-	// blocked. Drop all failure/recovery side effects in that case; a
-	// CANCELLED transition already owns graceful teardown.
+	// blocked. Drop all failure/recovery side effects in that case. CANCELLED
+	// owns teardown only when another path has claimed this exact execution.
 	if terminalState, terminal := e.currentTerminalSessionState(ctx, sessionID); terminal {
-		if terminalState != models.TaskSessionStateCancelled {
+		if terminalState != models.TaskSessionStateCancelled ||
+			e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
 			e.stopFailedStartExecution(ctx, agentExecutionID, "terminal start race")
 		}
 		return
@@ -147,11 +156,19 @@ func (e *Executor) handleAgentProcessStartFailure(
 		e.writeTaskReviewStateIfNoWorkingSessions(ctx, taskID, sessionID)
 	}
 
-	// The agent process never fully started. A concurrent cancellation owns
-	// graceful teardown; every other final state needs forced cleanup.
-	if finalState != models.TaskSessionStateCancelled {
+	// The agent process never fully started. Skip forced cleanup only when a
+	// concurrent path owns teardown for this exact cancelled execution.
+	if finalState != models.TaskSessionStateCancelled ||
+		e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
 		e.stopFailedStartExecution(ctx, agentExecutionID, "start failure")
 	}
+}
+
+func (e *Executor) claimForcedExecutionCleanup(sessionID, agentExecutionID string) bool {
+	if e.onExecutionCleanupClaim == nil {
+		return true
+	}
+	return e.onExecutionCleanupClaim(sessionID, agentExecutionID)
 }
 
 func (e *Executor) stopFailedStartExecution(ctx context.Context, agentExecutionID, phase string) {
@@ -171,6 +188,20 @@ func (e *Executor) currentTerminalSessionState(
 		return "", false
 	}
 	return session.State, true
+}
+
+func (e *Executor) stopStartedExecutionIfSessionTerminal(
+	ctx context.Context,
+	sessionID, agentExecutionID, phase string,
+) (models.TaskSessionState, bool) {
+	terminalState, terminal := e.currentTerminalSessionState(ctx, sessionID)
+	if !terminal {
+		return "", false
+	}
+	if e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
+		e.stopFailedStartExecution(ctx, agentExecutionID, phase)
+	}
+	return terminalState, true
 }
 
 // startAgentProcessAsync starts the agent subprocess and transitions the task to IN_PROGRESS on success.
@@ -205,7 +236,9 @@ func (e *Executor) cleanupUnstartedExecutionAfterPersistError(
 	persistErr error,
 ) {
 	var superseded *SessionStateSupersededError
-	if errors.As(persistErr, &superseded) && superseded.State == models.TaskSessionStateCancelled {
+	if errors.As(persistErr, &superseded) &&
+		superseded.State == models.TaskSessionStateCancelled &&
+		!e.claimForcedExecutionCleanup(sessionID, agentExecutionID) {
 		return
 	}
 	e.stopUnstartedExecution(ctx, sessionID, agentExecutionID)

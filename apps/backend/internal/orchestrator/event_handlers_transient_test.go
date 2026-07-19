@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // overloaded529 is the exact transient 529 Overloaded envelope the
@@ -324,6 +327,90 @@ func TestRetryTransientPrompt_SynchronousPromptErrorSurfacesRecovery(t *testing.
 	if !hasRecovery {
 		t.Error("expected recovery banner after synchronous PromptTask failure")
 	}
+}
+
+func TestRetryTransientPrompt_DoesNotStopOrRelaunchCoordinatorOwnedExecution(t *testing.T) {
+	svc, _ := newTransientTestService(t)
+	svc.rememberTurnPrompt("s1", "retry me", "", false, nil)
+	svc.transientRetries.Store("s1", &transientRetryEntry{attempt: 1, cancel: func() {}})
+	svc.RegisterExecutionStopOwner("s1", "exec-owned", true)
+
+	svc.retryTransientPrompt(context.Background(), "t1", "s1", "exec-owned")
+
+	agentManager := svc.agentManager.(*mockAgentManager)
+	agentManager.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), agentManager.stopAgentWithReasonArgs...)
+	promptCalls := append([]promptCall(nil), agentManager.capturedPromptCalls...)
+	agentManager.mu.Unlock()
+	if len(stopCalls) != 0 {
+		t.Fatalf("transient recovery duplicated coordinator stop: %#v", stopCalls)
+	}
+	if len(promptCalls) != 0 {
+		t.Fatalf("transient recovery relaunched after coordinator stop: %#v", promptCalls)
+	}
+	if _, ok := svc.transientRetries.Load("s1"); ok {
+		t.Fatal("coordinator-owned teardown left transient retry armed")
+	}
+}
+
+func TestRetryTransientPrompt_OwningStopSurvivesCoordinatorCancellation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-retry-race", "session-retry-race", models.TaskSessionStateWaitingForInput)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-retry-race", v1.TaskStateInProgress)
+
+	stopEntered := make(chan struct{})
+	releaseStop := make(chan struct{})
+	stopContextCancelled := make(chan error, 1)
+	var stopCalls atomic.Int32
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "execution-retry-race", nil
+		},
+		stopAgentWithReasonFunc: func(stopCtx context.Context, _ string, _ string, _ bool) error {
+			stopCalls.Add(1)
+			close(stopEntered)
+			select {
+			case <-releaseStop:
+				return nil
+			case <-stopCtx.Done():
+				stopContextCancelled <- stopCtx.Err()
+				return stopCtx.Err()
+			}
+		},
+	}
+	svc := newCoordinatorStopTestService(repo, taskRepo, agentManager)
+	retryCtx, cancelRetry := context.WithCancel(ctx)
+	svc.rememberTurnPrompt("session-retry-race", "retry me", "", false, nil)
+	svc.transientRetries.Store("session-retry-race", &transientRetryEntry{
+		attempt: 1,
+		cancel:  cancelRetry,
+	})
+	retryDone := make(chan struct{})
+	go func() {
+		svc.retryTransientPrompt(
+			retryCtx,
+			"task-retry-race",
+			"session-retry-race",
+			"execution-retry-race",
+		)
+		close(retryDone)
+	}()
+
+	coordinatorStopAwaitSignal(t, stopEntered, "transient retry teardown")
+	result, err := svc.StopTaskForCoordinator(ctx, "task-retry-race")
+	require.NoError(t, err)
+	require.Equal(t, CoordinatorTaskStopStatusStopped, result.Status)
+	select {
+	case err := <-stopContextCancelled:
+		t.Fatalf("owning force-stop inherited retry cancellation: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseStop)
+	coordinatorStopAwaitSignal(t, retryDone, "transient retry completion")
+	require.Equal(t, int32(1), stopCalls.Load())
+	require.Empty(t, agentManager.capturedPromptCalls, "cancelled retry must not relaunch")
 }
 
 func TestTransientRetryEntryClaimPreventsDoubleFire(t *testing.T) {

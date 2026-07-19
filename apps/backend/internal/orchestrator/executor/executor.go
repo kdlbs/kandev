@@ -95,8 +95,8 @@ var (
 	ErrAgentCommandMissing     = errors.New("existing execution has no agent command configured")
 	// ErrSessionStateSuperseded means a runtime registered successfully, but a
 	// concurrent terminal session transition won the persistence race. Callers
-	// must not start the process or force-stop it; the terminal transition owns
-	// teardown.
+	// must not start the process and must arbitrate exact-execution teardown
+	// ownership before deciding whether to force-stop the registered runtime.
 	ErrSessionStateSuperseded = errors.New("session state superseded by terminal transition")
 )
 
@@ -561,6 +561,16 @@ type SessionStateTransitionFunc func(ctx context.Context, taskID, sessionID stri
 // callback should also move the parent task to IN_PROGRESS immediately.
 type SessionStartingFunc func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error
 
+// ExecutionCleanupClaimFunc atomically claims forced cleanup for one exact
+// session execution. It returns true when the executor owns cleanup and false
+// when another teardown path already owns that execution.
+type ExecutionCleanupClaimFunc func(sessionID, agentExecutionID string) bool
+
+// ExecutionStopOwnerRegistrationFunc records that an explicit teardown path
+// owns one exact session execution. Registration is advisory: the explicit
+// stop still runs, while orphan cleanup uses the record to avoid duplicating it.
+type ExecutionStopOwnerRegistrationFunc func(sessionID, agentExecutionID string, force bool)
+
 // TaskReviewStateReconcileFunc is called when runtime work stopped and the
 // parent task should move to REVIEW only if no session is still STARTING/RUNNING.
 type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSessionID string)
@@ -623,6 +633,15 @@ type Executor struct {
 	// the orchestrator so launch/resume/model-switch transitions serialize with
 	// runtime task-state reconciliation.
 	onSessionStarting SessionStartingFunc
+
+	// Callback for exact-execution forced cleanup arbitration. Set by the
+	// orchestrator so coordinator graceful stop and launch cleanup cannot both
+	// tear down the same execution.
+	onExecutionCleanupClaim ExecutionCleanupClaimFunc
+
+	// Callback for registering explicit exact-execution teardown ownership before
+	// a legacy stop persists CANCELLED. The requested stop always runs.
+	onExecutionStopOwnerRegistration ExecutionStopOwnerRegistrationFunc
 
 	// Callback for REVIEW reconciliation after runtime start failures. Set by the
 	// orchestrator so failed-start writes share the same serialized guard as
@@ -735,6 +754,16 @@ func (e *Executor) SetOnSessionStateTransition(fn SessionStateTransitionFunc) {
 // SetOnSessionStarting sets a callback for full session-row STARTING updates.
 func (e *Executor) SetOnSessionStarting(fn SessionStartingFunc) {
 	e.onSessionStarting = fn
+}
+
+// SetOnExecutionCleanupClaim sets the exact-execution forced cleanup arbiter.
+func (e *Executor) SetOnExecutionCleanupClaim(fn ExecutionCleanupClaimFunc) {
+	e.onExecutionCleanupClaim = fn
+}
+
+// SetOnExecutionStopOwnerRegistration sets the explicit-stop ownership registrar.
+func (e *Executor) SetOnExecutionStopOwnerRegistration(fn ExecutionStopOwnerRegistrationFunc) {
+	e.onExecutionStopOwnerRegistration = fn
 }
 
 // SetOnTaskReviewStateReconcile sets the guarded task REVIEW reconciliation
