@@ -30,11 +30,11 @@
 
 ## Four distinguishable states, not by color alone §spec:state-vocabulary
 
-*Status: partially complete — generating / background-running / done are
-landed and distinguishable by shape+motion (not hue alone) via the shared
-`getTaskStateIcon` / `getSessionStateIcon` in
-`apps/web/lib/ui/state-icons.tsx`; waiting-for-input as a consistent fourth
-state across surfaces is not started (see §spec:waiting-for-input-parity).*
+*Status: complete — all four states (generating / background-running /
+waiting-for-input / done) are landed and distinguishable by shape+label (not
+hue alone) via the shared `getTaskStateIcon` / `getSessionStateIcon` in
+`apps/web/lib/ui/state-icons.tsx`; the waiting-for-input fourth state now reads
+consistently on every surface (see §spec:waiting-for-input-parity).*
 
 Every status surface communicates four mutually distinguishable
 conditions for a task or session:
@@ -239,11 +239,15 @@ attributes (mobile parity) · §req:constraints
 
 ## Waiting-for-my-input reads consistently everywhere §spec:waiting-for-input-parity
 
-*Status: not started — waiting-for-input is rich on the sidebar (message-
-derived pending-clarification and needs-permission variants) but degrades
-to the plain coarse task state on the card, list row, graph/swimlane
-node, header, and session menus; the task-list row explicitly disables the
-clarification path.*
+*Status: complete — the sidebar's rich waiting reading (message-derived
+pending-clarification and pending-permission variants) is now carried to the
+kanban card, task-list row, graph/swimlane node, open-task header, and the
+session menus (desktop + mobile), lifted into the shared vocabulary
+(`getTaskStateIcon` / `getSessionStateIcon` plus the `useTaskPendingInput` /
+`useSessionPendingInput` hooks) rather than reinvented per surface. The
+task-list row's disabled clarification path is re-enabled, and each waiting
+variant is distinct from done and from both running states by icon shape/label
+(grayscale-safe), not hue alone.*
 
 Waiting-for-my-input is a first-class fourth state, distinguishable from
 finished and from both running states, on every surface — not only the
