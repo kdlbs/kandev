@@ -4,6 +4,7 @@ import { panel, type LayoutState } from "@/lib/state/layout-manager";
 import {
   BUILT_IN_LAYOUT_PROFILES,
   createLayoutProfile,
+  createLayoutProfileId,
   deleteLayoutProfile,
   duplicateLayoutProfile,
   getBuiltInLayoutProfile,
@@ -166,6 +167,16 @@ describe("validateReusableLayout", () => {
       issues: [expect.objectContaining({ code: "invalid-active-panel" })],
     });
   });
+
+  it("reports an invalid active panel only once", () => {
+    const layout = reusableLayout();
+    layout.columns[0].groups[0].activePanel = "files-outside-group";
+
+    const result = validateReusableLayout(layout);
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.filter(({ code }) => code === "invalid-active-panel")).toHaveLength(1);
+  });
 });
 
 describe("layout profile defaults", () => {
@@ -199,6 +210,36 @@ describe("layout profile defaults", () => {
     expect(resolved.source).toBe("built-in");
     expect(resolved.profile.id).toBe("default");
     expect(validateReusableLayout(resolved.layout).valid).toBe(true);
+  });
+
+  it("applies a legacy default after removing its retired sidebar column", () => {
+    const layout = reusableLayout();
+    layout.columns.unshift({
+      id: "sidebar",
+      groups: [
+        {
+          id: "group-sidebar",
+          panels: [{ id: "sidebar", component: "sidebar", title: "Sidebar" }],
+          activePanel: "sidebar",
+        },
+      ],
+    });
+    const profile = savedLayout({ is_default: true, layout });
+
+    const resolved = resolveEffectiveDefaultLayout([profile]);
+
+    expect(resolved.source).toBe("custom");
+    expect(resolved.layout.columns.map(({ id }) => id)).toEqual([CENTER_COLUMN_ID]);
+  });
+});
+
+describe("layout profile IDs", () => {
+  it("uses UUID-backed IDs", () => {
+    const first = createLayoutProfileId();
+    const second = createLayoutProfileId();
+
+    expect(first).toMatch(/^layout-[0-9a-f-]{36}$/);
+    expect(second).not.toBe(first);
   });
 });
 

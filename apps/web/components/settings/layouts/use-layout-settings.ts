@@ -4,6 +4,7 @@ import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import {
+  createLayoutProfileId,
   deleteLayoutProfile,
   duplicateLayoutProfile,
   getBuiltInLayoutProfile,
@@ -114,7 +115,7 @@ function useProfileActions(drafts: Drafts, selected: ReturnType<typeof selectedS
   const selectedName = selected.selectedBuiltIn?.name ?? selected.selectedCustom?.name ?? "Layout";
   const duplicate = () =>
     attempt(drafts.setError, () => {
-      const id = `layout-${globalThis.crypto.randomUUID()}`;
+      const id = createLayoutProfileId();
       const source = selected.selectedBuiltIn ?? drafts.selection.id;
       drafts.replaceProfiles(
         duplicateLayoutProfile(drafts.profiles, source, {
@@ -127,7 +128,7 @@ function useProfileActions(drafts: Drafts, selected: ReturnType<typeof selectedS
     });
   const create = () =>
     attempt(drafts.setError, () => {
-      const id = `layout-${globalThis.crypto.randomUUID()}`;
+      const id = createLayoutProfileId();
       drafts.replaceProfiles(
         duplicateLayoutProfile(drafts.profiles, getBuiltInLayoutProfile("default"), {
           id,

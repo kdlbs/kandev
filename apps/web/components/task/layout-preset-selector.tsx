@@ -49,6 +49,7 @@ import { useDockviewStore, type BuiltInPreset } from "@/lib/state/dockview-store
 import {
   BUILT_IN_LAYOUT_PROFILES,
   createLayoutProfile,
+  createLayoutProfileId,
   deleteLayoutProfile,
   type BuiltInLayoutProfileId,
 } from "@/lib/layout/layout-profiles";
@@ -102,7 +103,7 @@ function SaveLayoutDialog({
       const layout = captureCurrentLayout();
       const response = await updateUserSettings({
         saved_layouts: createLayoutProfile(savedLayouts, {
-          id: `layout-${Date.now()}`,
+          id: createLayoutProfileId(),
           name: trimmed,
           isDefault,
           layout,

@@ -89,6 +89,10 @@ export type DuplicateLayoutProfileInput = {
 
 const REUSABLE_PANEL_ID_SET = new Set<string>(REUSABLE_PANEL_IDS);
 
+export function createLayoutProfileId(): string {
+  return `layout-${globalThis.crypto.randomUUID()}`;
+}
+
 export function getBuiltInLayoutProfile(id: BuiltInLayoutProfileId): BuiltInLayoutProfile {
   const descriptor = BUILT_IN_LAYOUT_PROFILES.find((profile) => profile.id === id);
   if (!descriptor) throw new Error(`Unknown built-in layout profile: ${id}`);
@@ -271,7 +275,15 @@ export function getLayoutProfileCompatibility(profile: SavedLayout): LayoutProfi
 export function resolveEffectiveDefaultLayout(profiles: SavedLayout[]): EffectiveDefaultLayout {
   const profile = profiles.find((candidate) => candidate.is_default);
   if (profile) {
-    const validation = validateReusableLayout(profile.layout);
+    const layout = Array.isArray(profile.layout.columns)
+      ? {
+          ...profile.layout,
+          columns: profile.layout.columns.filter(
+            (column) => !isRecord(column) || column.id !== "sidebar",
+          ),
+        }
+      : profile.layout;
+    const validation = validateReusableLayout(layout);
     if (validation.valid) {
       return { source: "custom", profile, layout: validation.layout };
     }
