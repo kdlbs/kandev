@@ -6,8 +6,9 @@ import { fileURLToPath } from "node:url";
 
 const evalDir = path.dirname(fileURLToPath(import.meta.url));
 const skillDir = path.resolve(evalDir, "..");
+const skill = fs.readFileSync(path.join(skillDir, "SKILL.md"), "utf8");
 const bundle = [
-  fs.readFileSync(path.join(skillDir, "SKILL.md"), "utf8"),
+  skill,
   ...fs
     .readdirSync(path.join(skillDir, "references"))
     .filter((name) => name.endsWith(".md"))
@@ -67,6 +68,11 @@ test("keeps semantic focus evidence separate from camera keyframes in landing ex
     assert.match(example, /"pointerTrack"\s*:/);
     assert.match(example, /"keyframes"\s*:/);
   }
+});
+
+test("names the settled penultimate loop frame in the acceptance gate", () => {
+  assert.match(skill, /first, settled penultimate, and final/i);
+  assert.doesNotMatch(skill, /first\/settled\/final/i);
 });
 
 test("explicitly rejects bad editorial shortcuts", () => {

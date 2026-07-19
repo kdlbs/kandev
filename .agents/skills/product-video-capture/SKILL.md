@@ -73,7 +73,7 @@ Follow [qa-checklist.md](references/qa-checklist.md). Do not ship until:
 - raw and delivery dimensions are proven by decoded pixels, not only container metadata;
 - cadence is constant 25 fps, timestamps have no gaps, the FFmpeg log proves zero duplicated and dropped frames, and no audio stream exists;
 - 10/25/50/75/90% frames, an overview contact sheet, actual-size 100% frame proofs, and full playback pass visual review;
-- camera motion is smooth, reaches intended depth, and uses the profile's tested loop frame: centered 1x for a wide loop, or identical first/settled/final crops for an approved focused landing/docs loop that improves readability while preserving identifying context;
+- camera motion is smooth, reaches intended depth, and uses the profile's tested loop frame: centered 1x for a wide loop, or identical first, settled penultimate, and final crops for an approved focused landing/docs loop that improves readability while preserving identifying context;
 - text, menus, diffs, pointer, and touch targets remain inside frame; frame-by-frame pointer containment passes with a deliberate edge margin;
 - staged WebM, MP4, WebP, responsive source selection, lazy loading, and reduced-motion behavior pass codec probes and real-browser playback;
 - SHA-256 hashes cover raw masters, camera configs, semantic metadata, proofs, and every delivery candidate;
