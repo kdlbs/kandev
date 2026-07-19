@@ -301,10 +301,7 @@ function getDirtyContributors(
 function snapshotDirtyContributors(
   contributors: Map<string, RegisteredContributor>,
 ): RegisteredContributor[] {
-  return getDirtyContributors(contributors).map((entry) => ({
-    ...entry,
-    contributor: entry.contributor,
-  }));
+  return getDirtyContributors(contributors).map((entry) => ({ ...entry }));
 }
 
 function hasNewerRevision(
