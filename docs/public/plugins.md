@@ -10,9 +10,10 @@ Plugins extend kandev without forking core: a plugin ships a **Go backend**
 that kandev spawns and supervises as a subprocess over a strict typed gRPC
 protocol, and can optionally ship a **native frontend bundle** that kandev
 loads into the SPA. This page covers what plugins are, how to install and
-manage them, and the current security posture. For building a plugin, see
-[Authoring a plugin](plugins-authoring.md). For the manifest schema, see
-[Plugin manifest reference](plugins-manifest.md).
+manage them, and the current security posture. To discover and install plugins
+from the in-app catalog, see the [Plugin marketplace](plugins-marketplace.md).
+For building a plugin, see [Authoring a plugin](plugins-authoring.md). For the
+manifest schema, see [Plugin manifest reference](plugins-manifest.md).
 
 Plugins are an operator-level, instance-wide capability — there is no
 per-user plugin access. They are gated behind the `plugins` feature flag
@@ -41,10 +42,14 @@ its own action right where you message an agent.
 
 ## Installing a plugin
 
-Open **Settings > Plugins** and click **Install plugin**. You can install
-from a URL (kandev downloads the tarball) or by uploading a `.tar.gz` file
-directly. No credentials are ever shown or copied — installing a plugin has
-nothing to reveal, unlike a webhook-secret/API-key registration flow.
+The easiest way to install is from the in-app catalog — **Settings > Plugins >
+Browse**, then **Install** on a card (see the [Plugin
+marketplace](plugins-marketplace.md)). To install a plugin that is not in a
+configured catalog, open **Settings > Plugins** and click **Install plugin**.
+You can install from a URL (kandev downloads the tarball) or by uploading a
+`.tar.gz` file directly. No credentials are ever shown or copied — installing a
+plugin has nothing to reveal, unlike a webhook-secret/API-key registration
+flow.
 
 ![The Install plugin dialog with From URL and Upload file tabs and a drag-and-drop area for a .tar.gz package.](../screenshots/plugin-install-dialog.png)
 
@@ -188,9 +193,12 @@ identically to an unsigned one; signing is not required in v1.
   realm boundary) is explicit future work — see below.
 - **Package integrity is always checked; signing is optional.** See
   "Signed vs. unsigned packages" above.
-- **No plugin marketplace.** Install-by-URL/upload is a manual, single-plugin
-  action; there is no central catalog, one-click install, or automatic
-  discovery.
+- **Curated marketplace, no auto-install.** The [Plugin
+  marketplace](plugins-marketplace.md) adds one-click install from a catalog,
+  but the official source is PR-curated (a plugin appears only after a
+  maintainer approves it), install is always an explicit operator action, and
+  updates require an explicit click — there is no automatic discovery or
+  background install. kandev collects no download or usage telemetry.
 
 Related: [Authoring a plugin](plugins-authoring.md), [Plugin manifest
 reference](plugins-manifest.md), and [Extending Kandev](extending-kandev.md).

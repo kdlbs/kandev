@@ -43,6 +43,7 @@
     "release-process",
     "---Plugins---",
     "plugins",
+    "plugins-marketplace",
     "plugins-authoring",
     "plugins-manifest",
     "---Office---",
