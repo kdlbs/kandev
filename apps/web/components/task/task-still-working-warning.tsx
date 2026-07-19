@@ -1,10 +1,5 @@
 import { IconAlertTriangle } from "@tabler/icons-react";
 
-// The §spec:destructive-action-guard "still working" warning, shared by the
-// archive and delete confirmation dialogs so both surface identical copy. It is a
-// warn-before-proceed banner inside the existing dialog — not a hard block — shown
-// only while the task is in-flight (see useTaskInFlight). `count` tailors the
-// wording for a bulk selection where at least one task is still working.
 export function StillWorkingWarning({ count }: { count?: number }) {
   const subject =
     count && count > 1

@@ -47,6 +47,9 @@ vi.mock("@/hooks/domains/session/use-session-actions", () => ({
 
 const PILL_TESTID = "mobile-sessions-pill";
 const ICON_CIRCLE_CHECK = "tabler-icon-circle-check";
+const SESSION_A = "session-a";
+const SESSION_BG = "session-bg";
+const START_TIME = "2026-01-01T00:00:00Z";
 
 function session(
   id: string,
@@ -75,21 +78,21 @@ function profile(id: string, label: string, agentName: string): AgentProfileOpti
   };
 }
 
+afterEach(cleanup);
+
+beforeEach(() => {
+  mocks.activeSessionId = SESSION_A;
+  mocks.sessions = [
+    session(SESSION_A, "profile-a", START_TIME),
+    session("session-b", "profile-b", "2026-01-01T00:01:00Z"),
+  ];
+  mocks.agentProfiles = [
+    profile("profile-a", "Alpha", "claude"),
+    profile("profile-b", "Beta", "codex"),
+  ];
+});
+
 describe("MobileSessionsPicker", () => {
-  afterEach(cleanup);
-
-  beforeEach(() => {
-    mocks.activeSessionId = "session-a";
-    mocks.sessions = [
-      session("session-a", "profile-a", "2026-01-01T00:00:00Z"),
-      session("session-b", "profile-b", "2026-01-01T00:01:00Z"),
-    ];
-    mocks.agentProfiles = [
-      profile("profile-a", "Alpha", "claude"),
-      profile("profile-b", "Beta", "codex"),
-    ];
-  });
-
   it("uses the effective layout session instead of a stale store session", () => {
     render(<MobileSessionsPicker taskId="task-1" sessionId="session-b" fullWidth />);
 
@@ -123,9 +126,9 @@ describe("MobileSessionsPicker", () => {
     // check. Tabler renders the icon shape into the svg class
     // (`tabler-icon-<name>`), so asserting the class proves the distinction is
     // carried by SHAPE (survives a grayscale scan), not hue alone.
-    mocks.activeSessionId = "session-bg";
+    mocks.activeSessionId = SESSION_BG;
     mocks.sessions = [
-      session("session-bg", "profile-a", "2026-01-01T00:00:00Z", {
+      session(SESSION_BG, "profile-a", START_TIME, {
         state: "RUNNING",
         foreground_activity: "background",
       }),
@@ -137,7 +140,7 @@ describe("MobileSessionsPicker", () => {
         state: "COMPLETED",
       }),
     ];
-    render(<MobileSessionsPicker taskId="task-1" sessionId="session-bg" fullWidth />);
+    render(<MobileSessionsPicker taskId="task-1" sessionId={SESSION_BG} fullWidth />);
     fireEvent.click(screen.getByTestId(PILL_TESTID));
 
     const bg = screen.getByTestId("mobile-session-state-session-bg");
@@ -161,13 +164,34 @@ describe("MobileSessionsPicker", () => {
     expect(svgClass(done)).toContain(ICON_CIRCLE_CHECK);
   });
 
+  it("keeps the background-running label while the foreground has a pending prompt", () => {
+    mocks.activeSessionId = SESSION_BG;
+    mocks.sessions = [
+      session(SESSION_BG, "profile-a", START_TIME, {
+        state: "RUNNING",
+        foreground_activity: "background",
+      }),
+    ];
+    mocks.messagesBySession = {
+      [SESSION_BG]: [{ type: "clarification_request", metadata: { status: "pending" } }],
+    };
+
+    render(<MobileSessionsPicker taskId="task-1" sessionId={SESSION_BG} fullWidth />);
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+
+    expect(screen.getByTestId("mobile-session-state-session-bg").textContent).toMatch(
+      /background/i,
+    );
+    mocks.messagesBySession = {};
+  });
+
   it("carries the waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
     // A pending clarification and a pending permission each read distinctly on
     // the mobile session row — the question / shield glyphs — never a done check
     // or a running dot, matching the sidebar and desktop menus.
     mocks.activeSessionId = "session-clar";
     mocks.sessions = [
-      session("session-clar", "profile-a", "2026-01-01T00:00:00Z", {
+      session("session-clar", "profile-a", START_TIME, {
         state: "WAITING_FOR_INPUT",
       }),
       session("session-perm", "profile-b", "2026-01-01T00:01:00Z", {

@@ -13,7 +13,7 @@ import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
-import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { getTaskStateIcon, isTaskInFlight } from "@/lib/ui/state-icons";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
@@ -602,6 +602,7 @@ function TaskRowActions({
         onOpenChange={onDeleteOpenChange}
         taskTitle={task.title}
         taskId={task.id}
+        isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
         isDeleting={isDeleting}
         onConfirm={({ cascade }) => onDelete(task.id, { cascade })}
@@ -611,6 +612,7 @@ function TaskRowActions({
         onOpenChange={onArchiveOpenChange}
         taskTitle={task.title}
         taskId={task.id}
+        isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
         onConfirm={({ cascade }) => onArchive(task.id, { cascade })}
       />

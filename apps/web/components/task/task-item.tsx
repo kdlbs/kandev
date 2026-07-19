@@ -185,6 +185,22 @@ function TaskStateIcon({
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
 }) {
+  if (foregroundActivity === "background") {
+    return (
+      <span data-testid="task-state-background-running" className="mt-[1px] flex shrink-0">
+        {getSessionStateIcon("RUNNING", "h-3.5 w-3.5", "background")}
+      </span>
+    );
+  }
+  if (foregroundActivity === "generating") {
+    return (
+      <IconCircleDashed
+        data-testid="task-state-running"
+        data-loading-phase="running"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
+      />
+    );
+  }
   if (shouldUseQuestionTaskIcon(state, hasPendingClarification)) {
     return (
       <IconMessageQuestion
@@ -210,28 +226,9 @@ function TaskStateIcon({
       />
     );
   }
-  // Background-running: the task's foreground turns are idle, held open only by
-  // spawned background work. Driven by the task-level most-active-wins aggregate
-  // (`foregroundActivity`) carried on the task record, so a background-running
-  // secondary session is caught even when the client store only holds the
-  // finished primary — matching the board card and open-task header
-  // (§spec:task-level-truth). Render the shared background affordance — distinct
-  // by shape from this surface's generating spinner (IconCircleDashed) and never
-  // the review/done check. The aggregate is backend truth, so an unknown/
-  // generating substate falls through to the generating spinner below (never done).
-  if (foregroundActivity === "background") {
-    return (
-      <span data-testid="task-state-background-running" className="mt-[1px] flex shrink-0">
-        {getSessionStateIcon("RUNNING", "h-3.5 w-3.5", "background")}
-      </span>
-    );
-  }
-  // Generating: the established gold spinner (§req:success-criteria #9, left
-  // unchanged). `isInProgress` keeps a live turn spinning when the aggregate is
-  // unknown (safe default, never done); `foregroundActivity === "generating"`
-  // additionally catches a generating secondary session on a task whose coarse
-  // state/primary already reads done.
-  if (isInProgress || foregroundActivity === "generating") {
+  // When the aggregate is unknown, a live turn safely falls back to the
+  // established generating spinner rather than a done affordance.
+  if (isInProgress) {
     return (
       <IconCircleDashed
         data-testid="task-state-running"

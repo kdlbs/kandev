@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
@@ -103,5 +103,14 @@ describe("TasksListView row — waiting-for-input parity (§spec:waiting-for-inp
   it("shows the plain waiting question for a finished turn awaiting a reply", () => {
     const { container } = renderList(makeTask({}), { "session-1": [] });
     expect(container.querySelector(".tabler-icon-message-question")).not.toBeNull();
+  });
+});
+
+describe("TasksListView row — destructive-action guard", () => {
+  it("warns from the paginated row data even when the task is absent from kanban state", () => {
+    renderList(makeTask({ foreground_activity: "background" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete task" }));
+    expect(screen.queryByTestId("still-working-warning")).not.toBeNull();
   });
 });
