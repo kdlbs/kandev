@@ -12,12 +12,28 @@ type TaskStateActionsProps = {
    * task shows the distinct background affordance rather than a done check.
    */
   foregroundActivity?: ForegroundActivity | null;
+  /** Message-derived pending-clarification flag (§spec:waiting-for-input-parity). */
+  hasPendingClarification?: boolean;
+  /** Message-derived pending-permission flag (§spec:waiting-for-input-parity). */
+  hasPendingPermission?: boolean;
 };
 
-export function TaskStateActions({ state, className, foregroundActivity }: TaskStateActionsProps) {
+export function TaskStateActions({
+  state,
+  className,
+  foregroundActivity,
+  hasPendingClarification = false,
+  hasPendingPermission = false,
+}: TaskStateActionsProps) {
   return (
     <div className="flex items-center justify-end">
-      {getTaskStateIcon(state, className, false, foregroundActivity)}
+      {getTaskStateIcon(
+        state,
+        className,
+        hasPendingClarification,
+        foregroundActivity,
+        hasPendingPermission,
+      )}
     </div>
   );
 }

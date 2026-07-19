@@ -19,6 +19,7 @@ import Link from "@/components/routing/app-link";
 import { TaskPageContent } from "@/components/task/task-page-content";
 import { TaskBody, resolveTaskBodyMode } from "@/components/task/TaskBody";
 import { TaskHeader } from "@/components/task/TaskHeader";
+import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { TaskStateActions } from "@/components/task/task-state-actions";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isFromOffice } from "@/lib/types/http";
@@ -96,20 +97,30 @@ export function KanbanTaskShell({
 
 // Open-task header row for the kanban simple view: a task-level status icon plus
 // the shared TaskHeader. Both reflect the MOST-ACTIVE-WINS activity aggregate so a
-// background-running task reads distinctly and never as done (§spec:task-level-indicator).
+// background-running task reads distinctly and never as done (§spec:task-level-indicator),
+// and carry the sidebar's rich "needs me" reading — pending clarification /
+// permission — so the header distinguishes waiting-for-input (§spec:waiting-for-input-parity).
 function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
+  const pendingInput = useTaskPendingInput(task?.primary_session_id, {
+    primarySessionState: task?.primary_session_state,
+    primarySessionPendingAction: task?.primary_session_pending_action,
+  });
   return (
     <div className="flex items-center gap-2">
       <TaskStateActions
         state={task?.state ?? undefined}
         className="shrink-0"
         foregroundActivity={task?.foreground_activity}
+        hasPendingClarification={pendingInput.clarification}
+        hasPendingPermission={pendingInput.permission}
       />
       <TaskHeader
         identifier={task?.id?.slice(0, 8)}
         title={task?.title ?? "Loading..."}
         state={task?.state ?? null}
         foregroundActivity={task?.foreground_activity}
+        hasPendingClarification={pendingInput.clarification}
+        hasPendingPermission={pendingInput.permission}
       />
     </div>
   );
