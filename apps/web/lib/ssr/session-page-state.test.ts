@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { mergeInitialState } from "@/lib/state/default-state";
 import type { Task } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
@@ -124,9 +123,8 @@ describe("fetchSessionDataForTask hydration", () => {
     mocks.listTaskSessionMessages.mockResolvedValue(null);
 
     const result = await fetchSessionDataForTask("task-1");
-    const hydratedState = mergeInitialState(result.initialState);
 
-    expect(hydratedState.turns.bySession[session.id]?.[0]?.metadata).toEqual({
+    expect(result.initialState.turns?.bySession[session.id]?.[0]?.metadata).toEqual({
       runtime_config_snapshot: runtimeConfigSnapshot,
     });
   });
