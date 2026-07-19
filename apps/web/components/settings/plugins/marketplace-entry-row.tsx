@@ -10,6 +10,16 @@ import type { MarketplaceEntry } from "@/lib/types/plugins";
 // from any other source get a source badge; the official one does not.
 const OFFICIAL_SOURCE_ID = "official";
 
+/**
+ * Guard for rendering a catalog-supplied URL as an <a href>. repo_url comes
+ * from an untrusted index.json (an operator-added or compromised source), so
+ * only http(s) is allowed — a `javascript:` (or other) scheme would execute in
+ * the operator's session on click. rel/target do NOT block `javascript:`.
+ */
+function isHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url.trim());
+}
+
 type MarketplaceEntryRowProps = {
   entry: MarketplaceEntry;
   busy: boolean;
@@ -55,7 +65,7 @@ export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntry
             {cat}
           </Badge>
         ))}
-        {entry.repo_url && (
+        {isHttpUrl(entry.repo_url) && (
           <a
             href={entry.repo_url}
             target="_blank"
