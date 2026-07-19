@@ -48,7 +48,9 @@ Save machine-readable probe output per slug under staged `qa/codec/`. Container 
 - [ ] Mobile config uses `formFactor: "mobile"`; its tested cap is respected and never exceeds 2.0x.
 - [ ] Camera keyframes derive from semantic metadata rather than guessed click positions.
 - [ ] Camera stays center-biased toward the active pointer/target and never moves away from an active pointer journey.
+- [ ] One smooth establishing tighten reaches a stable working depth; no zoom breathing occurs while the semantic subject remains unchanged.
 - [ ] Long travel uses widen-pan-tighten: widen before departure, pan with motion, tighten after arrival.
+- [ ] Every semantic camera move lasts at least 1.2 seconds, readable holds last 0.9-1.5 seconds, and routine pan median/p95 stay at or below 0.11 source-widths per second.
 - [ ] Full menus, provider panels, sheets, dialogs, and diffs remain visible as framing priority.
 - [ ] Frame-by-frame containment includes the full cursor/touch glyph and edge-safe margin for every visibility interval; the cursor never leaves the frame.
 - [ ] Wide shots remain readable at actual display size.
@@ -65,7 +67,7 @@ Reject lazy global zoom, cursor-opposed camera motion, clipped glyphs, tight pan
 - loop reset is calm rather than a snap;
 - readable copy remains stable long enough to understand.
 
-For an editorial landing film, repeat the timeline audit inside the production theater at 760px, 850px, and 950px CSS widths. Reject a technically sharp delivery when the feature label, active control, changed line, feedback, or result cannot be read at those sizes.
+For an editorial landing film, repeat the timeline audit inside the production theater at 760px, 850px, and 950px CSS widths, including the current 964x602 actual landing stage. Reject a technically sharp delivery when the feature label, active control, changed line, feedback, or result cannot be read at those sizes. Reject compression or scaling artifacts that make text, glyphs, or labels hard to read in the actual player.
 
 ## 4. Actual-Size Visual Audit
 

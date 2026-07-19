@@ -47,7 +47,7 @@ Before using the editorial landing profile, confirm the focused tests recognize 
 
 Build keyframes from the recorded semantic story and complete pointer journey:
 
-1. Establish a readable identifying frame.
+1. Establish a readable identifying frame with one smooth establishing tighten.
 2. Bias camera focus toward the active target and pointer while retaining enough surrounding UI to explain the action.
 3. Hold context briefly, ignore micro-jitter, and sample every intentional movement for containment.
 4. Move focus only when semantic story focus changes.
@@ -63,21 +63,25 @@ For long travel, use widen-pan-tighten choreography:
 3. Pan with the pointer toward its semantic target.
 4. Tighten only after arrival and after confirming the full destination menu/dialog remains visible.
 
+Treat camera timing as an acceptance contract, not a subjective afterthought. Every semantic camera move or travel lasts at least 1.2 seconds unless the pointer remains inside one already-settled focus region. Hold each readable result, tooltip, status group, or final action for 0.9-1.5 seconds. During stable-depth tracking, routine pan median and p95 must each stay at or below 0.11 source-widths per second. A single peak may be higher only for a declared long journey that still passes the tested profile cap.
+
 Pass normalized dense `pointerTrack` waypoints and `pointerSafeMargin` to `createCameraTrack`. Derive the margin from the complete rendered cursor/touch glyph bounds around its hotspot, including asymmetric orientation near edges. Validate every output frame and every visibility interval. A failed containment check blocks delivery: the visible cursor never leaves the frame.
 
 Use `loopFrame: "focused"` only with the `docs` or `landing` form factor. The opening, settled penultimate, and final camera keyframes must be identical, and the crop must still show enough context to identify the feature. This is an editorial framing tool, not a way to hide a product defect or misleading state. Native mobile media keeps its standard loop contract.
 
-For a landing film, compose for the real theater rather than the master canvas. Review important frames around 760-950 CSS pixels wide. Labels, code, comments, and results must remain readable there. Start on the first meaningful subject, widen around that subject before a long cursor journey, pan while wide, and tighten at the destination. Do not repeatedly return to a full-workspace view merely to prove the product has navigation chrome.
+For a landing film, compose for the real theater rather than the master canvas. The current actual landing player is 964x602 CSS pixels at the primary desktop review viewport; also review important frames around 760-950 CSS pixels wide. Labels, code, comments, and results must remain readable there. Start on the first meaningful subject, widen around that subject before a long cursor journey, pan while wide, and tighten at the destination. Do not repeatedly return to a full-workspace view merely to prove the product has navigation chrome.
 
 ## Explicit Camera Rejections
 
 - Reject lazy global zoom that holds one magnified crop through unrelated actions.
+- Reject zoom breathing: repeated in/out depth changes when the semantic subject has not changed.
 - Reject any zoom or camera pan away from the active cursor while it moves.
 - Reject camera motion designed from click timestamps without dense intermediate pointer samples.
 - Reject a crop that keeps only the hotspot while clipping cursor glyph bounds.
 - Reject a tight pan begun after the pointer is already outside the crop.
 - Reject stale UI or an encode whose raw master lacks current-source provenance.
 - Reject wide shots that make product text unreadable at actual size.
+- Reject compression or scaling artifacts that make text, glyphs, or labels unreadable in the actual player even when the full-resolution delivery looks sharp.
 - Reject cropping or zoom used to hide incomplete menus, provider panels, dialogs, or product defects.
 
 An editorial landing config uses the same matched-loop rule with `formFactor: "landing"`, a 3840x2400 source, and a 1920x1200 delivery. At 2x, the source crop is exactly 1920x1200, so the encoder does not invent detail by upscaling it. Add intermediate wide keyframes around travel instead of combining a deep zoom and long pan in one segment.

@@ -57,11 +57,12 @@ Use `$LANDING_REPO/scripts/product-loop-camera.mjs` and `$LANDING_REPO/scripts/p
 
 Do not remove waits with cuts or speed changes. Improve the source choreography or recapture. One trim at the beginning/end is acceptable; time skips are not.
 
-The camera is center-biased, not cursor-naive: follow the active semantic target while retaining the context needed to understand the action. Widen-pan-tighten for long journeys. Keep the full dialog or menu visible as a priority, even when that means less zoom. The visible cursor never leaves the frame, including its complete rendered glyph and safety margin.
+The camera is center-biased, not cursor-naive: follow the active semantic target while retaining the context needed to understand the action. Use one smooth establishing tighten, then keep a stable working depth. Widen-pan-tighten for long journeys. Keep the full dialog or menu visible as a priority, even when that means less zoom. The visible cursor never leaves the frame, including its complete rendered glyph and safety margin.
 
 Explicit rejection rules:
 
 - Reject lazy global zoom that holds one crop regardless of the active target.
+- Reject zoom breathing: repeated in/out depth changes around one subject or state.
 - Reject any zoom or camera move away from the active cursor while it is traveling.
 - Reject stale UI, stale builds, accumulated rehearsal data, or captures from a non-current source checkout.
 - Reject wide shots that make product text unreadable at actual size.

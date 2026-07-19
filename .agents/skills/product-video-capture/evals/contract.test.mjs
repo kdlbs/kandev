@@ -103,6 +103,20 @@ test("proves pointer containment and actual-size readability", () => {
   assert.match(bundle, /contact sheet/i);
 });
 
+test("rejects camera breathing and abrupt semantic travel", () => {
+  assert.match(bundle, /reject[^\n]{0,120}(?:zoom )?breathing/i);
+  assert.match(bundle, /one smooth[^\n]{0,80}(?:establish|tighten)/i);
+  assert.match(bundle, /semantic (?:camera )?(?:move|travel)[^\n]{0,100}(?:at least|minimum)[^\n]{0,30}1\.2 seconds/i);
+  assert.match(bundle, /readable hold[^\n]{0,100}(?:0\.9[^\n]{0,20}1\.5 seconds|900[^\n]{0,20}1,?500 ?ms)/i);
+  assert.match(bundle, /routine pan[^\n]{0,120}(?:median|p95)[^\n]{0,80}0\.11/i);
+});
+
+test("audits readability at the production landing theater size", () => {
+  assert.match(bundle, /964[^\n]{0,20}602/i);
+  assert.match(bundle, /actual (?:landing )?(?:player|theater|stage)/i);
+  assert.match(bundle, /reject[^\n]{0,140}(?:artifact|compression)[^\n]{0,100}(?:text|glyph|label)/i);
+});
+
 test("requires multi-format QA, hashes, provenance, and teardown", () => {
   for (const token of ["WebM", "MP4", "WebP", "SHA-256", "browser", "codec", "provenance", "teardown"]) {
     assert.match(bundle, new RegExp(token, "i"));
