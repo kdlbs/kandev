@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { toast } from "sonner";
 import {
   IconLayout,
   IconCheck,
@@ -81,6 +82,10 @@ const BUILT_IN_PRESETS: PresetOption[] = BUILT_IN_LAYOUT_PROFILES.map((profile) 
   icon: PRESET_ICONS[profile.id],
 }));
 
+function mutationError(error: unknown): string {
+  return error instanceof Error ? error.message : "Please try again.";
+}
+
 function SaveLayoutDialog({
   open,
   onOpenChange,
@@ -114,6 +119,8 @@ function SaveLayoutDialog({
       setName("");
       setIsDefault(false);
       onOpenChange(false);
+    } catch (error) {
+      toast.error("Failed to save layout", { description: mutationError(error) });
     } finally {
       setSaving(false);
     }
@@ -274,10 +281,23 @@ function DeleteLayoutDialog({
 }: {
   layout: SavedLayout | null;
   onClose: () => void;
-  onDelete: (layoutId: string) => void;
+  onDelete: (layoutId: string) => Promise<void>;
 }) {
+  const [deleting, setDeleting] = useState(false);
+  const handleDelete = async () => {
+    if (!layout) return;
+    setDeleting(true);
+    try {
+      await onDelete(layout.id);
+      onClose();
+    } catch (error) {
+      toast.error("Failed to delete layout", { description: mutationError(error) });
+    } finally {
+      setDeleting(false);
+    }
+  };
   return (
-    <AlertDialog open={Boolean(layout)} onOpenChange={(open) => !open && onClose()}>
+    <AlertDialog open={Boolean(layout)} onOpenChange={(open) => !open && !deleting && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete {layout?.name ?? "saved layout"}?</AlertDialogTitle>
@@ -288,15 +308,18 @@ function DeleteLayoutDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer" disabled={deleting}>
+            Cancel
+          </AlertDialogCancel>
           <AlertDialogAction
             className="cursor-pointer"
-            onClick={() => {
-              if (layout) onDelete(layout.id);
-              onClose();
+            disabled={deleting}
+            onClick={(event) => {
+              event.preventDefault();
+              void handleDelete();
             }}
           >
-            Delete
+            {deleting ? "Deleting..." : "Delete"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -397,7 +420,7 @@ export function LayoutPresetSelector() {
       <DeleteLayoutDialog
         layout={deleteCandidate}
         onClose={() => setDeleteCandidate(null)}
-        onDelete={(layoutId) => void handleDeleteLayout(layoutId)}
+        onDelete={handleDeleteLayout}
       />
     </>
   );
