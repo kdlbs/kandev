@@ -45,13 +45,18 @@ type Registry = {
   unregister: (id: string) => void;
 };
 
+type DirtyScopeRegistry = {
+  upsert: (id: string, isDirty: boolean) => void;
+  unregister: (id: string) => void;
+};
+
 type SaveResult = {
   canLeave: boolean;
   failedIds: Set<string>;
 };
 
 const SettingsSaveRegistryContext = createContext<Registry | null>(null);
-const SettingsRouteDirtyContext = createContext(false);
+const SettingsDirtyScopeContext = createContext<DirtyScopeRegistry | null>(null);
 
 export function SettingsSaveProvider({ children }: { children: ReactNode }) {
   const { contributors, registry, dirtyContributors, refreshRegistry } = useContributorRegistry();
@@ -134,29 +139,51 @@ export function SettingsSaveProvider({ children }: { children: ReactNode }) {
 
   return (
     <SettingsSaveRegistryContext.Provider value={registry}>
-      <SettingsRouteDirtyContext.Provider value={hasDirty}>
-        {children}
-        {(hasDirty || status === "saved") && (
-          <SettingsFloatingSave
-            status={displayStatus}
-            dirtyContributorIds={dirtyContributors
-              .map(({ contributor }) => contributor.id)
-              .join(",")}
-            invalidReason={invalidReason}
-            navigationIntent={pendingNavigation}
-            isDiscarding={isDiscarding}
-            onSave={handleSave}
-            onDiscardAndLeave={discardAndLeave}
-            onContinueEditing={continueEditing}
-          />
-        )}
-      </SettingsRouteDirtyContext.Provider>
+      {children}
+      {(hasDirty || status === "saved") && (
+        <SettingsFloatingSave
+          status={displayStatus}
+          dirtyContributorIds={dirtyContributors.map(({ contributor }) => contributor.id).join(",")}
+          invalidReason={invalidReason}
+          navigationIntent={pendingNavigation}
+          isDiscarding={isDiscarding}
+          onSave={handleSave}
+          onDiscardAndLeave={discardAndLeave}
+          onContinueEditing={continueEditing}
+        />
+      )}
     </SettingsSaveRegistryContext.Provider>
   );
 }
 
-export function useSettingsRouteIsDirty(): boolean {
-  return useContext(SettingsRouteDirtyContext);
+export function SettingsSaveDirtyScope({
+  children,
+}: {
+  children: (isDirty: boolean) => ReactNode;
+}) {
+  const dirtyIdsRef = useRef(new Set<string>());
+  const [, setVersion] = useState(0);
+  const registry = useMemo<DirtyScopeRegistry>(
+    () => ({
+      upsert: (id, isDirty) => {
+        const changed = isDirty ? !dirtyIdsRef.current.has(id) : dirtyIdsRef.current.has(id);
+        if (!changed) return;
+        if (isDirty) dirtyIdsRef.current.add(id);
+        else dirtyIdsRef.current.delete(id);
+        setVersion((version) => version + 1);
+      },
+      unregister: (id) => {
+        if (dirtyIdsRef.current.delete(id)) setVersion((version) => version + 1);
+      },
+    }),
+    [],
+  );
+
+  return (
+    <SettingsDirtyScopeContext.Provider value={registry}>
+      {children(dirtyIdsRef.current.size > 0)}
+    </SettingsDirtyScopeContext.Provider>
+  );
 }
 
 function useContributorRegistry() {
@@ -247,15 +274,20 @@ function saveCompletionStatus(
 
 export function useSettingsSaveContributor(contributor: SettingsSaveContributor): void {
   const registry = useContext(SettingsSaveRegistryContext);
+  const dirtyScope = useContext(SettingsDirtyScopeContext);
   if (!registry) throw new Error("useSettingsSaveContributor requires SettingsSaveProvider");
 
   useLayoutEffect(() => {
     registry.upsert(contributor);
+    dirtyScope?.upsert(contributor.id, contributor.isDirty);
   });
 
   useEffect(() => {
-    return () => registry.unregister(contributor.id);
-  }, [contributor.id, registry]);
+    return () => {
+      registry.unregister(contributor.id);
+      dirtyScope?.unregister(contributor.id);
+    };
+  }, [contributor.id, dirtyScope, registry]);
 }
 
 function getDirtyContributors(

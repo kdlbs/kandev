@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { EditorForm, defaultFormState } from "./editor-form";
 import { SettingsPageTemplate } from "./settings-page-template";
-import { SettingsSaveProvider } from "./settings-save-provider";
+import { SettingsSaveProvider, useSettingsSaveContributor } from "./settings-save-provider";
 
 afterEach(cleanup);
 
@@ -29,6 +29,17 @@ function renderEditorForm(props: Partial<React.ComponentProps<typeof EditorForm>
     </SettingsSaveProvider>,
   );
   return { onSave };
+}
+
+function DirtySiblingContributor() {
+  useSettingsSaveContributor({
+    id: "sibling",
+    revision: 1,
+    isDirty: true,
+    save: vi.fn(),
+    discard: vi.fn(),
+  });
+  return null;
 }
 
 describe("EditorForm coordinated save", () => {
@@ -90,5 +101,20 @@ describe("EditorForm coordinated save", () => {
     expect(screen.getByText("Edit VS Code").parentElement?.getAttribute(DIRTY_ATTRIBUTE)).toBe(
       DIRTY_ATTRIBUTE_VALUE,
     );
+  });
+
+  it("does not mark a page card dirty for a contributor outside its scope", async () => {
+    render(
+      <SettingsSaveProvider>
+        <DirtySiblingContributor />
+        <SettingsPageTemplate title="Editors" isDirty={false} saveStatus="idle" onSave={vi.fn()}>
+          <div>Editor settings</div>
+        </SettingsPageTemplate>
+      </SettingsSaveProvider>,
+    );
+
+    const pageCard = document.querySelector('[data-settings-dirty-level="card"]');
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeTruthy());
+    expect(pageCard?.getAttribute(DIRTY_ATTRIBUTE)).toBe("false");
   });
 });
