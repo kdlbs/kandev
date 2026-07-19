@@ -6,17 +6,30 @@ import (
 	"testing"
 )
 
-// breakoutPayload is an attacker-controlled task title/body arriving verbatim
-// from an external integration (Sentry/Linear/Jira issue title). The leading
-// `\"` defeats quote-only escaping: escaping the quote turns `\"` into `\\"`,
-// which AppleScript reads as one escaped backslash followed by the REAL closing
-// delimiter — so the `display notification "..."` literal terminates early and
-// the remaining text runs as code. `do shell script (...)` spells `touch
-// /tmp/pwn` via quote-less ASCII-character concatenation; `--` comments out the
-// trailing ` with title "..."`.
-const breakoutPayload = `\"` + "\n" +
-	`do shell script (ASCII character 116 & ASCII character 111 & ASCII character 117 & ASCII character 99 & ASCII character 104 & ASCII character 32 & ASCII character 47 & ASCII character 116 & ASCII character 109 & ASCII character 112 & ASCII character 47 & ASCII character 112 & ASCII character 119 & ASCII character 110)` + "\n" +
-	`--`
+// doShellTouch is a quote-less `do shell script` invocation spelling
+// `touch /tmp/pwn` via `ASCII character N` concatenation. It carries no literal
+// `"`, so buildAppleScript's quote-escaping never touches it — the payload
+// survives interpolation intact.
+const doShellTouch = `do shell script (ASCII character 116 & ASCII character 111 & ASCII character 117 & ASCII character 99 & ASCII character 104 & ASCII character 32 & ASCII character 47 & ASCII character 116 & ASCII character 109 & ASCII character 112 & ASCII character 47 & ASCII character 112 & ASCII character 119 & ASCII character 110)`
+
+// breakoutPayload is the MULTI-LINE attacker input (Sentry-style: exception
+// text can contain newlines). The leading `\"` defeats quote-only escaping —
+// escaping the quote turns `\"` into `\\"`, which AppleScript reads as one
+// escaped backslash followed by the REAL closing delimiter, so the `display
+// notification "..."` literal terminates early. The newline is a STATEMENT
+// separator, so `do shell script (...)` runs as a second top-level statement;
+// `--` comments out the trailing ` with title "..."`.
+const breakoutPayload = `\"` + "\n" + doShellTouch + "\n" + `--`
+
+// singleLineBreakoutPayload is the SINGLE-LINE attacker input (Jira summary /
+// Linear title — typically no newline). It proves a newline is NOT required: the
+// same `\"` break-out lands in code context, and instead of a second statement
+// the payload injects an EXPRESSION — `& (do shell script (...))` — into the
+// body-argument position. `do shell script` executes as a side effect of
+// evaluating that expression and returns its stdout as text, which concatenates
+// with the `\`-string; the whole line stays ONE valid `display notification …
+// with title "Kandev"` statement. Expression injection needs no separator.
+const singleLineBreakoutPayload = `\" & (` + doShellTouch + `)`
 
 // legacyBuildAppleScript reproduces the vulnerable pre-fix implementation
 // (quote-only escaping, string interpolation) so the exploit stays documented
@@ -82,6 +95,58 @@ func TestPoC_LegacyAppleScriptBreakout(t *testing.T) {
 		"`do shell script` would execute on the host. RCE reproduced.")
 }
 
+// TestPoC_SingleLineExpressionInjection settles the severity question raised in
+// review: does the SINGLE-LINE case (Jira summary / Linear title, no newline)
+// still achieve host code execution, or does it merely DoS the notification?
+//
+// It does execute. A newline (statement separator) is only needed if you want a
+// SECOND statement. This payload instead injects an EXPRESSION into the existing
+// `display notification <body>` argument: after the `\"` break-out, `& (do shell
+// script (...))` concatenates the `\`-string with the TEXT that `do shell
+// script` returns — evaluating that expression runs the command as a side
+// effect. The line remains a single valid statement, so osascript compiles and
+// executes it. Conclusion: single-line inputs are host RCE, not just DoS.
+func TestPoC_SingleLineExpressionInjection(t *testing.T) {
+	script := legacyBuildAppleScript("Kandev", singleLineBreakoutPayload)
+	t.Logf("legacy osascript -e argument (single line):\n%s", script)
+
+	// No newline anywhere: this is the Jira/Linear single-line shape.
+	if strings.ContainsAny(script, "\n\r") {
+		t.Fatalf("payload unexpectedly contains a line break: %q", script)
+	}
+
+	const opener = `display notification "`
+	if !strings.HasPrefix(script, opener) {
+		t.Fatalf("unexpected prefix: %q", script)
+	}
+
+	content, end, closed := applescriptStringLiteral(script, len(opener)-1)
+	if !closed {
+		t.Fatalf("literal never closed: %q", script)
+	}
+	remainder := script[end:]
+
+	// The body literal still closes early (decodes to a lone backslash)...
+	if content != `\` {
+		t.Fatalf("expected body literal to decode to a lone backslash, got %q", content)
+	}
+	// ...and the very next token is the `&` concatenation operator — i.e. we are
+	// in EXPRESSION context with NO statement separator in between.
+	trimmed := strings.TrimLeft(remainder, " \t")
+	if !strings.HasPrefix(trimmed, "&") {
+		t.Fatalf("expected `&` expression injection immediately after literal, got %q", remainder)
+	}
+	if !strings.Contains(remainder, "do shell script") {
+		t.Fatalf("expected `do shell script` in the injected expression, got %q", remainder)
+	}
+	// The trailing ` with title "Kandev"` keeps it one valid statement.
+	if !strings.Contains(remainder, `with title "Kandev"`) {
+		t.Fatalf("expected statement to close with the title argument, got %q", remainder)
+	}
+	t.Log("CONFIRMED (legacy, single line): no newline needed — `do shell script` " +
+		"executes as an injected body expression. Single-line inputs are host RCE.")
+}
+
 // splitOsascriptArgs mirrors osascript's option parsing: `-e X` builds script
 // fragments, `--` terminates option parsing so every following token is a
 // positional `run` argument. Returns the collected script fragments and run
@@ -111,30 +176,40 @@ func splitOsascriptArgs(args []string) (scriptFragments, runArgs []string) {
 // interpolated into any `-e` AppleScript source. This FAILS against the legacy
 // interpolating implementation and PASSES after the fix.
 func TestOsascriptNotifyArgs_NoInjection(t *testing.T) {
-	title := "Kandev"
-	args := osascriptNotifyArgs(title, breakoutPayload)
-	scriptFragments, runArgs := splitOsascriptArgs(args)
+	const title = "Kandev"
+	// Both attack shapes must be neutralized: the multi-line (statement-
+	// separator) payload AND the single-line (expression-injection) payload.
+	cases := map[string]string{
+		"multi_line_statement":     breakoutPayload,
+		"single_line_expression":   singleLineBreakoutPayload,
+		"flag_like_do_shell_quote": `do shell script "touch /tmp/pwn"`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			args := osascriptNotifyArgs(title, body)
+			scriptFragments, runArgs := splitOsascriptArgs(args)
 
-	// 1. The untrusted title/body must appear ONLY as trailing run arguments,
-	//    byte-for-byte, and never embedded in any AppleScript source fragment.
-	if len(runArgs) != 2 || runArgs[0] != title || runArgs[1] != breakoutPayload {
-		t.Fatalf("title/body not passed as opaque run args: %#v", runArgs)
-	}
-	for _, frag := range scriptFragments {
-		if strings.Contains(frag, "do shell script") {
-			t.Fatalf("attacker text leaked into AppleScript source: %q", frag)
-		}
-		if strings.Contains(frag, "Kandev") || strings.Contains(frag, `\"`) {
-			t.Fatalf("title/body interpolated into AppleScript source: %q", frag)
-		}
-	}
+			// 1. The untrusted title/body must appear ONLY as trailing run
+			//    arguments, byte-for-byte, never embedded in any source fragment.
+			if len(runArgs) != 2 || runArgs[0] != title || runArgs[1] != body {
+				t.Fatalf("title/body not passed as opaque run args: %#v", runArgs)
+			}
+			for _, frag := range scriptFragments {
+				if strings.Contains(frag, "do shell script") {
+					t.Fatalf("attacker text leaked into AppleScript source: %q", frag)
+				}
+				if strings.Contains(frag, "Kandev") || strings.Contains(frag, `\"`) {
+					t.Fatalf("title/body interpolated into AppleScript source: %q", frag)
+				}
+			}
 
-	// 2. The script fragments must reference argv, not interpolated literals.
-	joined := strings.Join(scriptFragments, "\n")
-	if !strings.Contains(joined, "item 2 of argv") || !strings.Contains(joined, "item 1 of argv") {
-		t.Fatalf("expected argv-referencing display notification, got: %q", joined)
+			// 2. The script fragments reference argv, not interpolated literals.
+			joined := strings.Join(scriptFragments, "\n")
+			if !strings.Contains(joined, "item 2 of argv") || !strings.Contains(joined, "item 1 of argv") {
+				t.Fatalf("expected argv-referencing display notification, got: %q", joined)
+			}
+		})
 	}
-	t.Logf("safe osascript args: %#v", args)
 }
 
 // TestOsascriptNotifyArgs_OptionTerminator guards the second injection vector:
