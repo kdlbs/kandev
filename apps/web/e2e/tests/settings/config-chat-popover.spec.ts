@@ -65,9 +65,7 @@ test.describe("Configuration Chat", () => {
       await expectElementsNotToIntersect(saveButton, configChatButton);
 
       await configChatButton.click();
-      const configChatPopover = testPage.locator('[data-slot="popover-content"]').filter({
-        has: testPage.getByRole("button", { name: "Close config chat" }),
-      });
+      const configChatPopover = testPage.getByTestId("config-chat-popover");
       await expect(configChatPopover).toBeVisible();
       await expectElementAbove(saveButton, configChatPopover);
     } finally {

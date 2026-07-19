@@ -41,7 +41,6 @@ test.describe("Docker executor profile persistence", () => {
         .getByRole("button", { name: "Save changes" });
       await expect(saveButton).toBeDisabled();
 
-      await saveButton.hover();
       await expect(
         testPage.getByText("Build this Docker image before creating the profile."),
       ).toBeVisible();

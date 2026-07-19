@@ -29,7 +29,10 @@ test.describe("Prompts settings — duplicate name handling", () => {
     await expect(form).toBeVisible();
     await form.getByTestId("prompt-name-input").fill("dupe-prompt");
     await form.getByTestId("prompt-content-input").fill("second content");
-    await form.getByTestId("prompt-submit").click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
 
     const toast = testPage.getByTestId("toast-message");
     await expect(toast).toBeVisible({ timeout: 5_000 });
@@ -85,7 +88,10 @@ test.describe("Prompts settings — duplicate name handling", () => {
     const form = testPage.getByTestId("prompt-create-form");
     await form.getByTestId("prompt-name-input").fill("e2e-fresh-prompt");
     await form.getByTestId("prompt-content-input").fill("hello world");
-    await form.getByTestId("prompt-submit").click();
+    await testPage
+      .getByTestId("settings-floating-save")
+      .getByRole("button", { name: "Save changes" })
+      .click();
 
     await expect(
       testPage.locator('[data-testid="prompt-list-item"][data-prompt-name="e2e-fresh-prompt"]'),

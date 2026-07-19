@@ -164,26 +164,31 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
         sideOffset={8}
         onInteractOutside={(event) => event.preventDefault()}
         data-testid="config-chat-popover"
-        className="relative flex h-[min(550px,calc(100dvh_-_11rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)))] max-h-[550px] w-[min(420px,calc(100vw_-_2rem))] flex-col gap-0 overflow-hidden p-0 shadow-2xl"
+        className="relative flex h-[min(550px,calc(100dvh_-_11rem_-_env(safe-area-inset-top)_-_env(safe-area-inset-bottom)))] max-h-[550px] w-[min(420px,calc(100vw_-_2rem))] flex-col gap-0 overflow-visible p-0 shadow-2xl"
       >
         <ConfigChatFloatingActionsHost setHost={setFloatingActionsHost} />
-        <PanelHeader onExpand={panel.handleExpand} onClose={() => panel.handleOpenChange(false)} />
-        {panel.session ? (
-          <QuickChatSessionView
-            session={panel.session}
-            onInitialPromptSent={() =>
-              panel.setQuickChatInitialPrompt(panel.session!.sessionId, undefined)
-            }
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[inherit]">
+          <PanelHeader
+            onExpand={panel.handleExpand}
+            onClose={() => panel.handleOpenChange(false)}
           />
-        ) : (
-          <ConfigChatSetup
-            presentation="floating"
-            defaultProfileId={panel.defaultProfileId}
-            isStarting={panel.isStarting}
-            error={panel.error}
-            onStart={panel.handleStart}
-          />
-        )}
+          {panel.session ? (
+            <QuickChatSessionView
+              session={panel.session}
+              onInitialPromptSent={() =>
+                panel.setQuickChatInitialPrompt(panel.session!.sessionId, undefined)
+              }
+            />
+          ) : (
+            <ConfigChatSetup
+              presentation="floating"
+              defaultProfileId={panel.defaultProfileId}
+              isStarting={panel.isStarting}
+              error={panel.error}
+              onStart={panel.handleStart}
+            />
+          )}
+        </div>
       </PopoverContent>
     </Popover>
   );
