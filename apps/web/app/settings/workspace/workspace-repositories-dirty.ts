@@ -3,7 +3,13 @@ import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 
 export type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 
-const repositoryFields: Array<keyof RepositoryWithScripts> = [
+export function cloneRepository(repo: RepositoryWithScripts): RepositoryWithScripts {
+  return { ...repo, scripts: repo.scripts.map((script) => ({ ...script })) };
+}
+
+// worktree_branch_template is compared separately via branchTemplate() so an
+// empty string on either side is treated as the default template value.
+const REPOSITORY_DIRTY_FIELDS = [
   "name",
   "source_type",
   "local_path",
@@ -18,14 +24,11 @@ const repositoryFields: Array<keyof RepositoryWithScripts> = [
   "cleanup_script",
   "dev_script",
   "copy_files",
-];
+  "startup_prompt",
+] as const satisfies ReadonlyArray<keyof Repository>;
 
 function branchTemplate(repo: RepositoryWithScripts): string {
   return repo.worktree_branch_template || defaultWorktreeBranchTemplate;
-}
-
-export function cloneRepository(repo: RepositoryWithScripts): RepositoryWithScripts {
-  return { ...repo, scripts: repo.scripts.map((script) => ({ ...script })) };
 }
 
 export function isRepositoryDirty(
@@ -34,7 +37,7 @@ export function isRepositoryDirty(
 ): boolean {
   if (!saved) return true;
   return (
-    repositoryFields.some((field) => repo[field] !== saved[field]) ||
+    REPOSITORY_DIRTY_FIELDS.some((field) => repo[field] !== saved[field]) ||
     branchTemplate(repo) !== branchTemplate(saved)
   );
 }

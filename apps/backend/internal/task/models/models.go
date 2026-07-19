@@ -868,6 +868,7 @@ type Repository struct {
 	CleanupScript          string     `json:"cleanup_script"`
 	DevScript              string     `json:"dev_script"`
 	CopyFiles              string     `json:"copy_files"`
+	StartupPrompt          string     `json:"startup_prompt"`
 	CreatedAt              time.Time  `json:"created_at"`
 	UpdatedAt              time.Time  `json:"updated_at"`
 	DeletedAt              *time.Time `json:"deleted_at,omitempty"`

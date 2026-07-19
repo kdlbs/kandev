@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -214,6 +215,103 @@ func TestHandleCreateTask_RejectsAssigneeAgentProfileID(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
+// TestHandleCreateTask_SubtaskUsesStartupPromptWhenDescriptionEmpty pins the
+// business rule that the sub-task description guard runs AFTER startup prompt
+// resolution: a subtask with an empty description is accepted as long as the
+// bound repository has a startup_prompt that resolves to a non-empty string.
+func TestHandleCreateTask_SubtaskUsesStartupPromptWhenDescriptionEmpty(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	repo, err := svc.CreateRepository(ctx, &service.CreateRepositoryRequest{
+		WorkspaceID:   workspaces[0].ID,
+		Name:          "target",
+		SourceType:    "local",
+		StartupPrompt: "Start with {{TASK_TITLE}}.",
+	})
+	require.NoError(t, err)
+	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID:  workspaces[0].ID,
+		WorkflowID:   workflows[0].ID,
+		Title:        "Parent",
+		Repositories: []service.TaskRepositoryInput{{RepositoryID: repo.ID}},
+	})
+	require.NoError(t, err)
+
+	// start_agent defaults to true so the sub-task description guard actually
+	// fires; nil sessionLauncher means the auto-start step no-ops, so the test
+	// exercises the guard-after-resolution path without launching an agent.
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"title":               "Fix bug",
+		"parent_id":           parent.ID,
+		"agent_profile_id":    "test-agent-profile",
+		"executor_profile_id": "test-executor-profile",
+	})
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type,
+		"subtask should succeed when startup_prompt provides a description; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Start with Fix bug.", task.Description)
+}
+
+// TestHandleCreateTask_StartupPromptResolvesFromLocalPathInput pins the fix
+// for the case where the caller identifies the target repo via `local_path`
+// instead of `repository_id`. Pre-fix, the startup_prompt lookup silently
+// skipped because the resolved TaskRepositoryInput carried an empty
+// RepositoryID until CreateTask later resolved it.
+func TestHandleCreateTask_StartupPromptResolvesFromLocalPathInput(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	repoPath := filepath.Join(t.TempDir(), "repo")
+	require.NoError(t, os.MkdirAll(repoPath, 0o755))
+	_, err = svc.CreateRepository(ctx, &service.CreateRepositoryRequest{
+		WorkspaceID:   workspaces[0].ID,
+		Name:          "path-repo",
+		SourceType:    "local",
+		LocalPath:     repoPath,
+		StartupPrompt: "Start with {{TASK_TITLE}}.",
+	})
+	require.NoError(t, err)
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":        workspaces[0].ID,
+		"workflow_id":         workflows[0].ID,
+		"title":               "Refactor billing",
+		"repositories":        []map[string]interface{}{{"local_path": repoPath}},
+		"agent_profile_id":    "test-agent-profile",
+		"executor_profile_id": "test-executor-profile",
+		"start_agent":         false,
+	})
+	resp, err := h.handleCreateTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equalf(t, ws.MessageTypeResponse, resp.Type,
+		"create should succeed when startup_prompt resolves via local_path; payload: %s", string(resp.Payload))
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &created))
+	task, err := svc.GetTask(ctx, created.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Start with Refactor billing.", task.Description)
+}
+
 func TestSessionStateEventsIncludeUpdatedAt(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -263,13 +361,33 @@ func TestSessionStateEventsIncludeUpdatedAt(t *testing.T) {
 }
 
 func TestHandleCreateTask_SubtaskMissingDescription(t *testing.T) {
-	h := &Handlers{}
+	// Business rule: a subtask with no description and start_agent=true is
+	// rejected because the sub-agent has no initial prompt. The rule is
+	// enforced AFTER startup-prompt fallback so a repo's startup_prompt can
+	// satisfy the requirement; here the parent has no repos with a
+	// startup_prompt so the fallback also returns empty and the rule fires.
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+	parent, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Parent task",
+	})
+	require.NoError(t, err)
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"title":     "Fix bug",
-		"parent_id": "task-parent",
+		"parent_id": parent.ID,
 	})
 
-	resp, err := h.handleCreateTask(context.Background(), msg)
+	resp, err := h.handleCreateTask(ctx, msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }

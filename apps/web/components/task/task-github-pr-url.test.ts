@@ -29,6 +29,7 @@ function repo(overrides: RepoOverrides): Repository {
     cleanup_script: "",
     dev_script: "",
     copy_files: "",
+    startup_prompt: "",
     created_at: "2026-06-23T00:00:00Z",
     updated_at: "2026-06-23T00:00:00Z",
   };

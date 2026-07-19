@@ -25,6 +25,7 @@ function makeRepo(overrides: Partial<RepositoryWithScripts> = {}): RepositoryWit
     cleanup_script: "",
     dev_script: "",
     copy_files: "",
+    startup_prompt: "",
     created_at: "",
     updated_at: "",
     scripts: [],

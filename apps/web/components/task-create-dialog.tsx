@@ -408,6 +408,7 @@ export function useTaskCreateDialogSetup(
   const repositoryLocalPath = resolveSingleRowLocalPath(fs, repositories);
   useTaskCreateDialogEffects(fs, {
     open,
+    isCreateMode,
     workspaceId,
     workflowId,
     repositories,

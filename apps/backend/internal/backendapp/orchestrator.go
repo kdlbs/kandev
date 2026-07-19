@@ -285,6 +285,14 @@ type issueTaskCreatorAdapter struct {
 }
 
 // CreateIssueTask implements orchestrator.IssueTaskCreator.
+//
+// When the target repository has a non-empty startup_prompt set, the resolved
+// prompt REPLACES the source's default description — the source's
+// interpolateJiraPrompt / interpolateLinearPrompt output is a per-integration
+// fallback that only fires when the repo declines to opt in. This asymmetry
+// with the MCP create-task path is deliberate: watcher-created tasks have no
+// user typing a description, so the repository default is authoritative when
+// present.
 func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orchestrator.IssueTaskRequest) (*taskmodels.Task, error) {
 	var repos []taskservice.TaskRepositoryInput
 	for _, r := range req.Repositories {
@@ -293,12 +301,22 @@ func (a *issueTaskCreatorAdapter) CreateIssueTask(ctx context.Context, req *orch
 			BaseBranch:   r.BaseBranch,
 		})
 	}
+	description := req.Description
+	for _, r := range req.Repositories {
+		if r.RepositoryID == "" {
+			continue
+		}
+		if resolved := a.svc.ResolveRepositoryStartupPrompt(ctx, r.RepositoryID, req.Title, req.Metadata); resolved != "" {
+			description = resolved
+		}
+		break
+	}
 	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
 		WorkflowID:     req.WorkflowID,
 		WorkflowStepID: req.WorkflowStepID,
 		Title:          req.Title,
-		Description:    req.Description,
+		Description:    description,
 		Metadata:       req.Metadata,
 		Repositories:   repos,
 	})

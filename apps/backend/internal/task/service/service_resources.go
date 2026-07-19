@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/scriptengine"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -621,6 +622,7 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		CleanupScript:          req.CleanupScript,
 		DevScript:              req.DevScript,
 		CopyFiles:              req.CopyFiles,
+		StartupPrompt:          req.StartupPrompt,
 	}
 
 	// Auto-detect GitHub provider info from git remote if not provided
@@ -790,6 +792,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 		}
 		repository.CopyFiles = *req.CopyFiles
 	}
+	if req.StartupPrompt != nil {
+		repository.StartupPrompt = *req.StartupPrompt
+	}
 	return nil
 }
 
@@ -862,6 +867,62 @@ func (s *Service) ListRepositories(ctx context.Context, workspaceID string) ([]*
 		}
 	}
 	return live, nil
+}
+
+// ResolveRepositoryStartupPrompt returns the given repository's StartupPrompt
+// with {{TICKET_*}} / {{TASK_TITLE}} placeholders substituted from the task's
+// title and metadata. Lines whose ticket placeholders never resolve are
+// dropped (see scriptengine.ResolveStartupPrompt). Returns empty string when
+// the repository has no startup prompt, when the repository lookup fails, or
+// when repositoryID is empty — callers treat "" as "no prompt to apply".
+func (s *Service) ResolveRepositoryStartupPrompt(ctx context.Context, repositoryID, taskTitle string, metadata map[string]interface{}) string {
+	if repositoryID == "" {
+		return ""
+	}
+	repo, err := s.repoEntities.GetRepository(ctx, repositoryID)
+	if err != nil || repo == nil || repo.StartupPrompt == "" {
+		return ""
+	}
+	return scriptengine.ResolveStartupPrompt(repo.StartupPrompt, taskTitle, metadata)
+}
+
+// FindRepositoryForInput returns the workspace repository that matches the
+// given input — resolved from repository_id, github_url, or local_path in that
+// order. Returns nil (with nil error) when no match exists; callers treat
+// that as "no repo to apply". Used by the MCP path so create_task_kandev
+// callers who identify their repo via URL or local path still get the
+// repository's startup_prompt applied.
+func (s *Service) FindRepositoryForInput(ctx context.Context, workspaceID string, input TaskRepositoryInput) (*models.Repository, error) {
+	if input.RepositoryID != "" {
+		repo, err := s.repoEntities.GetRepository(ctx, input.RepositoryID)
+		if err != nil || repo == nil {
+			return repo, err
+		}
+		// Enforce workspace ownership so a caller from workspace A can't
+		// reach into workspace B by supplying a foreign repository_id and
+		// unintentionally pick up that repo's startup_prompt.
+		if workspaceID != "" && repo.WorkspaceID != workspaceID {
+			return nil, nil
+		}
+		return repo, nil
+	}
+	if input.GitHubURL != "" {
+		if owner, name, err := parseGitHubRepoURL(input.GitHubURL); err == nil && workspaceID != "" {
+			return s.repoEntities.GetRepositoryByProviderInfo(ctx, workspaceID, "github", owner, name)
+		}
+	}
+	if input.LocalPath != "" && workspaceID != "" {
+		repos, err := s.repoEntities.ListRepositories(ctx, workspaceID)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range repos {
+			if r.LocalPath == input.LocalPath {
+				return r, nil
+			}
+		}
+	}
+	return nil, nil
 }
 
 // CountActiveSessionsByRepository returns the number of agent sessions in an

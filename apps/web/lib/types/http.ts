@@ -218,6 +218,7 @@ export type Repository = {
    * suffix. Remote executors always copy the bytes.
    */
   copy_files: string;
+  startup_prompt: string;
   created_at: string;
   updated_at: string;
 };
