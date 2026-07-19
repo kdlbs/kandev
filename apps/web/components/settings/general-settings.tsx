@@ -24,6 +24,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
 import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
+import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 
@@ -166,9 +167,12 @@ export function TaskActionsSettings() {
       <SettingsSection
         icon={<IconArchive className="h-5 w-5" />}
         title="Task Actions"
-        description="Configure safeguards for task actions"
+        description="Configure archive safeguards and defaults for tasks created by agents"
       >
-        <ArchiveConfirmationSettings />
+        <div className="space-y-4">
+          <MCPTaskAgentProfileDefaultSettings />
+          <ArchiveConfirmationSettings />
+        </div>
       </SettingsSection>
     </div>
   );

@@ -356,6 +356,11 @@ func TestServerModeExternal_RegistersCorrectTools(t *testing.T) {
 
 	// External mode includes create_task_kandev so external agents can spawn tasks
 	assert.Contains(t, tools, "create_task_kandev")
+	createTask := s.mcpServer.ListTools()["create_task_kandev"]
+	assert.Contains(t, createTask.Tool.Description, "explicit agent_profile_id always wins")
+	assert.Contains(t, createTask.Tool.Description, "current_task")
+	assert.Contains(t, createTask.Tool.Description, "workspace_default")
+	assert.Contains(t, createTask.Tool.Description, "workflow profiles first")
 
 	// External mode does NOT include session-scoped tools
 	assert.NotContains(t, tools, "ask_user_question_kandev")

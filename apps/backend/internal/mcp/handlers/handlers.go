@@ -27,6 +27,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	usermodels "github.com/kandev/kandev/internal/user/models"
 	workflowctrl "github.com/kandev/kandev/internal/workflow/controller"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowsvc "github.com/kandev/kandev/internal/workflow/service"
@@ -155,25 +156,32 @@ type PromptReferenceResolver interface {
 	ResolvePromptReferences(ctx context.Context, content string) ([]promptservice.PromptReferenceExpansion, error)
 }
 
+// UserSettingsProvider supplies the single portable preference used when an
+// MCP-created task omits agent_profile_id.
+type UserSettingsProvider interface {
+	GetUserSettings(ctx context.Context) (*usermodels.UserSettings, error)
+}
+
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
-	taskSvc            *service.Service
-	workflowCtrl       *workflowctrl.Controller
-	clarificationSvc   ClarificationService
-	sessionCanceller   SessionCanceller
-	inputPauser        ClarificationInputPauser
-	messageCreator     MessageCreator
-	sessionRepo        SessionRepository
-	taskRepo           TaskRepository
-	eventBus           EventBus
-	planService        *service.PlanService
-	walkthroughService *service.WalkthroughService
-	sessionLauncher    SessionLauncher
-	taskStopper        TaskStopper
-	stopTaskGetter     func(context.Context, string) (*models.Task, error)
-	messageQueue       MessageQueuer
-	promptResolver     PromptReferenceResolver
-	logger             *logger.Logger
+	taskSvc              *service.Service
+	workflowCtrl         *workflowctrl.Controller
+	clarificationSvc     ClarificationService
+	sessionCanceller     SessionCanceller
+	inputPauser          ClarificationInputPauser
+	messageCreator       MessageCreator
+	sessionRepo          SessionRepository
+	taskRepo             TaskRepository
+	eventBus             EventBus
+	planService          *service.PlanService
+	walkthroughService   *service.WalkthroughService
+	sessionLauncher      SessionLauncher
+	taskStopper          TaskStopper
+	stopTaskGetter       func(context.Context, string) (*models.Task, error)
+	messageQueue         MessageQueuer
+	promptResolver       PromptReferenceResolver
+	userSettingsProvider UserSettingsProvider
+	logger               *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
 	workflowSvc       *workflowsvc.Service
@@ -243,6 +251,11 @@ func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) 
 // SetTaskStopper wires the orchestrator-owned halt operation.
 func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 	h.taskStopper = stopper
+}
+
+// SetUserSettingsProvider wires portable user preferences into MCP task creation.
+func (h *Handlers) SetUserSettingsProvider(provider UserSettingsProvider) {
+	h.userSettingsProvider = provider
 }
 
 // SetConfigDeps sets the config-mode dependencies for agent-native configuration handlers.
@@ -873,7 +886,7 @@ type mcpAutoStartConfig struct {
 	ExecutorProfileID string
 }
 
-var errMCPAgentProfileRequired = errors.New("agent_profile_id is required because no agent profile can be resolved from the parent task, source task, workflow, or workspace defaults")
+var errMCPAgentProfileRequired = errors.New("agent_profile_id is required because the selected task profile policy, workflow, and workspace defaults did not resolve a profile")
 
 // autoStartTask launches an agent session for a newly created task in the background.
 // It is kept as a small compatibility wrapper for direct tests; handleCreateTask
@@ -916,14 +929,24 @@ func (h *Handlers) resolveMCPLaunchMetadata(ctx context.Context, task *models.Ta
 }
 
 func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task *models.Task, agentProfileID, executorProfileID, sourceTaskID string) (mcpAutoStartConfig, error) {
-	executorID, err := h.inheritFromTask(ctx, task.ParentID, &agentProfileID, &executorProfileID)
+	profileDefault, err := h.mcpTaskAgentProfileDefault(ctx, agentProfileID)
+	if err != nil {
+		return mcpAutoStartConfig{}, fmt.Errorf("read MCP task agent profile default: %w", err)
+	}
+	profileForInheritance := &agentProfileID
+	ignoredInheritedProfile := ""
+	if profileDefault == usermodels.MCPTaskAgentProfileDefaultWorkspaceDefault {
+		profileForInheritance = &ignoredInheritedProfile
+	}
+
+	executorID, err := h.inheritFromTask(ctx, task.ParentID, profileForInheritance, &executorProfileID)
 	if err != nil {
 		return mcpAutoStartConfig{}, fmt.Errorf("inherit from parent task %s: %w", task.ParentID, err)
 	}
 
 	// For top-level tasks, inherit from the source task (the calling agent's task).
 	if task.ParentID == "" && sourceTaskID != "" {
-		sourceExecutorID, err := h.inheritFromTask(ctx, sourceTaskID, &agentProfileID, &executorProfileID)
+		sourceExecutorID, err := h.inheritFromTask(ctx, sourceTaskID, profileForInheritance, &executorProfileID)
 		if err != nil {
 			return mcpAutoStartConfig{}, fmt.Errorf("inherit from source task %s: %w", sourceTaskID, err)
 		}
@@ -957,6 +980,20 @@ func (h *Handlers) resolveMCPAutoStartConfigWithError(ctx context.Context, task 
 		ExecutorID:        executorID,
 		ExecutorProfileID: executorProfileID,
 	}, nil
+}
+
+func (h *Handlers) mcpTaskAgentProfileDefault(ctx context.Context, explicitAgentProfileID string) (string, error) {
+	if explicitAgentProfileID != "" || h.userSettingsProvider == nil {
+		return usermodels.MCPTaskAgentProfileDefaultCurrentTask, nil
+	}
+	settings, err := h.userSettingsProvider.GetUserSettings(ctx)
+	if err != nil {
+		return "", err
+	}
+	if settings == nil {
+		return usermodels.MCPTaskAgentProfileDefaultCurrentTask, nil
+	}
+	return usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault), nil
 }
 
 func (h *Handlers) resolveWorkflowAgentProfile(ctx context.Context, workflowStepID, workflowID string) string {

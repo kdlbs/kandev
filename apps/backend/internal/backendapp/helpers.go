@@ -1184,6 +1184,7 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
+	mcpHandlers.SetUserSettingsProvider(p.services.User)
 
 	// Enrich list_tasks responses with associated GitHub PRs (link, title,
 	// number, state) when the github service is available.

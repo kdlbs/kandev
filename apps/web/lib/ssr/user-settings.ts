@@ -8,6 +8,7 @@ import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/s
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/state/slices/settings/types";
 import type { SavedLayout, SidebarTaskPrefsApi, UserSettingsResponse } from "@/lib/types/http";
+import type { MCPTaskAgentProfileDefault } from "@/lib/types/http-user-settings";
 import type { VoiceModeSettings } from "@/lib/types/http-voice";
 
 export type UserSettingsData = NonNullable<UserSettingsResponse["settings"]>;
@@ -18,6 +19,12 @@ export function parseTerminalLinkBehavior(value: string | undefined): "new_tab" 
 
 export function parseChangesPanelLayout(value: string | undefined): "flat" | "tree" {
   return value === "flat" ? "flat" : "tree";
+}
+
+export function parseMCPTaskAgentProfileDefault(
+  value: string | undefined,
+): MCPTaskAgentProfileDefault {
+  return value === "workspace_default" ? "workspace_default" : "current_task";
 }
 
 export function parseSystemMetricsDisplay(value: UserSettingsData["system_metrics_display"]) {
@@ -108,6 +115,7 @@ function buildBehaviorFields(s: UserSettingsData) {
     chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
     confirmTaskArchive: s.confirm_task_archive ?? true,
+    mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(s.mcp_task_agent_profile_default),
     showReleaseNotification: s.show_release_notification ?? true,
     releaseNotesLastSeenVersion: s.release_notes_last_seen_version || null,
     keyboardShortcuts: s.keyboard_shortcuts ?? {},
@@ -167,6 +175,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       chatSubmitKey: "cmd_enter" as const,
       reviewAutoMarkOnScroll: true,
       confirmTaskArchive: true,
+      mcpTaskAgentProfileDefault: "current_task" as const,
       showReleaseNotification: true,
       releaseNotesLastSeenVersion: null,
       savedLayouts: [] as SavedLayout[],

@@ -48,6 +48,7 @@ type UpdateUserSettingsRequest struct {
 	ChatSubmitKey               *string
 	ReviewAutoMarkOnScroll      *bool
 	ConfirmTaskArchive          *bool
+	MCPTaskAgentProfileDefault  *string
 	ShowReleaseNotification     *bool
 	ReleaseNotesLastSeenVersion *string
 	LspAutoStartLanguages       *[]string
@@ -217,6 +218,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if req.ConfirmTaskArchive != nil {
 		settings.ConfirmTaskArchive = *req.ConfirmTaskArchive
 	}
+	if err := applyMCPTaskAgentProfileDefault(settings, req.MCPTaskAgentProfileDefault); err != nil {
+		return err
+	}
 	if req.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *req.ShowReleaseNotification
 	}
@@ -255,6 +259,22 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		settings.TerminalFontSize = v
 	}
 	return nil
+}
+
+func applyMCPTaskAgentProfileDefault(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	switch *value {
+	case models.MCPTaskAgentProfileDefaultCurrentTask, models.MCPTaskAgentProfileDefaultWorkspaceDefault:
+		settings.MCPTaskAgentProfileDefault = *value
+		return nil
+	default:
+		return fmt.Errorf("mcp_task_agent_profile_default must be %q or %q",
+			models.MCPTaskAgentProfileDefaultCurrentTask,
+			models.MCPTaskAgentProfileDefaultWorkspaceDefault,
+		)
+	}
 }
 
 func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupValue *string) error {
@@ -547,6 +567,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"chat_submit_key":                 settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":      settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":            settings.ConfirmTaskArchive,
+		"mcp_task_agent_profile_default":  models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_release_notification":       settings.ShowReleaseNotification,
 		"release_notes_last_seen_version": settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":        settings.LspAutoStartLanguages,

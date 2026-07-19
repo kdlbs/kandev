@@ -16,6 +16,55 @@ func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
 	}
 }
 
+func TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "workspace default", value: models.MCPTaskAgentProfileDefaultWorkspaceDefault, want: models.MCPTaskAgentProfileDefaultWorkspaceDefault},
+		{name: "unknown defaults to current task", value: "future_value", want: models.MCPTaskAgentProfileDefaultCurrentTask},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(FromUserSettings(&models.UserSettings{MCPTaskAgentProfileDefault: tt.value}))
+			if err != nil {
+				t.Fatalf("marshal DTO: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatalf("decode DTO: %v", err)
+			}
+			if got := payload["mcp_task_agent_profile_default"]; got != tt.want {
+				t.Fatalf("mcp_task_agent_profile_default = %#v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUpdateUserSettingsRequestMCPTaskAgentProfileDefaultPatchSemantics(t *testing.T) {
+	t.Run("omitted value stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.MCPTaskAgentProfileDefault != nil {
+			t.Fatalf("MCPTaskAgentProfileDefault = %q, want nil", *req.MCPTaskAgentProfileDefault)
+		}
+	})
+
+	t.Run("explicit value is retained", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"mcp_task_agent_profile_default":"workspace_default"}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.MCPTaskAgentProfileDefault == nil || *req.MCPTaskAgentProfileDefault != models.MCPTaskAgentProfileDefaultWorkspaceDefault {
+			t.Fatalf("MCPTaskAgentProfileDefault = %#v, want workspace_default", req.MCPTaskAgentProfileDefault)
+		}
+	})
+}
+
 func TestNullableSidebarDraft(t *testing.T) {
 	t.Run("omitted field is not set", func(t *testing.T) {
 		var req UpdateUserSettingsRequest

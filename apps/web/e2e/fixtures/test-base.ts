@@ -160,6 +160,7 @@ export const test = backendFixture.extend<
     // previous tests in this worker. Keep the seeded workflow and the seed
     // agent profile so the worker-scoped seedData fixture remains valid.
     await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+    await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
     await apiClient.cleanupTestProfiles([seedData.agentProfileId]);
 
     await apiClient.saveUserSettings({
@@ -168,6 +169,7 @@ export const test = backendFixture.extend<
       keyboard_shortcuts: {},
       enable_preview_on_click: false,
       confirm_task_archive: true,
+      mcp_task_agent_profile_default: "current_task",
       sidebar_views: [],
       task_create_last_used: {
         repository_id: seedData.repositoryId,
@@ -230,12 +232,14 @@ export const test = backendFixture.extend<
 // call wrote into user_settings. This is idempotent — the testPage fixture
 // also calls saveUserSettings, so tests that do use testPage are unaffected.
 test.beforeEach(async ({ apiClient, seedData }) => {
+  await apiClient.updateWorkspace(seedData.workspaceId, { default_agent_profile_id: "" });
   await apiClient.saveUserSettings({
     workspace_id: seedData.workspaceId,
     workflow_filter_id: seedData.workflowId,
     keyboard_shortcuts: {},
     enable_preview_on_click: false,
     confirm_task_archive: true,
+    mcp_task_agent_profile_default: "current_task",
     sidebar_views: [],
     kanban_view_mode: "",
     task_create_last_used: {

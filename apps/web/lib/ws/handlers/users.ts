@@ -7,6 +7,7 @@ import {
   parseSystemMetricsDisplay,
   taskCreateLastUsedHasValue,
   parseVoiceMode,
+  parseMCPTaskAgentProfileDefault,
 } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import { migrateView } from "@/lib/state/slices/ui/ui-slice";
@@ -19,6 +20,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
         sidebarViews: buildSidebarViewsState(state, message.payload),
         sidebarTaskPrefs: buildSidebarTaskPrefsState(state, message.payload),
         userSettings: buildUserSettingsState(state, message.payload),
+        userSettingsServerRevision: state.userSettingsServerRevision + 1,
       }));
     },
   };
@@ -76,6 +78,9 @@ function buildBehaviorSettings(payload: UserSettingsUpdatedPayload) {
     chatSubmitKey: (payload.chat_submit_key as "enter" | "cmd_enter") ?? "cmd_enter",
     reviewAutoMarkOnScroll: payload.review_auto_mark_on_scroll ?? true,
     confirmTaskArchive: payload.confirm_task_archive ?? true,
+    mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(
+      payload.mcp_task_agent_profile_default,
+    ),
     showReleaseNotification: payload.show_release_notification ?? true,
     releaseNotesLastSeenVersion: (payload.release_notes_last_seen_version as string) || null,
     terminalLinkBehavior:

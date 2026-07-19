@@ -68,6 +68,15 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
 
+### Choose the profile for MCP-created tasks
+
+Open **Settings → General → Task Actions → MCP-Created Task Profile** to choose the global agent-profile policy for tasks and subtasks created through `create_task_kandev` when the call omits `agent_profile_id`:
+
+- **Current task profile** preserves compatibility with existing behavior and is selected by default. Kandev first inherits the parent or calling task profile, then checks the workflow step or workflow default, and finally checks the target workspace's **Default Agent Profile**.
+- **Workspace default profile** skips the parent and calling task profiles. Kandev still uses the workflow step or workflow default first, then the **Default Agent Profile** from the workspace that will own the new task.
+
+This preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. An explicit `agent_profile_id` in the tool call always overrides the saved preference. If **Workspace default profile** is selected and neither the workflow nor the target workspace supplies a profile, task creation fails without creating the task, including when `start_agent=false`.
+
 ### Multiple repositories
 
 A task can include several local or remote repository rows. Multi-repository task creation currently requires the **git-worktree** executor; the dialog leaves incompatible executors visible but disables them with `Multi-repo tasks only support the git-worktree executor.` Each remote needs credentials that can clone and fetch its selected base branch.

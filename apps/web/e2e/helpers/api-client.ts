@@ -6,6 +6,7 @@ import type {
   ListWorkflowStepsResponse,
   TaskSessionState,
   TaskCreateLastUsedApi,
+  MCPTaskAgentProfileDefault,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
@@ -659,6 +660,7 @@ export class ApiClient {
       terminal_link_behavior?: string;
       terminal_font_family?: string;
       terminal_font_size?: number;
+      mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       [key: string]: unknown;
     };
   }> {
@@ -668,6 +670,7 @@ export class ApiClient {
   async saveUserSettings(settings: {
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
+    mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     workspace_id?: string;
     workflow_filter_id?: string;
     repository_ids?: string[];
