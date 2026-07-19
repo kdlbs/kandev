@@ -57,8 +57,12 @@ type IndexEntry struct {
 	MinKandevVersion string `json:"min_kandev_version"`
 	PackageURL       string `json:"package_url"`
 	PackageSHA256    string `json:"package_sha256"`
-	Stars            int    `json:"stars"`
-	UpdatedAt        string `json:"updated_at"`
+	// Stars is a pointer so a `null` in index.json (the registry build emits
+	// null when a repo's star lookup failed) stays unknown rather than
+	// decoding to 0 — a known-zero repo and an unknown one must not collapse,
+	// and unknown sorts last rather than corrupting the ranking.
+	Stars     *int   `json:"stars"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // IndexDocument is a full index.json fetched from a source URL.

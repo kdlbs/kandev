@@ -26,12 +26,18 @@ export function MarketplaceBrowser({ onInstallUrl }: MarketplaceBrowserProps) {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [installingId, setInstallingId] = useState<string | null>(null);
 
-  const query: CatalogQuery = {
+  // Category is filtered client-side (not sent to the server): otherwise a
+  // category-narrowed catalog would shrink the category dropdown to just the
+  // selected value, trapping the user. Search + sort stay server-side.
+  const { catalog, loading, error, reload, softReload } = useMarketplace({
     q: text.trim() || undefined,
-    category: category === ALL_CATEGORIES ? undefined : category,
     sort,
-  };
-  const { catalog, loading, error, reload, softReload } = useMarketplace(query);
+  });
+  const categories = useCatalogCategories(catalog);
+  const visible =
+    category === ALL_CATEGORIES
+      ? catalog.plugins
+      : catalog.plugins.filter((entry) => entry.categories.includes(category));
 
   const install = async (entry: MarketplaceEntry) => {
     setInstallingId(entry.id);
@@ -50,7 +56,7 @@ export function MarketplaceBrowser({ onInstallUrl }: MarketplaceBrowserProps) {
         onText={setText}
         category={category}
         onCategory={setCategory}
-        categories={useCatalogCategories(catalog)}
+        categories={categories}
         sort={sort}
         onSort={setSort}
         onManageSources={() => setSourcesOpen(true)}
@@ -60,10 +66,10 @@ export function MarketplaceBrowser({ onInstallUrl }: MarketplaceBrowserProps) {
       <DegradedSourcesBanner catalog={catalog} />
 
       <MarketplaceList
-        catalog={catalog}
+        entries={visible}
         loading={loading}
         error={error}
-        filtered={Boolean(query.q || query.category)}
+        filtered={Boolean(text.trim() || category !== ALL_CATEGORIES)}
         installingId={installingId}
         onInstall={install}
       />
@@ -170,7 +176,7 @@ function DegradedSourcesBanner({ catalog }: { catalog: MarketplaceCatalog }) {
 }
 
 type ListProps = {
-  catalog: MarketplaceCatalog;
+  entries: MarketplaceEntry[];
   loading: boolean;
   error: string | null;
   filtered: boolean;
@@ -179,7 +185,7 @@ type ListProps = {
 };
 
 function MarketplaceList({
-  catalog,
+  entries,
   loading,
   error,
   filtered,
@@ -193,14 +199,14 @@ function MarketplaceList({
       </div>
     );
   }
-  if (loading && catalog.plugins.length === 0) {
+  if (loading && entries.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
         Loading marketplace…
       </div>
     );
   }
-  if (catalog.plugins.length === 0) {
+  if (entries.length === 0) {
     return (
       <div className="rounded-xl border border-dashed border-border/70 p-10 text-center text-sm text-muted-foreground">
         {filtered
@@ -212,10 +218,10 @@ function MarketplaceList({
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        {catalog.plugins.length} {catalog.plugins.length === 1 ? "plugin" : "plugins"} available
+        {entries.length} {entries.length === 1 ? "plugin" : "plugins"} available
       </p>
       <div className="grid gap-3 md:grid-cols-2">
-        {catalog.plugins.map((entry) => (
+        {entries.map((entry) => (
           <MarketplaceEntryRow
             key={`${entry.source_id}:${entry.id}`}
             entry={entry}

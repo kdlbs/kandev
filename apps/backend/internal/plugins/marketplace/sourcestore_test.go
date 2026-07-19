@@ -84,8 +84,8 @@ func TestAddRejectsBadAndDuplicateURL(t *testing.T) {
 	if _, err := s.Add("first", "https://dup.example/index.json"); err != nil {
 		t.Fatalf("add: %v", err)
 	}
-	if _, err := s.Add("second", "https://dup.example/index.json"); err == nil {
-		t.Fatalf("expected duplicate url to be rejected")
+	if _, err := s.Add("second", "https://dup.example/index.json"); !errors.Is(err, ErrDuplicateSource) {
+		t.Fatalf("expected ErrDuplicateSource, got %v", err)
 	}
 }
 

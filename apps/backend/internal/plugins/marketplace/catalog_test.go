@@ -39,6 +39,22 @@ func itoa(n int) string {
 	return string(b)
 }
 
+func ip(n int) *int { return &n }
+
+// TestStarSortPlacesUnknownLast proves a nil (unknown) star count sorts after
+// real ones instead of ranking as zero.
+func TestStarSortPlacesUnknownLast(t *testing.T) {
+	entries := []CatalogEntry{
+		{IndexEntry: IndexEntry{ID: "unknown", Stars: nil}},
+		{IndexEntry: IndexEntry{ID: "low", Stars: ip(1)}},
+		{IndexEntry: IndexEntry{ID: "high", Stars: ip(99)}},
+	}
+	sorted := ApplyQuery(entries, Query{})
+	if sorted[0].ID != "high" || sorted[1].ID != "low" || sorted[2].ID != "unknown" {
+		t.Fatalf("unknown stars must sort last, got %s,%s,%s", sorted[0].ID, sorted[1].ID, sorted[2].ID)
+	}
+}
+
 func newTestService(t *testing.T) *Service {
 	t.Helper()
 	store := newTestSourceStore(t)
@@ -205,8 +221,8 @@ func TestCatalogPreservesIconURL(t *testing.T) {
 
 func TestApplyQueryFilterAndSort(t *testing.T) {
 	entries := []CatalogEntry{
-		{IndexEntry: IndexEntry{ID: "zed", Name: "Zed Stats", Description: "analytics", Categories: []string{"analytics"}, Stars: 5, UpdatedAt: "2026-01-01"}},
-		{IndexEntry: IndexEntry{ID: "abc", Name: "Abc Chat", Description: "messaging", Categories: []string{"chat"}, Stars: 50, UpdatedAt: "2026-06-01"}},
+		{IndexEntry: IndexEntry{ID: "zed", Name: "Zed Stats", Description: "analytics", Categories: []string{"analytics"}, Stars: ip(5), UpdatedAt: "2026-01-01"}},
+		{IndexEntry: IndexEntry{ID: "abc", Name: "Abc Chat", Description: "messaging", Categories: []string{"chat"}, Stars: ip(50), UpdatedAt: "2026-06-01"}},
 	}
 	// Default sort = stars desc.
 	byStars := ApplyQuery(entries, Query{})

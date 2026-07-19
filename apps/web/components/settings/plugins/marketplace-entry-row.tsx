@@ -6,6 +6,10 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import type { MarketplaceEntry } from "@/lib/types/plugins";
 
+// Id of the built-in official source (marketplace.officialSourceID). Entries
+// from any other source get a source badge; the official one does not.
+const OFFICIAL_SOURCE_ID = "official";
+
 type MarketplaceEntryRowProps = {
   entry: MarketplaceEntry;
   busy: boolean;
@@ -26,7 +30,7 @@ export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntry
           <div className="flex items-center gap-2">
             <span className="truncate font-medium text-foreground">{entry.name}</span>
             <span className="text-xs text-muted-foreground">v{entry.version}</span>
-            {!entry.source_name.includes("Official") && (
+            {entry.source_id !== OFFICIAL_SOURCE_ID && (
               <Badge variant="outline" className="text-[10px]">
                 {entry.source_name}
               </Badge>
@@ -43,7 +47,7 @@ export function MarketplaceEntryRow({ entry, busy, onInstall }: MarketplaceEntry
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="inline-flex items-center gap-1">
           <IconStar className="h-3.5 w-3.5" />
-          {entry.stars.toLocaleString()}
+          {entry.stars === null ? "—" : entry.stars.toLocaleString()}
         </span>
         {entry.author && <span>by {entry.author}</span>}
         {entry.categories.map((cat) => (

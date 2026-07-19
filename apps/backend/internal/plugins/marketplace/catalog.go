@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 )
@@ -36,6 +38,10 @@ type Service struct {
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
+	// sf collapses concurrent downloads of the same source URL into one HTTP
+	// request (Browse opened in two tabs while the cache is cold no longer
+	// races two identical fetches).
+	sf singleflight.Group
 }
 
 type cacheEntry struct {
@@ -103,27 +109,55 @@ func (s *Service) Catalog(ctx context.Context, installed []InstalledPlugin) (*Ca
 	if err != nil {
 		return nil, err
 	}
+	fetched := s.fetchAll(ctx, sources)
+
+	// Merge sequentially in source order so first-source-wins dedup is stable,
+	// even though the fetches above ran concurrently.
 	installedByID := indexInstalled(installed)
 	result := &CatalogResult{Plugins: []CatalogEntry{}, Sources: []SourceStatus{}}
 	seen := map[string]bool{}
-
-	for _, src := range sources {
+	for i, src := range sources {
 		status := statusFor(src)
 		if !src.Enabled {
 			result.Sources = append(result.Sources, status)
 			continue
 		}
-		doc, ferr := s.fetch(ctx, src.URL)
-		if ferr != nil {
+		if fetched[i].err != nil {
 			status.Healthy = false
-			status.Error = ferr.Error()
+			status.Error = fetched[i].err.Error()
 			result.Sources = append(result.Sources, status)
 			continue
 		}
-		result.Plugins = append(result.Plugins, mergeEntries(doc, src, installedByID, seen)...)
+		result.Plugins = append(result.Plugins, mergeEntries(fetched[i].doc, src, installedByID, seen)...)
 		result.Sources = append(result.Sources, status)
 	}
 	return result, nil
+}
+
+type fetchOutcome struct {
+	doc *IndexDocument
+	err error
+}
+
+// fetchAll fetches every enabled source concurrently, so one slow/unreachable
+// source can't serialize (up to 20s each) in front of the others — the Browse
+// tab's latency is bounded by the slowest single source, not their sum.
+func (s *Service) fetchAll(ctx context.Context, sources []SourceRecord) []fetchOutcome {
+	out := make([]fetchOutcome, len(sources))
+	var wg sync.WaitGroup
+	for i, src := range sources {
+		if !src.Enabled {
+			continue
+		}
+		wg.Add(1)
+		go func(i int, url string) {
+			defer wg.Done()
+			doc, err := s.fetch(ctx, url)
+			out[i] = fetchOutcome{doc: doc, err: err}
+		}(i, src.URL)
+	}
+	wg.Wait()
+	return out
 }
 
 // mergeEntries appends this source's not-yet-seen entries as annotated catalog
@@ -176,22 +210,38 @@ func annotate(e IndexEntry, src SourceRecord, installed map[string]string) Catal
 // fetch returns a source's index document from cache when fresh, otherwise
 // downloads and caches it.
 func (s *Service) fetch(ctx context.Context, url string) (*IndexDocument, error) {
-	s.mu.Lock()
-	if ce, ok := s.cache[url]; ok && s.now().Sub(ce.at) < s.ttl {
-		doc := ce.doc
-		s.mu.Unlock()
+	if doc, ok := s.cached(url); ok {
 		return doc, nil
 	}
-	s.mu.Unlock()
-
-	doc, err := s.download(ctx, url)
+	// singleflight collapses concurrent misses on the same URL into one
+	// download; latecomers get the leader's result.
+	v, err, _ := s.sf.Do(url, func() (any, error) {
+		if doc, ok := s.cached(url); ok { // another caller may have filled it
+			return doc, nil
+		}
+		doc, derr := s.download(ctx, url)
+		if derr != nil {
+			return nil, derr
+		}
+		s.mu.Lock()
+		s.cache[url] = cacheEntry{doc: doc, at: s.now()}
+		s.mu.Unlock()
+		return doc, nil
+	})
 	if err != nil {
 		return nil, err
 	}
+	return v.(*IndexDocument), nil
+}
+
+// cached returns a still-fresh cached document for url, if any.
+func (s *Service) cached(url string) (*IndexDocument, bool) {
 	s.mu.Lock()
-	s.cache[url] = cacheEntry{doc: doc, at: s.now()}
-	s.mu.Unlock()
-	return doc, nil
+	defer s.mu.Unlock()
+	if ce, ok := s.cache[url]; ok && s.now().Sub(ce.at) < s.ttl {
+		return ce.doc, true
+	}
+	return nil, false
 }
 
 func (s *Service) download(ctx context.Context, url string) (*IndexDocument, error) {
@@ -271,7 +321,19 @@ func sortEntries(entries []CatalogEntry, mode string) {
 		})
 	default: // "stars"
 		sort.SliceStable(entries, func(i, j int) bool {
-			return entries[i].Stars > entries[j].Stars
+			return starsBefore(entries[i].Stars, entries[j].Stars)
 		})
 	}
+}
+
+// starsBefore orders by star count descending, with unknown (nil) stars sorted
+// last so a repo whose star lookup failed never outranks a real one.
+func starsBefore(a, b *int) bool {
+	if a == nil {
+		return false
+	}
+	if b == nil {
+		return true
+	}
+	return *a > *b
 }

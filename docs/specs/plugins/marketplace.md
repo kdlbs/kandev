@@ -175,7 +175,10 @@ kandev; kandev talks to the source URLs.
 
 ```
 GET    /api/plugins/marketplace                 # Merged, deduped catalog across all enabled sources
-                                                #   query: ?q=<search>&category=<cat>&sort=stars|name
+                                                #   query: ?q=<search>&category=<cat>&sort=stars|name|recent
+                                                #     stars  (default): star count desc, unknown (null) last
+                                                #     name:   display name asc (case-insensitive)
+                                                #     recent: updated_at desc (last release / repo push)
                                                 #   each entry annotated with install_state:
                                                 #     available | installed | update_available
 GET    /api/plugins/marketplace/sources         # List configured sources
@@ -237,9 +240,10 @@ response but stays `enabled`.
   existing install pipeline surfaces the install error unchanged; the catalog entry
   is unaffected.
 - **`package_sha256` mismatch** between the catalog and the downloaded tarball:
-  install fails closed with a provenance error (the curated digest and the actual
-  digest differ), even though the tarball's own `checksums.txt` may be internally
-  consistent.
+  once digest enforcement is enabled (a planned option — see "Open questions"),
+  install fails closed with a provenance error even though the tarball's own
+  `checksums.txt` may be internally consistent. In v1 the digest is advisory and
+  install proceeds through the existing pipeline unchanged.
 - **Duplicate `id` across sources:** the first configured source wins; later
   duplicates are silently hidden (documented, not an error).
 - **GitHub star-refresh Action hits API rate limits:** the previous star counts in
@@ -286,9 +290,10 @@ response but stays `enabled`.
 - **GIVEN** a configured source is unreachable, **WHEN** the catalog is fetched,
   **THEN** the response marks that source `degraded`, omits its entries, and still
   returns entries from the reachable sources.
-- **GIVEN** a catalog entry whose `package_sha256` does not match the downloaded
-  tarball, **WHEN** the user installs it, **THEN** the install fails closed with a
-  provenance error and no plugin process is spawned.
+- **GIVEN** digest enforcement is enabled (planned) and a catalog entry whose
+  `package_sha256` does not match the downloaded tarball, **WHEN** the user installs
+  it, **THEN** the install fails closed with a provenance error and no plugin process
+  is spawned. (In v1 the digest is advisory; install is unchanged.)
 - **GIVEN** the marketplace is empty or entirely offline, **WHEN** the user opens the
   install dialog, **THEN** install-by-URL and upload still work exactly as before.
 - **GIVEN** a PR that adds an entry to `plugins.yaml` whose `id` does not match the

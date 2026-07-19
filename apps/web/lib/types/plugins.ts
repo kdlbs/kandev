@@ -92,7 +92,8 @@ export interface MarketplaceEntry {
   min_kandev_version: string;
   package_url: string;
   package_sha256: string;
-  stars: number;
+  /** Null when the registry couldn't read the repo's star count. */
+  stars: number | null;
   updated_at: string;
   install_state: MarketplaceInstallState;
   installed_version?: string;

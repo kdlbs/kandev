@@ -159,14 +159,16 @@ function useInstallAction(upsertPlugin: (p: PluginRecord) => void) {
   // marketplaceInstall runs the same post-install effect as the dialog
   // (upsert + hot-load if active + success toast), but surfaces failures as a
   // toast rather than the dialog-scoped installError region — the Browse tab
-  // has no such region. It rejects on failure so the caller can clear its
-  // per-entry busy state and the catalog is only re-fetched on success.
+  // has no such region. It resolves even on failure (after toasting) so its
+  // fire-and-forget onClick callers never leak an unhandled rejection; their
+  // try/finally still clears per-entry busy state.
   const marketplaceInstall = async (url: string) => {
-    const result = await installPluginFromUrl(url).catch((err) => {
+    try {
+      const result = await installPluginFromUrl(url);
+      await afterInstall(result);
+    } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to install plugin");
-      throw err;
-    });
-    await afterInstall(result);
+    }
   };
 
   return {

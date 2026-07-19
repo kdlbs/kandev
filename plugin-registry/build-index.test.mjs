@@ -17,7 +17,7 @@ function stubGitHub({ release, manifestText, repoMeta }) {
   globalThis.fetch = async (url) => {
     const u = String(url);
     if (u.includes("/releases/latest")) return jsonResponse(release);
-    if (u.includes("raw.githubusercontent.com")) return textResponse(manifestText ?? "");
+    if (u.includes("/manifest.yaml")) return textResponse(manifestText ?? "");
     if (u.includes("/repos/")) return jsonResponse(repoMeta);
     throw new Error(`unexpected fetch: ${u}`);
   };
@@ -69,6 +69,16 @@ test("parseManifestFields extracts presentation keys and ignores the rest", () =
   assert.equal(fields.min_kandev_version, "0.72.0");
   assert.deepEqual(fields.categories, ["getting-started"]);
   assert.equal("id" in fields, false);
+});
+
+test("parseManifestFields reads block-sequence categories", () => {
+  const fields = parseManifestFields(
+    ["display_name: Multi", "categories:", "  - integrations", "  - analytics", "author: kandev"].join(
+      "\n",
+    ),
+  );
+  assert.deepEqual(fields.categories, ["integrations", "analytics"]);
+  assert.equal(fields.author, "kandev");
 });
 
 test("buildEntry resolves release, manifest, icon_url and stars", async () => {
@@ -132,7 +142,7 @@ test("buildIndex skips bad entries but still builds the good ones", async () => 
         ? jsonResponse({ tag_name: "1.0.0", assets: [{ name: "a-1.0.0.tar.gz", browser_download_url: "https://dl/a" }] })
         : jsonResponse(null);
     }
-    if (u.includes("raw.githubusercontent.com")) return textResponse("");
+    if (u.includes("/manifest.yaml")) return textResponse("");
     return jsonResponse({ stargazers_count: 1, owner: { login: "o" } });
   };
 

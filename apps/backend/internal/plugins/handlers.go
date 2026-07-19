@@ -44,6 +44,10 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	api := router.Group("/api/plugins")
 	api.POST("/install", ctrl.install)
 	api.POST("/sync", ctrl.sync)
+	// Register the static /marketplace routes before the /:id wildcard, matching
+	// the /install and /sync ordering — some gin/httprouter tree versions reject
+	// a static sibling added after an existing wildcard for the same method.
+	ctrl.registerMarketplaceRoutes(api)
 	api.GET("", ctrl.list)
 	api.GET("/:id", ctrl.get)
 	api.GET("/:id/config", ctrl.getConfig)
@@ -56,8 +60,6 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	api.GET("/:id/ui/*path", ctrl.ui)
 	api.POST("/:id/webhooks/:key", ctrl.webhook)
 	api.GET("/:id/webhooks/:key", ctrl.webhook)
-
-	ctrl.registerMarketplaceRoutes(api)
 }
 
 // --- Management ---

@@ -103,6 +103,12 @@ func (c *Controller) addSource(ctx *gin.Context) {
 	}
 	rec, err := m.AddSource(req.Name, req.URL)
 	if err != nil {
+		if errors.Is(err, marketplace.ErrDuplicateSource) {
+			ctx.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		// Remaining Add errors are input validation (bad/empty URL) with clean,
+		// non-leaking messages.
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

@@ -170,13 +170,30 @@ async function fetchManifest(repo, ref) {
 export function parseManifestFields(text) {
   const out = {};
   const scalarKeys = ["display_name", "description", "author", "min_kandev_version", "icon"];
+  let inCategoryBlock = false;
   for (const rawLine of text.split("\n")) {
     const line = stripComment(rawLine);
+    // Collect indented block-sequence items while inside `categories:`.
+    const item = line.match(/^\s+-\s*(.+)$/);
+    if (inCategoryBlock && item) {
+      out.categories.push(unquote(item[1].trim()));
+      continue;
+    }
     const match = line.match(/^([a-z_]+):\s*(.*)$/);
     if (!match) continue;
+    inCategoryBlock = false;
     const [, key, value] = match;
-    if (scalarKeys.includes(key) && value.trim() !== "") out[key] = unquote(value.trim());
-    else if (key === "categories" && value.trim().startsWith("[")) out.categories = parseScalar(value.trim());
+    const v = value.trim();
+    if (scalarKeys.includes(key) && v !== "") {
+      out[key] = unquote(v);
+    } else if (key === "categories") {
+      if (v.startsWith("[")) {
+        out.categories = parseScalar(v); // inline: [a, b]
+      } else {
+        out.categories = []; // block sequence: subsequent `- item` lines
+        inCategoryBlock = true;
+      }
+    }
   }
   return out;
 }

@@ -25,6 +25,10 @@ var ErrSourceNotFound = errors.New("marketplace source not found")
 // built-in official source (it may be disabled, but never removed).
 var ErrBuiltinImmutable = errors.New("the built-in source cannot be deleted")
 
+// ErrDuplicateSource is returned by Add when a source with the same URL is
+// already configured (maps to 409, not a leaked raw SQL constraint error).
+var ErrDuplicateSource = errors.New("a source with this url already exists")
+
 // SourceStore persists configured marketplace sources in the
 // plugin_marketplace_source table.
 type SourceStore struct {
@@ -118,6 +122,9 @@ func (s *SourceStore) Add(name, url string) (*SourceRecord, error) {
 	if name == "" {
 		name = url
 	}
+	if s.urlExists(url) {
+		return nil, ErrDuplicateSource
+	}
 	id := uuid.New().String()
 	now := time.Now().UTC()
 	_, err := s.db.Exec(s.db.Rebind(`
@@ -125,9 +132,23 @@ func (s *SourceStore) Add(name, url string) (*SourceRecord, error) {
 		VALUES (?, ?, ?, 1, 0, ?)
 	`), id, name, url, now.Format(time.RFC3339))
 	if err != nil {
-		return nil, fmt.Errorf("add marketplace source: %w", err)
+		// A concurrent insert may have won the UNIQUE(url) race; report that as
+		// a duplicate rather than leaking the raw driver constraint message.
+		if s.urlExists(url) {
+			return nil, ErrDuplicateSource
+		}
+		return nil, errors.New("failed to add marketplace source")
 	}
 	return &SourceRecord{ID: id, Name: name, URL: url, Enabled: true, CreatedAt: now}, nil
+}
+
+// urlExists reports whether a source with the given URL is already stored.
+func (s *SourceStore) urlExists(url string) bool {
+	var one int
+	err := s.ro.QueryRow(s.ro.Rebind(`
+		SELECT 1 FROM plugin_marketplace_source WHERE url = ?
+	`), url).Scan(&one)
+	return err == nil
 }
 
 // Update changes a source's name and/or enabled flag. nil fields are left
