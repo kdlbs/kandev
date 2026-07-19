@@ -34,6 +34,7 @@ type serverListeners struct {
 
 	retryCancel context.CancelFunc
 	retryDone   chan struct{}
+	stopOnce    sync.Once
 }
 
 // startHTTPServers binds one listener per host and serves the shared handler on
@@ -146,16 +147,20 @@ func (sl *serverListeners) retryLoop(ctx context.Context, hosts []string) {
 	}
 }
 
-// Stop cancels the background retry loop and waits for it to drain. Idempotent
-// and safe to call when no retry loop was started. Must run before
-// server.Shutdown so no new listener appears after shutdown begins.
+// Stop cancels the background retry loop and waits for it to drain. Safe to
+// call concurrently and when no retry loop was started; the cancel+drain runs
+// at most once via stopOnce. Must run before server.Shutdown so no new listener
+// appears after shutdown begins.
 func (sl *serverListeners) Stop() {
-	if sl == nil || sl.retryCancel == nil {
+	if sl == nil {
 		return
 	}
-	sl.retryCancel()
-	sl.retryCancel = nil
-	<-sl.retryDone
+	sl.stopOnce.Do(func() {
+		if sl.retryCancel != nil {
+			sl.retryCancel()
+			<-sl.retryDone
+		}
+	})
 }
 
 // probeAddr returns an address the readiness probe can dial. It prefers a bound

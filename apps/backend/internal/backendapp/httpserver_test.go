@@ -150,6 +150,7 @@ func TestStartHTTPServersPartialFailSelfHeals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("occupy 127.0.0.2:%d: %v", port, err)
 	}
+	t.Cleanup(func() { _ = blocker.Close() })
 
 	server := noContentServer()
 	listeners, ok := startHTTPServers(server, []string{"127.0.0.1", "127.0.0.2"}, port, log)
@@ -209,6 +210,11 @@ func TestProbeAddrPrefersLoopback(t *testing.T) {
 	wildcard := &serverListeners{bound: []string{"0.0.0.0:8080"}}
 	if got := wildcard.probeAddr(); got != "127.0.0.1:8080" {
 		t.Fatalf("probeAddr() wildcard = %q, want 127.0.0.1:8080", got)
+	}
+
+	wildcard6 := &serverListeners{bound: []string{"[::]:8080"}}
+	if got := wildcard6.probeAddr(); got != "[::1]:8080" {
+		t.Fatalf("probeAddr() ipv6 wildcard = %q, want [::1]:8080", got)
 	}
 
 	tailnetOnly := &serverListeners{bound: []string{"100.64.0.1:8080"}}

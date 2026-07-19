@@ -118,14 +118,22 @@ func splitHosts(s string) []string {
 	return out
 }
 
-// isWildcardHost reports whether h binds every interface. Any wildcard entry
-// collapses the whole bind set, since it already covers everything.
-func isWildcardHost(h string) bool {
-	switch h {
-	case "", "0.0.0.0", "::":
-		return true
+// normalizeHost validates h and returns its canonical form plus whether it is a
+// wildcard (binds every interface). IP addresses are canonicalized via
+// net.ParseIP so equivalent forms dedupe (e.g. 0:0:0:0:0:0:0:1 and ::1); any
+// unspecified IP (0.0.0.0, ::, or a longhand form) is treated as a wildcard.
+// Hostnames are returned as-is. An invalid entry returns an error.
+func normalizeHost(h string) (canonical string, wildcard bool, err error) {
+	if ip := net.ParseIP(h); ip != nil {
+		if ip.IsUnspecified() {
+			return ip.String(), true, nil
+		}
+		return ip.String(), false, nil
 	}
-	return false
+	if isValidHostname(h) {
+		return h, false, nil
+	}
+	return "", false, fmt.Errorf("server bind host %q is not a valid IP address or hostname", h)
 }
 
 // isValidHostname reports whether h is a syntactically valid RFC 1123 hostname.
@@ -160,14 +168,6 @@ func isValidHostnameLabel(label string) bool {
 	return true
 }
 
-// validateHost checks that h is a valid IP address or hostname.
-func validateHost(h string) error {
-	if net.ParseIP(h) != nil || isValidHostname(h) {
-		return nil
-	}
-	return fmt.Errorf("server bind host %q is not a valid IP address or hostname", h)
-}
-
 // IsLoopbackHost reports whether h refers only to the local loopback
 // interface. A wildcard (empty/0.0.0.0/::) is NOT loopback because it also
 // binds routable interfaces. Unresolvable hostnames are treated as
@@ -193,9 +193,12 @@ func IsLoopbackHost(h string) bool {
 // KANDEV_SERVER_HOST env override and env must beat a config-file server.hosts
 // (env-over-file precedence, and the desktop loopback contract). server.hosts
 // is used only when host is unset. Whitespace is trimmed and empty/duplicate
-// entries dropped. If any entry is a wildcard (empty/0.0.0.0/::) the whole set
-// collapses to that single wildcard, since it already binds every interface.
-// An empty result falls back to the wildcard default.
+// entries dropped, and IP addresses are canonicalized so equivalent forms
+// dedupe. Every entry is validated before the set is collapsed, so an invalid
+// host is rejected regardless of its position relative to a wildcard. If any
+// entry is a wildcard (empty/0.0.0.0/:: or an unspecified IP) the whole set
+// collapses to that single wildcard, since it already binds every interface. An
+// empty result falls back to the wildcard default.
 func (c *ServerConfig) ResolvedBinds() ([]string, error) {
 	raw := splitHosts(c.Host)
 	if len(raw) == 0 {
@@ -206,18 +209,26 @@ func (c *ServerConfig) ResolvedBinds() ([]string, error) {
 
 	seen := make(map[string]struct{}, len(raw))
 	out := make([]string, 0, len(raw))
+	wildcard := ""
 	for _, h := range raw {
-		if isWildcardHost(h) {
-			return []string{h}, nil
-		}
-		if err := validateHost(h); err != nil {
+		norm, isWild, err := normalizeHost(h)
+		if err != nil {
 			return nil, err
 		}
-		if _, dup := seen[h]; dup {
+		if isWild {
+			if wildcard == "" {
+				wildcard = norm
+			}
 			continue
 		}
-		seen[h] = struct{}{}
-		out = append(out, h)
+		if _, dup := seen[norm]; dup {
+			continue
+		}
+		seen[norm] = struct{}{}
+		out = append(out, norm)
+	}
+	if wildcard != "" {
+		return []string{wildcard}, nil
 	}
 	if len(out) == 0 {
 		return []string{defaultServerHost}, nil

@@ -237,7 +237,10 @@ func TestResolvedBinds(t *testing.T) {
 		{name: "hosts array used when host unset", host: "", hosts: []string{"127.0.0.1", "100.64.0.1"}, want: []string{"127.0.0.1", "100.64.0.1"}},
 		{name: "explicit host wins over hosts array", host: "127.0.0.1", hosts: []string{"0.0.0.0"}, want: []string{"127.0.0.1"}},
 		{name: "hosts array as comma string", hosts: []string{"127.0.0.1,100.64.0.1"}, want: []string{"127.0.0.1", "100.64.0.1"}},
+		{name: "equivalent ipv6 forms dedupe", host: "::1,0:0:0:0:0:0:0:1", want: []string{"::1"}},
+		{name: "longhand unspecified ipv6 is wildcard", host: "0:0:0:0:0:0:0:0,127.0.0.1", want: []string{"::"}},
 		{name: "invalid entry errors", host: "127.0.0.1,not a host!!", wantErr: true},
+		{name: "invalid entry after wildcard still errors", host: "0.0.0.0,not a host!!", wantErr: true},
 	}
 
 	for _, tt := range tests {

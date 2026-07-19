@@ -43,7 +43,7 @@ func TestServerProbeAddr(t *testing.T) {
 	}{
 		{name: "port-only address probes loopback", listenAddr: ":38429", want: "127.0.0.1:38429"},
 		{name: "wildcard ipv4 probes loopback", listenAddr: "0.0.0.0:38429", want: "127.0.0.1:38429"},
-		{name: "wildcard ipv6 probes loopback", listenAddr: "[::]:38429", want: "127.0.0.1:38429"},
+		{name: "wildcard ipv6 probes ipv6 loopback", listenAddr: "[::]:38429", want: "[::1]:38429"},
 		{name: "loopback address probes itself", listenAddr: "127.0.0.1:38429", want: "127.0.0.1:38429"},
 		{name: "ipv6 loopback probes itself", listenAddr: "[::1]:38429", want: "[::1]:38429"},
 	}

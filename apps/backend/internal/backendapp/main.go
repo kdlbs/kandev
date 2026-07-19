@@ -805,8 +805,12 @@ func serverProbeAddr(listenAddr string) string {
 		return listenAddr
 	}
 	switch host {
-	case "", "0.0.0.0", "::":
+	case "", "0.0.0.0":
 		host = "127.0.0.1"
+	case "::":
+		// Preserve the address family: an IPv6-only wildcard listener isn't
+		// reachable via 127.0.0.1, so probe the IPv6 loopback instead.
+		host = "::1"
 	}
 	return net.JoinHostPort(host, port)
 }
