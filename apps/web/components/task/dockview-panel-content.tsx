@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 import { useAppStore } from "@/components/state-provider";
 import { useActiveTaskHasRepos } from "@/hooks/domains/kanban/use-active-task-has-repos";
@@ -37,12 +38,14 @@ export function resolveChatPanelTitle(agentLabel: string | null | undefined): st
 }
 
 function useChatSessionTitle(panelId: string, sessionId: string | null) {
-  const sessionTitleData = useAppStore((state) => {
-    if (!sessionId) return null;
-    const session = state.taskSessions.items[sessionId];
-    if (!session) return null;
-    return { name: session.name ?? null, agentProfileId: session.agent_profile_id ?? null };
-  });
+  const sessionTitleData = useAppStore(
+    useShallow((state) => {
+      if (!sessionId) return null;
+      const session = state.taskSessions.items[sessionId];
+      if (!session) return null;
+      return { name: session.name ?? null, agentProfileId: session.agent_profile_id ?? null };
+    }),
+  );
   const { agentProfiles } = useSettingsData(Boolean(sessionTitleData?.agentProfileId));
   const agentLabel = useMemo(() => {
     if (sessionTitleData?.name) return sessionTitleData.name;

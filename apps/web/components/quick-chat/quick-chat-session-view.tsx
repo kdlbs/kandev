@@ -1,5 +1,6 @@
 "use client";
 
+import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
@@ -7,15 +8,17 @@ import type { QuickChatSession } from "@/lib/state/slices/ui/types";
 import { QuickChatContent } from "./quick-chat-content";
 
 function useIsQuickChatPassthrough(sessionId: string) {
-  const sessionData = useAppStore((state) => {
-    const session = state.taskSessions.items[sessionId];
-    return {
-      isPassthrough: session?.is_passthrough,
-      profileId:
-        session?.agent_profile_id ??
-        state.quickChat.sessions.find((item) => item.sessionId === sessionId)?.agentProfileId,
-    };
-  });
+  const sessionData = useAppStore(
+    useShallow((state) => {
+      const session = state.taskSessions.items[sessionId];
+      return {
+        isPassthrough: session?.is_passthrough,
+        profileId:
+          session?.agent_profile_id ??
+          state.quickChat.sessions.find((item) => item.sessionId === sessionId)?.agentProfileId,
+      };
+    }),
+  );
   const { agentProfiles } = useSettingsData(typeof sessionData.isPassthrough !== "boolean");
   if (typeof sessionData.isPassthrough === "boolean") return sessionData.isPassthrough;
   if (!sessionData.profileId) return false;

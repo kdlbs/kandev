@@ -26,6 +26,15 @@ export type SeedData = {
   worktreeExecutorProfileId: string;
 };
 
+function defaultTaskCreateLastUsed(seedData: SeedData) {
+  return {
+    repository_id: seedData.repositoryId,
+    branch: "main",
+    agent_profile_id: seedData.agentProfileId,
+    executor_profile_id: seedData.worktreeExecutorProfileId,
+  };
+}
+
 export const test = backendFixture.extend<
   {
     testPage: Page;
