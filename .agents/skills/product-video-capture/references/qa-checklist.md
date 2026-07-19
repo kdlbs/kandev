@@ -14,6 +14,8 @@
 - [ ] OS cursor is disabled and exactly one DOM cursor/touch treatment is visible.
 - [ ] DOM overlay and real browser pointer advance in lockstep through every eased travel sample; no independent overlay animation followed by a final browser-pointer move is allowed.
 - [ ] A focused travel test proves zero endpoint displacement when real input settles, and normal-speed raw playback shows no pointer stepping, lag, or teleport.
+- [ ] Re-sync the current pointer after direct setup input and before RECORD so the first semantic travel starts from the real browser position.
+- [ ] The final RECORD trusted-event ledger, measured under active X11 capture load, keeps every meaningful travel at p95 <= 56ms and maximum <= 64ms; rehearsal-only cadence is not acceptance evidence.
 - [ ] Dense semantic metadata includes timestamps, intermediate samples, target bounds, target glyph bounds, pointer glyph bounds, and visibility intervals. Target and pointer geometry are independently measured, never aliases; every interval begins at departure and includes motion, arrival, and settle.
 
 ## 2. Technical And Codec Probe

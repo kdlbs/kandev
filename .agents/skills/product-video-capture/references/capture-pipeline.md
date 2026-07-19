@@ -75,7 +75,11 @@ Use one capture-only overlay:
 - OS pointer disabled through `-draw_mouse 0`;
 - overlay hidden only after recording for a clean poster.
 
-Move real input and the overlay together through one eased, time-sampled trajectory. At every sample, update the DOM overlay and the real browser pointer before advancing to the next sample. If the overlay also listens to real `mousemove` events, never animate it independently with `requestAnimationFrame` and then move the browser pointer to the destination afterward: that late input event overrides the overlay and produces a visible endpoint teleport. Keep the complete rendered glyph inside the raw viewport. Preserve the hotspot on the real target, using an edge-safe glyph orientation near the right or bottom edge instead of clipping it.
+Move real input and the overlay together through one eased, time-sampled trajectory. Keep the DOM overlay and real browser pointer in lockstep. At every sample, make the trusted mousemove event on desktop, or the corresponding trusted pointer/touch event on mobile, the sole source of truth. Send real Playwright/CDP input and let that trusted event update both the DOM cursor from its event coordinates and the semantic metadata ledger. Never animate it independently with `requestAnimationFrame` and then move the browser pointer afterward: that later input will override the overlay and create a visible teleport. Keep the complete rendered glyph inside the raw viewport. Preserve the hotspot on the real target, using an edge-safe glyph orientation near the right or bottom edge instead of clipping it.
+
+Direct setup input can leave a travel helper's remembered origin stale even when the browser is correct. Re-sync the current pointer from a trusted setup click or movement before RECORD and before every semantic story that follows direct Playwright setup input.
+
+Use adaptive sample waits calculated from the measured elapsed time of the preceding trusted input event. A fixed sleep is insufficient under recording load: it can turn a smooth rehearsal into stepped 45-90ms movement during X11 capture. Target roughly 32ms between trusted movement events, retain a small non-zero wait rather than issuing catch-up bursts, and validate the RECORD stream itself. Reject a take when meaningful travel has p95 above 56ms or a maximum interval above 64ms, even if camera metadata interpolates smoothly.
 
 Exercise the travel helper in a focused contract test before RECORD. The test must prove that intermediate overlay and browser-pointer positions stay aligned, the final real-input update causes no residual overlay displacement, and click/hover begins only after both sources reach the same destination. Inspect the resulting motion at normal playback speed; metadata interpolation alone cannot prove that recorded pixels are smooth.
 
@@ -113,6 +117,7 @@ Normalize pointer coordinates against the exact camera source. For full-frame ca
 - Land each pointer or touch target before activating it.
 - Remove dead waits through deterministic seed timing, not editing time.
 - End on a readable result and hold a settled frame long enough for a calm loop.
+- End after the requested product beat. Do not append unrelated route loading, environment setup, terminal cleanup, or session readiness merely because the fixture can observe it; validate those separately from the recorded story.
 - Treat 7-11 seconds as a target, never a reason to compromise an honest interaction, settled loop, or actual-size readability.
 
 Use a mobile Playwright context with `isMobile` and touch enabled, a separate script, and native mobile navigation. Do not replay desktop coordinates or selectors. Assert complete sheets, menus, bottom navigation, labels, and action buttons before recording.

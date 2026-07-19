@@ -52,6 +52,31 @@ test("keeps the DOM overlay and real browser pointer in lockstep", () => {
   assert.match(bundle, /normal playback speed/i);
 });
 
+test("uses trusted browser input as the sole pointer authority", () => {
+  assert.match(
+    bundle,
+    /trusted (?:mouse|pointer)(?:move)? event[^\n]{0,120}sole (?:source of truth|authority)/i,
+  );
+  assert.match(
+    bundle,
+    /(?:overlay|DOM cursor)[^\n]{0,100}(?:event coordinates|trusted event)[^\n]{0,100}(?:metadata|ledger)/i,
+  );
+  assert.match(
+    bundle,
+    /re-?sync[^\n]{0,100}(?:direct|setup)[^\n]{0,100}(?:input|click)[^\n]{0,100}(?:before|prior to)[^\n]{0,40}(?:RECORD|recording)/i,
+  );
+});
+
+test("adapts pointer sampling to recorder load and rejects visible stepping", () => {
+  assert.match(
+    bundle,
+    /adaptive[^\n]{0,100}(?:sample|cadence|wait)[^\n]{0,120}(?:elapsed|recorder load|recording load)/i,
+  );
+  assert.match(bundle, /fixed sleep[^\n]{0,100}(?:reject|insufficient|not)/i);
+  assert.match(bundle, /p95[^\n]{0,100}(?:56|60|64) ?ms/i);
+  assert.match(bundle, /maximum[^\n]{0,100}64 ?ms/i);
+});
+
 test("keeps target and pointer glyph geometry distinct over the full movement", () => {
   assert.match(
     bundle,
@@ -131,6 +156,18 @@ test("keeps the camera timing exceptions explicit in the QA checklist", () => {
   assert.match(
     qaChecklist,
     /single pan peak[^\n]{0,100}(?:higher|exceed)[^\n]{0,100}declared long journey[^\n]{0,100}profile cap/i,
+  );
+});
+
+test("checks trusted pointer cadence in the final RECORD", () => {
+  assert.match(
+    qaChecklist,
+    /trusted[- ]event[^\n]{0,120}p95[^\n]{0,60}56 ?ms/i,
+  );
+  assert.match(qaChecklist, /maximum[^\n]{0,80}64 ?ms/i);
+  assert.match(
+    qaChecklist,
+    /re-?sync[^\n]{0,100}(?:setup|direct)[^\n]{0,80}input[^\n]{0,80}(?:before|prior to)[^\n]{0,30}RECORD/i,
   );
 });
 
