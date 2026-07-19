@@ -302,6 +302,29 @@ export const qk = {
       config: (workspaceId?: OptionalString) =>
         ["integrations", "linear", "config", id(workspaceId)] as const,
       teams: () => ["integrations", "linear", "teams"] as const,
+      issues: (
+        workspaceId: OptionalString,
+        params: {
+          query?: string;
+          teamKey?: string;
+          assigned?: string;
+          pageToken?: string;
+          maxResults?: number;
+        },
+      ) =>
+        [
+          "integrations",
+          "linear",
+          "issues",
+          id(workspaceId),
+          {
+            query: params.query ?? "",
+            teamKey: params.teamKey ?? "",
+            assigned: params.assigned ?? "",
+            pageToken: params.pageToken ?? "",
+            maxResults: params.maxResults ?? null,
+          },
+        ] as const,
       issueWatches: (workspaceId?: OptionalString) =>
         ["integrations", "linear", "issueWatches", id(workspaceId)] as const,
     },
