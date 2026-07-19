@@ -123,7 +123,13 @@ interface PluginRegistry {
 
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." props={...}/>. Initial slots: "task-sidebar",
-  // "settings-nav", "main-nav-footer".
+  // "settings-nav", "main-nav-footer", "chat-input-actions". The last renders
+  // icon buttons in the chat composer toolbar (beside the model picker, mic,
+  // and send) and forwards `{ taskId, taskTitle, activeSessionId, sessionIds }`
+  // as `slotProps` — the active session plus every kandev session id on the
+  // task. Resolving a session id to an agent/ACP transcript id (e.g. to key
+  // tokscale cost data on a session) is the plugin's job, done server-side in
+  // the plugin backend via the Host data API; the host only propagates ids.
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
 
   // WS action handler. Bridged into the existing lib/ws dispatch; called with the
@@ -161,6 +167,11 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   message to any `registry.getWsHandlers(action)`.
 - `components/plugins/plugin-slot.tsx`: `<PluginSlot name props/>` renders all
   slot components; drop into task detail sidebar + settings nav as initial hosts.
+  The chat composer toolbar
+  (`components/task/chat/chat-input-toolbar-desktop.tsx` and
+  `-mobile.tsx`, via `chat-input-plugin-actions.tsx`) hosts the
+  `chat-input-actions` slot, passing
+  `{ taskId, taskTitle, activeSessionId, sessionIds }`.
 
 ## Security posture (documented, enforced where cheap)
 

@@ -234,7 +234,8 @@ interface PluginRegistry {
   registerNavItem(item: NavItem): void;
   // Route under /settings/plugins/{id}/..., rendered inside the settings shell.
   registerSettingsRoute(path: string, Component: React.ComponentType): void;
-  // Named slot injection. Initial slots: "task-sidebar", "settings-nav", "main-nav-footer".
+  // Named slot injection. Initial slots: "task-sidebar", "settings-nav",
+  // "main-nav-footer", "chat-input-actions" (see "Chat toolbar actions" below).
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
   // WS action handler, bridged into the existing lib/ws dispatch.
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
@@ -310,6 +311,83 @@ here for routes that opt out and render their own chrome), and
 `TaskCreateDialog`, so a plugin can hand off task creation to kandev's real
 create-task flow (repo/branch/agent pickers, validation) instead of POSTing
 directly. See `apps/web/lib/plugins/host-api.ts` for the exact current list.
+
+## Named slots
+
+`registerComponent(slot, Component)` injects a component into a host-defined
+slot. The host renders every plugin's component for that slot (each isolated
+behind an error boundary), so a slot may hold contributions from several
+plugins at once. Available slots:
+
+| Slot | Where it renders | `slotProps` |
+| --- | --- | --- |
+| `task-sidebar` | Bottom of the task-detail sidebar | — |
+| `settings-nav` | Settings navigation tree | — |
+| `main-nav-footer` | Footer of the main sidebar | — |
+| `chat-input-actions` | Chat composer toolbar, beside the model picker, mic, and send button | `{ taskId, taskTitle, activeSessionId, sessionIds }` |
+
+### Chat toolbar actions
+
+Register a `chat-input-actions` component to add an icon button to the chat
+composer toolbar. The host passes the current context as `slotProps`:
+
+```ts
+type ChatInputActionsSlotProps = {
+  taskId: string | null;
+  taskTitle?: string;
+  activeSessionId: string | null; // session the composer is bound to
+  sessionIds: string[];           // every kandev session id on the task
+};
+```
+
+A task can hold several sessions, so both the active session and the full
+`sessionIds` list are provided. These are **kandev** session ids — resolving one
+to an agent/ACP transcript id (for example, to key per-session cost data from a
+tool like tokscale) is your plugin's job. Do that **server-side in your plugin
+backend** via the Host data API (`host.Sessions()`), not in the bundle: propagate
+the ids from the UI to your backend over `host.api.fetch(...)`, and let the
+backend do the matching. See `kandev-plugin-tokscale` for the pattern.
+
+```js
+function makeChatAction(host) {
+  const { jsx: h, ui } = host;
+  const { Button, Tooltip, TooltipTrigger, TooltipContent } = ui;
+
+  return function ChatAction({ slotProps }) {
+    const { taskId } = slotProps ?? {};
+    return h(
+      Tooltip,
+      null,
+      h(
+        TooltipTrigger,
+        { asChild: true },
+        h(
+          Button,
+          {
+            type: "button",
+            variant: "ghost",
+            size: "icon",
+            className: "h-7 w-7 cursor-pointer hover:bg-muted/40",
+            "aria-label": "Open plugin page",
+            onClick: () => host.navigate("/hello-world"),
+          },
+          /* an icon element built with host.jsx */ myIcon(h),
+        ),
+      ),
+      h(TooltipContent, null, taskId ? `Task: ${taskId}` : "Plugin action"),
+    );
+  };
+}
+
+// inside initialize(registry, host):
+registry.registerComponent("chat-input-actions", makeChatAction(host));
+```
+
+Match the first-party toolbar buttons: `Button` from `host.ui` with
+`variant="ghost"`, `size="icon"`, `h-7 w-7`, `cursor-pointer`, and a 16px
+(`h-4 w-4`) icon. Wrap it in `host.ui.Tooltip` so it reads like the native
+mic/attach controls. `kandev-plugin-hello/ui/bundle.js` ships a working
+example.
 
 ## Three integration patterns
 

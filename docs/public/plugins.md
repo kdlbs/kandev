@@ -34,7 +34,10 @@ A native UI bundle can register a nav item that renders as a top-level
 sidebar entry or, when it declares itself part of the Integrations section,
 alongside kandev's first-party integration links in the main sidebar's
 **Integrations** section — expect new entries to appear there once such a
-plugin is installed and active.
+plugin is installed and active. Bundles can also inject components into
+host-defined slots, including **icon buttons in the chat composer toolbar**
+(beside the model picker, mic, and send button), so an active plugin can add
+its own action right where you message an agent.
 
 ## Installing a plugin
 
