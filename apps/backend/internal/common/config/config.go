@@ -92,9 +92,12 @@ type ServerConfig struct {
 	// Host is the bind address. A single value (e.g. "127.0.0.1") behaves as
 	// it always has; a comma-separated list (e.g. "127.0.0.1,100.64.0.1")
 	// binds one listener per address. Empty means the wildcard default.
+	//
+	// Host carries the KANDEV_SERVER_HOST env override, so when it is set it
+	// wins over Hosts to preserve env-over-file precedence (see ResolvedBinds).
 	Host string `mapstructure:"host"`
-	// Hosts is the YAML-array form of Host. When non-empty it takes precedence
-	// over Host, letting config files express the bind set without commas.
+	// Hosts is the YAML-array form of Host, for config files that prefer an
+	// array to a comma-separated string. It is used only when Host is unset.
 	Hosts          []string `mapstructure:"hosts"`
 	Port           int      `mapstructure:"port"`
 	ReadTimeout    int      `mapstructure:"readTimeout"`  // in seconds
@@ -185,20 +188,20 @@ func IsLoopbackHost(h string) bool {
 }
 
 // ResolvedBinds returns the de-duplicated, validated list of hosts the HTTP
-// server should bind to. server.hosts (YAML array) takes precedence over
-// server.host (comma-separated string) when non-empty. Whitespace is trimmed
-// and empty/duplicate entries dropped. If any entry is a wildcard
-// (empty/0.0.0.0/::) the whole set collapses to that single wildcard, since it
-// already binds every interface. An empty result falls back to the wildcard
-// default.
+// server should bind to. server.host (comma-separated string) takes precedence
+// over server.hosts (YAML array) when set, because Host carries the
+// KANDEV_SERVER_HOST env override and env must beat a config-file server.hosts
+// (env-over-file precedence, and the desktop loopback contract). server.hosts
+// is used only when host is unset. Whitespace is trimmed and empty/duplicate
+// entries dropped. If any entry is a wildcard (empty/0.0.0.0/::) the whole set
+// collapses to that single wildcard, since it already binds every interface.
+// An empty result falls back to the wildcard default.
 func (c *ServerConfig) ResolvedBinds() ([]string, error) {
-	var raw []string
-	if len(c.Hosts) > 0 {
+	raw := splitHosts(c.Host)
+	if len(raw) == 0 {
 		for _, h := range c.Hosts {
 			raw = append(raw, splitHosts(h)...)
 		}
-	} else {
-		raw = splitHosts(c.Host)
 	}
 
 	seen := make(map[string]struct{}, len(raw))
@@ -437,8 +440,12 @@ func detectDefaultLogFormat() string {
 
 // setDefaults configures default values for all configuration options.
 func setDefaults(v *viper.Viper) {
-	// Server defaults
-	v.SetDefault("server.host", defaultServerHost)
+	// Server defaults. Host defaults to empty (not the wildcard) so an unset
+	// host is distinguishable from an explicit one: ResolvedBinds falls back to
+	// server.hosts only when host is unset, and empty resolves to the wildcard
+	// default. This keeps KANDEV_SERVER_HOST winning over a config-file
+	// server.hosts.
+	v.SetDefault("server.host", "")
 	v.SetDefault("server.port", ports.Backend)
 	v.SetDefault("server.readTimeout", 30)
 	v.SetDefault("server.writeTimeout", 30)

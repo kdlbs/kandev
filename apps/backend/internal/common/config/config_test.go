@@ -234,7 +234,9 @@ func TestResolvedBinds(t *testing.T) {
 		{name: "wildcard collapses set", host: "127.0.0.1,0.0.0.0", want: []string{"0.0.0.0"}},
 		{name: "ipv6 wildcard collapses set", host: "::,127.0.0.1", want: []string{"::"}},
 		{name: "hostname allowed", host: "my-tailnet-host", want: []string{"my-tailnet-host"}},
-		{name: "hosts array wins over default host", host: "0.0.0.0", hosts: []string{"127.0.0.1", "100.64.0.1"}, want: []string{"127.0.0.1", "100.64.0.1"}},
+		{name: "hosts array used when host unset", host: "", hosts: []string{"127.0.0.1", "100.64.0.1"}, want: []string{"127.0.0.1", "100.64.0.1"}},
+		{name: "explicit host wins over hosts array", host: "127.0.0.1", hosts: []string{"0.0.0.0"}, want: []string{"127.0.0.1"}},
+		{name: "hosts array as comma string", hosts: []string{"127.0.0.1,100.64.0.1"}, want: []string{"127.0.0.1", "100.64.0.1"}},
 		{name: "invalid entry errors", host: "127.0.0.1,not a host!!", wantErr: true},
 	}
 
@@ -309,6 +311,57 @@ func TestNonLoopbackBinds(t *testing.T) {
 	wildcard := ServerConfig{Host: "0.0.0.0"}
 	if got, err := wildcard.NonLoopbackBinds(); err != nil || len(got) != 1 || got[0] != "0.0.0.0" {
 		t.Fatalf("NonLoopbackBinds() = %v (err %v), want [0.0.0.0]", got, err)
+	}
+}
+
+// TestServerHostEnvOverridesConfigHosts verifies env-over-file precedence: a
+// KANDEV_SERVER_HOST env override must win over a config-file server.hosts
+// array, so launching with a loopback host binds only loopback even if the
+// config file left non-loopback addresses in server.hosts. Regression for the
+// desktop/headless loopback contract.
+func TestServerHostEnvOverridesConfigHosts(t *testing.T) {
+	dir := t.TempDir()
+	cfgYAML := "server:\n  hosts:\n    - 0.0.0.0\n    - 100.64.0.1\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	t.Setenv("KANDEV_SERVER_HOST", "127.0.0.1")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	binds, err := cfg.Server.ResolvedBinds()
+	if err != nil {
+		t.Fatalf("ResolvedBinds: %v", err)
+	}
+	if len(binds) != 1 || binds[0] != "127.0.0.1" {
+		t.Fatalf("ResolvedBinds() = %v, want [127.0.0.1] (env host must override config server.hosts)", binds)
+	}
+}
+
+// TestServerHostsFromConfigWhenHostUnset confirms server.hosts is honored when
+// no host/env override is present.
+func TestServerHostsFromConfigWhenHostUnset(t *testing.T) {
+	dir := t.TempDir()
+	cfgYAML := "server:\n  hosts:\n    - 127.0.0.1\n    - 100.64.0.1\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfgYAML), 0o600); err != nil {
+		t.Fatalf("write config.yaml: %v", err)
+	}
+	// Ensure no ambient KANDEV_SERVER_HOST override leaks into the test.
+	t.Setenv("KANDEV_SERVER_HOST", "")
+
+	cfg, err := LoadWithPath(dir)
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	binds, err := cfg.Server.ResolvedBinds()
+	if err != nil {
+		t.Fatalf("ResolvedBinds: %v", err)
+	}
+	want := []string{"127.0.0.1", "100.64.0.1"}
+	if len(binds) != len(want) || binds[0] != want[0] || binds[1] != want[1] {
+		t.Fatalf("ResolvedBinds() = %v, want %v", binds, want)
 	}
 }
 
