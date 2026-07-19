@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import {
@@ -55,9 +55,10 @@ function useLayoutProfileDrafts(savedLayouts: SavedLayout[]) {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [editorReset, setEditorReset] = useState(0);
-  const baselineKey = JSON.stringify(baseline);
-  const isDirty = baselineKey !== JSON.stringify(profiles);
-  const storeKey = JSON.stringify(savedLayouts);
+  const baselineKey = useMemo(() => JSON.stringify(baseline), [baseline]);
+  const profilesKey = useMemo(() => JSON.stringify(profiles), [profiles]);
+  const storeKey = useMemo(() => JSON.stringify(savedLayouts), [savedLayouts]);
+  const isDirty = baselineKey !== profilesKey;
 
   useEffect(() => {
     if (storeKey === baselineKey || isDirty) return;
