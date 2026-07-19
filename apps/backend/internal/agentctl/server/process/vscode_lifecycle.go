@@ -43,7 +43,7 @@ func (v *VscodeManager) monitorProcess(cmd *exec.Cmd, doneCh chan struct{}) {
 // Stop stops the code-server process.
 func (v *VscodeManager) Stop(ctx context.Context) error {
 	startDone := v.beginStop()
-	if err := waitForVscodeStartGeneration(startDone); err != nil {
+	if err := waitForVscodeStartGeneration(ctx, startDone); err != nil {
 		return err
 	}
 	cmd, doneCh := v.snapshotStoppedProcess(startDone)
@@ -78,10 +78,12 @@ func (v *VscodeManager) beginStop() chan struct{} {
 	return startDone
 }
 
-func waitForVscodeStartGeneration(startDone <-chan struct{}) error {
+func waitForVscodeStartGeneration(ctx context.Context, startDone <-chan struct{}) error {
 	if startDone != nil {
 		select {
 		case <-startDone:
+		case <-ctx.Done():
+			return fmt.Errorf("wait for code-server startup generation: %w", ctx.Err())
 		case <-time.After(2 * time.Second):
 			return fmt.Errorf("code-server startup generation did not stop after cancellation")
 		}

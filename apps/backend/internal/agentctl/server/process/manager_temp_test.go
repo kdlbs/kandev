@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -74,6 +75,7 @@ func TestManager_BuildFinalCommandInjectsIsolatedTempDir(t *testing.T) {
 		AgentEnv:  []string{"PATH=/usr/bin"},
 	}, newTestLogger(t))
 	mgr.adapter = stubAgentAdapter{}
+	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })
 
 	if err := mgr.buildFinalCommand(); err != nil {
 		t.Fatalf("buildFinalCommand() error = %v", err)
@@ -88,7 +90,33 @@ func TestManager_BuildFinalCommandInjectsIsolatedTempDir(t *testing.T) {
 	if info, err := os.Stat(want); err != nil || !info.IsDir() {
 		t.Fatalf("expected temp dir %q to exist, stat=%v err=%v", want, info, err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(want) })
+}
+
+func TestManager_OwnedProcessEnvOverridesRequestedTemp(t *testing.T) {
+	setAgentTempTestEnv(t)
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir:   t.TempDir(),
+		SessionID: "session-child-env",
+	}, newTestLogger(t))
+	if err := mgr.ensureAgentTempEnv(); err != nil {
+		t.Fatalf("ensureAgentTempEnv() error = %v", err)
+	}
+
+	env := mgr.ownedProcessEnv(map[string]string{
+		"TMPDIR": "unmanaged",
+		"CUSTOM": "preserved",
+	})
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		if got := env[key]; got != mgr.agentTempDir {
+			t.Fatalf("%s = %q, want %q", key, got, mgr.agentTempDir)
+		}
+	}
+	if got := env["CUSTOM"]; got != "preserved" {
+		t.Fatalf("CUSTOM = %q, want preserved", got)
+	}
+	if err := mgr.StopForTeardown(context.Background()); err != nil {
+		t.Fatalf("StopForTeardown() error = %v", err)
+	}
 }
 
 func TestManager_StopRemovesAlreadyStoppedTempDirAndPreservesSibling(t *testing.T) {
@@ -280,6 +308,12 @@ func TestManager_StopUsesOpenedRootAfterPathIsReplaced(t *testing.T) {
 	root := filepath.Join(tempBase, agentTempDirRoot)
 	parkedRoot := filepath.Join(tempBase, "original-kandev-agent")
 	if err := os.Rename(root, parkedRoot); err != nil {
+		if runtime.GOOS == "windows" {
+			if stopErr := mgr.StopForTeardown(context.Background()); stopErr != nil {
+				t.Fatalf("StopForTeardown() after protected-root rename = %v", stopErr)
+			}
+			return
+		}
 		t.Fatalf("rename original temp root: %v", err)
 	}
 	outside := t.TempDir()
@@ -507,6 +541,11 @@ func TestManager_TempCleanupWaitsForMainProcessGroupReap(t *testing.T) {
 	mgr.terminateGroupFn = func(int) error { return nil }
 	mgr.killGroupFn = func(int) error { return nil }
 	mgr.waitGroupExitFn = func(context.Context, int) bool { return false }
+	t.Cleanup(func() {
+		mgr.groupAliveFn = func(int) bool { return false }
+		mgr.waitGroupExitFn = nil
+		_ = mgr.StopForTeardown(context.Background())
+	})
 	err := mgr.StopForTeardown(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "remains alive") {
 		t.Fatalf("Stop() error = %v, want process-group reap failure", err)
@@ -530,7 +569,11 @@ func TestManager_TempCleanupWaitsForMainGoroutineReap(t *testing.T) {
 	mgr.cmd = &exec.Cmd{Process: &os.Process{Pid: 424243}}
 	mgr.status.Store(StatusRunning)
 	mgr.wg.Add(1)
-	defer mgr.wg.Done()
+	t.Cleanup(func() {
+		mgr.wg.Done()
+		mgr.managerWaitFn = nil
+		_ = mgr.StopForTeardown(context.Background())
+	})
 	mgr.groupAliveFn = func(int) bool { return false }
 	mgr.terminateGroupFn = func(int) error { return nil }
 	mgr.killGroupFn = func(int) error { return nil }

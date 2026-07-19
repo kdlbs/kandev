@@ -21,6 +21,8 @@ spec: "../../specs/platform/workspace-git-status.md"
 ```bash
 rtk git check-ignore -q .verify-cache/go-cache/probe
 rtk git check-ignore -q .tmp/gocache/probe
+! rtk git check-ignore -q nested/.verify-cache/probe
+! rtk git check-ignore -q nested/.tmp/probe
 rtk rg -n 'outside the repository|/\.verify-cache/' .agents/skills/verify/SKILL.md .gitignore
 ```
 

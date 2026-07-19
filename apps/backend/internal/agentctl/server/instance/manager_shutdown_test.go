@@ -251,8 +251,8 @@ type cleanupOnlyError struct {
 
 func (e cleanupOnlyError) Error() string { return e.err.Error() }
 func (e cleanupOnlyError) Unwrap() error { return e.err }
-func (e cleanupOnlyError) RetainInstanceResources() bool {
-	return false
+func (e cleanupOnlyError) CanReleaseInstanceResources() bool {
+	return true
 }
 
 func (m *fakeProcessManager) CloseAdmission() {}

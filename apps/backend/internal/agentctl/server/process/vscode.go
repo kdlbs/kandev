@@ -56,6 +56,7 @@ type VscodeManager struct {
 	status       VscodeStatus
 	err          string
 	message      string
+	env          map[string]string
 	mu           sync.Mutex
 	cancelStart  context.CancelFunc // cancels startAsync goroutine
 	startDone    chan struct{}      // closes when the current start generation exits
@@ -88,6 +89,15 @@ func NewVscodeManager(
 		installStrategy: strategy,
 		logger:          log.WithFields(zap.String("component", "vscode-manager")),
 		status:          VscodeStatusStopped,
+	}
+}
+
+func (v *VscodeManager) setEnv(env map[string]string) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.env = make(map[string]string, len(env))
+	for key, value := range env {
+		v.env[key] = value
 	}
 }
 
@@ -245,6 +255,10 @@ func (v *VscodeManager) startProcess(ctx context.Context, generationDone chan st
 	}
 	cmd := exec.Command(binaryPath, args...)
 	cmd.Dir = workDir
+	cmd.Env = append([]string(nil), os.Environ()...)
+	for key, value := range v.env {
+		cmd.Env = upsertEnvValue(cmd.Env, key, value)
+	}
 	v.workDir = workDir
 	// Give code-server its own process group so Stop() can kill the entire
 	// process tree (main process + Node.js workers) without affecting agentctl.

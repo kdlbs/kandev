@@ -82,11 +82,12 @@ func killAndWaitShellCommand(cmd *exec.Cmd) error {
 
 // Config holds shell session configuration
 type Config struct {
-	WorkDir      string   // Working directory (default: workspace)
-	Cols         int      // Initial terminal columns (default: 80)
-	Rows         int      // Initial terminal rows (default: 24)
-	ShellCommand string   // Optional shell command override
-	ShellArgs    []string // Optional shell args override
+	WorkDir      string            // Working directory (default: workspace)
+	Cols         int               // Initial terminal columns (default: 80)
+	Rows         int               // Initial terminal rows (default: 24)
+	ShellCommand string            // Optional shell command override
+	ShellArgs    []string          // Optional shell args override
+	Env          map[string]string // Optional environment overrides
 }
 
 // DefaultConfig returns the default shell configuration
@@ -194,7 +195,7 @@ func (s *Session) start(cfg Config) error {
 
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = cfg.WorkDir
-	s.cmd.Env = buildShellEnv(cfg.WorkDir)
+	s.cmd.Env = buildShellEnv(cfg.WorkDir, cfg.Env)
 	configureShellProcess(s.cmd)
 
 	// Start with PTY
@@ -578,7 +579,7 @@ func (s *Session) respawn() error {
 	doneCh := make(chan struct{})
 	s.cmd = exec.Command(s.shell, s.shellArgs...)
 	s.cmd.Dir = s.workDir
-	s.cmd.Env = buildShellEnv(s.workDir)
+	s.cmd.Env = buildShellEnv(s.workDir, s.config.Env)
 	configureShellProcess(s.cmd)
 
 	// Start with PTY
@@ -618,8 +619,11 @@ func (s *Session) respawn() error {
 }
 
 // buildShellEnv creates the environment for the shell process
-func buildShellEnv(workDir string) []string {
+func buildShellEnv(workDir string, overrides map[string]string) []string {
 	env := os.Environ()
+	for key, value := range overrides {
+		env = upsertShellEnv(env, key, value)
+	}
 
 	// Set working directory related vars
 	env = append(env, "PWD="+workDir)
@@ -630,4 +634,24 @@ func buildShellEnv(workDir string) []string {
 	env = append(env, "LC_ALL=C.UTF-8")
 
 	return env
+}
+
+func upsertShellEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	result := make([]string, 0, len(env)+1)
+	found := false
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			if !found {
+				result = append(result, prefix+value)
+				found = true
+			}
+			continue
+		}
+		result = append(result, entry)
+	}
+	if !found {
+		result = append(result, prefix+value)
+	}
+	return result
 }

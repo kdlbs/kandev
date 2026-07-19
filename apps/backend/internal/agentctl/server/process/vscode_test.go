@@ -336,6 +336,21 @@ func TestVscodeManager_StopCancelsGenerationBeforeProcessCommit(t *testing.T) {
 	require.Nil(t, v.cmd, "canceled generation committed a process")
 }
 
+func TestVscodeManager_StopStartupWaitHonorsContext(t *testing.T) {
+	v := NewVscodeManager("code-server", t.TempDir(), "dark", nil, newTestLogger(t))
+	v.status = VscodeStatusInstalling
+	v.stopCh = make(chan struct{})
+	v.startDone = make(chan struct{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	started := time.Now()
+	err := v.Stop(ctx)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Less(t, time.Since(started), 500*time.Millisecond)
+}
+
 func TestVscodeManager_StopReturnsLiveProcessGroupError(t *testing.T) {
 	v := NewVscodeManager("code-server", t.TempDir(), "dark", nil, newTestLogger(t))
 	done := make(chan struct{})

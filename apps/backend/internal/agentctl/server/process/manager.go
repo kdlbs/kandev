@@ -190,6 +190,7 @@ type Manager struct {
 	agentTempDir        string
 	agentTempChild      string
 	agentTempRootHandle *os.Root
+	agentTempMu         sync.Mutex
 
 	// Synchronization
 	mu               sync.RWMutex
@@ -600,6 +601,10 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*P
 	if m.processRunner == nil {
 		return nil, fmt.Errorf("process runner not available")
 	}
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return nil, err
+	}
+	req.Env = m.ownedProcessEnv(req.Env)
 	return m.processRunner.Start(ctx, req)
 }
 
@@ -1098,6 +1103,9 @@ func formatEnvEntrySizes(entries []envEntrySize) string {
 }
 
 func (m *Manager) ensureAgentTempEnv() error {
+	m.agentTempMu.Lock()
+	defer m.agentTempMu.Unlock()
+
 	root := filepath.Join(os.TempDir(), agentTempDirRoot)
 	child := agentTempDirName(m.cfg.SessionID, m.cfg.InstanceID, m.cfg.Port)
 	dir := filepath.Join(root, child)
@@ -1126,6 +1134,20 @@ func (m *Manager) ensureAgentTempEnv() error {
 		m.cfg.AgentEnv = upsertEnvValue(m.cfg.AgentEnv, key, dir)
 	}
 	return nil
+}
+
+func (m *Manager) ownedProcessEnv(env map[string]string) map[string]string {
+	m.agentTempMu.Lock()
+	defer m.agentTempMu.Unlock()
+
+	managed := make(map[string]string, len(env)+3)
+	for key, value := range env {
+		managed[key] = value
+	}
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		managed[key] = m.agentTempDir
+	}
+	return managed
 }
 
 func openOwnedTempRoot(path string) (*os.Root, error) {
@@ -1170,6 +1192,9 @@ func ensureOwnedTempChild(root *os.Root, name string) error {
 }
 
 func (m *Manager) cleanupAgentTempDir() error {
+	m.agentTempMu.Lock()
+	defer m.agentTempMu.Unlock()
+
 	root := filepath.Clean(m.agentTempRoot)
 	target := filepath.Clean(m.agentTempDir)
 	if m.agentTempRoot == "" && m.agentTempDir == "" {
@@ -1288,6 +1313,7 @@ func (m *Manager) startAgentShell() {
 	}
 	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
 	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
+	shellCfg.Env = m.ownedProcessEnv(nil)
 	shellSession, err := shell.NewSession(shellCfg, m.logger)
 	if err != nil {
 		m.logger.Warn("failed to create shell session", zap.Error(err))
@@ -1534,8 +1560,8 @@ type tempCleanupError struct {
 
 func (e tempCleanupError) Error() string { return e.err.Error() }
 func (e tempCleanupError) Unwrap() error { return e.err }
-func (e tempCleanupError) RetainInstanceResources() bool {
-	return false
+func (e tempCleanupError) CanReleaseInstanceResources() bool {
+	return true
 }
 
 func classifyTempCleanupError(err error) error {
@@ -2303,9 +2329,13 @@ func (m *Manager) StartShell() error {
 	if !m.cfg.ShellEnabled {
 		return nil
 	}
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return err
+	}
 
 	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
 	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
+	shellCfg.Env = m.ownedProcessEnv(nil)
 	shellSession, err := shell.NewSession(shellCfg, m.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create shell session: %w", err)
@@ -2314,6 +2344,20 @@ func (m *Manager) StartShell() error {
 	m.shell = shellSession
 	m.logger.Info("shell session started independently")
 	return nil
+}
+
+// StartTerminalShell creates a managed per-terminal shell with the instance temp environment.
+func (m *Manager) StartTerminalShell(terminalID string, cfg shell.Config) (*shell.Session, error) {
+	release, err := m.admitStart()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return nil, err
+	}
+	cfg.Env = m.ownedProcessEnv(cfg.Env)
+	return m.shellMgr.Start(terminalID, cfg)
 }
 
 // StartVscode starts the code-server process on a random OS-assigned port.
@@ -2325,6 +2369,9 @@ func (m *Manager) StartVscode(_ context.Context, theme string) error {
 		return err
 	}
 	defer release()
+	if err := m.ensureAgentTempEnv(); err != nil {
+		return err
+	}
 	return m.startVscode(theme)
 }
 
@@ -2349,6 +2396,7 @@ func (m *Manager) startVscode(theme string) error {
 
 	strategy := codeServerInstallStrategy(m.logger)
 	m.vscode = NewVscodeManager(command, m.cfg.WorkDir, theme, strategy, m.logger)
+	m.vscode.setEnv(m.ownedProcessEnv(nil))
 	m.vscode.Start()
 	return nil
 }

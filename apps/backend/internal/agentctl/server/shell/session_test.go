@@ -555,7 +555,7 @@ func TestSessionStatusAfterStop(t *testing.T) {
 // TestBuildShellEnv tests the buildShellEnv function
 func TestBuildShellEnv(t *testing.T) {
 	workDir := "/test/workspace"
-	env := buildShellEnv(workDir)
+	env := buildShellEnv(workDir, nil)
 
 	// Check that env is not empty
 	if len(env) == 0 {
@@ -579,6 +579,30 @@ func TestBuildShellEnv(t *testing.T) {
 	}
 	if !termFound {
 		t.Error("expected TERM to be set in environment")
+	}
+}
+
+func TestBuildShellEnvOverridesManagedTemp(t *testing.T) {
+	workDir := t.TempDir()
+	t.Setenv("TMPDIR", "unmanaged")
+	env := buildShellEnv(workDir, map[string]string{
+		"TMPDIR": "/tmp/kandev-agent/session",
+		"TMP":    "/tmp/kandev-agent/session",
+		"TEMP":   "/tmp/kandev-agent/session",
+	})
+
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		want := key + "=/tmp/kandev-agent/session"
+		found := false
+		for _, entry := range env {
+			if entry == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("environment does not contain %q", want)
+		}
 	}
 }
 
