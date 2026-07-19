@@ -18,12 +18,19 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/state"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
+
+// testBootToken is the per-boot operator token the test routers register with;
+// doRequest / doMultipartInstall attach it in the X-Kandev-Boot-Token header so
+// the guarded state-changing routes accept them. Tests that assert the guard
+// itself build their own requests without the header.
+const testBootToken = "test-boot-token"
 
 // newTestStateStore returns an in-memory-sqlite-backed *state.Store, for
 // handler tests exercising plugins that declare the state capability.
@@ -53,12 +60,13 @@ func newTestRouter(t *testing.T) (*gin.Engine, *Service) {
 	// where Provide always attaches the shared vault.
 	svc.SetSecrets(newFakeSecretRevealer())
 	router := gin.New()
-	RegisterRoutes(router, svc, nil, testLogger(t))
+	RegisterRoutes(router, svc, nil, testLogger(t), testBootToken)
 	return router, svc
 }
 
 func doRequest(router *gin.Engine, method, path string, body string, headers map[string]string) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set(httpmw.BootTokenHeader, testBootToken)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
@@ -84,6 +92,7 @@ func doMultipartInstall(t *testing.T, router *gin.Engine, pkg *bytes.Buffer) *ht
 
 	req := httptest.NewRequest(http.MethodPost, "/api/plugins/install", &body)
 	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set(httpmw.BootTokenHeader, testBootToken)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	return rec
@@ -440,6 +449,109 @@ func TestWriteWebhookResponse_ValidStatusRelaysHeadersAndBody(t *testing.T) {
 	}
 	if rec.Body.String() != `{"ok":true}` {
 		t.Fatalf("body = %q, want %q", rec.Body.String(), `{"ok":true}`)
+	}
+}
+
+// doMultipartInstallNoToken posts a multipart install WITHOUT the operator
+// boot-token header — the shape of a cross-origin CSRF drive-by or an
+// unauthenticated LAN caller.
+func doMultipartInstallNoToken(t *testing.T, router *gin.Engine, pkg *bytes.Buffer) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	part, err := w.CreateFormFile("package", "plugin.tar.gz")
+	if err != nil {
+		t.Fatalf("CreateFormFile: %v", err)
+	}
+	if _, err := io.Copy(part, pkg); err != nil {
+		t.Fatalf("copy package into form: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/plugins/install", &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestInstallHandlerMultipartRejectsMissingBootToken is the C1 regression: a
+// cross-origin multipart POST /api/plugins/install with no operator token must
+// be rejected with 403 AND must not execute the install (no plugin spawned).
+func TestInstallHandlerMultipartRejectsMissingBootToken(t *testing.T) {
+	router, svc := newTestRouter(t)
+
+	rec := doMultipartInstallNoToken(t, router, testPackage(t, "kandev-plugin-slack", "1.0.0", false))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403, body=%s", rec.Code, rec.Body.String())
+	}
+	if len(svc.List()) != 0 {
+		t.Fatalf("install executed despite missing token: %d plugins registered", len(svc.List()))
+	}
+	if _, err := svc.Get("kandev-plugin-slack"); err == nil {
+		t.Fatal("plugin was installed despite missing operator token")
+	}
+}
+
+// TestStateChangingRoutesRejectMissingBootToken pins that every gated
+// state-changing route rejects a tokenless request with 403.
+func TestStateChangingRoutesRejectMissingBootToken(t *testing.T) {
+	router, _ := newTestRouter(t)
+
+	cases := []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodPost, "/api/plugins/install", `{"url":"http://x"}`},
+		{http.MethodPost, "/api/plugins/sync", ""},
+		{http.MethodPatch, "/api/plugins/some-id", `{"config":{}}`},
+		{http.MethodDelete, "/api/plugins/some-id", ""},
+		{http.MethodPost, "/api/plugins/some-id/enable", ""},
+		{http.MethodPost, "/api/plugins/some-id/disable", ""},
+		{http.MethodPost, "/api/plugins/marketplace/refresh", ""},
+		{http.MethodPost, "/api/plugins/marketplace/sources", `{"name":"x","url":"http://x"}`},
+		{http.MethodPatch, "/api/plugins/marketplace/sources/sid", `{"enabled":false}`},
+		{http.MethodDelete, "/api/plugins/marketplace/sources/sid", ""},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("%s %s: status = %d, want 403 (body=%s)", tc.method, tc.path, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestReadAndWebhookRoutesAllowedWithoutBootToken pins that the ungated
+// surface — read-only management GETs, browser-native asset loads, and the
+// external webhook relay — is NOT locked behind the operator token (a 403 here
+// would break plugin UI loading and inbound webhooks).
+func TestReadAndWebhookRoutesAllowedWithoutBootToken(t *testing.T) {
+	router, _ := newTestRouter(t)
+
+	// GET /api/plugins (list) must not require the token.
+	list := httptest.NewRequest(http.MethodGet, "/api/plugins", nil)
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, list)
+	if listRec.Code == http.StatusForbidden {
+		t.Fatalf("GET /api/plugins wrongly gated by operator token")
+	}
+
+	// Webhook relay must reach the handler (404 unknown plugin), not 403.
+	wh := httptest.NewRequest(http.MethodPost, "/api/plugins/missing/webhooks/key1", strings.NewReader("{}"))
+	whRec := httptest.NewRecorder()
+	router.ServeHTTP(whRec, wh)
+	if whRec.Code == http.StatusForbidden {
+		t.Fatalf("webhook relay wrongly gated by operator token; got 403")
+	}
+	if whRec.Code != http.StatusNotFound {
+		t.Fatalf("webhook relay status = %d, want 404 (unknown plugin)", whRec.Code)
 	}
 }
 

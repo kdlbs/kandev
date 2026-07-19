@@ -34,6 +34,12 @@ type RuntimeConfig struct {
 	APIPrefix     string `json:"apiPrefix"`
 	WebSocketPath string `json:"webSocketPath"`
 	Debug         bool   `json:"debug,omitempty"`
+	// CSRFToken is the per-boot operator token the SPA echoes back in the
+	// X-Kandev-Boot-Token header on state-changing requests (see
+	// httpmw.RequireBootToken). It is same-origin readable only, so a
+	// cross-origin CSRF page cannot learn it, and a "simple" cross-origin
+	// request cannot forge the custom header.
+	CSRFToken string `json:"csrfToken,omitempty"`
 }
 
 // BootError is a serializable non-fatal boot-data error for partial hydration.

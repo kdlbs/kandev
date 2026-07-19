@@ -1,4 +1,23 @@
 import { getBackendConfig } from "@/lib/config";
+import { readBootToken } from "@/src/boot-payload";
+
+// BOOT_TOKEN_HEADER carries the per-boot operator token on state-changing
+// requests. A cross-origin CSRF page cannot read the same-origin boot payload
+// to learn the token, and a CORS "simple" request cannot set a custom header
+// without triggering a preflight the backend's CORS layer then blocks — so
+// gating state-changing routes on this header defeats the CSRF drive-by and
+// the unauthenticated LAN caller. Must match httpmw.BootTokenHeader on the
+// backend.
+export const BOOT_TOKEN_HEADER = "X-Kandev-Boot-Token";
+
+// bootTokenHeaders returns the operator-token header when a token is present in
+// the boot payload, or an empty object otherwise. Merge it into a request's
+// headers for any state-changing operator call (plugin install/enable,
+// marketplace source mutations).
+export function bootTokenHeaders(): Record<string, string> {
+  const token = readBootToken();
+  return token ? { [BOOT_TOKEN_HEADER]: token } : {};
+}
 
 export type ApiRequestOptions = {
   baseUrl?: string;

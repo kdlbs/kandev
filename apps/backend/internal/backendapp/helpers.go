@@ -483,9 +483,13 @@ type routeParams struct {
 	webInternalURL          string
 	devMode                 bool
 	httpPort                int
-	features                config.FeaturesConfig
-	voice                   config.VoiceConfig
-	log                     *logger.Logger
+	// bootToken is the per-boot operator token embedded in the SPA boot
+	// payload and required (via httpmw.RequireBootToken) on state-changing
+	// operator routes such as plugin install/enable.
+	bootToken string
+	features  config.FeaturesConfig
+	voice     config.VoiceConfig
+	log       *logger.Logger
 }
 
 // registerRoutes sets up all HTTP and WebSocket routes on the given router.
@@ -679,7 +683,7 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 func bootPayload(ctx context.Context, req *http.Request, p routeParams, route webapp.RouteClassification) webapp.BootPayload {
 	payload := webapp.NewBootPayload(
 		route,
-		webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws", Debug: p.devMode},
+		webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws", Debug: p.devMode, CSRFToken: p.bootToken},
 		bootInitialState(ctx, req, p, route),
 	)
 	payload.RouteData = bootRouteData(ctx, req, p, route)
@@ -992,7 +996,7 @@ func registerSecondaryRoutes(
 	}
 
 	if p.features.Plugins && p.services.Plugins != nil {
-		plugins.RegisterRoutes(p.router, p.services.Plugins, p.services.Plugins.Deliverer(), p.log)
+		plugins.RegisterRoutes(p.router, p.services.Plugins, p.services.Plugins.Deliverer(), p.log, p.bootToken)
 		p.log.Debug("Registered Plugins handlers (HTTP)")
 	}
 

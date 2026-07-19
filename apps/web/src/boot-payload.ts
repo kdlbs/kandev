@@ -17,6 +17,11 @@ export type BootRuntime = {
   apiPrefix?: string;
   webSocketPath?: string;
   debug?: boolean;
+  // csrfToken is the per-boot operator token the backend embeds here; the API
+  // client echoes it back in the X-Kandev-Boot-Token header on state-changing
+  // requests so guarded routes (plugin install/enable, marketplace source
+  // mutations) accept them. See httpmw.RequireBootToken on the backend.
+  csrfToken?: string;
 };
 
 export type BootRouteData = {
@@ -126,7 +131,18 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
     apiPrefix: readString(value.apiPrefix),
     webSocketPath: readString(value.webSocketPath),
     debug: value.debug === true ? true : undefined,
+    csrfToken: readString(value.csrfToken),
   };
+}
+
+// readBootToken returns the per-boot operator token from the injected (prod)
+// or fetched-and-cached (split-origin dev) boot payload on `window`, or
+// undefined when absent. Read at call time — plugin actions fire long after
+// boot, so the global is always populated by then.
+export function readBootToken(win: Window = window): string | undefined {
+  const payload = (win as BootWindow).__KANDEV_BOOT_PAYLOAD__;
+  if (!isRecord(payload) || !isRecord(payload.runtime)) return undefined;
+  return readString(payload.runtime.csrfToken);
 }
 
 function readString(value: unknown): string | undefined {
