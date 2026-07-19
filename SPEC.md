@@ -366,10 +366,13 @@ the session's turn is still open.
 
 ## Guard against destroying a running task §spec:destructive-action-guard
 
-*Status: not started — task-level archive and delete have no running-state
-check today (only session-level delete gates on RUNNING); the archive
-confirm dialog can additionally be silenced by the `confirmTaskArchive`
-user setting.*
+*Status: complete — the archive and delete confirmation dialogs render a
+"still working" warning (`task-still-working-warning.tsx`) whenever
+`useTaskInFlight` reports the task-level `foreground_activity` aggregate is
+generating or background-running, reading the same store truth the board
+indicators show. The archive dialog honors the `confirmTaskArchive` bypass
+as designed (documented residual gap, q1_opt2); delete has no bypass and is
+always guarded.*
 
 When the operator attempts to archive or delete a task that still has work
 running — any session generating or running recognized background work,
