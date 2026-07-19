@@ -1340,7 +1340,7 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	if task == nil {
 		return false, errors.New("restore task message rollback: task is nil")
 	}
-	task.UpdatedAt = time.Now().UTC()
+	updatedAt := time.Now().UTC()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -1358,7 +1358,7 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 			  AND task_sessions.task_id = tasks.id
 			  AND task_sessions.state = ?
 		  )
-	`), task.State, task.WorkflowStepID, task.UpdatedAt, task.ID, sessionID, expectedSessionState)
+	`), task.State, task.WorkflowStepID, updatedAt, task.ID, sessionID, expectedSessionState)
 	if err != nil {
 		return false, err
 	}
@@ -1372,7 +1372,11 @@ func (r *Repository) RestoreTaskMessageRollbackIfSessionState(
 	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
 		return false, err
 	}
-	return true, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	task.UpdatedAt = updatedAt
+	return true, nil
 }
 
 // UpdateTaskStateIfCurrentIn transitions state inside a transaction, re-checking

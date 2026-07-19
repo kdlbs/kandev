@@ -925,11 +925,12 @@ func (s *Service) RestoreTaskMessageRollback(
 		return nil, false, err
 	}
 	oldState := task.State
-	task.State = state
-	task.WorkflowStepID = workflowStepID
+	restoredTask := *task
+	restoredTask.State = state
+	restoredTask.WorkflowStepID = workflowStepID
 	updated, err := repo.RestoreTaskMessageRollbackIfSessionState(
 		ctx,
-		task,
+		&restoredTask,
 		ownerSessionID,
 		expectedSessionState,
 	)
@@ -937,11 +938,11 @@ func (s *Service) RestoreTaskMessageRollback(
 		return task, updated, err
 	}
 
-	if task.State != oldState {
-		s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
+	if restoredTask.State != oldState {
+		s.publishTaskEvent(ctx, events.TaskStateChanged, &restoredTask, &oldState)
 	}
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
-	return task, true, nil
+	s.publishTaskEvent(ctx, events.TaskUpdated, &restoredTask, nil)
+	return &restoredTask, true, nil
 }
 
 // ArchiveTask archives a task by setting its archived_at timestamp.

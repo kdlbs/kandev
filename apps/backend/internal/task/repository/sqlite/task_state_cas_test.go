@@ -111,6 +111,94 @@ func TestUpdateTaskStateIfSessionState_UpdatesMatchingSession(t *testing.T) {
 	}
 }
 
+func TestRestoreTaskMessageRollbackIfSessionState_RejectionDoesNotMutateCandidate(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-rollback-rejected")
+	insertSession(t, repo, "session-rollback-rejected", "task-rollback-rejected", string(models.TaskSessionStateWaitingForInput))
+	if _, err := repo.db.Exec(`
+		UPDATE tasks SET state = ?, workflow_step_id = ? WHERE id = ?
+	`, v1.TaskStateInProgress, "current-step", "task-rollback-rejected"); err != nil {
+		t.Fatalf("seed current task fields: %v", err)
+	}
+
+	originalUpdatedAt := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	candidate := &models.Task{
+		ID:             "task-rollback-rejected",
+		State:          v1.TaskStateReview,
+		WorkflowStepID: "restored-step",
+		UpdatedAt:      originalUpdatedAt,
+	}
+	updated, err := repo.RestoreTaskMessageRollbackIfSessionState(
+		ctx,
+		candidate,
+		"session-rollback-rejected",
+		models.TaskSessionStateRunning,
+	)
+	if err != nil {
+		t.Fatalf("RestoreTaskMessageRollbackIfSessionState: %v", err)
+	}
+	if updated {
+		t.Fatal("expected session-state mismatch to reject rollback")
+	}
+	if !candidate.UpdatedAt.Equal(originalUpdatedAt) {
+		t.Fatalf("rejected candidate UpdatedAt = %v, want unchanged %v", candidate.UpdatedAt, originalUpdatedAt)
+	}
+	persisted, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if persisted.State != v1.TaskStateInProgress || persisted.WorkflowStepID != "current-step" {
+		t.Fatalf("rejected rollback persisted state/step = %q/%q", persisted.State, persisted.WorkflowStepID)
+	}
+}
+
+func TestRestoreTaskMessageRollbackIfSessionState_RestoresFieldsAndRunner(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-rollback-success")
+	insertSession(t, repo, "session-rollback-success", "task-rollback-success", string(models.TaskSessionStateRunning))
+	if _, err := repo.db.Exec(`
+		UPDATE tasks SET state = ?, workflow_step_id = ? WHERE id = ?
+	`, v1.TaskStateInProgress, "current-step", "task-rollback-success"); err != nil {
+		t.Fatalf("seed current task fields: %v", err)
+	}
+
+	originalUpdatedAt := time.Date(2026, 7, 19, 12, 0, 0, 0, time.UTC)
+	candidate := &models.Task{
+		ID:                     "task-rollback-success",
+		State:                  v1.TaskStateReview,
+		WorkflowStepID:         "restored-step",
+		AssigneeAgentProfileID: "profile-restored",
+		UpdatedAt:              originalUpdatedAt,
+	}
+	updated, err := repo.RestoreTaskMessageRollbackIfSessionState(
+		ctx,
+		candidate,
+		"session-rollback-success",
+		models.TaskSessionStateRunning,
+	)
+	if err != nil {
+		t.Fatalf("RestoreTaskMessageRollbackIfSessionState: %v", err)
+	}
+	if !updated {
+		t.Fatal("expected matching session state to restore task")
+	}
+	if !candidate.UpdatedAt.After(originalUpdatedAt) {
+		t.Fatalf("successful candidate UpdatedAt = %v, want after %v", candidate.UpdatedAt, originalUpdatedAt)
+	}
+	persisted, err := repo.GetTask(ctx, candidate.ID)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if persisted.State != v1.TaskStateReview || persisted.WorkflowStepID != "restored-step" {
+		t.Fatalf("restored state/step = %q/%q", persisted.State, persisted.WorkflowStepID)
+	}
+	if persisted.AssigneeAgentProfileID != "profile-restored" {
+		t.Fatalf("restored runner = %q, want profile-restored", persisted.AssigneeAgentProfileID)
+	}
+}
+
 // TestUpdateTaskStateIfCurrentIn_SkipsArchivedTask reproduces the TOCTOU race
 // flagged in PR #1706 review: a caller's earlier archived-state guard (a
 // plain GetTask read) can observe archived_at == NULL, then have ArchiveTask
