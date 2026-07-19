@@ -21,7 +21,7 @@ const (
 
 // handleMessageChunkEvent handles a "message_chunk" agent event, accumulating and flushing on newlines.
 func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agentctl.AgentEvent) {
-	if event.Text == "" {
+	if event.Role == "user" || event.Text == "" {
 		return
 	}
 	execution.messageMu.Lock()
