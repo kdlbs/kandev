@@ -70,9 +70,12 @@ func TestInitSubmodules_BlocksExtRCE(t *testing.T) {
 	}
 }
 
-// TestInitSubmodules_BlocksFileTransport asserts local file:// submodules are
+// TestInitSubmodules_BlocksFileTransport asserts local-path submodules are
 // denied by default (no explicit per-repo opt-in), closing the local-path /
-// path-traversal surface for untrusted trees.
+// path-traversal surface for untrusted trees. Exercises both the bare-path
+// form and the explicit file:// URL form — the latter is the shape an
+// attacker's .gitmodules is most likely to use, and on some git versions the
+// two take different transport-classification code paths (CVE-2022-39253).
 func TestInitSubmodules_BlocksFileTransport(t *testing.T) {
 	// A real local repo to point at; the point is that the transport is
 	// refused, not that the target is missing.
@@ -87,12 +90,14 @@ func TestInitSubmodules_BlocksFileTransport(t *testing.T) {
 	runGit(t, target, "add", ".")
 	runGit(t, target, "commit", "-m", "init")
 
-	wt := buildMaliciousRepo(t, target, "evil")
-	m := &Manager{logger: newTestLogger()}
-	m.initSubmodules(context.Background(), wt)
+	for _, url := range []string{target, "file://" + target} {
+		wt := buildMaliciousRepo(t, url, "evil")
+		m := &Manager{logger: newTestLogger()}
+		m.initSubmodules(context.Background(), wt)
 
-	if _, err := os.Stat(filepath.Join(wt, "evil", "x.txt")); err == nil {
-		t.Fatalf("SECURITY REGRESSION: file:// submodule initialized despite protocol.allow=never")
+		if _, err := os.Stat(filepath.Join(wt, "evil", "x.txt")); err == nil {
+			t.Fatalf("SECURITY REGRESSION: local submodule %q initialized despite protocol.allow=never", url)
+		}
 	}
 }
 
@@ -137,7 +142,9 @@ func TestInitSubmodules_BlocksPlainHTTPFetch(t *testing.T) {
 // carries every hardening flag and env, at the sink so all call sites
 // benefit. This is the structural guard against silent regressions.
 func TestNewSubmoduleUpdateCmd_HasHardeningFlags(t *testing.T) {
-	cmd := newSubmoduleUpdateCmd(context.Background(), "/tmp/somewhere")
+	dir := filepath.Join(t.TempDir(), "wt")
+	m := &Manager{logger: newTestLogger()}
+	cmd := m.newSubmoduleUpdateCmd(context.Background(), dir)
 	joined := strings.Join(cmd.Args, " ")
 
 	wantFlags := []string{
@@ -154,16 +161,24 @@ func TestNewSubmoduleUpdateCmd_HasHardeningFlags(t *testing.T) {
 		}
 	}
 
-	var hasTermPrompt bool
+	// The full non-interactive env set must be present so an attacker ssh://
+	// (or http) submodule URL cannot hang the runner on a prompt.
+	wantEnv := []string{
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_SSH_COMMAND=ssh -oBatchMode=yes",
+		"SSH_ASKPASS=/bin/false",
+		"GCM_INTERACTIVE=Never",
+	}
+	haveEnv := make(map[string]bool, len(cmd.Env))
 	for _, e := range cmd.Env {
-		if e == "GIT_TERMINAL_PROMPT=0" {
-			hasTermPrompt = true
+		haveEnv[e] = true
+	}
+	for _, want := range wantEnv {
+		if !haveEnv[want] {
+			t.Errorf("submodule command env missing %q; got: %v", want, cmd.Env)
 		}
 	}
-	if !hasTermPrompt {
-		t.Errorf("submodule command env missing GIT_TERMINAL_PROMPT=0; got: %v", cmd.Env)
-	}
-	if cmd.Dir != "/tmp/somewhere" {
-		t.Errorf("cmd.Dir = %q, want /tmp/somewhere", cmd.Dir)
+	if cmd.Dir != dir {
+		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, dir)
 	}
 }

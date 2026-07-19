@@ -28,10 +28,15 @@ import (
 //     `protocol.ext.allow=always`, so it can
 //     never be re-enabled out from under us.
 //
-// file:// and git:// are left to the protocol.allow=never default (denied
-// unless an operator explicitly opts a repo in via protocol.file.allow),
-// since a leading-`never` command-line pin would also block legitimate
-// local-submodule workflows.
+// file:// and git:// fall through to protocol.allow=never and are denied.
+// Because these are command-line `-c` overrides, they outrank repo/global
+// config files — so a host with `protocol.file.allow=always` in .git/config
+// or ~/.gitconfig will NOT re-enable file submodules here. That is
+// intentional: the worktree content is untrusted, so we do not want ambient
+// config to widen the transport surface. If a Kandev deployment ever needs
+// local-path submodules for trusted repos, that must be a deliberate
+// per-repo opt-in that appends `-c protocol.file.allow=always`, not an
+// implicit reliance on host git config.
 var hardenedSubmoduleConfig = []string{
 	"protocol.allow=never",
 	"protocol.https.allow=always",
@@ -44,21 +49,20 @@ var hardenedSubmoduleConfig = []string{
 }
 
 // newSubmoduleUpdateCmd builds the hardened `git submodule update --init
-// --recursive` command for dir. Kept separate from initSubmodules so tests
-// can assert the hardening flags/env are present at the sink.
-func newSubmoduleUpdateCmd(ctx context.Context, dir string) *exec.Cmd {
+// --recursive` command for dir. It reuses newNonInteractiveGitCmd so the
+// submodule fetch inherits the full non-interactive env set (GIT_SSH_COMMAND
+// with BatchMode, SSH/GCM askpass suppression, GIT_TERMINAL_PROMPT=0) and
+// WaitDelay — critical because an attacker `ssh://…` submodule URL would
+// otherwise hang the review runner on host-key/passphrase prompts until the
+// context deadline. Kept separate from initSubmodules so tests can assert the
+// hardening flags/env are present at the sink.
+func (m *Manager) newSubmoduleUpdateCmd(ctx context.Context, dir string) *exec.Cmd {
 	args := make([]string, 0, len(hardenedSubmoduleConfig)*2+4)
 	for _, c := range hardenedSubmoduleConfig {
 		args = append(args, "-c", c)
 	}
 	args = append(args, "submodule", "update", "--init", "--recursive")
-
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	// GIT_TERMINAL_PROMPT=0 stops an attacker-chosen URL from hanging the
-	// host on an interactive credential prompt (matches manager_git.go).
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	return cmd
+	return m.newNonInteractiveGitCmd(ctx, dir, args...)
 }
 
 // getSubmodulePaths returns the paths of all submodules registered in HEAD.
@@ -92,7 +96,7 @@ func getSubmodulePaths(ctx context.Context, dir string) ([]string, error) {
 // Failures are non-fatal: submodule URLs may be unreachable (private repos,
 // missing credentials), but the worktree is still usable for non-submodule files.
 func (m *Manager) initSubmodules(ctx context.Context, dir string) {
-	cmd := newSubmoduleUpdateCmd(ctx, dir)
+	cmd := m.newSubmoduleUpdateCmd(ctx, dir)
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
 		m.logger.Warn("git submodule update --init failed (non-fatal)",
