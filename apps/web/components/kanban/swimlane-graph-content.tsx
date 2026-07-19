@@ -23,7 +23,7 @@ import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
-import { useTaskPendingClarification } from "@/hooks/use-task-pending-clarification";
+import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 
 export type SwimlaneGraphContentProps = {
@@ -74,15 +74,16 @@ function DraggableTaskChip({
     id: task.id,
   });
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
-  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId, {
+  const pendingInput = useTaskPendingInput(task.primarySessionId, {
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
   const statusIcon = getTaskStateIcon(
     task.state,
     "h-3 w-3",
-    hasPendingClarificationRequest,
+    pendingInput.clarification,
     task.foregroundActivity,
+    pendingInput.permission,
   );
 
   return (
@@ -109,15 +110,16 @@ function DraggableTaskChip({
 }
 
 function TaskChipPreview({ task }: { task: Task }) {
-  const hasPendingClarificationRequest = useTaskPendingClarification(task.primarySessionId, {
+  const pendingInput = useTaskPendingInput(task.primarySessionId, {
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });
   const statusIcon = getTaskStateIcon(
     task.state,
     "h-3 w-3",
-    hasPendingClarificationRequest,
+    pendingInput.clarification,
     task.foregroundActivity,
+    pendingInput.permission,
   );
   return (
     <div

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
-import type { ForegroundActivity } from "@/lib/types/http";
+import type { ForegroundActivity, TaskPendingAction } from "@/lib/types/http";
 import { SwimlaneGraphContent } from "./swimlane-graph-content";
 
 afterEach(() => {
@@ -11,6 +11,8 @@ afterEach(() => {
 });
 
 const STEPS: WorkflowStep[] = [{ id: "step-1", title: "In Progress", color: "#888" }];
+const ICON_CHECK = ".tabler-icon-check";
+const ICON_LOADER2 = ".tabler-icon-loader-2";
 
 function makeTask(foregroundActivity?: ForegroundActivity | null): Task {
   return {
@@ -42,19 +44,57 @@ describe("SwimlaneGraphContent — task-level background-running affordance", ()
     // aggregate — background-running (IconLoader), never a done check for a task
     // still doing background work, even when the coarse state is COMPLETED.
     expect(container.querySelector(".tabler-icon-loader")).not.toBeNull();
-    expect(container.querySelector(".tabler-icon-check")).toBeNull();
-    expect(container.querySelector(".tabler-icon-loader-2")).toBeNull();
+    expect(container.querySelector(ICON_CHECK)).toBeNull();
+    expect(container.querySelector(ICON_LOADER2)).toBeNull();
   });
 
   it("shows the generating spinner (IconLoader2) when a session is generating", () => {
     const { container } = renderSwimlane("generating");
-    expect(container.querySelector(".tabler-icon-loader-2")).not.toBeNull();
-    expect(container.querySelector(".tabler-icon-check")).toBeNull();
+    expect(container.querySelector(ICON_LOADER2)).not.toBeNull();
+    expect(container.querySelector(ICON_CHECK)).toBeNull();
   });
 
   it("falls through to the coarse done check when no session is active", () => {
     const { container } = renderSwimlane(null);
-    expect(container.querySelector(".tabler-icon-check")).not.toBeNull();
-    expect(container.querySelector(".tabler-icon-loader-2")).toBeNull();
+    expect(container.querySelector(ICON_CHECK)).not.toBeNull();
+    expect(container.querySelector(ICON_LOADER2)).toBeNull();
+  });
+});
+
+describe("SwimlaneGraphContent — waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+  function renderWaiting(pendingAction: TaskPendingAction) {
+    const task = {
+      id: "task-1",
+      title: "A task",
+      workflowStepId: "step-1",
+      state: "WAITING_FOR_INPUT",
+      primarySessionId: "session-1",
+      primarySessionState: "WAITING_FOR_INPUT",
+      primarySessionPendingAction: pendingAction,
+    } as Task;
+    return render(
+      <StateProvider>
+        <SwimlaneGraphContent
+          workflowId="wf-1"
+          steps={STEPS}
+          tasks={[task]}
+          onPreviewTask={() => undefined}
+        />
+      </StateProvider>,
+    );
+  }
+
+  it("shows the message-question for a pending clarification, distinct from done and running", () => {
+    const { container } = renderWaiting("clarification");
+    expect(container.querySelector(".tabler-icon-message-question")).not.toBeNull();
+    expect(container.querySelector(ICON_CHECK)).toBeNull();
+    expect(container.querySelector(ICON_LOADER2)).toBeNull();
+  });
+
+  it("shows the shield-question for a pending permission, distinct from done and running", () => {
+    const { container } = renderWaiting("permission");
+    expect(container.querySelector(".tabler-icon-shield-question")).not.toBeNull();
+    expect(container.querySelector(ICON_CHECK)).toBeNull();
+    expect(container.querySelector(ICON_LOADER2)).toBeNull();
   });
 });
