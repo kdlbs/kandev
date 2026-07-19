@@ -114,6 +114,49 @@ func TestCleanupFailsClosedWhenInventoryIsIncompleteOrErrors(t *testing.T) {
 	}
 }
 
+func TestAnalyzeReportsAllWorkspaceBytesIncludingYoungOrphans(t *testing.T) {
+	provider, root, _ := newProviderFixture(t, Inventory{Complete: true}, nil)
+	oldOrphan := createOwnedCandidate(t, root, "old-orphan_abc", OwnershipMarker{
+		TaskID: "old", TaskDirName: "old-orphan_abc", LayoutVersion: LayoutVersionSemantic,
+	})
+	youngOrphan := createOwnedCandidate(t, root, "young-orphan_def", OwnershipMarker{
+		TaskID: "young", TaskDirName: "young-orphan_def", LayoutVersion: LayoutVersionSemantic,
+	})
+	active := createOwnedCandidate(t, root, "active-task_ghi", OwnershipMarker{
+		TaskID: "active", TaskDirName: "active-task_ghi", LayoutVersion: LayoutVersionSemantic,
+	})
+	for path, contents := range map[string]string{
+		oldOrphan: "old orphan bytes", youngOrphan: "young orphan bytes", active: "active bytes",
+	} {
+		if err := os.WriteFile(filepath.Join(path, "artifact"), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := provider.config.Now().Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(oldOrphan, old, old); err != nil {
+		t.Fatal(err)
+	}
+	provider.config.Inventory = fakeInventorySource{inventory: Inventory{
+		Complete: true, EnvironmentPaths: []string{active},
+	}}
+
+	analysis, err := provider.Analyze(context.Background())
+	if err != nil {
+		t.Fatalf("Analyze: %v", err)
+	}
+	wantTotal := int64(0)
+	for _, path := range []string{oldOrphan, youngOrphan, active} {
+		size, sizeErr := directorySizeNoFollow(path)
+		if sizeErr != nil {
+			t.Fatal(sizeErr)
+		}
+		wantTotal += size
+	}
+	if analysis.TotalBytes != wantTotal {
+		t.Fatalf("TotalBytes = %d, want %d", analysis.TotalBytes, wantTotal)
+	}
+}
+
 func TestCleanupQuarantinesOldOwnedOrphanAndRestoreIsConflictSafe(t *testing.T) {
 	provider, root, store := newProviderFixture(t, Inventory{Complete: true}, nil)
 	candidate := createOwnedCandidate(t, root, "orphan-task_abc", OwnershipMarker{
@@ -282,33 +325,44 @@ func TestCleanupProtectsEveryInventorySourceAndScratchSiblingsIndependently(t *t
 	}
 }
 
-func TestCleanupPathUncertaintyAbortsBeforeAnyMove(t *testing.T) {
+func TestCleanupQuarantinesWorkspaceWithoutFollowingNestedSymlink(t *testing.T) {
 	provider, root, store := newProviderFixture(t, Inventory{Complete: true}, nil)
-	first := createOwnedCandidate(t, root, "first-task_abc", OwnershipMarker{TaskID: "first", TaskDirName: "first-task_abc", LayoutVersion: LayoutVersionSemantic})
-	unsafe := createOwnedCandidate(t, root, "unsafe-task_def", OwnershipMarker{TaskID: "unsafe", TaskDirName: "unsafe-task_def", LayoutVersion: LayoutVersionSemantic})
-	for _, path := range []string{first, unsafe} {
-		old := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
-		if err := os.Chtimes(path, old, old); err != nil {
-			t.Fatalf("Chtimes: %v", err)
-		}
+	candidate := createOwnedCandidate(t, root, "linked-task_abc", OwnershipMarker{
+		TaskID: "linked", TaskDirName: "linked-task_abc", LayoutVersion: LayoutVersionSemantic,
+	})
+	external := t.TempDir()
+	externalArtifact := filepath.Join(external, "keep")
+	if err := os.WriteFile(externalArtifact, []byte("external"), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	if err := os.Symlink(t.TempDir(), filepath.Join(unsafe, "escape")); err != nil {
+	if err := os.Symlink(external, filepath.Join(candidate, "external-link")); err != nil {
 		t.Fatalf("Symlink: %v", err)
 	}
 	old := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
-	if err := os.Chtimes(unsafe, old, old); err != nil {
-		t.Fatalf("Chtimes unsafe after symlink: %v", err)
+	if err := os.Chtimes(candidate, old, old); err != nil {
+		t.Fatalf("Chtimes candidate: %v", err)
 	}
-	if _, err := provider.Cleanup(context.Background()); err == nil {
-		t.Fatal("Cleanup succeeded with symlink uncertainty")
+
+	result, err := provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("Cleanup: %v", err)
 	}
-	if len(store.entries) != 0 {
-		t.Fatalf("persisted %d entries before validating every candidate", len(store.entries))
+	if result.Quarantined != 1 || len(store.entries) != 1 {
+		t.Fatalf("cleanup result=%#v entries=%#v", result, store.entries)
 	}
-	for _, path := range []string{first, unsafe} {
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("candidate moved despite path uncertainty: %v", err)
-		}
+	if _, err := os.Stat(externalArtifact); err != nil {
+		t.Fatalf("cleanup followed nested symlink target: %v", err)
+	}
+	entry := store.entries["entry-1"]
+	if _, err := os.Lstat(filepath.Join(entry.QuarantinePath, "external-link")); err != nil {
+		t.Fatalf("symlink entry was not quarantined: %v", err)
+	}
+	provider.config.Now = func() time.Time { return entry.DeleteAfter }
+	if _, err := provider.PermanentDelete(context.Background(), entry.ID, "DELETE"); err != nil {
+		t.Fatalf("PermanentDelete: %v", err)
+	}
+	if _, err := os.Stat(externalArtifact); err != nil {
+		t.Fatalf("permanent deletion followed nested symlink target: %v", err)
 	}
 }
 

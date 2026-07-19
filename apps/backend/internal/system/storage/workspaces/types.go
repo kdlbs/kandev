@@ -77,6 +77,7 @@ type CleanupResult struct {
 }
 
 type Analysis struct {
+	TotalBytes     int64    `json:"total_bytes"`
 	ActiveBytes    int64    `json:"active_bytes"`
 	CandidateBytes int64    `json:"candidate_bytes"`
 	Warnings       []string `json:"warnings,omitempty"`

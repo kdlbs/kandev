@@ -40,7 +40,7 @@ func TestStorageResultJSONUsesSnakeCase(t *testing.T) {
 			value: DiskUsage{
 				BuildCacheBytes: 30, Images: []ImageUsage{}, Containers: []ContainerUsage{},
 			},
-			want: `{"build_cache_bytes":30,"images":[],"containers":[]}`,
+			want: `{"image_layer_bytes":0,"build_cache_bytes":30,"images":[],"containers":[]}`,
 		},
 		{
 			name: "prune result", value: PruneResult{Deleted: 3, BytesReclaimed: 40},
@@ -64,7 +64,8 @@ func TestDiskUsageMapsTypedSDKResponse(t *testing.T) {
 	created := time.Unix(100, 0)
 	lastUsed := time.Unix(200, 0)
 	sdk := &fakeStorageAPI{usage: dockertypes.DiskUsage{
-		Images: []*image.Summary{{ID: "image-1", Size: 300, Containers: 0, Created: created.Unix()}},
+		LayersSize: 500,
+		Images:     []*image.Summary{{ID: "image-1", Size: 300, Containers: 0, Created: created.Unix()}},
 		Containers: []*container.Summary{
 			{ID: "managed", SizeRw: 75, Labels: map[string]string{"kandev.managed": "true"}},
 			{ID: "unrelated", SizeRw: 125, Labels: map[string]string{"owner": "user"}},
@@ -80,7 +81,8 @@ func TestDiskUsageMapsTypedSDKResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DiskUsage: %v", err)
 	}
-	if got.BuildCacheBytes != 300 || len(got.Images) != 1 || !got.Images[0].CreatedAt.Equal(created) ||
+	if got.ImageLayerBytes != 500 || got.BuildCacheBytes != 300 ||
+		len(got.Images) != 1 || !got.Images[0].CreatedAt.Equal(created) ||
 		len(got.Containers) != 2 || got.Containers[0].WritableBytes != 75 ||
 		got.Containers[0].Labels["kandev.managed"] != "true" {
 		t.Fatalf("disk usage = %#v", got)

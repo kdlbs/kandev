@@ -33,6 +33,7 @@ type ContainerUsage struct {
 }
 
 type DiskUsage struct {
+	ImageLayerBytes int64            `json:"image_layer_bytes"`
 	BuildCacheBytes int64            `json:"build_cache_bytes"`
 	Images          []ImageUsage     `json:"images"`
 	Containers      []ContainerUsage `json:"containers"`
@@ -60,8 +61,9 @@ func (c *Client) DiskUsage(ctx context.Context) (DiskUsage, error) {
 		return DiskUsage{}, fmt.Errorf("read Docker disk usage: %w", err)
 	}
 	result := DiskUsage{
-		Images:     make([]ImageUsage, 0, len(usage.Images)),
-		Containers: make([]ContainerUsage, 0, len(usage.Containers)),
+		ImageLayerBytes: usage.LayersSize,
+		Images:          make([]ImageUsage, 0, len(usage.Images)),
+		Containers:      make([]ContainerUsage, 0, len(usage.Containers)),
 	}
 	for _, cache := range usage.BuildCache {
 		if cache != nil && cache.Size > 0 {

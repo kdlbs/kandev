@@ -53,10 +53,12 @@ type Provider struct {
 
 // Analysis describes the configured cache without changing it.
 type Analysis struct {
-	Path      string `json:"path"`
-	SizeBytes int64  `json:"size_bytes"`
-	Owned     bool   `json:"owned"`
-	Enabled   bool   `json:"enabled"`
+	Path               string `json:"path"`
+	SizeBytes          int64  `json:"size_bytes"`
+	Owned              bool   `json:"owned"`
+	Enabled            bool   `json:"enabled"`
+	UnmanagedPath      string `json:"unmanaged_path,omitempty"`
+	UnmanagedSizeBytes int64  `json:"unmanaged_size_bytes,omitempty"`
 }
 
 // CleanupResult describes one cache rotation.
@@ -118,7 +120,32 @@ func (p *Provider) Analyze(ctx context.Context) (Analysis, error) {
 	if err != nil {
 		return Analysis{}, err
 	}
-	return Analysis{Path: cachePath, SizeBytes: size, Owned: owned, Enabled: settings.GoCache.Enabled}, nil
+	analysis := Analysis{Path: cachePath, SizeBytes: size, Owned: owned, Enabled: settings.GoCache.Enabled}
+	unmanagedPath, ok := defaultGoCachePath()
+	if !ok || unmanagedPath == cachePath {
+		return analysis, nil
+	}
+	unmanagedSize, err := directorySize(unmanagedPath)
+	if err != nil {
+		return Analysis{}, err
+	}
+	analysis.UnmanagedPath = unmanagedPath
+	analysis.UnmanagedSizeBytes = unmanagedSize
+	return analysis, nil
+}
+
+func defaultGoCachePath() (string, bool) {
+	if configured := os.Getenv("GOCACHE"); configured != "" {
+		if configured == "off" || !filepath.IsAbs(configured) {
+			return "", false
+		}
+		return filepath.Clean(configured), true
+	}
+	cacheDir, err := os.UserCacheDir()
+	if err != nil || !filepath.IsAbs(cacheDir) {
+		return "", false
+	}
+	return filepath.Join(cacheDir, "go-build"), true
 }
 
 // Cleanup rotates an above-threshold cache into Kandev trash.

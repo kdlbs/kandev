@@ -56,3 +56,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0046 | [Settings route save coordinator](0046-settings-route-save-coordinator.md)                                                          | accepted   | frontend                    | 2026-07-14 |
 | 2026-07-18-turn-configuration-snapshots | [Attribute runtime configuration to turns](2026-07-18-turn-configuration-snapshots.md) | accepted | backend, frontend | 2026-07-18 |
 | 2026-07-19-reject-mcp-actions-on-raw-websocket | [Reject MCP Actions on the Raw WebSocket](2026-07-19-reject-mcp-actions-on-raw-websocket.md) | accepted | backend, protocol | 2026-07-19 |
+| 2026-07-19-workspace-symlink-entries | [Treat Nested Workspace Symlinks as Entries](2026-07-19-workspace-symlink-entries.md) | accepted | backend, infra | 2026-07-19 |

@@ -60,11 +60,50 @@ describe("StorageOverviewCard", () => {
   it("renders unavailable Docker resources without inventing zero usage", () => {
     render(<StorageOverviewCard overview={degradedOverview} onRunGoCache={vi.fn()} />);
 
-    const dockerResourceIds = ["managed-containers", "docker-build-cache", "docker-unused-images"];
+    const dockerResourceIds = [
+      "managed-containers",
+      "docker-image-layers",
+      "docker-build-cache",
+      "docker-unused-images",
+    ];
     for (const resourceId of dockerResourceIds) {
       const trigger = screen.getByTestId(`storage-resource-${resourceId}-trigger`);
       expect(trigger.textContent).toContain("Unavailable");
       expect(trigger.textContent).not.toContain("0 B");
     }
+  });
+
+  it("renders total workspace, unmanaged Go cache, and Docker layer usage", () => {
+    const overview = {
+      ...degradedOverview,
+      summary: {
+        ...degradedOverview.summary,
+        workspaces: {
+          total_bytes: 8 * 1024 ** 3,
+          active_bytes: 2 * 1024 ** 3,
+          candidate_bytes: 5 * 1024 ** 3,
+        },
+        go_cache: {
+          ...degradedOverview.summary.go_cache,
+          unmanaged_path: "/root/.cache/go-build",
+          unmanaged_size_bytes: 25 * 1024 ** 3,
+        },
+        docker: {
+          ...degradedOverview.summary.docker,
+          available: true,
+          image_layer_bytes: 14 * 1024 ** 3,
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
+
+    expect(screen.getByTestId("storage-resource-workspaces-trigger").textContent).toContain("8 GB");
+    expect(screen.getByTestId("storage-resource-unmanaged-go-cache-trigger").textContent).toContain(
+      "25 GB",
+    );
+    expect(
+      screen.getByTestId("storage-resource-docker-image-layers-trigger").textContent,
+    ).toContain("14 GB");
   });
 });

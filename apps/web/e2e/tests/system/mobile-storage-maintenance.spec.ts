@@ -43,6 +43,10 @@ test.describe("Mobile storage maintenance", () => {
     await expect(testPage.getByTestId("storage-analyze")).toHaveText("Analysis complete");
     await testPage.getByTestId("storage-resource-workspaces-trigger").click();
     await expect(testPage.getByTestId("storage-resource-workspaces")).toBeVisible();
+    await testPage.getByTestId("storage-resource-unmanaged-go-cache-trigger").click();
+    await expect(testPage.getByTestId("storage-resource-unmanaged-go-cache")).toBeVisible();
+    await testPage.getByTestId("storage-resource-docker-image-layers-trigger").click();
+    await expect(testPage.getByTestId("storage-resource-docker-image-layers")).toBeVisible();
     await testPage.getByTestId("storage-resource-go-cache-trigger").click();
     const explicitRequest = testPage.waitForRequest(
       (request) =>
