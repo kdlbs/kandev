@@ -44,22 +44,24 @@ func KandevBranchCheckoutPostlude() string {
 # The previous "git checkout -B feature origin/feature" form was destructive
 # for the resume case — overwriting local commits with the remote tip.
 #
-# SECURITY: every data placeholder below is wrapped in single quotes and the
-# scriptengine providers shell-single-quote the substituted value, so a branch
-# name containing shell metacharacters (e.g. "$(...)", backticks, ";") is
-# treated as a literal string and cannot inject commands. Do NOT switch these
-# back to double quotes — double quotes still allow $(...) command substitution.
+# SECURITY: the data placeholders below are referenced BARE (no surrounding
+# quotes). The scriptengine providers substitute a fully single-quoted,
+# self-contained shell token (see scriptengine.shellQuote), so a branch name
+# containing shell metacharacters (e.g. "$(...)", backticks, ";") resolves to a
+# quoted literal that cannot inject commands. Do NOT wrap these in double
+# quotes — double quotes would re-expose $(...) command substitution. Do NOT
+# assume they are unquoted data either; the value carries its own quoting.
 (
-  if [ -d '{{workspace.path}}/.git' ] \
-     && [ -n '{{worktree.branch}}' ] \
-     && [ '{{worktree.branch}}' != '{{repository.branch}}' ]; then
-    cd '{{workspace.path}}' || exit 0
-    if git rev-parse --verify '{{worktree.branch}}' >/dev/null 2>&1; then
-      git checkout '{{worktree.branch}}'
-    elif git fetch --depth=1 origin '{{worktree.branch}}' 2>/dev/null; then
-      git checkout -b '{{worktree.branch}}' 'origin/{{worktree.branch}}'
+  if [ -d {{workspace.path}}/.git ] \
+     && [ -n {{worktree.branch}} ] \
+     && [ {{worktree.branch}} != {{repository.branch}} ]; then
+    cd {{workspace.path}} || exit 0
+    if git rev-parse --verify {{worktree.branch}} >/dev/null 2>&1; then
+      git checkout {{worktree.branch}}
+    elif git fetch --depth=1 origin {{worktree.branch}} 2>/dev/null; then
+      git checkout -b {{worktree.branch}} origin/{{worktree.branch}}
     else
-      git checkout -b '{{worktree.branch}}'
+      git checkout -b {{worktree.branch}}
     fi
   fi
 ) || true
@@ -110,11 +112,12 @@ git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
 # The kandev-managed feature-branch checkout is appended as an invariant
 # postlude (see KandevBranchCheckoutPostlude) — keep it out of the default
 # so old profiles snapshotting this script and the postlude never disagree.
-# SECURITY: '{{repository.branch}}'/'{{repository.clone_url}}'/'{{workspace.path}}'
-# are single-quoted and shell-single-quoted by the providers so a hostile
-# branch name / URL cannot break out of the git clone argument. Do not unquote.
-git clone --depth=1 --branch '{{repository.branch}}' '{{repository.clone_url}}' '{{workspace.path}}'
-cd '{{workspace.path}}'
+# SECURITY: the providers substitute fully single-quoted tokens (shellQuote) for
+# repository.branch / repository.clone_url / workspace.path, so a hostile branch
+# name or URL cannot break out of the git clone argument even though the
+# placeholders are referenced bare here. Do not add double quotes around them.
+git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
+cd {{workspace.path}}
 
 # Strip embedded token from remote URL to avoid persisting credentials in .git/config
 git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true
@@ -156,12 +159,13 @@ chmod +x /usr/local/bin/pnpm
 # The kandev-managed feature-branch checkout is appended as an invariant
 # postlude (see KandevBranchCheckoutPostlude) — keep it out of the default
 # so old profiles snapshotting this script and the postlude never disagree.
-# SECURITY: single-quote every data placeholder (branch/url/path). The echo is
-# also single-quoted because double quotes would still expand $(...) from a
-# hostile branch name. The providers shell-single-quote the values. Do not unquote.
-echo 'Cloning {{repository.clone_url}} (branch: {{repository.branch}})...'
-git clone --depth=1 --quiet --branch '{{repository.branch}}' '{{repository.clone_url}}' '{{workspace.path}}'
-cd '{{workspace.path}}'
+# SECURITY: the providers substitute fully single-quoted tokens (shellQuote) for
+# these placeholders. printf takes them as separate arguments, NOT inside a
+# double-quoted string (which would re-expand a hostile URL/branch). Do not
+# reintroduce an echo of these placeholders inside a double-quoted string.
+printf 'Cloning %s (branch: %s)...\n' {{repository.clone_url}} {{repository.branch}}
+git clone --depth=1 --quiet --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}
+cd {{workspace.path}}
 
 # Strip embedded token from remote URL to avoid persisting credentials in .git/config
 git remote set-url origin "$(git remote get-url origin | sed 's|https://[^@]*@github.com/|https://github.com/|')" 2>/dev/null || true

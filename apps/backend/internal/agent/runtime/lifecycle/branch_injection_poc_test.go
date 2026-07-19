@@ -100,6 +100,54 @@ func TestBranchNameCommandInjection_Regression(t *testing.T) {
 		}
 		t.Logf("safe: clone line did not execute injected command; marker absent")
 	})
+
+	// ---------------------------------------------------------------------
+	// Case C: LEGACY stored prepare_script with BARE / double-quoted
+	// placeholders. Profiles created before this fix snapshotted a default
+	// template that referenced {{repository.branch}} / {{worktree.branch}}
+	// with no single quotes. The providers now emit a self-contained quoted
+	// token, so those stored scripts are safe without editing every profile.
+	// This is the scenario the automated reviewers flagged.
+	// ---------------------------------------------------------------------
+	t.Run("legacy stored script with bare placeholders is safe", func(t *testing.T) {
+		tmp := t.TempDir()
+		markerClone := filepath.Join(tmp, "pwned_legacy_clone")
+		markerCheckout := filepath.Join(tmp, "pwned_legacy_checkout")
+
+		// Mimic an old stored prepare_script: both the clone branch and the
+		// checkout reference the placeholders BARE (no surrounding quotes),
+		// which is how pre-fix default templates were snapshotted.
+		legacyStored := "" +
+			"git clone --depth=1 --branch {{repository.branch}} {{repository.clone_url}} {{workspace.path}}\n" +
+			"git -C {{workspace.path}} checkout {{worktree.branch}}\n"
+
+		req := &ExecutorCreateRequest{
+			Metadata: map[string]interface{}{
+				MetadataKeySetupScript: legacyStored,
+				"base_branch":          "main;touch " + markerClone + ";#",
+				"repository_clone_url": "https://github.com/org/repo.git",
+				"repository_path":      "/tmp/repo",
+				"worktree_branch":      "$(touch " + markerCheckout + ")",
+			},
+			Env: map[string]string{},
+		}
+
+		script := exec.resolvePrepareScript(req)
+		assertNoUnquotedPayload(t, script, "main;touch "+markerClone+";#")
+		assertNoUnquotedPayload(t, script, "$(touch "+markerCheckout+")")
+
+		// Execute both legacy lines through the real eval sink.
+		runViaEval(t, tmp, extractLine(t, script, "git clone --depth=1 --branch"))
+		runViaEval(t, tmp, extractLine(t, script, "git -C"))
+
+		if _, err := os.Stat(markerClone); err == nil {
+			t.Fatalf("REGRESSION: legacy bare clone line executed injection: %s", markerClone)
+		}
+		if _, err := os.Stat(markerCheckout); err == nil {
+			t.Fatalf("REGRESSION: legacy checkout line executed injection: %s", markerCheckout)
+		}
+		t.Logf("safe: legacy stored script did not execute injected commands")
+	})
 }
 
 // assertNoUnquotedPayload fails if the payload appears in the script outside of

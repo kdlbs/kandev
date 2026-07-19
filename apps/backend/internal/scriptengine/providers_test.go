@@ -70,65 +70,78 @@ func TestRepositoryProvider_UsesRepositorySetupScriptKey(t *testing.T) {
 }
 
 // TestProviders_ShellEscapeDataPlaceholders is the scriptengine-level
-// regression guard for the branch-name command-injection RCE. Data
-// placeholders that land in shell text (branch/url/path) must be
-// shell-single-quoted so a hostile value like "$(touch pwned)" or "a;b" cannot
-// break out of the surrounding single quotes in the prepare-script templates.
+// regression guard for the branch-name command-injection RCE. Every data
+// placeholder that lands in shell text (branch/url/path) must be emitted as a
+// fully self-contained single-quoted token (shellQuote), so a hostile value
+// like "$(touch pwned)" or "a;b" is a literal even when a template — including
+// a stored/legacy prepare_script — references the placeholder BARE.
 func TestProviders_ShellEscapeDataPlaceholders(t *testing.T) {
 	// A payload containing a single quote exercises the escape sequence: the
-	// only character shellSingleQuote transforms is `'` -> `'"'"'`.
+	// embedded `'` becomes `'"'"'`, and shellQuote wraps the whole in `'...'`.
 	const evil = `x'$(touch pwned)`
-	const wantEscaped = `x'"'"'$(touch pwned)` // ' closed, "'" literal quote, ' reopened
+	const wantQuoted = `'x'"'"'$(touch pwned)'` // '  x  '"'"'  $(touch pwned)  '
 
-	t.Run("WorktreeProvider escapes branch and paths", func(t *testing.T) {
-		vars := WorktreeProvider("/base", "/wt", "wt-id", evil, evil)()
-		for _, key := range []string{"worktree.branch", "worktree.base_branch"} {
-			if got := vars[key]; got != wantEscaped {
-				t.Errorf("%s = %q, want %q", key, got, wantEscaped)
-			}
+	// assertQuoted checks the provider emitted the fully-quoted token AND that
+	// the token parses back to the original literal through a real shell (no
+	// command substitution fires).
+	assertQuoted := func(t *testing.T, key, got string) {
+		t.Helper()
+		if got != wantQuoted {
+			t.Errorf("%s = %q, want %q", key, got, wantQuoted)
 		}
-		// worktree.id is a kandev UUID, intentionally not escaped.
+		if out := shellUnquote(t, got); out != evil {
+			t.Errorf("%s token %q evaluated to %q, want literal %q", key, got, out, evil)
+		}
+	}
+
+	t.Run("WorktreeProvider quotes branch and paths", func(t *testing.T) {
+		vars := WorktreeProvider(evil, evil, "wt-id", evil, evil)()
+		for _, key := range []string{"worktree.base_path", "worktree.path", "worktree.branch", "worktree.base_branch"} {
+			assertQuoted(t, key, vars[key])
+		}
+		// worktree.id is a kandev UUID, intentionally not quoted.
 		if got := vars["worktree.id"]; got != "wt-id" {
 			t.Errorf("worktree.id = %q, want unmodified", got)
 		}
 	})
 
-	t.Run("WorkspaceProvider escapes path", func(t *testing.T) {
-		if got := WorkspaceProvider(evil)()["workspace.path"]; got != wantEscaped {
-			t.Errorf("workspace.path = %q, want %q", got, wantEscaped)
-		}
+	t.Run("WorkspaceProvider quotes path", func(t *testing.T) {
+		assertQuoted(t, "workspace.path", WorkspaceProvider(evil)()["workspace.path"])
 	})
 
-	t.Run("RepositoryProvider escapes branch and clone url", func(t *testing.T) {
+	t.Run("RepositoryProvider quotes branch, paths and clone url", func(t *testing.T) {
 		vars := RepositoryProvider(map[string]any{
 			"base_branch":          evil,
 			"repository_clone_url": evil,
-			"repository_path":      "/tmp/repo",
+			"repository_path":      evil,
 		}, nil, nil, nil)()
-		if got := vars["repository.branch"]; got != wantEscaped {
-			t.Errorf("repository.branch = %q, want %q", got, wantEscaped)
-		}
-		if got := vars["repository.clone_url"]; got != wantEscaped {
-			t.Errorf("repository.clone_url = %q, want %q", got, wantEscaped)
-		}
+		assertQuoted(t, "repository.branch", vars["repository.branch"])
+		assertQuoted(t, "repository.clone_url", vars["repository.clone_url"])
+		assertQuoted(t, "repository.path", vars["repository.path"])
+		// repository.name is derived from the (hostile) path's last segment and
+		// must also be quoted, since it can land in shell text.
+		assertQuoted(t, "repository.name", vars["repository.name"])
 	})
 
-	t.Run("repository.setup_script is NOT escaped (script fragment)", func(t *testing.T) {
+	t.Run("resolver-derived repository.ssh_url is quoted", func(t *testing.T) {
+		// When no explicit clone URL is set, the provider resolves the remote
+		// via repoURLResolver; that value is attacker-influenceable (a remote
+		// URL) and must be quoted too.
+		resolver := func(string) (string, error) { return evil, nil }
+		vars := RepositoryProvider(map[string]any{
+			"repository_path": "/tmp/repo",
+		}, nil, resolver, nil)()
+		assertQuoted(t, "repository.ssh_url", vars["repository.ssh_url"])
+		assertQuoted(t, "repository.clone_url", vars["repository.clone_url"])
+	})
+
+	t.Run("repository.setup_script is NOT quoted (script fragment)", func(t *testing.T) {
 		fragment := "npm ci\necho 'hi'"
 		vars := RepositoryProvider(map[string]any{
 			"repository_setup_script": fragment,
 		}, nil, nil, nil)()
 		if got := vars["repository.setup_script"]; got != fragment {
 			t.Errorf("repository.setup_script = %q, want unmodified %q", got, fragment)
-		}
-	})
-
-	t.Run("wrapping escaped value in single quotes yields the literal", func(t *testing.T) {
-		// This is the invariant the templates rely on: '<escaped>' parses back
-		// to the original string with no command substitution.
-		wrapped := "'" + wantEscaped + "'"
-		if out := shellUnquote(t, wrapped); out != evil {
-			t.Errorf("'%s' evaluated to %q, want literal %q", wantEscaped, out, evil)
 		}
 	})
 }
