@@ -150,24 +150,36 @@ func TestBranchNameCommandInjection_Regression(t *testing.T) {
 	})
 }
 
-// assertNoUnquotedPayload fails if the payload appears in the script outside of
-// a single-quoted context. Every line that mentions the payload must wrap it in
-// single quotes (the only place command substitution / `;` is inert).
+// assertNoUnquotedPayload fails if any character of the payload appears outside
+// an open single-quoted region — the only shell context where command
+// substitution / `;` is inert. It tracks real single-quote state char-by-char
+// (a `'` toggles the region) rather than the weaker "some quote before and
+// after" heuristic, so a line like `a='x' $(payload) b='y'` is correctly
+// rejected. Assumes the payload contains no single quote of its own (true for
+// these test payloads), so a quoted occurrence stays wholly inside one region.
 func assertNoUnquotedPayload(t *testing.T, script, payload string) {
 	t.Helper()
 	for _, line := range strings.Split(script, "\n") {
-		// Every occurrence of the payload on the line must sit between a
-		// preceding `'` and a following `'` (single-quoted, hence inert).
+		// inQuote[i] == true means byte i of the line sits inside an open
+		// single-quoted region.
+		inQuote := make([]bool, len(line))
+		open := false
+		for i := 0; i < len(line); i++ {
+			if line[i] == '\'' {
+				open = !open // the quote char itself is a delimiter
+				inQuote[i] = false
+				continue
+			}
+			inQuote[i] = open
+		}
 		for off := 0; ; {
 			idx := strings.Index(line[off:], payload)
 			if idx < 0 {
 				break
 			}
 			abs := off + idx
-			before := line[:abs]
-			after := line[abs+len(payload):]
-			if !strings.Contains(before, "'") || !strings.Contains(after, "'") {
-				t.Fatalf("payload not single-quoted; line still injectable:\n%s", line)
+			if !inQuote[abs] {
+				t.Fatalf("payload starts outside a single-quoted region; line injectable:\n%s", line)
 			}
 			off = abs + len(payload)
 		}

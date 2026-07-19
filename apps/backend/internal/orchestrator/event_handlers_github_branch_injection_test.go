@@ -35,16 +35,15 @@ func TestResolveReviewRepository_RejectsUnsafeHeadBranch(t *testing.T) {
 	}
 
 	cases := []struct {
-		name           string
-		headBranch     string
-		wantCheckout   string
-		wantHasRepoRow bool
+		name         string
+		headBranch   string
+		wantCheckout string
 	}{
-		{name: "safe branch is checked out", headBranch: "feature/login", wantCheckout: "feature/login", wantHasRepoRow: true},
-		{name: "command substitution rejected", headBranch: "$(touch pwned)", wantCheckout: "", wantHasRepoRow: true},
-		{name: "semicolon chaining rejected", headBranch: "main;touch pwned", wantCheckout: "", wantHasRepoRow: true},
-		{name: "backtick rejected", headBranch: "`id`", wantCheckout: "", wantHasRepoRow: true},
-		{name: "space rejected", headBranch: "a b", wantCheckout: "", wantHasRepoRow: true},
+		{name: "safe branch is checked out", headBranch: "feature/login", wantCheckout: "feature/login"},
+		{name: "command substitution rejected", headBranch: "$(touch pwned)", wantCheckout: ""},
+		{name: "semicolon chaining rejected", headBranch: "main;touch pwned", wantCheckout: ""},
+		{name: "backtick rejected", headBranch: "`id`", wantCheckout: ""},
+		{name: "space rejected", headBranch: "a b", wantCheckout: ""},
 	}
 
 	for _, tc := range cases {
