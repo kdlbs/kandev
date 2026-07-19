@@ -105,6 +105,12 @@ Minimal editorial-landing config shape. Replace the placeholder coordinates with
       { "tMs": 0, "x": 0.5, "y": 0.5 },
       { "tMs": 8000, "x": 0.5, "y": 0.5 }
     ],
+    "focusTrack": [
+      { "tMs": 0, "label": "opening feature context", "x": 0.5, "y": 0.5 },
+      // Story focus targets follow the recorded semantic evidence.
+      { "tMs": 7760, "label": "settled feature context", "x": 0.5, "y": 0.5 },
+      { "tMs": 8000, "label": "matched loop frame", "x": 0.5, "y": 0.5 }
+    ],
     "keyframes": [
       { "tMs": 0, "zoom": 2, "x": 0.5, "y": 0.5 },
       // Story keyframes follow the recorded pointer journey.
@@ -151,6 +157,14 @@ Use a landing slug with the required desktop prefix. Replace `<capture-root>` wi
       { "tMs": 10000, "x": 0.55, "y": 0.61 },
       { "tMs": 11700, "x": 0.5, "y": 0.5 },
       { "tMs": 12000, "x": 0.5, "y": 0.5 }
+    ],
+    "focusTrack": [
+      { "tMs": 0, "label": "integration context", "x": 0.5, "y": 0.5 },
+      { "tMs": 2200, "label": "GitHub integration", "x": 0.18, "y": 0.43 },
+      { "tMs": 6800, "label": "pull request row", "x": 0.65, "y": 0.48 },
+      { "tMs": 10000, "label": "created task", "x": 0.55, "y": 0.61 },
+      { "tMs": 11700, "label": "settled integration context", "x": 0.5, "y": 0.5 },
+      { "tMs": 12000, "label": "matched loop frame", "x": 0.5, "y": 0.5 }
     ],
     "keyframes": [
       { "tMs": 0, "zoom": 1.25, "x": 0.5, "y": 0.5 },

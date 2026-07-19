@@ -51,6 +51,24 @@ test("requires semantic evidence for the landing editorial profile", () => {
   assert.match(bundle, /landing-editorial[^\n]{0,120}requires?[^\n]{0,80}pointerTrack/i);
 });
 
+test("keeps semantic focus evidence separate from camera keyframes in landing examples", () => {
+  const reference = fs.readFileSync(
+    path.join(skillDir, "references", "camera-encoding.md"),
+    "utf8",
+  );
+  const examples = reference.match(/```jsonc?[\s\S]*?```/g) ?? [];
+  const landingExamples = examples.filter((example) =>
+    example.includes('"cameraProfile": "landing-editorial"'),
+  );
+
+  assert.equal(landingExamples.length, 2);
+  for (const example of landingExamples) {
+    assert.match(example, /"focusTrack"\s*:/);
+    assert.match(example, /"pointerTrack"\s*:/);
+    assert.match(example, /"keyframes"\s*:/);
+  }
+});
+
 test("explicitly rejects bad editorial shortcuts", () => {
   assert.match(bundle, /reject[^\n]{0,100}lazy global zoom/i);
   assert.match(bundle, /reject[^\n]{0,120}(?:zoom|camera)[^\n]{0,80}away from[^\n]{0,40}(?:active )?(?:cursor|pointer)/i);
