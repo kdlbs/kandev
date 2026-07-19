@@ -5,11 +5,11 @@ import {
   IconCheck,
   IconCircleCheck,
   IconCircleFilled,
-  IconClock,
   IconLoader,
   IconLoader2,
   IconMessageQuestion,
   IconPlayerPause,
+  IconShieldQuestion,
   IconX,
 } from "@tabler/icons-react";
 import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
@@ -23,6 +23,11 @@ type IconConfig = {
 const STYLE_MUTED = "text-muted-foreground";
 const STYLE_LOADING = "text-blue-500 animate-spin";
 const STYLE_WARNING = "text-yellow-500";
+// The pending-permission "needs me" hue — amber, distinct from the yellow
+// clarification/waiting question so the two "needs me" variants read apart even
+// side by side (§spec:waiting-for-input-parity). Matches the sidebar's inline
+// IconShieldQuestion amber in task-item.tsx, now single-sourced here.
+const STYLE_PERMISSION = "text-amber-500";
 const STYLE_ERROR = "text-red-500";
 const WAITING_FOR_INPUT = "WAITING_FOR_INPUT";
 
@@ -50,7 +55,13 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
   // Office sessions: agent process torn down, conversation paused. Use the
   // pause icon — visually distinct from RUNNING and from terminal states.
   IDLE: { Icon: IconPlayerPause, className: STYLE_MUTED },
-  WAITING_FOR_INPUT: { Icon: IconClock, className: STYLE_MUTED },
+  // waiting-for-my-input: the agent finished its turn and is waiting on a reply
+  // (§spec:waiting-for-input-parity). The message-question glyph reads as
+  // "needs me" — matching the sidebar and the task-level waiting icon — and is
+  // distinct by SHAPE from the running dot, the background spinner, and the done
+  // check, so it survives a grayscale scan (§req:not-color-alone). The pending-
+  // clarification / pending-permission variants layer on top via getSessionStateIcon.
+  WAITING_FOR_INPUT: { Icon: IconMessageQuestion, className: STYLE_WARNING },
   COMPLETED: { Icon: IconCircleCheck, className: "text-green-500" },
   FAILED: { Icon: IconAlertTriangle, className: STYLE_ERROR },
   CANCELLED: { Icon: IconPlayerPause, className: STYLE_MUTED },
@@ -98,6 +109,22 @@ const TASK_GENERATING_ICON: IconConfig = {
 const TASK_BACKGROUND_ICON: IconConfig = {
   Icon: IconLoader,
   className: "text-violet-500 animate-spin",
+};
+
+// The pending-permission waiting variant (§spec:waiting-for-input-parity): the
+// agent is blocked on a permission prompt and needs the operator to approve or
+// deny. A shield-question — distinct by SHAPE from the clarification/waiting
+// message-question (so the two "needs me" variants read apart), from the done
+// check, and from both running affordances, surviving a grayscale scan. Shared
+// by both the task-level and session-level waiting readings.
+const TASK_PENDING_PERMISSION_ICON: IconConfig = {
+  Icon: IconShieldQuestion,
+  className: STYLE_PERMISSION,
+};
+
+const SESSION_PENDING_PERMISSION_ICON: IconConfig = {
+  Icon: IconShieldQuestion,
+  className: STYLE_PERMISSION,
 };
 
 const DEFAULT_TASK_ICON: IconConfig = {
@@ -184,6 +211,7 @@ function getTaskStateIconConfig(
   state?: TaskState,
   hasPendingClarification = false,
   foregroundActivity?: ForegroundActivity | null,
+  hasPendingPermission = false,
 ): IconConfig {
   // The task-level MOST-ACTIVE-WINS aggregate sits ABOVE the coarse task state
   // (§spec:task-level-indicator): a task whose foreground turns are idle while
@@ -192,6 +220,12 @@ function getTaskStateIconConfig(
   // (e.g. a finished primary session) would otherwise render done.
   if (foregroundActivity === "background") return TASK_BACKGROUND_ICON;
   if (foregroundActivity === "generating") return TASK_GENERATING_ICON;
+  // "needs me" variants (§spec:waiting-for-input-parity). Pending-permission
+  // takes precedence over the generic waiting/clarification question so a
+  // permission prompt is never masked by a coarse WAITING_FOR_INPUT state.
+  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
+    return TASK_PENDING_PERMISSION_ICON;
+  }
   if (shouldUseQuestionTaskIcon(state, hasPendingClarification)) {
     return TASK_STATE_ICONS.WAITING_FOR_INPUT;
   }
@@ -204,14 +238,22 @@ export function getTaskStateIcon(
   className?: string,
   hasPendingClarification = false,
   foregroundActivity?: ForegroundActivity | null,
+  hasPendingPermission = false,
 ) {
-  const config = getTaskStateIconConfig(state, hasPendingClarification, foregroundActivity);
+  const config = getTaskStateIconConfig(
+    state,
+    hasPendingClarification,
+    foregroundActivity,
+    hasPendingPermission,
+  );
   return <config.Icon className={cn("h-4 w-4", config.className, className)} />;
 }
 
 function getSessionStateIconConfig(
   state?: TaskSessionState,
   foregroundActivity?: ForegroundActivity | null,
+  hasPendingClarification = false,
+  hasPendingPermission = false,
 ): IconConfig {
   // (b) background-running wins over the default RUNNING (generating) icon:
   // while the foreground turn waits on spawned background work the session must
@@ -219,6 +261,15 @@ function getSessionStateIconConfig(
   if (state === "RUNNING" && foregroundActivity === "background") {
     return SESSION_BACKGROUND_ICON;
   }
+  // "needs me" variants (§spec:waiting-for-input-parity), carrying the sidebar's
+  // rich reading to the session menus. A pending permission / clarification wins
+  // over the coarse state — including a session still coarsely RUNNING mid-turn
+  // when the agent has stopped to ask — so "needs me" is never masked. Permission
+  // (shield) takes precedence over clarification/waiting (question), matching the
+  // task-level precedence. A plain WAITING_FOR_INPUT with no message flags falls
+  // through to SESSION_STATE_ICONS.WAITING_FOR_INPUT (the same question glyph).
+  if (hasPendingPermission) return SESSION_PENDING_PERMISSION_ICON;
+  if (hasPendingClarification) return SESSION_STATE_ICONS.WAITING_FOR_INPUT;
   if (!state) return DEFAULT_SESSION_ICON;
   return SESSION_STATE_ICONS[state] ?? DEFAULT_SESSION_ICON;
 }
@@ -227,7 +278,14 @@ export function getSessionStateIcon(
   state?: TaskSessionState,
   className?: string,
   foregroundActivity?: ForegroundActivity | null,
+  hasPendingClarification = false,
+  hasPendingPermission = false,
 ) {
-  const config = getSessionStateIconConfig(state, foregroundActivity);
+  const config = getSessionStateIconConfig(
+    state,
+    foregroundActivity,
+    hasPendingClarification,
+    hasPendingPermission,
+  );
   return <config.Icon className={cn("h-4 w-4", config.className, className)} />;
 }

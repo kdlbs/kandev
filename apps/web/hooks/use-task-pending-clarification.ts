@@ -1,23 +1,13 @@
-import { useAppStore } from "@/components/state-provider";
-import type { TaskPendingAction } from "@/lib/types/http";
-import { hasPendingClarification } from "@/lib/utils/pending-clarification";
+import { useTaskPendingInput, type PendingInputFallback } from "@/hooks/use-task-pending-input";
 
-type PendingActionFallback = {
-  primarySessionState?: string | null;
-  primarySessionPendingAction?: TaskPendingAction | null;
-};
-
+/**
+ * Backwards-compatible wrapper: the boolean "does the primary session have a
+ * pending clarification" reading. New surfaces should prefer
+ * {@link useTaskPendingInput}, which also exposes the pending-permission flag.
+ */
 export function useTaskPendingClarification(
   primarySessionId: string | null | undefined,
-  fallback?: PendingActionFallback,
+  fallback?: PendingInputFallback,
 ): boolean {
-  return useAppStore((state) => {
-    if (!primarySessionId) return false;
-    const messages = state.messages.bySession[primarySessionId];
-    if (messages !== undefined) return hasPendingClarification(messages);
-    return (
-      fallback?.primarySessionState === "WAITING_FOR_INPUT" &&
-      fallback.primarySessionPendingAction === "clarification"
-    );
-  });
+  return useTaskPendingInput(primarySessionId, fallback).clarification;
 }
