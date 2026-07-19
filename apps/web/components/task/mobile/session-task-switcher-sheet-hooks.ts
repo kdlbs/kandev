@@ -80,7 +80,7 @@ type SheetItemCtx = {
   acknowledgedAgentErrors: Record<string, string>;
 };
 
-function toSheetItem(
+export function toSheetItem(
   task: KanbanState["tasks"][number] & { _workflowId: string },
   ctx: SheetItemCtx,
 ) {
@@ -102,6 +102,11 @@ function toSheetItem(
     workspaceMode: task.workspaceMode,
     state: task.state as TaskState | undefined,
     sessionState: resolvedSessionState,
+    // Task-level most-active-wins busy aggregate from the task record — the same
+    // authoritative value the desktop sidebar (toSidebarItem) and board read, so the
+    // mobile task-switcher row shows background-running and agrees with the board for
+    // multi-session tasks instead of missing it (§spec:task-level-truth).
+    foregroundActivity: task.foregroundActivity,
     description: task.description,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),
