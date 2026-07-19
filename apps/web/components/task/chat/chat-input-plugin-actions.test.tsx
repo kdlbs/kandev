@@ -21,7 +21,7 @@ const mockState = {
 };
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (s: typeof mockState) => unknown) => selector(mockState),
+  useOptionalAppStore: (selector: (s: typeof mockState) => unknown) => selector(mockState),
 }));
 
 describe("ChatInputPluginActions", () => {
@@ -62,5 +62,18 @@ describe("ChatInputPluginActions", () => {
     render(<ChatInputPluginActions sessionId="s9" taskId="t-unknown" taskTitle="Demo" />);
 
     expect(screen.getByTestId("plugin-icon").textContent).toBe("s9");
+  });
+
+  it("propagates only the active session when taskId is null", () => {
+    pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, ({ slotProps }) => {
+      const ctx = slotProps as ChatInputActionsSlotProps;
+      return (
+        <div data-testid="plugin-icon">{`${ctx.taskId}|${ctx.activeSessionId}|${ctx.sessionIds.join(",")}`}</div>
+      );
+    });
+
+    render(<ChatInputPluginActions sessionId="s9" taskId={null} />);
+
+    expect(screen.getByTestId("plugin-icon").textContent).toBe("null|s9|s9");
   });
 });

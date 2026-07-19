@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useCallback, useMemo } from "react";
+import { useOptionalAppStore } from "@/components/state-provider";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
+import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
 
 /**
@@ -45,12 +46,17 @@ export function ChatInputPluginActions(props: {
   const { sessionId, taskId, taskTitle } = props;
   // itemsByTaskId holds a stable per-task array reference (updated only when
   // that task's sessions change), so selecting it avoids a new-array-per-render.
-  const taskSessions = useAppStore((s) =>
-    taskId ? (s.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
+  // Read optionally: the composer always renders under a StateProvider in the
+  // app, but rendering the toolbar in isolation (unit tests) must not crash.
+  const selectSessions = useCallback(
+    (s: AppState): TaskSession[] =>
+      taskId ? (s.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
+    [taskId],
   );
+  const taskSessions = useOptionalAppStore(selectSessions, EMPTY_SESSIONS);
 
   const slotProps = useMemo<ChatInputActionsSlotProps>(() => {
-    const sessionIds: string[] = taskSessions.map((session) => String(session.id));
+    const sessionIds: string[] = taskSessions.map((session) => session.id);
     // The active session may not yet be in the store list (freshly prepared);
     // make sure the plugin always receives it.
     if (sessionId && !sessionIds.includes(sessionId)) sessionIds.unshift(sessionId);

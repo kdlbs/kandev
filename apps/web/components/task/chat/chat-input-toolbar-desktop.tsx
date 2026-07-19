@@ -138,6 +138,7 @@ function DesktopRightSection(props: {
   sessionId: string | null;
   taskId: string | null;
   taskTitle?: string;
+  hideAgentControls: boolean;
   planModeEnabled: boolean;
   isAgentBusy: boolean;
   hasContent: boolean;
@@ -160,11 +161,13 @@ function DesktopRightSection(props: {
       {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
         <ImplementPlanButton onClick={props.onImplementPlan} />
       )}
-      <ChatInputPluginActions
-        sessionId={props.sessionId}
-        taskId={props.taskId}
-        taskTitle={props.taskTitle}
-      />
+      {!props.hideAgentControls && (
+        <ChatInputPluginActions
+          sessionId={props.sessionId}
+          taskId={props.taskId}
+          taskTitle={props.taskTitle}
+        />
+      )}
       <div className="ml-1 flex items-center gap-1">
         {props.onVoiceTranscript && (
           <VoiceInputButton
@@ -255,6 +258,7 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
         sessionId={props.sessionId}
         taskId={props.taskId}
         taskTitle={props.taskTitle}
+        hideAgentControls={props.hideAgentControls}
         planModeEnabled={props.planModeEnabled}
         isAgentBusy={props.isAgentBusy}
         hasContent={props.hasContent ?? false}

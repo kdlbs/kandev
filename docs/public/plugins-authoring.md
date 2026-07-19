@@ -344,9 +344,9 @@ A task can hold several sessions, so both the active session and the full
 `sessionIds` list are provided. These are **kandev** session ids — resolving one
 to an agent/ACP transcript id (for example, to key per-session cost data from a
 tool like tokscale) is your plugin's job. Do that **server-side in your plugin
-backend** via the Host data API (`host.Sessions()`), not in the bundle: propagate
-the ids from the UI to your backend over `host.api.fetch(...)`, and let the
-backend do the matching. See `kandev-plugin-tokscale` for the pattern.
+backend** via the Host data API (`host.Sessions()` exposes each session's
+`ACPSessionID`), not in the bundle: propagate the ids from the UI to your
+backend over `host.api.fetch(...)`, and let the backend do the matching.
 
 ```js
 function makeChatAction(host) {

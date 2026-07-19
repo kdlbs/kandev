@@ -165,11 +165,13 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
         {props.planModeEnabled && !props.isAgentBusy && props.onImplementPlan && (
           <ImplementPlanButton onClick={props.onImplementPlan} />
         )}
-        <ChatInputPluginActions
-          sessionId={props.sessionId}
-          taskId={props.taskId}
-          taskTitle={props.taskTitle}
-        />
+        {!props.hideAgentControls && (
+          <ChatInputPluginActions
+            sessionId={props.sessionId}
+            taskId={props.taskId}
+            taskTitle={props.taskTitle}
+          />
+        )}
         {props.onVoiceTranscript && (
           <VoiceInputButton
             onTranscript={props.onVoiceTranscript}
