@@ -219,7 +219,11 @@ func (s *Service) fetch(ctx context.Context, url string) (*IndexDocument, error)
 		if doc, ok := s.cached(url); ok { // another caller may have filled it
 			return doc, nil
 		}
-		doc, derr := s.download(ctx, url)
+		// Detach from the leader's cancellation: the singleflight result is
+		// shared across all waiters, so if the first caller navigates away its
+		// canceled ctx must not fail everyone else's still-live request. Values
+		// are preserved; the client's 20s timeout still bounds the download.
+		doc, derr := s.download(context.WithoutCancel(ctx), url)
 		if derr != nil {
 			return nil, derr
 		}
