@@ -9,6 +9,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 var ErrGitHubCredentialBrokerUnreachable = errors.New("GitHub credential broker is unreachable from executor")
@@ -34,7 +35,7 @@ func runBrokerReachabilityPreflight(
 		return nil
 	}
 	probeEnv := map[string]string{
-		envKeyGitHubCredentialBrokerURL: env[envKeyGitHubCredentialBrokerURL],
+		githubauth.CredentialBrokerURLEnv: env[githubauth.CredentialBrokerURLEnv],
 	}
 	output, err := run(ctx, brokerReachabilityScript, probeEnv)
 	if err != nil {

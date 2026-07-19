@@ -3,6 +3,20 @@ package lifecycle
 import (
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/githubauth"
+)
+
+const (
+	envKeyGitHubCredentialBrokerURL  = githubauth.CredentialBrokerURLEnv
+	envKeyGitHubCredentialLease      = githubauth.CredentialLeaseEnv
+	envKeyGitHubCredentialTaskID     = githubauth.CredentialTaskIDEnv
+	envKeyGitHubCredentialSessionID  = githubauth.CredentialSessionIDEnv
+	envKeyGitHubCredentialRepository = githubauth.CredentialRepositoryEnv
+	envKeyGitHubCredentialOwner      = githubauth.CredentialOwnerEnv
+	envKeyGitHubCredentialRepo       = githubauth.CredentialRepoEnv
+	envKeyGitHubCredentialHost       = githubauth.CredentialHostEnv
+	envKeyGitHubCredentialScopes     = githubauth.CredentialScopesEnv
 )
 
 func TestManagedGitHubBrokerEnvUsesStrictAllowlist(t *testing.T) {

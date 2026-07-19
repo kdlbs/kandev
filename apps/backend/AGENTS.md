@@ -79,6 +79,7 @@ apps/backend/
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
+│   ├── githubauth/       # Shared GitHub credential-broker environment contract
 │   ├── common/           # Shared utilities, config, logger
 │   ├── integration/      # External integrations
 │   ├── integrations/     # Shared shapes for third-party integrations

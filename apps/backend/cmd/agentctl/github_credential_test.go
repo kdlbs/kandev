@@ -9,6 +9,20 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/githubauth"
+)
+
+const (
+	envGitHubCredentialBrokerURL  = githubauth.CredentialBrokerURLEnv
+	envGitHubCredentialLease      = githubauth.CredentialLeaseEnv
+	envGitHubCredentialTaskID     = githubauth.CredentialTaskIDEnv
+	envGitHubCredentialSessionID  = githubauth.CredentialSessionIDEnv
+	envGitHubCredentialRepository = githubauth.CredentialRepositoryEnv
+	envGitHubCredentialOwner      = githubauth.CredentialOwnerEnv
+	envGitHubCredentialRepo       = githubauth.CredentialRepoEnv
+	envGitHubCredentialHost       = githubauth.CredentialHostEnv
+	envGitHubCredentialScopes     = githubauth.CredentialScopesEnv
 )
 
 func TestGitHubCredentialHelperGetsFreshCredential(t *testing.T) {

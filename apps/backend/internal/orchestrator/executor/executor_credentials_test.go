@@ -10,8 +10,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+)
+
+const (
+	envGitHubCredentialBrokerURL  = githubauth.CredentialBrokerURLEnv
+	envGitHubCredentialLease      = githubauth.CredentialLeaseEnv
+	envGitHubCredentialTaskID     = githubauth.CredentialTaskIDEnv
+	envGitHubCredentialSessionID  = githubauth.CredentialSessionIDEnv
+	envGitHubCredentialRepository = githubauth.CredentialRepositoryEnv
+	envGitHubCredentialOwner      = githubauth.CredentialOwnerEnv
+	envGitHubCredentialRepo       = githubauth.CredentialRepoEnv
+	envGitHubCredentialHost       = githubauth.CredentialHostEnv
+	envGitHubCredentialScopes     = githubauth.CredentialScopesEnv
 )
 
 type fakeGitHubCredentialLeaseIssuer struct {

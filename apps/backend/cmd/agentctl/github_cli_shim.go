@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 const envGitHubCLIShimDir = "KANDEV_GITHUB_CLI_SHIM_DIR"
@@ -40,7 +43,7 @@ func runGitHubCLIShim(
 	lookPath githubCLILookPath,
 	runner githubCLICommandRunner,
 ) error {
-	client, err := newGitHubCredentialBrokerClient(getenv, httpClient)
+	client, err := newGitHubCLIShimCredentialBrokerClient(ctx, args, getenv, httpClient)
 	if err != nil {
 		return err
 	}
@@ -63,6 +66,134 @@ func runGitHubCLIShim(
 		"PATH":          realPath,
 	}, "GITHUB_TOKEN")
 	return runner(ctx, executable, args, childEnv, stdin, stdout, stderr)
+}
+
+type githubCLIRepository struct {
+	host  string
+	owner string
+	repo  string
+}
+
+func newGitHubCLIShimCredentialBrokerClient(
+	ctx context.Context,
+	args []string,
+	getenv func(string) string,
+	httpClient *http.Client,
+) (*githubCredentialBrokerClient, error) {
+	if strings.TrimSpace(getenv(githubauth.CredentialScopesEnv)) == "" {
+		return newGitHubCredentialBrokerClient(getenv, httpClient)
+	}
+	target, err := resolveGitHubCLIRepository(ctx, args, getenv)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		return newGitHubCredentialBrokerClient(getenv, httpClient)
+	}
+	client, err := newGitHubCredentialBrokerClientForInput(getenv, httpClient, map[string]string{
+		"protocol": "https",
+		"host":     target.host,
+		"path":     target.owner + "/" + target.repo,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("select GitHub credential for repository: %w", err)
+	}
+	return client, nil
+}
+
+func resolveGitHubCLIRepository(
+	ctx context.Context,
+	args []string,
+	getenv func(string) string,
+) (*githubCLIRepository, error) {
+	defaultHost := strings.TrimSpace(getenv(githubauth.CredentialHostEnv))
+	raw, found, err := githubCLIRepositoryArgument(args)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return parseGitHubCLIRepository(raw, defaultHost)
+	}
+	if raw = strings.TrimSpace(getenv("GH_REPO")); raw != "" {
+		return parseGitHubCLIRepository(raw, defaultHost)
+	}
+	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, nil
+	}
+	target, err := parseGitHubCLIRepository(strings.TrimSpace(string(output)), defaultHost)
+	if err != nil {
+		return nil, nil
+	}
+	return target, nil
+}
+
+func githubCLIRepositoryArgument(args []string) (string, bool, error) {
+	for index, arg := range args {
+		if arg == "--" {
+			break
+		}
+		switch {
+		case arg == "-R" || arg == "--repo":
+			if index+1 >= len(args) || strings.TrimSpace(args[index+1]) == "" {
+				return "", true, fmt.Errorf("GitHub CLI repository argument is empty")
+			}
+			return args[index+1], true, nil
+		case strings.HasPrefix(arg, "--repo="):
+			return strings.TrimPrefix(arg, "--repo="), true, nil
+		case strings.HasPrefix(arg, "-R="):
+			return strings.TrimPrefix(arg, "-R="), true, nil
+		case strings.HasPrefix(arg, "-R") && len(arg) > 2:
+			return strings.TrimPrefix(arg, "-R"), true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func parseGitHubCLIRepository(raw, defaultHost string) (*githubCLIRepository, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, fmt.Errorf("GitHub CLI repository is empty")
+	}
+	if strings.Contains(raw, "://") {
+		parsed, err := url.Parse(raw)
+		if err != nil || parsed.Hostname() == "" {
+			return nil, fmt.Errorf("GitHub CLI repository %q is invalid", raw)
+		}
+		return repositoryFromHostAndPath(parsed.Hostname(), parsed.Path, raw)
+	}
+	if before, path, found := strings.Cut(raw, ":"); found && strings.Contains(before, "@") {
+		host := before[strings.LastIndex(before, "@")+1:]
+		return repositoryFromHostAndPath(host, path, raw)
+	}
+	parts := strings.Split(strings.Trim(raw, "/"), "/")
+	if len(parts) == 2 {
+		if defaultHost == "" {
+			defaultHost = "github.com"
+		}
+		return repositoryFromHostAndPath(defaultHost, strings.Join(parts, "/"), raw)
+	}
+	if len(parts) == 3 {
+		return repositoryFromHostAndPath(parts[0], strings.Join(parts[1:], "/"), raw)
+	}
+	return nil, fmt.Errorf("GitHub CLI repository %q must be [HOST/]OWNER/REPO", raw)
+}
+
+func repositoryFromHostAndPath(host, path, raw string) (*githubCLIRepository, error) {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 2 || strings.TrimSpace(host) == "" || parts[0] == "" || parts[1] == "" {
+		return nil, fmt.Errorf("GitHub CLI repository %q must be [HOST/]OWNER/REPO", raw)
+	}
+	repo := strings.TrimSuffix(parts[1], ".git")
+	if repo == "" {
+		return nil, fmt.Errorf("GitHub CLI repository %q must include a repository name", raw)
+	}
+	return &githubCLIRepository{
+		host:  strings.ToLower(strings.TrimSpace(host)),
+		owner: parts[0],
+		repo:  repo,
+	}, nil
 }
 
 func isolatedGitHubCLIConfigDir(taskID, sessionID string) (string, error) {

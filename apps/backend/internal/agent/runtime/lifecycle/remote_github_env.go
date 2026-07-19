@@ -1,29 +1,21 @@
 package lifecycle
 
-import "strconv"
+import (
+	"strconv"
 
-const (
-	envKeyGitHubCredentialBrokerURL  = "KANDEV_GITHUB_CREDENTIAL_BROKER_URL"
-	envKeyGitHubCredentialLease      = "KANDEV_GITHUB_CREDENTIAL_LEASE"
-	envKeyGitHubCredentialTaskID     = "KANDEV_GITHUB_CREDENTIAL_TASK_ID"
-	envKeyGitHubCredentialSessionID  = "KANDEV_GITHUB_CREDENTIAL_SESSION_ID"
-	envKeyGitHubCredentialRepository = "KANDEV_GITHUB_CREDENTIAL_REPOSITORY_ID"
-	envKeyGitHubCredentialOwner      = "KANDEV_GITHUB_CREDENTIAL_OWNER"
-	envKeyGitHubCredentialRepo       = "KANDEV_GITHUB_CREDENTIAL_REPO"
-	envKeyGitHubCredentialHost       = "KANDEV_GITHUB_CREDENTIAL_HOST"
-	envKeyGitHubCredentialScopes     = "KANDEV_GITHUB_CREDENTIAL_SCOPES"
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 var managedGitHubBrokerEnvKeys = []string{
-	envKeyGitHubCredentialBrokerURL,
-	envKeyGitHubCredentialLease,
-	envKeyGitHubCredentialTaskID,
-	envKeyGitHubCredentialSessionID,
-	envKeyGitHubCredentialRepository,
-	envKeyGitHubCredentialOwner,
-	envKeyGitHubCredentialRepo,
-	envKeyGitHubCredentialHost,
-	envKeyGitHubCredentialScopes,
+	githubauth.CredentialBrokerURLEnv,
+	githubauth.CredentialLeaseEnv,
+	githubauth.CredentialTaskIDEnv,
+	githubauth.CredentialSessionIDEnv,
+	githubauth.CredentialRepositoryEnv,
+	githubauth.CredentialOwnerEnv,
+	githubauth.CredentialRepoEnv,
+	githubauth.CredentialHostEnv,
+	githubauth.CredentialScopesEnv,
 	"GIT_TERMINAL_PROMPT",
 }
 
@@ -31,7 +23,7 @@ var managedGitHubBrokerEnvKeys = []string{
 // broker-backed git helper and gh shim. It deliberately excludes unrelated
 // profile and control-plane secrets from the long-lived agentctl process.
 func managedGitHubBrokerEnv(env map[string]string) map[string]string {
-	if env[envKeyGitHubCredentialBrokerURL] == "" {
+	if env[githubauth.CredentialBrokerURLEnv] == "" {
 		return nil
 	}
 	result := make(map[string]string, len(managedGitHubBrokerEnvKeys)+1)
@@ -61,5 +53,5 @@ func copyIndexedGitConfig(source, target map[string]string) {
 }
 
 func hasManagedGitHubBrokerEnv(env map[string]string) bool {
-	return env[envKeyGitHubCredentialBrokerURL] != "" && env[envKeyGitHubCredentialLease] != ""
+	return env[githubauth.CredentialBrokerURLEnv] != "" && env[githubauth.CredentialLeaseEnv] != ""
 }

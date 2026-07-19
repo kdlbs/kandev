@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 const (
@@ -18,16 +20,6 @@ const (
 	envGitHubToken = "GITHUB_TOKEN"
 	// envGHToken is the gh CLI compatible environment variable name.
 	envGHToken = "GH_TOKEN"
-
-	envGitHubCredentialBrokerURL  = "KANDEV_GITHUB_CREDENTIAL_BROKER_URL"
-	envGitHubCredentialLease      = "KANDEV_GITHUB_CREDENTIAL_LEASE"
-	envGitHubCredentialTaskID     = "KANDEV_GITHUB_CREDENTIAL_TASK_ID"
-	envGitHubCredentialSessionID  = "KANDEV_GITHUB_CREDENTIAL_SESSION_ID"
-	envGitHubCredentialRepository = "KANDEV_GITHUB_CREDENTIAL_REPOSITORY_ID"
-	envGitHubCredentialOwner      = "KANDEV_GITHUB_CREDENTIAL_OWNER"
-	envGitHubCredentialRepo       = "KANDEV_GITHUB_CREDENTIAL_REPO"
-	envGitHubCredentialHost       = "KANDEV_GITHUB_CREDENTIAL_HOST"
-	envGitHubCredentialScopes     = "KANDEV_GITHUB_CREDENTIAL_SCOPES"
 
 	gitHubCredentialHelper = "!agentctl git-credential"
 	defaultGitHubHost      = "github.com"
@@ -110,15 +102,15 @@ func (e *Executor) configureGitHubCredentialBrokerForRepositories(
 		return fmt.Errorf("encode GitHub credential scopes: %w", err)
 	}
 	primary := scopes[0]
-	req.Env[envGitHubCredentialBrokerURL] = e.githubCredentialBrokerURL
-	req.Env[envGitHubCredentialLease] = primary.Lease
-	req.Env[envGitHubCredentialTaskID] = primary.TaskID
-	req.Env[envGitHubCredentialSessionID] = primary.SessionID
-	req.Env[envGitHubCredentialRepository] = primary.RepositoryID
-	req.Env[envGitHubCredentialOwner] = primary.Owner
-	req.Env[envGitHubCredentialRepo] = primary.Repo
-	req.Env[envGitHubCredentialHost] = primary.Host
-	req.Env[envGitHubCredentialScopes] = string(encodedScopes)
+	req.Env[githubauth.CredentialBrokerURLEnv] = e.githubCredentialBrokerURL
+	req.Env[githubauth.CredentialLeaseEnv] = primary.Lease
+	req.Env[githubauth.CredentialTaskIDEnv] = primary.TaskID
+	req.Env[githubauth.CredentialSessionIDEnv] = primary.SessionID
+	req.Env[githubauth.CredentialRepositoryEnv] = primary.RepositoryID
+	req.Env[githubauth.CredentialOwnerEnv] = primary.Owner
+	req.Env[githubauth.CredentialRepoEnv] = primary.Repo
+	req.Env[githubauth.CredentialHostEnv] = primary.Host
+	req.Env[githubauth.CredentialScopesEnv] = string(encodedScopes)
 	req.Env["GIT_TERMINAL_PROMPT"] = "0"
 	appendGitConfig(req.Env, "credential.https://github.com.helper", gitHubCredentialHelper)
 	appendGitConfig(req.Env, "credential.useHttpPath", "true")

@@ -11,18 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
-)
 
-const (
-	envGitHubCredentialBrokerURL  = "KANDEV_GITHUB_CREDENTIAL_BROKER_URL"
-	envGitHubCredentialLease      = "KANDEV_GITHUB_CREDENTIAL_LEASE"
-	envGitHubCredentialTaskID     = "KANDEV_GITHUB_CREDENTIAL_TASK_ID"
-	envGitHubCredentialSessionID  = "KANDEV_GITHUB_CREDENTIAL_SESSION_ID"
-	envGitHubCredentialRepository = "KANDEV_GITHUB_CREDENTIAL_REPOSITORY_ID"
-	envGitHubCredentialOwner      = "KANDEV_GITHUB_CREDENTIAL_OWNER"
-	envGitHubCredentialRepo       = "KANDEV_GITHUB_CREDENTIAL_REPO"
-	envGitHubCredentialHost       = "KANDEV_GITHUB_CREDENTIAL_HOST"
-	envGitHubCredentialScopes     = "KANDEV_GITHUB_CREDENTIAL_SCOPES"
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 type githubBrokerResolveRequest struct {
@@ -51,15 +41,15 @@ func newGitHubCredentialBrokerClient(
 	httpClient *http.Client,
 ) (*githubCredentialBrokerClient, error) {
 	request := githubBrokerResolveRequest{
-		Lease:        strings.TrimSpace(getenv(envGitHubCredentialLease)),
-		TaskID:       strings.TrimSpace(getenv(envGitHubCredentialTaskID)),
-		SessionID:    strings.TrimSpace(getenv(envGitHubCredentialSessionID)),
-		RepositoryID: strings.TrimSpace(getenv(envGitHubCredentialRepository)),
-		Owner:        strings.TrimSpace(getenv(envGitHubCredentialOwner)),
-		Repo:         strings.TrimSuffix(strings.TrimSpace(getenv(envGitHubCredentialRepo)), ".git"),
-		Host:         strings.ToLower(strings.TrimSpace(getenv(envGitHubCredentialHost))),
+		Lease:        strings.TrimSpace(getenv(githubauth.CredentialLeaseEnv)),
+		TaskID:       strings.TrimSpace(getenv(githubauth.CredentialTaskIDEnv)),
+		SessionID:    strings.TrimSpace(getenv(githubauth.CredentialSessionIDEnv)),
+		RepositoryID: strings.TrimSpace(getenv(githubauth.CredentialRepositoryEnv)),
+		Owner:        strings.TrimSpace(getenv(githubauth.CredentialOwnerEnv)),
+		Repo:         strings.TrimSuffix(strings.TrimSpace(getenv(githubauth.CredentialRepoEnv)), ".git"),
+		Host:         strings.ToLower(strings.TrimSpace(getenv(githubauth.CredentialHostEnv))),
 	}
-	endpoint := strings.TrimSpace(getenv(envGitHubCredentialBrokerURL))
+	endpoint := strings.TrimSpace(getenv(githubauth.CredentialBrokerURLEnv))
 	for name, value := range map[string]string{
 		"broker URL": endpoint, "lease": request.Lease, "task": request.TaskID,
 		"session": request.SessionID, "repository": request.RepositoryID,
@@ -151,7 +141,7 @@ func newGitHubCredentialBrokerClientForInput(
 	httpClient *http.Client,
 	input map[string]string,
 ) (*githubCredentialBrokerClient, error) {
-	rawScopes := strings.TrimSpace(getenv(envGitHubCredentialScopes))
+	rawScopes := strings.TrimSpace(getenv(githubauth.CredentialScopesEnv))
 	if rawScopes == "" {
 		return newGitHubCredentialBrokerClient(getenv, httpClient)
 	}
@@ -172,7 +162,7 @@ func newGitHubCredentialBrokerClientForRequest(
 	httpClient *http.Client,
 	request githubBrokerResolveRequest,
 ) (*githubCredentialBrokerClient, error) {
-	endpoint := strings.TrimSpace(getenv(envGitHubCredentialBrokerURL))
+	endpoint := strings.TrimSpace(getenv(githubauth.CredentialBrokerURLEnv))
 	for name, value := range map[string]string{
 		"broker URL": endpoint, "lease": request.Lease, "task": request.TaskID,
 		"session": request.SessionID, "repository": request.RepositoryID,
