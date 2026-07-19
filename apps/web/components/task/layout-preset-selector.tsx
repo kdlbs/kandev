@@ -9,12 +9,23 @@ import {
   IconFileText,
   IconDeviceDesktop,
   IconBrandVscode,
+  IconRestore,
   IconTrash,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Checkbox } from "@kandev/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@kandev/ui/alert-dialog";
 import {
   Dialog,
   DialogContent,
@@ -35,8 +46,15 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Badge } from "@kandev/ui/badge";
 import { useDockviewStore, type BuiltInPreset } from "@/lib/state/dockview-store";
+import {
+  BUILT_IN_LAYOUT_PROFILES,
+  createLayoutProfile,
+  deleteLayoutProfile,
+  type BuiltInLayoutProfileId,
+} from "@/lib/layout/layout-profiles";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import type { SavedLayout } from "@/lib/types/http";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { resolveLayoutApplySessionIds } from "./layout-preset-selector-session-ids";
@@ -48,32 +66,19 @@ type PresetOption = {
   icon: React.ElementType;
 };
 
-const BUILT_IN_PRESETS: PresetOption[] = [
-  {
-    id: "default",
-    label: "Default",
-    description: "Sidebar + Agent + Changes/Files/Terminal",
-    icon: IconColumns3,
-  },
-  {
-    id: "plan",
-    label: "Plan Mode",
-    description: "Sidebar + Agent + Plan (side-by-side)",
-    icon: IconFileText,
-  },
-  {
-    id: "preview",
-    label: "Preview Mode",
-    description: "Sidebar + Agent + Browser (side-by-side)",
-    icon: IconDeviceDesktop,
-  },
-  {
-    id: "vscode",
-    label: "VS Code",
-    description: "Sidebar + Agent/VS Code (tabbed)",
-    icon: IconBrandVscode,
-  },
-];
+const PRESET_ICONS: Record<BuiltInLayoutProfileId, React.ElementType> = {
+  default: IconColumns3,
+  plan: IconFileText,
+  preview: IconDeviceDesktop,
+  vscode: IconBrandVscode,
+};
+
+const BUILT_IN_PRESETS: PresetOption[] = BUILT_IN_LAYOUT_PROFILES.map((profile) => ({
+  id: profile.id,
+  label: profile.name,
+  description: profile.description,
+  icon: PRESET_ICONS[profile.id],
+}));
 
 function SaveLayoutDialog({
   open,
@@ -87,6 +92,7 @@ function SaveLayoutDialog({
   const [saving, setSaving] = useState(false);
   const captureCurrentLayout = useDockviewStore((s) => s.captureCurrentLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const setUserSettings = useAppStore((s) => s.setUserSettings);
 
   const handleSave = useCallback(async () => {
     const trimmed = name.trim();
@@ -94,25 +100,23 @@ function SaveLayoutDialog({
     setSaving(true);
     try {
       const layout = captureCurrentLayout();
-      const newLayout: SavedLayout = {
-        id: `layout-${Date.now()}`,
-        name: trimmed,
-        is_default: isDefault,
-        layout,
-        created_at: new Date().toISOString(),
-      };
-      // If this layout is the default, unset other defaults
-      const updated = savedLayouts.map((l) => (isDefault ? { ...l, is_default: false } : l));
-      await updateUserSettings({
-        saved_layouts: [...updated, newLayout],
+      const response = await updateUserSettings({
+        saved_layouts: createLayoutProfile(savedLayouts, {
+          id: `layout-${Date.now()}`,
+          name: trimmed,
+          isDefault,
+          layout,
+          createdAt: new Date().toISOString(),
+        }),
       });
+      setUserSettings(mapUserSettingsResponse(response));
       setName("");
       setIsDefault(false);
       onOpenChange(false);
     } finally {
       setSaving(false);
     }
-  }, [name, isDefault, captureCurrentLayout, savedLayouts, onOpenChange]);
+  }, [name, isDefault, captureCurrentLayout, savedLayouts, setUserSettings, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -175,37 +179,35 @@ function SavedLayoutItems({
 }: {
   layouts: SavedLayout[];
   onApply: (layout: SavedLayout) => void | Promise<void>;
-  onDelete: (layoutId: string) => void;
+  onDelete: (layout: SavedLayout) => void;
 }) {
   if (layouts.length === 0) {
     return <div className="px-2 py-1.5 text-xs text-muted-foreground">No saved layouts</div>;
   }
   return layouts.map((layout) => (
-    <DropdownMenuItem
-      key={layout.id}
-      className="cursor-pointer group/layout"
-      onClick={() => {
-        void onApply(layout);
-      }}
-    >
-      <IconCheck className="h-3.5 w-3.5 mr-2 shrink-0 opacity-0" />
-      <span className="text-xs truncate flex-1">{layout.name}</span>
-      {layout.is_default && (
-        <Badge variant="secondary" className="text-[9px] px-1 py-0 ml-1">
-          default
-        </Badge>
-      )}
-      <button
-        type="button"
-        className="ml-1 text-destructive/60 hover:text-destructive opacity-0 group-hover/layout:opacity-100 transition-opacity cursor-pointer"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete(layout.id);
-        }}
+    <div key={layout.id} className="flex items-stretch" role="presentation">
+      <DropdownMenuItem
+        className="min-w-0 flex-1 cursor-pointer"
+        onSelect={() => void onApply(layout)}
+      >
+        <IconCheck className="mr-2 h-3.5 w-3.5 shrink-0 opacity-0" />
+        <span className="flex-1 truncate text-xs">{layout.name}</span>
+        {layout.is_default && (
+          <Badge variant="secondary" className="ml-1 px-1 py-0 text-[9px]">
+            default
+          </Badge>
+        )}
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        className="min-h-11 min-w-11 shrink-0 cursor-pointer justify-center px-2 text-destructive/60 focus:text-destructive sm:min-h-7 sm:min-w-7"
+        aria-label={`Delete ${layout.name}`}
+        data-testid="layout-saved-delete"
+        data-layout-id={layout.id}
+        onSelect={() => onDelete(layout)}
       >
         <IconTrash className="h-3.5 w-3.5" />
-      </button>
-    </DropdownMenuItem>
+      </DropdownMenuItem>
+    </div>
   ));
 }
 
@@ -264,20 +266,63 @@ function useApplySavedLayout() {
   );
 }
 
+function DeleteLayoutDialog({
+  layout,
+  onClose,
+  onDelete,
+}: {
+  layout: SavedLayout | null;
+  onClose: () => void;
+  onDelete: (layoutId: string) => void;
+}) {
+  return (
+    <AlertDialog open={Boolean(layout)} onOpenChange={(open) => !open && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete {layout?.name ?? "saved layout"}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {layout?.is_default
+              ? "The built-in Default layout will become the default."
+              : "This saved layout will be permanently removed."}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="cursor-pointer"
+            onClick={() => {
+              if (layout) onDelete(layout.id);
+              onClose();
+            }}
+          >
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export function LayoutPresetSelector() {
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState<SavedLayout | null>(null);
   const recentlyClosedRef = useRef(false);
   const applyBuiltInPreset = useDockviewStore((s) => s.applyBuiltInPreset);
+  const resetLayout = useDockviewStore((s) => s.resetLayout);
   const savedLayouts = useAppStore((s) => s.userSettings.savedLayouts);
+  const setUserSettings = useAppStore((s) => s.setUserSettings);
   const handleApplyCustom = useApplySavedLayout();
 
   const handleDeleteLayout = useCallback(
     async (layoutId: string) => {
-      await updateUserSettings({ saved_layouts: savedLayouts.filter((l) => l.id !== layoutId) });
+      const response = await updateUserSettings({
+        saved_layouts: deleteLayoutProfile(savedLayouts, layoutId),
+      });
+      setUserSettings(mapUserSettingsResponse(response));
     },
-    [savedLayouts],
+    [savedLayouts, setUserSettings],
   );
 
   const handleDropdownOpenChange = useCallback((open: boolean) => {
@@ -323,12 +368,21 @@ export function LayoutPresetSelector() {
             <BuiltInPresetItems onApply={(id) => applyBuiltInPreset(id, true)} />
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
+          <DropdownMenuItem
+            data-testid="layout-reset-item"
+            onClick={resetLayout}
+            className="cursor-pointer"
+          >
+            <IconRestore className="h-4 w-4 mr-2 shrink-0" />
+            <span className="text-xs">Reset Layout</span>
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuGroup>
             <DropdownMenuLabel className="text-xs">Saved Layouts</DropdownMenuLabel>
             <SavedLayoutItems
               layouts={savedLayouts}
               onApply={handleApplyCustom}
-              onDelete={handleDeleteLayout}
+              onDelete={setDeleteCandidate}
             />
           </DropdownMenuGroup>
           <DropdownMenuSeparator />
@@ -339,6 +393,11 @@ export function LayoutPresetSelector() {
         </DropdownMenuContent>
       </DropdownMenu>
       <SaveLayoutDialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen} />
+      <DeleteLayoutDialog
+        layout={deleteCandidate}
+        onClose={() => setDeleteCandidate(null)}
+        onDelete={(layoutId) => void handleDeleteLayout(layoutId)}
+      />
     </>
   );
 }

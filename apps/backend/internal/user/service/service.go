@@ -430,9 +430,24 @@ func applySavedLayouts(settings *models.UserSettings, req *UpdateUserSettingsReq
 	if len(layouts) > maxSavedLayouts {
 		return fmt.Errorf("saved_layouts: max %d layouts allowed", maxSavedLayouts)
 	}
+	seen := make(map[string]struct{}, len(layouts))
+	hasDefault := false
 	for i := range layouts {
+		if strings.TrimSpace(layouts[i].ID) == "" {
+			return errors.New("saved_layouts: layout id must not be empty")
+		}
 		if strings.TrimSpace(layouts[i].Name) == "" {
 			return errors.New("saved_layouts: layout name must not be empty")
+		}
+		if _, dup := seen[layouts[i].ID]; dup {
+			return fmt.Errorf("saved_layouts: duplicate layout id %q", layouts[i].ID)
+		}
+		seen[layouts[i].ID] = struct{}{}
+		if layouts[i].IsDefault {
+			if hasDefault {
+				return errors.New("saved_layouts: at most one default layout allowed")
+			}
+			hasDefault = true
 		}
 	}
 	settings.SavedLayouts = layouts

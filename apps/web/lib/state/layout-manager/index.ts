@@ -20,11 +20,13 @@ export {
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
   TERMINAL_DEFAULT_ID,
+  REUSABLE_PANEL_IDS,
   SIDEBAR_LOCK,
   KNOWN_PANEL_IDS,
   PANEL_REGISTRY,
   panel,
 } from "./constants";
+export type { ReusablePanelId } from "./constants";
 
 // Runtime caps for pinned columns
 export {

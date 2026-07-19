@@ -393,6 +393,17 @@ func TestApplySavedLayouts(t *testing.T) {
 			wantApplied: true,
 		},
 		{
+			name: "valid layout with one default is applied",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "l1", Name: "Default layout", IsDefault: true, Layout: json.RawMessage(`{}`)},
+					{ID: "l2", Name: "Other layout", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantCount:   2,
+			wantApplied: true,
+		},
+		{
 			name: "exactly max layouts is accepted",
 			req: &UpdateUserSettingsRequest{
 				SavedLayouts: ptr(makeLayouts(maxSavedLayouts)),
@@ -424,6 +435,44 @@ func TestApplySavedLayouts(t *testing.T) {
 				}),
 			},
 			wantErr: "saved_layouts: layout name must not be empty",
+		},
+		{
+			name: "empty id returns error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "", Name: "Layout", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: "saved_layouts: layout id must not be empty",
+		},
+		{
+			name: "whitespace-only id returns error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "   ", Name: "Layout", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: "saved_layouts: layout id must not be empty",
+		},
+		{
+			name: "duplicate ids return error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "l1", Name: "First", Layout: json.RawMessage(`{}`)},
+					{ID: "l1", Name: "Second", Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: `saved_layouts: duplicate layout id "l1"`,
+		},
+		{
+			name: "multiple defaults return error",
+			req: &UpdateUserSettingsRequest{
+				SavedLayouts: ptr([]models.SavedLayout{
+					{ID: "l1", Name: "First", IsDefault: true, Layout: json.RawMessage(`{}`)},
+					{ID: "l2", Name: "Second", IsDefault: true, Layout: json.RawMessage(`{}`)},
+				}),
+			},
+			wantErr: "saved_layouts: at most one default layout allowed",
 		},
 	}
 
