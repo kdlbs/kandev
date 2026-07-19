@@ -144,13 +144,20 @@ a PR that lists it.
        categories: [productivity] # optional
    ```
 
-   `id` must match your manifest `id` and be unique in the file. `featured` is a
-   maintainer-only pin — leave it out of submissions.
-2. Open a pull request. CI validates `plugins.yaml` against
-   [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json)
-   and checks that your `id` matches your repo's latest-release manifest `id`.
-3. A maintainer reviews and merges. The index-build workflow picks up your entry
-   and your plugin appears in the in-app catalog on the next build.
+   `id` must match your manifest `id` and be unique in the file — the index
+   build looks for a `<id>-<version>.tar.gz` release asset, so a mismatch means
+   your package can't be resolved. `categories` here are free-form curation tags
+   for catalog filtering (not the manifest's category enum). `featured` is a
+   maintainer-only pin — leave it out of submissions. The pointer-list shape is
+   defined by
+   [`plugin-registry/schema.json`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json).
+2. Open a pull request. The registry index-build workflow runs on your PR
+   (build + tests, no Pages deploy), resolving your entry against the GitHub API
+   — your repo must have a latest release whose assets include the correctly
+   named `<id>-<version>.tar.gz` package, or the entry can't be built.
+3. A maintainer reviews and merges — maintainer approval is what gates the
+   official catalog. The index-build workflow then picks up your entry and your
+   plugin appears in the in-app catalog on the next build.
 
 Ranking in the catalog is **GitHub stars only** — there is no download or usage
 telemetry to game. Full submission details are in
