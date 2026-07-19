@@ -151,4 +151,7 @@ test("requires measured realtime recorder capacity and zero cadence loss", () =>
   assert.match(bundle, /measured[^\n]{0,100}realtime[^\n]{0,100}(?:recorder|encode|capacity)/i);
   assert.match(bundle, /zero[^\n]{0,60}(?:duplicated|duplicate|dup)[^\n]{0,60}(?:and|\/)[^\n]{0,60}(?:dropped|drop)[^\n]{0,60}frames/i);
   assert.match(bundle, /FFmpeg log/i);
+  assert.match(bundle, /time_base/i);
+  assert.match(bundle, /(?:best_effort_timestamp|pkt_dts|pkt_pts)(?!_time)/i);
+  assert.match(bundle, /integer[^\n]{0,100}(?:timestamp|tick)/i);
 });

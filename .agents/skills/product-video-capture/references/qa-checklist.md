@@ -22,11 +22,11 @@ Use `ffprobe` on every raw, WebM, and MP4:
 
 ```bash
 ffprobe -v error \
-  -show_entries stream=index,codec_name,codec_type,width,height,r_frame_rate,avg_frame_rate,pix_fmt:format=duration,size \
+  -show_entries stream=index,codec_name,codec_type,width,height,r_frame_rate,avg_frame_rate,time_base,pix_fmt:format=duration,size \
   -of json <video>
 
 ffprobe -v error -select_streams v:0 \
-  -show_entries frame=best_effort_timestamp_time,pkt_duration_time \
+  -show_entries frame=best_effort_timestamp,best_effort_timestamp_time,pkt_duration,pkt_duration_time \
   -of csv=p=0 <video>
 ```
 
@@ -34,7 +34,7 @@ Verify:
 
 - decoded dimensions match the exact source/delivery profile;
 - `r_frame_rate` and `avg_frame_rate` are constant 25 fps;
-- frame timestamps advance by 0.04 seconds within one stream time-base tick, with no duplicate, negative, or missing-frame gap;
+- integer frame timestamps advance by the expected 25 fps interval expressed in the stream `time_base`, within one integer tick of rounding tolerance, with no duplicate, negative, or missing-frame gap; seconds fields are reporting aids, not the cadence authority;
 - the full FFmpeg log reports zero duplicated and dropped frames and proves measured realtime recorder capacity at the exact source profile;
 - story marks and camera timeline fit inside source duration;
 - no audio stream exists in raw or deliveries;
