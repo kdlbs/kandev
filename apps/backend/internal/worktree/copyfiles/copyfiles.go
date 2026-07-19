@@ -686,15 +686,29 @@ func (s *copyState) copyFile(src, rel string, info os.FileInfo) error {
 		return nil
 	}
 
-	// Skip-if-exists for idempotency on resume.
-	if _, err := os.Lstat(dst); err == nil {
-		s.copied[dst] = struct{}{}
-		s.debug("skip existing", zap.String("rel", rel))
+	// Validate the destination parent chain and resolve symlinks before any
+	// filesystem write, mirroring symlinkMatch/writeOneEntry. Without this a
+	// symlinked ancestor in the target (e.g. an attacker fork-PR head that
+	// ships `config` as a mode-120000 tree entry) would let the MkdirAll below
+	// follow the link and os.Create write the source bytes outside the
+	// worktree. secureDestination also creates the parent dirs and re-confirms
+	// containment via EvalSymlinks, returning the safe destination path.
+	cleanDst, warn, err := secureDestination(s.targetDir, rel)
+	if err != nil {
+		return err
+	}
+	if warn != "" {
+		s.warn("copy rejected: %s", warn)
 		return nil
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("copyfiles: mkdir %s: %w", filepath.Dir(dst), err)
+	// Skip-if-exists for idempotency on resume. A symlinked leaf component is
+	// neutralized here (nothing is written through it); only symlinked parents
+	// were the escape vector, and secureDestination already rejected those.
+	if _, err := os.Lstat(cleanDst); err == nil {
+		s.copied[dst] = struct{}{}
+		s.debug("skip existing", zap.String("rel", rel))
+		return nil
 	}
 
 	in, err := os.Open(src)
@@ -704,21 +718,21 @@ func (s *copyState) copyFile(src, rel string, info os.FileInfo) error {
 	}
 	defer func() { _ = in.Close() }()
 
-	out, err := os.Create(dst)
+	out, err := os.Create(cleanDst)
 	if err != nil {
-		return fmt.Errorf("copyfiles: create %s: %w", dst, err)
+		return fmt.Errorf("copyfiles: create %s: %w", cleanDst, err)
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		_ = out.Close()
-		_ = os.Remove(dst)
-		return fmt.Errorf("copyfiles: copy %s: %w", dst, err)
+		_ = os.Remove(cleanDst)
+		return fmt.Errorf("copyfiles: copy %s: %w", cleanDst, err)
 	}
 	if err := out.Close(); err != nil {
-		_ = os.Remove(dst)
-		return fmt.Errorf("copyfiles: close %s: %w", dst, err)
+		_ = os.Remove(cleanDst)
+		return fmt.Errorf("copyfiles: close %s: %w", cleanDst, err)
 	}
-	if err := os.Chmod(dst, info.Mode().Perm()); err != nil {
-		return fmt.Errorf("copyfiles: chmod %s: %w", dst, err)
+	if err := os.Chmod(cleanDst, info.Mode().Perm()); err != nil {
+		return fmt.Errorf("copyfiles: chmod %s: %w", cleanDst, err)
 	}
 
 	s.copied[dst] = struct{}{}
